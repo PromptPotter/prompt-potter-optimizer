@@ -1,6 +1,10 @@
 # PromptPotter Optimizer
 
-API-first prompt optimization service that iteratively improves prompts based on dataset performance.
+## Chain it your way: workflows • algorithms • LLMs • web researchers • custom evaluators
+
+- Compose and optimize chains of workflows, algorithms, LLMs, researchers, and custom evaluators
+- Custom workflow chains for reranking. Continuous optimization campaigns. Custom evaluators.
+- API-first prompt optimization service that iteratively improves prompts based on dataset performance.
 
 ## Overview
 
