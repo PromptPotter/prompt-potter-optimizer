@@ -23,6 +23,34 @@ PromptPotter connects to your existing FastAPI backend (or Langfuse server) and:
 └─────────────────────┘         └─────────────────────┘
 ```
 
+## Core Optimization Pipeline
+
+The internal optimization loop follows this DAG:
+
+```
+INPUT → ANALYZE → PROMPT_STATE → GROW_FILTER → EVALUATE → CHECK
+           ▲                                                 │
+           │         ┌──────────┬───────────────┬────────────┤
+           │         │          │               │            │
+           │    [generate]  [refine]→ctx    [modify]       done
+           │         │          └──►plan◄───────┘            │
+           │         │               │                       ▼
+           └─────────┴───────────────┘                    OUTPUT
+```
+
+**Pipeline stages:**
+
+1. **INPUT** — context, training set, test set
+2. **ANALYZE** — LLM restructures context into prompt components
+3. **PROMPT_STATE** — `{persona, task_intent, problem_description, instruction, thinking_style, plan}`
+4. **GROW/FILTER** — expand or prune prompt variations
+5. **EVALUATE** — score candidates → decide `next_action`
+6. **ROUTE** on `next_action`:
+   - `generate` → loop back to PROMPT_STATE
+   - `refine context` → update context → update plan → loop
+   - `modify plan` → update plan → loop
+7. **EXIT** when `counter >= max_iterations`
+
 **Works with:**
 - Any FastAPI backend logging in [Langfuse-compatible format](https://langfuse.com/docs)
 - Langfuse server directly
