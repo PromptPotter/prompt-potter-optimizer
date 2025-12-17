@@ -1,8 +1,34 @@
 # PromptPotter Optimizer
 
-**Chain it your way: workflows • algorithms • LLMs • web researchers • custom evaluators**
+**Optimize prompts for any LLM application that logs in Langfuse-compatible format.**
 
-API-first prompt optimization service that iteratively improves prompts based on dataset performance.
+## How It Works
+
+PromptPotter connects to your existing FastAPI backend (or Langfuse server) and:
+
+1. **Fetches** evaluation traces, failed cases, and metrics from your application
+2. **Analyzes** failure patterns using LLM-powered reasoning
+3. **Generates** improved prompt variants
+4. **Evaluates** new prompts against your dataset
+5. **Repeats** until convergence or max iterations
+
+```
+┌─────────────────────┐         ┌─────────────────────┐
+│  Your Application   │         │  PromptPotter       │
+│  (FastAPI backend)  │◄───────►│  Optimizer API      │
+│                     │  fetch  │                     │
+│  - Langfuse logs    │  traces │  - Analyze failures │
+│  - Evaluation data  │         │  - Generate prompts │
+│  - Match results    │         │  - Run experiments  │
+└─────────────────────┘         └─────────────────────┘
+```
+
+**Works with:**
+- Any FastAPI backend logging in [Langfuse-compatible format](https://langfuse.com/docs)
+- Langfuse server directly
+- Custom evaluation endpoints
+
+**Example integration:** [TermNorm-excel](https://github.com/runfish5/TermNorm-excel) - an AI-powered terminology normalization add-in with Langfuse-compatible logging.
 
 ## Quick Start
 
@@ -35,13 +61,13 @@ Look for **"PromptPotter Learning Path"** in the JupyterLab launcher:
 
 ## Overview
 
-PromptPotter Optimizer helps you optimize prompts for LLM applications. Upload a dataset with examples, specify your target metric, and get back an optimized prompt.
+PromptPotter is a **companion service** for LLM applications. Instead of manually analyzing logs and tweaking prompts, point PromptPotter at your Langfuse-compatible backend and let it optimize automatically.
 
 **Key Features:**
-- API-First Design (REST API for any client)
-- Iterative Optimization with LLM feedback
-- JupyterLab environment with custom launcher tiles
-- Works with OpenAI, Anthropic, and other providers
+- **Langfuse-compatible**: Connects to any backend using Langfuse logging format
+- **API-First**: REST API works from Colab notebooks, scripts, or other services
+- **Iterative Optimization**: Analyzes failures, generates variants, evaluates, repeats
+- **Framework-agnostic**: No LangChain/DSPy lock-in required
 
 ## API Usage
 
@@ -76,9 +102,18 @@ prompt-potter-optimizer/
 ├── tests/               # Tests
 ├── prompts/             # LLM agent prompt templates
 ├── docs/                # Extended documentation
-├── research/            # Research artifacts (being compiled into docs)
-└── external/            # Git submodule: TermNorm-excel (read-only reference)
+└── external/            # Local reference clone (gitignored, see below)
 ```
+
+### External Reference
+
+The `external/` folder is gitignored and contains a local clone of [TermNorm-excel](https://github.com/runfish5/TermNorm-excel) for reference. Clone it yourself if needed:
+
+```bash
+git clone https://github.com/runfish5/TermNorm-excel external/TermNorm-excel
+```
+
+This shows how a real FastAPI backend implements Langfuse-compatible logging that PromptPotter can consume.
 
 ## Configuration
 
@@ -86,10 +121,11 @@ Edit `.env` file:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key | - |
-| `ANTHROPIC_API_KEY` | Anthropic API key | - |
+| `TARGET_API_URL` | Your backend's API URL (Langfuse-compatible) | - |
+| `LANGFUSE_HOST` | Or connect to Langfuse server directly | - |
+| `OPENAI_API_KEY` | OpenAI API key (for optimization LLM) | - |
+| `ANTHROPIC_API_KEY` | Anthropic API key (alternative) | - |
 | `MAX_ITERATIONS` | Max optimization iterations | 5 |
-| `DEFAULT_MODEL` | Default LLM model | gpt-4 |
 
 ## Local Development
 
@@ -102,9 +138,8 @@ uvicorn api.main:app --reload
 
 ## Documentation
 
-- `docs/architecture.md` - Design patterns
-- `docs/registry-design.md` - Optimization tracking patterns
-- `docs/submodule-strategy.md` - External reference policy
+- `docs/architecture.md` - Design patterns and dual-mode philosophy
+- `docs/registry-design.md` - Optimization tracking patterns (MLflow/DSPy style)
 
 ## NVIDIA Brev Deployment
 

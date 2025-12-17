@@ -72,5 +72,4 @@ dmypy.json
 Thumbs.db
 
 # External reference (clone locally, not tracked)
-# See docs/submodule-strategy.md
 external/
