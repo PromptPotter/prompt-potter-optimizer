@@ -1,0 +1,102 @@
+# Research and Rank Pipeline
+# Web search + entity profiling + candidate ranking
+#
+# This workflow:
+# 1. Searches the web for information about a query
+# 2. Uses an LLM to extract/profile the entity
+# 3. Ranks candidates against the profiled entity
+
+class: Workflow
+cwlVersion: v1.2
+id: research_rank_workflow
+label: "Research and Rank Pipeline"
+description: "Web search + entity profiling + candidate ranking"
+
+inputs:
+  query:
+    type: string
+    description: "User query to research"
+  candidates:
+    type: string[]
+    description: "List of candidate terms to rank against query"
+
+steps:
+  - id: web_search
+    run: nodes/WebSearchNode
+    in:
+      query: query
+    out:
+      - results
+      - total_results
+    config:
+      max_results: 5
+      provider: mock
+    metadata:
+      type: external
+      deterministic: false
+
+  - id: entity_profiler
+    run: nodes/LLMNode
+    in:
+      messages:
+        - role: user
+          content: |
+            Analyze the following search results for the query: {{query}}
+
+            Search Results:
+            {{search_results}}
+
+            Extract a comprehensive entity profile including:
+            - Primary name/term
+            - Category/type
+            - Key attributes
+            - Related terms
+
+            Return as JSON.
+      variables:
+        query: query
+        search_results: web_search/results
+    out:
+      - content
+      - parsed
+    config:
+      model: gpt-4
+      temperature: 0.0
+      output_format: json
+    metadata:
+      type: llm
+      deterministic: false
+      model: gpt-4
+      temperature: 0.0
+
+  - id: candidate_ranker
+    run: nodes/RankerNode
+    in:
+      query: query
+      candidates: candidates
+      context: entity_profiler/parsed
+    out:
+      - ranked_candidates
+      - top_candidate
+      - confidence
+    config:
+      model: gpt-4
+      temperature: 0.0
+      max_candidates: 20
+    metadata:
+      type: llm
+      deterministic: false
+
+outputs:
+  profile:
+    type: object
+    outputSource: entity_profiler/parsed
+  ranked_results:
+    type: array
+    outputSource: candidate_ranker/ranked_candidates
+  best_match:
+    type: string
+    outputSource: candidate_ranker/top_candidate
+  confidence:
+    type: float
+    outputSource: candidate_ranker/confidence
