@@ -25,8 +25,17 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
     # LLM Provider Settings
+    LLM_PROVIDER: str = "groq"  # "groq", "openai", or "anthropic"
+    LLM_MODEL: str = ""  # Model to use (provider-specific default if empty)
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
+
+    # Langfuse Observability (cloud.langfuse.com)
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+    LANGFUSE_ENABLED: bool = True
 
     # Optimization Settings
     MAX_DATASET_SIZE: int = 1000  # Maximum number of examples in dataset

@@ -24,6 +24,9 @@ jupyter_app_launcher
 # Interactive UI
 streamlit>=1.30
 
+# Observability
+langfuse>=2.0.0
+
 # Testing (optional)
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
