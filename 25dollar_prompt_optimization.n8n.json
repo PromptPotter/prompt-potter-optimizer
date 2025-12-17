@@ -1,0 +1,766 @@
+{
+  "name": "25dollar_prompt_optimization",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        -256
+      ],
+      "id": "9065f8c8-fbaa-4481-9047-17ed18def9cd",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7260ee96-cb1b-42c8-9888-8931e0de3a44",
+              "name": "message",
+              "value": "You are a prompt optimization machine named potter",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1152,
+        -256
+      ],
+      "id": "88d29ae1-d9dc-4667-b198-466505ce3b3f",
+      "name": "context_input"
+    },
+    {
+      "parameters": {
+        "content": "# Initialization\n\ntraining, test, context (json)\nplan\n**Prompt**: expert persona*, task intent*, problem description, instruction, thinking style, +/- {{strategy, ...}}\nreasoning\noptimized fewshot",
+        "height": 304,
+        "width": 1184
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        768,
+        -416
+      ],
+      "id": "aee2c2dc-750f-4cff-9460-d8bb38bd1f1b",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "36547e56-9db5-4dbe-bd45-de9e836429ba",
+              "name": "training",
+              "value": "excel_trainig",
+              "type": "string"
+            },
+            {
+              "id": "41445480-a547-4357-acf6-53366e7a9ad7",
+              "name": "test",
+              "value": "excel_test",
+              "type": "string"
+            },
+            {
+              "id": "9ac93035-405e-4961-897b-287840fd866e",
+              "name": "context",
+              "value": "message",
+              "type": "string"
+            },
+            {
+              "id": "d893f324-d357-4182-9ac5-2bc1a44fc195",
+              "name": "counter",
+              "value": 0,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2048,
+        -256
+      ],
+      "id": "d09357ba-e455-427f-a1fe-7d8440c2f3be",
+      "name": "full_input"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "36547e56-9db5-4dbe-bd45-de9e836429ba",
+              "name": "persona",
+              "value": "A biology professor",
+              "type": "string"
+            },
+            {
+              "id": "41445480-a547-4357-acf6-53366e7a9ad7",
+              "name": "task_intent",
+              "value": "Solving a domain specific problem.",
+              "type": "string"
+            },
+            {
+              "id": "9ac93035-405e-4961-897b-287840fd866e",
+              "name": "problem_description",
+              "value": "FOund out in analysis:",
+              "type": "string"
+            },
+            {
+              "id": "1ead2cd8-3e60-42e4-9aaf-baffbb146c13",
+              "name": "instruction",
+              "value": "found out in analysis",
+              "type": "string"
+            },
+            {
+              "id": "9b4af823-a4c9-48ff-b740-327ac2c68486",
+              "name": "thinking style",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "f7ec5d1a-40fb-49ec-82a3-9000b6135dc3",
+              "name": "plan",
+              "value": "run this until valuebelow 0.5",
+              "type": "string"
+            },
+            {
+              "id": "ae99088a-825d-47c3-9c2a-9e0c72af5f99",
+              "name": "counter",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        832,
+        0
+      ],
+      "id": "ea579bf4-5e95-4cf6-9e12-1028ca22c7c8",
+      "name": "main_data"
+    },
+    {
+      "parameters": {
+        "content": "# Grow/Filter",
+        "height": 208,
+        "width": 224
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        944,
+        -64
+      ],
+      "id": "874df67b-a414-4282-ad84-2e00f3130f24",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "36547e56-9db5-4dbe-bd45-de9e836429ba",
+              "name": "persona",
+              "value": "A biology professor",
+              "type": "string"
+            },
+            {
+              "id": "41445480-a547-4357-acf6-53366e7a9ad7",
+              "name": "task_intent",
+              "value": "Solving a domain specific problem.",
+              "type": "string"
+            },
+            {
+              "id": "9ac93035-405e-4961-897b-287840fd866e",
+              "name": "problem_description",
+              "value": "FOund out in analysis:",
+              "type": "string"
+            },
+            {
+              "id": "1ead2cd8-3e60-42e4-9aaf-baffbb146c13",
+              "name": "instruction",
+              "value": "found out in analysis",
+              "type": "string"
+            },
+            {
+              "id": "9b4af823-a4c9-48ff-b740-327ac2c68486",
+              "name": "thinking style",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "f7ec5d1a-40fb-49ec-82a3-9000b6135dc3",
+              "name": "plan",
+              "value": "run this until valuebelow 0.5",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1328,
+        0
+      ],
+      "id": "88466218-ffda-4bbe-a63a-c02956bca871",
+      "name": "main_data_plus"
+    },
+    {
+      "parameters": {
+        "content": "# Analysis + Evaluation",
+        "height": 208
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        -64
+      ],
+      "id": "28f20611-2ffd-490d-b247-6459949e8052",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('report').item.json.next_action }}",
+                    "rightValue": "generate",
+                    "operator": {
+                      "type": "array",
+                      "operation": "contains",
+                      "rightType": "any"
+                    },
+                    "id": "b2c79b02-e292-4f37-b75c-49679004e24c"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "91cf37d5-38ca-4e7d-ba61-2dde301d4a25",
+                    "leftValue": "={{ $('report').item.json.next_action }}",
+                    "rightValue": "refine context",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "3dd919d9-61f0-48a1-ba6f-cd07a16a0a2c",
+                    "leftValue": "={{ $('report').item.json.next_action }}",
+                    "rightValue": "modify plan",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        816,
+        176
+      ],
+      "id": "929d3745-f68a-48ff-a541-a1cc34fa5eda",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3735af1f-7cd9-408a-abea-9fc7082b030b",
+              "name": "scores",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "291d4707-200b-4624-bb21-8cf5152667fe",
+              "name": "next_action",
+              "value": "[\"generate\", \"todo\"]",
+              "type": "array"
+            },
+            {
+              "id": "aa940c25-ec3d-49b5-aa85-eeebcfdf12e9",
+              "name": "",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1840,
+        0
+      ],
+      "id": "1afed579-0a4f-463c-8f53-29150451f0e6",
+      "name": "report"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d26b1e9a-61cc-44de-b937-94eb6d017d94",
+              "name": "",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1712,
+        432
+      ],
+      "id": "4f1c0f5e-3efc-4b54-99ca-34552cc49f39",
+      "name": "updated_plan"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1360,
+        256
+      ],
+      "id": "89f754c5-962b-4905-ac47-d78480580af6",
+      "name": "updated_context"
+    },
+    {
+      "parameters": {
+        "content": "# Modify plan",
+        "height": 144,
+        "width": 320
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        208
+      ],
+      "id": "dab65fe2-9375-4e61-bb9b-331f2fdef5a1",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "# Refine context\n\nincl. critiques and applied metrices",
+        "height": 208,
+        "width": 672
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        992,
+        384
+      ],
+      "id": "273bd261-6bbb-498e-94a6-477726532b5e",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0c5a96e2-e407-48be-97ca-eef22c8a16b6",
+              "leftValue": "={{ $json.counter }}",
+              "rightValue": 2,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2048,
+        0
+      ],
+      "id": "b16e808e-1b5d-4a52-82e1-2abc1be85c18",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2336,
+        -16
+      ],
+      "id": "0c662551-b8ef-4e4a-9975-aae89c6a8f5e",
+      "name": "output"
+    },
+    {
+      "parameters": {
+        "jsCode": "let previousData;\n\ntry {\n  // Try to get the previous output from this node\n  previousData = $('count_plus_one').last().json;\n} catch (error) {\n  // If it doesn't exist yet (first run), use full_input\n  previousData = $('full_input').item.json;\n}\n\nreturn [{ \n  json: { \n    ...previousData, \n    counter: (previousData.counter || 0) + 1 \n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1952,
+        0
+      ],
+      "id": "55f140b3-6cd5-4a31-9cce-abb659626ee7",
+      "name": "count_plus_one"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=From the context given, reflect and come to an answer. Your task is to restructure the given context into elements destined for a prompt optimization process.\n\n\n[context]  {{ $json.context }}\n\n\n[example]",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        2048,
+        -256
+      ],
+      "id": "5ca9a6d9-6a00-4d17-8e44-4d3c164e4322",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n\t\"type\": \"object\",\n\t\"properties\": {\n\t\t\"task_description\": {\n\t\t\t\"type\": \"string\",\n            \"description\": \"Description of the task\"\n\t\t},\n        \"base_instruction\": {\n\t\t\t\"type\": \"string\",\n            \"description\": \"Let's think step by step.\"\n\t\t},\n        \"answer_format\": {\n\t\t\t\"type\": \"string\",\n            \"description\": \"At the end, wrap only your final option between <ANS> and </ANS> tags.\"\n\t\t}\n\t}\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2208,
+        -144
+      ],
+      "id": "8a5c2375-ccd2-4709-8799-145c62b55e10",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        -144
+      ],
+      "id": "e968dbc9-229d-4c6f-9326-06fc78e6d048",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "sue07pcKIgrn1xhP",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "1vcr07PWuWg7w-NfRSvjQOjnNeQj6IAn6",
+          "mode": "list",
+          "cachedResultName": "TermNorm_Eval_251110.jsonl",
+          "cachedResultUrl": "https://drive.google.com/file/d/1vcr07PWuWg7w-NfRSvjQOjnNeQj6IAn6/view?usp=drivesdk"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1360,
+        -256
+      ],
+      "id": "baa25fc2-53e5-4e3d-b0e7-6fca1e37aa9b",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GRg5DOUiOWebN44z",
+          "name": "Google Drive account_Win"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const binaryData = $input.item.binary.data;\nconst text = Buffer.from(binaryData.data, 'base64').toString('utf-8');\n\n// Split by finding complete JSON objects\nconst objects = [];\nlet braceCount = 0;\nlet currentObject = '';\nlet inString = false;\nlet escapeNext = false;\n\nfor (let i = 0; i < text.length; i++) {\n  const char = text[i];\n  \n  if (escapeNext) {\n    currentObject += char;\n    escapeNext = false;\n    continue;\n  }\n  \n  if (char === '\\\\') {\n    escapeNext = true;\n    currentObject += char;\n    continue;\n  }\n  \n  if (char === '\"') {\n    inString = !inString;\n  }\n  \n  currentObject += char;\n  \n  if (!inString) {\n    if (char === '{') braceCount++;\n    if (char === '}') braceCount--;\n    \n    if (braceCount === 0 && currentObject.trim()) {\n      objects.push(JSON.parse(currentObject.trim()));\n      currentObject = '';\n    }\n  }\n}\n\nreturn objects.map(obj => ({ json: obj }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        -256
+      ],
+      "id": "9d105a55-ee6e-4039-8854-88f9b1a36533",
+      "name": "Code in JavaScript1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "context_input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "context_input": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "full_input": {
+      "main": [
+        []
+      ]
+    },
+    "main_data": {
+      "main": [
+        [
+          {
+            "node": "main_data_plus",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "main_data_plus": {
+      "main": [
+        [
+          {
+            "node": "report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "main_data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "updated_context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "updated_plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "report": {
+      "main": [
+        [
+          {
+            "node": "count_plus_one",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "updated_plan": {
+      "main": [
+        [
+          {
+            "node": "main_data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "updated_context": {
+      "main": [
+        [
+          {
+            "node": "updated_plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "count_plus_one": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "main_data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "98365120-1546-4a97-bdd9-33e663e755bf",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "09a80676641fdc883fcaa67648f06322bebbd00adb281b1cf481107091bcc026"
+  },
+  "id": "lPUbX4MmXEQQUhji",
+  "tags": []
+}

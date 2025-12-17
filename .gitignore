@@ -39,6 +39,7 @@ env/
 *.swo
 *~
 .DS_Store
+settings.local.json
 
 # Testing
 .pytest_cache/
