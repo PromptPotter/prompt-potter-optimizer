@@ -39,28 +39,52 @@ streamlit run apps/secrets_manager.py    # API key configuration
 ## Architecture
 
 ```
-api/                    # FastAPI application (core optimization engine)
-├── main.py            # App entry, CORS, router mounting
-├── config/settings.py # Pydantic BaseSettings (env config)
-├── models/            # Pydantic request/response schemas
-├── routers/           # Endpoint handlers (health, optimize)
-├── core/optimizer.py  # PromptOptimizer class (core algorithm)
-└── services/          # Future: LLM provider integrations
+api/
+├── main.py                 # FastAPI app entry, router mounting
+├── config/settings.py      # Pydantic BaseSettings (env config)
+├── models/
+│   ├── workflow.py         # WorkflowDefinition, StepDefinition (CWL-inspired)
+│   └── request.py, response.py
+├── routers/
+│   ├── workflows.py        # /workflows/* endpoints
+│   └── health.py, optimize.py
+├── core/
+│   ├── workflow_runner.py  # DAG execution engine
+│   └── optimizer.py        # Legacy optimizer (placeholder)
+├── nodes/                  # Composable workflow nodes
+│   ├── base.py             # NodeBase[TInput, TOutput] generic
+│   ├── llm_node.py         # LLMNode - LLM inference
+│   ├── web_search_node.py  # WebSearchNode (mock)
+│   └── ranker_node.py      # RankerNode - LLM-based ranking
+├── evaluators/             # Evaluation framework
+│   ├── base.py             # EvaluatorBase
+│   ├── exact_match.py      # ExactMatchEvaluator
+│   └── criteria.py         # CriteriaEvaluator (LLM-judge)
+└── services/
+    └── llm_client.py       # OpenAI/Anthropic abstraction
 
-apps/                   # Streamlit interactive UIs
-docker/                 # Dockerfile, docker-compose.yml, entrypoint.sh
-examples/               # Jupyter notebooks (quickstart, advanced)
-launcher/               # JupyterLab app launcher config
-tests/                  # pytest test suite
-docs/                   # Architecture and design documentation
-external/               # GITIGNORED reference clones (not runtime dependencies)
+workflows/                  # CWL-inspired workflow definitions
+├── examples/
+│   ├── research_rank.yaml  # Web search + profile + rank
+│   └── simple_llm.yaml     # Single LLM call
+└── schemas/
+
+apps/                       # Streamlit interactive UIs
+docker/                     # Dockerfile, docker-compose.yml
+tests/                      # pytest test suite
+docs/                       # Design documentation
+external/                   # GITIGNORED reference clones
 ```
 
 ## Key Endpoints
 
 - `GET /api/v1/health` - Service status
 - `GET /api/v1/ready` - Readiness check
-- `POST /api/v1/optimize` - Main optimization endpoint
+- `POST /api/v1/optimize` - Legacy optimization endpoint
+- `POST /api/v1/workflows/execute` - Execute a workflow
+- `POST /api/v1/workflows/evaluate` - Evaluate workflow on dataset
+- `GET /api/v1/workflows` - List registered workflows
+- `GET /api/v1/nodes` - List available node types
 
 ## Configuration
 
@@ -72,14 +96,45 @@ Environment variables via `.env` (see `.env.example`):
 
 ## Design Patterns
 
+- **NodeBase[TInput, TOutput]** - Generic base class for workflow nodes
+- **CWL-inspired YAML** - Workflow definitions with typed inputs/outputs
 - **Registry pattern** for optimization tracking (see `docs/registry-design.md`)
 - **Parent-child run hierarchy** (MLflow/DSPy style) for campaign/trial tracking
 - **JSONL format** for results (OpenAI Evals standard)
-- Core logic in `api/core/optimizer.py` must remain framework-agnostic
+
+## Creating Custom Nodes
+
+```python
+from api.nodes.base import NodeBase
+from pydantic import BaseModel
+
+class MyInput(BaseModel):
+    text: str
+
+class MyOutput(BaseModel):
+    result: str
+
+class MyNode(NodeBase[MyInput, MyOutput]):
+    @classmethod
+    def get_input_model(cls): return MyInput
+
+    @classmethod
+    def get_output_model(cls): return MyOutput
+
+    async def _execute(self, input_data: MyInput) -> MyOutput:
+        return MyOutput(result=input_data.text.upper())
+
+# Register: api/nodes/__init__.py
+from .my_node import MyNode
+register_node(MyNode)
+```
 
 ## Current State
 
-The optimizer has placeholder implementations for `_evaluate_prompt()` and `_improve_prompt()` methods in `api/core/optimizer.py`. These are marked TODO and need actual LLM integration.
+- **Workflow system**: Fully implemented with LLMNode, WebSearchNode (mock), RankerNode
+- **Evaluators**: ExactMatchEvaluator and CriteriaEvaluator (LLM-judge)
+- **WebSearchNode**: Mock implementation - add real providers (Brave, SearxNG) later
+- **Legacy optimizer**: `api/core/optimizer.py` has placeholder implementations (TODO)
 
 ## External References
 
