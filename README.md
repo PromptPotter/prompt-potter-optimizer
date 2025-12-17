@@ -25,31 +25,63 @@ PromptPotter connects to your existing FastAPI backend (or Langfuse server) and:
 
 ## Core Optimization Pipeline
 
-The internal optimization loop follows this DAG:
+The optimizer follows a **human-in-the-loop** iterative loop:
 
 ```
-INPUT → ANALYZE → PROMPT_STATE → GROW_FILTER → EVALUATE → CHECK
-           ▲                                                 │
-           │         ┌──────────┬───────────────┬────────────┤
-           │         │          │               │            │
-           │    [generate]  [refine]→ctx    [modify]       done
-           │         │          └──►plan◄───────┘            │
-           │         │               │                       ▼
-           └─────────┴───────────────┘                    OUTPUT
+INITIALIZE → S1 → GROW/FILTER → ANALYSIS → [HUMAN] → CHECK
+                                              │
+                      ┌───────────────────────┼───────────────────────┐
+                      │                       │                       │
+                   (a) continue            (b) refine ctx         (c) modify plan
+                      │                       │                       │
+                      └───────────┬───────────┴───────────────────────┘
+                                  ▼
+                              back to S1
 ```
 
-**Pipeline stages:**
+### Human-in-the-Loop Decision Point
 
-1. **INPUT** — context, training set, test set
-2. **ANALYZE** — LLM restructures context into prompt components
-3. **PROMPT_STATE** — `{persona, task_intent, problem_description, instruction, thinking_style, plan}`
-4. **GROW/FILTER** — expand or prune prompt variations
-5. **EVALUATE** — score candidates → decide `next_action`
-6. **ROUTE** on `next_action`:
-   - `generate` → loop back to PROMPT_STATE
-   - `refine context` → update context → update plan → loop
-   - `modify plan` → update plan → loop
-7. **EXIT** when `counter >= max_iterations`
+After **ANALYSIS**, the human reviews the current state and chooses:
+- **(a) Continue** — proceed to S1 with no changes
+- **(b) Refine Context** — update context fields → back to S1
+- **(c) Modify Plan + Refine Context** — update plan and context → back to S1
+
+### PROMPT_STATE Object
+
+The optimization state is a structured object containing:
+
+| Field | Description |
+|-------|-------------|
+| `plan` | Current optimization strategy/approach |
+| `training` | Training dataset |
+| `test` | Test/evaluation dataset |
+| `context` | Domain context and constraints |
+| `problem_description` | What problem the prompt solves |
+| `optimized_prompt` | Current best prompt candidate |
+
+### Type Classes
+
+PROMPT_STATE fields support these semantic type classes:
+
+| Type Class | Purpose |
+|------------|---------|
+| `expert_persona` | Who the LLM should embody |
+| `task_intent` | What the prompt aims to achieve |
+| `problem_description` | The problem domain/constraints |
+| `instruction` | Explicit behavioral instructions |
+| `thinking_style` | Reasoning approach (CoT, step-by-step, etc.) |
+
+### Analysis Outputs
+
+The ANALYSIS step extracts additional artifacts that can be added to state:
+
+- **Few-shot examples** — representative input/output pairs
+- **Reasoning traces** — chain-of-thought patterns
+- **Failure patterns** — common error modes identified
+- **Edge cases** — boundary conditions discovered
+- **Confidence scores** — per-component quality estimates
+
+These outputs inform the human's decision at the intervention point.
 
 **Works with:**
 - Any FastAPI backend logging in [Langfuse-compatible format](https://langfuse.com/docs)
