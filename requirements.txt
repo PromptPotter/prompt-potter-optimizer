@@ -17,7 +17,14 @@ aiofiles==23.2.1
 pandas==2.2.0
 numpy==1.26.3
 
+# JupyterLab + Launcher
+jupyterlab>=4.0
+jupyter_app_launcher
+
+# Interactive UI
+streamlit>=1.30
+
 # Testing (optional)
-pytest==8.0.0
-pytest-asyncio==0.23.4
-httpx==0.26.0
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+httpx>=0.26.0

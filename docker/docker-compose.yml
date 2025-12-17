@@ -1,30 +1,34 @@
-version: '3.8'
-
 services:
-  promptpotter-api:
+  promptpotter:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: promptpotter-optimizer
     ports:
-      - "8000:8000"
+      - "8000:8000"   # FastAPI
+      - "8888:8888"   # JupyterLab
     environment:
       - ENVIRONMENT=development
       - DEBUG=true
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-}
+      - API_BASE_URL=http://localhost:8000
     env_file:
       - ../.env
     volumes:
       # Mount source code for development (hot reload)
       - ../api:/app/api
+      - ../apps:/app/apps
+      - ../examples:/app/examples
+      - ../launcher:/app/launcher
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     networks:
       - promptpotter-network
 

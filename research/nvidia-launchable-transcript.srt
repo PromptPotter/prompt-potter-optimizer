@@ -1,0 +1,56 @@
+1
+00:00:00,000 --> 00:00:55,000
+Hey, what's up? Chris here and today we're going to go through the first part of the build an agent workshop. Specifically, we're going to build a report generation agent. Now, what this is going to do is it's going to allow you to build a markdown style report just like this. Uh, you know, this is a very popular use case for AI. We're going to build this agent powered by Nvidia Neotron Nano V2 through open router endpoints. That's right. Uh, Nano V2 is available on open router uh for
+
+2
+00:00:27,000 --> 00:01:21,000
+you to use. Now, the way we get started is pretty straightforward. We're going to click the deploy now button, and this is going to take us to a brev.envidia.com launchable. That brev.invidia.com launchable is going to be where we can launch this workshop. Now, a launchable is going to be a self-contained environment that has everything you need already preconfigured and installed. You just have to add some API keys and you're good to go. Once we click deploy launchable, we'll be brought to this
+
+3
+00:00:54,000 --> 00:01:46,000
+launchable uh screen where when the loading is complete, we can launch our Jupyter lab. Uh and you can tell that it's done when you look up here and you see built and completed. Uh of course, we've done this ahead of time just to make sure that uh you know we don't we don't have to wait for it live. Uh but the idea is once this is done, you can click open notebook and you'll be brought to Jupyter Lab. Now, in Jupiter Lab, you're going to see some extra buttons on the bottom of the main
+
+4
+00:01:21,000 --> 00:02:14,000
+Jupiter uh lab launcher. You're going to see introduction to agents and secrets manager. These are the two buttons we're going to worry about for this video. Now, secrets manager is pretty straightforward. It's basically going to just uh allow you to import your API keys. And from there, you're good to go ahead and save them. And that's going to have you set up for the rest of the tutorial. You can also click the introduction to agents button which is going to bring you to the build an agent
+
+5
+00:01:47,000 --> 00:02:41,000
+workshop. In this case, we're going to go ahead and we're going to go straight to the report generation agent where we're going to discuss how to build an agent that does some research, does some planning, and finally writes a report. Now, the way that we do this is entirely tutorialized through this workshop. So, uh every detail is going to be available to you guys. In the video, we're going to move through each of those steps in order to figure out how exactly to do this. So, the first thing we're going to
+
+6
+00:02:14,000 --> 00:03:11,000
+do is we're going to define some tools, which we can do in our tools. py. Now, of course, tools are ways for our agents to interact with the world, right? In this case, we're going to build a search to villi tool uh using the at tool decorator. And what this is going to do is it's going to search the web using API and then it's going to return a string of the results from that search. Pretty simple, right? Uh the next thing we're going to do is build our researcher uh agent. A researcher agent
+
+7
+00:02:43,000 --> 00:03:34,000
+is going to be a simple React agent, right? So that means we're going to start, we're going to go to the agent, which is going to determine if we need to make tool calls. If we do, we're going to make those tool calls and then go back to the agent and rinse and repeat. And if we don't need to make tool calls, we're going to go to the next phase of the pipeline. You can see in the actual code that we're using the uh chat Nvidia uh langchain connector and we're pointing that at open router
+
+8
+00:03:08,000 --> 00:04:01,000
+to that Nvidia Neotron Nano 9B v2 model. Uh and we're also binding some tools to it. Of course, for each of our agents, we're going to set up some state. In this case, our research needs topic number of queries as well as the chat history. We're going to define nodes. So, in this case, we have our tool node that's going to call tools. our call model node which is going to call the model and determine if we need to use tools or not. And then we're going to make our conditional edge which is going
+
+9
+00:03:34,000 --> 00:04:37,000
+to give us that behavior uh which allows us to have this branch between yes and no. If we need tools we go to the tools node and if not we go to the end. So you can see this conditional node here. Finally, we build our workflow by instantiating our state graph, adding our agent and tool nodes, adding our conditional edge, making sure everything's connected with edges, and then compiling our graph. And that's it for the research uh graph. Next up, we have the author graph. Now, the author
+
+10
+00:04:06,000 --> 00:05:18,000
+graph is a little bit more straightforward, which is simply we're going to say, do we need research? If yes, we should go to the researcher and if no, we should go to the writer. So what this means is that we're going to effectively uh make sure that the uh you know before we do research, we determine if we need research. You can see the author graph implemented here. We start with our agent, our tools and our writer. We start with our conditional edges, one for the actual uh overall flow determining if we need to use uh
+
+11
+00:04:41,000 --> 00:05:49,000
+the the writer or the re research or not and then the next piece being uh whether or not we need to go to our tools. So since we have these two branching paths, we have two conditional edges. Next and finally, we have our full workflow. Our full workflow is going to start, go to our researcher, then to our report planner, then to our author agent, then to our report author, and finally we'll be done. We can see the implementation here where we have our topic researcher, we have our report planner, we have our
+
+12
+00:05:16,000 --> 00:06:18,000
+section author, orchestrator, as well as we have our report author. We attach these in the linear workflow that we saw in the previous image, compile the graph, and we're good to go. So, how does this thing actually work? Well, we can go ahead and look at that by heading to our uh introduction to agents or or we can look at our agent client. In our agent client, you can see that we have the uh runnable cells and finally we can add a topic and some structure. And then we can use that topic in this case the
+
+13
+00:05:47,000 --> 00:06:46,000
+latest developments with AI agents in 2025 as well as this structure we've outlined to ask our agent this question. When it's done uh working, which is going to take a little while as it needs to do a number of web searches uh for the research and planning phases, you will see that we can get this uh markdown formatted report as the end product. Thanks so much for watching. Uh if you like this video, we have a live stream where we dive into it as well as talk to some folks from Open Router as
+
+14
+00:06:16,000 --> 00:06:29,000
+well as we have the technical blog uh which will both be linked down below. Uh thanks for watching. Have a great day.
+

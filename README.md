@@ -1,206 +1,117 @@
 # PromptPotter Optimizer
 
-## Chain it your way: workflows • algorithms • LLMs • web researchers • custom evaluators
+**Chain it your way: workflows • algorithms • LLMs • web researchers • custom evaluators**
 
-- Compose and optimize chains of workflows, algorithms, LLMs, researchers, and custom evaluators
-- Custom workflow chains for reranking. Continuous optimization campaigns. Custom evaluators.
-- API-first prompt optimization service that iteratively improves prompts based on dataset performance.
-
-## Overview
-
-PromptPotter Optimizer is a microservice that helps you optimize prompts for LLM applications. Upload a dataset with examples, specify your target metric, and get back an optimized prompt that performs better on your specific use case.
-
-### Key Features
-
-- **API-First Design**: Clean REST API consumable by any client (Python, JavaScript, etc.)
-- **Iterative Optimization**: Uses LLM feedback to iteratively improve prompts
-- **Flexible Deployment**: Run locally, self-host, or use hosted service
-- **Dataset-Driven**: Optimization based on your actual use cases
-- **Multiple LLM Support**: Works with OpenAI, Anthropic, and other providers
+API-first prompt optimization service that iteratively improves prompts based on dataset performance.
 
 ## Quick Start
 
-### Option 1: Docker (Recommended)
-
 ```bash
-# Clone the repository
+# Clone and setup
 git clone https://github.com/yourusername/prompt-potter-optimizer.git
 cd prompt-potter-optimizer
-
-# Copy environment file
 cp .env.example .env
+# Edit .env with your API keys
 
-# Edit .env and add your API keys
-# OPENAI_API_KEY=your_key_here
-
-# Run with Docker Compose
-docker-compose -f docker/docker-compose.yml up -d
-
-# API will be available at http://localhost:8000
+# Run with Docker
+cd docker
+docker-compose up --build
 ```
 
-### Option 2: Local Development
+**Open:**
+- **JupyterLab**: http://localhost:8888 (with custom learning path tiles)
+- **FastAPI**: http://localhost:8000/docs
 
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+### JupyterLab Launcher Tiles
 
-# Install dependencies
-pip install -r requirements.txt
+Look for **"PromptPotter Learning Path"** in the JupyterLab launcher:
 
-# Copy environment file
-cp .env.example .env
+| Tile | Description |
+|------|-------------|
+| Introduction to Prompt Optimization | Quickstart tutorial notebook |
+| Advanced Optimization | Multi-iteration techniques |
+| Secrets Manager | Configure API keys (OpenAI, Anthropic) |
+| Prompt Optimizer Client | Interactive optimization UI |
 
-# Edit .env and add your API keys
+## Overview
 
-# Run the server
-uvicorn api.main:app --reload
+PromptPotter Optimizer helps you optimize prompts for LLM applications. Upload a dataset with examples, specify your target metric, and get back an optimized prompt.
 
-# API will be available at http://localhost:8000
-```
+**Key Features:**
+- API-First Design (REST API for any client)
+- Iterative Optimization with LLM feedback
+- JupyterLab environment with custom launcher tiles
+- Works with OpenAI, Anthropic, and other providers
 
-## API Documentation
-
-Once running, visit:
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
-### Example API Request
+## API Usage
 
 ```python
 import requests
 
-# Optimization request
 response = requests.post(
     "http://localhost:8000/api/v1/optimize",
     json={
         "initial_prompt": "Classify the sentiment:",
         "dataset": [
             {"text": "I love this!", "expected": "positive"},
-            {"text": "This is terrible", "expected": "negative"},
-            {"text": "Amazing product!", "expected": "positive"}
+            {"text": "This is terrible", "expected": "negative"}
         ],
         "target_metric": "accuracy",
-        "model": "gpt-4",
         "max_iterations": 5
     }
 )
-
 result = response.json()
-print(f"Optimized prompt: {result['optimized_prompt']}")
-print(f"Improvement: {result['improvement']:.2f}%")
+print(f"Optimized: {result['optimized_prompt']}")
 ```
 
-## Google Colab Integration
+## Project Structure
 
-See the `examples/` directory for Jupyter/Colab notebooks demonstrating usage:
-
-- `examples/quickstart.ipynb`: Basic optimization workflow
-- `examples/advanced_optimization.ipynb`: Advanced techniques and parameters
-
-To use in Colab:
-
-```python
-# If using hosted service
-API_URL = "https://your-hosted-api.com/api/v1"
-
-# If running locally with ngrok
-# API_URL = "https://your-ngrok-url.ngrok.io/api/v1"
+```
+prompt-potter-optimizer/
+├── api/                 # FastAPI application
+├── apps/                # Streamlit apps (secrets_manager, optimizer_client)
+├── docker/              # Docker configs
+├── examples/            # Tutorial notebooks
+├── launcher/            # JupyterLab tiles config
+├── tests/               # Tests
+├── prompts/             # LLM agent prompt templates
+├── docs/                # Extended documentation
+├── research/            # Research artifacts (being compiled into docs)
+└── external/            # Git submodule: TermNorm-excel (read-only reference)
 ```
 
 ## Configuration
 
-Edit `.env` file or set environment variables:
+Edit `.env` file:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ENVIRONMENT` | Environment (development/production) | development |
-| `DEBUG` | Enable debug mode | true |
-| `API_HOST` | API host | 0.0.0.0 |
-| `API_PORT` | API port | 8000 |
 | `OPENAI_API_KEY` | OpenAI API key | - |
 | `ANTHROPIC_API_KEY` | Anthropic API key | - |
-| `MAX_DATASET_SIZE` | Maximum examples in dataset | 1000 |
-| `MAX_ITERATIONS` | Maximum optimization iterations | 5 |
+| `MAX_ITERATIONS` | Max optimization iterations | 5 |
 | `DEFAULT_MODEL` | Default LLM model | gpt-4 |
 
-## Deployment
-
-### Self-Hosted (Docker)
+## Local Development
 
 ```bash
-# Build production image
-docker build -f docker/Dockerfile -t promptpotter-optimizer .
-
-# Run container
-docker run -d \
-  -p 8000:8000 \
-  -e OPENAI_API_KEY=your_key \
-  --name promptpotter \
-  promptpotter-optimizer
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn api.main:app --reload
 ```
 
-### Cloud Deployment
+## Documentation
 
-Deploy to your preferred cloud provider:
+- `docs/architecture.md` - Design patterns
+- `docs/registry-design.md` - Optimization tracking patterns
+- `docs/submodule-strategy.md` - External reference policy
 
-- **AWS**: ECS/Fargate or EC2
-- **GCP**: Cloud Run or GKE
-- **Azure**: Container Instances or AKS
+## NVIDIA Brev Deployment
 
-See deployment guides in `docs/` (coming soon).
-
-## Development
-
-### Project Structure
-
-```
-prompt-potter-optimizer/
-├── api/
-│   ├── core/           # Optimization algorithms
-│   ├── routers/        # API endpoints
-│   ├── models/         # Request/response models
-│   ├── services/       # LLM integrations
-│   ├── config/         # Configuration
-│   └── main.py         # FastAPI app
-├── examples/           # Colab notebooks
-├── docker/             # Docker configs
-└── tests/              # Tests
-```
-
-### Running Tests
-
-```bash
-pytest tests/
-```
-
-### Adding New LLM Providers
-
-1. Add provider SDK to `requirements.txt`
-2. Create provider client in `api/services/`
-3. Update `api/core/optimizer.py` to use new provider
-
-## Roadmap
-
-- [ ] Implement actual LLM-based optimization logic
-- [ ] Add support for more metrics (F1, precision, recall)
-- [ ] Custom metric functions
-- [ ] Prompt versioning and A/B testing
-- [ ] Rate limiting and authentication
-- [ ] Web UI dashboard
-- [ ] Batch optimization endpoints
+1. Go to [brev.nvidia.com](https://brev.nvidia.com)
+2. Create launchable → select this repo
+3. Use `.brev/setup.sh` as setup script
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Contributing
-
-Contributions welcome! Please open an issue or PR.
-
-## Support
-
-For issues or questions:
-- GitHub Issues: [yourusername/prompt-potter-optimizer/issues]
-- Documentation: [Link to docs]
+MIT License - see LICENSE file.

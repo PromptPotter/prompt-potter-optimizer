@@ -16,8 +16,13 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
 
-    # CORS
-    ALLOWED_ORIGINS: List[str] = ["*"]
+    # CORS - stored as comma-separated string, parsed via property
+    ALLOWED_ORIGINS: str = "*"
+
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        """Parse ALLOWED_ORIGINS as comma-separated list."""
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
     # LLM Provider Settings
     OPENAI_API_KEY: str = ""
