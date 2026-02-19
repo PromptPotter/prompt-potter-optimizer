@@ -129,12 +129,44 @@ from .my_node import MyNode
 register_node(MyNode)
 ```
 
+## Specifications
+
+Formal project specs live in `docs/specs/`:
+
+| Document | Purpose |
+|----------|---------|
+| [Project Charter](docs/specs/project-charter.md) | Problem, vision, scope, success criteria |
+| [PRD](docs/specs/prd.md) | Requirements (P0/P1/P2) with acceptance criteria |
+| [ADD](docs/specs/add.md) | Architecture, ADRs, data model, API contract |
+| [WBS](docs/specs/wbs.md) | Work packages by phase with estimates and dependencies |
+| [Roadmap](docs/specs/roadmap.md) | Milestones and decision gates |
+
+Supporting design docs in `docs/`:
+- `docs/literature-review.md` — Survey of 11+ optimization frameworks
+- `docs/registry-design.md` — Campaign/trial tracking pattern
+
+## Current Milestone: M0 (Specifications)
+
+**Status:** Complete
+**Deliverables:** All spec documents created, CLAUDE.md updated, CHANGELOG.md baselined.
+
+## Next Up: M1 (Foundation)
+
+**Goal:** Test coverage for existing components + PromptState model + CI pipeline
+**Key work packages:**
+- Add `PromptState` Pydantic model (`api/models/prompt_state.py`)
+- Write tests for evaluators and workflow runner
+- Set up GitHub Actions CI (lint + test)
+- Update CLAUDE.md with M1 status
+
+**PRP scope:** One session per work package (see WBS 1.1–1.6).
+
 ## Current State
 
 - **Workflow system**: Fully implemented with LLMNode, WebSearchNode (mock), RankerNode
 - **Evaluators**: ExactMatchEvaluator and CriteriaEvaluator (LLM-judge)
-- **WebSearchNode**: Mock implementation - add real providers (Brave, SearxNG) later
-- **Legacy optimizer**: `api/core/optimizer.py` has placeholder implementations (TODO)
+- **WebSearchNode**: Mock implementation — add real providers (Brave, SearxNG) in M4
+- **Legacy optimizer**: `api/core/optimizer.py` has placeholder implementations — replaced in M2
 
 ## External References
 
