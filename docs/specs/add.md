@@ -16,6 +16,7 @@
 - [Data Model](#data-model)
 - [Architectural Decisions](#architectural-decisions)
 - [Integration Points](#integration-points)
+- [Validation Scenario](#validation-scenario)
 
 ---
 
@@ -238,4 +239,55 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 | **File system** | Read/write campaigns, trials, lineage | JSON/JSONL | Planned (M3) |
 | **Streamlit** | Streamlit calls the API | HTTP | Exists (prototype) |
 | **Consuming projects** (e.g., TermNorm) | PromptPotter loads external datasets | File path or URL | Exists (loader) |
+| **TermNorm prompt registry** | PromptPotter reads current prompts from `logs/prompts/{family}/{version}/prompt.txt` and writes optimized versions back as new version numbers (v2, v3, ...) | File system (TermNorm's `PromptRegistry` with `{{variable}}` templates) | Planned (M4) |
 | **MCP clients** (e.g., Claude Code) | Clients invoke optimization tools | MCP | Planned (P2.3) |
+
+---
+
+## Validation Scenario
+
+The pinnacle validation for PromptPotter is the **TermNorm pipeline variant comparison** (SC5). This section describes how the architecture supports the concrete validation that proves the system works.
+
+### TermNorm Pipeline
+
+TermNorm is a terminology normalization system (primary domain: LCA -- Life Cycle Assessment) that matches free-form text to standardized database identifiers. Its pipeline has three stages, two of which are LLM calls with prompts managed by TermNorm's versioned prompt registry:
+
+| Stage | Component | Type | Prompt Family |
+|-------|-----------|------|---------------|
+| 1 | Web scrape | External | -- |
+| 2 | Entity profiling (LLM1) | LLM call | `entity_profiling` (vars: `query`, `format_string`, `combined_text`) |
+| 3 | Table Reranker | Non-LLM | -- (token/string matching, no semantic understanding) |
+| 4 | Semantic reranking (LLM2) | LLM call | `llm_ranking` (vars: `core_concept`, `entity_profile_json`, `matches`) |
+
+### Variant Comparison
+
+The two pipeline variants under comparison:
+
+- **Variant A**: Web scrape --> LLM1 (`entity_profiling` v1) --> Table Reranker --> done (skip LLM2)
+- **Variant B**: Web scrape --> LLM1 (`entity_profiling` v1) --> Table Reranker --> LLM2 (`llm_ranking`) --> done
+
+**Research question:** Does LLM2 semantic reranking add enough accuracy over the table reranker to justify the extra LLM cost and latency?
+
+### Optimization Strategy
+
+Variant A serves as the **fixed baseline** -- `entity_profiling` v1 plus the table reranker, with no LLM2 call. Its score on the evaluation dataset is the bar that Variant B must clear.
+
+PromptPotter's job is to **optimize the `llm_ranking` prompt** (generating v2, v3, ...) so that Variant B beats Variant A. The `entity_profiling` prompt stays at v1 throughout; only the `llm_ranking` prompt changes between trials. This is the concrete test of whether an optimized LLM2 call adds enough value to justify its cost.
+
+The optimization loop:
+1. Evaluate Variant A (once) to establish the baseline score
+2. Evaluate Variant B with `llm_ranking` v1 as the initial candidate
+3. Run the optimize cycle on `llm_ranking`: analyze failures, generate candidate prompts (v2, v3, ...), evaluate each, select best
+4. Compare the best Variant B score against the Variant A baseline
+5. Produce a clear recommendation: is the optimized LLM2 call worth it?
+
+Optimized prompt versions are written back to TermNorm's prompt registry as new version numbers.
+
+Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). LCA dataset validation follows when deploying to real-world use. MedMentions 500-term subset serves as an additional biomedical benchmark.
+
+### Decision Points
+
+| # | Decision | Method | Milestone |
+|---|----------|--------|-----------|
+| 1 | LLM2 on/off -- can an optimized `llm_ranking` prompt make Variant B beat Variant A? | Optimize `llm_ranking` prompt, compare best Variant B score against Variant A baseline, results persisted and traceable in Langfuse | M4 |
+| 2 | How many websites to scrape for entity profiling? | Ablation study varying scrape count, measuring quality vs. cost/latency | Post-M4 |

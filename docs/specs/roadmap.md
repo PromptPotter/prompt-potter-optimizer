@@ -98,7 +98,8 @@
 ## M4: Integration and Polish — Weeks 9-11
 
 - **Deliverables:**
-  - TermNorm E2E test against MedMentions/BC5CDR 500-term hard subsets (SC5)
+  - TermNorm Variant A vs Variant B comparison on BC5CDR 500-term subset (SC5)
+  - Optimized `llm_ranking` prompt versions written back to TermNorm's prompt registry
   - Real web search provider replacing mock (P1.4)
   - Human-in-the-loop gates: pause/approve/reject/edit (P1.3)
   - Streamlit dashboard: campaign browser, trial comparison, dataset explorer (P2.4)
@@ -108,14 +109,15 @@
 - **Entry criteria:** M3 exit gate passed; registry and Langfuse working
 
 - **Exit gate:**
-  - Full demo: optimize a real TermNorm configuration, track in registry, view in Langfuse and dashboard
-  - Optimized configuration outperforms hand-tuned TermNorm baseline (SC5)
+  - **Variant A vs Variant B comparison completes** on the BC5CDR 500-term subset: Variant A baseline established, `llm_ranking` prompt optimized (v2+), best Variant B score compared against Variant A, clear recommendation produced (SC5)
+  - Results are persisted in the campaign registry and traceable in Langfuse
   - Time to first optimization under 15 minutes (SC4)
   - Docker deployment works with `docker-compose up`
-  - Decision: ready for others to use? Which P2 features to prioritize next?
+  - Decision: does the optimized LLM2 call justify its cost? Ready for others to use? Which P2 features to prioritize next?
 
 - **Risks:**
   - TermNorm integration depends on external dataset availability and format stability
+  - Optimizing `llm_ranking` may not produce enough improvement to justify the LLM2 call -- this is a valid result, not a failure
   - HITL UX is hard to get right for both API and notebook modes
   - Dashboard scope can expand; keep to three core views
 
@@ -123,14 +125,22 @@
 
 ## Future (Post-M4, Unscheduled)
 
+### Next Validation: Web Scrape Ablation
+
+After the Variant A vs Variant B comparison is settled, the next decision point is: **how many websites to scrape** for `entity_profiling`? More websites means better entity profiles but higher cost and latency. This ablation study varies the scrape count while holding the winning variant's prompts fixed, measuring the quality vs. cost/latency tradeoff. Also extends validation to the LCA dataset for real-world use case confirmation.
+
+### Additional Features
+
 | Feature | PRD | Notes |
 |---------|-----|-------|
+| Web scrape count ablation | -- | Vary number of websites scraped, measure quality vs. cost/latency |
+| LCA dataset validation | -- | Real-world use case validation after BC5CDR development is complete |
 | Reflection-based learning | P2.1 | Chained reflections to improve generation |
 | Evolutionary operators (GA/DE) | P2.2 | Population-based search for multi-parameter optimization |
 | MCP server mode | P2.3 | Expose optimization tools to Claude Code and MCP clients |
 | Workflow-based optimization | P1.2 | Optimize single steps within multi-step pipelines |
 
-Prioritization decided at the M4 exit gate based on TermNorm validation results.
+Prioritization decided at the M4 exit gate based on Variant A vs Variant B results.
 
 ---
 

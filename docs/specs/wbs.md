@@ -242,16 +242,18 @@
 
 ## Phase 4: Integration and Polish (M4)
 
-### 4.1 TermNorm End-to-End Integration Test
+### 4.1 TermNorm Variant Comparison (Pinnacle Validation)
 
-- **Scope:** Run a full optimization campaign against a TermNorm hard-test dataset (MedMentions or BC5CDR 500-term subset). Validates the optimizer on a real biomedical entity normalization task.
+- **Scope:** Run the **Variant A vs Variant B** comparison that proves the whole system works (SC5). Evaluate Variant A (`entity_profiling` v1 + table reranker, no LLM2) once to establish the baseline score. Then run the optimization loop on Variant B's `llm_ranking` prompt -- generating v2, v3, etc. -- to find the best LLM2 prompt. Compare the best Variant B score against the Variant A baseline and produce a clear recommendation on whether the LLM2 call is worth the extra cost/latency. Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth). LCA dataset validation follows when deploying to real-world use.
 - **Sessions:** 2
 - **Dependencies:** 2.6, 3.2
 - **PRD Ref:** SC5
 - **Done when:**
-  - Campaign runs against a 500-term TermNorm dataset without errors
-  - Final configuration outperforms the hand-tuned baseline on at least one metric
+  - Variant A baseline score is established on the BC5CDR 500-term subset
+  - Optimization campaign runs on `llm_ranking` prompt (Variant B), producing at least one improved version
+  - Variant A and best Variant B scores are compared, with a clear recommendation produced
   - Full campaign is persisted and traceable in Langfuse
+  - Optimized prompt versions are written back to TermNorm's prompt registry
 
 ### 4.2 Real Web Search Provider
 
@@ -310,7 +312,7 @@
   - At least one notebook demonstrates a full campaign
   - No references to removed or renamed components
 
-**Phase 4 exit criteria:** E2E optimization works against TermNorm, dashboard shows campaign results, Docker works, HITL gates functional.
+**Phase 4 exit criteria:** Variant A vs Variant B comparison completes on BC5CDR 500-term subset with clear recommendation, optimized `llm_ranking` prompt versions written to TermNorm registry, dashboard shows campaign results, Docker works, HITL gates functional.
 
 ---
 

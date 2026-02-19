@@ -25,9 +25,24 @@ Existing optimization frameworks (DSPy, TextGrad, EvoPrompt) each solve parts of
 
 ### Motivating Use Case: TermNorm
 
-**TermNorm** is a biomedical entity normalization system that maps free-text medical mentions (e.g., "SJS," "heart attack") to standardized concept identifiers in medical ontologies. Its pipeline has multiple tunable parameters: the system prompt, few-shot examples, candidate retrieval count, similarity thresholds, and temperature.
+**TermNorm** is an AI-powered terminology normalization system that matches free-form text (product names, material codes, process terms) to standardized database identifiers. Its primary domain is **Life Cycle Assessment (LCA)** workflows, where it disambiguates against 11,750+ database entries. Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). MedMentions 500-term subset serves as an additional biomedical benchmark. LCA dataset validation follows when deploying to real-world use.
 
-The first real use case for PromptPotter is optimizing TermNorm's parameters against hard evaluation datasets (500-term subsets from the **MedMentions** and **BC5CDR** biomedical benchmarks). These datasets expose failure modes — rare diseases, ambiguous abbreviations, overlapping concept boundaries — that manual tuning struggles to address systematically.
+TermNorm's pipeline uses two LLM calls connected by a non-LLM table reranker:
+
+1. **LLM1 (`entity_profiling`)** -- extracts a structured entity profile from web-scraped research data. Template variables: `query`, `format_string`, `combined_text`.
+2. **Table Reranker** -- a non-LLM step that reranks candidates using token/string matching. Fast and cheap, but has no semantic understanding.
+3. **LLM2 (`llm_ranking`)** -- semantic reranking of 20 candidates using the entity profile, weighted 70% on core concept match with a 4-tier scoring rubric. Template variables: `core_concept`, `entity_profile_json`, `matches`.
+
+TermNorm already has a versioned prompt registry (`backend-api/logs/prompts/` with `PromptRegistry`) storing both prompt families as `{{variable}}`-templated text with metadata (author, model recommendation, temperature).
+
+The central research question for PromptPotter validation is a **pipeline variant comparison**:
+
+- **Variant A**: Web scrape --> LLM1 (`entity_profiling`) --> Table Reranker --> done (skip LLM2)
+- **Variant B**: Web scrape --> LLM1 (`entity_profiling`) --> Table Reranker --> LLM2 (`llm_ranking`) --> done
+
+**Does LLM2 semantic reranking add enough accuracy over the "dumb" table reranker to justify the extra LLM cost and latency?** This is a concrete, testable question. When PromptPotter can run both variants against the same evaluation dataset and produce a clear, traceable recommendation, we know the whole system works.
+
+A future decision point (post-M4) extends this: **how many websites to scrape** for entity profiling -- a quality vs. cost/latency tradeoff that becomes the second ablation study.
 
 ---
 
@@ -76,7 +91,7 @@ The system keeps humans in control of strategy and priorities through decision g
 | 2 | **Reproducibility** | Given identical inputs (initial configuration, dataset, campaign settings), the optimizer produces a consistent improvement trajectory | Scores for the same trial vary by **less than 5%** across repeated runs (accounting for LLM non-determinism with temperature 0) |
 | 3 | **Langfuse observability** | Optimization campaigns appear in Langfuse with correct parent-child trace hierarchy and per-trial scores | **100%** of trials have associated Langfuse traces and scores |
 | 4 | **Time to first optimization** | A developer with API keys configured can run their first optimization campaign | **Under 15 minutes** from `pip install` to completed campaign, using the API or a notebook |
-| 5 | **TermNorm validation** | Run a full campaign against a TermNorm hard-test dataset | Produces a configuration that **outperforms the hand-tuned baseline** on the MedMentions or BC5CDR 500-term subset |
+| 5 | **TermNorm validation** | Compare Variant A (table reranker only) vs Variant B (table reranker + LLM2 semantic reranking) on the same evaluation dataset | Produces a clear result showing **which variant is better and by how much**, with full campaign persisted and traceable in Langfuse |
 
 ---
 

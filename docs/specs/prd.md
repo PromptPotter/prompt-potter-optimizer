@@ -59,11 +59,13 @@ This document uses terms defined in the [Project Charter](project-charter.md): *
 **As a** developer, **I want to** evaluate a configuration against a labeled dataset **so that** I have a quantitative baseline before optimization.
 
 **What the system does:**
-- Accepts an initial configuration and an evaluation dataset (list of input/expected-output pairs, loaded from the consuming project — e.g., TermNorm's 500-term MedMentions or BC5CDR hard subsets)
+- Accepts an initial configuration and an evaluation dataset (list of input/expected-output pairs, loaded from the consuming project)
 - Executes the configured LLM call against each dataset item
 - Scores outputs using one or more evaluators (exact match, LLM-as-judge, custom)
 - Returns per-item scores and aggregate metrics
 - Logs all evaluations to Langfuse with parent-child trace hierarchy
+
+The core operation for the TermNorm validation (SC5) is evaluating both **Variant A** (table reranker only) and **Variant B** (table reranker + LLM2 semantic reranking) against the same dataset to produce comparable scores. Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). MedMentions 500-term subset serves as an additional biomedical benchmark. LCA dataset validation follows when deploying to real-world use.
 
 **Acceptance criteria:**
 1. Given a configuration and a dataset of at least 500 items, the system returns aggregate scores and per-item results
