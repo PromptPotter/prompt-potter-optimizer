@@ -73,3 +73,4 @@ Thumbs.db
 
 # External reference (clone locally, not tracked)
 external/
+data/

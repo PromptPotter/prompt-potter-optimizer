@@ -60,13 +60,12 @@ steps:
       - content
       - parsed
     config:
-      model: gpt-4
+      # model: uses settings.LLM_MODEL (default: groq/llama-4-maverick)
       temperature: 0.0
       output_format: json
     metadata:
       type: llm
       deterministic: false
-      model: gpt-4
       temperature: 0.0
 
   - id: candidate_ranker
@@ -80,7 +79,7 @@ steps:
       - top_candidate
       - confidence
     config:
-      model: gpt-4
+      # model: uses settings.LLM_MODEL (default: groq/llama-4-maverick)
       temperature: 0.0
       max_candidates: 20
     metadata:

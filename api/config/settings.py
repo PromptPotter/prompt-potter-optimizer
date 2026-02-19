@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # LLM Provider Settings
     LLM_PROVIDER: str = "groq"  # "groq", "openai", or "anthropic"
-    LLM_MODEL: str = ""  # Model to use (provider-specific default if empty)
+    LLM_MODEL: str = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Model to use
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GROQ_API_KEY: str = ""
