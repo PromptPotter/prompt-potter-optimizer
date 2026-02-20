@@ -153,6 +153,21 @@ The abstraction boundary is **designed but not implemented** until post-M4. M2-M
 
 The optimization loop is a **DAG-based iterative workflow** with an initialization phase followed by a main loop with conditional feedback paths. The design is derived from the reference n8n workflow (`docs/design/optimization-workflow.n8n.json`).
 
+### 3-Layer Optimization Architecture
+
+The three feedback paths form **nested optimization layers** with escalation.
+The innermost layer runs first; outer layers activate only when inner ones stall:
+
+| Layer | Feedback Path | PromptState Fields | Escalation Trigger |
+|-------|--------------|--------------------|--------------------|
+| **1 - Generate** (innermost) | `"generate"` → main_data | persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples | Default — always runs |
+| **2 - Refine Context** (middle) | `"refine context"` → updated_context → updated_plan → main_data | context, parameters | Layer 1 shows no improvement |
+| **3 - Modify Plan** (outermost) | `"modify plan"` → updated_plan → main_data | plan | Layer 2 shows no improvement |
+
+Layer 3 ships with `OptimizationDefaults` — sensible strategy parameters that should
+rarely need changing. The escalation design means most optimization runs complete
+using only Layer 1 (generating divergent variants in one pass).
+
 ### Initialization Phase
 
 ```
@@ -235,9 +250,9 @@ The Switch node routes based on the `next_action` field from the analysis report
 
 | next_action | Path | Effect |
 |-------------|------|--------|
-| **"generate"** | Loop directly back to `main_data` | Create new prompt variants from scratch — used when the current approach is fundamentally off |
-| **"refine context"** | `updated_context` --> `updated_plan` --> `main_data` | Update optimization context with critiques and applied metrics, then revise the plan — used when the approach is right but needs fine-tuning |
-| **"modify plan"** | `updated_plan` --> `main_data` | Change the optimization strategy/plan without changing context — used when the evaluation suggests a different approach |
+| **"generate"** | Loop directly back to `main_data` | **Layer 1**: Create new prompt variants — the innermost loop, runs every pass |
+| **"refine context"** | `updated_context` --> `updated_plan` --> `main_data` | **Layer 2**: Update context with critiques and metrics, then revise plan — escalation when Layer 1 stalls |
+| **"modify plan"** | `updated_plan` --> `main_data` | **Layer 3**: Change optimization strategy — last resort escalation when Layer 2 stalls |
 
 ### Phased Rollout
 
@@ -276,7 +291,7 @@ The DAG supports two operational modes:
 
 Three models are central. See [Charter Key Terms](project-charter.md) for definitions and [PRD P0.5](prd.md) for PROMPT_STATE acceptance criteria.
 
-- **PROMPT_STATE** — versioned snapshot of prompt text + few-shot examples + parameters dictionary (temperature, retrieval count, thresholds, etc.). Immutable; each trial creates a new one.
+- **PROMPT_STATE** — versioned snapshot organized into three optimization layers: **Layer 1 (Generate)** structured prompt components (persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples), **Layer 2 (Refine Context)** optimization context and hypervariables (context, parameters), and **Layer 3 (Modify Plan)** optimization strategy (plan). Immutable; each trial creates a new one. Includes `render()` to assemble Layer 1 fields into a prompt string.
 - **Campaign** — one optimization run: config, initial state, status, best trial reference.
 - **Trial** — one iteration: PROMPT_STATE snapshot, scores, analysis, rationale, parent reference.
 
@@ -306,7 +321,7 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 | **No framework dependency** (no DSPy, LangChain, TextGrad) | Avoid lock-in; borrow ideas from [literature review](../literature-review.md), build on own abstractions | More initial work, but strategies are swappable |
 | **DAG-based optimization loop with conditional feedback** | Reference n8n workflow proves the pattern works; three feedback paths (generate, refine context, modify plan) let the system adapt its strategy per iteration instead of rigidly repeating the same cycle | More complex than a linear loop; requires routing logic and state management across feedback paths |
 | **Phased rollout: linear first, cycling later** | Phase 1 (linear mode, 0 cycles) is simpler to build and test; breadth-first (N parallel runs) provides value without the complexity of feedback cycling | Phase 1 may miss optimization opportunities that require iterative refinement; Phase 2 adds that capability |
-| **Structured prompt state as DAG data flow** | Prompt components (persona, task_intent, problem_description, instruction, thinking_style, plan) flow through the DAG as structured data, not opaque strings; enables targeted modification by each node | More fields to maintain; adding a new prompt component requires updating the state schema |
+| **Structured prompt state as DAG data flow** | Prompt components organized into 3 optimization layers (Generate, Refine Context, Modify Plan) flow through the DAG as structured data, not opaque strings; `OptimizationDefaults` provides sensible Layer 3 strategy parameters; enables targeted modification by each node at the appropriate layer | More fields to maintain; adding a new prompt component requires updating the state schema and `LAYER_FIELDS` mapping |
 | **AI Agent initialization with structured output** | LLM analyzes raw context and produces typed prompt components (task_description, base_instruction, answer_format) via structured output parsing; avoids manual prompt decomposition | Quality of initialization depends on the LLM's ability to parse arbitrary context; may need domain-specific examples |
 | **Optimizer built on workflow engine** | Reuse existing DAG execution, tracing, error handling | Optimization steps are nodes -- testable, composable, traceable for free |
 | **File-based registry first** | No database for MVP; JSON/JSONL is human-readable and OpenAI Evals compatible | Limited query capability; acceptable at single-user scale. Swappable later behind interface. |

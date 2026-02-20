@@ -3,6 +3,11 @@ PromptState — versioned, immutable snapshot of a prompt configuration.
 
 Each optimization trial creates a new PromptState linked to its parent,
 forming a lineage chain. The diff() function compares any two states.
+
+Fields are organized into three optimization layers:
+  Layer 1 (Generate)        — prompt components that vary every pass
+  Layer 2 (Refine Context)  — context and parameters, adjusted when Layer 1 stalls
+  Layer 3 (Modify Plan)     — optimization strategy, ideally left at defaults
 """
 import difflib
 import uuid
@@ -12,6 +17,29 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+# ---------------------------------------------------------------------------
+# Layer field mapping
+# ---------------------------------------------------------------------------
+
+LAYER_FIELDS: Dict[str, List[str]] = {
+    "generate": [
+        "persona",
+        "task_intent",
+        "problem_description",
+        "instruction",
+        "thinking_style",
+        "answer_format",
+        "few_shot_examples",
+    ],
+    "refine_context": ["context", "parameters"],
+    "modify_plan": ["plan"],
+}
+
+
+# ---------------------------------------------------------------------------
+# Supporting models
+# ---------------------------------------------------------------------------
+
 class FewShotExample(BaseModel):
     """An input/output pair used as a few-shot demonstration."""
 
@@ -20,20 +48,81 @@ class FewShotExample(BaseModel):
     explanation: Optional[str] = None
 
 
+class OptimizationDefaults(BaseModel):
+    """Layer 3 strategy defaults. Should rarely need changing."""
+
+    n_variants: int = 5
+    creativity: float = 0.7  # 0.0-1.0
+    selection_strategy: str = "best_of_n"
+    improvement_threshold: float = 0.01
+    max_context_refinements: int = 3  # Layer 2 patience
+    max_plan_modifications: int = 2  # Layer 3 patience
+    max_iterations: int = 5
+    target_score: Optional[float] = None
+    seed: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# PromptState
+# ---------------------------------------------------------------------------
+
 class PromptState(BaseModel):
-    """Immutable snapshot of prompt text + few-shot examples + parameters."""
+    """Immutable snapshot of structured prompt components organized into
+    three optimization layers, plus metadata for lineage tracking."""
 
     model_config = {"frozen": True}
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
-    prompt_text: str
-    few_shot_examples: List[FewShotExample] = Field(default_factory=list)
-    parameters: Dict[str, Any] = Field(default_factory=dict)
     parent_id: Optional[str] = None
     changes_description: Optional[str] = None
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+
+    # Layer 1: Generate (prompt components, vary every pass)
+    persona: str = ""
+    task_intent: str = ""
+    problem_description: str = ""
+    instruction: str = ""
+    thinking_style: str = ""
+    answer_format: str = ""
+    few_shot_examples: List[FewShotExample] = Field(default_factory=list)
+
+    # Layer 2: Refine Context (adjust when generation stalls)
+    context: str = ""
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+    # Layer 3: Modify Plan (outermost, ideally at defaults)
+    plan: str = ""
+
+    def render(self) -> str:
+        """Assemble Layer 1 string fields into a prompt string.
+
+        Skips empty fields. Sections are separated by double newlines.
+        Few-shot examples are formatted as Input/Output pairs.
+        """
+        parts: List[str] = []
+        for field_name in (
+            "persona",
+            "task_intent",
+            "problem_description",
+            "instruction",
+            "thinking_style",
+            "answer_format",
+        ):
+            value = getattr(self, field_name)
+            if value:
+                parts.append(value)
+
+        if self.few_shot_examples:
+            examples_lines: List[str] = []
+            for ex in self.few_shot_examples:
+                examples_lines.append(f"Input: {ex.input}\nOutput: {ex.output}")
+                if ex.explanation:
+                    examples_lines.append(f"Explanation: {ex.explanation}")
+            parts.append("\n".join(examples_lines))
+
+        return "\n\n".join(parts)
 
     def derive(self, **changes: Any) -> "PromptState":
         """Create a child state with modifications.
@@ -49,11 +138,33 @@ class PromptState(BaseModel):
         return PromptState(**data)
 
 
+# ---------------------------------------------------------------------------
+# Diff
+# ---------------------------------------------------------------------------
+
+class FieldChange(BaseModel):
+    """A single field-level change between two PromptState instances."""
+
+    field: str
+    layer: str
+    old: Any = None
+    new: Any = None
+
+
 class PromptStateDiff(BaseModel):
     """Structured diff between two PromptState instances."""
 
-    prompt_text_changed: bool
-    prompt_text_diff: Optional[str] = None
+    field_changes: List[FieldChange] = Field(default_factory=list)
+
+    # Layer-level flags
+    generate_changed: bool = False
+    context_changed: bool = False
+    plan_changed: bool = False
+
+    # Rendered diff (comparing render() output)
+    rendered_diff: Optional[str] = None
+
+    # Preserved detailed sub-diffs
     few_shot_added: List[FewShotExample] = Field(default_factory=list)
     few_shot_removed: List[FewShotExample] = Field(default_factory=list)
     parameters_added: Dict[str, Any] = Field(default_factory=dict)
@@ -61,27 +172,61 @@ class PromptStateDiff(BaseModel):
     parameters_changed: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
+def _layer_for_field(field_name: str) -> str:
+    """Return the layer name for a given field."""
+    for layer, fields in LAYER_FIELDS.items():
+        if field_name in fields:
+            return layer
+    return "metadata"
+
+
 def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
     """Compare two PromptState snapshots and return a structured diff."""
-    # Prompt text
-    text_changed = a.prompt_text != b.prompt_text
-    text_diff = None
-    if text_changed:
-        text_diff = "\n".join(
-            difflib.unified_diff(
-                a.prompt_text.splitlines(),
-                b.prompt_text.splitlines(),
-                fromfile="a",
-                tofile="b",
-                lineterm="",
-            )
-        )
+    field_changes: List[FieldChange] = []
+
+    # Compare Layer 1 string fields
+    for field_name in ("persona", "task_intent", "problem_description",
+                       "instruction", "thinking_style", "answer_format"):
+        old_val = getattr(a, field_name)
+        new_val = getattr(b, field_name)
+        if old_val != new_val:
+            field_changes.append(FieldChange(
+                field=field_name,
+                layer="generate",
+                old=old_val,
+                new=new_val,
+            ))
+
+    # Compare Layer 2 context
+    if a.context != b.context:
+        field_changes.append(FieldChange(
+            field="context",
+            layer="refine_context",
+            old=a.context,
+            new=b.context,
+        ))
+
+    # Compare Layer 3 plan
+    if a.plan != b.plan:
+        field_changes.append(FieldChange(
+            field="plan",
+            layer="modify_plan",
+            old=a.plan,
+            new=b.plan,
+        ))
 
     # Few-shot examples
     a_examples = [ex.model_dump() for ex in a.few_shot_examples]
     b_examples = [ex.model_dump() for ex in b.few_shot_examples]
-    added = [FewShotExample(**ex) for ex in b_examples if ex not in a_examples]
-    removed = [FewShotExample(**ex) for ex in a_examples if ex not in b_examples]
+    fs_added = [FewShotExample(**ex) for ex in b_examples if ex not in a_examples]
+    fs_removed = [FewShotExample(**ex) for ex in a_examples if ex not in b_examples]
+    if fs_added or fs_removed:
+        field_changes.append(FieldChange(
+            field="few_shot_examples",
+            layer="generate",
+            old=a_examples,
+            new=b_examples,
+        ))
 
     # Parameters
     a_keys = set(a.parameters)
@@ -92,12 +237,42 @@ def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
     for k in a_keys & b_keys:
         if a.parameters[k] != b.parameters[k]:
             params_changed[k] = {"old": a.parameters[k], "new": b.parameters[k]}
+    if params_added or params_removed or params_changed:
+        field_changes.append(FieldChange(
+            field="parameters",
+            layer="refine_context",
+            old=a.parameters,
+            new=b.parameters,
+        ))
+
+    # Layer flags
+    generate_changed = any(fc.layer == "generate" for fc in field_changes)
+    context_changed = any(fc.layer == "refine_context" for fc in field_changes)
+    plan_changed = any(fc.layer == "modify_plan" for fc in field_changes)
+
+    # Rendered diff
+    rendered_a = a.render()
+    rendered_b = b.render()
+    rendered_diff = None
+    if rendered_a != rendered_b:
+        rendered_diff = "\n".join(
+            difflib.unified_diff(
+                rendered_a.splitlines(),
+                rendered_b.splitlines(),
+                fromfile="a",
+                tofile="b",
+                lineterm="",
+            )
+        )
 
     return PromptStateDiff(
-        prompt_text_changed=text_changed,
-        prompt_text_diff=text_diff,
-        few_shot_added=added,
-        few_shot_removed=removed,
+        field_changes=field_changes,
+        generate_changed=generate_changed,
+        context_changed=context_changed,
+        plan_changed=plan_changed,
+        rendered_diff=rendered_diff,
+        few_shot_added=fs_added,
+        few_shot_removed=fs_removed,
         parameters_added=params_added,
         parameters_removed=params_removed,
         parameters_changed=params_changed,

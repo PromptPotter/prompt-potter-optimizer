@@ -107,7 +107,7 @@ The candidate generation process has two stages:
    - `base_instruction` — step-by-step reasoning directive (e.g., "Let's think step by step.")
    - `answer_format` — output format specification (e.g., "Wrap your final answer in `<ANS>` tags.")
 
-2. **Grow/Filter** — Given the current prompt state (persona, task_intent, problem_description, instruction, thinking_style, plan), enriches and expands the prompt. This node operates on structured prompt components, not raw text, enabling targeted modifications.
+2. **Grow/Filter** — Given the current prompt state's **Layer 1 fields** (persona, task_intent, problem_description, instruction, thinking_style, answer_format), enriches and expands the prompt. This node operates on structured prompt components, not raw text, enabling targeted modifications.
 
 Candidates are generated as structured prompt states with typed fields, not opaque prompt strings. Each field can be independently modified based on analysis feedback.
 
@@ -127,10 +127,11 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 - **Initialization:** AI agent analyzes context and produces structured prompt components
 - **Main loop per iteration:** prompt state flows through Grow/Filter --> Analysis + Evaluation --> counter increment --> stop condition check
 - **Feedback routing:** Analysis produces a `next_action` decision that routes to one of three feedback paths:
-  - `"generate"` — loop back to main_data to create new variants from scratch
-  - `"refine context"` — update context with critiques and applied metrics, then update plan, then loop back
-  - `"modify plan"` — update the optimization plan, then loop back
+  - `"generate"` — **Layer 1**: loop back to main_data to create new variants
+  - `"refine context"` — **Layer 2**: update context, then update plan, then loop back
+  - `"modify plan"` — **Layer 3**: update the optimization plan, then loop back
 - **Stop condition:** counter-based (counter >= N), configurable iteration limit
+- Layer 3 ships with `OptimizationDefaults` providing sensible strategy parameters (n_variants, creativity, selection_strategy, improvement_threshold, max_iterations). These should rarely need changing.
 - Returns the best-performing prompt state with full lineage
 
 **Phased rollout:**
@@ -150,7 +151,7 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 **As a** developer, **I want** each configuration version to carry structured metadata **so that** I can trace how parameters evolved across trials.
 
 **What the system does:**
-- Maintains a PROMPT_STATE model that snapshots the full configuration at each trial: prompt text, few-shot examples, and a `parameters` dictionary for all other tunable values (temperature, retrieval counts, thresholds, etc.)
+- Maintains a PROMPT_STATE model that snapshots the full configuration at each trial: structured prompt components organized into three optimization layers (Generate, Refine Context, Modify Plan), plus few-shot examples and a `parameters` dictionary for all other tunable values (temperature, retrieval counts, thresholds, etc.)
 - Each optimization trial produces a new PROMPT_STATE
 - State transitions are logged with diffs showing what changed between parent and child
 

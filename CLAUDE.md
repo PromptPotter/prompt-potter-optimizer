@@ -90,7 +90,8 @@ workflows/examples/              # CWL-inspired YAML workflow definitions
 
 ## Key Models
 
-- **`PromptState`** — Immutable, versioned prompt snapshot with `derive()` for creating children. Forms a lineage chain via `parent_id`. Used by the DAG-based optimization workflow to track prompt state across iterations.
+- **`PromptState`** — Immutable, versioned prompt snapshot organized into three optimization layers: **Layer 1 (Generate)** structured prompt components (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`, `few_shot_examples`), **Layer 2 (Refine Context)** optimization context and hypervariables (`context`, `parameters`), **Layer 3 (Modify Plan)** optimization strategy (`plan`). Includes `render()` to assemble Layer 1 fields into a prompt string, and `derive()` for creating children. Forms a lineage chain via `parent_id`. `LAYER_FIELDS` maps layer names to their fields.
+- **`OptimizationDefaults`** — Layer 3 strategy defaults (n_variants, creativity, selection_strategy, improvement_threshold, max_iterations, etc.). Should rarely need changing.
 - **`ExecutionResultItem`** — Per-query result from a replay. Includes `pipeline_data` dict which stores the full backend response (entity_profile, token_matched_candidates, etc.) for local optimization.
 - **`Execution`** — A complete replay run containing a list of `ExecutionResultItem`s.
 
