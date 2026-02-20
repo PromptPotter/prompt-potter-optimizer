@@ -140,6 +140,7 @@ ruff check api/ tests/
 ## Milestone Status
 
 **M1 (Foundation)**: Complete — PromptState, ProjectStore, backends, replay, comparison, evaluators, workflow runner, tests, CI.
+**M2 (Core Optimizer)**: In progress — 3-layer PromptState restructured, next: initialization node, grow/filter, analysis+evaluation.
 
 ## External References
 

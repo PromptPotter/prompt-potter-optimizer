@@ -50,8 +50,9 @@
           +--------+--------+          +-------+--------+
           |  LLM Providers  |          |  File System   |
           | (Groq, OpenAI,  |          | (.promptpotter |
-          |  Anthropic)     |          |  /campaigns/)  |
-          +--------+--------+          +----------------+
+          |  Anthropic)     |          |  /projects/)   |  ← exists (M1)
+          +--------+--------+          |  /campaigns/)  |  ← planned (M3)
+                                       +----------------+
                    |
           +--------+--------+
           |    Langfuse      |
@@ -82,7 +83,7 @@
 | **Exact match evaluator** | String matching with normalization | Pre-M1 |
 | **Criteria evaluator** | LLM-as-judge for non-deterministic outputs | Pre-M1 |
 | **LLM client** | Multi-provider abstraction (Groq, OpenAI, Anthropic) | Pre-M1 |
-| **Optimize router** | Placeholder — not yet a real implementation | Pre-M1 |
+| **Optimize router** | Placeholder — not yet a real implementation | Pre-M1 (placeholder; real implementation in M2 via 2.5) |
 | **PromptState model** | Immutable, versioned prompt snapshot with `derive()` and structured diff | M1 |
 | **ProjectStore** | File-based backend data storage (`.promptpotter/projects/`) with incremental writes | M1 |
 | **Backends router** | `/backends/*` — register, sync, execute, compare | M1 |
@@ -117,7 +118,7 @@ The optimizer implements a **DAG-based iterative workflow** derived from the ref
 |-----------|---------------|------------|
 | **Optimization orchestrator** | Manages the DAG-based optimization loop: initialization, iteration cycling, stop condition checking, and feedback routing | Workflow engine, all optimizer nodes |
 | **Workflow engine** | DAG execution with tracing; used for both user workflows and the optimization loop | LLM client, node registry |
-| **Initialization node** | Loads eval dataset + context; AI agent analyzes context and produces structured prompt components (task_description, base_instruction, answer_format) | LLM client |
+| **Initialization node** | Loads eval dataset + context; AI agent analyzes context and produces structured prompt components (task_intent, instruction, answer_format) | LLM client |
 | **Grow/Filter node** | Enriches the current prompt state — expands, refines, or constrains prompt components based on the current plan | LLM client |
 | **Analysis + Evaluation node** | Evaluates the current prompt state against the dataset, produces scores, and decides the next action (generate, refine context, or modify plan) | LLM client, Evaluation framework |
 | **Feedback router (Switch)** | Routes to one of three feedback paths based on `next_action` from the analysis report | None |
@@ -138,7 +139,7 @@ All nodes follow the same pattern:
 
 ### Target Abstraction
 
-The DAG-based optimization loop is parameterized by a **state schema** — the Pydantic model that defines the tunable parameters flowing through the graph. M2-M4 implement the concrete `PromptState` schema (persona, task_intent, problem_description, instruction, thinking_style, plan). The architecture is designed so that the core loop (initialize → grow/filter → analyze+evaluate → feedback) operates on any state schema without modification.
+The DAG-based optimization loop is parameterized by a **state schema** — the Pydantic model that defines the tunable parameters flowing through the graph. M2-M4 implement the concrete `PromptState` schema (persona, task_intent, problem_description, instruction, thinking_style, answer_format). The architecture is designed so that the core loop (initialize → grow/filter → analyze+evaluate → feedback) operates on any state schema without modification.
 
 Post-M4, new target types (scoring function weights, fuzzy matching thresholds, retrieval query templates, GA parameters) can be added by:
 1. Defining a new state schema (Pydantic model)
@@ -164,6 +165,8 @@ The innermost layer runs first; outer layers activate only when inner ones stall
 | **2 - Refine Context** (middle) | `"refine context"` → updated_context → updated_plan → main_data | context, parameters | Layer 1 shows no improvement |
 | **3 - Modify Plan** (outermost) | `"modify plan"` → updated_plan → main_data | plan | Layer 2 shows no improvement |
 
+**Layer 1 mutation strategy:** The primary mutation is **substitution** — replacing a building block with a new version. Secondary mutations (elimination, addition) are possible but not preferred. Layer 1 fields are extensible: users can register additional building blocks beyond the 6 defaults.
+
 Layer 3 ships with `OptimizationDefaults` — sensible strategy parameters that should
 rarely need changing. The escalation design means most optimization runs complete
 using only Layer 1 (generating divergent variants in one pass).
@@ -179,13 +182,15 @@ using only Layer 1 (generating divergent variants in one pass).
                                                 +--------+---------+
                                                          |
                                               Structured output:
-                                              - task_description
-                                              - base_instruction
+                                              - task_intent
+                                              - instruction
                                               - answer_format
                                                          |
                                                          v
                                                    [main_data]
 ```
+
+**Campaign inputs and context lifecycle:** A campaign starts with three required inputs: `training_data`, `test_data`, and `context` (raw user-provided domain description). During initialization, the AI Agent refines the raw context according to the Plan to produce the initial PromptState. This refined context lives on the PromptState (Layer 2) and can be further refined during escalation via the "refine context" feedback path.
 
 The AI Agent uses **structured output parsing** (Groq + Llama 4 Maverick) to transform raw context into prompt components that seed the main loop.
 
@@ -322,7 +327,7 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 | **DAG-based optimization loop with conditional feedback** | Reference n8n workflow proves the pattern works; three feedback paths (generate, refine context, modify plan) let the system adapt its strategy per iteration instead of rigidly repeating the same cycle | More complex than a linear loop; requires routing logic and state management across feedback paths |
 | **Phased rollout: linear first, cycling later** | Phase 1 (linear mode, 0 cycles) is simpler to build and test; breadth-first (N parallel runs) provides value without the complexity of feedback cycling | Phase 1 may miss optimization opportunities that require iterative refinement; Phase 2 adds that capability |
 | **Structured prompt state as DAG data flow** | Prompt components organized into 3 optimization layers (Generate, Refine Context, Modify Plan) flow through the DAG as structured data, not opaque strings; `OptimizationDefaults` provides sensible Layer 3 strategy parameters; enables targeted modification by each node at the appropriate layer | More fields to maintain; adding a new prompt component requires updating the state schema and `LAYER_FIELDS` mapping |
-| **AI Agent initialization with structured output** | LLM analyzes raw context and produces typed prompt components (task_description, base_instruction, answer_format) via structured output parsing; avoids manual prompt decomposition | Quality of initialization depends on the LLM's ability to parse arbitrary context; may need domain-specific examples |
+| **AI Agent initialization with structured output** | LLM analyzes raw context and produces typed prompt components (task_intent, instruction, answer_format) via structured output parsing; avoids manual prompt decomposition | Quality of initialization depends on the LLM's ability to parse arbitrary context; may need domain-specific examples |
 | **Optimizer built on workflow engine** | Reuse existing DAG execution, tracing, error handling | Optimization steps are nodes -- testable, composable, traceable for free |
 | **File-based registry first** | No database for MVP; JSON/JSONL is human-readable and OpenAI Evals compatible | Limited query capability; acceptable at single-user scale. Swappable later behind interface. |
 | **PROMPT_STATE as first-class model** | Track all tunable params (not just prompt text); enable structured diffs | Open-ended parameters dict means no schema enforcement on values |

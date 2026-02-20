@@ -36,7 +36,7 @@
 - **Dependencies:** —
 - **PRD Ref:** P0.5
 - **Done when:**
-  - PROMPT_STATE model is importable with typed fields for prompt text, few-shot examples, and a parameters dict
+  - PROMPT_STATE model is importable with typed fields for structured prompt components (3-layer architecture), few-shot examples, and a parameters dict
   - Diff function produces a structured comparison between two PROMPT_STATE instances
 - **Completed:** `06b6635 feat: add PromptState model with diff and derive`
 
@@ -119,7 +119,7 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
 
 ### 2.1 Implement Initialization Node
 
-- **Scope:** Build the initialization node that loads evaluation dataset + context, then uses an AI Agent with structured output parsing to produce typed prompt components (task_description, base_instruction, answer_format). Uses Groq + Llama 4 Maverick with structured output.
+- **Scope:** Build the initialization node that loads evaluation dataset + context, then uses an AI Agent with structured output parsing to produce typed prompt components (task_intent, instruction, answer_format). Uses Groq + Llama 4 Maverick with structured output.
 - **Sessions:** 1
 - **Dependencies:** 1.1
 - **PRD Ref:** P0.3
@@ -131,7 +131,7 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
 
 ### 2.2 Implement Grow/Filter Node
 
-- **Scope:** Build the Grow/Filter node that takes the current prompt state (persona, task_intent, problem_description, instruction, thinking_style, plan) and enriches it. The node expands, refines, or constrains prompt components based on the current plan and context.
+- **Scope:** Build the Grow/Filter node that takes the current prompt state (persona, task_intent, problem_description, instruction, thinking_style, answer_format) and enriches it. The node expands, refines, or constrains prompt components based on the current plan and context.
 - **Sessions:** 1
 - **Dependencies:** 1.1, 2.1
 - **PRD Ref:** P0.3

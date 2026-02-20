@@ -103,8 +103,8 @@ The core operation for the TermNorm validation (SC5) is evaluating both **Varian
 The candidate generation process has two stages:
 
 1. **Initialization** — An AI agent analyzes the user-provided context (domain description, task requirements, constraints) and produces structured prompt components via structured output parsing:
-   - `task_description` — what the prompt needs to accomplish
-   - `base_instruction` — step-by-step reasoning directive (e.g., "Let's think step by step.")
+   - `task_intent` — what the prompt needs to accomplish
+   - `instruction` — step-by-step reasoning directive (e.g., "Let's think step by step.")
    - `answer_format` — output format specification (e.g., "Wrap your final answer in `<ANS>` tags.")
 
 2. **Grow/Filter** — Given the current prompt state's **Layer 1 fields** (persona, task_intent, problem_description, instruction, thinking_style, answer_format), enriches and expands the prompt. This node operates on structured prompt components, not raw text, enabling targeted modifications.

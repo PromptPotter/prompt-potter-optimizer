@@ -12,7 +12,7 @@
 |------|-----------|
 | **Campaign** | A single optimization run from start to finish. A campaign starts with a baseline configuration, runs one or more trials, and ends with a recommended best configuration. |
 | **Trial** | One iteration within a campaign. Each trial tests a candidate configuration against the evaluation dataset and records the results. |
-| **PROMPT_STATE** | The tracked, versioned snapshot of a prompt and all its tunable parameters (prompt text, few-shot examples, temperature, retrieval settings, etc.). Every trial produces a new PROMPT_STATE. |
+| **PROMPT_STATE** | The tracked, versioned snapshot of a prompt organized into three optimization layers: **Layer 1 (Generate)** structured prompt components (persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples), **Layer 2 (Refine Context)** optimization context and hypervariables (context, parameters), **Layer 3 (Modify Plan)** optimization strategy (plan). Immutable; includes `render()` to assemble Layer 1 into prompt text, `derive()` for lineage-tracked children, and `OptimizationDefaults` for Layer 3 strategy parameters. Every trial produces a new PROMPT_STATE. |
 | **Evaluation dataset** | A labeled set of input/expected-output pairs used to score how well a configuration performs. Datasets are owned by the consuming project, not by PromptPotter. |
 
 ---
