@@ -5,7 +5,7 @@ Main FastAPI application entry point
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.config.settings import settings
-from api.routers import ablation, health, optimize, workflows
+from api.routers import backends, health, optimize, workflows
 
 app = FastAPI(
     title="PromptPotter Optimizer",
@@ -28,7 +28,7 @@ app.add_middleware(
 app.include_router(health.router, prefix="/api/v1", tags=["Health"])
 app.include_router(optimize.router, prefix="/api/v1", tags=["Optimization"])
 app.include_router(workflows.router, prefix="/api/v1", tags=["Workflows"])
-app.include_router(ablation.router, prefix="/api/v1", tags=["Ablation"])
+app.include_router(backends.router, prefix="/api/v1", tags=["Backends"])
 
 @app.on_event("startup")
 async def startup_event():
