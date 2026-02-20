@@ -8,7 +8,8 @@ pipeline queries. All API responses stored verbatim.
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+import inspect
+from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 
@@ -163,15 +164,20 @@ class BackendClient:
         terms: List[str],
         skip_llm_ranking: bool = True,
         delay_between: float = 2.0,
+        on_result: Optional[Callable[[Dict[str, Any], int, int], Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Replay queries sequentially against the backend.
 
         Initializes a session with ``terms``, then runs each query.
         Returns a list of result dicts compatible with ExecutionResultItem.
+
+        If ``on_result`` is provided, it is called after each query completes
+        with ``(result_dict, index, total_count)``.  May be sync or async.
         """
         await self.init_session(terms)
 
         results: List[Dict[str, Any]] = []
+        total = len(queries)
         for i, q in enumerate(queries):
             start = time.time()
             try:
@@ -221,6 +227,11 @@ class BackendClient:
                         "variant_b_confidence": q.get("original_confidence", 0),
                     }
                 )
+
+            if on_result is not None:
+                cb_result = on_result(results[-1], i, total)
+                if inspect.isawaitable(cb_result):
+                    await cb_result
 
             if i < len(queries) - 1:
                 await asyncio.sleep(delay_between)

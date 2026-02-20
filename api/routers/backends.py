@@ -284,22 +284,28 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
     if request.limit > 0:
         queries = queries[: request.limit]
 
-    # Run replay
+    # Generate execution_id before replay so incremental writes use it
+    execution_id = uuid.uuid4().hex[:12]
+
+    def _on_result(result: dict, index: int, total: int) -> None:
+        store.append_result(backend_id, execution_id, result)
+
+    # Run replay with incremental persistence
     try:
         results = await client.replay_queries(
             queries=queries,
             terms=terms,
             skip_llm_ranking=request.skip_llm_ranking,
             delay_between=request.delay_between,
+            on_result=_on_result,
         )
     except Exception as e:
         raise HTTPException(
             status_code=502,
-            detail=f"Replay failed: {e}",
+            detail=f"Replay failed after partial progress: {e}",
         )
 
-    # Build and save execution
-    execution_id = uuid.uuid4().hex[:12]
+    # Build and finalize execution
     successful = sum(1 for r in results if r.get("status") == "success")
     errors = sum(1 for r in results if r.get("status") == "error")
 
@@ -324,7 +330,7 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
         error_count=errors,
         results=[ExecutionResultItem(**r) for r in results],
     )
-    store.save_execution(execution)
+    store.finalize_execution(execution)
 
     return ExecuteResponse(
         execution_id=execution_id,

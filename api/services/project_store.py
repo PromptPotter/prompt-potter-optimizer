@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from api.models.backend import BackendConnection, Execution
+from api.models.backend import BackendConnection, Execution, ExecutionResultItem
 
 BASE_DIR = Path(".promptpotter") / "projects"
 
@@ -139,6 +139,66 @@ class ProjectStore:
         if not path.exists():
             return None
         return Execution(**self._read_json(path))
+
+    def append_result(
+        self, backend_id: str, execution_id: str, result: Dict[str, Any]
+    ) -> Path:
+        """Append a single result as one JSON line to an in-progress .jsonl file."""
+        path = self._executions_dir(backend_id) / f"{execution_id}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(result, ensure_ascii=False) + "\n")
+            f.flush()
+        return path
+
+    def load_partial_results(
+        self, backend_id: str, execution_id: str
+    ) -> List[Dict[str, Any]]:
+        """Read all result lines from an in-progress .jsonl file.
+
+        Returns an empty list if no .jsonl exists.
+        """
+        path = self._executions_dir(backend_id) / f"{execution_id}.jsonl"
+        if not path.exists():
+            return []
+        results = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    results.append(json.loads(line))
+        return results
+
+    def finalize_execution(self, execution: Execution) -> Path:
+        """Merge .jsonl partial results into Execution, save .json, delete .jsonl."""
+        jsonl_path = (
+            self._executions_dir(execution.backend_id)
+            / f"{execution.execution_id}.jsonl"
+        )
+
+        if not execution.results and jsonl_path.exists():
+            partial = self.load_partial_results(
+                execution.backend_id, execution.execution_id
+            )
+            execution = execution.model_copy(
+                update={
+                    "results": [ExecutionResultItem(**r) for r in partial],
+                    "query_count": len(partial),
+                    "successful_count": sum(
+                        1 for r in partial if r.get("status") == "success"
+                    ),
+                    "error_count": sum(
+                        1 for r in partial if r.get("status") == "error"
+                    ),
+                }
+            )
+
+        json_path = self.save_execution(execution)
+
+        if jsonl_path.exists():
+            jsonl_path.unlink()
+
+        return json_path
 
     def list_executions(self, backend_id: str) -> List[Dict[str, Any]]:
         """List execution summaries (without full results array)."""
