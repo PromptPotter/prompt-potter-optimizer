@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 PromptPotter Optimizer is an API-first prompt optimization service that connects to backends like TermNorm. It syncs experiment data, replays pipelines with different configurations, and computes statistical comparisons — delivered as both a FastAPI REST service and Jupyter notebooks.
@@ -11,17 +9,19 @@ PromptPotter Optimizer is an API-first prompt optimization service that connects
 ## Commands
 
 ```bash
-# Development
+# Install
 pip install -r requirements.txt
+
+# Run API server
 uvicorn api.main:app --reload --port 8001
 
-# Testing
+# Run tests
 pytest
 
 # Docker
 cd docker && docker-compose up --build
 
-# Streamlit
+# Streamlit UI
 streamlit run apps/optimizer_client.py
 ```
 
@@ -29,35 +29,40 @@ streamlit run apps/optimizer_client.py
 
 ```
 api/
-├── main.py                     # FastAPI entry, router mounting
-├── config/settings.py          # Pydantic BaseSettings
+├── main.py                      # FastAPI entry, router mounting
+├── config/settings.py           # Pydantic BaseSettings
 ├── models/
-│   ├── backend.py              # BackendConnection, Execution, ExecutionResultItem
-│   ├── prompt_state.py         # PromptState (immutable optimization state)
-│   └── workflow.py             # WorkflowDefinition, StepDefinition
+│   ├── backend.py               # BackendConnection, Execution, ExecutionResultItem
+│   ├── prompt_state.py          # PromptState (immutable, versioned prompt snapshots)
+│   └── workflow.py              # WorkflowDefinition, StepDefinition
 ├── routers/
-│   ├── backends.py             # /backends/* — connect, sync, execute, compare
-│   ├── workflows.py            # /workflows/* — execute, evaluate
-│   └── health.py, optimize.py
+│   ├── backends.py              # /backends/* — connect, sync, execute, compare
+│   ├── workflows.py             # /workflows/* — execute, evaluate
+│   ├── health.py                # /health, /ready
+│   └── optimize.py              # /optimize (legacy)
 ├── services/
-│   ├── project_store.py        # File I/O for .promptpotter/projects/
-│   ├── backend_client.py       # HTTP client for backend APIs (TermNorm)
-│   ├── comparison.py           # Statistical comparison (hit@k, McNemar, Wilcoxon)
-│   └── llm_client.py           # OpenAI/Anthropic abstraction
+│   ├── project_store.py         # File I/O for .promptpotter/projects/
+│   ├── backend_client.py        # HTTP client for backend APIs (TermNorm)
+│   ├── comparison.py            # Statistical comparison (hit@k, McNemar, Wilcoxon)
+│   ├── llm_client.py            # OpenAI/Anthropic abstraction
+│   └── langfuse_client.py       # Langfuse integration
 ├── core/
-│   ├── workflow_runner.py      # DAG execution engine
-│   └── optimizer.py            # Legacy optimizer (placeholder, replaced in M2)
-├── nodes/                      # Composable workflow nodes (LLM, WebSearch, Ranker)
-└── evaluators/                 # ExactMatch, CriteriaEvaluator (LLM-judge)
+│   ├── workflow_runner.py       # DAG execution engine
+│   └── optimizer.py             # Legacy optimizer (placeholder)
+├── nodes/                       # Composable workflow nodes (LLM, WebSearch, Ranker)
+└── evaluators/                  # ExactMatch, CriteriaEvaluator (LLM-judge)
 
 notebooks/
-├── termnorm_backend.ipynb      # Register → sync → replay → compare (no server needed)
+└── termnorm_backend.ipynb       # Full workflow: register → sync → replay → compare → optimize
 
-workflows/examples/             # CWL-inspired YAML workflow definitions
-apps/                           # Streamlit UIs
-docker/                         # Dockerfile, docker-compose.yml
-tests/                          # pytest suite
-docs/                           # Design docs + specs
+apps/                            # Streamlit UIs
+docs/
+├── specs/                       # Formal specs (project-charter, PRD, ADD, WBS, roadmap)
+├── connectors/                  # Backend connector contracts (termnorm.md)
+└── *.md                         # Design docs (architecture, literature-review, etc.)
+tests/                           # pytest suite
+docker/                          # Dockerfile, docker-compose.yml
+workflows/examples/              # CWL-inspired YAML workflow definitions
 ```
 
 ## Project Store Layout
@@ -65,12 +70,13 @@ docs/                           # Design docs + specs
 ```
 .promptpotter/projects/
   {backend_id}/
-    backend.json                # Connection config
+    backend.json                 # Connection config
     sync/
-      experiments.json          # GET /experiments (verbatim)
-      experiments/{id}.json     # GET /experiments/{id}/mappings (verbatim)
+      experiments.json           # GET /experiments (verbatim)
+      experiments/{id}.json      # GET /experiments/{id}/mappings (verbatim)
+      optimization/              # Saved PromptState winners from optimization runs
     executions/
-      {execution_id}.json       # Replay results
+      {execution_id}.json        # Replay results (with pipeline_data per query)
 ```
 
 ## Key Endpoints
@@ -78,32 +84,38 @@ docs/                           # Design docs + specs
 **Backends (primary workflow):**
 - `POST /api/v1/backends` — Register backend connection
 - `POST /api/v1/backends/{id}/sync` — Sync experiments from backend
-- `GET /api/v1/backends/{id}/experiments` — List synced experiments
+- `GET  /api/v1/backends/{id}/experiments` — List synced experiments
 - `POST /api/v1/backends/{id}/execute` — Replay pipeline via backend
-- `GET /api/v1/backends/{id}/compare/{exec_id}` — Statistical comparison
+- `GET  /api/v1/backends/{id}/compare/{exec_id}` — Statistical comparison
 
 **Other:**
 - `GET /api/v1/health` / `GET /api/v1/ready`
 - `POST /api/v1/workflows/execute` / `POST /api/v1/workflows/evaluate`
 
+## Key Models
+
+- **`PromptState`** — Immutable, versioned prompt snapshot with `derive()` for creating children. Forms a lineage chain via `parent_id`. Used by the flat search optimizer.
+- **`ExecutionResultItem`** — Per-query result from a replay. Includes `pipeline_data` dict which stores the full backend response (entity_profile, token_matched_candidates, etc.) for local optimization.
+- **`Execution`** — A complete replay run containing a list of `ExecutionResultItem`s.
+
 ## Configuration
 
 Environment variables via `.env`:
-- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` — LLM provider keys
+- `GROQ_API_KEY` — Groq API key (primary LLM provider)
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` — Alternative LLM provider keys
 - `DEFAULT_MODEL` — Fallback model (default: gpt-4)
 - `MAX_ITERATIONS` — Optimization iteration limit (default: 5)
 
-## Specifications
+## Conventions
 
-Formal specs in `docs/specs/`: project-charter, PRD, ADD, WBS, roadmap.
-Design docs in `docs/`: literature-review, registry-design, architecture.
+- **Commit style**: Conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, etc.)
+- **Default LLM**: `meta-llama/llama-4-maverick-17b-128e-instruct` via Groq
+- **Branch**: Active development on `feat/m1-foundation`
 
-## Current State
+## Backend Connectors
 
-- **Backend storage**: Working end-to-end — register, sync, replay, compare
-- **PromptState model**: Implemented (`api/models/prompt_state.py`)
-- **Workflow system**: LLMNode, WebSearchNode (mock), RankerNode
-- **Evaluators**: ExactMatchEvaluator, CriteriaEvaluator (LLM-judge)
+Connector contracts are documented in `docs/connectors/`. Currently supported:
+- **TermNorm** (`docs/connectors/termnorm.md`) — Terminology normalization pipeline with entity profiling, token matching, and LLM ranking stages.
 
 ## External References
 
