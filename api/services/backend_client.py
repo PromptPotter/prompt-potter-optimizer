@@ -60,13 +60,22 @@ class BackendClient:
             return resp.json()
 
     async def run_match(
-        self, query: str, skip_llm_ranking: bool = True
+        self,
+        query: str,
+        skip_llm_ranking: bool = True,
+        pipeline_params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """POST /matches — run a single query through the backend pipeline."""
+        payload: Dict[str, Any] = {
+            "query": query,
+            "skip_llm_ranking": skip_llm_ranking,
+        }
+        if pipeline_params:
+            payload.update(pipeline_params)
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self.base_url}/matches",
-                json={"query": query, "skip_llm_ranking": skip_llm_ranking},
+                json=payload,
                 timeout=120.0,
             )
             resp.raise_for_status()
@@ -165,6 +174,7 @@ class BackendClient:
         skip_llm_ranking: bool = True,
         delay_between: float = 2.0,
         on_result: Optional[Callable[[Dict[str, Any], int, int], Any]] = None,
+        pipeline_params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Replay queries sequentially against the backend.
 
@@ -182,7 +192,9 @@ class BackendClient:
             start = time.time()
             try:
                 response = await self.run_match(
-                    q["query"], skip_llm_ranking=skip_llm_ranking
+                    q["query"],
+                    skip_llm_ranking=skip_llm_ranking,
+                    pipeline_params=pipeline_params,
                 )
                 elapsed = time.time() - start
                 data = response.get("data", {})

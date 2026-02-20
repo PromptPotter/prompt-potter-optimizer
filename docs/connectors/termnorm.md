@@ -58,6 +58,8 @@ Full pipeline execution for a single query. Three-stage pipeline:
 
 Set `skip_llm_ranking: true` to skip stage 3 and return raw token-match scores.
 
+PromptPotter may forward additional `pipeline_params` beyond `query` and `skip_llm_ranking` (e.g., model overrides, candidate limits). These are merged into the `/matches` request body.
+
 **Response:**
 ```json
 {

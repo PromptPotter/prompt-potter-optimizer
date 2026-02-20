@@ -66,6 +66,10 @@ class ExecuteRequest(BaseModel):
         default=True,
         description="Whether to skip LLM2 ranking in the backend",
     )
+    pipeline_params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional pipeline parameters forwarded to the backend",
+    )
     limit: int = Field(
         default=0,
         description="Limit number of queries (0 = all)",
@@ -298,6 +302,7 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
             skip_llm_ranking=request.skip_llm_ranking,
             delay_between=request.delay_between,
             on_result=_on_result,
+            pipeline_params=request.pipeline_params,
         )
     except Exception as e:
         raise HTTPException(

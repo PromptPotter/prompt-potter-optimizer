@@ -2,7 +2,7 @@
 Health check endpoints
 """
 from fastapi import APIRouter
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter()
 
@@ -16,8 +16,8 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "PromptPotter Optimizer",
-        "timestamp": datetime.utcnow().isoformat(),
-        "version": "0.1.0"
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "version": "0.4.0"
     }
 
 
@@ -27,8 +27,7 @@ async def readiness_check():
     Readiness check endpoint
     Verifies all dependencies are available
     """
-    # TODO: Add checks for LLM provider connectivity
     return {
         "status": "ready",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }

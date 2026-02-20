@@ -44,7 +44,7 @@ api/
 │   └── langfuse_client.py       # Langfuse integration
 ├── core/
 │   └── workflow_runner.py       # DAG execution engine
-├── nodes/                       # Composable workflow nodes (LLM, WebSearch, Ranker)
+├── nodes/                       # Composable workflow nodes (LLM, PipelineConfig, Ranker)
 └── evaluators/                  # ExactMatch, CriteriaEvaluator (LLM-judge)
 
 notebooks/

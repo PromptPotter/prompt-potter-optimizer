@@ -1,8 +1,8 @@
 # Research and Rank Pipeline
-# Web search + entity profiling + candidate ranking
+# Pipeline configuration + entity profiling + candidate ranking
 #
 # This workflow:
-# 1. Searches the web for information about a query
+# 1. Assembles pipeline configuration for the backend
 # 2. Uses an LLM to extract/profile the entity
 # 3. Ranks candidates against the profiled entity
 
@@ -10,7 +10,7 @@ class: Workflow
 cwlVersion: v1.2
 id: research_rank_workflow
 label: "Research and Rank Pipeline"
-description: "Web search + entity profiling + candidate ranking"
+description: "Pipeline configuration + entity profiling + candidate ranking"
 
 inputs:
   query:
@@ -21,19 +21,20 @@ inputs:
     description: "List of candidate terms to rank against query"
 
 steps:
-  - id: web_search
-    run: nodes/WebSearchNode
+  - id: pipeline_config
+    run: nodes/PipelineConfigNode
     in:
       query: query
     out:
-      - results
-      - total_results
+      - query
+      - skip_llm_ranking
+      - pipeline_params
     config:
-      max_results: 5
-      provider: mock
+      skip_llm_ranking: true
+      pipeline_params: {}
     metadata:
-      type: external
-      deterministic: false
+      type: config
+      deterministic: true
 
   - id: entity_profiler
     run: nodes/LLMNode
@@ -41,10 +42,7 @@ steps:
       messages:
         - role: user
           content: |
-            Analyze the following search results for the query: {{query}}
-
-            Search Results:
-            {{search_results}}
+            Analyze the following query: {{query}}
 
             Extract a comprehensive entity profile including:
             - Primary name/term
@@ -55,7 +53,6 @@ steps:
             Return as JSON.
       variables:
         query: query
-        search_results: web_search/results
     out:
       - content
       - parsed
