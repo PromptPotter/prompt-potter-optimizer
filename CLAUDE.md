@@ -20,9 +20,6 @@ pytest
 
 # Docker
 cd docker && docker-compose up --build
-
-# Streamlit UI
-streamlit run apps/optimizer_client.py
 ```
 
 ## Architecture
@@ -38,8 +35,7 @@ api/
 ├── routers/
 │   ├── backends.py              # /backends/* — connect, sync, execute, compare
 │   ├── workflows.py             # /workflows/* — execute, evaluate
-│   ├── health.py                # /health, /ready
-│   └── optimize.py              # /optimize (legacy)
+│   └── health.py                # /health, /ready
 ├── services/
 │   ├── project_store.py         # File I/O for .promptpotter/projects/
 │   ├── backend_client.py        # HTTP client for backend APIs (TermNorm)
@@ -47,15 +43,12 @@ api/
 │   ├── llm_client.py            # OpenAI/Anthropic abstraction
 │   └── langfuse_client.py       # Langfuse integration
 ├── core/
-│   ├── workflow_runner.py       # DAG execution engine
-│   └── optimizer.py             # Legacy optimizer (placeholder)
+│   └── workflow_runner.py       # DAG execution engine
 ├── nodes/                       # Composable workflow nodes (LLM, WebSearch, Ranker)
 └── evaluators/                  # ExactMatch, CriteriaEvaluator (LLM-judge)
 
 notebooks/
 └── termnorm_backend.ipynb       # Full workflow: register → sync → replay → compare → optimize
-
-apps/                            # Streamlit UIs
 docs/
 ├── specs/                       # Formal specs (project-charter, PRD, ADD, WBS, roadmap)
 ├── connectors/                  # Backend connector contracts (termnorm.md)
@@ -116,6 +109,32 @@ Environment variables via `.env`:
 
 Connector contracts are documented in `docs/connectors/`. Currently supported:
 - **TermNorm** (`docs/connectors/termnorm.md`) — Terminology normalization pipeline with entity profiling, token matching, and LLM ranking stages.
+
+## Testing
+
+```bash
+# Run all tests
+pytest -v
+
+# Run with short tracebacks
+pytest -v --tb=short
+
+# Lint
+ruff check api/ tests/
+```
+
+**Test files:**
+- `tests/test_api.py` — FastAPI endpoint tests (health, readiness)
+- `tests/test_prompt_state.py` — PromptState immutability and lineage
+- `tests/test_incremental_writes.py` — ProjectStore append/finalize
+- `tests/test_evaluators.py` — ExactMatch, CriteriaEvaluator, registry aliases
+- `tests/test_workflow_runner.py` — DAG sort, input resolution, execution
+
+**Fixtures** (`tests/conftest.py`): `mock_llm_client`, `tmp_store`, auto-reset Langfuse singleton.
+
+## Milestone Status
+
+**M1 (Foundation)**: Complete — PromptState, ProjectStore, backends, replay, comparison, evaluators, workflow runner, tests, CI.
 
 ## External References
 
