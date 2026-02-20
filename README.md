@@ -70,9 +70,11 @@ api/                  # FastAPI application
 ├── nodes/            #   LLM, WebSearch, Ranker
 └── evaluators/       #   ExactMatch, Criteria (LLM-judge)
 notebooks/            # Interactive workflows (termnorm_backend.ipynb)
-apps/                 # Streamlit UIs (secrets_manager)
+scripts/              # Utilities (sync_termnorm_to_langfuse.py)
 workflows/            # CWL-inspired YAML definitions
 docker/               # Dockerfile, docker-compose
+├── apps/             #   Streamlit UIs (secrets_manager)
+└── launcher/         #   JupyterLab launcher config
 docs/                 # Design docs + formal specs
 tests/                # pytest suite
 ```

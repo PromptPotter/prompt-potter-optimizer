@@ -20,8 +20,8 @@ services:
     volumes:
       # Mount source code for development (hot reload)
       - ../api:/app/api
-      - ../apps:/app/apps
-      - ../launcher:/app/launcher
+      - ./apps:/app/apps
+      - ./launcher:/app/launcher
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/health"]

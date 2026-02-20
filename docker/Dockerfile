@@ -28,8 +28,8 @@ COPY --from=builder /root/.local /root/.local
 
 # Copy application code
 COPY api/ /app/api/
-COPY apps/ /app/apps/
-COPY launcher/ /app/launcher/
+COPY docker/apps/ /app/apps/
+COPY docker/launcher/ /app/launcher/
 COPY requirements.txt /app/
 
 # Copy entrypoint script and fix line endings (Windows -> Unix)

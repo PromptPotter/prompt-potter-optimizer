@@ -55,6 +55,9 @@ docs/
 └── *.md                         # Design docs (architecture, literature-review, etc.)
 tests/                           # pytest suite
 docker/                          # Dockerfile, docker-compose.yml
+├── apps/                        # Streamlit UIs (secrets_manager)
+└── launcher/                    # JupyterLab launcher config
+scripts/                         # Utilities (sync_termnorm_to_langfuse.py)
 workflows/examples/              # CWL-inspired YAML workflow definitions
 ```
 
