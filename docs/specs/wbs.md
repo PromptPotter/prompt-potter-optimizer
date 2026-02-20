@@ -91,7 +91,18 @@
   - CLAUDE.md reflects M1 as complete and M2 as current
   - Any new file patterns or test conventions are documented
 
-**Phase 1 exit criteria:** All tests pass, CI is green, PROMPT_STATE model exists and is importable, CLAUDE.md updated.
+### 1.7 Ablation Comparison Scripts
+
+- **Scope:** Replay script (calls external pipeline API with component skipped) + comparison script (offline statistical analysis with McNemar's and Wilcoxon p-values, structured JSON output). Validates against TermNorm experiment fixture.
+- **Sessions:** 1
+- **Dependencies:** 1.1
+- **PRD Ref:** P1.6
+- **Done when:**
+  - Replay script produces Variant A results from TermNorm API with `skip_llm_ranking=true`
+  - Comparison script outputs structured JSON with hit@k, MRR, p-values, and per-query classification
+  - Both scripts work offline from saved fixture files (replay only needs API for initial run)
+
+**Phase 1 exit criteria:** All tests pass, CI is green, PROMPT_STATE model exists and is importable, ablation comparison produces statistical report, CLAUDE.md updated.
 
 ---
 
@@ -321,11 +332,11 @@
 | Phase | Packages | Sessions |
 |-------|:--------:|:--------:|
 | M0: Specifications | 5 | 5 |
-| M1: Foundation | 6 | 6 |
+| M1: Foundation | 7 | 7 |
 | M2: Core Optimizer | 6 | 7 |
 | M3: Registry and Tracking | 6 | 6 |
 | M4: Integration and Polish | 6 | 9 |
-| **Total** | **29** | **33** |
+| **Total** | **30** | **34** |
 
 ---
 
@@ -392,5 +403,6 @@ M4 Integration
 | P1.3 | 4.3 | M4 |
 | P1.4 | 4.2 | M4 |
 | P1.5 | 2.3 | M2 |
+| P1.6 | 1.7 | M1 |
 | P2.1-P2.3 | — | Unscheduled |
 | P2.4 | 4.4 | M4 |

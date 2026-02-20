@@ -81,6 +81,8 @@ The system keeps humans in control of strategy and priorities through decision g
 - **GUI/dashboard beyond prototypes** — Streamlit apps for development use, not a production dashboard
 - **Dataset hosting** — evaluation datasets live in the consuming project's repository (e.g., the TermNorm repo), not in PromptPotter
 
+**Future direction:** The ablation comparison workflow (upload experiment data, remove a pipeline component, see statistical comparison with p-values) is designed for self-service use across multiple client types (CLI, notebooks, JS frontend). When PromptPotter is deployed as a web service with user credentials, this becomes a first-class UI flow with pipeline visualization.
+
 ---
 
 ## Success Criteria

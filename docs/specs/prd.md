@@ -21,6 +21,7 @@
 | P1.3 | Human-in-the-Loop Gates | P1 | Pause optimization for developer review and approval of candidates before promotion |
 | P1.4 | Real Web Search Provider | P1 | Replace the mock web search node with a real search API provider |
 | P1.5 | Candidate Population and Selection | P1 | Support multiple strategies for evaluating and selecting the best candidate |
+| P1.6 | Ablation Comparison | P1 | Remove a pipeline component, replay, and compare with statistical significance tests (p-values) |
 | P2.1 | Reflection-Based Learning | P2 | Generate natural language reflections after each iteration to inform the next |
 | P2.2 | Evolutionary Operators | P2 | Apply genetic algorithm operators (crossover, mutation) to evolve a population of configurations |
 | P2.3 | MCP Server Mode | P2 | Expose optimization as an MCP server for use by Claude Code and other MCP clients |
@@ -216,6 +217,26 @@ The core operation for the TermNorm validation (SC5) is evaluating both **Varian
 2. Strategy is configurable at campaign start
 3. Each selection decision includes a rationale explaining why that candidate was chosen
 
+### P1.6: Ablation Comparison
+
+**As a** developer, **I want to** remove a pipeline component and compare the results against the full pipeline **so that** I can determine whether that component justifies its cost and latency.
+
+**What the system does:**
+- Accepts experiment data (evaluation results from a pipeline run) and a component to ablate (skip)
+- Replays the experiment with the specified component removed (e.g., skip the LLM2 reranking step)
+- Computes paired ML metrics: hit@k, MRR, latency, confidence
+- Runs statistical significance tests (McNemar's test for classification agreement, Wilcoxon signed-rank for latency) and reports p-values
+- Returns a structured comparison (JSON) with per-query classification (where the removed component helped, hurt, or made no difference)
+
+**User story:** A developer runs a TermNorm pipeline with web search, entity profiling (LLM1), token matching, and LLM2 semantic reranking. They want to know if LLM2 is worth the extra cost. They upload the experiment results, select "skip LLM2," and the system replays all queries without LLM2, then produces a statistical comparison showing hit@1 with McNemar's p-value and latency savings with Wilcoxon's p-value, plus a per-query breakdown of where LLM2 helped or hurt.
+
+**Acceptance criteria:**
+1. Given experiment data and a component to skip, the system produces ablated variant results
+2. Comparison includes hit@1 with McNemar's test p-value and latency with Wilcoxon p-value
+3. Per-query classification shows which queries were affected by the ablation
+4. All results are structured JSON consumable by any client (CLI, notebook, JS frontend)
+5. Report is reproducible from saved results without re-running the pipeline
+
 ---
 
 ## P2 — Nice to Have (Advanced Capabilities)
@@ -326,6 +347,7 @@ This matrix maps PRD requirements to charter success criteria (bidirectional).
 | P1.3 Human-in-the-Loop Gates | | | | | |
 | P1.4 Real Web Search Provider | | | | | |
 | P1.5 Candidate Population and Selection | x | | | | x |
+| P1.6 Ablation Comparison | x | x | | | x |
 | P2.1 Reflection-Based Learning | x | | | | |
 | P2.2 Evolutionary Operators | x | | | | |
 | P2.3 MCP Server Mode | | | | x | |
@@ -339,7 +361,7 @@ This matrix maps PRD requirements to charter success criteria (bidirectional).
 | SC2: Reproducibility | P0.1, P0.4, P0.5, P1.1 | P2.4 |
 | SC3: Langfuse Observability | P0.1, P0.2, P0.4 | — |
 | SC4: Time to First Optimization | P0.1, P0.4 | P2.3 |
-| SC5: TermNorm Validation | P0.1, P0.2, P0.3, P0.4, P1.2, P1.5 | — |
+| SC5: TermNorm Validation | P0.1, P0.2, P0.3, P0.4, P1.2, P1.5, P1.6 | — |
 
 **Coverage notes:**
 - P1.3 (HITL Gates) and P1.4 (Web Search) do not directly map to a success criterion. They are included as P1 because they support the charter's vision of human-controlled optimization and full workflow support, respectively.

@@ -65,6 +65,8 @@
 - **Langfuse** receives traces and scores for every trial
 - **File system** stores campaign/trial records
 
+**Multi-client architecture:** PromptPotter is consumed by multiple client types — CLI / Python scripts, Jupyter notebooks, and lightweight JS frontends. All share the same REST API; no client gets special treatment. Every API response is structured JSON so any client can render it.
+
 ---
 
 ## What Exists vs. What Gets Built
@@ -284,6 +286,12 @@ The optimization loop:
 Optimized prompt versions are written back to TermNorm's prompt registry as new version numbers.
 
 Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). LCA dataset validation follows when deploying to real-world use. MedMentions 500-term subset serves as an additional biomedical benchmark.
+
+### Ablation Comparison (Generalized Pattern)
+
+The Variant A vs B comparison above is an instance of a general pattern: **pipeline ablation**. Any linear pipeline can be evaluated with a node removed to measure its marginal value. The system accepts prior results, replays with a node skipped, and produces a statistical comparison with p-values (McNemar's test for accuracy, Wilcoxon signed-rank for latency).
+
+Pipeline nodes are typed (`LLMGeneration`, `DeterministicFunction`, `WebSearch`) with visible input/output schemas. Clients auto-detect node capabilities and surface relevant parameters (prompt text, temperature, threshold, etc.). This pattern becomes a self-service feature when PromptPotter is deployed as a web service — users upload experiment data, select which component to remove, and see the comparison.
 
 ### Decision Points
 
