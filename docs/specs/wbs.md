@@ -29,7 +29,7 @@
 
 ## Phase 1: Foundation (M1)
 
-### 1.1 Add PROMPT_STATE Model
+### 1.1 Add PROMPT_STATE Model — Complete
 
 - **Scope:** Create the Pydantic model that snapshots prompt text, few-shot examples, and an open parameters dictionary (temperature, retrieval count, thresholds, etc.). Include structured diff generation between two states.
 - **Sessions:** 1
@@ -38,6 +38,7 @@
 - **Done when:**
   - PROMPT_STATE model is importable with typed fields for prompt text, few-shot examples, and a parameters dict
   - Diff function produces a structured comparison between two PROMPT_STATE instances
+- **Completed:** `06b6635 feat: add PromptState model with diff and derive`
 
 ### 1.2 Add Test Fixtures and Dataset Helpers
 
@@ -91,7 +92,7 @@
   - CLAUDE.md reflects M1 as complete and M2 as current
   - Any new file patterns or test conventions are documented
 
-### 1.7 Ablation Comparison Scripts
+### 1.7 Ablation Comparison Scripts — Complete
 
 - **Scope:** Replay script (calls external pipeline API with component skipped) + comparison script (offline statistical analysis with McNemar's and Wilcoxon p-values, structured JSON output). Validates against TermNorm experiment fixture.
 - **Sessions:** 1
@@ -101,6 +102,7 @@
   - Replay script produces Variant A results from TermNorm API with `skip_llm_ranking=true`
   - Comparison script outputs structured JSON with hit@k, MRR, p-values, and per-query classification
   - Both scripts work offline from saved fixture files (replay only needs API for initial run)
+- **Completed:** Exceeds original scope — now includes project-based backend storage (`ProjectStore`), notebook exploration workflow, incremental writes with `on_result` callback, and REST API endpoints (`/backends/*`). Key commits: `88e3b83`, `ab154d7`, `244714d`, `7bfde52`.
 
 **Phase 1 exit criteria:** All tests pass, CI is green, PROMPT_STATE model exists and is importable, ablation comparison produces statistical report, CLAUDE.md updated.
 

@@ -12,7 +12,7 @@
 | Milestone | Focus | Timeline | Status |
 |-----------|-------|----------|--------|
 | M0 | Specifications | Week 1 | Complete |
-| M1 | Foundation | Weeks 2-3 | Next |
+| M1 | Foundation | Weeks 2-3 | In Progress |
 | M2 | Core Optimizer | Weeks 4-6 | Planned |
 | M3 | Registry and Tracking | Weeks 7-8 | Planned |
 | M4 | Integration and Polish | Weeks 9-11 | Planned |
@@ -43,6 +43,10 @@
   - All tests pass, CI green
   - PROMPT_STATE model importable and unit tested
   - Decision: are there bugs in existing components that must be fixed before building the optimizer on top?
+
+- **Progress:**
+  - 1.1 PROMPT_STATE Model — **Complete** (`06b6635`)
+  - 1.7 Ablation Comparison — **Complete** (exceeds original scope: backend storage, notebook exploration, incremental writes, REST API endpoint)
 
 - **Risks:**
   - Existing code may have untested edge cases that surface during test writing
