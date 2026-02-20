@@ -36,6 +36,7 @@ class ExecutionResultItem(BaseModel):
     ranked_candidates: List[Dict[str, Any]] = Field(default_factory=list)
     latency_ms: float = 0.0
     web_search_status: Optional[str] = None
+    pipeline_data: Dict[str, Any] = Field(default_factory=dict)
     status: str = "success"
     error: Optional[str] = None
     timestamp: Optional[str] = None

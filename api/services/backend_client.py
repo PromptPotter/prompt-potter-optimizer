@@ -200,6 +200,7 @@ class BackendClient:
                         "ranked_candidates": ranked[:20],
                         "latency_ms": round(elapsed * 1000, 1),
                         "web_search_status": data.get("web_search_status"),
+                        "pipeline_data": data,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "status": "success",
                         "variant_b_predicted": q.get("original_predicted", ""),
