@@ -7,7 +7,7 @@ Validated connector contract for TermNorm backend integration.
 | Field | Value |
 |-------|-------|
 | Base URL | `http://127.0.0.1:8000` (default local) |
-| Auth | Session-based via `X-User-ID` header (set automatically by `BackendClient`) |
+| Auth | None (local development) |
 | Transport | HTTP/1.1, JSON request/response |
 | Timeout | 30s default, 120s for `/matches` |
 
@@ -58,7 +58,35 @@ Full pipeline execution for a single query. Three-stage pipeline:
 
 Set `skip_llm_ranking: true` to skip stage 3 and return raw token-match scores.
 
-PromptPotter may forward additional `pipeline_params` beyond `query` and `skip_llm_ranking` (e.g., model overrides, candidate limits). These are merged into the `/matches` request body.
+#### Pipeline Parameter Overrides
+
+PromptPotter forwards `pipeline_params` into the `/matches` request body, giving the optimizer control over every influential knob. All parameters are optional and fall back to their defaults when omitted.
+
+| Parameter | Default | Stage | Description |
+|-----------|---------|-------|-------------|
+| `max_sites` | `7` | Web scraping | Number of pages fetched and scraped |
+| `num_results` | `20` | Web search | Search result count (Brave / SearXNG) |
+| `content_char_limit` | `800` | Web scraping | Max characters kept per scraped page |
+| `raw_content_limit` | `5000` | Entity profiling | Total research text sent to LLM1 |
+| `profiling_temperature` | `0.3` | Entity profiling | LLM1 temperature |
+| `profiling_max_tokens` | `1800` | Entity profiling | LLM1 output token limit |
+| `ranking_temperature` | `0` | LLM ranking | LLM2 temperature |
+| `ranking_max_tokens` | `4000` | LLM ranking | LLM2 output token limit |
+| `ranking_sample_size` | `20` | LLM ranking | Candidates sampled for LLM2 |
+| `max_token_candidates` | `20` | Token matching | Candidates kept from token matching |
+| `relevance_weight_core` | `0.7` | Scoring | Weight of core concept score (`spec_score` gets `1 - weight`) |
+
+**Example request with overrides:**
+```json
+{
+  "query": "Kupferblech CW004A / Laserschneiden",
+  "skip_llm_ranking": false,
+  "max_sites": 3,
+  "profiling_temperature": 0.1,
+  "ranking_sample_size": 15,
+  "relevance_weight_core": 0.8
+}
+```
 
 **Response:**
 ```json

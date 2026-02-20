@@ -84,6 +84,7 @@ class ExecuteResponse(BaseModel):
     execution_id: str
     backend_id: str
     experiment_id: str
+    pipeline_params: Dict[str, Any] = Field(default_factory=dict)
     query_count: int
     successful_count: int
     error_count: int
@@ -324,6 +325,7 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
         if exp_data.get("runs")
         else None,
         session_terms_count=len(terms),
+        pipeline_params=request.pipeline_params,
         limitations=[
             "Session terms pool is from synced experiment mappings"
             " (may be smaller than production DB)",
@@ -341,6 +343,7 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
         execution_id=execution_id,
         backend_id=backend_id,
         experiment_id=request.experiment_id,
+        pipeline_params=request.pipeline_params,
         query_count=execution.query_count,
         successful_count=successful,
         error_count=errors,

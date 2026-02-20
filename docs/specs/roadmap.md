@@ -38,6 +38,7 @@
   - Test suite for evaluators, workflow runner, PromptState, incremental writes, API endpoints
   - Test fixtures and dataset helpers (conftest.py)
   - GitHub Actions CI (lint + test)
+  - Pipeline parameter passthrough: 11 controllable TermNorm pipeline knobs forwarded, echoed, and logged
   - CLAUDE.md updated with M1 status
 
 - **Entry criteria:** M0 specs approved, no open contradictions between charter/PRD/ADD
@@ -146,7 +147,7 @@
 
 ### Next Validation: Web Scrape Ablation
 
-After the Variant A vs Variant B comparison is settled, the next decision point is: **how many websites to scrape** for `entity_profiling`? More websites means better entity profiles but higher cost and latency. This ablation study varies the scrape count while holding the winning variant's prompts fixed, measuring the quality vs. cost/latency tradeoff. Also extends validation to the LCA dataset for real-world use case confirmation.
+After the Variant A vs Variant B comparison is settled, the next decision point is: **how many websites to scrape** for `entity_profiling`? The pipeline parameter passthrough infrastructure (M1) already makes this controllable via `max_sites` and `num_results` — the ablation study uses these knobs to vary the scrape count while holding the winning variant's prompts fixed, measuring the quality vs. cost/latency tradeoff. Also extends validation to the LCA dataset for real-world use case confirmation.
 
 ### Public Service Deployment
 

@@ -109,6 +109,14 @@
   - Both scripts work offline from saved fixture files (replay only needs API for initial run)
 - **Completed:** Exceeds original scope — now includes project-based backend storage (`ProjectStore`), notebook exploration workflow, incremental writes with `on_result` callback, and REST API endpoints (`/backends/*`). Key commits: `88e3b83`, `ab154d7`, `244714d`, `7bfde52`.
 
+### 1.8 Pipeline Parameter Passthrough — Complete
+
+- **Scope:** Forward controllable pipeline knobs (`max_sites`, LLM temperatures, candidate limits, score weights) from PromptPotter execution requests through to the backend `/matches` endpoint. Echo `pipeline_params` in the execution response.
+- **Sessions:** 1
+- **Dependencies:** 1.7
+- **PRD Ref:** P1.7
+- **Completed:** `19b975f feat: pipeline parameter passthrough (PromptPotter → TermNorm)`
+
 **Phase 1 exit criteria:** All tests pass, CI is green, PROMPT_STATE model exists and is importable, ablation comparison produces statistical report, CLAUDE.md updated. **All exit criteria met.**
 
 ---

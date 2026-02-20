@@ -91,6 +91,7 @@
 | **Comparison service** | Statistical comparison with McNemar's test, Wilcoxon signed-rank, hit@k, MRR | M1 |
 | **Test suite** | Evaluators, workflow runner, PromptState, incremental writes, API endpoints | M1 |
 | **CI pipeline** | GitHub Actions: ruff lint + pytest on push/PR | M1 |
+| **Pipeline parameter passthrough** | Controllable knobs for all TermNorm pipeline stages (11 params: search, profiling, ranking, scoring) forwarded via `/matches` payload, echoed in response and training record | M1 |
 
 ### Will Be Built
 
@@ -346,7 +347,7 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 | **File system** (campaigns) | Read/write campaigns, trials, lineage | JSON/JSONL in `.promptpotter/campaigns/` | Planned (M3) |
 | **Streamlit** | Streamlit calls the API | HTTP | Exists (prototype) |
 | **Consuming projects** (e.g., TermNorm) | PromptPotter loads external datasets | File path or URL | Exists (loader) |
-| **TermNorm backend API** | PromptPotter syncs experiments and replays pipelines | HTTP REST | Exists (M1) |
+| **TermNorm backend API** | PromptPotter syncs experiments, replays pipelines, and forwards pipeline parameter overrides (search depth, LLM temperatures, candidate limits, score weights) | HTTP REST | Exists (M1) |
 | **TermNorm prompt registry** | PromptPotter reads current prompts from `logs/prompts/{family}/{version}/prompt.txt` and writes optimized versions back as new version numbers (v2, v3, ...) | File system (TermNorm's `PromptRegistry` with `{{variable}}` templates) | Planned (M4) |
 | **MCP clients** (e.g., Claude Code) | Clients invoke optimization tools | MCP | Planned (P2.3) |
 | **Public API gateway** | External consumers access PromptPotter as a hosted service | HTTP REST with API key auth | Post-M4 |
@@ -367,6 +368,8 @@ TermNorm is a terminology normalization system (primary domain: LCA -- Life Cycl
 | 2 | Entity profiling (LLM1) | LLM call | `entity_profiling` (vars: `query`, `format_string`, `combined_text`) |
 | 3 | Table Reranker | Non-LLM | -- (token/string matching, no semantic understanding) |
 | 4 | Semantic reranking (LLM2) | LLM call | `llm_ranking` (vars: `core_concept`, `entity_profile_json`, `matches`) |
+
+All pipeline stages expose configurable parameters via the `/matches` payload (see [TermNorm connector docs](../connectors/termnorm.md#pipeline-parameter-overrides) for the full catalog). This enables human-in-the-loop experimentation (manually varying knobs in the notebook) and automated optimization (the DAG loop systematically exploring the parameter space).
 
 ### Variant Comparison
 
@@ -405,4 +408,4 @@ Pipeline nodes are typed (`LLMGeneration`, `DeterministicFunction`, `WebSearch`)
 | # | Decision | Method | Milestone |
 |---|----------|--------|-----------|
 | 1 | LLM2 on/off -- can an optimized `llm_ranking` prompt make Variant B beat Variant A? | Optimize `llm_ranking` prompt, compare best Variant B score against Variant A baseline, results persisted and traceable in Langfuse | M4 |
-| 2 | How many websites to scrape for entity profiling? | Ablation study varying scrape count, measuring quality vs. cost/latency | Post-M4 |
+| 2 | How many websites to scrape for entity profiling? | Ablation study varying scrape count via `pipeline_params` passthrough (infrastructure exists); measuring quality vs. cost/latency | M4 |

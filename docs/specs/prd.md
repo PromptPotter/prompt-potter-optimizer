@@ -22,6 +22,7 @@
 | P1.4 | Real Web Search Provider | P1 | Replace the mock web search node with a real search API provider |
 | P1.5 | Candidate Population and Selection | P1 | Support multiple strategies for evaluating and selecting the best candidate |
 | P1.6 | Ablation Comparison | P1 | Remove a pipeline component, replay, and compare with statistical significance tests (p-values) |
+| P1.7 | Pipeline Parameter Passthrough | P1 | Forward controllable pipeline knobs (search depth, LLM temperatures, candidate limits, score weights) to backend via execution requests |
 | P2.1 | Reflection-Based Learning | P2 | Generate natural language reflections after each iteration to inform the next |
 | P2.2 | Evolutionary Operators | P2 | Apply genetic algorithm operators (crossover, mutation) to evolve a population of configurations |
 | P2.3 | MCP Server Mode | P2 | Expose optimization as an MCP server for use by Claude Code and other MCP clients |

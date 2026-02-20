@@ -60,6 +60,10 @@ class Execution(BaseModel):
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    pipeline_params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Pipeline parameter overrides forwarded to the backend",
+    )
     query_count: int = 0
     successful_count: int = 0
     error_count: int = 0
