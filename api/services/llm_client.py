@@ -85,7 +85,7 @@ class OpenAIClient(LLMClientBase):
 
         # Prepare request
         request_params = {
-            "model": model or settings.DEFAULT_MODEL,
+            "model": model or settings.LLM_MODEL,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -157,7 +157,7 @@ class GroqClient(LLMClientBase):
         client = self._get_client()
 
         # Use configured model or default Groq model
-        model_name = model or settings.LLM_MODEL or "llama-3.3-70b-versatile"
+        model_name = model or settings.LLM_MODEL
 
         # Prepare request
         request_params = {

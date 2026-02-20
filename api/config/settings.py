@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # API Configuration
     API_HOST: str = "0.0.0.0"
-    API_PORT: int = 8000
+    API_PORT: int = 8001
 
     # CORS - stored as comma-separated string, parsed via property
     ALLOWED_ORIGINS: str = "*"
@@ -40,11 +40,11 @@ class Settings(BaseSettings):
     # Optimization Settings
     MAX_DATASET_SIZE: int = 1000  # Maximum number of examples in dataset
     MAX_ITERATIONS: int = 5  # Maximum optimization iterations
-    DEFAULT_MODEL: str = "gpt-4"
 
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
 
 settings = Settings()

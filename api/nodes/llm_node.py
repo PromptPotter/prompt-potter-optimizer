@@ -49,7 +49,7 @@ class LLMNode(NodeBase[LLMInput, LLMOutput]):
     template variables, JSON output mode, and multiple providers.
 
     Config options:
-        model: Model identifier (default: from settings.DEFAULT_MODEL)
+        model: Model identifier (default: from settings.LLM_MODEL)
         temperature: Sampling temperature 0.0-2.0 (default: 0.0)
         max_tokens: Maximum response tokens (default: 1000)
         output_format: "text" or "json" (default: "text")

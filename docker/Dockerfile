@@ -1,5 +1,5 @@
 # Multi-stage build for smaller final image
-FROM python:3.11-slim AS builder
+FROM python:3.13-slim AS builder
 
 WORKDIR /build
 
@@ -14,7 +14,7 @@ RUN pip install --user --no-cache-dir -r requirements.txt
 
 
 # Final stage
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
@@ -29,7 +29,6 @@ COPY --from=builder /root/.local /root/.local
 # Copy application code
 COPY api/ /app/api/
 COPY apps/ /app/apps/
-COPY examples/ /app/examples/
 COPY launcher/ /app/launcher/
 COPY requirements.txt /app/
 
@@ -48,17 +47,17 @@ RUN mkdir -p /root/.local/share/jupyter/jupyter_app_launcher && \
 # Copy launcher config to correct location
 RUN cp /app/launcher/jp_app_launcher.yaml /root/.local/share/jupyter/jupyter_app_launcher/jp_app_launcher.yaml
 
-# Expose ports: FastAPI (8000) and JupyterLab (8888)
-EXPOSE 8000 8888
+# Expose ports: FastAPI (8001) and JupyterLab (8888)
+EXPOSE 8001 8888
 
 # Health check on FastAPI
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+    CMD curl -f http://localhost:8001/api/v1/health || exit 1
 
 # Environment variables
 ENV JUPYTER_TOKEN=""
 ENV API_HOST="0.0.0.0"
-ENV API_PORT="8000"
+ENV API_PORT="8001"
 
 # Run both JupyterLab and FastAPI
 CMD ["/app/entrypoint.sh"]

@@ -24,7 +24,6 @@ PromptPotter connects to your backend (e.g. TermNorm), syncs experiment data, re
 ## Quick Start
 
 ```bash
-git clone https://github.com/yourusername/prompt-potter-optimizer.git
 cd prompt-potter-optimizer
 pip install -r requirements.txt
 ```
@@ -59,7 +58,7 @@ cd docker && docker-compose up --build
 ```
 
 - **JupyterLab**: http://localhost:8888
-- **FastAPI docs**: http://localhost:8000/docs
+- **FastAPI docs**: http://localhost:8001/docs
 
 ## Project Structure
 
@@ -71,7 +70,7 @@ api/                  # FastAPI application
 ├── nodes/            #   LLM, WebSearch, Ranker
 └── evaluators/       #   ExactMatch, Criteria (LLM-judge)
 notebooks/            # Interactive workflows (termnorm_backend.ipynb)
-apps/                 # Streamlit UIs (optimizer_client, secrets_manager)
+apps/                 # Streamlit UIs (secrets_manager)
 workflows/            # CWL-inspired YAML definitions
 docker/               # Dockerfile, docker-compose
 docs/                 # Design docs + formal specs
@@ -84,9 +83,13 @@ Edit `.env` (see `.env.example`):
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `DEFAULT_MODEL` | Fallback model (default: gpt-4) |
+| `GROQ_API_KEY` | Groq API key (primary LLM provider) |
+| `LLM_PROVIDER` | LLM provider: `groq`, `openai`, or `anthropic` (default: `groq`) |
+| `LLM_MODEL` | Model identifier (default: `meta-llama/llama-4-maverick-17b-128e-instruct`) |
+| `OPENAI_API_KEY` | OpenAI API key (alternative provider) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (alternative provider) |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key for observability |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key for observability |
 | `MAX_ITERATIONS` | Max optimization iterations (default: 5) |
 
 ## Documentation

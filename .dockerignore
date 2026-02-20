@@ -1,0 +1,61 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+
+# Virtual environments
+venv
+env
+.venv
+
+# Environment files
+.env
+.env.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov
+
+# Documentation
+*.md
+!README.md
+
+# Docker (exclude compose and dockerfile, but keep entrypoint)
+docker/Dockerfile
+docker/docker-compose.yml
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Not needed in Docker image
+docs/
+scripts/
+data/
+.promptpotter/
+tests/
+.github/
+notebooks/
+.ruff_cache/

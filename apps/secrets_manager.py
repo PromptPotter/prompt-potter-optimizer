@@ -54,7 +54,7 @@ def save_env_file(env_vars: dict):
 def check_key_status(key: str, env_vars: dict) -> tuple[str, str]:
     """Check if a key is configured and return status emoji and text."""
     value = env_vars.get(key, "")
-    if value and not value.startswith("your_"):
+    if value and not value.startswith("your_") and not value.startswith("gsk_your_"):
         return "configured", value
     return "not_configured", ""
 
@@ -74,6 +74,22 @@ env_vars = load_env_file()
 
 # API Keys section
 st.header("API Keys")
+
+# Groq (primary)
+groq_status, groq_current = check_key_status("GROQ_API_KEY", env_vars)
+col1, col2 = st.columns([3, 1])
+with col1:
+    groq_key = st.text_input(
+        "Groq API Key (primary)",
+        type="password",
+        placeholder="gsk_...",
+        help="Get your API key from https://console.groq.com/keys"
+    )
+with col2:
+    if groq_status == "configured":
+        st.success("Configured")
+    else:
+        st.warning("Not set")
 
 # OpenAI
 openai_status, openai_current = check_key_status("OPENAI_API_KEY", env_vars)
@@ -107,14 +123,31 @@ with col2:
     else:
         st.warning("Not set")
 
-# Optional: Other providers
-st.header("Optional Settings")
+# Model settings
+st.header("Model Settings")
 
-default_model = st.selectbox(
-    "Default Model",
-    options=["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "claude-3-opus", "claude-3-sonnet"],
-    index=0 if env_vars.get("DEFAULT_MODEL", "gpt-4") == "gpt-4" else 0,
-    help="Default model for prompt optimization"
+llm_provider = st.selectbox(
+    "LLM Provider",
+    options=["groq", "openai", "anthropic"],
+    index=["groq", "openai", "anthropic"].index(
+        env_vars.get("LLM_PROVIDER", "groq")
+    ) if env_vars.get("LLM_PROVIDER", "groq") in ["groq", "openai", "anthropic"] else 0,
+    help="Which LLM provider to use"
+)
+
+llm_model = st.selectbox(
+    "LLM Model",
+    options=[
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "llama-3.3-70b-versatile",
+        "gpt-4",
+        "gpt-4-turbo",
+        "gpt-3.5-turbo",
+        "claude-3-opus-20240229",
+        "claude-3-sonnet-20240229",
+    ],
+    index=0,
+    help="Model to use for LLM calls (must match your provider)"
 )
 
 # Save button
@@ -122,18 +155,21 @@ st.divider()
 
 if st.button("Save Configuration", type="primary", use_container_width=True):
     # Update env vars with new values (only if provided)
+    if groq_key:
+        env_vars["GROQ_API_KEY"] = groq_key
     if openai_key:
         env_vars["OPENAI_API_KEY"] = openai_key
     if anthropic_key:
         env_vars["ANTHROPIC_API_KEY"] = anthropic_key
 
-    env_vars["DEFAULT_MODEL"] = default_model
+    env_vars["LLM_PROVIDER"] = llm_provider
+    env_vars["LLM_MODEL"] = llm_model
 
     # Ensure other required vars exist
     env_vars.setdefault("ENVIRONMENT", "development")
     env_vars.setdefault("DEBUG", "true")
     env_vars.setdefault("API_HOST", "0.0.0.0")
-    env_vars.setdefault("API_PORT", "8000")
+    env_vars.setdefault("API_PORT", "8001")
     env_vars.setdefault("ALLOWED_ORIGINS", "*")
     env_vars.setdefault("MAX_DATASET_SIZE", "1000")
     env_vars.setdefault("MAX_ITERATIONS", "5")
@@ -148,6 +184,12 @@ if st.button("Save Configuration", type="primary", use_container_width=True):
 # Help section
 with st.expander("How to get API keys"):
     st.markdown("""
+    **Groq (recommended):**
+    1. Go to [console.groq.com](https://console.groq.com/)
+    2. Sign in or create an account
+    3. Navigate to API Keys
+    4. Create a new API key
+
     **OpenAI:**
     1. Go to [platform.openai.com](https://platform.openai.com/)
     2. Sign in or create an account

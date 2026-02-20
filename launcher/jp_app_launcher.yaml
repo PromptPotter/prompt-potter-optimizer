@@ -1,23 +1,17 @@
-# PromptPotter Learning Path - JupyterLab Launcher Configuration
+# PromptPotter - JupyterLab Launcher Configuration
 # This file configures custom tiles in the JupyterLab launcher
 # See: https://jupyter-app-launcher.readthedocs.io/
 
-# Tutorial Notebooks
-- title: Introduction to Prompt Optimization
-  description: Learn the basics of prompt engineering and optimization
+# Notebooks
+- title: TermNorm Backend Workflow
+  description: Register backend, sync experiments, replay queries, compare variants, optimize
   type: notebook
-  source: examples/quickstart.ipynb
-  catalog: PromptPotter Learning Path
-
-- title: Advanced Optimization
-  description: Multi-iteration optimization with custom metrics
-  type: notebook
-  source: examples/advanced_optimization.ipynb
-  catalog: PromptPotter Learning Path
+  source: notebooks/termnorm_backend.ipynb
+  catalog: PromptPotter
 
 # Interactive Tools
 - title: Secrets Manager
-  description: Configure your API keys (OpenAI, Anthropic)
+  description: Configure your API keys (Groq, OpenAI, Anthropic)
   type: local-server
   source: http://localhost:$PORT/
   cwd: ./
@@ -28,18 +22,4 @@
     - --server.port=$PORT
     - --server.headless=true
     - --browser.gatherUsageStats=false
-  catalog: PromptPotter Learning Path
-
-- title: Prompt Optimizer Client
-  description: Interactive UI to optimize prompts
-  type: local-server
-  source: http://localhost:$PORT/
-  cwd: ./
-  args:
-    - streamlit
-    - run
-    - apps/optimizer_client.py
-    - --server.port=$PORT
-    - --server.headless=true
-    - --browser.gatherUsageStats=false
-  catalog: PromptPotter Learning Path
+  catalog: PromptPotter

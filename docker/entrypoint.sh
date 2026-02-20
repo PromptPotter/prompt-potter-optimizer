@@ -7,8 +7,8 @@ set -e
 echo "Starting PromptPotter Optimizer..."
 
 # Start FastAPI server in background
-echo "Starting FastAPI server on port ${API_PORT:-8000}..."
-uvicorn api.main:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} &
+echo "Starting FastAPI server on port ${API_PORT:-8001}..."
+uvicorn api.main:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8001} &
 FASTAPI_PID=$!
 
 # Wait for FastAPI to be ready
@@ -33,8 +33,8 @@ echo "============================================"
 echo "PromptPotter Optimizer is running!"
 echo "============================================"
 echo "JupyterLab:  http://localhost:8888"
-echo "FastAPI:     http://localhost:${API_PORT:-8000}"
-echo "Swagger UI:  http://localhost:${API_PORT:-8000}/docs"
+echo "FastAPI:     http://localhost:${API_PORT:-8001}"
+echo "Swagger UI:  http://localhost:${API_PORT:-8001}/docs"
 echo "============================================"
 echo ""
 

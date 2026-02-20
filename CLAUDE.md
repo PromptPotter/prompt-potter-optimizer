@@ -95,8 +95,9 @@ workflows/examples/              # CWL-inspired YAML workflow definitions
 
 Environment variables via `.env`:
 - `GROQ_API_KEY` — Groq API key (primary LLM provider)
+- `LLM_PROVIDER` — LLM provider: `groq`, `openai`, or `anthropic` (default: `groq`)
+- `LLM_MODEL` — Model identifier (default: `meta-llama/llama-4-maverick-17b-128e-instruct`)
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` — Alternative LLM provider keys
-- `DEFAULT_MODEL` — Fallback model (default: gpt-4)
 - `MAX_ITERATIONS` — Optimization iteration limit (default: 5)
 
 ## Conventions
