@@ -189,6 +189,16 @@ async def replay_all(
     return results
 
 
+LIMITATIONS = [
+    "Session terms pool is ~93 unique dataset_entry values from mappings"
+    " (smaller than production ecoinvent DB)",
+    "Web search results may differ from original run"
+    " (different time, pages changed)",
+    "LLM1 entity profiling may produce different profiles"
+    " (non-deterministic)",
+]
+
+
 def save_results(
     results: List[Dict], terms: List[str], source_data: dict
 ) -> None:
@@ -204,20 +214,42 @@ def save_results(
         "query_count": len(results),
         "successful_count": sum(1 for r in results if r["status"] == "success"),
         "error_count": sum(1 for r in results if r["status"] == "error"),
-        "limitations": [
-            "Session terms pool is ~93 unique dataset_entry values from mappings"
-            " (smaller than production ecoinvent DB)",
-            "Web search results may differ from original run"
-            " (different time, pages changed)",
-            "LLM1 entity profiling may produce different profiles"
-            " (non-deterministic)",
-        ],
+        "limitations": LIMITATIONS,
         "results": results,
     }
     OUTPUT_FIXTURE.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_FIXTURE, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
     print(f"\n  Results saved to {OUTPUT_FIXTURE}")
+
+
+async def ingest_to_promptpotter(
+    promptpotter_url: str,
+    results: List[Dict],
+    terms: List[str],
+    source_data: dict,
+) -> None:
+    """POST replay results to PromptPotter's ablation API."""
+    payload = {
+        "variant_label": "LLM1-TokenMatching (no LLM2)",
+        "pipeline_notation": "LLM1-TokenMatching",
+        "source_experiment": source_data["experiment"]["experiment_id"],
+        "source_run_id": source_data["runs"][0]["run_id"],
+        "session_terms_count": len(terms),
+        "limitations": LIMITATIONS,
+        "results": [r for r in results if r.get("status") == "success"],
+    }
+
+    url = f"{promptpotter_url}/api/v1/ablation/results"
+    print(f"\n  Ingesting {len(payload['results'])} results to {url}...")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, json=payload, timeout=30.0)
+        resp.raise_for_status()
+        body = resp.json()
+        print(f"  Ingested: ablation_id={body['ablation_id']}, "
+              f"queries={body['query_count']}, stored_at={body['stored_at']}")
+        print(f"  Compare at: {promptpotter_url}/api/v1/ablation/compare/{body['ablation_id']}")
 
 
 def main():
@@ -228,6 +260,21 @@ def main():
         "--base-url",
         default="http://127.0.0.1:8000",
         help="TermNorm API base URL (default: http://127.0.0.1:8000)",
+    )
+    parser.add_argument(
+        "--promptpotter-url",
+        default="http://127.0.0.1:8001",
+        help="PromptPotter API URL to ingest results (default: http://127.0.0.1:8001)",
+    )
+    parser.add_argument(
+        "--no-ingest",
+        action="store_true",
+        help="Skip ingesting results into PromptPotter API",
+    )
+    parser.add_argument(
+        "--ingest-only",
+        action="store_true",
+        help="Ingest existing fixture results without replaying",
     )
     parser.add_argument(
         "--dry-run",
@@ -256,6 +303,22 @@ def main():
 
     print(f"  Queries with valid ground truth: {len(queries)}")
     print(f"  Session terms: {len(terms)}")
+
+    # Ingest-only mode: load existing replay results and POST to PromptPotter
+    if args.ingest_only:
+        if not OUTPUT_FIXTURE.exists():
+            print(f"  Error: {OUTPUT_FIXTURE} not found. Run replay first.")
+            sys.exit(1)
+        with open(OUTPUT_FIXTURE, encoding="utf-8") as f:
+            existing = json.load(f)
+        print(f"  Loading existing replay: {len(existing['results'])} results")
+        asyncio.run(
+            ingest_to_promptpotter(
+                args.promptpotter_url, existing["results"], terms, data
+            )
+        )
+        return
+
     est_minutes = len(queries) * 20 / 60
     print(f"  Estimated time: ~{est_minutes:.0f} minutes")
 
@@ -282,6 +345,18 @@ def main():
     print(f"\n  Done: {successes} success, {errors} errors")
 
     save_results(results, terms, data)
+
+    # Ingest into PromptPotter API
+    if not args.no_ingest:
+        try:
+            asyncio.run(
+                ingest_to_promptpotter(args.promptpotter_url, results, terms, data)
+            )
+        except Exception as e:
+            print(f"\n  Warning: Failed to ingest into PromptPotter: {e}")
+            print(f"  Results are still saved locally at {OUTPUT_FIXTURE}")
+    else:
+        print("  Skipping PromptPotter ingest (--no-ingest)")
 
 
 if __name__ == "__main__":
