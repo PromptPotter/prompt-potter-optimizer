@@ -94,7 +94,7 @@ workflows/examples/              # CWL-inspired YAML workflow definitions
 
 ## Key Models
 
-- **`PromptState`** — Immutable, versioned prompt snapshot with `derive()` for creating children. Forms a lineage chain via `parent_id`. Used by the flat search optimizer.
+- **`PromptState`** — Immutable, versioned prompt snapshot with `derive()` for creating children. Forms a lineage chain via `parent_id`. Used by the DAG-based optimization workflow to track prompt state across iterations.
 - **`ExecutionResultItem`** — Per-query result from a replay. Includes `pipeline_data` dict which stores the full backend response (entity_profile, token_matched_candidates, etc.) for local optimization.
 - **`Execution`** — A complete replay run containing a list of `ExecutionResultItem`s.
 

@@ -1,7 +1,7 @@
 # Product Requirements Document: PromptPotter Optimizer
 
-**Version:** 0.2.0
-**Date:** 2026-02-19
+**Version:** 0.3.0
+**Date:** 2026-02-20
 **Status:** Draft
 **Depends on:** [Project Charter](project-charter.md)
 
@@ -91,36 +91,54 @@ The core operation for the TermNorm validation (SC5) is evaluating both **Varian
 
 ### P0.3: Candidate Generation
 
-**As a** developer, **I want** the system to generate improved configuration candidates **so that** I do not have to manually rewrite parameters through trial and error.
+**As a** developer, **I want** the system to generate improved prompt configurations **so that** I do not have to manually rewrite parameters through trial and error.
 
 **What the system does:**
-- Given the current configuration, failure analysis, and optimization context, generates N candidate configurations
-- Each candidate includes a rationale explaining what it changes and why
-- Candidates address specific failure patterns identified in analysis
-- Candidates may modify any tunable parameter: prompt text, few-shot examples, temperature, retrieval counts, thresholds, or other configuration values
-- Supports configurable generation strategies (rewrite, extend, simplify, parameter sweep)
+
+The candidate generation process has two stages:
+
+1. **Initialization** — An AI agent analyzes the user-provided context (domain description, task requirements, constraints) and produces structured prompt components via structured output parsing:
+   - `task_description` — what the prompt needs to accomplish
+   - `base_instruction` — step-by-step reasoning directive (e.g., "Let's think step by step.")
+   - `answer_format` — output format specification (e.g., "Wrap your final answer in `<ANS>` tags.")
+
+2. **Grow/Filter** — Given the current prompt state (persona, task_intent, problem_description, instruction, thinking_style, plan), enriches and expands the prompt. This node operates on structured prompt components, not raw text, enabling targeted modifications.
+
+Candidates are generated as structured prompt states with typed fields, not opaque prompt strings. Each field can be independently modified based on analysis feedback.
 
 **Acceptance criteria:**
-1. The generator produces 2-5 candidates per iteration (configurable)
-2. Each candidate includes a rationale field describing its changes
-3. Candidates are meaningfully different from each other (not minor rephrasing)
-4. Candidates can modify non-prompt parameters (e.g., temperature, retrieval count) when the failure analysis suggests those are contributing factors
+1. Initialization produces structured prompt components from arbitrary context input
+2. Grow/Filter produces enriched prompt states with all required fields populated
+3. In Phase 1 (linear mode), N independent runs produce meaningfully different prompt variants through breadth
+4. Candidates can modify any prompt component field (persona, task_intent, problem_description, instruction, thinking_style) when analysis suggests it
+5. Each candidate state is a valid PromptState with lineage tracking via `parent_id`
 
 ### P0.4: Optimization Loop
 
-**As a** developer, **I want** an automated loop that evaluates, analyzes, generates, and re-evaluates **so that** optimization runs without manual intervention.
+**As a** developer, **I want** an automated DAG-based optimization loop that initializes, evaluates, analyzes, and adapts **so that** optimization runs without manual intervention.
 
 **What the system does:**
-- Orchestrates the cycle: evaluate baseline, analyze failures, generate candidates, evaluate candidates, select best, repeat
-- Configurable stopping criteria: maximum iterations, target score, convergence threshold (no improvement for N iterations)
-- Tracks the improvement trajectory across iterations
-- Returns the best-performing configuration with full lineage (which trial it came from, what changed at each step)
+- Implements a DAG-based iterative workflow (derived from the reference n8n design in `docs/design/optimization-workflow.n8n.json`)
+- **Initialization:** AI agent analyzes context and produces structured prompt components
+- **Main loop per iteration:** prompt state flows through Grow/Filter --> Analysis + Evaluation --> counter increment --> stop condition check
+- **Feedback routing:** Analysis produces a `next_action` decision that routes to one of three feedback paths:
+  - `"generate"` — loop back to main_data to create new variants from scratch
+  - `"refine context"` — update context with critiques and applied metrics, then update plan, then loop back
+  - `"modify plan"` — update the optimization plan, then loop back
+- **Stop condition:** counter-based (counter >= N), configurable iteration limit
+- Returns the best-performing prompt state with full lineage
+
+**Phased rollout:**
+- **Phase 1 (M2):** Linear mode — initialization --> grow/filter --> analysis+evaluation --> output. No feedback cycling. Run N independent times for breadth-first exploration.
+- **Phase 2 (post-M2):** Full cycling mode with feedback paths enabled. Counter threshold set to N (configurable). Iterative depth-first refinement.
 
 **Acceptance criteria:**
-1. The loop runs end-to-end and returns the best configuration plus the score trajectory
-2. Stops when any configured stopping criterion is met (max iterations, target score, or convergence)
-3. Each iteration's results are traceable in Langfuse with parent-child relationships
-4. The returned result includes the full lineage from baseline to best configuration
+1. Phase 1: linear mode runs end-to-end and returns a scored prompt state
+2. Phase 1: N independent linear runs produce diverse candidates; the best is selectable by score
+3. Phase 2: the full DAG with feedback cycling runs and stops when counter >= N
+4. Each iteration's results are traceable in Langfuse with parent-child relationships
+5. The returned result includes the full lineage from initialization to best configuration
+6. The `next_action` routing correctly dispatches to the three feedback paths (Phase 2)
 
 ### P0.5: PROMPT_STATE Tracking
 

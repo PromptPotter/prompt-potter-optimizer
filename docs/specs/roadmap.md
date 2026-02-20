@@ -1,7 +1,7 @@
 # Roadmap: PromptPotter Optimizer
 
-**Version:** 0.2.0
-**Date:** 2026-02-19
+**Version:** 0.3.0
+**Date:** 2026-02-20
 **Status:** Draft
 **Depends on:** [WBS](wbs.md)
 
@@ -54,25 +54,33 @@
 
 ---
 
-## M2: Core Optimizer — Weeks 4-6
+## M2: Core Optimizer (DAG-Based Workflow) — Weeks 4-6
 
 - **Deliverables:**
-  - Analyzer, Generator, and Selector nodes (P0.2, P0.3, P0.4, P1.5)
-  - Optimization orchestrator: full evaluate-analyze-generate-select loop (P0.4)
-  - Updated optimize endpoint replacing the placeholder
-  - E2E test: optimization on sample dataset produces measurable improvement
+  - **Phase 1 (linear mode)** of the DAG-based optimization workflow:
+    - Initialization node: AI agent with structured output parsing (context --> prompt components)
+    - Grow/Filter node: prompt state enrichment
+    - Analysis + Evaluation node: scoring + failure analysis + next_action decision
+    - Linear mode orchestrator: init --> grow/filter --> evaluate --> output, run N times for breadth
+  - Updated optimize endpoint replacing the placeholder (P0.4)
+  - E2E test: linear mode optimization on sample dataset produces scored prompt states
+  - **Phase 2 (cycling mode)** partially implemented:
+    - Feedback router (Switch: generate / refine context / modify plan)
+    - Context refinement and plan update nodes
+    - Counter-based stop condition with configurable threshold
 
 - **Entry criteria:** M1 exit gate passed; CI green; PROMPT_STATE model finalized
 
 - **Exit gate:**
-  - Optimize endpoint runs a real loop end-to-end
-  - E2E test demonstrates score improvement from baseline
-  - Decision: does the optimizer produce measurably better configurations? Is the API contract right?
+  - Optimize endpoint runs the linear mode DAG end-to-end
+  - N independent runs produce diverse prompt states; best is selectable by score
+  - E2E test passes in CI
+  - Decision: does the linear mode produce useful prompt states? Is the DAG architecture right for adding cycling later?
 
 - **Risks:**
-  - LLM-based analysis/generation quality may vary across providers
-  - Candidate generation may produce insufficiently diverse configurations
-  - Largest milestone; highest scope creep risk
+  - LLM-based structured output quality may vary (initialization node depends on Groq + Llama 4 Maverick producing valid structured responses)
+  - Grow/Filter node may produce insufficiently diverse enrichments without cycling feedback
+  - Largest milestone; highest scope creep risk — cycling mode (2.7) should be deferred if linear mode takes longer than expected
 
 ---
 
@@ -139,7 +147,7 @@ After the Variant A vs Variant B comparison is settled, the next decision point 
 |---------|-----|-------|
 | Web scrape count ablation | -- | Vary number of websites scraped, measure quality vs. cost/latency |
 | LCA dataset validation | -- | Real-world use case validation after BC5CDR development is complete |
-| Reflection-based learning | P2.1 | Chained reflections to improve generation |
+| Full cycling mode (if not completed in M2) | P0.4, P2.1 | Enable feedback paths with iterative refinement; "refine context" path provides reflection-like capability |
 | Evolutionary operators (GA/DE) | P2.2 | Population-based search for multi-parameter optimization |
 | MCP server mode | P2.3 | Expose optimization tools to Claude Code and MCP clients |
 | Workflow-based optimization | P1.2 | Optimize single steps within multi-step pipelines |
