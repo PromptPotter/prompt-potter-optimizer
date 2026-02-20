@@ -4,208 +4,96 @@
 
 ## How It Works
 
-PromptPotter connects to your existing FastAPI backend (or Langfuse server) and:
-
-1. **Fetches** evaluation traces, failed cases, and metrics from your application
-2. **Analyzes** failure patterns using LLM-powered reasoning
-3. **Generates** improved prompt variants
-4. **Evaluates** new prompts against your dataset
-5. **Repeats** until convergence or max iterations
+PromptPotter connects to your backend (e.g. TermNorm), syncs experiment data, replays pipelines with different configurations, and computes statistical comparisons to find what works.
 
 ```
 ┌─────────────────────┐         ┌─────────────────────┐
-│  Your Application   │         │  PromptPotter       │
-│  (FastAPI backend)  │◄───────►│  Optimizer API      │
-│                     │  fetch  │                     │
-│  - Langfuse logs    │  traces │  - Analyze failures │
-│  - Evaluation data  │         │  - Generate prompts │
-│  - Match results    │         │  - Run experiments  │
-└─────────────────────┘         └─────────────────────┘
+│  Your Backend       │         │  PromptPotter        │
+│  (e.g. TermNorm)    │◄───────►│  Optimizer           │
+│                     │  sync   │                      │
+│  - Experiments      │  replay │  - Project store     │
+│  - Pipeline API     │  compare│  - Statistical tests │
+│  - Evaluation data  │         │  - Notebooks + API   │
+└─────────────────────┘         └──────────────────────┘
 ```
-
-## Core Optimization Pipeline
-
-The optimizer follows a **human-in-the-loop** iterative loop:
-
-```
-INITIALIZE → S1 → GROW/FILTER → ANALYSIS → [HUMAN] → CHECK
-                                              │
-                      ┌───────────────────────┼───────────────────────┐
-                      │                       │                       │
-                   (a) continue            (b) refine ctx         (c) modify plan
-                      │                       │                       │
-                      └───────────┬───────────┴───────────────────────┘
-                                  ▼
-                              back to S1
-```
-
-### Human-in-the-Loop Decision Point
-
-After **ANALYSIS**, the human reviews the current state and chooses:
-- **(a) Continue** — proceed to S1 with no changes
-- **(b) Refine Context** — update context fields → back to S1
-- **(c) Modify Plan + Refine Context** — update plan and context → back to S1
-
-### PROMPT_STATE Object
-
-The optimization state is a structured object containing:
-
-| Field | Description |
-|-------|-------------|
-| `plan` | Current optimization strategy/approach |
-| `training` | Training dataset |
-| `test` | Test/evaluation dataset |
-| `context` | Domain context and constraints |
-| `problem_description` | What problem the prompt solves |
-| `optimized_prompt` | Current best prompt candidate |
-
-### Type Classes
-
-PROMPT_STATE fields support these semantic type classes:
-
-| Type Class | Purpose |
-|------------|---------|
-| `expert_persona` | Who the LLM should embody |
-| `task_intent` | What the prompt aims to achieve |
-| `problem_description` | The problem domain/constraints |
-| `instruction` | Explicit behavioral instructions |
-| `thinking_style` | Reasoning approach (CoT, step-by-step, etc.) |
-
-### Analysis Outputs
-
-The ANALYSIS step extracts additional artifacts that can be added to state:
-
-- **Few-shot examples** — representative input/output pairs
-- **Reasoning traces** — chain-of-thought patterns
-- **Failure patterns** — common error modes identified
-- **Edge cases** — boundary conditions discovered
-- **Confidence scores** — per-component quality estimates
-
-These outputs inform the human's decision at the intervention point.
 
 **Works with:**
-- Any FastAPI backend logging in [Langfuse-compatible format](https://langfuse.com/docs)
-- Langfuse server directly
-- Custom evaluation endpoints
-
-**Example integration:** [TermNorm-excel](https://github.com/runfish5/TermNorm-excel) - an AI-powered terminology normalization add-in with Langfuse-compatible logging.
+- Any FastAPI backend with [Langfuse-compatible](https://langfuse.com/docs) logging
+- [TermNorm-excel](https://github.com/runfish5/TermNorm-excel) — AI terminology normalization
 
 ## Quick Start
 
 ```bash
-# Clone and setup
 git clone https://github.com/yourusername/prompt-potter-optimizer.git
 cd prompt-potter-optimizer
-cp .env.example .env
-# Edit .env with your API keys
-
-# Run with Docker
-cd docker
-docker-compose up --build
+pip install -r requirements.txt
 ```
 
-**Open:**
-- **JupyterLab**: http://localhost:8888 (with custom learning path tiles)
-- **FastAPI**: http://localhost:8000/docs
+### Notebook (recommended)
 
-### JupyterLab Launcher Tiles
+Open `notebooks/termnorm_backend.ipynb` in Jupyter — register a backend, sync experiments, replay queries, compare variants. No server needed.
 
-Look for **"PromptPotter Learning Path"** in the JupyterLab launcher:
+### REST API
 
-| Tile | Description |
-|------|-------------|
-| Introduction to Prompt Optimization | Quickstart tutorial notebook |
-| Advanced Optimization | Multi-iteration techniques |
-| Secrets Manager | Configure API keys (OpenAI, Anthropic) |
-| Prompt Optimizer Client | Interactive optimization UI |
-
-## Overview
-
-PromptPotter is a **companion service** for LLM applications. Instead of manually analyzing logs and tweaking prompts, point PromptPotter at your Langfuse-compatible backend and let it optimize automatically.
-
-**Key Features:**
-- **Langfuse-compatible**: Connects to any backend using Langfuse logging format
-- **API-First**: REST API works from Colab notebooks, scripts, or other services
-- **Iterative Optimization**: Analyzes failures, generates variants, evaluates, repeats
-- **Framework-agnostic**: No LangChain/DSPy lock-in required
-
-## API Usage
-
-```python
-import requests
-
-response = requests.post(
-    "http://localhost:8000/api/v1/optimize",
-    json={
-        "initial_prompt": "Classify the sentiment:",
-        "dataset": [
-            {"text": "I love this!", "expected": "positive"},
-            {"text": "This is terrible", "expected": "negative"}
-        ],
-        "target_metric": "accuracy",
-        "max_iterations": 5
-    }
-)
-result = response.json()
-print(f"Optimized: {result['optimized_prompt']}")
+```bash
+uvicorn api.main:app --port 8001 --reload
 ```
+
+```bash
+# Register backend
+curl -X POST http://localhost:8001/api/v1/backends \
+  -H "Content-Type: application/json" \
+  -d '{"name": "TermNorm", "backend_type": "termnorm", "base_url": "http://localhost:8000"}'
+
+# Sync experiments
+curl -X POST http://localhost:8001/api/v1/backends/termnorm/sync
+
+# View synced data
+curl http://localhost:8001/api/v1/backends/termnorm/experiments
+```
+
+### Docker
+
+```bash
+cd docker && docker-compose up --build
+```
+
+- **JupyterLab**: http://localhost:8888
+- **FastAPI docs**: http://localhost:8000/docs
 
 ## Project Structure
 
 ```
-prompt-potter-optimizer/
-├── api/                 # FastAPI application
-├── apps/                # Streamlit apps (secrets_manager, optimizer_client)
-├── docker/              # Docker configs
-├── examples/            # Tutorial notebooks
-├── launcher/            # JupyterLab tiles config
-├── tests/               # Tests
-├── prompts/             # LLM agent prompt templates
-├── docs/                # Extended documentation
-└── external/            # Local reference clone (gitignored, see below)
+api/                  # FastAPI application
+├── routers/          #   backends, workflows, health
+├── services/         #   project_store, backend_client, comparison
+├── models/           #   backend, prompt_state, workflow
+├── nodes/            #   LLM, WebSearch, Ranker
+└── evaluators/       #   ExactMatch, Criteria (LLM-judge)
+notebooks/            # Interactive workflows (termnorm_backend.ipynb)
+apps/                 # Streamlit UIs (optimizer_client, secrets_manager)
+workflows/            # CWL-inspired YAML definitions
+docker/               # Dockerfile, docker-compose
+docs/                 # Design docs + formal specs
+tests/                # pytest suite
 ```
-
-### External Reference
-
-The `external/` folder is gitignored and contains a local clone of [TermNorm-excel](https://github.com/runfish5/TermNorm-excel) for reference. Clone it yourself if needed:
-
-```bash
-git clone https://github.com/runfish5/TermNorm-excel external/TermNorm-excel
-```
-
-This shows how a real FastAPI backend implements Langfuse-compatible logging that PromptPotter can consume.
 
 ## Configuration
 
-Edit `.env` file:
+Edit `.env` (see `.env.example`):
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `TARGET_API_URL` | Your backend's API URL (Langfuse-compatible) | - |
-| `LANGFUSE_HOST` | Or connect to Langfuse server directly | - |
-| `OPENAI_API_KEY` | OpenAI API key (for optimization LLM) | - |
-| `ANTHROPIC_API_KEY` | Anthropic API key (alternative) | - |
-| `MAX_ITERATIONS` | Max optimization iterations | 5 |
-
-## Local Development
-
-```bash
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn api.main:app --reload
-```
+| Variable | Description |
+|----------|-------------|
+| `OPENAI_API_KEY` | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `DEFAULT_MODEL` | Fallback model (default: gpt-4) |
+| `MAX_ITERATIONS` | Max optimization iterations (default: 5) |
 
 ## Documentation
 
-- `docs/architecture.md` - Design patterns and dual-mode philosophy
-- `docs/registry-design.md` - Optimization tracking patterns (MLflow/DSPy style)
-
-## NVIDIA Brev Deployment
-
-1. Go to [brev.nvidia.com](https://brev.nvidia.com)
-2. Create launchable → select this repo
-3. Use `.brev/setup.sh` as setup script
+- `docs/architecture.md` — Design patterns
+- `docs/registry-design.md` — Optimization tracking (MLflow/DSPy style)
+- `docs/specs/` — Formal specs (charter, PRD, ADD, WBS, roadmap)
 
 ## License
 

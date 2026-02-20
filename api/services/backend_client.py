@@ -1,8 +1,8 @@
 """
 HTTP client for backend APIs (e.g. TermNorm).
 
-Consolidates DatasetLoader + replay_without_llm2.py logic into one class.
-All responses are returned as-is (verbatim) for storage in the project store.
+Fetches experiments, syncs data into the project store, and replays
+pipeline queries. All API responses stored verbatim.
 """
 
 import asyncio
@@ -98,7 +98,7 @@ class BackendClient:
         store.save_sync(backend_id, f"experiments/{experiment_id}.json", detail)
         return detail
 
-    # -- replay helpers (from replay_without_llm2.py) ---------------------
+    # -- replay helpers ---------------------------------------------------
 
     @staticmethod
     def extract_session_terms(experiment_data: Dict) -> List[str]:
