@@ -235,16 +235,31 @@ def compute_comparison(results: List[Dict]) -> Dict[str, Any]:
         },
         "dataset": {"query_count": n},
         "metrics": {
-            "hit_at_1": {
+            "accuracy": {
                 "a": round(a_hit1_count / n, 4) if n else 0,
                 "a_count": a_hit1_count,
                 "b": round(b_hit1_count / n, 4) if n else 0,
                 "b_count": b_hit1_count,
                 "mcnemar": mcnemar,
+                "note": "Exact match: predicted == ground_truth",
             },
-            "hit_at_3": {"a": round(a_hit3 / n, 4) if n else 0, "a_count": a_hit3, "b": None},
-            "hit_at_5": {"a": round(a_hit5 / n, 4) if n else 0, "a_count": a_hit5, "b": None},
-            "mrr": {"a": round(a_rr_sum / n, 4) if n else 0, "b": None},
+            "recall_at_3": {
+                "a": round(a_hit3 / n, 4) if n else 0,
+                "a_count": a_hit3,
+                "b": None,
+                "note": "Ground truth found in top-3 candidates",
+            },
+            "recall_at_5": {
+                "a": round(a_hit5 / n, 4) if n else 0,
+                "a_count": a_hit5,
+                "b": None,
+                "note": "Ground truth found in top-5 candidates",
+            },
+            "mrr": {
+                "a": round(a_rr_sum / n, 4) if n else 0,
+                "b": None,
+                "note": "Mean Reciprocal Rank (1/rank of ground truth)",
+            },
             "latency_ms": {
                 "a": latency_stats(a_latencies),
                 "b": latency_stats(b_latencies),
@@ -278,7 +293,7 @@ def format_text(comp: Dict, meta: Dict) -> str:
     m = comp["metrics"]
     c = comp["classification"]
     n = comp["dataset"]["query_count"]
-    h1 = m["hit_at_1"]
+    acc = m["accuracy"]
     lat = m["latency_ms"]
 
     lines = []
@@ -295,25 +310,29 @@ def format_text(comp: Dict, meta: Dict) -> str:
     lines.append("")
 
     # Accuracy
-    lines.append("  ACCURACY")
+    lines.append("  ACCURACY (exact match: predicted == ground truth)")
     lines.append("  " + "-" * 66)
     lines.append(f"  {'Metric':<22} {'Variant A':<16} {'Variant B':<16} {'p-value':<10}")
     lines.append("  " + "-" * 66)
 
-    a_pct = f"{h1['a_count']}/{n} ({h1['a'] * 100:.1f}%)"
-    b_pct = f"{h1['b_count']}/{n} ({h1['b'] * 100:.1f}%)"
-    lines.append(f"  {'hit@1':<22} {a_pct:<16} {b_pct:<16}")
-
-    mc = h1["mcnemar"]
+    a_pct = f"{acc['a_count']}/{n} ({acc['a'] * 100:.1f}%)"
+    b_pct = f"{acc['b_count']}/{n} ({acc['b'] * 100:.1f}%)"
+    mc = acc["mcnemar"]
     p_str = f"p={mc['p_value']:.4f}" if mc.get("p_value") is not None else mc.get("note", "n/a")
-    lines.append(f"  {'McNemar test':<22} {'':16} {'':16} {p_str}")
+    lines.append(f"  {'Accuracy':<22} {a_pct:<16} {b_pct:<16} {p_str}")
+    lines.append("")
 
-    h3 = m["hit_at_3"]
-    h5 = m["hit_at_5"]
+    # Recall
+    r3 = m["recall_at_3"]
+    r5 = m["recall_at_5"]
     mrr = m["mrr"]
-    lines.append(f"  {'hit@3 (A only)':<22} {h3['a_count']}/{n} ({h3['a'] * 100:.1f}%){'':5} {'n/a':<16}")
-    lines.append(f"  {'hit@5 (A only)':<22} {h5['a_count']}/{n} ({h5['a'] * 100:.1f}%){'':5} {'n/a':<16}")
-    lines.append(f"  {'MRR (A only)':<22} {mrr['a']:.4f}{'':11} {'n/a':<16}")
+    lines.append("  RECALL (ground truth found in top-k candidates)")
+    lines.append("  " + "-" * 66)
+    lines.append(f"  {'Metric':<22} {'Variant A':<16} {'Variant B':<16}")
+    lines.append("  " + "-" * 66)
+    lines.append(f"  {'Recall@3':<22} {r3['a_count']}/{n} ({r3['a'] * 100:.1f}%){'':<3} {'n/a':<16}")
+    lines.append(f"  {'Recall@5':<22} {r5['a_count']}/{n} ({r5['a'] * 100:.1f}%){'':<3} {'n/a':<16}")
+    lines.append(f"  {'MRR':<22} {mrr['a']:.4f}{'':11} {'n/a':<16}")
     lines.append("")
 
     # Latency
@@ -321,9 +340,9 @@ def format_text(comp: Dict, meta: Dict) -> str:
     lines.append("  " + "-" * 66)
     lines.append(f"  {'Metric':<22} {'Variant A':<16} {'Variant B':<16} {'p-value':<10}")
     lines.append("  " + "-" * 66)
-    lines.append(f"  {'Avg latency':<22} {lat['a']['mean']:.0f}ms{'':<10} {lat['b']['mean']:.0f}ms")
-    lines.append(f"  {'Median latency':<22} {lat['a']['median']:.0f}ms{'':<9} {lat['b']['median']:.0f}ms")
-    lines.append(f"  {'P95 latency':<22} {lat['a']['p95']:.0f}ms{'':<10} {lat['b']['p95']:.0f}ms")
+    lines.append(f"  {'Mean':<22} {lat['a']['mean']:.0f}ms{'':<10} {lat['b']['mean']:.0f}ms")
+    lines.append(f"  {'Median':<22} {lat['a']['median']:.0f}ms{'':<9} {lat['b']['median']:.0f}ms")
+    lines.append(f"  {'P95':<22} {lat['a']['p95']:.0f}ms{'':<10} {lat['b']['p95']:.0f}ms")
 
     w = lat["wilcoxon"]
     w_str = f"p={w['p_value']:.4f}" if w.get("p_value") is not None else w.get("note", "n/a")
@@ -375,9 +394,9 @@ def format_markdown(comp: Dict, meta: Dict) -> str:
     m = comp["metrics"]
     c = comp["classification"]
     n = comp["dataset"]["query_count"]
-    h1 = m["hit_at_1"]
+    acc = m["accuracy"]
     lat = m["latency_ms"]
-    mc = h1["mcnemar"]
+    mc = acc["mcnemar"]
     w = lat["wilcoxon"]
 
     lines = []
@@ -389,17 +408,23 @@ def format_markdown(comp: Dict, meta: Dict) -> str:
     lines.append(f"- **Queries:** {n}")
     lines.append(f"- **Session terms:** {meta.get('session_terms_count', '?')}\n")
 
+    a_pct = f"{acc['a_count']}/{n} ({acc['a'] * 100:.1f}%)"
+    b_pct = f"{acc['b_count']}/{n} ({acc['b'] * 100:.1f}%)"
+    p_str = f"{mc['p_value']:.4f}" if mc.get("p_value") is not None else "n/a"
+
     lines.append("## Accuracy\n")
     lines.append("| Metric | Variant A | Variant B | p-value |")
     lines.append("|--------|-----------|-----------|---------|")
+    lines.append(f"| Accuracy (exact match) | {a_pct} | {b_pct} | McNemar p={p_str} |\n")
 
-    a_pct = f"{h1['a_count']}/{n} ({h1['a'] * 100:.1f}%)"
-    b_pct = f"{h1['b_count']}/{n} ({h1['b'] * 100:.1f}%)"
-    p_str = f"{mc['p_value']:.4f}" if mc.get("p_value") is not None else "n/a"
-    lines.append(f"| hit@1 | {a_pct} | {b_pct} | McNemar p={p_str} |")
-    lines.append(f"| hit@3 | {m['hit_at_3']['a_count']}/{n} ({m['hit_at_3']['a'] * 100:.1f}%) | n/a | |")
-    lines.append(f"| hit@5 | {m['hit_at_5']['a_count']}/{n} ({m['hit_at_5']['a'] * 100:.1f}%) | n/a | |")
-    lines.append(f"| MRR | {m['mrr']['a']:.4f} | n/a | |\n")
+    lines.append("## Recall\n")
+    lines.append("| Metric | Variant A | Variant B |")
+    lines.append("|--------|-----------|-----------|")
+    r3 = m["recall_at_3"]
+    r5 = m["recall_at_5"]
+    lines.append(f"| Recall@3 | {r3['a_count']}/{n} ({r3['a'] * 100:.1f}%) | n/a |")
+    lines.append(f"| Recall@5 | {r5['a_count']}/{n} ({r5['a'] * 100:.1f}%) | n/a |")
+    lines.append(f"| MRR | {m['mrr']['a']:.4f} | n/a |\n")
 
     lines.append("## Latency\n")
     lines.append("| Metric | Variant A | Variant B | p-value |")
@@ -488,6 +513,13 @@ def main():
         help="Output format (default: text)",
     )
     parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=None,
+        help="Save report to file (auto-detects format from extension: .json, .md, .txt)",
+    )
+    parser.add_argument(
         "--export-csv",
         type=Path,
         default=None,
@@ -512,13 +544,34 @@ def main():
     # Compute comparison
     comp = compute_comparison(results)
 
-    # Output
-    if args.format == "json":
-        print(json.dumps(comp, indent=2, ensure_ascii=False))
-    elif args.format == "markdown":
-        print(format_markdown(comp, meta))
+    # Determine format (--output extension overrides --format)
+    fmt = args.format
+    if args.output:
+        ext = args.output.suffix.lower()
+        if ext == ".json":
+            fmt = "json"
+        elif ext == ".md":
+            fmt = "markdown"
+        else:
+            fmt = "text"
+
+    # Generate report
+    if fmt == "json":
+        report = json.dumps(comp, indent=2, ensure_ascii=False)
+    elif fmt == "markdown":
+        report = format_markdown(comp, meta)
     else:
-        print(format_text(comp, meta))
+        report = format_text(comp, meta)
+
+    print(report)
+
+    # Save to file
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(report)
+            f.write("\n")
+        print(f"\n  Report saved to {args.output}")
 
     # CSV export
     if args.export_csv:

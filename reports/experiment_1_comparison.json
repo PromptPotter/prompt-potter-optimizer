@@ -1,0 +1,366 @@
+{
+  "pipeline": {
+    "variant_a": {
+      "notation": "LLM1-TokenMatching",
+      "description": "No LLM2 reranking"
+    },
+    "variant_b": {
+      "notation": "LLM1-TokenMatching-LLM2",
+      "description": "Full pipeline with LLM2 semantic reranking"
+    }
+  },
+  "dataset": {
+    "query_count": 40
+  },
+  "metrics": {
+    "accuracy": {
+      "a": 0.225,
+      "a_count": 9,
+      "b": 0.05,
+      "b_count": 2,
+      "mcnemar": {
+        "statistic": 5.1429,
+        "p_value": 0.0233,
+        "contingency": {
+          "both_correct": 2,
+          "a_only": 7,
+          "b_only": 0,
+          "both_wrong": 31
+        }
+      },
+      "note": "Exact match: predicted == ground_truth"
+    },
+    "recall_at_3": {
+      "a": 0.375,
+      "a_count": 15,
+      "b": null,
+      "note": "Ground truth found in top-3 candidates"
+    },
+    "recall_at_5": {
+      "a": 0.6,
+      "a_count": 24,
+      "b": null,
+      "note": "Ground truth found in top-5 candidates"
+    },
+    "mrr": {
+      "a": 0.3635,
+      "b": null,
+      "note": "Mean Reciprocal Rank (1/rank of ground truth)"
+    },
+    "latency_ms": {
+      "a": {
+        "mean": 13706.6,
+        "median": 14122.2,
+        "p95": 18768.6
+      },
+      "b": {
+        "mean": 25816.8,
+        "median": 26610.0,
+        "p95": 40720.0
+      },
+      "wilcoxon": {
+        "statistic": 43.0,
+        "p_value": 0.0
+      }
+    },
+    "confidence": {
+      "a_mean": 0.4377,
+      "b_mean": 0
+    }
+  },
+  "classification": {
+    "both_correct": 2,
+    "a_only_correct": 7,
+    "b_only_correct": 0,
+    "both_wrong": 31,
+    "details": {
+      "both_correct": [
+        {
+          "query": "EN AW-ALSi1MgMn H13/cold forming",
+          "bom_material": "EN AW-ALSi1MgMn H13",
+          "ground_truth": "Aluminium, wrought alloy {GLO}| market for aluminium, wrought alloy | Cut-off, S",
+          "a_predicted": "Aluminium, wrought alloy {GLO}| market for aluminium, wrought alloy | Cut-off, S",
+          "b_predicted": "Aluminium, wrought alloy {GLO}| market for aluminium, wrought alloy | Cut-off, S"
+        },
+        {
+          "query": "PA66-GF25 Ultramid A3UG5 black 23215 RAL 9005",
+          "bom_material": "PA66-GF25 Ultramid A3UG5 black 23215 RAL 9005",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "b_predicted": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER"
+        }
+      ],
+      "a_only_correct": [
+        {
+          "query": "EN AW-AL99,5 H14/cold forming",
+          "bom_material": "EN AW-AL99,5 H14",
+          "ground_truth": "Aluminium, wrought alloy {GLO}| market for aluminium, wrought alloy | Cut-off, S",
+          "a_predicted": "Aluminium, wrought alloy {GLO}| market for aluminium, wrought alloy | Cut-off, S",
+          "b_predicted": "Metal working, average for aluminium product manufacturing {RER}| metal working, average for aluminium product manufacturing | Cut-off, S"
+        },
+        {
+          "query": "PA66-GF25 Ultramid A3UG5 black 23215 RAL 9005/molding",
+          "bom_material": "PA66-GF25 Ultramid A3UG5 black 23215 RAL 9005",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PA66-GF25 ULTRAMID A3UG5 RAL7035 grey/molding",
+          "bom_material": "PA66-GF25 ULTRAMID A3UG5 RAL7035 grey",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PC/ABS Cycoloy C2950 RAL7035/molding",
+          "bom_material": "PC/ABS Cycoloy C2950 RAL7035",
+          "ground_truth": "Cycoloy C2950 /GLO",
+          "a_predicted": "Cycoloy C2950 /GLO",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PMC ISO 14530-UP (GF10+MD65),M,FR Ralupol UP 804 7035.00 M/Q E 8.4/molding",
+          "bom_material": "PMC ISO 14530-UP (GF10+MD65),M,FR Ralupol UP 804 7035.00 M/Q E 8.4",
+          "ground_truth": "Glass fibre reinforced plastic, polyester resin, hand lay-up {GLO}| market for glass fibre reinforced plastic, polyester resin, hand lay-up | Cut-off, S",
+          "a_predicted": "Glass fibre reinforced plastic, polyester resin, hand lay-up {GLO}| market for glass fibre reinforced plastic, polyester resin, hand lay-up | Cut-off, S",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "Round EN 10277-3-11SMn30+C/cold forming",
+          "bom_material": "Round EN 10277-3-11SMn30+C",
+          "ground_truth": "Steel, low-alloyed {GLO}| market for steel, low-alloyed | Cut-off, S",
+          "a_predicted": "Steel, low-alloyed {GLO}| market for steel, low-alloyed | Cut-off, S",
+          "b_predicted": "Metal working, average for steel product manufacturing {RER}| metal working, average for steel product manufacturing | Cut-off, S"
+        },
+        {
+          "query": "Sleeving IEC 60684-3-123 silicone elastomer/extrude",
+          "bom_material": "Sleeving IEC 60684-3-123 silicone elastomer",
+          "ground_truth": "Silicone product {RER}| market for silicone product | Cut-off, S",
+          "a_predicted": "Silicone product {RER}| market for silicone product | Cut-off, S",
+          "b_predicted": "Extrusion, plastic pipes {RER}| extrusion, plastic pipes | Cut-off, S"
+        }
+      ],
+      "b_only_correct": [],
+      "both_wrong": [
+        {
+          "query": "6.8. - ISO 898-1/thread rolling",
+          "bom_material": "6.8. - ISO 898-1",
+          "ground_truth": "Steel, unalloyed {GLO}| market for steel, unalloyed | Cut-off, S",
+          "a_predicted": "Steel, chromium steel 18/8 {GLO}| market for steel, chromium steel 18/8 | Cut-off, S",
+          "b_predicted": "Sheet rolling, chromium steel {RER}| sheet rolling, chromium steel | Cut-off, S"
+        },
+        {
+          "query": "AgC3 fiber parallel/stamping",
+          "bom_material": "AgC3 fiber parallel",
+          "ground_truth": "AgC3 | 83% Silver 17%Graphite /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 95% PA66 5% GF /RER",
+          "b_predicted": "Metal working, average for copper product manufacturing {RER}| metal working, average for copper product manufacturing | Cut-off, S"
+        },
+        {
+          "query": "AgC5/stamping",
+          "bom_material": "AgC5",
+          "ground_truth": "AgC3 | 83% Silver 17%Graphite /RER",
+          "a_predicted": "Metal working, average for copper product manufacturing {RER}| metal working, average for copper product manufacturing | Cut-off, S",
+          "b_predicted": "Metal working, average for steel product manufacturing {RER}| metal working, average for steel product manufacturing | Cut-off, S"
+        },
+        {
+          "query": "Bimetal TB 20110/stamping",
+          "bom_material": "Bimetal TB 20110",
+          "ground_truth": "Steel, low-alloyed {GLO}| market for steel, low-alloyed | Cut-off, S",
+          "a_predicted": "Steel, chromium steel 18/8 {GLO}| market for steel, chromium steel 18/8 | Cut-off, S",
+          "b_predicted": "Metal working, average for copper product manufacturing {RER}| metal working, average for copper product manufacturing | Cut-off, S"
+        },
+        {
+          "query": "CuZn36-MS-63-FS material no. 2.0335/thread rolling",
+          "bom_material": "CuZn36-MS-63-FS material no. 2.0335",
+          "ground_truth": "Brass {RoW}| market for brass | Cut-off, S",
+          "a_predicted": "Galvanized Copper | 99.6% Copper 0.4% Zinc /GLO",
+          "b_predicted": "Sheet rolling, copper {RoW}| sheet rolling, copper | Cut-off, S"
+        },
+        {
+          "query": "Bimetal TB 1435/stamping",
+          "bom_material": "Bimetal TB 1435",
+          "ground_truth": "Steel, low-alloyed {GLO}| market for steel, low-alloyed | Cut-off, S",
+          "a_predicted": "Metal working, average for copper product manufacturing {RER}| metal working, average for copper product manufacturing | Cut-off, S",
+          "b_predicted": "Metal working, average for copper product manufacturing {RER}| metal working, average for copper product manufacturing | Cut-off, S"
+        },
+        {
+          "query": "FLAT IEC 60317-29-2,5x1,6 Degree 2-200/coil winding",
+          "bom_material": "FLAT IEC 60317-29-2,5x1,6 Degree 2-200",
+          "ground_truth": "Copper, cathode {GLO}| market for copper, cathode | Cut-off, S",
+          "a_predicted": "Magnet, Sm1Co5",
+          "b_predicted": "Wire drawing, copper {RER}| wire drawing, copper | Cut-off, S"
+        },
+        {
+          "query": "FM-PC Makrolon 2805 transparent/molding",
+          "bom_material": "FM-PC Makrolon 2805 transparent",
+          "ground_truth": "Polycarbonate {RER}| market for polycarbonate | Cut-off, S",
+          "a_predicted": "Injection moulding {RoW}| injection moulding | Cut-off, S",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PA66 Ultramid A3SK natural colour /molding",
+          "bom_material": "PA66 Ultramid A3SK natural colour",
+          "ground_truth": "Polyamide (Nylon) 6.6/EU-27",
+          "a_predicted": "Glass fibre reinforced plastic | 50% PA66 50% GF /RER",
+          "b_predicted": "Injection moulding {RoW}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PA66+6-GFR30 Grilon TSG 30/4 FR X RAL7035 /molding",
+          "bom_material": "PA66+6-GFR30 Grilon TSG 30/4 FR X RAL7035",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Polyamide (Nylon) 6.6/EU-27",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PA66+6-GFR30 Grilon TSG 30/4 FR X RAL9005/molding",
+          "bom_material": "PA66+6-GFR30 Grilon TSG 30/4 FR X RAL9005",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 50% PA66 50% GF /RER",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PA66-Bergamid A700 CF RAL6018/molding",
+          "bom_material": "PA66-Bergamid A700 CF RAL6018",
+          "ground_truth": "Polyamide (Nylon) 6.6/EU-27",
+          "a_predicted": "Glass fibre reinforced plastic | 50% PA66 50% GF /RER",
+          "b_predicted": "Injection moulding {RoW}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PA66-GF35 Bergamid A700 G25H RAL9005/molding",
+          "bom_material": "PA66-GF35 Bergamid A700 G25H RAL9005",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 65% PA66 35% GF /RER",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PA66-GF35 Bergamid A700 G35 H RAL3000/molding",
+          "bom_material": "PA66-GF35 Bergamid A700 G35 H RAL3000",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 65% PA66 35% GF /RER",
+          "b_predicted": "Injection moulding {RoW}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PBT-GF30 Ultradur B4300 G6 High Speed nature/molding",
+          "bom_material": "PBT-GF30 Ultradur B4300 G6 High Speed nature",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 50% PA66 50% GF /RER",
+          "b_predicted": "Injection moulding {RoW}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PC/ABS CYCOLOY C2100 RAL7035/molding",
+          "bom_material": "PC/ABS CYCOLOY C2100 RAL7035",
+          "ground_truth": "Cycoloy C2950 /GLO",
+          "a_predicted": "Acrylonitrile-butadiene-styrene copolymer {GLO}| market for acrylonitrile-butadiene-styrene copolymer | Cut-off, S",
+          "b_predicted": "Injection moulding {RoW}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PC-GF10 XANTAR MX1094 RAL7035/molding",
+          "bom_material": "PC-GF10 XANTAR MX1094 RAL7035",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 90% PC 10% GF /GLO",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PEEK-GF30 PEEK 450 GL 30 natur/molding",
+          "bom_material": "PEEK-GF30 PEEK 450 GL 30 natur",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 50% PA66 50% GF /RER",
+          "b_predicted": "Injection moulding {RoW}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PEI-GF30 ULTEM 4000 black 7401/molding",
+          "bom_material": "PEI-GF30 ULTEM 4000 black 7401",
+          "ground_truth": "Glass fibre reinforced plastic | 75% PA66 25% GF /RER",
+          "a_predicted": "Glass fibre reinforced plastic | 50% PA66 50% GF /RER",
+          "b_predicted": "Injection moulding {RER}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "PET Adhesive tape 0,3x15 Grey RAL7035/stamping",
+          "bom_material": "PET Adhesive tape 0,3x15 Grey RAL7035",
+          "ground_truth": "Polyethylene terephthalate, granulate, amorphous {GLO}| market for polyethylene terephthalate, granulate, amorphous | Cut-off, S",
+          "a_predicted": "Extrusion, plastic film {RER}| extrusion, plastic film | Cut-off, S",
+          "b_predicted": "Silicone product {RER}| market for silicone product | Cut-off, S"
+        },
+        {
+          "query": "PMC ISO 14530-UP Ralupol UP 4806 7035.00 M/QE 5.3 RAL7035/molding",
+          "bom_material": "PMC ISO 14530-UP Ralupol UP 4806 7035.00 M/QE 5.3 RAL7035",
+          "ground_truth": "Glass fibre reinforced plastic, polyester resin, hand lay-up {GLO}| market for glass fibre reinforced plastic, polyester resin, hand lay-up | Cut-off, S",
+          "a_predicted": "Glass fibre reinforced plastic | 95% PA66 5% GF /RER",
+          "b_predicted": "Injection moulding {RoW}| injection moulding | Cut-off, S"
+        },
+        {
+          "query": "Round couper wire 0,75mmÂ²/pre-welded braid",
+          "bom_material": "Round couper wire 0,75mmÂ²",
+          "ground_truth": "Copper, cathode {GLO}| market for copper, cathode | Cut-off, S",
+          "a_predicted": "Wire drawing, copper {RER}| wire drawing, copper | Cut-off, S",
+          "b_predicted": "Wire drawing, copper {RER}| wire drawing, copper | Cut-off, S"
+        },
+        {
+          "query": "Round couper wire 2,5mmÂ²/pre-welded braid",
+          "bom_material": "Round couper wire 2,5mmÂ²",
+          "ground_truth": "Copper, cathode {GLO}| market for copper, cathode | Cut-off, S",
+          "a_predicted": "Wire drawing, copper {RoW}| wire drawing, copper | Cut-off, S",
+          "b_predicted": "Wire drawing, copper {RER}| wire drawing, copper | Cut-off, S"
+        },
+        {
+          "query": "Round couper wire 8mmÂ²/pre-welded braid",
+          "bom_material": "Round couper wire 8mmÂ²",
+          "ground_truth": "Copper, cathode {GLO}| market for copper, cathode | Cut-off, S",
+          "a_predicted": "Wire drawing, copper {RoW}| wire drawing, copper | Cut-off, S",
+          "b_predicted": "Wire drawing, copper {RER}| wire drawing, copper | Cut-off, S"
+        },
+        {
+          "query": "Round EN 10277-3-11SMn30+C/turning",
+          "bom_material": "Round EN 10277-3-11SMn30+C",
+          "ground_truth": "Steel, low-alloyed {GLO}| market for steel, low-alloyed | Cut-off, S",
+          "a_predicted": "Hot rolling, steel {RoW}| hot rolling, steel | Cut-off, S",
+          "b_predicted": "Steel removed by turning, average, conventional {RER}| steel turning, average, conventional | Cut-off, S"
+        },
+        {
+          "query": "Round EN 12164-CuZn21Si3P-RND2,0A/cold forming",
+          "bom_material": "Round EN 12164-CuZn21Si3P-RND2,0A",
+          "ground_truth": "Brass {RoW}| market for brass | Cut-off, S",
+          "a_predicted": "Copper, cathode {GLO}| market for copper, cathode | only secondary material, S",
+          "b_predicted": "Metal working, average for copper product manufacturing {RER}| metal working, average for copper product manufacturing | Cut-off, S"
+        },
+        {
+          "query": "Round EN12164-CuZn40-R430-RND2A/cold forming",
+          "bom_material": "Round EN12164-CuZn40-R430-RND2A",
+          "ground_truth": "Brass {RoW}| market for brass | Cut-off, S",
+          "a_predicted": "Sheet rolling, copper {RoW}| sheet rolling, copper | Cut-off, S",
+          "b_predicted": "Brass removed by turning, average, conventional {RER}| brass turning, average, conventional | Cut-off, S"
+        },
+        {
+          "query": "Round wire IEC 60317-13 Degree 1-1,8-200/coil winding",
+          "bom_material": "Round wire IEC 60317-13 Degree 1-1,8-200",
+          "ground_truth": "Copper, cathode {GLO}| market for copper, cathode | Cut-off, S",
+          "a_predicted": "Magnet, Sm1Co5",
+          "b_predicted": "Wire drawing, copper {RER}| wire drawing, copper | Cut-off, S"
+        },
+        {
+          "query": "RoundEN 10277-3-11SMn30+C/cold forming",
+          "bom_material": "RoundEN 10277-3-11SMn30+C",
+          "ground_truth": "Steel, low-alloyed {GLO}| market for steel, low-alloyed | Cut-off, S",
+          "a_predicted": "Sheet rolling, steel {RoW}| sheet rolling, steel | Cut-off, S",
+          "b_predicted": "Sheet rolling, steel {RER}| sheet rolling, steel | Cut-off, S"
+        },
+        {
+          "query": "Spring steel/stamping",
+          "bom_material": "Spring steel",
+          "ground_truth": "Steel, low-alloyed {GLO}| market for steel, low-alloyed | Cut-off, S",
+          "a_predicted": "Steel, zinc coated /RER",
+          "b_predicted": "Metal working, average for steel product manufacturing {RER}| metal working, average for steel product manufacturing | Cut-off, S"
+        },
+        {
+          "query": "Spring wire 1,15 Klasse II/wrap spring",
+          "bom_material": "Spring wire 1,15 Klasse II",
+          "ground_truth": "Steel, unalloyed {GLO}| market for steel, unalloyed | Cut-off, S",
+          "a_predicted": "Wire drawing, steel {RER}| wire drawing, steel | Cut-off, S",
+          "b_predicted": "Wire drawing, steel {RER}| wire drawing, steel | Cut-off, S"
+        }
+      ]
+    }
+  }
+}
