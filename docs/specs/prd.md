@@ -368,6 +368,8 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 2. API key authentication middleware exists and can be enabled via configuration
 3. Rate limiting middleware exists as a no-op placeholder configurable for future enforcement
 4. API versioning (e.g., `/api/v1/`) is consistent across all endpoints
+5. Three access tiers are supported: **anonymous** (health/ready only), **authenticated** (full API scoped to own data), and **admin** (user management, global config, system metrics)
+6. Authenticated users' data (campaigns, backends, executions, project store) is isolated — no cross-user data access
 
 ---
 

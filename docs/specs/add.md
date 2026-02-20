@@ -15,6 +15,7 @@
 - [The Optimization Loop](#the-optimization-loop)
 - [Data Model](#data-model)
 - [Architectural Decisions](#architectural-decisions)
+- [Deployment Model & Access Control](#deployment-model--access-control)
 - [Integration Points](#integration-points)
 - [Validation Scenario](#validation-scenario)
 
@@ -334,6 +335,54 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 | **PROMPT_STATE as first-class model** | Track all tunable params (not just prompt text); enable structured diffs | Open-ended parameters dict means no schema enforcement on values |
 | **LLM-as-judge for evaluation** | Non-deterministic outputs need criteria-based scoring beyond exact match | Judge quality depends on judge prompt; cost scales with dataset x iterations x candidates |
 | **Target-agnostic optimization loop** | DAG operates on a pluggable state schema so the same loop can optimize prompts, schemas, scoring functions, fuzzy matchers, and other parameter types post-M4 | Adds abstraction layer between loop and state; mitigated by building the concrete prompt case first (M2-M4) and generalizing only after the loop is proven |
+| **Stateless API with pluggable auth** | Public deployment requires credential-based access and data isolation; designing the API stateless from day one avoids costly rewrites | Auth middleware adds latency; mitigated by keeping it as a thin middleware layer that can be toggled off for local use |
+
+---
+
+## Deployment Model & Access Control
+
+PromptPotter is designed for a staged deployment progression, from a local development tool to a publicly accessible optimization service. This section describes the deployment model and the layered access control that enables safe multi-tenant operation.
+
+### Deployment Progression
+
+| Stage | Timeframe | Auth | Users | Hosting |
+|-------|-----------|------|-------|---------|
+| **Local** | M1–M4 | None | Single user | `localhost` only |
+| **Private server** | Post-M4 | API key authentication | Team-level access | Self-hosted |
+| **Public service** | Post-M4 | Multi-tenant with user accounts | Any developer | Cloud-hosted with rate limiting |
+
+During local development (M1–M4), no authentication is required. The API runs on `localhost` and serves a single user. Private server deployment adds API key authentication for team-level access within an organization. Public service deployment introduces full multi-tenancy with user accounts, role-based access, and rate limiting.
+
+### Layered Access Model
+
+When deployed publicly, the API enforces three access tiers:
+
+| Tier | Access | Scope |
+|------|--------|-------|
+| **Anonymous** | Health and readiness endpoints only (`/health`, `/ready`) | No data access |
+| **Authenticated (API key)** | Full API access | Scoped to own data — campaigns, backends, executions, project store |
+| **Admin** | User management, global configuration, system metrics | Cross-tenant visibility |
+
+Each tier is additive — authenticated users have anonymous access, and admins have authenticated access.
+
+### Data Isolation
+
+Each authenticated user's data is fully isolated:
+
+- **Campaigns** — a user can only list, read, and modify their own campaigns and trials
+- **Backends** — backend connections and synced experiments are per-user
+- **Project store** — the `.promptpotter/projects/` directory is scoped per user; no cross-user data access
+- **Executions** — replay results belong to the user who initiated them
+
+Cross-user data access is not permitted at any tier except admin.
+
+### Design Constraints for Today
+
+The API is already designed with public deployment in mind:
+
+- **Stateless request handling** — no server-side session state between requests. Each request carries all context needed for processing. This is the foundation for horizontal scaling and multi-tenancy.
+- **Pluggable auth middleware** — authentication is designed as a thin middleware layer that is disabled for local use and enabled on deployment. No endpoint logic changes are required to add auth.
+- **Versioned API contracts** — all endpoints use `/api/v1/` prefixing, ensuring stable contracts for external consumers across deployment stages.
 
 ---
 

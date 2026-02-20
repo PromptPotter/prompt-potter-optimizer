@@ -98,6 +98,7 @@ These items are explicitly deferred, not permanently excluded:
 
 - **Public service deployment** — authentication, rate limiting, multi-tenancy, and hosting infrastructure for making PromptPotter accessible as a public API (north star)
 - **Non-prompt optimization targets** — generalizing the optimization loop to schemas, scoring functions, fuzzy matchers, retrieval queries, and GA parameters (north star)
+- **Layered access control** — anonymous, API-key-authenticated, and admin tiers with per-user data isolation, enabling safe multi-tenant deployment
 - **Benchmarking and publication** — systematic benchmarks against MedMentions, BC5CDR, and LCA datasets for archival publication
 
 **Future direction:** The ablation comparison workflow (upload experiment data, remove a pipeline component, see statistical comparison with p-values) is designed for self-service use across multiple client types (CLI, notebooks, JS frontend). When PromptPotter is deployed as a web service with user credentials, this becomes a first-class UI flow with pipeline visualization.
