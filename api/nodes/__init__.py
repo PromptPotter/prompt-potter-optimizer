@@ -92,11 +92,11 @@ def get_node_info_all() -> list[dict]:
 
 # Import and register built-in nodes
 from .llm_node import LLMNode
-from .web_search_node import WebSearchNode
+from .pipeline_config_node import PipelineConfigNode
 from .ranker_node import RankerNode
 
 register_node(LLMNode)
-register_node(WebSearchNode)
+register_node(PipelineConfigNode)
 register_node(RankerNode)
 
 
@@ -108,6 +108,6 @@ __all__ = [
     "list_node_types",
     "get_node_info_all",
     "LLMNode",
-    "WebSearchNode",
+    "PipelineConfigNode",
     "RankerNode",
 ]

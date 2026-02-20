@@ -1,173 +1,147 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-PromptPotter Optimizer is an API-first prompt optimization service that connects to Langfuse-compatible backends. It iteratively improves prompts through automated analysis and evaluation, delivered as both a FastAPI REST service and JupyterLab interactive environment.
+PromptPotter Optimizer is an API-first prompt optimization service that connects to backends like TermNorm. It syncs experiment data, replays pipelines with different configurations, and computes statistical comparisons — delivered as both a FastAPI REST service and Jupyter notebooks.
 
-**Core Philosophy**: Framework-agnostic (no LangChain/DSPy lock-in), Pydantic I/O with dependency injection, dual-mode delivery (notebooks + REST API).
+**Core Philosophy**: Framework-agnostic, Pydantic I/O, dual-mode delivery (notebooks + REST API).
 
 ## Commands
 
-### Development
 ```bash
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# Install
 pip install -r requirements.txt
-uvicorn api.main:app --reload
-```
 
-### Docker
-```bash
-cd docker
-docker-compose up --build
-```
+# Run API server
+uvicorn api.main:app --reload --port 8001
 
-### Testing
-```bash
-pytest                      # Run all tests
-pytest tests/test_api.py    # Run specific test file
-```
+# Run tests
+pytest
 
-### Streamlit Apps
-```bash
-streamlit run apps/optimizer_client.py   # Optimization UI
-streamlit run apps/secrets_manager.py    # API key configuration
+# Docker
+cd docker && docker-compose up --build
 ```
 
 ## Architecture
 
 ```
 api/
-├── main.py                 # FastAPI app entry, router mounting
-├── config/settings.py      # Pydantic BaseSettings (env config)
+├── main.py                      # FastAPI entry, router mounting
+├── config/settings.py           # Pydantic BaseSettings
 ├── models/
-│   ├── workflow.py         # WorkflowDefinition, StepDefinition (CWL-inspired)
-│   └── request.py, response.py
+│   ├── backend.py               # BackendConnection, Execution, ExecutionResultItem
+│   ├── prompt_state.py          # PromptState (immutable, versioned prompt snapshots)
+│   └── workflow.py              # WorkflowDefinition, StepDefinition
 ├── routers/
-│   ├── workflows.py        # /workflows/* endpoints
-│   └── health.py, optimize.py
+│   ├── backends.py              # /backends/* — connect, sync, execute, compare
+│   ├── workflows.py             # /workflows/* — execute, evaluate
+│   └── health.py                # /health, /ready
+├── services/
+│   ├── project_store.py         # File I/O for .promptpotter/projects/
+│   ├── backend_client.py        # HTTP client for backend APIs (TermNorm)
+│   ├── comparison.py            # Statistical comparison (hit@k, McNemar, Wilcoxon)
+│   ├── llm_client.py            # OpenAI/Anthropic abstraction
+│   └── langfuse_client.py       # Langfuse integration
 ├── core/
-│   ├── workflow_runner.py  # DAG execution engine
-│   └── optimizer.py        # Legacy optimizer (placeholder)
-├── nodes/                  # Composable workflow nodes
-│   ├── base.py             # NodeBase[TInput, TOutput] generic
-│   ├── llm_node.py         # LLMNode - LLM inference
-│   ├── web_search_node.py  # WebSearchNode (mock)
-│   └── ranker_node.py      # RankerNode - LLM-based ranking
-├── evaluators/             # Evaluation framework
-│   ├── base.py             # EvaluatorBase
-│   ├── exact_match.py      # ExactMatchEvaluator
-│   └── criteria.py         # CriteriaEvaluator (LLM-judge)
-└── services/
-    └── llm_client.py       # OpenAI/Anthropic abstraction
+│   └── workflow_runner.py       # DAG execution engine
+├── nodes/                       # Composable workflow nodes (LLM, PipelineConfig, Ranker)
+└── evaluators/                  # ExactMatch, CriteriaEvaluator (LLM-judge)
 
-workflows/                  # CWL-inspired workflow definitions
-├── examples/
-│   ├── research_rank.yaml  # Web search + profile + rank
-│   └── simple_llm.yaml     # Single LLM call
-└── schemas/
+notebooks/
+└── termnorm_backend.ipynb       # Full workflow: register → sync → replay → compare → optimize
+docs/
+├── specs/                       # Formal specs (project-charter, PRD, ADD, WBS, roadmap)
+├── connectors/                  # Backend connector contracts (termnorm.md)
+└── *.md                         # Design docs (architecture, literature-review, etc.)
+tests/                           # pytest suite
+docker/                          # Dockerfile, docker-compose.yml
+├── apps/                        # Streamlit UIs (secrets_manager)
+└── launcher/                    # JupyterLab launcher config
+scripts/                         # Utilities (sync_termnorm_to_langfuse.py)
+workflows/examples/              # CWL-inspired YAML workflow definitions
+```
 
-apps/                       # Streamlit interactive UIs
-docker/                     # Dockerfile, docker-compose.yml
-tests/                      # pytest test suite
-docs/                       # Design documentation
-external/                   # GITIGNORED reference clones
+## Project Store Layout
+
+```
+.promptpotter/projects/
+  {backend_id}/
+    backend.json                 # Connection config
+    sync/
+      experiments.json           # GET /experiments (verbatim)
+      experiments/{id}.json      # GET /experiments/{id}/mappings (verbatim)
+      optimization/              # Saved PromptState winners from optimization runs
+    executions/
+      {execution_id}.json        # Replay results (with pipeline_data per query)
 ```
 
 ## Key Endpoints
 
-- `GET /api/v1/health` - Service status
-- `GET /api/v1/ready` - Readiness check
-- `POST /api/v1/optimize` - Legacy optimization endpoint
-- `POST /api/v1/workflows/execute` - Execute a workflow
-- `POST /api/v1/workflows/evaluate` - Evaluate workflow on dataset
-- `GET /api/v1/workflows` - List registered workflows
-- `GET /api/v1/nodes` - List available node types
+**Backends (primary workflow):**
+- `POST /api/v1/backends` — Register backend connection
+- `POST /api/v1/backends/{id}/sync` — Sync experiments from backend
+- `GET  /api/v1/backends/{id}/experiments` — List synced experiments
+- `POST /api/v1/backends/{id}/execute` — Replay pipeline via backend
+- `GET  /api/v1/backends/{id}/compare/{exec_id}` — Statistical comparison
+
+**Other:**
+- `GET /api/v1/health` / `GET /api/v1/ready`
+- `POST /api/v1/workflows/execute` / `POST /api/v1/workflows/evaluate`
+
+## Key Models
+
+- **`PromptState`** — Immutable, versioned prompt snapshot organized into three optimization layers: **Layer 1 (Generate)** structured prompt components (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`, `few_shot_examples`), **Layer 2 (Refine Context)** optimization context and hypervariables (`context`, `parameters`), **Layer 3 (Modify Plan)** optimization strategy (`plan`). Includes `render()` to assemble Layer 1 fields into a prompt string, and `derive()` for creating children. Forms a lineage chain via `parent_id`. `LAYER_FIELDS` maps layer names to their fields.
+- **`OptimizationDefaults`** — Layer 3 strategy defaults (n_variants, creativity, selection_strategy, improvement_threshold, max_iterations, etc.). Should rarely need changing.
+- **`ExecutionResultItem`** — Per-query result from a replay. Includes `pipeline_data` dict which stores the full backend response (entity_profile, token_matched_candidates, etc.) for local optimization.
+- **`Execution`** — A complete replay run containing a list of `ExecutionResultItem`s.
 
 ## Configuration
 
-Environment variables via `.env` (see `.env.example`):
-- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` - LLM provider keys
-- `DEFAULT_MODEL` - Fallback model (default: gpt-4)
-- `MAX_ITERATIONS` - Optimization iteration limit (default: 5)
-- `MAX_DATASET_SIZE` - Dataset size constraint (default: 1000)
+Environment variables via `.env`:
+- `GROQ_API_KEY` — Groq API key (primary LLM provider)
+- `LLM_PROVIDER` — LLM provider: `groq`, `openai`, or `anthropic` (default: `groq`)
+- `LLM_MODEL` — Model identifier (default: `meta-llama/llama-4-maverick-17b-128e-instruct`)
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` — Alternative LLM provider keys
+- `MAX_ITERATIONS` — Optimization iteration limit (default: 5)
 
-## Design Patterns
+## Conventions
 
-- **NodeBase[TInput, TOutput]** - Generic base class for workflow nodes
-- **CWL-inspired YAML** - Workflow definitions with typed inputs/outputs
-- **Registry pattern** for optimization tracking (see `docs/registry-design.md`)
-- **Parent-child run hierarchy** (MLflow/DSPy style) for campaign/trial tracking
-- **JSONL format** for results (OpenAI Evals standard)
+- **Commit style**: Conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, etc.)
+- **Default LLM**: `meta-llama/llama-4-maverick-17b-128e-instruct` via Groq
+- **Branch**: Active development on `feat/m1-foundation`
 
-## Creating Custom Nodes
+## Backend Connectors
 
-```python
-from api.nodes.base import NodeBase
-from pydantic import BaseModel
+Connector contracts are documented in `docs/connectors/`. Currently supported:
+- **TermNorm** (`docs/connectors/termnorm.md`) — Terminology normalization pipeline with entity profiling, token matching, and LLM ranking stages.
 
-class MyInput(BaseModel):
-    text: str
+## Testing
 
-class MyOutput(BaseModel):
-    result: str
+```bash
+# Run all tests
+pytest -v
 
-class MyNode(NodeBase[MyInput, MyOutput]):
-    @classmethod
-    def get_input_model(cls): return MyInput
+# Run with short tracebacks
+pytest -v --tb=short
 
-    @classmethod
-    def get_output_model(cls): return MyOutput
-
-    async def _execute(self, input_data: MyInput) -> MyOutput:
-        return MyOutput(result=input_data.text.upper())
-
-# Register: api/nodes/__init__.py
-from .my_node import MyNode
-register_node(MyNode)
+# Lint
+ruff check api/ tests/
 ```
 
-## Specifications
+**Test files:**
+- `tests/test_api.py` — FastAPI endpoint tests (health, readiness)
+- `tests/test_prompt_state.py` — PromptState immutability and lineage
+- `tests/test_incremental_writes.py` — ProjectStore append/finalize
+- `tests/test_evaluators.py` — ExactMatch, CriteriaEvaluator, registry aliases
+- `tests/test_workflow_runner.py` — DAG sort, input resolution, execution
 
-Formal project specs live in `docs/specs/`:
+**Fixtures** (`tests/conftest.py`): `mock_llm_client`, `tmp_store`, auto-reset Langfuse singleton.
 
-| Document | Purpose |
-|----------|---------|
-| [Project Charter](docs/specs/project-charter.md) | Problem, vision, scope, success criteria |
-| [PRD](docs/specs/prd.md) | Requirements (P0/P1/P2) with acceptance criteria |
-| [ADD](docs/specs/add.md) | Architecture, ADRs, data model, API contract |
-| [WBS](docs/specs/wbs.md) | Work packages by phase with estimates and dependencies |
-| [Roadmap](docs/specs/roadmap.md) | Milestones and decision gates |
+## Milestone Status
 
-Supporting design docs in `docs/`:
-- `docs/literature-review.md` — Survey of 11+ optimization frameworks
-- `docs/registry-design.md` — Campaign/trial tracking pattern
-
-## Current Milestone: M0 (Specifications)
-
-**Status:** Complete
-**Deliverables:** All spec documents created, CLAUDE.md updated, CHANGELOG.md baselined.
-
-## Next Up: M1 (Foundation)
-
-**Goal:** Test coverage for existing components + PromptState model + CI pipeline
-**Key work packages:**
-- Add `PromptState` Pydantic model (`api/models/prompt_state.py`)
-- Write tests for evaluators and workflow runner
-- Set up GitHub Actions CI (lint + test)
-- Update CLAUDE.md with M1 status
-
-**PRP scope:** One session per work package (see WBS 1.1–1.6).
-
-## Current State
-
-- **Workflow system**: Fully implemented with LLMNode, WebSearchNode (mock), RankerNode
-- **Evaluators**: ExactMatchEvaluator and CriteriaEvaluator (LLM-judge)
-- **WebSearchNode**: Mock implementation — add real providers (Brave, SearxNG) in M4
-- **Legacy optimizer**: `api/core/optimizer.py` has placeholder implementations — replaced in M2
+**M1 (Foundation)**: Complete — PromptState, ProjectStore, backends, replay, comparison, evaluators, workflow runner, tests, CI.
+**M2 (Core Optimizer)**: In progress — 3-layer PromptState restructured, next: initialization node, grow/filter, analysis+evaluation.
 
 ## External References
 
-The `external/` directory is gitignored and contains reference clones (like TermNorm-excel) for documentation purposes only - no runtime dependency.
+The `external/` directory is gitignored and contains reference clones (like TermNorm-excel) for documentation purposes only.

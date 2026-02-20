@@ -33,7 +33,7 @@ steps:
       - model
       - usage
     config:
-      model: llama-3.3-70b-versatile  # Groq model
+      model: meta-llama/llama-4-maverick-17b-128e-instruct  # Groq model
       temperature: 0.7
       max_tokens: 1000
     metadata:

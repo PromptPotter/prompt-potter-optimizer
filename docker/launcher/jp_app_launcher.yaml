@@ -1,0 +1,25 @@
+# PromptPotter - JupyterLab Launcher Configuration
+# This file configures custom tiles in the JupyterLab launcher
+# See: https://jupyter-app-launcher.readthedocs.io/
+
+# Notebooks
+- title: TermNorm Backend Workflow
+  description: Register backend, sync experiments, replay queries, compare variants, optimize
+  type: notebook
+  source: notebooks/termnorm_backend.ipynb
+  catalog: PromptPotter
+
+# Interactive Tools
+- title: Secrets Manager
+  description: Configure your API keys (Groq, OpenAI, Anthropic)
+  type: local-server
+  source: http://localhost:$PORT/
+  cwd: ./
+  args:
+    - streamlit
+    - run
+    - apps/secrets_manager.py
+    - --server.port=$PORT
+    - --server.headless=true
+    - --browser.gatherUsageStats=false
+  catalog: PromptPotter

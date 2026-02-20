@@ -1,9 +1,9 @@
 # Product Requirements Document: PromptPotter Optimizer
 
-**Version:** 0.2.0
-**Date:** 2026-02-19
+**Version:** 0.4.0
+**Date:** 2026-02-20
 **Status:** Draft
-**Depends on:** [Project Charter](project-charter.md)
+**Depends on:** [Project Charter v0.4.0](project-charter.md)
 
 ---
 
@@ -21,10 +21,14 @@
 | P1.3 | Human-in-the-Loop Gates | P1 | Pause optimization for developer review and approval of candidates before promotion |
 | P1.4 | Real Web Search Provider | P1 | Replace the mock web search node with a real search API provider |
 | P1.5 | Candidate Population and Selection | P1 | Support multiple strategies for evaluating and selecting the best candidate |
+| P1.6 | Ablation Comparison | P1 | Remove a pipeline component, replay, and compare with statistical significance tests (p-values) |
+| P1.7 | Pipeline Parameter Passthrough | P1 | Forward controllable pipeline knobs (search depth, LLM temperatures, candidate limits, score weights) to backend via execution requests |
 | P2.1 | Reflection-Based Learning | P2 | Generate natural language reflections after each iteration to inform the next |
 | P2.2 | Evolutionary Operators | P2 | Apply genetic algorithm operators (crossover, mutation) to evolve a population of configurations |
 | P2.3 | MCP Server Mode | P2 | Expose optimization as an MCP server for use by Claude Code and other MCP clients |
 | P2.4 | Streamlit Dashboard | P2 | Provide a visual interface for browsing campaigns, comparing trials, and exploring datasets |
+| P2.5 | Non-Prompt Optimization Targets | P2 | Generalize the optimization loop to non-prompt parameter types (schemas, scoring functions, fuzzy matchers, GA settings) |
+| P2.6 | Public Deployment Readiness | P2 | Stateless API design with API key authentication and rate limiting readiness for public deployment |
 
 ---
 
@@ -35,6 +39,9 @@ Builds LLM-powered features and needs to iterate on parameters systematically. D
 
 **Pipeline Operator ("CI/CD Casey")**
 Integrates parameter optimization into automated workflows. Calls the REST API from scripts or CI pipelines. Needs structured responses and clear status reporting. Cares about idempotency and error handling.
+
+**Benchmarking Researcher ("Dataset Dana")**
+Runs systematic benchmarks against established datasets (MedMentions, BC5CDR, domain-specific LCA corpora). Values reproducibility, statistical rigor, and structured outputs suitable for publication. Uses PromptPotter to compare pipeline variants with p-values and per-query breakdowns, then exports results for inclusion in research papers.
 
 ---
 
@@ -90,43 +97,62 @@ The core operation for the TermNorm validation (SC5) is evaluating both **Varian
 
 ### P0.3: Candidate Generation
 
-**As a** developer, **I want** the system to generate improved configuration candidates **so that** I do not have to manually rewrite parameters through trial and error.
+**As a** developer, **I want** the system to generate improved prompt configurations **so that** I do not have to manually rewrite parameters through trial and error.
 
 **What the system does:**
-- Given the current configuration, failure analysis, and optimization context, generates N candidate configurations
-- Each candidate includes a rationale explaining what it changes and why
-- Candidates address specific failure patterns identified in analysis
-- Candidates may modify any tunable parameter: prompt text, few-shot examples, temperature, retrieval counts, thresholds, or other configuration values
-- Supports configurable generation strategies (rewrite, extend, simplify, parameter sweep)
+
+The candidate generation process has two stages:
+
+1. **Initialization** — An AI agent analyzes the user-provided context (domain description, task requirements, constraints) and produces structured prompt components via structured output parsing:
+   - `task_intent` — what the prompt needs to accomplish
+   - `instruction` — step-by-step reasoning directive (e.g., "Let's think step by step.")
+   - `answer_format` — output format specification (e.g., "Wrap your final answer in `<ANS>` tags.")
+
+2. **Grow/Filter** — Given the current prompt state's **Layer 1 fields** (persona, task_intent, problem_description, instruction, thinking_style, answer_format), enriches and expands the prompt. This node operates on structured prompt components, not raw text, enabling targeted modifications.
+
+Candidates are generated as structured prompt states with typed fields, not opaque prompt strings. Each field can be independently modified based on analysis feedback.
 
 **Acceptance criteria:**
-1. The generator produces 2-5 candidates per iteration (configurable)
-2. Each candidate includes a rationale field describing its changes
-3. Candidates are meaningfully different from each other (not minor rephrasing)
-4. Candidates can modify non-prompt parameters (e.g., temperature, retrieval count) when the failure analysis suggests those are contributing factors
+1. Initialization produces structured prompt components from arbitrary context input
+2. Grow/Filter produces enriched prompt states with all required fields populated
+3. In Phase 1 (linear mode), N independent runs produce meaningfully different prompt variants through breadth
+4. Candidates can modify any prompt component field (persona, task_intent, problem_description, instruction, thinking_style) when analysis suggests it
+5. Each candidate state is a valid PromptState with lineage tracking via `parent_id`
 
 ### P0.4: Optimization Loop
 
-**As a** developer, **I want** an automated loop that evaluates, analyzes, generates, and re-evaluates **so that** optimization runs without manual intervention.
+**As a** developer, **I want** an automated DAG-based optimization loop that initializes, evaluates, analyzes, and adapts **so that** optimization runs without manual intervention.
 
 **What the system does:**
-- Orchestrates the cycle: evaluate baseline, analyze failures, generate candidates, evaluate candidates, select best, repeat
-- Configurable stopping criteria: maximum iterations, target score, convergence threshold (no improvement for N iterations)
-- Tracks the improvement trajectory across iterations
-- Returns the best-performing configuration with full lineage (which trial it came from, what changed at each step)
+- Implements a DAG-based iterative workflow (derived from the reference n8n design in `docs/design/optimization-workflow.n8n.json`)
+- **Initialization:** AI agent analyzes context and produces structured prompt components
+- **Main loop per iteration:** prompt state flows through Grow/Filter --> Analysis + Evaluation --> counter increment --> stop condition check
+- **Feedback routing:** Analysis produces a `next_action` decision that routes to one of three feedback paths:
+  - `"generate"` — **Layer 1**: loop back to main_data to create new variants
+  - `"refine context"` — **Layer 2**: update context, then update plan, then loop back
+  - `"modify plan"` — **Layer 3**: update the optimization plan, then loop back
+- **Stop condition:** counter-based (counter >= N), configurable iteration limit
+- Layer 3 ships with `OptimizationDefaults` providing sensible strategy parameters (n_variants, creativity, selection_strategy, improvement_threshold, max_iterations). These should rarely need changing.
+- Returns the best-performing prompt state with full lineage
+
+**Phased rollout:**
+- **Phase 1 (M2):** Linear mode — initialization --> grow/filter --> analysis+evaluation --> output. No feedback cycling. Run N independent times for breadth-first exploration.
+- **Phase 2 (post-M2):** Full cycling mode with feedback paths enabled. Counter threshold set to N (configurable). Iterative depth-first refinement.
 
 **Acceptance criteria:**
-1. The loop runs end-to-end and returns the best configuration plus the score trajectory
-2. Stops when any configured stopping criterion is met (max iterations, target score, or convergence)
-3. Each iteration's results are traceable in Langfuse with parent-child relationships
-4. The returned result includes the full lineage from baseline to best configuration
+1. Phase 1: linear mode runs end-to-end and returns a scored prompt state
+2. Phase 1: N independent linear runs produce diverse candidates; the best is selectable by score
+3. Phase 2: the full DAG with feedback cycling runs and stops when counter >= N
+4. Each iteration's results are traceable in Langfuse with parent-child relationships
+5. The returned result includes the full lineage from initialization to best configuration
+6. The `next_action` routing correctly dispatches to the three feedback paths (Phase 2)
 
 ### P0.5: PROMPT_STATE Tracking
 
 **As a** developer, **I want** each configuration version to carry structured metadata **so that** I can trace how parameters evolved across trials.
 
 **What the system does:**
-- Maintains a PROMPT_STATE model that snapshots the full configuration at each trial: prompt text, few-shot examples, and a `parameters` dictionary for all other tunable values (temperature, retrieval counts, thresholds, etc.)
+- Maintains a PROMPT_STATE model that snapshots the full configuration at each trial: structured prompt components organized into three optimization layers (Generate, Refine Context, Modify Plan), plus few-shot examples and a `parameters` dictionary for all other tunable values (temperature, retrieval counts, thresholds, etc.)
 - Each optimization trial produces a new PROMPT_STATE
 - State transitions are logged with diffs showing what changed between parent and child
 
@@ -216,6 +242,26 @@ The core operation for the TermNorm validation (SC5) is evaluating both **Varian
 2. Strategy is configurable at campaign start
 3. Each selection decision includes a rationale explaining why that candidate was chosen
 
+### P1.6: Ablation Comparison
+
+**As a** developer, **I want to** remove a pipeline component and compare the results against the full pipeline **so that** I can determine whether that component justifies its cost and latency.
+
+**What the system does:**
+- Accepts experiment data (evaluation results from a pipeline run) and a component to ablate (skip)
+- Replays the experiment with the specified component removed (e.g., skip the LLM2 reranking step)
+- Computes paired ML metrics: hit@k, MRR, latency, confidence
+- Runs statistical significance tests (McNemar's test for classification agreement, Wilcoxon signed-rank for latency) and reports p-values
+- Returns a structured comparison (JSON) with per-query classification (where the removed component helped, hurt, or made no difference)
+
+**User story:** A developer runs a TermNorm pipeline with web search, entity profiling (LLM1), token matching, and LLM2 semantic reranking. They want to know if LLM2 is worth the extra cost. They upload the experiment results, select "skip LLM2," and the system replays all queries without LLM2, then produces a statistical comparison showing hit@1 with McNemar's p-value and latency savings with Wilcoxon's p-value, plus a per-query breakdown of where LLM2 helped or hurt.
+
+**Acceptance criteria:**
+1. Given experiment data and a component to skip, the system produces ablated variant results
+2. Comparison includes hit@1 with McNemar's test p-value and latency with Wilcoxon p-value
+3. Per-query classification shows which queries were affected by the ablation
+4. All results are structured JSON consumable by any client (CLI, notebook, JS frontend)
+5. Report is reproducible from saved results without re-running the pipeline
+
 ---
 
 ## P2 — Nice to Have (Advanced Capabilities)
@@ -291,6 +337,40 @@ The core operation for the TermNorm validation (SC5) is evaluating both **Varian
 3. Dataset explorer displays per-item scores with the ability to filter by score range and sort by any metric
 4. Dashboard reads from the file-based registry (P1.1) with no additional data store required
 
+### P2.5: Non-Prompt Optimization Targets
+
+**As a** developer, **I want** to optimize non-prompt parameters (schemas, scoring functions, fuzzy matching thresholds, retrieval queries, GA settings) using the same optimization loop **so that** I can improve any tunable configuration, not just prompts.
+
+**What the system does:**
+- Accepts a pluggable parameter type (state schema) that defines the tunable parameters for the optimization target
+- Runs the same DAG-based analyze-generate-evaluate loop regardless of parameter type
+- Evaluates using the same evaluator framework (exact match, LLM-as-judge, custom metrics)
+- Tracks state lineage and scores identically to prompt optimization
+
+**Acceptance criteria:**
+1. At least one non-prompt parameter type can be optimized using the same DAG loop (e.g., scoring function weights or fuzzy matching thresholds)
+2. The optimization produces measurable improvement on the evaluation dataset
+3. State lineage and scoring work identically to prompt optimization
+4. No changes to the core optimization loop are required to support the new parameter type
+
+### P2.6: Public Deployment Readiness
+
+**As a** platform operator, **I want** the API designed for stateless public deployment **so that** PromptPotter can eventually serve as an accessible optimization service.
+
+**What the system does:**
+- All API endpoints handle requests statelessly — no server-side session state between requests
+- API key authentication middleware is available (disabled by default for local use)
+- Rate limiting hooks are defined but not enforced in M1-M4
+- API contracts are stable and versioned for external consumers
+
+**Acceptance criteria:**
+1. All API endpoints are stateless — no in-memory session state across requests
+2. API key authentication middleware exists and can be enabled via configuration
+3. Rate limiting middleware exists as a no-op placeholder configurable for future enforcement
+4. API versioning (e.g., `/api/v1/`) is consistent across all endpoints
+5. Three access tiers are supported: **anonymous** (health/ready only), **authenticated** (full API scoped to own data), and **admin** (user management, global config, system metrics)
+6. Authenticated users' data (campaigns, backends, executions, project store) is isolated — no cross-user data access
+
 ---
 
 ## Non-Functional Requirements
@@ -305,6 +385,7 @@ The core operation for the TermNorm validation (SC5) is evaluating both **Varian
 | Python version | 3.10+ |
 | Langfuse trace coverage | 100% of trials have associated traces and scores |
 | Dataset location | External (consuming project's repository, not PromptPotter) |
+| API design | Stateless request handling; no server-side session state between requests |
 
 ---
 
@@ -314,33 +395,38 @@ This matrix maps PRD requirements to charter success criteria (bidirectional).
 
 **Requirements to Charter Success Criteria:**
 
-| Requirement | SC1: Measurable Improvement | SC2: Reproducibility | SC3: Langfuse Observability | SC4: Time to First Optimization | SC5: TermNorm Validation |
-|-------------|:---:|:---:|:---:|:---:|:---:|
-| P0.1 Evaluation on Dataset | x | x | x | x | x |
-| P0.2 Failure Analysis | x | | x | | x |
-| P0.3 Candidate Generation | x | | | | x |
-| P0.4 Optimization Loop | x | x | x | x | x |
-| P0.5 PROMPT_STATE Tracking | | x | | | |
-| P1.1 File-Based Registry | | x | | | |
-| P1.2 Workflow-Based Optimization | | | | | x |
-| P1.3 Human-in-the-Loop Gates | | | | | |
-| P1.4 Real Web Search Provider | | | | | |
-| P1.5 Candidate Population and Selection | x | | | | x |
-| P2.1 Reflection-Based Learning | x | | | | |
-| P2.2 Evolutionary Operators | x | | | | |
-| P2.3 MCP Server Mode | | | | x | |
-| P2.4 Streamlit Dashboard | | x | | | |
+| Requirement | SC1: Measurable Improvement | SC2: Reproducibility | SC3: Langfuse Observability | SC4: Time to First Optimization | SC5: TermNorm Validation | SC6: Generalization Beyond Prompts |
+|-------------|:---:|:---:|:---:|:---:|:---:|:---:|
+| P0.1 Evaluation on Dataset | x | x | x | x | x | |
+| P0.2 Failure Analysis | x | | x | | x | |
+| P0.3 Candidate Generation | x | | | | x | |
+| P0.4 Optimization Loop | x | x | x | x | x | x |
+| P0.5 PROMPT_STATE Tracking | | x | | | | |
+| P1.1 File-Based Registry | | x | | | | |
+| P1.2 Workflow-Based Optimization | | | | | x | |
+| P1.3 Human-in-the-Loop Gates | | | | | | |
+| P1.4 Real Web Search Provider | | | | | | |
+| P1.5 Candidate Population and Selection | x | | | | x | |
+| P1.6 Ablation Comparison | x | x | | | x | |
+| P2.1 Reflection-Based Learning | x | | | | | |
+| P2.2 Evolutionary Operators | x | | | | | |
+| P2.3 MCP Server Mode | | | | x | | |
+| P2.4 Streamlit Dashboard | | x | | | | |
+| P2.5 Non-Prompt Optimization Targets | x | | | | | x |
+| P2.6 Public Deployment Readiness | | | | x | | |
 
 **Charter Success Criteria to Requirements (reverse mapping):**
 
 | Charter Success Criterion | Required By (P0/P1) | Enhanced By (P2) |
 |--------------------------|---------------------|------------------|
-| SC1: Measurable Improvement | P0.1, P0.2, P0.3, P0.4, P1.5 | P2.1, P2.2 |
+| SC1: Measurable Improvement | P0.1, P0.2, P0.3, P0.4, P1.5 | P2.1, P2.2, P2.5 |
 | SC2: Reproducibility | P0.1, P0.4, P0.5, P1.1 | P2.4 |
 | SC3: Langfuse Observability | P0.1, P0.2, P0.4 | — |
-| SC4: Time to First Optimization | P0.1, P0.4 | P2.3 |
-| SC5: TermNorm Validation | P0.1, P0.2, P0.3, P0.4, P1.2, P1.5 | — |
+| SC4: Time to First Optimization | P0.1, P0.4 | P2.3, P2.6 |
+| SC5: TermNorm Validation | P0.1, P0.2, P0.3, P0.4, P1.2, P1.5, P1.6 | — |
+| SC6: Generalization Beyond Prompts | P0.4 | P2.5 |
 
 **Coverage notes:**
 - P1.3 (HITL Gates) and P1.4 (Web Search) do not directly map to a success criterion. They are included as P1 because they support the charter's vision of human-controlled optimization and full workflow support, respectively.
-- All five success criteria have at least one P0 requirement ensuring they are achievable at MVP.
+- SC6 is post-M4 and has P0.4 as its foundation (the optimization loop must be target-agnostic by design). P2.5 is the specific implementation requirement.
+- All six success criteria have at least one P0 requirement ensuring they are achievable or foundationally supported.
