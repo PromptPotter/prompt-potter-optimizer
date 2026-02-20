@@ -1,9 +1,9 @@
 # Product Requirements Document: PromptPotter Optimizer
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 **Date:** 2026-02-20
 **Status:** Draft
-**Depends on:** [Project Charter](project-charter.md)
+**Depends on:** [Project Charter v0.4.0](project-charter.md)
 
 ---
 
@@ -26,6 +26,8 @@
 | P2.2 | Evolutionary Operators | P2 | Apply genetic algorithm operators (crossover, mutation) to evolve a population of configurations |
 | P2.3 | MCP Server Mode | P2 | Expose optimization as an MCP server for use by Claude Code and other MCP clients |
 | P2.4 | Streamlit Dashboard | P2 | Provide a visual interface for browsing campaigns, comparing trials, and exploring datasets |
+| P2.5 | Non-Prompt Optimization Targets | P2 | Generalize the optimization loop to non-prompt parameter types (schemas, scoring functions, fuzzy matchers, GA settings) |
+| P2.6 | Public Deployment Readiness | P2 | Stateless API design with API key authentication and rate limiting readiness for public deployment |
 
 ---
 
@@ -36,6 +38,9 @@ Builds LLM-powered features and needs to iterate on parameters systematically. D
 
 **Pipeline Operator ("CI/CD Casey")**
 Integrates parameter optimization into automated workflows. Calls the REST API from scripts or CI pipelines. Needs structured responses and clear status reporting. Cares about idempotency and error handling.
+
+**Benchmarking Researcher ("Dataset Dana")**
+Runs systematic benchmarks against established datasets (MedMentions, BC5CDR, domain-specific LCA corpora). Values reproducibility, statistical rigor, and structured outputs suitable for publication. Uses PromptPotter to compare pipeline variants with p-values and per-query breakdowns, then exports results for inclusion in research papers.
 
 ---
 
@@ -330,6 +335,38 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 3. Dataset explorer displays per-item scores with the ability to filter by score range and sort by any metric
 4. Dashboard reads from the file-based registry (P1.1) with no additional data store required
 
+### P2.5: Non-Prompt Optimization Targets
+
+**As a** developer, **I want** to optimize non-prompt parameters (schemas, scoring functions, fuzzy matching thresholds, retrieval queries, GA settings) using the same optimization loop **so that** I can improve any tunable configuration, not just prompts.
+
+**What the system does:**
+- Accepts a pluggable parameter type (state schema) that defines the tunable parameters for the optimization target
+- Runs the same DAG-based analyze-generate-evaluate loop regardless of parameter type
+- Evaluates using the same evaluator framework (exact match, LLM-as-judge, custom metrics)
+- Tracks state lineage and scores identically to prompt optimization
+
+**Acceptance criteria:**
+1. At least one non-prompt parameter type can be optimized using the same DAG loop (e.g., scoring function weights or fuzzy matching thresholds)
+2. The optimization produces measurable improvement on the evaluation dataset
+3. State lineage and scoring work identically to prompt optimization
+4. No changes to the core optimization loop are required to support the new parameter type
+
+### P2.6: Public Deployment Readiness
+
+**As a** platform operator, **I want** the API designed for stateless public deployment **so that** PromptPotter can eventually serve as an accessible optimization service.
+
+**What the system does:**
+- All API endpoints handle requests statelessly — no server-side session state between requests
+- API key authentication middleware is available (disabled by default for local use)
+- Rate limiting hooks are defined but not enforced in M1-M4
+- API contracts are stable and versioned for external consumers
+
+**Acceptance criteria:**
+1. All API endpoints are stateless — no in-memory session state across requests
+2. API key authentication middleware exists and can be enabled via configuration
+3. Rate limiting middleware exists as a no-op placeholder configurable for future enforcement
+4. API versioning (e.g., `/api/v1/`) is consistent across all endpoints
+
 ---
 
 ## Non-Functional Requirements
@@ -344,6 +381,7 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 | Python version | 3.10+ |
 | Langfuse trace coverage | 100% of trials have associated traces and scores |
 | Dataset location | External (consuming project's repository, not PromptPotter) |
+| API design | Stateless request handling; no server-side session state between requests |
 
 ---
 
@@ -353,34 +391,38 @@ This matrix maps PRD requirements to charter success criteria (bidirectional).
 
 **Requirements to Charter Success Criteria:**
 
-| Requirement | SC1: Measurable Improvement | SC2: Reproducibility | SC3: Langfuse Observability | SC4: Time to First Optimization | SC5: TermNorm Validation |
-|-------------|:---:|:---:|:---:|:---:|:---:|
-| P0.1 Evaluation on Dataset | x | x | x | x | x |
-| P0.2 Failure Analysis | x | | x | | x |
-| P0.3 Candidate Generation | x | | | | x |
-| P0.4 Optimization Loop | x | x | x | x | x |
-| P0.5 PROMPT_STATE Tracking | | x | | | |
-| P1.1 File-Based Registry | | x | | | |
-| P1.2 Workflow-Based Optimization | | | | | x |
-| P1.3 Human-in-the-Loop Gates | | | | | |
-| P1.4 Real Web Search Provider | | | | | |
-| P1.5 Candidate Population and Selection | x | | | | x |
-| P1.6 Ablation Comparison | x | x | | | x |
-| P2.1 Reflection-Based Learning | x | | | | |
-| P2.2 Evolutionary Operators | x | | | | |
-| P2.3 MCP Server Mode | | | | x | |
-| P2.4 Streamlit Dashboard | | x | | | |
+| Requirement | SC1: Measurable Improvement | SC2: Reproducibility | SC3: Langfuse Observability | SC4: Time to First Optimization | SC5: TermNorm Validation | SC6: Generalization Beyond Prompts |
+|-------------|:---:|:---:|:---:|:---:|:---:|:---:|
+| P0.1 Evaluation on Dataset | x | x | x | x | x | |
+| P0.2 Failure Analysis | x | | x | | x | |
+| P0.3 Candidate Generation | x | | | | x | |
+| P0.4 Optimization Loop | x | x | x | x | x | x |
+| P0.5 PROMPT_STATE Tracking | | x | | | | |
+| P1.1 File-Based Registry | | x | | | | |
+| P1.2 Workflow-Based Optimization | | | | | x | |
+| P1.3 Human-in-the-Loop Gates | | | | | | |
+| P1.4 Real Web Search Provider | | | | | | |
+| P1.5 Candidate Population and Selection | x | | | | x | |
+| P1.6 Ablation Comparison | x | x | | | x | |
+| P2.1 Reflection-Based Learning | x | | | | | |
+| P2.2 Evolutionary Operators | x | | | | | |
+| P2.3 MCP Server Mode | | | | x | | |
+| P2.4 Streamlit Dashboard | | x | | | | |
+| P2.5 Non-Prompt Optimization Targets | x | | | | | x |
+| P2.6 Public Deployment Readiness | | | | x | | |
 
 **Charter Success Criteria to Requirements (reverse mapping):**
 
 | Charter Success Criterion | Required By (P0/P1) | Enhanced By (P2) |
 |--------------------------|---------------------|------------------|
-| SC1: Measurable Improvement | P0.1, P0.2, P0.3, P0.4, P1.5 | P2.1, P2.2 |
+| SC1: Measurable Improvement | P0.1, P0.2, P0.3, P0.4, P1.5 | P2.1, P2.2, P2.5 |
 | SC2: Reproducibility | P0.1, P0.4, P0.5, P1.1 | P2.4 |
 | SC3: Langfuse Observability | P0.1, P0.2, P0.4 | — |
-| SC4: Time to First Optimization | P0.1, P0.4 | P2.3 |
+| SC4: Time to First Optimization | P0.1, P0.4 | P2.3, P2.6 |
 | SC5: TermNorm Validation | P0.1, P0.2, P0.3, P0.4, P1.2, P1.5, P1.6 | — |
+| SC6: Generalization Beyond Prompts | P0.4 | P2.5 |
 
 **Coverage notes:**
 - P1.3 (HITL Gates) and P1.4 (Web Search) do not directly map to a success criterion. They are included as P1 because they support the charter's vision of human-controlled optimization and full workflow support, respectively.
-- All five success criteria have at least one P0 requirement ensuring they are achievable at MVP.
+- SC6 is post-M4 and has P0.4 as its foundation (the optimization loop must be target-agnostic by design). P2.5 is the specific implementation requirement.
+- All six success criteria have at least one P0 requirement ensuring they are achievable or foundationally supported.

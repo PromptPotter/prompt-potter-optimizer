@@ -1,7 +1,7 @@
 # Project Charter: PromptPotter Optimizer
 
-**Version:** 0.2.0
-**Date:** 2026-02-19
+**Version:** 0.4.0
+**Date:** 2026-02-20
 **Status:** Draft
 
 ---
@@ -44,19 +44,30 @@ The central research question for PromptPotter validation is a **pipeline varian
 
 A future decision point (post-M4) extends this: **how many websites to scrape** for entity profiling -- a quality vs. cost/latency tradeoff that becomes the second ablation study.
 
+The TermNorm use case validates the core loop, but the underlying problem — systematically tuning configuration and measuring impact — applies far beyond prompts. Schemas, scoring functions, fuzzy matching parameters, retrieval queries, and genetic algorithm settings are all structured, non-code parameters that benefit from the same analyze-generate-evaluate cycle. PromptPotter's architecture is designed to generalize to these diverse optimization targets over time.
+
 ---
 
 ## Vision
 
-An **API-first, framework-agnostic parameter optimization service** that automates the analyze-generate-evaluate loop for any LLM-powered system. PromptPotter optimizes all tunable non-code parameters — not just prompt strings, but also few-shot examples, thresholds, retrieval counts, temperature, and other configuration that affects LLM behavior.
+An **API-first, framework-agnostic optimization service** that automates the analyze-generate-evaluate loop for **any AI-powered system**. PromptPotter optimizes any tunable non-code configuration — prompts, schemas, scoring functions, fuzzy matching parameters, retrieval queries, genetic algorithm settings, few-shot examples, thresholds, retrieval counts, temperature, and other structured parameters that affect system behavior.
 
-The system keeps humans in control of strategy and priorities through decision gates, while automating the repetitive work of generating candidates, running evaluations, and tracking what improved.
+The system keeps humans in control of strategy and priorities through decision gates, while automating the repetitive work of generating candidates, running evaluations, and tracking what improved. PromptPotter serves both as a private development tool and, eventually, as an accessible public optimization service.
+
+### North Star: Accessible Public Service
+
+PromptPotter is designed for eventual deployment as a publicly accessible optimization service — a hosted API where any developer can submit an optimization task and receive back improved configurations with statistical evidence. Near-term milestones (M1-M4) focus on the core optimization loop and single-user workflows; public deployment (authentication, rate limiting, multi-tenancy) is a post-M4 goal.
+
+### North Star: Diverse Optimization Targets
+
+While M2-M4 implement the concrete prompt optimization case, the DAG-based optimization loop is designed to be target-agnostic. The same analyze-generate-evaluate cycle works for any structured parameter: schemas, scoring functions, fuzzy matching thresholds, retrieval queries, GA/DE settings. The architecture separates the optimization loop from the parameter type so that new target types can be added without rewriting the core engine.
 
 **Core principles:**
 
 - **Framework-agnostic** — no runtime dependency on LangChain, DSPy, or any other framework. Borrows ideas from the research literature, builds on its own abstractions.
 - **Observable by default** — every optimization run is traced in **Langfuse** (an open-source LLM observability platform) with structured scores, parent-child run hierarchy, and full lineage.
 - **Dual-mode delivery** — available as both a FastAPI REST service for automation and a JupyterLab environment for interactive exploration.
+- **Target-agnostic** — the optimization loop works on any structured parameter, not just prompt strings. The DAG operates on a pluggable state schema; M2-M4 build the concrete prompt case, post-M4 generalizes.
 
 ---
 
@@ -64,7 +75,7 @@ The system keeps humans in control of strategy and priorities through decision g
 
 ### In Scope
 
-- **Parameter optimization** — iterative improvement of prompts, few-shot examples, temperature, retrieval counts, thresholds, and other non-code configuration through automated failure analysis, candidate generation, and evaluation
+- **Parameter optimization** — iterative improvement of any tunable non-code configuration: prompts, schemas, scoring functions, fuzzy matching parameters, retrieval queries, GA settings, few-shot examples, temperature, retrieval counts, thresholds, and other structured parameters through automated failure analysis, candidate generation, and evaluation
 - **Workflow-based optimization** — optimization of individual steps within multi-step pipelines (e.g., retrieval followed by ranking followed by classification), using the existing workflow engine
 - **API-first delivery** — FastAPI REST service with structured Pydantic input/output contracts
 - **Human-in-the-loop gates** — decision points where developers review and approve candidates before promotion
@@ -75,11 +86,19 @@ The system keeps humans in control of strategy and priorities through decision g
 ### Out of Scope
 
 - **Fine-tuning or model training** — PromptPotter optimizes parameters passed to LLMs, it does not modify model weights
-- **SaaS hosting or multi-tenant deployment** — single-user/single-team tool
+- **Public deployment infrastructure (M1-M4)** — no authentication, billing, or multi-tenancy in M1-M4. The API is designed stateless to enable future public deployment, but hosting infrastructure is post-M4
 - **Agent training or reinforcement learning** — no reward-model training or policy gradient methods
 - **Production prompt serving** — PromptPotter finds better configurations, it does not serve them at inference time
 - **GUI/dashboard beyond prototypes** — Streamlit apps for development use, not a production dashboard
 - **Dataset hosting** — evaluation datasets live in the consuming project's repository (e.g., the TermNorm repo), not in PromptPotter
+
+### Future Scope
+
+These items are explicitly deferred, not permanently excluded:
+
+- **Public service deployment** — authentication, rate limiting, multi-tenancy, and hosting infrastructure for making PromptPotter accessible as a public API (north star)
+- **Non-prompt optimization targets** — generalizing the optimization loop to schemas, scoring functions, fuzzy matchers, retrieval queries, and GA parameters (north star)
+- **Benchmarking and publication** — systematic benchmarks against MedMentions, BC5CDR, and LCA datasets for archival publication
 
 **Future direction:** The ablation comparison workflow (upload experiment data, remove a pipeline component, see statistical comparison with p-values) is designed for self-service use across multiple client types (CLI, notebooks, JS frontend). When PromptPotter is deployed as a web service with user credentials, this becomes a first-class UI flow with pipeline visualization.
 
@@ -94,6 +113,7 @@ The system keeps humans in control of strategy and priorities through decision g
 | 3 | **Langfuse observability** | Optimization campaigns appear in Langfuse with correct parent-child trace hierarchy and per-trial scores | **100%** of trials have associated Langfuse traces and scores |
 | 4 | **Time to first optimization** | A developer with API keys configured can run their first optimization campaign | **Under 15 minutes** from `pip install` to completed campaign, using the API or a notebook |
 | 5 | **TermNorm validation** | Compare Variant A (table reranker only) vs Variant B (table reranker + LLM2 semantic reranking) on the same evaluation dataset | Produces a clear result showing **which variant is better and by how much**, with full campaign persisted and traceable in Langfuse |
+| 6 | **Generalization beyond prompts** | Optimize at least one non-prompt parameter type (e.g., scoring function weights, fuzzy matching thresholds) using the same DAG loop | Successful optimization with measurable improvement, demonstrating target-agnostic architecture. **Post-M4** |
 
 ---
 
@@ -128,3 +148,5 @@ The system keeps humans in control of strategy and priorities through decision g
 | [Registry Design](../registry-design.md) | Campaign/trial tracking pattern based on MLflow, DSPy, and OpenAI Evals conventions |
 | [PRD](prd.md) | Detailed requirements (P0/P1/P2) with acceptance criteria |
 | [ADD](add.md) | Architecture, decision records, data model, and API contracts |
+| [WBS](wbs.md) | Work breakdown structure with session estimates and dependencies |
+| [Roadmap](roadmap.md) | Milestone timeline, progress tracking, and decision gates |

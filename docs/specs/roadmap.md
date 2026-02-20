@@ -1,9 +1,9 @@
 # Roadmap: PromptPotter Optimizer
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 **Date:** 2026-02-20
 **Status:** Draft
-**Depends on:** [WBS](wbs.md)
+**Depends on:** [WBS v0.4.0](wbs.md)
 
 ---
 
@@ -12,8 +12,8 @@
 | Milestone | Focus | Timeline | Status |
 |-----------|-------|----------|--------|
 | M0 | Specifications | Week 1 | Complete |
-| M1 | Foundation | Weeks 2-3 | In Progress |
-| M2 | Core Optimizer | Weeks 4-6 | Planned |
+| M1 | Foundation | Weeks 2-3 | Complete |
+| M2 | Core Optimizer | Weeks 4-6 | In Progress |
 | M3 | Registry and Tracking | Weeks 7-8 | Planned |
 | M4 | Integration and Polish | Weeks 9-11 | Planned |
 
@@ -28,12 +28,15 @@
 
 ---
 
-## M1: Foundation — Weeks 2-3
+## M1: Foundation — Complete
 
 - **Deliverables:**
   - PROMPT_STATE Pydantic model with parameters dictionary
-  - Test suite for evaluators and workflow runner
-  - Test fixtures and dataset helpers
+  - ProjectStore with file-based backend data storage and incremental writes
+  - Backends router with sync, execute, and compare endpoints
+  - Comparison service with McNemar's test, Wilcoxon signed-rank, hit@k, MRR
+  - Test suite for evaluators, workflow runner, PromptState, incremental writes, API endpoints
+  - Test fixtures and dataset helpers (conftest.py)
   - GitHub Actions CI (lint + test)
   - CLAUDE.md updated with M1 status
 
@@ -43,14 +46,18 @@
   - All tests pass, CI green
   - PROMPT_STATE model importable and unit tested
   - Decision: are there bugs in existing components that must be fixed before building the optimizer on top?
+  - **Exit gate result:** All criteria met. No blocking bugs identified.
 
-- **Progress:**
+- **Progress (all 7 work packages complete):**
   - 1.1 PROMPT_STATE Model — **Complete** (`06b6635`)
-  - 1.7 Ablation Comparison — **Complete** (exceeds original scope: backend storage, notebook exploration, incremental writes, REST API endpoint)
+  - 1.2 Test Fixtures and Dataset Helpers — **Complete** (`28833e3`, `7664b52`)
+  - 1.3 Evaluator Tests — **Complete** (`7664b52`)
+  - 1.4 Workflow Runner Tests — **Complete** (`7664b52`, `0d2acc1`)
+  - 1.5 CI Pipeline — **Complete** (`7664b52`)
+  - 1.6 CLAUDE.md Update — **Complete** (`3cc31f1`)
+  - 1.7 Ablation Comparison — **Complete** (exceeds original scope: backend storage, notebook exploration, incremental writes, REST API endpoints)
 
-- **Risks:**
-  - Existing code may have untested edge cases that surface during test writing
-  - PROMPT_STATE schema affects every downstream milestone; getting it wrong means rework
+- **Risks:** None (complete)
 
 ---
 
@@ -69,7 +76,7 @@
     - Context refinement and plan update nodes
     - Counter-based stop condition with configurable threshold
 
-- **Entry criteria:** M1 exit gate passed; CI green; PROMPT_STATE model finalized
+- **Entry criteria:** M1 exit gate passed; CI green; PROMPT_STATE model finalized. **Entry criteria satisfied.**
 
 - **Exit gate:**
   - Optimize endpoint runs the linear mode DAG end-to-end
@@ -140,6 +147,34 @@
 ### Next Validation: Web Scrape Ablation
 
 After the Variant A vs Variant B comparison is settled, the next decision point is: **how many websites to scrape** for `entity_profiling`? More websites means better entity profiles but higher cost and latency. This ablation study varies the scrape count while holding the winning variant's prompts fixed, measuring the quality vs. cost/latency tradeoff. Also extends validation to the LCA dataset for real-world use case confirmation.
+
+### Public Service Deployment
+
+Deploy PromptPotter as an accessible public optimization service. Requires:
+- API key authentication and rate limiting middleware (P2.6)
+- Multi-tenancy: isolated project stores per user/team
+- Hosting infrastructure (cloud deployment, monitoring, uptime)
+- Billing and usage tracking (if commercial)
+- The API is already designed stateless (no server-side session state), minimizing the architectural changes needed
+
+### Diverse Optimization Targets
+
+Generalize the DAG-based optimization loop beyond prompts (P2.5, SC6). Target types to explore:
+- **Scoring function weights** — optimize ranking coefficients for retrieval/matching systems
+- **Fuzzy matching parameters** — thresholds, algorithms, and configurations for string matching
+- **Retrieval queries** — query templates and expansion strategies
+- **GA/DE parameters** — population size, mutation rates, crossover strategies
+- **Schemas** — data model configurations that affect pipeline behavior
+
+Each new target type requires a state schema (Pydantic model) and target-specific initialization/grow logic. The core loop, evaluation framework, and feedback routing are reusable.
+
+### Benchmarking and Publication
+
+Systematic benchmarks for archival publication:
+- **BC5CDR** — primary development benchmark (500-term subset, well-known ground truth)
+- **MedMentions** — additional biomedical benchmark (500-term subset)
+- **LCA datasets** — real-world Life Cycle Assessment terminology normalization
+- Reproducible experiment runs with full campaign persistence and statistical reports
 
 ### Additional Features
 

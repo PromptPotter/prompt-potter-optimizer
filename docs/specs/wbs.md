@@ -1,9 +1,9 @@
 # Work Breakdown Structure: PromptPotter Optimizer
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 **Date:** 2026-02-20
 **Status:** Draft
-**Depends on:** [PRD](prd.md), [ADD](add.md)
+**Depends on:** [PRD v0.4.0](prd.md), [ADD v0.4.0](add.md)
 
 ---
 
@@ -27,7 +27,7 @@
 
 ---
 
-## Phase 1: Foundation (M1)
+## Phase 1: Foundation (M1) — Complete
 
 ### 1.1 Add PROMPT_STATE Model — Complete
 
@@ -40,7 +40,7 @@
   - Diff function produces a structured comparison between two PROMPT_STATE instances
 - **Completed:** `06b6635 feat: add PromptState model with diff and derive`
 
-### 1.2 Add Test Fixtures and Dataset Helpers
+### 1.2 Add Test Fixtures and Dataset Helpers — Complete
 
 - **Scope:** Create shared test infrastructure: conftest fixtures, sample evaluation datasets, and factory functions for PROMPT_STATE and workflow objects.
 - **Sessions:** 1
@@ -49,8 +49,9 @@
 - **Done when:**
   - Shared fixtures provide mock LLM client, sample datasets, and PROMPT_STATE factories
   - At least one sample dataset with 10+ input/expected-output pairs is available for tests
+- **Completed:** `28833e3`, `7664b52` — conftest.py with mock_llm_client, tmp_store, auto-reset Langfuse singleton
 
-### 1.3 Write Tests for Existing Evaluators
+### 1.3 Write Tests for Existing Evaluators — Complete
 
 - **Scope:** Unit tests for ExactMatchEvaluator and CriteriaEvaluator covering expected passes, expected failures, and edge cases (empty input, special characters, normalization).
 - **Sessions:** 1
@@ -59,8 +60,9 @@
 - **Done when:**
   - Tests cover both evaluator types with at least 5 test cases each
   - Edge cases (empty strings, Unicode, case sensitivity) are exercised
+- **Completed:** `7664b52` — test_evaluators.py with ExactMatch and CriteriaEvaluator tests, registry alias coverage
 
-### 1.4 Write Tests for Workflow Runner
+### 1.4 Write Tests for Workflow Runner — Complete
 
 - **Scope:** Unit tests for the workflow execution engine covering single-node workflows, multi-step DAGs, error propagation, and Langfuse trace emission.
 - **Sessions:** 1
@@ -70,8 +72,9 @@
   - Tests verify correct topological execution order for multi-step workflows
   - Error in one node propagates correctly without silent failure
   - Langfuse tracing is invoked (mocked) during execution
+- **Completed:** `7664b52`, `0d2acc1` — test_workflow_runner.py with DAG sort, input resolution, execution tests
 
-### 1.5 Set Up CI Pipeline
+### 1.5 Set Up CI Pipeline — Complete
 
 - **Scope:** GitHub Actions workflow running lint (ruff) and test (pytest) on every push and PR. Fail-fast on lint errors, report test results.
 - **Sessions:** 1
@@ -81,8 +84,9 @@
   - CI runs on push to main and on all PRs
   - Lint and test steps both pass on current codebase
   - Failed lint or test blocks merge
+- **Completed:** `7664b52` — .github/workflows/ci.yml with ruff + pytest steps
 
-### 1.6 Update CLAUDE.md with M1 Status
+### 1.6 Update CLAUDE.md with M1 Status — Complete
 
 - **Scope:** Mark M1 complete, update current milestone to M2, document any new conventions or patterns introduced during M1.
 - **Sessions:** 1
@@ -91,6 +95,7 @@
 - **Done when:**
   - CLAUDE.md reflects M1 as complete and M2 as current
   - Any new file patterns or test conventions are documented
+- **Completed:** `3cc31f1` — CLAUDE.md cleaned up to reflect current project state
 
 ### 1.7 Ablation Comparison Scripts — Complete
 
@@ -104,7 +109,7 @@
   - Both scripts work offline from saved fixture files (replay only needs API for initial run)
 - **Completed:** Exceeds original scope — now includes project-based backend storage (`ProjectStore`), notebook exploration workflow, incremental writes with `on_result` callback, and REST API endpoints (`/backends/*`). Key commits: `88e3b83`, `ab154d7`, `244714d`, `7bfde52`.
 
-**Phase 1 exit criteria:** All tests pass, CI is green, PROMPT_STATE model exists and is importable, ablation comparison produces statistical report, CLAUDE.md updated.
+**Phase 1 exit criteria:** All tests pass, CI is green, PROMPT_STATE model exists and is importable, ablation comparison produces statistical report, CLAUDE.md updated. **All exit criteria met.**
 
 ---
 
@@ -431,3 +436,5 @@ M4 Integration
 | P2.1 | 2.7 | M2 (Phase 2) |
 | P2.2-P2.3 | -- | Unscheduled |
 | P2.4 | 4.4 | M4 |
+| P2.5 | -- | Unscheduled (post-M4) |
+| P2.6 | -- | Unscheduled (post-M4) |

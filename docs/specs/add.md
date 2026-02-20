@@ -1,9 +1,9 @@
 # Architecture Design Document: PromptPotter Optimizer
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 **Date:** 2026-02-20
 **Status:** Draft
-**Depends on:** [Project Charter](project-charter.md), [PRD](prd.md)
+**Depends on:** [Project Charter v0.4.0](project-charter.md), [PRD v0.4.0](prd.md)
 
 ---
 
@@ -73,24 +73,28 @@
 
 ### Exists Today
 
-| Component | Role |
-|-----------|------|
-| **Workflow engine** | DAG execution with topological sort and Langfuse tracing |
-| **LLM node** | Multi-provider inference with template variables and JSON mode |
-| **Web search node** | Mock placeholder |
-| **Ranker node** | LLM-based candidate ranking |
-| **Exact match evaluator** | String matching with normalization |
-| **Criteria evaluator** | LLM-as-judge for non-deterministic outputs |
-| **LLM client** | Multi-provider abstraction (Groq, OpenAI, Anthropic) |
-| **Optimize router** | Placeholder — not yet a real implementation |
+| Component | Role | Since |
+|-----------|------|-------|
+| **Workflow engine** | DAG execution with topological sort and Langfuse tracing | Pre-M1 |
+| **LLM node** | Multi-provider inference with template variables and JSON mode | Pre-M1 |
+| **Web search node** | Mock placeholder | Pre-M1 |
+| **Ranker node** | LLM-based candidate ranking | Pre-M1 |
+| **Exact match evaluator** | String matching with normalization | Pre-M1 |
+| **Criteria evaluator** | LLM-as-judge for non-deterministic outputs | Pre-M1 |
+| **LLM client** | Multi-provider abstraction (Groq, OpenAI, Anthropic) | Pre-M1 |
+| **Optimize router** | Placeholder — not yet a real implementation | Pre-M1 |
+| **PromptState model** | Immutable, versioned prompt snapshot with `derive()` and structured diff | M1 |
+| **ProjectStore** | File-based backend data storage (`.promptpotter/projects/`) with incremental writes | M1 |
+| **Backends router** | `/backends/*` — register, sync, execute, compare | M1 |
+| **Backend client** | HTTP client for external backend APIs (TermNorm) | M1 |
+| **Comparison service** | Statistical comparison with McNemar's test, Wilcoxon signed-rank, hit@k, MRR | M1 |
+| **Test suite** | Evaluators, workflow runner, PromptState, incremental writes, API endpoints | M1 |
+| **CI pipeline** | GitHub Actions: ruff lint + pytest on push/PR | M1 |
 
 ### Will Be Built
 
 | Component | Milestone | PRD Req |
 |-----------|-----------|---------|
-| **PROMPT_STATE model** | M1 | P0.5 |
-| **Test suite** (evaluators + workflow runner) | M1 | -- |
-| **CI pipeline** | M1 | -- |
 | **Initialization node** (context analysis + structured prompt component extraction) | M2 | P0.3 |
 | **Grow/Filter node** (prompt state enrichment) | M2 | P0.3 |
 | **Analysis + Evaluation node** (scoring + failure analysis + next_action decision) | M2 | P0.1, P0.2 |
@@ -131,6 +135,17 @@ All nodes follow the same pattern:
 - **Composable** — wire together in the DAG or call individually
 - **Testable** — unit test with mock inputs
 - **Stateless** — prompt state flows through the DAG; nodes do not hold state
+
+### Target Abstraction
+
+The DAG-based optimization loop is parameterized by a **state schema** — the Pydantic model that defines the tunable parameters flowing through the graph. M2-M4 implement the concrete `PromptState` schema (persona, task_intent, problem_description, instruction, thinking_style, plan). The architecture is designed so that the core loop (initialize → grow/filter → analyze+evaluate → feedback) operates on any state schema without modification.
+
+Post-M4, new target types (scoring function weights, fuzzy matching thresholds, retrieval query templates, GA parameters) can be added by:
+1. Defining a new state schema (Pydantic model)
+2. Implementing target-specific initialization and grow/filter logic
+3. Reusing the existing evaluation framework and feedback routing
+
+The abstraction boundary is **designed but not implemented** until post-M4. M2-M4 build and validate the concrete prompt case; generalization follows once the loop is proven.
 
 ---
 
@@ -297,6 +312,7 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 | **File-based registry first** | No database for MVP; JSON/JSONL is human-readable and OpenAI Evals compatible | Limited query capability; acceptable at single-user scale. Swappable later behind interface. |
 | **PROMPT_STATE as first-class model** | Track all tunable params (not just prompt text); enable structured diffs | Open-ended parameters dict means no schema enforcement on values |
 | **LLM-as-judge for evaluation** | Non-deterministic outputs need criteria-based scoring beyond exact match | Judge quality depends on judge prompt; cost scales with dataset x iterations x candidates |
+| **Target-agnostic optimization loop** | DAG operates on a pluggable state schema so the same loop can optimize prompts, schemas, scoring functions, fuzzy matchers, and other parameter types post-M4 | Adds abstraction layer between loop and state; mitigated by building the concrete prompt case first (M2-M4) and generalizing only after the loop is proven |
 
 ---
 
@@ -306,11 +322,14 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 |--------|-----------|----------|--------|
 | **LLM providers** (Groq, OpenAI, Anthropic) | PromptPotter sends inference requests | OpenAI chat completions API | Exists |
 | **Langfuse** | PromptPotter sends traces + scores | Langfuse Python SDK | Exists |
-| **File system** | Read/write campaigns, trials, lineage | JSON/JSONL | Planned (M3) |
+| **ProjectStore** (backend data) | Read/write backend connections, synced experiments, executions | JSON files in `.promptpotter/projects/` | Exists (M1) |
+| **File system** (campaigns) | Read/write campaigns, trials, lineage | JSON/JSONL in `.promptpotter/campaigns/` | Planned (M3) |
 | **Streamlit** | Streamlit calls the API | HTTP | Exists (prototype) |
 | **Consuming projects** (e.g., TermNorm) | PromptPotter loads external datasets | File path or URL | Exists (loader) |
+| **TermNorm backend API** | PromptPotter syncs experiments and replays pipelines | HTTP REST | Exists (M1) |
 | **TermNorm prompt registry** | PromptPotter reads current prompts from `logs/prompts/{family}/{version}/prompt.txt` and writes optimized versions back as new version numbers (v2, v3, ...) | File system (TermNorm's `PromptRegistry` with `{{variable}}` templates) | Planned (M4) |
 | **MCP clients** (e.g., Claude Code) | Clients invoke optimization tools | MCP | Planned (P2.3) |
+| **Public API gateway** | External consumers access PromptPotter as a hosted service | HTTP REST with API key auth | Post-M4 |
 
 ---
 
