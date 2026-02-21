@@ -293,6 +293,7 @@ async def run_grid_search(
     temperature: float = 0.1,
     max_tokens: int = 4096,
     on_combo_done: Optional[Callable] = None,
+    request_delay: float = 1.0,
 ) -> pd.DataFrame:
     """Evaluate each grid combination on eval_data.
 
@@ -306,6 +307,8 @@ async def run_grid_search(
         max_tokens: Maximum response tokens.
         on_combo_done: Optional callback ``(combo_index, row_data)`` called
             after each combination is evaluated.
+        request_delay: Seconds to sleep between LLM calls within each
+            combination (default 1.0). Prevents hitting API rate limits.
 
     Returns:
         DataFrame with columns: axis indices, prompt_state_id,
@@ -318,6 +321,7 @@ async def run_grid_search(
         results = await evaluate_prompt_batch(
             ps, eval_data, llm_client,
             model=model, temperature=temperature, max_tokens=max_tokens,
+            request_delay=request_delay,
         )
 
         acc = compute_accuracy(results)

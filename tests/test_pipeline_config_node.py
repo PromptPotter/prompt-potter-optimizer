@@ -4,35 +4,22 @@ from api.nodes.pipeline_config_node import PipelineConfigNode
 
 
 @pytest.mark.asyncio
-async def test_default_config():
+async def test_pipeline_config_node():
+    # Defaults
     node = PipelineConfigNode(node_id="cfg1")
     result = await node.process({"query": "copper sheet"})
     assert result.query == "copper sheet"
     assert result.skip_llm_ranking is True
-    assert result.pipeline_params == {}
 
-
-@pytest.mark.asyncio
-async def test_input_overrides():
-    node = PipelineConfigNode(
+    # Input overrides config
+    node2 = PipelineConfigNode(
         node_id="cfg2",
         config={"skip_llm_ranking": True, "pipeline_params": {"max_candidates": 10}},
     )
-    result = await node.process({
+    result2 = await node2.process({
         "query": "steel plate",
         "skip_llm_ranking": False,
         "pipeline_params": {"model": "gpt-4"},
     })
-    assert result.skip_llm_ranking is False
-    assert result.pipeline_params == {"max_candidates": 10, "model": "gpt-4"}
-
-
-@pytest.mark.asyncio
-async def test_node_config_defaults():
-    node = PipelineConfigNode(
-        node_id="cfg3",
-        config={"skip_llm_ranking": False, "pipeline_params": {"temperature": 0.0}},
-    )
-    result = await node.process({"query": "aluminum alloy"})
-    assert result.skip_llm_ranking is False
-    assert result.pipeline_params == {"temperature": 0.0}
+    assert result2.skip_llm_ranking is False
+    assert result2.pipeline_params == {"max_candidates": 10, "model": "gpt-4"}

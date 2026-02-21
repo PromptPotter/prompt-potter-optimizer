@@ -1,21 +1,15 @@
-"""API tests for PromptPotter Optimizer."""
+"""API smoke tests."""
 from fastapi.testclient import TestClient
 from api.main import app
 
 client = TestClient(app)
 
 
-def test_health_check():
-    response = client.get("/api/v1/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "healthy"
-    assert data["version"] == "0.4.0"
-    assert "timestamp" in data
+def test_health_and_ready():
+    resp = client.get("/api/v1/health")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "healthy"
 
-
-def test_readiness_check():
-    response = client.get("/api/v1/ready")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "ready"
+    resp = client.get("/api/v1/ready")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ready"

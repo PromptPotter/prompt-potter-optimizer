@@ -4,6 +4,7 @@ Prompt evaluation service.
 Extracts baseline prompts from experiment data, filters evaluation datasets,
 and evaluates reranker prompts against cached pipeline data using LLMClientBase.
 """
+import asyncio
 import json
 import random
 from typing import Callable, Optional
@@ -194,6 +195,7 @@ async def evaluate_prompt_batch(
     temperature: float = 0.1,
     max_tokens: int = 4096,
     on_result: Optional[Callable] = None,
+    request_delay: float = 0,
 ) -> list:
     """Evaluate a prompt on all eval_data queries.
 
@@ -206,6 +208,8 @@ async def evaluate_prompt_batch(
         max_tokens: Maximum response tokens.
         on_result: Optional callback ``(result, index, total)`` called after
             each query evaluation.
+        request_delay: Seconds to sleep between LLM calls (0 = no delay).
+            Useful for staying under API rate limits during grid search.
 
     Returns:
         List of result dicts from local_reranker_eval.
@@ -214,6 +218,9 @@ async def evaluate_prompt_batch(
     rendered = prompt_state.render()
 
     for i, qd in enumerate(eval_data):
+        if request_delay > 0 and i > 0:
+            await asyncio.sleep(request_delay)
+
         result = await local_reranker_eval(
             rendered, qd, llm_client,
             model=model, temperature=temperature, max_tokens=max_tokens,

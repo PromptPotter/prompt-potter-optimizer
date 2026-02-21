@@ -67,7 +67,7 @@ class OpenAIClient(LLMClientBase):
         if self._client is None:
             try:
                 from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(api_key=self.api_key)
+                self._client = AsyncOpenAI(api_key=self.api_key, max_retries=5)
             except ImportError:
                 raise ImportError("openai package not installed. Run: pip install openai")
         return self._client
@@ -139,7 +139,8 @@ class GroqClient(LLMClientBase):
                 from openai import AsyncOpenAI
                 self._client = AsyncOpenAI(
                     api_key=self.api_key,
-                    base_url="https://api.groq.com/openai/v1"
+                    base_url="https://api.groq.com/openai/v1",
+                    max_retries=5,
                 )
             except ImportError:
                 raise ImportError("openai package not installed. Run: pip install openai")

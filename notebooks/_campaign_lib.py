@@ -698,6 +698,7 @@ async def run_grid_search(
         temperature=eval_llm.get("temperature", 0.1),
         max_tokens=eval_llm.get("max_tokens", 4096),
         on_combo_done=on_combo_done,
+        request_delay=eval_llm.get("request_delay", 1.0),
     )
     pbar.close()
     return df
