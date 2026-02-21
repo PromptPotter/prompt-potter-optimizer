@@ -213,6 +213,11 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 2. The API reports candidates with a status indicating they are awaiting review
 3. A follow-up call accepts approve/reject/edit decisions for each candidate
 4. Rejected candidates are not evaluated, saving LLM costs
+5. In notebook mode, the system generates LLM-powered suggestions after each optimization
+   round: failure pattern analysis, parameter change recommendations, and prompt phrase
+   fragments (atomic text snippets) the user can select or modify before the next iteration
+6. Campaign configuration is exposed as a single editable JSON object containing all
+   pipeline parameters, optimization settings, and eval LLM settings
 
 ### P1.4: Real Web Search Provider
 

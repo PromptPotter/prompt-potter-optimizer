@@ -105,6 +105,7 @@
 | **Optimization orchestrator** (DAG loop with counter-based stop condition) | M2 | P0.4 |
 | **Campaign registry** (file-based persistence) | M3 | P1.1 |
 | **Langfuse score integration** | M3 | SC3 |
+| **HITL Campaign Notebook** (interactive optimization with config editing, diagnostics, phrase fragment suggestions) | M2 | P1.3, P0.3 |
 | **Cycling mode** (enable feedback paths for iterative refinement) | Post-M2 | P0.4, P2.1 |
 | **Human-in-the-loop gates** | M4 | P1.3 |
 | **Real web search provider** | M4 | P1.4 |

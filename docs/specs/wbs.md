@@ -210,7 +210,22 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   - Counter-based stop condition works with configurable threshold
   - Integration test demonstrates multi-cycle optimization with feedback
 
-**Phase 2 exit criteria:** POST optimize endpoint runs the linear mode DAG and returns scored prompt states. E2E test passes in CI. Cycling mode (2.7) is implemented and tested but not required for the M2 exit gate.
+### 2.8 HITL Campaign Notebook
+
+- **Scope:** Build an interactive Jupyter notebook for running optimization campaigns
+  with full HITL control. Includes: editable campaign config JSON (all pipeline + optimization
+  parameters), integrated replay, candidate coverage diagnostics, iterative prompt optimization
+  with local evaluation, and LLM-generated suggestions with phrase fragments for user selection.
+- **Sessions:** 2
+- **Dependencies:** 1.1 (PromptState, ProjectStore, BackendClient)
+- **PRD Ref:** P1.3, P0.3
+- **Done when:**
+  - Notebook runs end-to-end: config → replay → diagnostics → baseline eval → optimization round → suggestions
+  - Campaign config exposes all pipeline parameters + optimization settings as editable JSON
+  - After each round, LLM produces categorized failure analysis and actionable phrase fragment suggestions
+  - Winner PromptState is saved with full lineage chain
+
+**Phase 2 exit criteria:** POST optimize endpoint runs the linear mode DAG and returns scored prompt states. E2E test passes in CI. Cycling mode (2.7) is implemented and tested but not required for the M2 exit gate. HITL campaign notebook runs end-to-end in JupyterLab with config editing, replay, and LLM-generated suggestions.
 
 ---
 
@@ -368,10 +383,10 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
 |-------|:--------:|:--------:|
 | M0: Specifications | 5 | 5 |
 | M1: Foundation | 7 | 7 |
-| M2: Core Optimizer (DAG Workflow) | 7 | 9 |
+| M2: Core Optimizer (DAG Workflow) | 8 | 11 |
 | M3: Registry and Tracking | 6 | 6 |
 | M4: Integration and Polish | 6 | 9 |
-| **Total** | **31** | **36** |
+| **Total** | **32** | **38** |
 
 ---
 
@@ -437,7 +452,7 @@ M4 Integration
 | P0.5 | 1.1, 3.3 | M1, M3 |
 | P1.1 | 3.1, 3.2, 3.3, 3.5, 3.6 | M3 |
 | P1.2 | 1.4 | M1 |
-| P1.3 | 4.3 | M4 |
+| P1.3 | 2.8, 4.3 | M2, M4 |
 | P1.4 | 4.2 | M4 |
 | P1.5 | 2.4 | M2 |
 | P1.6 | 1.7 | M1 |

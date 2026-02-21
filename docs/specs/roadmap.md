@@ -72,6 +72,9 @@
     - Linear mode orchestrator: init --> grow/filter --> evaluate --> output, run N times for breadth
   - Updated optimize endpoint replacing the placeholder (P0.4)
   - E2E test: linear mode optimization on sample dataset produces scored prompt states
+  - **HITL Campaign Notebook**: Interactive Jupyter notebook with editable campaign config,
+    integrated replay, candidate coverage diagnostics, iterative prompt optimization,
+    and LLM-generated phrase fragment suggestions for user-guided iteration
   - **Phase 2 (cycling mode)** partially implemented:
     - Feedback router (Switch: generate / refine context / modify plan)
     - Context refinement and plan update nodes
@@ -83,6 +86,7 @@
   - Optimize endpoint runs the linear mode DAG end-to-end
   - N independent runs produce diverse prompt states; best is selectable by score
   - E2E test passes in CI
+  - HITL campaign notebook produces actionable suggestions after optimization rounds
   - Decision: does the linear mode produce useful prompt states? Is the DAG architecture right for adding cycling later?
 
 - **Risks:**
