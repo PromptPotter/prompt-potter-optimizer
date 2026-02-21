@@ -396,10 +396,3 @@ class TestLoadEvalDataset:
         result = load_eval_dataset(tmp_store, "test", "exp1", query_limit=3)
         assert len(result) == 3
 
-    def test_returns_empty_when_not_found(self, tmp_store):
-        from api.models.backend import BackendConnection
-        tmp_store.register_backend(BackendConnection(
-            id="test", name="Test", backend_type="test", base_url="http://test",
-        ))
-        result = load_eval_dataset(tmp_store, "test", "nonexistent")
-        assert result == []

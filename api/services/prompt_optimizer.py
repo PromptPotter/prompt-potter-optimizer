@@ -179,7 +179,7 @@ def select_round_winner(
 
 async def generate_suggestions(
     campaign_rounds: list,
-    replay_results: list,
+    eval_data: list,
     campaign_config: dict,
     llm_client: LLMClientBase,
     model: Optional[str] = None,
@@ -188,7 +188,7 @@ async def generate_suggestions(
 
     Args:
         campaign_rounds: List of round dicts from the campaign.
-        replay_results: Original replay result dicts with pipeline_data.
+        eval_data: Evaluation data dicts with pipeline_data.
         campaign_config: Current campaign configuration dict.
         llm_client: LLM client implementing LLMClientBase.
         model: Model identifier (uses client default if None).
@@ -208,7 +208,7 @@ async def generate_suggestions(
         pd_data = next(
             (
                 rd.get("pipeline_data", {})
-                for rd in replay_results
+                for rd in eval_data
                 if rd["query"] == r["query"]
             ),
             {},

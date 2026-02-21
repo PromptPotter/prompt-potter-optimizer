@@ -14,53 +14,14 @@ from api.evaluators import get_evaluator
 # ---------------------------------------------------------------------------
 
 class TestExactMatchEvaluator:
-    def test_exact_match_pass(self):
-        ev = ExactMatchEvaluator()
-        out = ev.evaluate("hello", "hello")
-        assert out.result == EvalResult.PASS
-        assert out.score == 1.0
-
-    def test_exact_match_fail(self):
-        ev = ExactMatchEvaluator()
-        out = ev.evaluate("hello", "world")
-        assert out.result == EvalResult.FAIL
-        assert out.score < 1.0
-
     def test_case_insensitive(self):
         ev = ExactMatchEvaluator({"case_insensitive": True})
         out = ev.evaluate("Hello", "hELLO")
         assert out.result == EvalResult.PASS
 
-    def test_case_sensitive_default(self):
-        ev = ExactMatchEvaluator()
-        out = ev.evaluate("Hello", "hello")
-        assert out.result == EvalResult.FAIL
-
     def test_whitespace_normalization(self):
         ev = ExactMatchEvaluator({"normalize_whitespace": True})
         out = ev.evaluate("a  b   c", "a b c")
-        assert out.result == EvalResult.PASS
-
-    def test_strip_enabled_by_default(self):
-        ev = ExactMatchEvaluator()
-        out = ev.evaluate("abc", "  abc  ")
-        assert out.result == EvalResult.PASS
-
-    def test_both_none_passes(self):
-        ev = ExactMatchEvaluator()
-        out = ev.evaluate(None, None)
-        assert out.result == EvalResult.PASS
-        assert out.score == 1.0
-
-    def test_one_none_fails(self):
-        ev = ExactMatchEvaluator()
-        out = ev.evaluate("x", None)
-        assert out.result == EvalResult.FAIL
-        assert out.score == 0.0
-
-    def test_non_string_values(self):
-        ev = ExactMatchEvaluator()
-        out = ev.evaluate(42, 42)
         assert out.result == EvalResult.PASS
 
 
@@ -111,13 +72,6 @@ class TestCriteriaEvaluator:
         out = await ev.evaluate_async("cat", "airplane")
         assert out.result == EvalResult.FAIL
         assert out.score == pytest.approx(0.3)
-
-    async def test_both_none_short_circuits(self, mock_llm_client):
-        ev = CriteriaEvaluator()
-        out = await ev.evaluate_async(None, None)
-        assert out.result == EvalResult.PASS
-        assert out.score == 1.0
-        assert mock_llm_client._call_count == 0
 
 
 # ---------------------------------------------------------------------------

@@ -525,7 +525,7 @@ def select_round_winner(
 
 async def generate_suggestions(
     campaign_rounds: list,
-    replay_results: list,
+    eval_data: list,
     campaign_config: dict,
     eval_llm: dict,
     api_key: str,
@@ -535,7 +535,7 @@ async def generate_suggestions(
     print("Generating suggestions...")
 
     return await _generate_suggestions(
-        campaign_rounds, replay_results, campaign_config,
+        campaign_rounds, eval_data, campaign_config,
         client, model=eval_llm.get("model"),
     )
 

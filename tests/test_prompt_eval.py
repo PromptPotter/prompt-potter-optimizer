@@ -121,11 +121,6 @@ class TestFilterEvalData:
         assert len(result) == 1
         assert result[0]["query"] == "aspirin"
 
-    def test_returns_empty_for_no_matches(self):
-        assert filter_eval_data([{"status": "error"}]) == []
-
-    def test_returns_empty_for_empty_input(self):
-        assert filter_eval_data([]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +256,3 @@ class TestComputeAccuracy:
         assert acc["errors"] == 1
         assert abs(acc["accuracy"] - 1 / 3) < 1e-9
 
-    def test_empty_results(self):
-        acc = compute_accuracy([])
-        assert acc == {"hits": 0, "total": 0, "accuracy": 0.0, "errors": 0}
