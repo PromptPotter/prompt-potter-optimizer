@@ -218,6 +218,9 @@ Candidates are generated as structured prompt states with typed fields, not opaq
    fragments (atomic text snippets) the user can select or modify before the next iteration
 6. Campaign configuration is exposed as a single editable JSON object containing all
    pipeline parameters, optimization settings, and eval LLM settings
+7. Grid search exploration: LLM-assisted context restructuring into Layer 1 fields,
+   systematic sweep using shipped default axis library, ranked results with interaction
+   heatmaps, LLM consultation on results
 
 ### P1.4: Real Web Search Provider
 

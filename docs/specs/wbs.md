@@ -216,6 +216,7 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   with full HITL control. Includes: editable campaign config JSON (all pipeline + optimization
   parameters), integrated replay, candidate coverage diagnostics, iterative prompt optimization
   with local evaluation, and LLM-generated suggestions with phrase fragments for user selection.
+  Grid search winner serves as optional campaign starting seed.
 - **Sessions:** 2
 - **Dependencies:** 1.1 (PromptState, ProjectStore, BackendClient)
 - **PRD Ref:** P1.3, P0.3
@@ -225,7 +226,29 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   - After each round, LLM produces categorized failure analysis and actionable phrase fragment suggestions
   - Winner PromptState is saved with full lineage chain
 
-**Phase 2 exit criteria:** POST optimize endpoint runs the linear mode DAG and returns scored prompt states. E2E test passes in CI. Cycling mode (2.7) is implemented and tested but not required for the M2 exit gate. HITL campaign notebook runs end-to-end in JupyterLab with config editing, replay, and LLM-generated suggestions.
+### 2.9 Grid Search (Initial Condition Exploration)
+
+- **Scope:** Systematic exploration of PromptState Layer 1 fields via cartesian product sweep,
+  with LLM-assisted input restructuring and result analysis. Integrated into campaign notebook
+  as pre-optimization chapter (Section 5.5).
+- **Sessions:** 1
+- **Dependencies:** 2.1 (PromptState), 2.8 (campaign notebook + _campaign_lib.py)
+- **PRD Ref:** P1.3, P0.3
+- **Deliverables:**
+  - Default grid axes library (`DEFAULT_GRID_AXES`) with shipped variations for persona, task_intent, thinking_style, answer_format
+  - LLM context restructuring (`restructure_context()`) — parse raw context into Layer 1 fields
+  - Grid search execution + visualization (`run_grid_search()`, `display_grid_results()`)
+  - LLM result analysis (`analyze_grid_results()`)
+  - Winner selection as campaign seed (`select_grid_winner()`)
+  - Evaluation data loader (`load_eval_dataset()`) with trace/replay priority chain
+- **Done when:**
+  - Grid search produces ranked PromptState candidates sorted by accuracy
+  - Marginal analysis shows per-axis mean accuracy for each variant value
+  - Pairwise heatmaps visualize interaction effects between axes
+  - LLM-generated insights identify strongest fields and recommended focus
+  - Winner is selectable as optimization campaign seed
+
+**Phase 2 exit criteria:** POST optimize endpoint runs the linear mode DAG and returns scored prompt states. E2E test passes in CI. Cycling mode (2.7) is implemented and tested but not required for the M2 exit gate. HITL campaign notebook runs end-to-end in JupyterLab with config editing, replay, and LLM-generated suggestions. Grid search produces ranked exploration results with LLM-analyzed insights.
 
 ---
 
@@ -383,10 +406,10 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
 |-------|:--------:|:--------:|
 | M0: Specifications | 5 | 5 |
 | M1: Foundation | 7 | 7 |
-| M2: Core Optimizer (DAG Workflow) | 8 | 11 |
+| M2: Core Optimizer (DAG Workflow) | 9 | 12 |
 | M3: Registry and Tracking | 6 | 6 |
 | M4: Integration and Polish | 6 | 9 |
-| **Total** | **32** | **38** |
+| **Total** | **33** | **39** |
 
 ---
 
@@ -452,7 +475,7 @@ M4 Integration
 | P0.5 | 1.1, 3.3 | M1, M3 |
 | P1.1 | 3.1, 3.2, 3.3, 3.5, 3.6 | M3 |
 | P1.2 | 1.4 | M1 |
-| P1.3 | 2.8, 4.3 | M2, M4 |
+| P1.3 | 2.8, 2.9, 4.3 | M2, M4 |
 | P1.4 | 4.2 | M4 |
 | P1.5 | 2.4 | M2 |
 | P1.6 | 1.7 | M1 |

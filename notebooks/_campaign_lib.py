@@ -4,6 +4,7 @@ Extracts plumbing (imports, cache logic, async loops, LLM calls)
 so notebook cells stay short and dashboard-readable.
 """
 
+import itertools
 import json
 import os
 import random
@@ -470,6 +471,7 @@ async def evaluate_prompt(
     eval_llm: dict,
     api_key: str,
     label: str = "Eval",
+    verbose: bool = True,
 ) -> list:
     """Evaluate a prompt on all eval_data with progress bar.
 
@@ -484,14 +486,15 @@ async def evaluate_prompt(
         )
         results.append(result)
 
-        tag = "HIT " if result["hit"] else "MISS"
-        hits_so_far = sum(1 for r in results if r["hit"])
-        done = len(results)
-        tqdm.write(
-            f"[{done}/{len(eval_data)}] {tag}  {result['query'][:50]:<50s} "
-            f"| pred: {result['predicted'][:35]:<35s} "
-            f"| Running: {hits_so_far}/{done} ({hits_so_far / done * 100:.1f}%)"
-        )
+        if verbose:
+            tag = "HIT " if result["hit"] else "MISS"
+            hits_so_far = sum(1 for r in results if r["hit"])
+            done = len(results)
+            tqdm.write(
+                f"[{done}/{len(eval_data)}] {tag}  {result['query'][:50]:<50s} "
+                f"| pred: {result['predicted'][:35]:<35s} "
+                f"| Running: {hits_so_far}/{done} ({hits_so_far / done * 100:.1f}%)"
+            )
         _pbar.update(1)
 
     _pbar.close()
@@ -832,6 +835,530 @@ def display_suggestions(suggestions: dict, round_num: int) -> None:
         print(f"    Text: \"{pf.get('text', '')}\"")
         print(f"    Rationale: {pf.get('rationale', '')}")
         print()
+
+
+# ---------------------------------------------------------------------------
+# Grid Search — Landscape Exploration
+# ---------------------------------------------------------------------------
+
+DEFAULT_GRID_AXES = {
+    "persona": [
+        "",
+        "You are a domain expert with deep knowledge of this field.",
+        "You are a precise, analytical system that evaluates candidates methodically.",
+        "You are a careful assistant that considers all options before deciding.",
+    ],
+    "task_intent": [
+        "",
+        "Your task is to identify the single best match from the candidates.",
+        "Rank candidates by how well they match the concept described.",
+    ],
+    "thinking_style": [
+        "",
+        "Think step by step.",
+        "Focus on semantic meaning, not surface-level word overlap.",
+        "First understand the core concept, then evaluate each candidate against it.",
+    ],
+    "answer_format": [
+        "",
+        "Rank all candidates from most to least relevant.",
+    ],
+}
+
+GRID_SEARCHABLE_FIELDS = {
+    "persona", "task_intent", "problem_description",
+    "instruction", "thinking_style", "answer_format",
+}
+
+REQUIRED_TEMPLATE_VARS = {"{{core_concept}}", "{{entity_profile_json}}", "{{matches}}"}
+
+
+async def restructure_context(
+    context_input: Any,
+    eval_llm: dict,
+    api_key: str,
+) -> dict:
+    """LLM-assisted restructuring of user context into Layer 1 fields.
+
+    Args:
+        context_input: Either a string (raw context) or a dict of partial
+            Layer 1 fields.
+        eval_llm: Dict with model, provider_url, temperature, max_tokens.
+        api_key: API key for the LLM provider.
+
+    Returns:
+        Dict of structured Layer 1 field values.
+    """
+    if isinstance(context_input, dict):
+        mode = "validate"
+        user_content = (
+            "The user has provided partial Layer 1 fields for a prompt. "
+            "Validate them, fill any gaps, and suggest improvements.\n\n"
+            f"Provided fields:\n{json.dumps(context_input, indent=2)}"
+        )
+    else:
+        mode = "parse"
+        user_content = (
+            "The user has provided a raw context description. Parse it into "
+            "structured Layer 1 prompt fields.\n\n"
+            f"Context:\n{context_input}"
+        )
+
+    system_prompt = (
+        "You are a prompt engineering assistant. Your job is to structure "
+        "user-provided context into Layer 1 prompt fields for an optimization "
+        "campaign.\n\n"
+        "Layer 1 fields:\n"
+        "- persona: Who the LLM should act as (e.g., 'You are a domain expert...')\n"
+        "- task_intent: What the prompt needs to accomplish\n"
+        "- problem_description: Description of the problem domain\n"
+        "- instruction: Core instruction text (may contain template variables)\n"
+        "- thinking_style: How to reason (e.g., 'Think step by step')\n"
+        "- answer_format: Expected output format\n\n"
+        "Return a JSON object with exactly these keys. Use empty string for "
+        "fields that don't apply. Be concise and actionable."
+    )
+
+    async with httpx.AsyncClient() as http:
+        resp = await http.post(
+            eval_llm["provider_url"],
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": eval_llm["model"],
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 2000,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+        result = json.loads(resp.json()["choices"][0]["message"]["content"])
+
+    # Ensure all expected keys present
+    for key in ("persona", "task_intent", "problem_description",
+                "instruction", "thinking_style", "answer_format"):
+        result.setdefault(key, "")
+
+    print(f"Context restructured ({mode} mode):")
+    for k, v in result.items():
+        if k in GRID_SEARCHABLE_FIELDS and v:
+            print(f"  {k}: {v[:80]}{'...' if len(v) > 80 else ''}")
+
+    return result
+
+
+def validate_grid_config(
+    grid_config: dict,
+    baseline: PromptState,
+) -> dict:
+    """Validate grid axes and compute cartesian product size.
+
+    Args:
+        grid_config: Dict mapping field names to lists of variant values.
+        baseline: The baseline PromptState (for reference).
+
+    Returns:
+        Metadata dict: {axes, axis_names, total, actual_count, is_subsampled}
+
+    Raises:
+        ValueError: If axis keys are invalid or instruction variants lack
+            required template variables.
+    """
+    axis_names = list(grid_config.keys())
+    invalid = set(axis_names) - GRID_SEARCHABLE_FIELDS
+    if invalid:
+        raise ValueError(
+            f"Invalid grid axis fields: {invalid}. "
+            f"Must be in {GRID_SEARCHABLE_FIELDS}"
+        )
+
+    # Validate instruction variants contain required template vars
+    if "instruction" in grid_config:
+        for i, variant in enumerate(grid_config["instruction"]):
+            if not variant:  # empty string is allowed (means use baseline)
+                continue
+            missing = REQUIRED_TEMPLATE_VARS - set(
+                var for var in REQUIRED_TEMPLATE_VARS if var in variant
+            )
+            if missing:
+                raise ValueError(
+                    f"instruction variant {i} is missing template variables: "
+                    f"{missing}"
+                )
+
+    axes = {name: grid_config[name] for name in axis_names}
+    total = 1
+    for values in axes.values():
+        total *= len(values)
+
+    print(f"Grid config validated:")
+    for name, values in axes.items():
+        print(f"  {name}: {len(values)} variants")
+    print(f"  Total combinations: {total}")
+
+    return {
+        "axes": axes,
+        "axis_names": axis_names,
+        "total": total,
+        "actual_count": total,
+        "is_subsampled": False,
+    }
+
+
+def build_grid_combinations(
+    grid_config: dict,
+    baseline: PromptState,
+    max_combinations: int = 0,
+    seed: int = 42,
+) -> Tuple[list, dict]:
+    """Build cartesian product of grid axes as PromptState variants.
+
+    Args:
+        grid_config: Dict mapping field names to lists of variant values.
+        baseline: The baseline PromptState to derive from.
+        max_combinations: If >0, subsample to this many combos.
+        seed: Random seed for reproducible subsampling.
+
+    Returns:
+        Tuple of (combinations list, ps_lookup dict).
+        Each combination is (coord_dict, ps_id).
+        ps_lookup maps ps_id -> PromptState.
+    """
+    axis_names = list(grid_config.keys())
+    axis_values = [grid_config[name] for name in axis_names]
+    all_combos = list(itertools.product(*axis_values))
+
+    if max_combinations > 0 and len(all_combos) > max_combinations:
+        rng = random.Random(seed)
+        all_combos = rng.sample(all_combos, max_combinations)
+        print(f"Subsampled: {max_combinations}/{len(list(itertools.product(*axis_values)))} combinations")
+
+    combinations = []
+    ps_lookup = {}
+
+    for combo in all_combos:
+        coord_dict = {}
+        changes = {}
+        labels = []
+
+        for i, (name, value) in enumerate(zip(axis_names, combo)):
+            idx = grid_config[name].index(value)
+            coord_dict[name] = idx
+            labels.append(f"{name[:2]}={idx}")
+            if value:  # only override non-empty values
+                changes[name] = value
+
+        desc = f"grid[{','.join(labels)}]"
+        ps = baseline.derive(**changes, changes_description=desc)
+        combinations.append((coord_dict, ps.id))
+        ps_lookup[ps.id] = ps
+
+    print(f"Built {len(combinations)} grid combinations")
+    return combinations, ps_lookup
+
+
+async def run_grid_search(
+    combinations: list,
+    ps_lookup: dict,
+    eval_data: list,
+    eval_llm: dict,
+    api_key: str,
+) -> pd.DataFrame:
+    """Evaluate each grid combination on eval_data.
+
+    Args:
+        combinations: List of (coord_dict, ps_id) tuples.
+        ps_lookup: Dict mapping ps_id -> PromptState.
+        eval_data: List of query dicts with pipeline_data.
+        eval_llm: Dict with model, provider_url, temperature, max_tokens.
+        api_key: API key for the LLM provider.
+
+    Returns:
+        DataFrame with columns: axis indices, axis labels, prompt_state_id,
+        hits, total, accuracy, errors. Sorted by accuracy desc.
+    """
+    rows = []
+    pbar = tqdm(total=len(combinations), desc="Grid search", unit="combo")
+
+    for coord_dict, ps_id in combinations:
+        ps = ps_lookup[ps_id]
+        results = await evaluate_prompt(
+            ps, eval_data, eval_llm, api_key,
+            label=ps.changes_description or ps_id[:12],
+            verbose=False,
+        )
+
+        hits = sum(1 for r in results if r["hit"])
+        errors = sum(1 for r in results if r["error"])
+        total = len(results)
+        accuracy = hits / total if total else 0
+
+        row = dict(coord_dict)
+        row["prompt_state_id"] = ps_id
+        row["hits"] = hits
+        row["total"] = total
+        row["accuracy"] = accuracy
+        row["errors"] = errors
+        rows.append(row)
+
+        pbar.update(1)
+
+    pbar.close()
+
+    df = pd.DataFrame(rows)
+    df = df.sort_values("accuracy", ascending=False).reset_index(drop=True)
+    return df
+
+
+def display_grid_results(
+    grid_df: pd.DataFrame,
+    grid_config: dict,
+    top_k: int = 5,
+) -> None:
+    """Display ranked table, marginal stats, and pairwise heatmaps.
+
+    Args:
+        grid_df: DataFrame from run_grid_search().
+        grid_config: Dict mapping field names to lists of variant values.
+        top_k: Number of top combos to highlight.
+    """
+    from IPython.display import display as ipy_display
+
+    axis_names = list(grid_config.keys())
+
+    # 1. Ranked table
+    print(f"\n{'=' * 70}")
+    print(f"GRID RESULTS — TOP {top_k}")
+    print(f"{'=' * 70}")
+    display_cols = axis_names + ["accuracy", "hits", "total", "errors"]
+    ipy_display(grid_df[display_cols].head(top_k))
+
+    # 2. Marginal stats
+    print(f"\n{'=' * 70}")
+    print("MARGINAL STATS (mean accuracy per axis value)")
+    print(f"{'=' * 70}")
+    for name in axis_names:
+        marginal = grid_df.groupby(name)["accuracy"].mean().sort_values(ascending=False)
+        print(f"\n  {name}:")
+        for idx, acc in marginal.items():
+            value = grid_config[name][idx]
+            label = value[:60] if value else "(empty)"
+            print(f"    [{idx}] {acc:.1%}  {label}")
+
+    # 3. Pairwise heatmaps
+    if len(axis_names) >= 2:
+        print(f"\n{'=' * 70}")
+        print("PAIRWISE INTERACTION HEATMAPS")
+        print(f"{'=' * 70}")
+        for i, name_a in enumerate(axis_names):
+            for name_b in axis_names[i + 1:]:
+                pivot = grid_df.pivot_table(
+                    values="accuracy",
+                    index=name_a,
+                    columns=name_b,
+                    aggfunc="mean",
+                )
+                print(f"\n  {name_a} vs {name_b}:")
+                styled = pivot.style.background_gradient(
+                    cmap="RdYlGn", vmin=0, vmax=1
+                ).format("{:.1%}")
+                ipy_display(styled)
+
+
+def select_grid_winner(
+    grid_df: pd.DataFrame,
+    ps_lookup: dict,
+) -> dict:
+    """Select the best-performing grid combination.
+
+    Args:
+        grid_df: DataFrame from run_grid_search() (sorted by accuracy desc).
+        ps_lookup: Dict mapping ps_id -> PromptState.
+
+    Returns:
+        Campaign round entry dict with keys: round, label, prompt_state,
+        accuracy, hits, total, results.
+    """
+    best_row = grid_df.iloc[0]
+    ps_id = best_row["prompt_state_id"]
+    ps = ps_lookup[ps_id]
+
+    print(f"Grid winner: {ps.changes_description or ps_id[:12]}")
+    print(f"  Accuracy: {best_row['accuracy']:.1%} ({best_row['hits']}/{best_row['total']})")
+    print(f"  PromptState: {ps_id[:12]}")
+
+    return {
+        "round": "grid",
+        "label": f"grid_winner ({ps.changes_description or ps_id[:12]})",
+        "prompt_state": ps,
+        "accuracy": best_row["accuracy"],
+        "hits": int(best_row["hits"]),
+        "total": int(best_row["total"]),
+        "results": [],  # full results not stored per-combo
+    }
+
+
+async def analyze_grid_results(
+    grid_df: pd.DataFrame,
+    grid_config: dict,
+    eval_llm: dict,
+    api_key: str,
+) -> dict:
+    """LLM analysis of grid search results.
+
+    Args:
+        grid_df: DataFrame from run_grid_search().
+        grid_config: Dict mapping field names to lists of variant values.
+        eval_llm: Dict with model, provider_url, temperature, max_tokens.
+        api_key: API key for the LLM provider.
+
+    Returns:
+        Dict with keys: key_findings, strongest_fields, recommended_focus,
+        campaign_advice.
+    """
+    axis_names = list(grid_config.keys())
+
+    # Build summary for LLM
+    top_combos = grid_df.head(5).to_dict("records")
+    worst_combos = grid_df.tail(3).to_dict("records")
+
+    marginals = {}
+    for name in axis_names:
+        marginal = grid_df.groupby(name)["accuracy"].mean()
+        marginals[name] = {
+            int(idx): {
+                "accuracy": float(acc),
+                "label": grid_config[name][idx][:80] if grid_config[name][idx] else "(empty)",
+            }
+            for idx, acc in marginal.items()
+        }
+
+    analysis_prompt = (
+        "You are an optimization advisor. Analyze the results of a grid search "
+        "over prompt configuration fields.\n\n"
+        f"GRID AXES: {axis_names}\n"
+        f"TOTAL COMBINATIONS: {len(grid_df)}\n\n"
+        f"TOP 5 COMBINATIONS:\n{json.dumps(top_combos, indent=2, default=str)}\n\n"
+        f"WORST 3 COMBINATIONS:\n{json.dumps(worst_combos, indent=2, default=str)}\n\n"
+        f"MARGINAL STATS (mean accuracy per axis value):\n"
+        f"{json.dumps(marginals, indent=2, default=str)}\n\n"
+        "Return a JSON object with:\n"
+        '- "key_findings": array of 3-5 concise findings\n'
+        '- "strongest_fields": array of field names that matter most for accuracy\n'
+        '- "recommended_focus": which fields to prioritize in optimization\n'
+        '- "campaign_advice": 2-3 sentence advice for the optimization campaign'
+    )
+
+    async with httpx.AsyncClient() as http:
+        resp = await http.post(
+            eval_llm["provider_url"],
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": eval_llm["model"],
+                "messages": [{"role": "user", "content": analysis_prompt}],
+                "temperature": 0,
+                "max_tokens": 2000,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+        analysis = json.loads(resp.json()["choices"][0]["message"]["content"])
+
+    print(f"\n{'=' * 70}")
+    print("GRID ANALYSIS (LLM)")
+    print(f"{'=' * 70}")
+    for finding in analysis.get("key_findings", []):
+        print(f"  - {finding}")
+    print(f"\n  Strongest fields: {analysis.get('strongest_fields', [])}")
+    print(f"  Recommended focus: {analysis.get('recommended_focus', '')}")
+    print(f"  Advice: {analysis.get('campaign_advice', '')}")
+
+    return analysis
+
+
+def load_eval_dataset(
+    store: ProjectStore,
+    backend_id: str,
+    experiment_id: str,
+    query_limit: int = 0,
+) -> list:
+    """Load per-query evaluation data from synced experiments or replay cache.
+
+    Priority chain:
+    1. Traces — extract from synced experiment traces if available
+    2. Replay cache — load from existing execution's pipeline_data
+    3. Neither — print message and return empty list
+
+    Args:
+        store: ProjectStore instance.
+        backend_id: Backend identifier.
+        experiment_id: Experiment identifier.
+        query_limit: If >0, sample this many queries.
+
+    Returns:
+        List of query dicts with keys: query, ground_truth, pipeline_data
+        (containing entity_profile and token_matched_candidates).
+    """
+    # Try traces from synced experiment data
+    exp_data = store.load_sync(backend_id, f"experiments/{experiment_id}.json")
+    if exp_data:
+        traces = exp_data.get("traces", [])
+        if traces:
+            eval_data = []
+            for trace in traces:
+                pipeline_data = trace.get("pipeline_data", {})
+                if pipeline_data.get("entity_profile"):
+                    eval_data.append({
+                        "query": trace.get("query", ""),
+                        "ground_truth": trace.get("ground_truth", ""),
+                        "pipeline_data": pipeline_data,
+                        "status": "success",
+                    })
+            if eval_data:
+                if query_limit > 0 and len(eval_data) > query_limit:
+                    rng = random.Random(42)
+                    eval_data = rng.sample(eval_data, query_limit)
+                print(f"Loaded {len(eval_data)} eval queries from experiment traces")
+                return eval_data
+
+    # Try replay cache
+    executions = store.list_executions(backend_id)
+    for ex_summary in executions:
+        if ex_summary.get("experiment_id") == experiment_id:
+            execution = store.load_execution(backend_id, ex_summary["execution_id"])
+            if execution:
+                eval_data = [
+                    r.model_dump() for r in execution.results
+                    if r.status == "success"
+                    and r.pipeline_data
+                    and r.pipeline_data.get("entity_profile")
+                ]
+                if eval_data:
+                    if query_limit > 0 and len(eval_data) > query_limit:
+                        rng = random.Random(42)
+                        eval_data = rng.sample(eval_data, query_limit)
+                    print(
+                        f"Loaded {len(eval_data)} eval queries from replay cache "
+                        f"(execution {ex_summary['execution_id']})"
+                    )
+                    return eval_data
+
+    print(
+        "No eval data found. Run replay (Section 3) first or re-sync with "
+        "include_traces=true."
+    )
+    return []
 
 
 # ---------------------------------------------------------------------------

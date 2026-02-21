@@ -269,7 +269,7 @@ The DAG supports two operational modes:
 **Phase 1 — Linear Mode (0 cycles):**
 - Initialization --> Grow/Filter --> Analysis + Evaluation --> Output
 - No looping. The counter starts at 0 and the stop condition (counter >= 1) triggers immediately after the first pass.
-- Run N independent times with **breadth** (multiple parallel linear runs) instead of depth (iterative cycling).
+- Phase 1 breadth includes: (a) systematic grid search over Layer 1 fields using default axis library, with LLM input restructuring and result analysis, and (b) N random linear runs for further diversity. Grid search winner serves as an optional campaign starting seed.
 - This is the MVP implementation for M2.
 
 **Phase 2 — Cycling Mode (1+ cycles):**
