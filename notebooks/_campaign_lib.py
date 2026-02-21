@@ -90,37 +90,77 @@ def _make_llm_client(eval_llm: dict, api_key: str) -> LLMClientBase:
 # ---------------------------------------------------------------------------
 
 
-def init_services(
-    termnorm_url: str = "http://127.0.0.1:8000",
+async def init_services(
+    backend_url: str = "http://127.0.0.1:8000",
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
 ) -> dict:
     """Initialize store, client, and load experiment data.
 
-    Returns dict with keys: store, client, queries, terms, exp_data.
+    If experiment data is not in the project store, attempts an automatic
+    sync from the backend.  Connection errors are caught so the notebook
+    can still start (the user gets a clear message instead of a crash).
+
+    Returns dict with keys: store, client, queries, terms, exp_data,
+    backend_id, experiment_id.
     """
     project_root = Path(__file__).resolve().parent.parent
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
-    client = BackendClient(termnorm_url)
+    client = BackendClient(backend_url)
 
     if not store.get_backend(backend_id):
         store.register_backend(BackendConnection(
             id=backend_id, name="TermNorm Local",
-            backend_type="termnorm", base_url=termnorm_url,
+            backend_type="termnorm", base_url=backend_url,
         ))
 
     exp_data = store.load_sync(backend_id, f"experiments/{experiment_id}.json")
-    if not exp_data:
-        raise RuntimeError(
-            "No synced experiment data. "
-            "Run: await client.sync_experiments(store, backend_id)"
-        )
 
+    # Detect stale cache: data exists but has no traces
+    _has_traces = bool(
+        exp_data
+        and exp_data.get("runs")
+        and exp_data["runs"][0].get("traces")
+    )
+
+    # Auto-sync when experiment data is missing or lacks traces
+    if not exp_data or not _has_traces:
+        reason = "No cached experiment data" if not exp_data else "Cached data has no traces"
+        print(f"{reason} — syncing from {backend_url} ...")
+        try:
+            await client.sync_experiments(store, backend_id, include_traces=True)
+            exp_data = store.load_sync(
+                backend_id, f"experiments/{experiment_id}.json",
+            )
+        except Exception as exc:
+            print(f"Auto-sync failed ({exc}). Start the backend or sync manually.")
+
+    if not exp_data:
+        print(
+            "WARNING: No experiment data available. "
+            "Downstream cells will fail until data is synced."
+        )
+        return {
+            "store": store,
+            "client": client,
+            "queries": [],
+            "terms": [],
+            "exp_data": {},
+            "backend_id": backend_id,
+            "experiment_id": experiment_id,
+        }
+
+    mappings = exp_data.get("mappings", [])
     queries = client.extract_replay_queries(exp_data)
     terms = client.extract_session_terms(exp_data)
+    verified = sum(
+        1 for m in mappings
+        if m.get("dataset_entry", "").strip() not in ("", "--")
+    )
 
-    print(f"Experiment: {exp_data.get('experiment', {}).get('name', experiment_id)}")
-    print(f"Queries: {len(queries)}  |  Session terms: {len(terms)}")
+    print(f"Experiment : {exp_data.get('experiment', {}).get('name', experiment_id)}")
+    print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
+    print(f"Queries    : {len(queries)}  |  Session terms: {len(terms)}")
 
     return {
         "store": store,
@@ -128,6 +168,8 @@ def init_services(
         "queries": queries,
         "terms": terms,
         "exp_data": exp_data,
+        "backend_id": backend_id,
+        "experiment_id": experiment_id,
     }
 
 
@@ -746,8 +788,8 @@ def load_eval_dataset(
         print(f"Loaded {len(eval_data)} eval queries")
     else:
         print(
-            "No eval data found. Run replay (Section 3) first or re-sync with "
-            "include_traces=true."
+            "No eval data found. Re-sync with include_traces=true or run a "
+            "replay first."
         )
 
     return eval_data

@@ -348,50 +348,139 @@ class TestSelectGridWinner:
 
 
 class TestLoadEvalDataset:
-    def test_loads_from_traces(self, tmp_store):
+    @staticmethod
+    def _make_trace(query, bom_material, entity_profile, candidates=None):
+        """Build a single Langfuse-style trace dict."""
+        observations = [
+            {"name": "entity_profiling", "output": entity_profile},
+        ]
+        if candidates is not None:
+            observations.append(
+                {"name": "token_matching", "output": {"candidates": candidates}},
+            )
+        return {
+            "id": f"trace-{query}",
+            "input": {"query": query},
+            "output": {"target": "", "confidence": 0},
+            "observations": observations,
+        }
+
+    @staticmethod
+    def _make_mapping(bom_material, dataset_entry):
+        return {"bom_material": bom_material, "dataset_entry": dataset_entry}
+
+    def test_loads_from_run_traces(self, tmp_store):
+        """Langfuse-style runs[0].traces[] are parsed into eval data."""
         from api.models.backend import BackendConnection
         tmp_store.register_backend(BackendConnection(
             id="test", name="Test", backend_type="test", base_url="http://test",
         ))
-        tmp_store.save_sync("test", "experiments/exp1.json", {
-            "traces": [
-                {
-                    "query": "q1",
-                    "ground_truth": "gt1",
-                    "pipeline_data": {
-                        "entity_profile": {"core_concept": "c1"},
-                        "token_matched_candidates": ["gt1"],
-                    },
-                },
-                {
-                    "query": "q2",
-                    "ground_truth": "gt2",
-                    "pipeline_data": {},  # no entity_profile -> filtered out
-                },
-            ]
-        })
+
+        exp_data = {
+            "mappings": [
+                self._make_mapping("aspirin", "Acetylsalicylic acid"),
+                self._make_mapping("ibuprofen", "Ibuprofen"),
+                self._make_mapping("no_trace", "Paracetamol"),  # no matching trace
+            ],
+            "runs": [{
+                "traces": [
+                    self._make_trace(
+                        "aspirin/process1", "aspirin",
+                        {"core_concept": "aspirin analgesic"},
+                        [["Acetylsalicylic acid", 0.9], ["Aspirin", 0.4]],
+                    ),
+                    self._make_trace(
+                        "ibuprofen/process2", "ibuprofen",
+                        {"core_concept": "ibuprofen nsaid"},
+                        [["Ibuprofen", 0.8]],
+                    ),
+                ],
+            }],
+        }
+        tmp_store.save_sync("test", "experiments/exp1.json", exp_data)
 
         result = load_eval_dataset(tmp_store, "test", "exp1")
-        assert len(result) == 1
-        assert result[0]["query"] == "q1"
+        assert len(result) == 2
+        assert result[0]["query"] == "aspirin/process1"
+        assert result[0]["ground_truth"] == "Acetylsalicylic acid"
+        assert result[0]["pipeline_data"]["entity_profile"]["core_concept"] == "aspirin analgesic"
+        assert result[0]["pipeline_data"]["token_matched_candidates"] == [
+            ["Acetylsalicylic acid", 0.9], ["Aspirin", 0.4],
+        ]
+        assert result[1]["query"] == "ibuprofen/process2"
+        assert result[1]["ground_truth"] == "Ibuprofen"
+
+    def test_skips_traces_without_entity_profile(self, tmp_store):
+        """Traces missing entity_profiling observation are filtered out."""
+        from api.models.backend import BackendConnection
+        tmp_store.register_backend(BackendConnection(
+            id="test", name="Test", backend_type="test", base_url="http://test",
+        ))
+
+        exp_data = {
+            "mappings": [self._make_mapping("q1", "gt1")],
+            "runs": [{
+                "traces": [
+                    {
+                        "id": "trace-no-ep",
+                        "input": {"query": "q1"},
+                        "output": {},
+                        "observations": [
+                            {"name": "token_matching", "output": {"candidates": []}},
+                        ],
+                    },
+                ],
+            }],
+        }
+        tmp_store.save_sync("test", "experiments/exp1.json", exp_data)
+
+        result = load_eval_dataset(tmp_store, "test", "exp1")
+        assert len(result) == 0
+
+    def test_skips_traces_without_ground_truth(self, tmp_store):
+        """Traces whose bom_material has no mapping are skipped."""
+        from api.models.backend import BackendConnection
+        tmp_store.register_backend(BackendConnection(
+            id="test", name="Test", backend_type="test", base_url="http://test",
+        ))
+
+        exp_data = {
+            "mappings": [self._make_mapping("other_bom", "SomeGT")],
+            "runs": [{
+                "traces": [
+                    self._make_trace(
+                        "unknown_bom/process", "unknown_bom",
+                        {"core_concept": "unknown"},
+                    ),
+                ],
+            }],
+        }
+        tmp_store.save_sync("test", "experiments/exp1.json", exp_data)
+
+        result = load_eval_dataset(tmp_store, "test", "exp1")
+        assert len(result) == 0
 
     def test_query_limit(self, tmp_store):
         from api.models.backend import BackendConnection
         tmp_store.register_backend(BackendConnection(
             id="test", name="Test", backend_type="test", base_url="http://test",
         ))
+
+        mappings = [
+            self._make_mapping(f"bom{i}", f"gt{i}") for i in range(10)
+        ]
         traces = [
-            {
-                "query": f"q{i}",
-                "ground_truth": f"gt{i}",
-                "pipeline_data": {
-                    "entity_profile": {"core_concept": f"c{i}"},
-                    "token_matched_candidates": [f"gt{i}"],
-                },
-            }
+            self._make_trace(
+                f"bom{i}/proc", f"bom{i}",
+                {"core_concept": f"c{i}"},
+                [[f"gt{i}", 0.5]],
+            )
             for i in range(10)
         ]
-        tmp_store.save_sync("test", "experiments/exp1.json", {"traces": traces})
+        tmp_store.save_sync("test", "experiments/exp1.json", {
+            "mappings": mappings,
+            "runs": [{"traces": traces}],
+        })
 
         result = load_eval_dataset(tmp_store, "test", "exp1", query_limit=3)
         assert len(result) == 3

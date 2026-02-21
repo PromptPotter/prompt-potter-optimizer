@@ -32,15 +32,26 @@ class BackendClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def fetch_experiment(self, experiment_id: str) -> Dict[str, Any]:
+    async def fetch_experiment(
+        self, experiment_id: str, include_traces: bool = True,
+    ) -> Dict[str, Any]:
         """GET /experiments/{id}/mappings — returns full response verbatim.
 
         Uses the /mappings sub-endpoint which includes mappings, runs,
         and evaluation_results needed for replay.
+
+        Args:
+            experiment_id: Experiment identifier.
+            include_traces: When True, request Langfuse-style trace data
+                from the backend (pipeline observations per query).
         """
+        params: Dict[str, str] = {}
+        if include_traces:
+            params["include_traces"] = "true"
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.base_url}/experiments/{experiment_id}/mappings",
+                params=params,
                 timeout=self.timeout,
             )
             resp.raise_for_status()
@@ -83,7 +94,10 @@ class BackendClient:
 
     # -- high-level sync --------------------------------------------------
 
-    async def sync_experiments(self, store: "ProjectStore", backend_id: str) -> int:
+    async def sync_experiments(
+        self, store: "ProjectStore", backend_id: str,
+        include_traces: bool = True,
+    ) -> int:
         """Fetch all experiments and store verbatim. Returns count."""
         from api.services.project_store import ProjectStore  # avoid circular
 
@@ -94,17 +108,22 @@ class BackendClient:
         for exp in experiments:
             exp_id = exp.get("experiment_id", exp.get("id", ""))
             if exp_id:
-                detail = await self.fetch_experiment(exp_id)
+                detail = await self.fetch_experiment(
+                    exp_id, include_traces=include_traces,
+                )
                 store.save_sync(
                     backend_id, f"experiments/{exp_id}.json", detail
                 )
         return len(experiments)
 
     async def sync_experiment(
-        self, store: "ProjectStore", backend_id: str, experiment_id: str
+        self, store: "ProjectStore", backend_id: str, experiment_id: str,
+        include_traces: bool = True,
     ) -> Dict[str, Any]:
         """Fetch one experiment and store verbatim."""
-        detail = await self.fetch_experiment(experiment_id)
+        detail = await self.fetch_experiment(
+            experiment_id, include_traces=include_traces,
+        )
         store.save_sync(backend_id, f"experiments/{experiment_id}.json", detail)
         return detail
 
