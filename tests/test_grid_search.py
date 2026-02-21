@@ -1,19 +1,7 @@
-"""Tests for grid search functions in _campaign_lib.py."""
-import sys
-from pathlib import Path
-
+"""Tests for grid search functions (via api.services.grid_search)."""
 import pytest
 
-# Ensure project root is importable
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-# Ensure notebooks dir is importable for _campaign_lib
-_NOTEBOOKS_DIR = _PROJECT_ROOT / "notebooks"
-if str(_NOTEBOOKS_DIR) not in sys.path:
-    sys.path.insert(0, str(_NOTEBOOKS_DIR))
-
-from _campaign_lib import (
+from api.services.grid_search import (
     DEFAULT_GRID_AXES,
     GRID_SEARCHABLE_FIELDS,
     REQUIRED_TEMPLATE_VARS,

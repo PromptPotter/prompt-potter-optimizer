@@ -4,18 +4,28 @@
 
 ## How It Works
 
-PromptPotter connects to your backend (e.g. TermNorm), syncs experiment data, replays pipelines with different configurations, and computes statistical comparisons to find what works.
+PromptPotter connects to your backend (e.g. TermNorm), syncs experiment data, replays pipelines with different configurations, and runs optimization campaigns to systematically improve prompt accuracy.
 
 ```
 ┌─────────────────────┐         ┌─────────────────────┐
 │  Your Backend       │         │  PromptPotter        │
 │  (e.g. TermNorm)    │◄───────►│  Optimizer           │
 │                     │  sync   │                      │
-│  - Experiments      │  replay │  - Project store     │
-│  - Pipeline API     │  compare│  - Statistical tests │
+│  - Experiments      │  replay │  - Optimization      │
+│  - Pipeline API     │  compare│  - Grid search       │
 │  - Evaluation data  │         │  - Notebooks + API   │
 └─────────────────────┘         └──────────────────────┘
 ```
+
+### Optimization Campaign Workflow
+
+1. **Sync** experiment data from your backend
+2. **Replay** the pipeline to establish baseline accuracy
+3. **Explore** the prompt landscape with grid search over prompt component axes
+4. **Optimize** iteratively — generate candidates, evaluate, select winners
+5. **Analyze** results and apply LLM-generated improvement suggestions
+
+Prompts are structured into three optimization layers (see [3-Layer PromptState](#3-layer-promptstate)).
 
 **Works with:**
 - Any FastAPI backend with [Langfuse-compatible](https://langfuse.com/docs) logging
@@ -28,9 +38,12 @@ cd prompt-potter-optimizer
 pip install -r requirements.txt
 ```
 
-### Notebook (recommended)
+### Notebooks (recommended)
 
-Open `notebooks/termnorm_backend.ipynb` in Jupyter — register a backend, sync experiments, replay queries, compare variants. No server needed.
+Two notebooks cover the full workflow:
+
+- **`notebooks/termnorm_backend.ipynb`** — Exploration: register backend, sync experiments, replay queries, compare variants, diagnostics
+- **`notebooks/optimization_campaign.ipynb`** — Optimization: baseline evaluation, grid search, iterative HITL optimization, suggestions, save winners
 
 ### REST API
 
@@ -60,23 +73,63 @@ cd docker && docker-compose up --build
 - **JupyterLab**: http://localhost:8888
 - **FastAPI docs**: http://localhost:8001/docs
 
+## 3-Layer PromptState
+
+Prompts are organized into three optimization layers, each with different change frequency:
+
+| Layer | Name | Fields | When to change |
+|-------|------|--------|----------------|
+| **1** | Generate | `persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`, `few_shot_examples` | Every optimization pass |
+| **2** | Refine Context | `context`, `parameters` | When Layer 1 improvements stall |
+| **3** | Modify Plan | `plan` | Rarely — optimization strategy defaults |
+
+Each `PromptState` is immutable. `derive()` creates children, forming a lineage chain via `parent_id`. `render()` assembles Layer 1 fields into the final prompt string.
+
 ## Project Structure
 
 ```
-api/                  # FastAPI application
-├── routers/          #   backends, workflows, health
-├── services/         #   project_store, backend_client, comparison
-├── models/           #   backend, prompt_state, workflow
-├── nodes/            #   LLM, WebSearch, Ranker
-└── evaluators/       #   ExactMatch, Criteria (LLM-judge)
-notebooks/            # Interactive workflows (termnorm_backend.ipynb)
-scripts/              # Utilities (sync_termnorm_to_langfuse.py)
-workflows/            # CWL-inspired YAML definitions
-docker/               # Dockerfile, docker-compose
-├── apps/             #   Streamlit UIs (secrets_manager)
-└── launcher/         #   JupyterLab launcher config
-docs/                 # Design docs + formal specs
-tests/                # pytest suite
+api/                             # FastAPI application
+├── main.py                      # Entry point, router mounting
+├── config/settings.py           # Pydantic BaseSettings
+├── models/
+│   ├── backend.py               # BackendConnection, Execution, ExecutionResultItem
+│   ├── prompt_state.py          # PromptState (3-layer, immutable, versioned)
+│   └── workflow.py              # WorkflowDefinition, StepDefinition
+├── routers/
+│   ├── backends.py              # /backends/* — connect, sync, execute, compare
+│   ├── workflows.py             # /workflows/* — execute, evaluate
+│   └── health.py                # /health, /ready
+├── services/
+│   ├── prompt_eval.py           # Prompt evaluation (baseline, filter, batch eval)
+│   ├── prompt_optimizer.py      # Candidate generation, selection, suggestions
+│   ├── grid_search.py           # Grid search over prompt component axes
+│   ├── project_store.py         # File I/O for .promptpotter/projects/
+│   ├── backend_client.py        # HTTP client for backend APIs (TermNorm)
+│   ├── comparison.py            # Statistical comparison (hit@k, McNemar, Wilcoxon)
+│   ├── llm_client.py            # OpenAI/Anthropic/Groq abstraction
+│   └── langfuse_client.py       # Langfuse integration
+├── core/
+│   └── workflow_runner.py       # DAG execution engine
+├── nodes/                       # Composable workflow nodes (LLM, PipelineConfig, Ranker)
+└── evaluators/                  # ExactMatch, CriteriaEvaluator (LLM-judge)
+
+notebooks/
+├── termnorm_backend.ipynb       # Exploration: register → sync → replay → compare
+├── optimization_campaign.ipynb  # Optimization: eval → grid search → optimize → save
+└── _campaign_lib.py             # Notebook helper (thin wrapper over api/services/)
+
+docs/
+├── specs/                       # Formal specs (project-charter, PRD, ADD, WBS, roadmap)
+├── connectors/                  # Backend connector contracts (termnorm.md)
+├── user-guide.md                # Setup, workflows, configuration reference
+└── *.md                         # Design docs (registry-design, literature-review)
+
+tests/                           # pytest suite
+scripts/                         # Utilities (sync_termnorm_to_langfuse.py)
+workflows/examples/              # CWL-inspired YAML workflow definitions
+docker/                          # Dockerfile, docker-compose
+├── apps/                        # Streamlit UIs (secrets_manager)
+└── launcher/                    # JupyterLab launcher config
 ```
 
 ## Configuration
@@ -96,7 +149,7 @@ Edit `.env` (see `.env.example`):
 
 ## Documentation
 
-- `docs/architecture.md` — Design patterns
+- `docs/user-guide.md` — Setup, optimization workflow, configuration
 - `docs/registry-design.md` — Optimization tracking (MLflow/DSPy style)
 - `docs/specs/` — Formal specs (charter, PRD, ADD, WBS, roadmap)
 
