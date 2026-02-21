@@ -50,6 +50,22 @@ GRID_SEARCHABLE_FIELDS = {
     "instruction", "thinking_style", "answer_format",
 }
 
+EXPLORATION_PRESETS: Dict[str, Dict[str, List[str]]] = {
+    "conservative": {
+        "persona": ["", "You are a domain expert with deep knowledge of this field."],
+        "thinking_style": ["", "Think step by step."],
+    },
+    "balanced": dict(DEFAULT_GRID_AXES),
+    "exploration": {
+        **DEFAULT_GRID_AXES,
+        "problem_description": [
+            "",
+            "This is a terminology matching task requiring domain expertise.",
+            "Match informal descriptions to standardized catalog terms.",
+        ],
+    },
+}
+
 REQUIRED_TEMPLATE_VARS = {"{{core_concept}}", "{{entity_profile_json}}", "{{matches}}"}
 
 
@@ -169,6 +185,7 @@ async def restructure_context(
     context_input: Any,
     llm_client: LLMClientBase,
     model: Optional[str] = None,
+    improvement_areas: str = "",
 ) -> dict:
     """LLM-assisted restructuring of user context into Layer 1 fields.
 
@@ -177,9 +194,14 @@ async def restructure_context(
             Layer 1 fields.
         llm_client: LLM client implementing LLMClientBase.
         model: Model identifier (uses client default if None).
+        improvement_areas: Optional domain-expert observations about where
+            improvement is most likely (e.g. "profile schema quality, web
+            search relevance"). When non-empty, the LLM also returns a
+            ``consultation`` key with strategic advice.
 
     Returns:
-        Dict of structured Layer 1 field values.
+        Dict of structured Layer 1 field values, plus a ``consultation``
+        string when improvement_areas is provided.
     """
     if isinstance(context_input, dict):
         user_content = (
@@ -194,20 +216,46 @@ async def restructure_context(
             f"Context:\n{context_input}"
         )
 
-    system_prompt = (
-        "You are a prompt engineering assistant. Your job is to structure "
-        "user-provided context into Layer 1 prompt fields for an optimization "
-        "campaign.\n\n"
+    if improvement_areas:
+        user_content += (
+            "\n\nThe user has identified the following areas where improvement "
+            "is most likely:\n"
+            f"{improvement_areas}\n\n"
+            "Take these observations into account when structuring the fields "
+            "and provide strategic advice in the consultation field."
+        )
+
+    layer1_keys_description = (
         "Layer 1 fields:\n"
         "- persona: Who the LLM should act as (e.g., 'You are a domain expert...')\n"
         "- task_intent: What the prompt needs to accomplish\n"
         "- problem_description: Description of the problem domain\n"
         "- instruction: Core instruction text (may contain template variables)\n"
         "- thinking_style: How to reason (e.g., 'Think step by step')\n"
-        "- answer_format: Expected output format\n\n"
-        "Return a JSON object with exactly these keys. Use empty string for "
-        "fields that don't apply. Be concise and actionable."
+        "- answer_format: Expected output format\n"
     )
+
+    if improvement_areas:
+        system_prompt = (
+            "You are a prompt engineering assistant. Your job is to structure "
+            "user-provided context into Layer 1 prompt fields for an optimization "
+            "campaign.\n\n"
+            f"{layer1_keys_description}\n"
+            "Return a JSON object with these keys plus a \"consultation\" key. "
+            "The consultation value should be a natural-language paragraph of "
+            "strategic advice on how to approach optimization given the user's "
+            "identified improvement areas. Use empty string for Layer 1 fields "
+            "that don't apply. Be concise and actionable."
+        )
+    else:
+        system_prompt = (
+            "You are a prompt engineering assistant. Your job is to structure "
+            "user-provided context into Layer 1 prompt fields for an optimization "
+            "campaign.\n\n"
+            f"{layer1_keys_description}\n"
+            "Return a JSON object with exactly these keys. Use empty string for "
+            "fields that don't apply. Be concise and actionable."
+        )
 
     response = await llm_client.chat(
         messages=[
@@ -224,6 +272,9 @@ async def restructure_context(
     for key in ("persona", "task_intent", "problem_description",
                 "instruction", "thinking_style", "answer_format"):
         result.setdefault(key, "")
+
+    if improvement_areas:
+        result.setdefault("consultation", "")
 
     return result
 

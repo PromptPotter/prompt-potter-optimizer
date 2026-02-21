@@ -105,7 +105,7 @@ workflows/examples/              # CWL-inspired YAML workflow definitions
 
 - **`prompt_eval`** — `extract_baseline_prompt()`, `filter_eval_data()`, `local_reranker_eval()`, `evaluate_prompt_batch()`, `compute_accuracy()`. All LLM calls use `LLMClientBase`.
 - **`prompt_optimizer`** — `generate_candidates()`, `select_round_winner()`, `generate_suggestions()`, `save_campaign_winner()`. All LLM calls use `LLMClientBase`.
-- **`grid_search`** — `validate_grid_config()`, `build_grid_combinations()`, `restructure_context()`, `run_grid_search()`, `analyze_grid_results()`, `select_grid_winner()`, `load_eval_dataset()`. Constants: `DEFAULT_GRID_AXES`, `GRID_SEARCHABLE_FIELDS`, `REQUIRED_TEMPLATE_VARS`.
+- **`grid_search`** — `validate_grid_config()`, `build_grid_combinations()`, `restructure_context()`, `run_grid_search()`, `analyze_grid_results()`, `select_grid_winner()`, `load_eval_dataset()`. Constants: `DEFAULT_GRID_AXES`, `EXPLORATION_PRESETS` (conservative/balanced/exploration strategy modes), `GRID_SEARCHABLE_FIELDS`, `REQUIRED_TEMPLATE_VARS`. `restructure_context()` accepts optional `improvement_areas` for domain-expert guidance and returns a `consultation` key with strategic advice.
 - **`_campaign_lib.py`** — Thin notebook-facing wrapper over the services above. Adds tqdm, print, IPython.display. Preserves legacy `(eval_llm, api_key)` signatures via `_make_llm_client()` adapter.
 
 ## Configuration

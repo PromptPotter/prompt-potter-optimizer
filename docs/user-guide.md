@@ -107,6 +107,31 @@ DEFAULT_GRID_AXES = {
 }
 ```
 
+### Exploration Strategy
+
+Controls how broadly the grid search explores the prompt space — analogous to a learning rate:
+
+| Strategy | Axes | Combos | When to use |
+|----------|------|--------|-------------|
+| `conservative` (1) | 2 (persona, thinking_style) | 4 | Quick sanity check, limited API budget |
+| `balanced` (2) | 4 (persona, task_intent, thinking_style, answer_format) | 96 | Default — good coverage vs cost trade-off |
+| `exploration` (3) | 5 (balanced + problem_description) | 288 | New domain, unknown which fields matter |
+
+Set in the notebook's Section 2.5:
+```python
+exploration_strategy = 2  # 1=conservative, 2=balanced, 3=exploration
+```
+
+### Improvement Areas
+
+Domain expert guidance injected into the LLM consultant during context restructuring (cell 4.5a). Describe where you believe improvement is most likely:
+
+```python
+improvement_areas = "profile schema quality, web search relevance"
+```
+
+When set, `restructure_context()` returns a `consultation` key with natural-language strategic advice tailored to your observations.
+
 ### Custom Grid
 
 Override any axis or add new ones from `GRID_SEARCHABLE_FIELDS`:

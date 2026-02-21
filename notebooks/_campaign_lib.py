@@ -41,6 +41,7 @@ from api.services.prompt_optimizer import (
 )
 from api.services.grid_search import (
     DEFAULT_GRID_AXES,
+    EXPLORATION_PRESETS,
     GRID_SEARCHABLE_FIELDS,
     REQUIRED_TEMPLATE_VARS,
     validate_grid_config as _validate_grid_config,
@@ -55,6 +56,7 @@ from api.services.grid_search import (
 # Re-export constants for notebooks
 __all__ = [
     "DEFAULT_GRID_AXES",
+    "EXPLORATION_PRESETS",
     "GRID_SEARCHABLE_FIELDS",
     "REQUIRED_TEMPLATE_VARS",
 ]
@@ -624,16 +626,24 @@ async def restructure_context(
     context_input,
     eval_llm: dict,
     api_key: str,
+    improvement_areas: str = "",
 ) -> dict:
     """LLM-assisted restructuring of user context into Layer 1 fields."""
     client = _make_llm_client(eval_llm, api_key)
-    result = await _restructure_context(context_input, client, model=eval_llm.get("model"))
+    result = await _restructure_context(
+        context_input, client,
+        model=eval_llm.get("model"),
+        improvement_areas=improvement_areas,
+    )
 
     mode = "validate" if isinstance(context_input, dict) else "parse"
     print(f"Context restructured ({mode} mode):")
     for k, v in result.items():
         if k in GRID_SEARCHABLE_FIELDS and v:
             print(f"  {k}: {v[:80]}{'...' if len(v) > 80 else ''}")
+
+    if result.get("consultation"):
+        print(f"\nConsultation:\n  {result['consultation']}")
 
     return result
 

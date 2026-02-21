@@ -8,6 +8,7 @@ from api.models.prompt_state import PromptState
 from api.services.llm_client import MockLLMClient
 from api.services.grid_search import (
     DEFAULT_GRID_AXES,
+    EXPLORATION_PRESETS,
     GRID_SEARCHABLE_FIELDS,
     validate_grid_config,
     build_grid_combinations,
@@ -82,6 +83,53 @@ class TestDefaultGridAxes:
         for key, values in DEFAULT_GRID_AXES.items():
             for v in values:
                 assert isinstance(v, str)
+
+
+# ---------------------------------------------------------------------------
+# EXPLORATION_PRESETS
+# ---------------------------------------------------------------------------
+
+
+class TestExplorationPresets:
+    def test_all_presets_have_valid_fields(self):
+        for name, axes in EXPLORATION_PRESETS.items():
+            invalid = set(axes.keys()) - GRID_SEARCHABLE_FIELDS
+            assert not invalid, f"Preset '{name}' has invalid fields: {invalid}"
+
+    def test_conservative_is_subset(self):
+        conservative_axes = set(EXPLORATION_PRESETS["conservative"].keys())
+        balanced_axes = set(EXPLORATION_PRESETS["balanced"].keys())
+        assert conservative_axes < balanced_axes, (
+            "Conservative should have strictly fewer axes than balanced"
+        )
+
+    def test_balanced_matches_defaults(self):
+        assert set(EXPLORATION_PRESETS["balanced"].keys()) == set(DEFAULT_GRID_AXES.keys())
+
+    def test_exploration_is_superset(self):
+        balanced_axes = set(EXPLORATION_PRESETS["balanced"].keys())
+        exploration_axes = set(EXPLORATION_PRESETS["exploration"].keys())
+        assert balanced_axes <= exploration_axes
+
+    def test_each_preset_has_empty_variant(self):
+        for name, axes in EXPLORATION_PRESETS.items():
+            for field, values in axes.items():
+                assert "" in values, (
+                    f"Preset '{name}', field '{field}' missing empty variant"
+                )
+
+    def test_combo_counts(self):
+        """Verify expected combo counts for each preset."""
+        for name, axes in EXPLORATION_PRESETS.items():
+            total = 1
+            for values in axes.values():
+                total *= len(values)
+            if name == "conservative":
+                assert total == 4
+            elif name == "balanced":
+                assert total == 96
+            elif name == "exploration":
+                assert total == 288
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +283,41 @@ class TestRestructureContext:
         # Should have all 6 keys even if LLM only returned one
         assert "thinking_style" in result
         assert result["thinking_style"] == ""
+
+    @pytest.mark.asyncio
+    async def test_with_improvement_areas(self):
+        mock_resp = json.dumps({
+            "persona": "Domain expert",
+            "task_intent": "Rank candidates",
+            "problem_description": "Term normalization",
+            "instruction": "Rank them",
+            "thinking_style": "Step by step",
+            "answer_format": "JSON",
+            "consultation": "Focus on improving entity profile schema coverage.",
+        })
+        client = MockLLMClient(responses=[mock_resp])
+        result = await restructure_context(
+            "normalize terms", client,
+            improvement_areas="profile schema quality, web search relevance",
+        )
+        assert "consultation" in result
+        assert result["consultation"] == "Focus on improving entity profile schema coverage."
+        # Layer 1 fields still present
+        assert result["persona"] == "Domain expert"
+
+    @pytest.mark.asyncio
+    async def test_without_improvement_areas_no_consultation(self):
+        mock_resp = json.dumps({
+            "persona": "Expert",
+            "task_intent": "Rank",
+            "problem_description": "",
+            "instruction": "",
+            "thinking_style": "",
+            "answer_format": "",
+        })
+        client = MockLLMClient(responses=[mock_resp])
+        result = await restructure_context("test", client)
+        assert "consultation" not in result
 
 
 # ---------------------------------------------------------------------------
