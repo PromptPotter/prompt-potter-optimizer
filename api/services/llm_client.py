@@ -4,12 +4,15 @@ LLM client abstraction layer.
 Provides a unified interface for OpenAI and Anthropic APIs,
 with support for chat completions, JSON mode, and token tracking.
 """
+import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Literal
 from pydantic import BaseModel, Field
 import json
 
 from api.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLMResponse(BaseModel):
@@ -110,7 +113,7 @@ class OpenAIClient(LLMClientBase):
             try:
                 parsed = json.loads(content)
             except json.JSONDecodeError:
-                pass
+                logger.debug("OpenAI response not valid JSON: %s", content[:200])
 
         return LLMResponse(
             content=content,
@@ -187,7 +190,7 @@ class GroqClient(LLMClientBase):
             try:
                 parsed = json.loads(content)
             except json.JSONDecodeError:
-                pass
+                logger.debug("Groq response not valid JSON: %s", content[:200])
 
         return LLMResponse(
             content=content,
@@ -275,7 +278,7 @@ class AnthropicClient(LLMClientBase):
             try:
                 parsed = json.loads(content)
             except json.JSONDecodeError:
-                pass
+                logger.debug("Anthropic response not valid JSON: %s", content[:200])
 
         return LLMResponse(
             content=content,
@@ -320,7 +323,7 @@ class MockLLMClient(LLMClientBase):
             try:
                 parsed = json.loads(content)
             except json.JSONDecodeError:
-                pass
+                logger.debug("Mock response not valid JSON: %s", content[:200])
 
         return LLMResponse(
             content=content,

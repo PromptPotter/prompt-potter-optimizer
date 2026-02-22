@@ -327,13 +327,9 @@ PromptPotter                              TermNorm
 
 This replaces any hardcoded knowledge of TermNorm's pipeline structure (step count, parameter names, defaults) with runtime discovery. New parameters added to TermNorm are automatically available to PromptPotter without code changes.
 
-### Evaluation Modes
+### Evaluation Mode
 
-PromptPotter supports two evaluation modes for scoring prompt candidates. The choice depends on whether the TermNorm backend is running and whether accurate intermediate pipeline data (web search results, token match candidates) matters for the evaluation.
-
-#### Backend Evaluation (Primary)
-
-The backend runs the **full pipeline** for every query: web search → LLM1 (entity profiling) → token matching (database) → LLM2 (reranking with candidate prompt). PromptPotter passes the candidate prompt via the `ranking_prompt` parameter.
+All evaluation (grid search and optimization campaigns) runs via the TermNorm backend. The backend runs the **full pipeline** for every query: web search → LLM1 (entity profiling) → token matching (database) → LLM2 (reranking with candidate prompt). PromptPotter passes the candidate prompt via the `ranking_prompt` parameter.
 
 ```
 PromptPotter grid_search.py
@@ -347,28 +343,9 @@ PromptPotter grid_search.py
          └─ LLM2 reranking with ranking_prompt (only step that varies)
 ```
 
-**When to use:** Grid search and optimization campaigns. Required because the token matching step needs the backend's loaded database — this cannot be replicated locally.
-
 **Cost:** ~10-30s per query (web search + LLM1 + token matching + LLM2). For 35 queries × 34 combos = ~1,190 calls.
 
 **Crash protection:** Incremental writes to `.partial.jsonl` after each query. On restart, resumes from last completed query. Completed combos are cached via content-addressed hashing and skipped on re-run.
-
-#### Local Evaluation (Fallback)
-
-Reuses cached `pipeline_data` from a prior replay (entity_profile + token_matched_candidates) and only runs the LLM2 reranker locally via Groq/OpenAI. The intermediate pipeline data is **stale** — it comes from whatever prompt was used during the original replay, not the candidate prompt.
-
-```python
-# Access cached pipeline intermediates from a stored execution
-for result in execution.results:
-    profile = result.pipeline_data.get("entity_profile", {})
-    candidates = result.pipeline_data.get("token_matched_candidates", [])
-```
-
-**When to use:** Quick iteration when the backend is not available, or when the intermediate pipeline steps (web search, token matching) don't vary significantly between prompt candidates. Useful for rapid prototyping.
-
-**Cost:** ~2s per query (LLM call only).
-
-**Limitation:** Uses stale pipeline data — the entity profile and token match candidates were computed with a different prompt, so they may not reflect what the backend would produce with the candidate prompt. The accuracy numbers are **approximations**, not ground truth.
 
 ### Future Optimization: `/rerank` Endpoint
 

@@ -454,20 +454,13 @@ Optimized prompt versions are written back to TermNorm's prompt registry as new 
 
 Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). LCA dataset validation follows when deploying to real-world use. MedMentions 500-term subset serves as an additional biomedical benchmark.
 
-### Evaluation Modes
+### Evaluation Mode
 
-Grid search and optimization evaluate candidate prompts against the evaluation dataset. Two evaluation modes exist, each with distinct tradeoffs (see [TermNorm connector docs](../connectors/termnorm.md#evaluation-modes) for protocol details):
+Grid search and optimization evaluate candidate prompts against the evaluation dataset via the TermNorm backend (see [TermNorm connector docs](../connectors/termnorm.md#evaluation-mode) for protocol details). Each query runs the **full pipeline** via `/matches` with a `ranking_prompt` override: web search → LLM1 → token matching (DB) → LLM2. This gives ground truth accuracy with fresh intermediate data per query (~10-30s/query).
 
-| Mode | What runs | Per-query latency | Accuracy | When to use |
-|------|-----------|-------------------|----------|-------------|
-| **Backend evaluation** | Full pipeline via `/matches` with `ranking_prompt` override: web search → LLM1 → token matching (DB) → LLM2 | ~10-30s | Ground truth — fresh intermediate data per query | Grid search, optimization campaigns (primary) |
-| **Local evaluation** | Cached `pipeline_data` from prior replay + local LLM2 reranker call | ~2s | Approximate — stale intermediate data | Quick iteration, backend unavailable (fallback) |
+**Redundancy:** For grid search, only the `ranking_prompt` (LLM2) varies between combos. Steps 1-3 (web search → LLM1 → token matching) produce identical results for the same query regardless of the ranking prompt. A future `/rerank` endpoint on TermNorm (see [connector docs](../connectors/termnorm.md#future-optimization-rerank-endpoint)) would eliminate this redundancy by accepting pre-computed intermediates and only running LLM2.
 
-**Why backend evaluation is primary:** The token matching step queries TermNorm's loaded database — this cannot be replicated locally. Local evaluation reuses stale `entity_profile` and `token_matched_candidates` from a previous replay, which may not reflect what the backend would produce for a different prompt. Backend evaluation is slower but gives accurate end-to-end pipeline results.
-
-**Redundancy in backend mode:** For grid search, only the `ranking_prompt` (LLM2) varies between combos. Steps 1-3 (web search → LLM1 → token matching) produce identical results for the same query regardless of the ranking prompt. A future `/rerank` endpoint on TermNorm (see [connector docs](../connectors/termnorm.md#future-optimization-rerank-endpoint)) would eliminate this redundancy by accepting pre-computed intermediates and only running LLM2.
-
-Both modes share the same infrastructure for crash protection: incremental writes to `.partial.jsonl` after each query, content-addressed caching of completed combos, and partial-run resume on restart.
+Crash protection infrastructure: incremental writes to `.partial.jsonl` after each query, content-addressed caching of completed combos, and partial-run resume on restart.
 
 ### Ablation Comparison (Generalized Pattern)
 

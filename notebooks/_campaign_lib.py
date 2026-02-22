@@ -3,8 +3,6 @@
 Thin notebook-facing layer that delegates to ``api.services`` for core logic
 and adds tqdm progress bars, print statements, and IPython display for
 interactive notebook use.
-
-All existing function signatures are preserved for backward compatibility.
 """
 
 import json
@@ -30,7 +28,7 @@ from api.services.project_store import ProjectStore
 from api.services.prompt_eval import (
     extract_baseline_prompt,
     filter_eval_data as _filter_eval_data,
-    local_reranker_eval as _local_reranker_eval,
+    backend_reranker_eval as _backend_reranker_eval,
     evaluate_prompt_batch,
     compute_accuracy,
     eval_cache_key,
@@ -437,22 +435,6 @@ def filter_eval_data(replay_results: list) -> list:
     return eval_data
 
 
-async def local_reranker_eval(
-    prompt_template: str,
-    query_data: dict,
-    eval_llm: dict,
-    api_key: str,
-) -> dict:
-    """Evaluate a reranker prompt on a single query using cached pipeline data."""
-    client = _make_llm_client(eval_llm, api_key)
-    return await _local_reranker_eval(
-        prompt_template, query_data, client,
-        model=eval_llm.get("model"),
-        temperature=eval_llm.get("temperature", 0.1),
-        max_tokens=eval_llm.get("max_tokens", 4096),
-    )
-
-
 async def evaluate_prompt(
     prompt_state: PromptState,
     eval_data: list,
@@ -464,8 +446,10 @@ async def evaluate_prompt(
     store: "ProjectStore | None" = None,
     backend_id: str = "",
     force: bool = False,
+    backend_client=None,
+    pipeline_params: "dict | None" = None,
 ) -> list:
-    """Evaluate a prompt on all eval_data with progress bar.
+    """Evaluate a prompt on all eval_data via the backend with progress bar.
 
     Args:
         store: If provided, enables caching via ProjectStore dataset_runs.
@@ -473,7 +457,16 @@ async def evaluate_prompt(
             protection and partial-run resume.
         backend_id: Required when store is provided.
         force: Skip cache lookup and re-evaluate (overwrites existing cache).
+        backend_client: BackendClient for evaluation via /matches endpoint.
+            Required — raises ValueError if not provided.
+        pipeline_params: Optional pipeline parameter overrides.
     """
+    if backend_client is None:
+        raise ValueError(
+            "backend_client is required. Start the TermNorm backend and pass "
+            "svc.get('backend_client') from init_services()."
+        )
+
     rendered = prompt_state.render()
     model = eval_llm.get("model", "")
     temperature = eval_llm.get("temperature", 0.1)
@@ -513,8 +506,7 @@ async def evaluate_prompt(
         else:
             partial_results = []
 
-    # --- evaluate via LLM ---
-    client = _make_llm_client(eval_llm, api_key)
+    # --- evaluate via backend ---
     _pbar = tqdm(total=len(eval_data), desc=f"{label} eval", unit="query",
                  initial=len(partial_results))
 
@@ -536,10 +528,8 @@ async def evaluate_prompt(
         _pbar.update(1)
 
     new_results = await evaluate_prompt_batch(
-        prompt_state, remaining_data, client,
-        model=model,
-        temperature=temperature,
-        max_tokens=eval_llm.get("max_tokens", 4096),
+        prompt_state, remaining_data, backend_client,
+        pipeline_params=pipeline_params,
         on_result=on_result,
     )
     _pbar.close()
@@ -790,35 +780,30 @@ async def run_grid_search(
     session_terms: "list | None" = None,
     pipeline_params: "dict | None" = None,
 ) -> pd.DataFrame:
-    """Evaluate each grid combination on eval_data.
-
-    When ``backend_client`` is provided, evaluation is done via the backend's
-    ``/matches`` endpoint (full pipeline) instead of local LLM calls.
-    """
-    client = _make_llm_client(eval_llm, api_key)
-
-    mode = "backend" if backend_client else "local LLM"
-    pbar = tqdm(total=len(combinations), desc=f"Grid search ({mode})", unit="combo")
-
-    # Per-query progress bar (backend mode only — local LLM path has its own)
-    query_pbar = None
-    on_query_done = None
-    if backend_client:
-        query_pbar = tqdm(
-            total=len(eval_data), desc="  queries", unit="q", leave=False,
+    """Evaluate each grid combination on eval_data via the backend."""
+    if backend_client is None:
+        raise ValueError(
+            "backend_client is required. Start the TermNorm backend and pass "
+            "svc.get('backend_client') from init_services()."
         )
 
-        def on_query_done(combo_idx, qi, total_q, result):
-            tag = "HIT " if result["hit"] else "MISS"
-            done = qi + 1
-            tqdm.write(
-                f"    [{done}/{total_q}] {tag}  {result['query'][:50]:<50s} "
-                f"| pred: {result['predicted'][:35]:<35s} "
-                f"| gt: {result['ground_truth'][:35]}"
-            )
-            query_pbar.update(1)
-            if done >= total_q:  # combo finished, reset for next
-                query_pbar.reset()
+    pbar = tqdm(total=len(combinations), desc="Grid search (backend)", unit="combo")
+
+    query_pbar = tqdm(
+        total=len(eval_data), desc="  queries", unit="q", leave=False,
+    )
+
+    def on_query_done(combo_idx, qi, total_q, result):
+        tag = "HIT " if result["hit"] else "MISS"
+        done = qi + 1
+        tqdm.write(
+            f"    [{done}/{total_q}] {tag}  {result['query'][:50]:<50s} "
+            f"| pred: {result['predicted'][:35]:<35s} "
+            f"| gt: {result['ground_truth'][:35]}"
+        )
+        query_pbar.update(1)
+        if done >= total_q:  # combo finished, reset for next
+            query_pbar.reset()
 
     def on_combo_done(idx, row):
         tqdm.write(
@@ -828,22 +813,17 @@ async def run_grid_search(
         pbar.update(1)
 
     df = await _run_grid_search(
-        combinations, ps_lookup, eval_data, client,
-        model=eval_llm.get("model"),
-        temperature=eval_llm.get("temperature", 0.1),
-        max_tokens=eval_llm.get("max_tokens", 4096),
+        combinations, ps_lookup, eval_data, backend_client,
         on_combo_done=on_combo_done,
         on_query_done=on_query_done,
         request_delay=eval_llm.get("request_delay", 1.0),
         store=store,
         backend_id=backend_id,
-        backend_client=backend_client,
         session_terms=session_terms,
         pipeline_params=pipeline_params,
     )
     pbar.close()
-    if query_pbar is not None:
-        query_pbar.close()
+    query_pbar.close()
     return df
 
 
@@ -1127,6 +1107,8 @@ async def run_optimization_loop(
     backend_id: str = "",
     max_rounds: int = 10,
     patience: int = 3,
+    backend_client=None,
+    pipeline_params: "dict | None" = None,
 ) -> list:
     """Run optimization rounds until patience exhausted or max_rounds reached.
 
@@ -1145,6 +1127,8 @@ async def run_optimization_loop(
         backend_id: Backend identifier (required when store is provided).
         max_rounds: Hard cap on optimization rounds.
         patience: Rounds without improvement before auto-stop.
+        backend_client: BackendClient for evaluation via /matches endpoint.
+        pipeline_params: Optional pipeline parameter overrides.
 
     Returns:
         Updated campaign_rounds list.
@@ -1196,6 +1180,8 @@ async def run_optimization_loop(
                 label=f"Candidate {idx + 1}",
                 store=store,
                 backend_id=backend_id,
+                backend_client=backend_client,
+                pipeline_params=pipeline_params,
             )
 
         round_entry = select_round_winner(

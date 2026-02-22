@@ -40,21 +40,20 @@ def eval_data():
     return [{
         "query": "aspirin",
         "ground_truth": "Acetylsalicylic acid",
-        "status": "success",
-        "pipeline_data": {
-            "entity_profile": {"core_concept": "aspirin"},
-            "token_matched_candidates": ["Acetylsalicylic acid", "Ibuprofen"],
-        },
     }]
 
 
-@pytest.fixture
-def mock_hit():
-    return json.dumps({
-        "ranked_candidates": [
-            {"candidate": "Acetylsalicylic acid", "core_concept_score": 0.95}
-        ]
-    })
+def _make_backend_client(predicted="Acetylsalicylic acid"):
+    """Create an AsyncMock backend_client that returns a hit for the given predicted value."""
+    client = AsyncMock()
+    client.run_match.return_value = {
+        "data": {
+            "ranked_candidates": [
+                {"candidate": predicted, "core_concept_score": 0.95}
+            ]
+        }
+    }
+    return client
 
 
 def test_constants_wellformed():
@@ -126,21 +125,17 @@ async def test_restructure_context():
 
 
 @pytest.mark.asyncio
-async def test_run_grid_search_and_delay(baseline, eval_data, mock_hit):
+async def test_run_grid_search_backend(baseline, eval_data):
+    """Grid search evaluates combos via backend_client."""
     config = {"persona": ["", "Expert"]}
     combos, lookup, _ = build_grid_combinations(config, baseline)
-    client = MockLLMClient(responses=[mock_hit])
+    backend_client = _make_backend_client()
 
-    df = await run_grid_search(combos, lookup, eval_data, client, request_delay=0)
+    df = await run_grid_search(combos, lookup, eval_data, backend_client, request_delay=0)
     assert len(df) == 2
     assert "accuracy" in df.columns
-
-    # request_delay is passed through to evaluate_prompt_batch
-    with patch("api.services.grid_search.evaluate_prompt_batch", new_callable=AsyncMock) as mock_batch:
-        mock_batch.return_value = [{"hit": True, "error": None}]
-        await run_grid_search(combos, lookup, eval_data, client, request_delay=2.5)
-        for call in mock_batch.call_args_list:
-            assert call.kwargs["request_delay"] == 2.5
+    # 2 combos × 1 query each = 2 backend calls
+    assert backend_client.run_match.call_count == 2
 
 
 def test_select_grid_winner(baseline):
@@ -161,19 +156,19 @@ def test_select_grid_winner(baseline):
 
 
 @pytest.mark.asyncio
-async def test_grid_search_caches_and_reuses(baseline, eval_data, mock_hit, tmp_store):
-    """First run saves to cache; second run skips LLM calls entirely."""
+async def test_grid_search_caches_and_reuses(baseline, eval_data, tmp_store):
+    """First run saves to cache; second run skips backend calls entirely."""
     tmp_store.register_backend(BackendConnection(
         id="b1", name="Test", backend_type="test", base_url="http://test",
     ))
 
     config = {"persona": ["", "Expert"]}
     combos, lookup, _ = build_grid_combinations(config, baseline)
-    client = MockLLMClient(responses=[mock_hit])
+    backend_client = _make_backend_client()
 
     # First run — evaluates all combos and saves to cache
     df1 = await run_grid_search(
-        combos, lookup, eval_data, client,
+        combos, lookup, eval_data, backend_client,
         request_delay=0, store=tmp_store, backend_id="b1",
     )
     assert len(df1) == 2
@@ -181,15 +176,15 @@ async def test_grid_search_caches_and_reuses(baseline, eval_data, mock_hit, tmp_
     assert len(entries) == 2
 
     # Record call count after first run
-    calls_after_first = client._call_count
+    calls_after_first = backend_client.run_match.call_count
 
-    # Second run — should hit cache, no new LLM calls
+    # Second run — should hit cache, no new backend calls
     df2 = await run_grid_search(
-        combos, lookup, eval_data, client,
+        combos, lookup, eval_data, backend_client,
         request_delay=0, store=tmp_store, backend_id="b1",
     )
     assert len(df2) == 2
-    assert client._call_count == calls_after_first  # no new calls
+    assert backend_client.run_match.call_count == calls_after_first  # no new calls
 
     # Accuracy values should match between runs
     acc1 = df1.sort_values("prompt_state_id")["accuracy"].tolist()
@@ -198,7 +193,7 @@ async def test_grid_search_caches_and_reuses(baseline, eval_data, mock_hit, tmp_
 
 
 @pytest.mark.asyncio
-async def test_grid_search_resumes_partial(baseline, eval_data, mock_hit, tmp_store):
+async def test_grid_search_resumes_partial(baseline, eval_data, tmp_store):
     """Grid search resumes from a partial .jsonl instead of re-evaluating."""
     tmp_store.register_backend(BackendConnection(
         id="b1", name="Test", backend_type="test", base_url="http://test",
@@ -206,14 +201,14 @@ async def test_grid_search_resumes_partial(baseline, eval_data, mock_hit, tmp_st
 
     config = {"persona": ["", "Expert"]}
     combos, lookup, _ = build_grid_combinations(config, baseline)
-    client = MockLLMClient(responses=[mock_hit])
+    backend_client = _make_backend_client()
 
     # Pre-write a partial result for the first combo
     ps_first = lookup[combos[0][1]]
     rendered = ps_first.render()
     from api.services.prompt_eval import eval_cache_key
 
-    content_hash = eval_cache_key(rendered, eval_data, "", 0.1)
+    content_hash = eval_cache_key(rendered, eval_data, "", 0.0)
     run_id = f"grid_{content_hash[:8]}"
 
     # Write a partial file with the single eval_data item already done
@@ -222,22 +217,21 @@ async def test_grid_search_resumes_partial(baseline, eval_data, mock_hit, tmp_st
         "predicted": "Acetylsalicylic acid",
         "ground_truth": "Acetylsalicylic acid",
         "hit": True,
-        "confidence": 0.95,
         "error": None,
     }
     tmp_store.append_eval_item("b1", run_id, pre_result)
 
-    calls_before = client._call_count
+    calls_before = backend_client.run_match.call_count
 
     df = await run_grid_search(
-        combos, lookup, eval_data, client,
+        combos, lookup, eval_data, backend_client,
         request_delay=0, store=tmp_store, backend_id="b1",
     )
     assert len(df) == 2
 
-    # The first combo should have been resumed from partial (no LLM call for it).
-    # The second combo needs 1 LLM call (1 eval_data item).
-    assert client._call_count == calls_before + 1
+    # The first combo should have been resumed from partial (no backend call for it).
+    # The second combo needs 1 backend call (1 eval_data item).
+    assert backend_client.run_match.call_count == calls_before + 1
 
     # Partial file should be cleaned up after finalize
     partial_path = tmp_store._dataset_runs_dir("b1") / f"{run_id}.partial.jsonl"

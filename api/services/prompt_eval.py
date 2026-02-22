@@ -2,17 +2,15 @@
 Prompt evaluation service.
 
 Extracts baseline prompts from experiment data, filters evaluation datasets,
-and evaluates reranker prompts against cached pipeline data using LLMClientBase.
+and evaluates reranker prompts via the TermNorm backend's /matches endpoint.
 """
 import asyncio
 import hashlib
 import json
-import random
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from api.models.prompt_state import PromptState
-from api.services.llm_client import LLMClientBase
 
 
 def eval_cache_key(
@@ -128,151 +126,79 @@ def filter_eval_data(replay_results: list) -> list:
     ]
 
 
-def _render_reranker_input(
-    prompt_template: str,
+async def backend_reranker_eval(
     query_data: dict,
-) -> tuple:
-    """Render a reranker prompt for a single query.
-
-    Returns:
-        Tuple of (full_prompt, query, ground_truth).
-    """
-    pipeline = query_data["pipeline_data"]
-    entity_profile = pipeline["entity_profile"]
-    candidates = pipeline.get("token_matched_candidates", [])
-    ground_truth = query_data["ground_truth"]
-    query = query_data["query"]
-
-    core_concept = entity_profile.get("core_concept", "")
-    entity_profile_json = json.dumps(entity_profile, indent=2)
-
-    available = list(candidates[:20])
-    sample_size = min(len(available), 20)
-    sampled = random.sample(available, sample_size) if available else []
-    matches = "\n".join(
-        f"- {term}" if isinstance(term, str) else f"- {term[0]}"
-        for term in sampled
-    )
-
-    rendered = prompt_template.replace("{{core_concept}}", str(core_concept))
-    rendered = rendered.replace("{{entity_profile_json}}", entity_profile_json)
-    rendered = rendered.replace("{{matches}}", matches)
-
-    full_prompt = (
-        f"{rendered}\n\n"
-        "IMPORTANT: Return a valid JSON response matching this exact structure:\n"
-        "{\n"
-        '  "profile_summary": "Brief 1-2 sentence summary of the profile",\n'
-        '  "core_concept_description": '
-        '"What the core concept fundamentally is",\n'
-        '  "ranked_candidates": [\n'
-        "    {\n"
-        '      "candidate": "exact candidate string",\n'
-        '      "core_concept_score": 0.0,\n'
-        '      "spec_score": 0.0,\n'
-        '      "evaluation_reasoning": '
-        '"Brief explanation without quotes or backslashes",\n'
-        '      "key_match_factors": ["factor1", "factor2"],\n'
-        '      "spec_gaps": ["gap1", "gap2"]\n'
-        "    }\n"
-        "  ]\n"
-        "}\n\n"
-        "Ensure all strings are properly escaped and "
-        "avoid complex punctuation in reasoning."
-    )
-
-    return full_prompt, query, ground_truth
-
-
-async def local_reranker_eval(
-    prompt_template: str,
-    query_data: dict,
-    llm_client: LLMClientBase,
-    model: Optional[str] = None,
-    temperature: float = 0.1,
-    max_tokens: int = 4096,
+    backend_client,
+    rendered_prompt: str,
+    pipeline_params: Optional[dict] = None,
+    request_delay: float = 0,
 ) -> dict:
-    """Evaluate a reranker prompt on a single query using cached pipeline data.
+    """Evaluate a reranker prompt on a single query via the backend /matches endpoint.
 
     Args:
-        prompt_template: Prompt with ``{{core_concept}}``, ``{{entity_profile_json}}``,
-            ``{{matches}}`` placeholders.
-        query_data: Result dict with pipeline_data.entity_profile and
-            pipeline_data.token_matched_candidates.
-        llm_client: LLM client implementing LLMClientBase.
-        model: Model identifier (uses client default if None).
-        temperature: Sampling temperature.
-        max_tokens: Maximum response tokens.
+        query_data: Dict with ``query`` and ``ground_truth`` keys.
+        backend_client: BackendClient with ``run_match()`` method.
+        rendered_prompt: Fully rendered ranking prompt to pass as ``ranking_prompt``.
+        pipeline_params: Optional pipeline parameter overrides forwarded to
+            the backend's ``/matches`` endpoint.
+        request_delay: Seconds to sleep before the call (0 = no delay).
 
     Returns:
-        Dict with keys: query, predicted, ground_truth, hit, confidence, error.
+        Dict with keys: query, predicted, ground_truth, hit, error.
     """
-    full_prompt, query, ground_truth = _render_reranker_input(
-        prompt_template, query_data
-    )
+    query = query_data["query"]
+    ground_truth = query_data["ground_truth"]
 
     try:
-        response = await llm_client.chat(
-            messages=[{"role": "user", "content": full_prompt}],
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            output_format="json",
+        resp = await backend_client.run_match(
+            query,
+            skip_llm_ranking=False,
+            pipeline_params=pipeline_params,
+            ranking_prompt=rendered_prompt,
         )
-        parsed = response.parsed or json.loads(response.content)
-
-        ranked = parsed.get("ranked_candidates", [])
-        top = ranked[0] if ranked else {}
-        predicted = top.get("candidate", "NO_RESULT")
-        confidence = top.get(
-            "relevance_score", top.get("core_concept_score", 0)
+        data = resp.get("data", {})
+        ranked = data.get("ranked_candidates", [])
+        predicted = (
+            ranked[0].get("candidate", "NO_RESULT") if ranked else "NO_RESULT"
         )
-
         return {
             "query": query,
             "predicted": predicted,
             "ground_truth": ground_truth,
             "hit": predicted == ground_truth,
-            "confidence": confidence,
             "error": None,
         }
-    except Exception as e:
+    except Exception as exc:
         return {
             "query": query,
             "predicted": "ERROR",
             "ground_truth": ground_truth,
             "hit": False,
-            "confidence": 0,
-            "error": str(e),
+            "error": str(exc),
         }
 
 
 async def evaluate_prompt_batch(
     prompt_state: PromptState,
     eval_data: list,
-    llm_client: LLMClientBase,
-    model: Optional[str] = None,
-    temperature: float = 0.1,
-    max_tokens: int = 4096,
+    backend_client,
+    pipeline_params: Optional[dict] = None,
     on_result: Optional[Callable] = None,
     request_delay: float = 0,
 ) -> list:
-    """Evaluate a prompt on all eval_data queries.
+    """Evaluate a prompt on all eval_data queries via the backend.
 
     Args:
-        prompt_state: PromptState whose render() produces the template.
-        eval_data: List of query dicts with pipeline_data.
-        llm_client: LLM client implementing LLMClientBase.
-        model: Model identifier (uses client default if None).
-        temperature: Sampling temperature.
-        max_tokens: Maximum response tokens.
+        prompt_state: PromptState whose render() produces the ranking prompt.
+        eval_data: List of query dicts with ``query`` and ``ground_truth``.
+        backend_client: BackendClient with ``run_match()`` method.
+        pipeline_params: Optional pipeline parameter overrides.
         on_result: Optional callback ``(result, index, total)`` called after
             each query evaluation.
-        request_delay: Seconds to sleep between LLM calls (0 = no delay).
-            Useful for staying under API rate limits during grid search.
+        request_delay: Seconds to sleep between backend calls (0 = no delay).
 
     Returns:
-        List of result dicts from local_reranker_eval.
+        List of result dicts from backend_reranker_eval.
     """
     results = []
     rendered = prompt_state.render()
@@ -281,9 +207,9 @@ async def evaluate_prompt_batch(
         if request_delay > 0 and i > 0:
             await asyncio.sleep(request_delay)
 
-        result = await local_reranker_eval(
-            rendered, qd, llm_client,
-            model=model, temperature=temperature, max_tokens=max_tokens,
+        result = await backend_reranker_eval(
+            qd, backend_client, rendered,
+            pipeline_params=pipeline_params,
         )
         results.append(result)
 

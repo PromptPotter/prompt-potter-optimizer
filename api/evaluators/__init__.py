@@ -88,7 +88,7 @@ def list_evaluator_types() -> list[str]:
     Returns:
         List of evaluator type names
     """
-    return [k for k in _EVALUATOR_REGISTRY.keys() if not k.islower() or k == k.lower()]
+    return [k for k in _EVALUATOR_REGISTRY if not k.islower()]
 
 
 # Register built-in evaluators
