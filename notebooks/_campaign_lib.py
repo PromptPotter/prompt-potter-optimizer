@@ -35,6 +35,7 @@ from api.services.prompt_eval import (
     compute_accuracy,
     eval_cache_key,
     build_dataset_run_data,
+    make_incremental_writer,
 )
 from api.services.prompt_optimizer import (
     generate_candidates as _generate_candidates,
@@ -462,6 +463,8 @@ async def evaluate_prompt(
 
     Args:
         store: If provided, enables caching via ProjectStore dataset_runs.
+            Also enables incremental writes (.partial.jsonl) for crash
+            protection and partial-run resume.
         backend_id: Required when store is provided.
         force: Skip cache lookup and re-evaluate (overwrites existing cache).
     """
@@ -485,22 +488,49 @@ async def evaluate_prompt(
             )
             return results
 
+    # --- compute run_id for incremental writes ---
+    safe_label = label.lower().replace(" ", "_")
+    run_id = f"{safe_label}_{content_hash[:8]}"
+
+    # --- check for partial results (resume after crash) ---
+    partial_results = []
+    remaining_data = eval_data
+    if store and backend_id:
+        partial_results = store.load_partial_eval(backend_id, run_id)
+        if partial_results and len(partial_results) < len(eval_data):
+            skip = len(partial_results)
+            print(f"[resume] Found {skip}/{len(eval_data)} partial results, resuming...")
+            remaining_data = eval_data[skip:]
+        elif len(partial_results) >= len(eval_data):
+            # Partial file is complete — skip to finalize
+            remaining_data = []
+        else:
+            partial_results = []
+
     # --- evaluate via LLM ---
     client = _make_llm_client(eval_llm, api_key)
-    _pbar = tqdm(total=len(eval_data), desc=f"{label} eval", unit="query")
+    _pbar = tqdm(total=len(eval_data), desc=f"{label} eval", unit="query",
+                 initial=len(partial_results))
+
+    # Build incremental writer callback
+    _incremental_writer = None
+    if store and backend_id:
+        _incremental_writer = make_incremental_writer(store, backend_id, run_id)
 
     def on_result(result, index, total):
+        if _incremental_writer is not None:
+            _incremental_writer(result, index, total)
         if verbose:
             tag = "HIT " if result["hit"] else "MISS"
-            done = index + 1
+            done = len(partial_results) + index + 1
             tqdm.write(
-                f"[{done}/{total}] {tag}  {result['query'][:50]:<50s} "
+                f"[{done}/{len(eval_data)}] {tag}  {result['query'][:50]:<50s} "
                 f"| pred: {result['predicted'][:35]:<35s}"
             )
         _pbar.update(1)
 
-    results = await evaluate_prompt_batch(
-        prompt_state, eval_data, client,
+    new_results = await evaluate_prompt_batch(
+        prompt_state, remaining_data, client,
         model=model,
         temperature=temperature,
         max_tokens=eval_llm.get("max_tokens", 4096),
@@ -508,21 +538,20 @@ async def evaluate_prompt(
     )
     _pbar.close()
 
+    results = partial_results + new_results
     acc = compute_accuracy(results)
     print(
         f"\n{label}: {acc['hits']}/{acc['total']} ({acc['accuracy']:.1%})"
         f"  |  Errors: {acc['errors']}"
     )
 
-    # --- save to cache ---
+    # --- finalize: save complete run, delete .partial.jsonl ---
     if store and backend_id:
-        safe_label = label.lower().replace(" ", "_")
-        run_id = f"{safe_label}_{content_hash[:8]}"
         run_data = build_dataset_run_data(
             run_id, label, content_hash, prompt_state.id,
             rendered, model, temperature, acc, results,
         )
-        store.save_dataset_run(backend_id, run_id, run_data)
+        store.finalize_eval_run(backend_id, run_id, run_data)
         print(f"[cached] Saved {run_id}")
 
     return results
@@ -836,6 +865,90 @@ async def analyze_grid_results(
     return analysis
 
 
+def print_cache_summary(store: ProjectStore, backend_id: str) -> None:
+    """Print a summary table of completed and in-progress eval runs."""
+    completed = store.list_dataset_runs(backend_id)
+    partials = store.list_partial_evals(backend_id)
+
+    # Exclude partials whose run_id matches a completed run (already finalized)
+    completed_ids = {r["run_id"] for r in completed}
+    partials = [p for p in partials if p["run_id"] not in completed_ids]
+
+    if not completed and not partials:
+        print("Cache: empty (no eval runs yet)")
+        return
+
+    n_completed = len(completed)
+    n_partial = len(partials)
+    parts = []
+    if n_completed:
+        parts.append(f"{n_completed} completed run{'s' if n_completed != 1 else ''}")
+    if n_partial:
+        parts.append(f"{n_partial} in-progress")
+    print(f"Cache: {', '.join(parts)}")
+
+    # Build rows
+    rows = []
+    for r in completed:
+        scores = r.get("scores", {})
+        accuracy = scores.get("accuracy")
+        acc_str = f"{accuracy:.1%}" if accuracy is not None else "—"
+        model_str = r.get("model", "")
+        if len(model_str) > 25:
+            model_str = model_str[:22] + "..."
+        rows.append({
+            "run_id": r["run_id"],
+            "name": r.get("name", ""),
+            "model": model_str,
+            "temp": r.get("temperature", ""),
+            "accuracy": acc_str,
+            "queries": str(r.get("item_count", "?")),
+        })
+    for p in partials:
+        rows.append({
+            "run_id": p["run_id"],
+            "name": "(in-progress)",
+            "model": "",
+            "temp": "—",
+            "accuracy": "—",
+            "queries": f"{p['items']}/?",
+        })
+
+    if not rows:
+        return
+
+    # Determine which columns vary (only show columns that differ across rows)
+    vary_cols = []
+    for col in ["model", "temp"]:
+        vals = {r[col] for r in rows}
+        if len(vals) > 1:
+            vary_cols.append(col)
+
+    # Always-shown columns
+    header_cols = ["run_id", "name"] + vary_cols + ["accuracy", "queries"]
+
+    # Column widths
+    col_labels = {
+        "run_id": "run_id", "name": "name", "model": "model",
+        "temp": "temp", "accuracy": "accuracy", "queries": "queries",
+    }
+    widths = {}
+    for col in header_cols:
+        widths[col] = max(
+            len(col_labels[col]),
+            max((len(str(r[col])) for r in rows), default=0),
+        )
+
+    # Print header
+    header = "  " + "  ".join(col_labels[c].ljust(widths[c]) for c in header_cols)
+    print(header)
+
+    # Print rows
+    for r in rows:
+        line = "  " + "  ".join(str(r[c]).ljust(widths[c]) for c in header_cols)
+        print(line)
+
+
 def load_eval_dataset(
     store: ProjectStore,
     backend_id: str,
@@ -852,6 +965,8 @@ def load_eval_dataset(
             "No eval data found. Re-sync with include_traces=true or run a "
             "replay first."
         )
+
+    print_cache_summary(store, backend_id)
 
     return eval_data
 

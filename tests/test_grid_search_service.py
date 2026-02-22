@@ -170,6 +170,57 @@ async def test_grid_search_caches_and_reuses(baseline, eval_data, mock_hit, tmp_
     assert acc1 == acc2
 
 
+@pytest.mark.asyncio
+async def test_grid_search_resumes_partial(baseline, eval_data, mock_hit, tmp_store):
+    """Grid search resumes from a partial .jsonl instead of re-evaluating."""
+    tmp_store.register_backend(BackendConnection(
+        id="b1", name="Test", backend_type="test", base_url="http://test",
+    ))
+
+    config = {"persona": ["", "Expert"]}
+    combos, lookup = build_grid_combinations(config, baseline)
+    client = MockLLMClient(responses=[mock_hit])
+
+    # Pre-write a partial result for the first combo
+    ps_first = lookup[combos[0][1]]
+    rendered = ps_first.render()
+    from api.services.prompt_eval import eval_cache_key
+
+    content_hash = eval_cache_key(rendered, eval_data, "", 0.1)
+    run_id = f"grid_{content_hash[:8]}"
+
+    # Write a partial file with the single eval_data item already done
+    pre_result = {
+        "query": "aspirin",
+        "predicted": "Acetylsalicylic acid",
+        "ground_truth": "Acetylsalicylic acid",
+        "hit": True,
+        "confidence": 0.95,
+        "error": None,
+    }
+    tmp_store.append_eval_item("b1", run_id, pre_result)
+
+    calls_before = client._call_count
+
+    df = await run_grid_search(
+        combos, lookup, eval_data, client,
+        request_delay=0, store=tmp_store, backend_id="b1",
+    )
+    assert len(df) == 2
+
+    # The first combo should have been resumed from partial (no LLM call for it).
+    # The second combo needs 1 LLM call (1 eval_data item).
+    assert client._call_count == calls_before + 1
+
+    # Partial file should be cleaned up after finalize
+    partial_path = tmp_store._dataset_runs_dir("b1") / f"{run_id}.partial.jsonl"
+    assert not partial_path.exists()
+
+    # Both combos should be in the cache now
+    entries = tmp_store.list_dataset_runs("b1")
+    assert len(entries) == 2
+
+
 def test_load_eval_dataset(tmp_store):
     tmp_store.register_backend(BackendConnection(
         id="test", name="Test", backend_type="test", base_url="http://test",

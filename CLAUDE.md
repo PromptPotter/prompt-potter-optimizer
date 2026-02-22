@@ -82,6 +82,7 @@ workflows/examples/              # CWL-inspired YAML workflow definitions
     dataset_runs.json            # INDEX — eval run summaries (Langfuse naming)
     dataset_runs/
       {name}_{hash}.json         # DETAIL — full DatasetRun with DatasetRunItems
+      {run_id}.partial.jsonl      # In-progress eval (crash protection)
 ```
 
 ## Key Endpoints
@@ -106,10 +107,10 @@ workflows/examples/              # CWL-inspired YAML workflow definitions
 
 ## Key Services
 
-- **`prompt_eval`** — `extract_baseline_prompt()`, `filter_eval_data()`, `local_reranker_eval()`, `evaluate_prompt_batch()`, `compute_accuracy()`, `eval_cache_key()`, `build_dataset_run_data()`. All LLM calls use `LLMClientBase`. Cache utilities are shared by `_campaign_lib` and `grid_search`.
+- **`prompt_eval`** — `extract_baseline_prompt()`, `filter_eval_data()`, `local_reranker_eval()`, `evaluate_prompt_batch()`, `compute_accuracy()`, `eval_cache_key()`, `build_dataset_run_data()`, `make_incremental_writer()`. All LLM calls use `LLMClientBase`. Cache utilities are shared by `_campaign_lib` and `grid_search`. `make_incremental_writer(store, backend_id, run_id)` returns an `on_result` callback for per-query incremental writes to `.partial.jsonl`.
 - **`prompt_optimizer`** — `generate_candidates()`, `select_round_winner()`, `generate_suggestions()`, `save_campaign_winner()`. All LLM calls use `LLMClientBase`.
-- **`grid_search`** — `validate_grid_config()`, `build_grid_combinations()`, `restructure_context()`, `run_grid_search()`, `analyze_grid_results()`, `select_grid_winner()`, `load_eval_dataset()`. Constants: `DEFAULT_GRID_AXES`, `EXPLORATION_PRESETS` (conservative/balanced/exploration strategy modes), `GRID_SEARCHABLE_FIELDS`, `REQUIRED_TEMPLATE_VARS`. `restructure_context()` accepts optional `improvement_areas` for domain-expert guidance and returns a `consultation` key with strategic advice. `run_grid_search()` accepts optional `store`/`backend_id` for content-addressed per-combo caching via `dataset_runs/`.
-- **`_campaign_lib.py`** — Thin notebook-facing wrapper over the services above. Adds tqdm, print, IPython.display. Preserves legacy `(eval_llm, api_key)` signatures via `_make_llm_client()` adapter.
+- **`grid_search`** — `validate_grid_config()`, `build_grid_combinations()`, `restructure_context()`, `run_grid_search()`, `analyze_grid_results()`, `select_grid_winner()`, `load_eval_dataset()`. Constants: `DEFAULT_GRID_AXES`, `EXPLORATION_PRESETS` (conservative/balanced/exploration strategy modes), `GRID_SEARCHABLE_FIELDS`, `REQUIRED_TEMPLATE_VARS`. `restructure_context()` accepts optional `improvement_areas` for domain-expert guidance and returns a `consultation` key with strategic advice. `run_grid_search()` accepts optional `store`/`backend_id` for content-addressed per-combo caching via `dataset_runs/`, with per-query incremental writes and partial-run resume.
+- **`_campaign_lib.py`** — Thin notebook-facing wrapper over the services above. Adds tqdm, print, IPython.display. Preserves legacy `(eval_llm, api_key)` signatures via `_make_llm_client()` adapter. `evaluate_prompt()` supports incremental writes (crash protection) and partial-run resume via `store`/`backend_id` params.
 
 ## Configuration
 
@@ -148,12 +149,13 @@ ruff check api/ tests/
 - `tests/test_api.py` — FastAPI endpoint tests (health, readiness)
 - `tests/test_prompt_state.py` — PromptState immutability and lineage
 - `tests/test_incremental_writes.py` — ProjectStore append/finalize
+- `tests/test_project_store_evals.py` — Dataset runs caching + incremental eval writes
 - `tests/test_evaluators.py` — ExactMatch, CriteriaEvaluator, registry aliases
 - `tests/test_workflow_runner.py` — DAG sort, input resolution, execution
 - `tests/test_prompt_eval.py` — Baseline extraction, filter, batch eval, accuracy
 - `tests/test_prompt_optimizer.py` — Candidate generation, selection, suggestions, save
 - `tests/test_grid_search.py` — Grid validation, combinations (legacy import path)
-- `tests/test_grid_search_service.py` — Full grid search service tests (restructure, run, analyze)
+- `tests/test_grid_search_service.py` — Full grid search service tests (restructure, run, analyze, partial resume)
 
 **Fixtures** (`tests/conftest.py`): `mock_llm_client`, `tmp_store`, auto-reset Langfuse singleton.
 

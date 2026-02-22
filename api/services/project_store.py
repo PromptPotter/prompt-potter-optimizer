@@ -315,3 +315,58 @@ class ProjectStore:
             return []
         index = self._read_json(index_path)
         return index.get("dataset_runs", [])
+
+    # -- incremental eval writes ---------------------------------------------
+
+    def append_eval_item(
+        self, backend_id: str, run_id: str, item: dict
+    ) -> Path:
+        """Append one eval result to an in-progress .partial.jsonl file."""
+        path = self._dataset_runs_dir(backend_id) / f"{run_id}.partial.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+            f.flush()
+        return path
+
+    def load_partial_eval(
+        self, backend_id: str, run_id: str
+    ) -> List[Dict[str, Any]]:
+        """Read all items from an in-progress .partial.jsonl file."""
+        path = self._dataset_runs_dir(backend_id) / f"{run_id}.partial.jsonl"
+        if not path.exists():
+            return []
+        items: List[Dict[str, Any]] = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    items.append(json.loads(line))
+        return items
+
+    def list_partial_evals(self, backend_id: str) -> list[dict]:
+        """List in-progress .partial.jsonl files with line counts."""
+        d = self._dataset_runs_dir(backend_id)
+        if not d.exists():
+            return []
+        results = []
+        for p in sorted(d.glob("*.partial.jsonl")):
+            # run_id is the filename without .partial.jsonl
+            run_id = p.name.removesuffix(".partial.jsonl")
+            count = 0
+            with open(p, encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        count += 1
+            results.append({"run_id": run_id, "items": count, "path": str(p)})
+        return results
+
+    def finalize_eval_run(
+        self, backend_id: str, run_id: str, run_data: dict
+    ) -> Path:
+        """Save the complete dataset run and remove the .partial.jsonl file."""
+        detail_path = self.save_dataset_run(backend_id, run_id, run_data)
+        partial_path = self._dataset_runs_dir(backend_id) / f"{run_id}.partial.jsonl"
+        if partial_path.exists():
+            partial_path.unlink()
+        return detail_path

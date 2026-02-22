@@ -19,6 +19,7 @@ from api.services.prompt_eval import (
     compute_accuracy,
     eval_cache_key,
     build_dataset_run_data,
+    make_incremental_writer,
 )
 
 
@@ -338,21 +339,44 @@ async def run_grid_search(
         if cached_run:
             acc = cached_run["scores"]
         else:
-            results = await evaluate_prompt_batch(
-                ps, eval_data, llm_client,
+            run_id = f"grid_{content_hash[:8]}"
+
+            # Check for partial results (resume after crash)
+            partial = (
+                store.load_partial_eval(backend_id, run_id)
+                if store and backend_id
+                else []
+            )
+            if partial and len(partial) < len(eval_data):
+                remaining = eval_data[len(partial):]
+            elif partial and len(partial) >= len(eval_data):
+                remaining = []
+            else:
+                partial = []
+                remaining = eval_data
+
+            writer = (
+                make_incremental_writer(store, backend_id, run_id)
+                if store and backend_id
+                else None
+            )
+
+            new_results = await evaluate_prompt_batch(
+                ps, remaining, llm_client,
                 model=model, temperature=temperature, max_tokens=max_tokens,
+                on_result=writer,
                 request_delay=request_delay,
             )
+            results = partial + new_results
             acc = compute_accuracy(results)
 
-            # Save to cache
+            # Finalize: save complete run, delete .partial.jsonl
             if store and backend_id:
-                run_id = f"grid_{content_hash[:8]}"
                 run_data = build_dataset_run_data(
                     run_id, f"grid_combo_{combo_idx}", content_hash,
                     ps_id, rendered, model or "", temperature, acc, results,
                 )
-                store.save_dataset_run(backend_id, run_id, run_data)
+                store.finalize_eval_run(backend_id, run_id, run_data)
 
         row = dict(coord_dict)
         row["prompt_state_id"] = ps_id

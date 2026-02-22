@@ -95,3 +95,101 @@ def test_detail_file_written_correctly(tmp_store):
     detail = json.loads(path.read_text())
     assert detail["run_id"] == data["run_id"]
     assert detail["dataset_run_items"][0]["query"] == "q1"
+
+
+# ---------------------------------------------------------------------------
+# Incremental eval writes
+# ---------------------------------------------------------------------------
+
+
+def test_append_and_load_partial_eval(tmp_store):
+    """append_eval_item writes items that load_partial_eval reads back."""
+    items = [
+        {"query": "q1", "hit": True, "error": None},
+        {"query": "q2", "hit": False, "error": None},
+        {"query": "q3", "hit": True, "error": None},
+    ]
+    for item in items:
+        tmp_store.append_eval_item("b1", "run_abc", item)
+
+    loaded = tmp_store.load_partial_eval("b1", "run_abc")
+    assert len(loaded) == 3
+    assert loaded[0]["query"] == "q1"
+    assert loaded[2]["hit"] is True
+
+
+def test_load_partial_eval_empty(tmp_store):
+    """load_partial_eval returns empty list when no partial file exists."""
+    assert tmp_store.load_partial_eval("b1", "nonexistent") == []
+
+
+def test_finalize_eval_run_removes_partial(tmp_store):
+    """finalize_eval_run saves detail file and deletes .partial.jsonl."""
+    tmp_store.append_eval_item("b1", "run_xyz", {"query": "q1", "hit": True, "error": None})
+    tmp_store.append_eval_item("b1", "run_xyz", {"query": "q2", "hit": False, "error": None})
+
+    partial_path = tmp_store._dataset_runs_dir("b1") / "run_xyz.partial.jsonl"
+    assert partial_path.exists()
+
+    run_data = _make_run_data("run_xyz", "hash_xyz")
+    detail_path = tmp_store.finalize_eval_run("b1", "run_xyz", run_data)
+
+    assert not partial_path.exists()
+    assert detail_path.exists()
+    entries = tmp_store.list_dataset_runs("b1")
+    assert any(e["run_id"] == "run_xyz" for e in entries)
+
+
+def test_finalize_without_partial(tmp_store):
+    """finalize_eval_run works even when no .partial.jsonl exists."""
+    run_data = _make_run_data("run_nop", "hash_nop")
+    detail_path = tmp_store.finalize_eval_run("b1", "run_nop", run_data)
+    assert detail_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# list_partial_evals
+# ---------------------------------------------------------------------------
+
+
+def test_list_partial_evals_empty(tmp_store):
+    """Returns empty list when no partial files exist."""
+    assert tmp_store.list_partial_evals("b1") == []
+
+
+def test_list_partial_evals_single(tmp_store):
+    """Returns metadata for a single partial file."""
+    tmp_store.append_eval_item("b1", "run_abc", {"query": "q1", "hit": True})
+    tmp_store.append_eval_item("b1", "run_abc", {"query": "q2", "hit": False})
+
+    partials = tmp_store.list_partial_evals("b1")
+    assert len(partials) == 1
+    assert partials[0]["run_id"] == "run_abc"
+    assert partials[0]["items"] == 2
+    assert "path" in partials[0]
+
+
+def test_list_partial_evals_multiple(tmp_store):
+    """Returns metadata for multiple partial files, sorted by name."""
+    tmp_store.append_eval_item("b1", "alpha_run", {"query": "q1", "hit": True})
+    tmp_store.append_eval_item("b1", "beta_run", {"query": "q1", "hit": True})
+    tmp_store.append_eval_item("b1", "beta_run", {"query": "q2", "hit": False})
+    tmp_store.append_eval_item("b1", "beta_run", {"query": "q3", "hit": True})
+
+    partials = tmp_store.list_partial_evals("b1")
+    assert len(partials) == 2
+    assert partials[0]["run_id"] == "alpha_run"
+    assert partials[0]["items"] == 1
+    assert partials[1]["run_id"] == "beta_run"
+    assert partials[1]["items"] == 3
+
+
+def test_list_partial_evals_ignores_finalized(tmp_store):
+    """Finalized runs no longer appear in list_partial_evals."""
+    tmp_store.append_eval_item("b1", "run_fin", {"query": "q1", "hit": True})
+    assert len(tmp_store.list_partial_evals("b1")) == 1
+
+    run_data = _make_run_data("run_fin", "hash_fin")
+    tmp_store.finalize_eval_run("b1", "run_fin", run_data)
+
+    assert tmp_store.list_partial_evals("b1") == []

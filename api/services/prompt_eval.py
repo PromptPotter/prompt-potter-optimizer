@@ -64,6 +64,15 @@ def build_dataset_run_data(
     }
 
 
+def make_incremental_writer(store, backend_id: str, run_id: str):
+    """Return an on_result callback that appends each eval item to a .partial.jsonl."""
+
+    def writer(result, index, total):
+        store.append_eval_item(backend_id, run_id, result)
+
+    return writer
+
+
 def extract_baseline_prompt(exp_data: dict) -> PromptState:
     """Extract the llm_ranking prompt from experiment data, wrap in PromptState.
 
