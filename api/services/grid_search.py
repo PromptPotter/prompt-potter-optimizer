@@ -425,9 +425,13 @@ async def run_grid_search(
     temperature: float = 0.1,
     max_tokens: int = 4096,
     on_combo_done: Optional[Callable] = None,
+    on_query_done: Optional[Callable] = None,
     request_delay: float = 1.0,
     store: Optional["ProjectStore"] = None,
     backend_id: str = "",
+    backend_client: Optional[Any] = None,
+    session_terms: Optional[list] = None,
+    pipeline_params: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Evaluate each grid combination on eval_data.
 
@@ -441,15 +445,33 @@ async def run_grid_search(
         max_tokens: Maximum response tokens.
         on_combo_done: Optional callback ``(combo_index, row_data)`` called
             after each combination is evaluated.
+        on_query_done: Optional callback
+            ``(combo_index, query_index, total_queries, result)`` called after
+            each individual query within a backend-driven combo evaluation.
+            Useful for per-query progress reporting.
         request_delay: Seconds to sleep between LLM calls within each
             combination (default 1.0). Prevents hitting API rate limits.
         store: Optional ProjectStore for per-combo eval caching.
         backend_id: Required when store is provided.
+        backend_client: Optional BackendClient for backend-driven evaluation.
+            When provided, each combo is evaluated by calling the backend's
+            ``/matches`` endpoint with the rendered prompt instead of local
+            LLM evaluation.
+        session_terms: Session terms to initialize the backend session.
+            Required when backend_client is provided.
+        pipeline_params: Optional pipeline parameter overrides forwarded to
+            the backend's ``/matches`` endpoint.
 
     Returns:
         DataFrame with columns: axis indices, prompt_state_id,
         hits, total, accuracy, errors. Sorted by accuracy desc.
     """
+    import asyncio
+
+    # Initialize backend session once (not per combo)
+    if backend_client and session_terms:
+        await backend_client.init_session(session_terms)
+
     rows = []
 
     for combo_idx, (coord_dict, ps_id) in enumerate(combinations):
@@ -464,7 +486,92 @@ async def run_grid_search(
 
         if cached_run:
             acc = cached_run["scores"]
+        elif backend_client:
+            # Backend-driven evaluation: call /matches for each query
+            # Mirrors the local LLM path: incremental writes + partial resume
+            run_id = f"grid_{content_hash[:8]}"
+
+            # Partial resume (same as local path)
+            partial = (
+                store.load_partial_eval(backend_id, run_id)
+                if store and backend_id
+                else []
+            )
+            if partial and len(partial) < len(eval_data):
+                remaining = eval_data[len(partial):]
+            elif partial and len(partial) >= len(eval_data):
+                remaining = []
+            else:
+                partial = []
+                remaining = eval_data
+
+            writer = (
+                make_incremental_writer(store, backend_id, run_id)
+                if store and backend_id
+                else None
+            )
+
+            # Evaluate remaining queries via backend
+            new_results = []
+            hits = sum(1 for r in partial if r.get("hit"))
+            for qi, qd in enumerate(remaining):
+                try:
+                    resp = await backend_client.run_match(
+                        qd["query"],
+                        skip_llm_ranking=False,
+                        pipeline_params=pipeline_params,
+                        ranking_prompt=rendered,
+                    )
+                    data = resp.get("data", {})
+                    ranked = data.get("ranked_candidates", [])
+                    predicted = (
+                        ranked[0].get("candidate", "NO_RESULT")
+                        if ranked
+                        else "NO_RESULT"
+                    )
+                    hit = predicted == qd["ground_truth"]
+                    if hit:
+                        hits += 1
+                    result = {
+                        "query": qd["query"],
+                        "ground_truth": qd["ground_truth"],
+                        "predicted": predicted,
+                        "hit": hit,
+                        "error": None,
+                    }
+                except Exception as exc:
+                    result = {
+                        "query": qd["query"],
+                        "ground_truth": qd["ground_truth"],
+                        "predicted": "ERROR",
+                        "hit": False,
+                        "error": str(exc),
+                    }
+                new_results.append(result)
+
+                # Incremental write (crash protection)
+                if writer:
+                    writer(result, qi, len(remaining))
+                # Per-query callback (progress)
+                if on_query_done is not None:
+                    on_query_done(
+                        combo_idx, len(partial) + qi, len(eval_data), result,
+                    )
+
+                await asyncio.sleep(request_delay)
+
+            results = partial + new_results
+            acc = compute_accuracy(results)
+
+            # Finalize: save complete run, delete .partial.jsonl
+            if store and backend_id:
+                run_data = build_dataset_run_data(
+                    run_id, f"grid_combo_{combo_idx}", content_hash,
+                    ps_id, rendered, model or "", temperature, acc, results,
+                )
+                store.finalize_eval_run(backend_id, run_id, run_data)
         else:
+            # Local LLM evaluation (fallback when backend not running)
             run_id = f"grid_{content_hash[:8]}"
 
             # Check for partial results (resume after crash)

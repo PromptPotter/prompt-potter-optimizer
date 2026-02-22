@@ -168,6 +168,10 @@ async def init_services(
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
     print(f"Queries    : {len(queries)}  |  Session terms: {len(terms)}")
 
+    # Backend client for backend-driven grid search evaluation
+    backend_client = BackendClient(backend_url) if backend_url else None
+    session_terms = BackendClient.extract_session_terms(exp_data) if exp_data else []
+
     return {
         "store": store,
         "client": client,
@@ -176,6 +180,8 @@ async def init_services(
         "exp_data": exp_data,
         "backend_id": backend_id,
         "experiment_id": experiment_id,
+        "backend_client": backend_client,
+        "session_terms": session_terms,
     }
 
 
@@ -722,9 +728,9 @@ async def restructure_context(
     return result
 
 
-def validate_grid_config(grid_config: dict, baseline: PromptState) -> dict:
+def validate_grid_config(grid_config: dict, baseline: PromptState, n_combos: int = 0) -> dict:
     """Validate grid axes and compute cartesian product size."""
-    meta = _validate_grid_config(grid_config, baseline)
+    meta = _validate_grid_config(grid_config, baseline, n_combos=n_combos)
 
     print("Grid config validated:")
     for name, values in meta["axes"].items():
@@ -780,12 +786,45 @@ async def run_grid_search(
     *,
     store: "ProjectStore | None" = None,
     backend_id: str = "",
+    backend_client=None,
+    session_terms: "list | None" = None,
+    pipeline_params: "dict | None" = None,
 ) -> pd.DataFrame:
-    """Evaluate each grid combination on eval_data."""
+    """Evaluate each grid combination on eval_data.
+
+    When ``backend_client`` is provided, evaluation is done via the backend's
+    ``/matches`` endpoint (full pipeline) instead of local LLM calls.
+    """
     client = _make_llm_client(eval_llm, api_key)
-    pbar = tqdm(total=len(combinations), desc="Grid search", unit="combo")
+
+    mode = "backend" if backend_client else "local LLM"
+    pbar = tqdm(total=len(combinations), desc=f"Grid search ({mode})", unit="combo")
+
+    # Per-query progress bar (backend mode only — local LLM path has its own)
+    query_pbar = None
+    on_query_done = None
+    if backend_client:
+        query_pbar = tqdm(
+            total=len(eval_data), desc="  queries", unit="q", leave=False,
+        )
+
+        def on_query_done(combo_idx, qi, total_q, result):
+            tag = "HIT " if result["hit"] else "MISS"
+            done = qi + 1
+            tqdm.write(
+                f"    [{done}/{total_q}] {tag}  {result['query'][:50]:<50s} "
+                f"| pred: {result['predicted'][:35]:<35s} "
+                f"| gt: {result['ground_truth'][:35]}"
+            )
+            query_pbar.update(1)
+            if done >= total_q:  # combo finished, reset for next
+                query_pbar.reset()
 
     def on_combo_done(idx, row):
+        tqdm.write(
+            f"  [{idx + 1}/{len(combinations)}] "
+            f"acc={row['accuracy']:.1%} ({row['hits']}/{row['total']})"
+        )
         pbar.update(1)
 
     df = await _run_grid_search(
@@ -794,11 +833,17 @@ async def run_grid_search(
         temperature=eval_llm.get("temperature", 0.1),
         max_tokens=eval_llm.get("max_tokens", 4096),
         on_combo_done=on_combo_done,
+        on_query_done=on_query_done,
         request_delay=eval_llm.get("request_delay", 1.0),
         store=store,
         backend_id=backend_id,
+        backend_client=backend_client,
+        session_terms=session_terms,
+        pipeline_params=pipeline_params,
     )
     pbar.close()
+    if query_pbar is not None:
+        query_pbar.close()
     return df
 
 

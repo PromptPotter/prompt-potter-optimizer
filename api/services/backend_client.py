@@ -75,6 +75,7 @@ class BackendClient:
         query: str,
         skip_llm_ranking: bool = True,
         pipeline_params: Optional[Dict[str, Any]] = None,
+        ranking_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """POST /matches — run a single query through the backend pipeline."""
         payload: Dict[str, Any] = {
@@ -83,6 +84,8 @@ class BackendClient:
         }
         if pipeline_params:
             payload.update(pipeline_params)
+        if ranking_prompt:
+            payload["ranking_prompt"] = ranking_prompt
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self.base_url}/matches",
