@@ -1,9 +1,9 @@
 # Roadmap: PromptPotter Optimizer
 
-**Version:** 0.4.0
-**Date:** 2026-02-20
+**Version:** 0.5.0
+**Date:** 2026-02-22
 **Status:** Draft
-**Depends on:** [WBS v0.4.0](wbs.md)
+**Depends on:** [WBS v0.5.0](wbs.md)
 
 ---
 
@@ -99,8 +99,10 @@
   - 2.5 Optimize Router — Not started
   - 2.6 E2E Test — Not started
   - 2.7 Cycling Mode — Not started
-  - 2.8 HITL Campaign Notebook — **Complete** (exceeds scope: trace parsing, eval caching, incremental writes, crash protection, rate-limit backoff, `_campaign_lib.py` service extraction, training-style progress display, semi-automatic optimization loop with patience-based stopping)
-  - 2.9 Grid Search — **Complete** (default axes, LLM restructuring, grid execution/visualization/analysis, winner selection, distance-weighted stratified sampling with `n_combos` + `exploration_rate`, per-combo caching + partial-run resume)
+  - 2.8 HITL Campaign Notebook — **Complete** (exceeds scope: trace parsing, eval caching, incremental writes, crash protection, rate-limit backoff, `_campaign_lib.py` service extraction, training-style progress display, semi-automatic optimization loop with patience-based stopping, `init_services()` returns backend_client + session_terms for backend-driven evaluation)
+  - 2.9 Grid Search — **Complete** (default axes, LLM restructuring, grid execution with two eval modes: backend full-pipeline via `/matches` with `ranking_prompt` + local LLM fallback, per-query HIT/MISS progress logging, visualization/analysis, winner selection, distance-weighted stratified sampling with `n_combos` + `exploration_rate`, per-combo caching + incremental writes + partial-run resume)
+  - 2.10 TermNorm `GET /pipeline` Endpoint — Not started (external repo: adds pipeline discovery endpoint)
+  - 2.11 PromptPotter Discovery Integration — Not started (uses discovered schema in grid search instead of hardcoded `GRID_SEARCHABLE_FIELDS`)
 
 - **Risks:**
   - LLM-based structured output quality may vary (initialization node depends on Groq + Llama 4 Maverick producing valid structured responses)
@@ -162,6 +164,10 @@
 
 ## Future (Post-M4, Unscheduled)
 
+### Next Optimization: TermNorm `/rerank` Endpoint
+
+A dedicated `/rerank` endpoint on TermNorm would accept pre-computed `entity_profile` + `token_matched_candidates`.
+
 ### Next Validation: Web Scrape Ablation
 
 After the Variant A vs Variant B comparison is settled, the next decision point is: **how many websites to scrape** for `entity_profiling`? The pipeline parameter passthrough infrastructure (M1) already makes this controllable via `max_sites` and `num_results` — the ablation study uses these knobs to vary the scrape count while holding the winning variant's prompts fixed, measuring the quality vs. cost/latency tradeoff. Also extends validation to the LCA dataset for real-world use case confirmation.
@@ -198,6 +204,8 @@ Systematic benchmarks for archival publication:
 
 | Feature | PRD | Notes |
 |---------|-----|-------|
+| Discovery-driven pipeline protocol | P1.7 | M2 (WP 2.10-2.11). `GET /pipeline` endpoint on TermNorm + `get_pipeline_schema()` on PromptPotter. Replaces hardcoded pipeline knowledge with runtime discovery. Requires changes in both repos. |
+| TermNorm `/rerank` endpoint | -- | Eliminate redundant web search + LLM1 + token matching during grid search; ~10x speedup. Requires TermNorm backend change. |
 | Web scrape count ablation | -- | Vary number of websites scraped, measure quality vs. cost/latency |
 | LCA dataset validation | -- | Real-world use case validation after BC5CDR development is complete |
 | Full cycling mode (if not completed in M2) | P0.4, P2.1 | Enable feedback paths with iterative refinement; "refine context" path provides reflection-like capability |

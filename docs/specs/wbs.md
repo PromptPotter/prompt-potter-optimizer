@@ -1,9 +1,9 @@
 # Work Breakdown Structure: PromptPotter Optimizer
 
-**Version:** 0.4.0
-**Date:** 2026-02-20
+**Version:** 0.5.0
+**Date:** 2026-02-22
 **Status:** Draft
-**Depends on:** [PRD v0.4.0](prd.md), [ADD v0.4.0](add.md)
+**Depends on:** [PRD v0.5.0](prd.md), [ADD v0.5.0](add.md)
 
 ---
 
@@ -225,7 +225,7 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   - Campaign config exposes all pipeline parameters + optimization settings as editable JSON
   - After each round, LLM produces categorized failure analysis and actionable phrase fragment suggestions
   - Winner PromptState is saved with full lineage chain
-- **Completed:** Exceeds original scope — also includes: Langfuse-style trace parsing and eval dataset loader (`load_eval_dataset()` with trace/replay priority chain), eval caching via content-addressed hashing (`eval_cache_key()`), incremental writes with crash protection (`.partial.jsonl`), partial-run resume, cache status summary, rate-limit backoff for Groq API, `_campaign_lib.py` extraction with thin wrappers over services, training-style progress display (`display_progress()`), and semi-automatic optimization loop with patience-based stopping (`run_optimization_loop()`). Key commits: `89d4a2f`, `534fa3e`, `c8c10a1`, `23717e5`, `ad5533d`.
+- **Completed:** Exceeds original scope — also includes: Langfuse-style trace parsing and eval dataset loader (`load_eval_dataset()` with trace/replay priority chain), eval caching via content-addressed hashing (`eval_cache_key()`), incremental writes with crash protection (`.partial.jsonl`), partial-run resume, cache status summary, rate-limit backoff for Groq API, `_campaign_lib.py` extraction with thin wrappers over services, training-style progress display (`display_progress()`), semi-automatic optimization loop with patience-based stopping (`run_optimization_loop()`), and `init_services()` returning `backend_client` + `session_terms` for backend-driven grid search evaluation. Key commits: `89d4a2f`, `534fa3e`, `c8c10a1`, `23717e5`, `ad5533d`, `beaf662`.
 
 ### 2.9 Grid Search (Initial Condition Exploration) — Complete
 
@@ -239,6 +239,8 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   - Default grid axes library (`DEFAULT_GRID_AXES`) with shipped variations for persona, task_intent, thinking_style, answer_format
   - LLM context restructuring (`restructure_context()`) — parse raw context into Layer 1 fields
   - Grid search execution + visualization (`run_grid_search()`, `display_grid_results()`)
+  - Two evaluation modes: backend full-pipeline via `/matches` with `ranking_prompt` (primary) and local LLM with cached pipeline data (fallback)
+  - Backend eval features: `ranking_prompt` parameter on `BackendClient.run_match()`, per-query progress callback (`on_query_done`), incremental writes (`.partial.jsonl`), partial-run resume, per-query HIT/MISS logging in notebook
   - LLM result analysis (`analyze_grid_results()`)
   - Winner selection as campaign seed (`select_grid_winner()`)
   - Evaluation data loader (`load_eval_dataset()`) with trace/replay priority chain
@@ -250,7 +252,39 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   - Pairwise heatmaps visualize interaction effects between axes
   - LLM-generated insights identify strongest fields and recommended focus
   - Winner is selectable as optimization campaign seed
-- **Completed:** Key commits: `534fa3e`, `23717e5`, `ad5533d`. Distance-weighted sampling (replacing `EXPLORATION_PRESETS`) with two primary knobs (`n_combos`, `exploration_rate`) added in uncommitted work.
+- **Completed:** Key commits: `534fa3e`, `23717e5`, `ad5533d`, `b0fb375`, `beaf662`. Distance-weighted sampling (replacing `EXPLORATION_PRESETS`) with two primary knobs (`n_combos`, `exploration_rate`). Backend-driven grid search evaluation via `/matches` with `ranking_prompt` override, including incremental writes, partial-run resume, and per-query HIT/MISS progress logging. `backend_client.run_match()` accepts `ranking_prompt` parameter.
+
+### 2.10 TermNorm `GET /pipeline` Endpoint (External Repo)
+
+- **Scope:** Add `GET /pipeline` endpoint to TermNorm's `api/system.py` that returns the full pipeline topology with typed steps and tunable parameter schema. The endpoint builds the response by loading the existing `pipeline_config.json`, adding `web_search` as an explicit `ExternalService` step, and adding the `parameters` array extracted from the hardcoded defaults in `research_pipeline.py`. Also update `pipeline_config.json` to include the `web_search` step.
+- **Sessions:** 1
+- **Dependencies:** —
+- **PRD Ref:** P1.7
+- **Repo:** `TermNorm-excel/backend-api`
+- **Files:**
+  - `api/system.py` — Add `GET /pipeline` endpoint
+  - `logs/experiments/.../artifacts/pipeline_config.json` — Add `web_search` step
+- **Done when:**
+  - `GET /pipeline` returns the full pipeline schema with 4 steps and 12 parameters
+  - Response matches the contract specified in [TermNorm connector docs](../connectors/termnorm.md#get-pipeline--discover-pipeline-schema)
+  - Parameter defaults match the existing hardcoded values in `research_pipeline.py`
+
+### 2.11 PromptPotter Discovery Protocol Integration
+
+- **Scope:** Integrate the discovery-driven pipeline protocol into PromptPotter. Add `get_pipeline_schema()` to `backend_client.py` to call `GET /pipeline`. Update `init_services()` in `_campaign_lib.py` to call it at initialization and return the schema in the `svc` dict. Update `grid_search.py` to validate/build grid config from the discovered parameter schema instead of the hardcoded `GRID_SEARCHABLE_FIELDS`.
+- **Sessions:** 1
+- **Dependencies:** 2.10, 2.9
+- **PRD Ref:** P1.7
+- **Files:**
+  - `api/services/backend_client.py` — Add `get_pipeline_schema()` method
+  - `notebooks/_campaign_lib.py` — `init_services()` calls `get_pipeline_schema()` and returns it
+  - `api/services/grid_search.py` — Use discovered parameter schema to validate/build grid config
+- **Done when:**
+  - `backend_client.get_pipeline_schema()` calls `GET /pipeline` and returns parsed schema
+  - `init_services()` includes the pipeline schema in its return value
+  - Grid search validates parameter names against the discovered schema
+  - Hardcoded `GRID_SEARCHABLE_FIELDS` is replaced or augmented by discovered parameters
+  - Tests verify graceful fallback when `GET /pipeline` is unavailable (backward compatibility)
 
 **Phase 2 exit criteria:** POST optimize endpoint runs the linear mode DAG and returns scored prompt states. E2E test passes in CI. Cycling mode (2.7) is implemented and tested but not required for the M2 exit gate. HITL campaign notebook runs end-to-end in JupyterLab with config editing, replay, and LLM-generated suggestions. Grid search produces ranked exploration results with LLM-analyzed insights.
 
@@ -410,10 +444,10 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
 |-------|:--------:|:--------:|
 | M0: Specifications | 5 | 5 |
 | M1: Foundation | 7 | 7 |
-| M2: Core Optimizer (DAG Workflow) | 9 | 12 |
+| M2: Core Optimizer (DAG Workflow) | 11 | 14 |
 | M3: Registry and Tracking | 6 | 6 |
 | M4: Integration and Polish | 6 | 9 |
-| **Total** | **33** | **39** |
+| **Total** | **35** | **41** |
 
 ---
 
@@ -447,6 +481,10 @@ M2 Core Optimizer (DAG)      |   |
  |            |         |
  |            +-- 2.7 Cycling Mode (x2) [Phase 2]
  |                      |
+ |-- 2.10 TermNorm GET /pipeline (external repo, independent)
+ |    |
+ |    +-- 2.11 Discovery Integration <-- 2.10, 2.9
+ |
  v                      v
 M3 Registry              |
  |-- 3.1 Registry <----- 2.4
@@ -483,6 +521,7 @@ M4 Integration
 | P1.4 | 4.2 | M4 |
 | P1.5 | 2.4 | M2 |
 | P1.6 | 1.7 | M1 |
+| P1.7 | 1.8, 2.10, 2.11 | M1, M2 |
 | P2.1 | 2.7 | M2 (Phase 2) |
 | P2.2-P2.3 | -- | Unscheduled |
 | P2.4 | 4.4 | M4 |

@@ -1,7 +1,7 @@
 # Project Charter: PromptPotter Optimizer
 
-**Version:** 0.4.0
-**Date:** 2026-02-20
+**Version:** 0.5.0
+**Date:** 2026-02-22
 **Status:** Draft
 
 ---
@@ -41,6 +41,8 @@ The central research question for PromptPotter validation is a **pipeline varian
 - **Variant B**: Web scrape --> LLM1 (`entity_profiling`) --> Table Reranker --> LLM2 (`llm_ranking`) --> done
 
 **Does LLM2 semantic reranking add enough accuracy over the "dumb" table reranker to justify the extra LLM cost and latency?** This is a concrete, testable question. When PromptPotter can run both variants against the same evaluation dataset and produce a clear, traceable recommendation, we know the whole system works.
+
+**Evaluation constraint:** Optimizing the `llm_ranking` prompt requires running the full TermNorm pipeline per query via the backend's `/matches` endpoint. The token matching step (Stage 2) queries a loaded database that cannot be replicated locally. PromptPotter injects candidate prompts via the `ranking_prompt` parameter — the backend runs web search → LLM1 → token matching → LLM2 with the candidate prompt. This is slower (~10-30s/query) but gives accurate end-to-end results. A future `/rerank` endpoint on TermNorm (accepting pre-computed intermediates) would eliminate the redundant steps 1-3.
 
 A future decision point (post-M4) extends this: **how many websites to scrape** for entity profiling -- a quality vs. cost/latency tradeoff that becomes the second ablation study.
 

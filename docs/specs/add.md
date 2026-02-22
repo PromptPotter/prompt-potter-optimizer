@@ -1,9 +1,9 @@
 # Architecture Design Document: PromptPotter Optimizer
 
-**Version:** 0.4.0
-**Date:** 2026-02-20
+**Version:** 0.5.0
+**Date:** 2026-02-22
 **Status:** Draft
-**Depends on:** [Project Charter v0.4.0](project-charter.md), [PRD v0.4.0](prd.md)
+**Depends on:** [Project Charter v0.5.0](project-charter.md), [PRD v0.5.0](prd.md)
 
 ---
 
@@ -94,10 +94,10 @@
 | **CI pipeline** | GitHub Actions: ruff lint + pytest on push/PR | M1 |
 | **Pipeline parameter passthrough** | Controllable knobs for all TermNorm pipeline stages (11 params: search, profiling, ranking, scoring) forwarded via `/matches` payload, echoed in response and training record | M1 |
 | **HITL Campaign Notebook** | Interactive optimization notebook (`optimization_campaign.ipynb`) with editable campaign config, candidate coverage diagnostics, iterative prompt optimization with local evaluation, LLM-generated phrase fragment suggestions, training-style progress display, and semi-automatic optimization loop with patience-based stopping | M2 (WP 2.8) |
-| **Grid search service** | `api/services/grid_search.py` — default axis library (`DEFAULT_GRID_AXES`), LLM context restructuring (`restructure_context()`), distance-weighted stratified sampling (`n_combos` + `exploration_rate`), grid execution with per-combo eval caching and partial-run resume, result analysis, winner selection | M2 (WP 2.9) |
+| **Grid search service** | `api/services/grid_search.py` — default axis library (`DEFAULT_GRID_AXES`), LLM context restructuring (`restructure_context()`), distance-weighted stratified sampling (`n_combos` + `exploration_rate`), grid execution with two eval modes (backend full-pipeline via `/matches` with `ranking_prompt`, or local LLM with cached pipeline data), per-combo eval caching, incremental writes with crash protection, partial-run resume, per-query progress callback, result analysis, winner selection | M2 (WP 2.9) |
 | **Prompt eval service** | `api/services/prompt_eval.py` — baseline extraction, batch evaluation, content-addressed eval caching (`eval_cache_key()`), incremental writes with crash protection (`.partial.jsonl`), partial-run resume | M2 (WP 2.8) |
 | **Prompt optimizer service** | `api/services/prompt_optimizer.py` — candidate generation, round winner selection, LLM suggestion generation, campaign winner save | M2 (WP 2.8) |
-| **Campaign library** | `notebooks/_campaign_lib.py` — thin notebook-facing wrappers with tqdm/print, `display_progress()`, `run_optimization_loop()` | M2 (WP 2.8) |
+| **Campaign library** | `notebooks/_campaign_lib.py` — thin notebook-facing wrappers with tqdm/print, per-query HIT/MISS progress logging (backend mode), `display_progress()`, `run_optimization_loop()`, `init_services()` (returns backend_client + session_terms for backend eval) | M2 (WP 2.8) |
 | **Rate-limit backoff** | Groq client auto-retry with exponential backoff on 429 responses | M2 |
 
 ### Will Be Built
@@ -342,6 +342,7 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 | **PROMPT_STATE as first-class model** | Track all tunable params (not just prompt text); enable structured diffs | Open-ended parameters dict means no schema enforcement on values |
 | **LLM-as-judge for evaluation** | Non-deterministic outputs need criteria-based scoring beyond exact match | Judge quality depends on judge prompt; cost scales with dataset x iterations x candidates |
 | **Target-agnostic optimization loop** | DAG operates on a pluggable state schema so the same loop can optimize prompts, schemas, scoring functions, fuzzy matchers, and other parameter types post-M4 | Adds abstraction layer between loop and state; mitigated by building the concrete prompt case first (M2-M4) and generalizing only after the loop is proven |
+| **Backend evaluation as primary mode** | Grid search and optimization must run the full TermNorm pipeline per query because the token matching step requires the backend's loaded database — it cannot be replicated locally. The `ranking_prompt` parameter injects candidate prompts into the backend's LLM2 step. Local evaluation (reusing cached `pipeline_data`) is a fallback only. | Backend evaluation re-runs web search and LLM1 for every query even though only LLM2 varies between combos. A future `/rerank` endpoint on TermNorm would eliminate this redundancy (~10x speedup for grid search). |
 | **Stateless API with pluggable auth** | Public deployment requires credential-based access and data isolation; designing the API stateless from day one avoids costly rewrites | Auth middleware adds latency; mitigated by keeping it as a thin middleware layer that can be toggled off for local use |
 
 ---
@@ -403,7 +404,7 @@ The API is already designed with public deployment in mind:
 | **File system** (campaigns) | Read/write campaigns, trials, lineage | JSON/JSONL in `.promptpotter/campaigns/` | Planned (M3) |
 | **Streamlit** | Streamlit calls the API | HTTP | Exists (prototype) |
 | **Consuming projects** (e.g., TermNorm) | PromptPotter loads external datasets | File path or URL | Exists (loader) |
-| **TermNorm backend API** | PromptPotter syncs experiments, replays pipelines, and forwards pipeline parameter overrides (search depth, LLM temperatures, candidate limits, score weights) | HTTP REST | Exists (M1) |
+| **TermNorm backend API** | PromptPotter discovers pipeline topology and tunable parameters via `GET /pipeline`, syncs experiments, replays pipelines, forwards pipeline parameter overrides (search depth, LLM temperatures, candidate limits, score weights), and runs backend-driven grid search evaluation via `/matches` with `ranking_prompt` override. Discovery-driven protocol replaces hardcoded pipeline knowledge — see [connector docs](../connectors/termnorm.md#discovery-driven-pipeline-protocol). | HTTP REST | Exists (M1, extended M2); discovery endpoint planned |
 | **TermNorm prompt registry** | PromptPotter reads current prompts from `logs/prompts/{family}/{version}/prompt.txt` and writes optimized versions back as new version numbers (v2, v3, ...) | File system (TermNorm's `PromptRegistry` with `{{variable}}` templates) | Planned (M4) |
 | **MCP clients** (e.g., Claude Code) | Clients invoke optimization tools | MCP | Planned (P2.3) |
 | **Public API gateway** | External consumers access PromptPotter as a hosted service | HTTP REST with API key auth | Post-M4 |
@@ -425,7 +426,7 @@ TermNorm is a terminology normalization system (primary domain: LCA -- Life Cycl
 | 3 | Table Reranker | Non-LLM | -- (token/string matching, no semantic understanding) |
 | 4 | Semantic reranking (LLM2) | LLM call | `llm_ranking` (vars: `core_concept`, `entity_profile_json`, `matches`) |
 
-All pipeline stages expose configurable parameters via the `/matches` payload (see [TermNorm connector docs](../connectors/termnorm.md#pipeline-parameter-overrides) for the full catalog). This enables human-in-the-loop experimentation (manually varying knobs in the notebook) and automated optimization (the DAG loop systematically exploring the parameter space).
+All pipeline stages expose configurable parameters via the `/matches` payload (see [TermNorm connector docs](../connectors/termnorm.md#pipeline-parameter-overrides) for the full catalog). The pipeline topology and available parameters are **discoverable at runtime** via `GET /pipeline` (see [discovery protocol](../connectors/termnorm.md#discovery-driven-pipeline-protocol)), replacing hardcoded pipeline knowledge in PromptPotter. This enables human-in-the-loop experimentation (manually varying knobs in the notebook) and automated optimization (the DAG loop systematically exploring the parameter space discovered from the backend schema).
 
 ### Variant Comparison
 
@@ -453,11 +454,26 @@ Optimized prompt versions are written back to TermNorm's prompt registry as new 
 
 Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). LCA dataset validation follows when deploying to real-world use. MedMentions 500-term subset serves as an additional biomedical benchmark.
 
+### Evaluation Modes
+
+Grid search and optimization evaluate candidate prompts against the evaluation dataset. Two evaluation modes exist, each with distinct tradeoffs (see [TermNorm connector docs](../connectors/termnorm.md#evaluation-modes) for protocol details):
+
+| Mode | What runs | Per-query latency | Accuracy | When to use |
+|------|-----------|-------------------|----------|-------------|
+| **Backend evaluation** | Full pipeline via `/matches` with `ranking_prompt` override: web search → LLM1 → token matching (DB) → LLM2 | ~10-30s | Ground truth — fresh intermediate data per query | Grid search, optimization campaigns (primary) |
+| **Local evaluation** | Cached `pipeline_data` from prior replay + local LLM2 reranker call | ~2s | Approximate — stale intermediate data | Quick iteration, backend unavailable (fallback) |
+
+**Why backend evaluation is primary:** The token matching step queries TermNorm's loaded database — this cannot be replicated locally. Local evaluation reuses stale `entity_profile` and `token_matched_candidates` from a previous replay, which may not reflect what the backend would produce for a different prompt. Backend evaluation is slower but gives accurate end-to-end pipeline results.
+
+**Redundancy in backend mode:** For grid search, only the `ranking_prompt` (LLM2) varies between combos. Steps 1-3 (web search → LLM1 → token matching) produce identical results for the same query regardless of the ranking prompt. A future `/rerank` endpoint on TermNorm (see [connector docs](../connectors/termnorm.md#future-optimization-rerank-endpoint)) would eliminate this redundancy by accepting pre-computed intermediates and only running LLM2.
+
+Both modes share the same infrastructure for crash protection: incremental writes to `.partial.jsonl` after each query, content-addressed caching of completed combos, and partial-run resume on restart.
+
 ### Ablation Comparison (Generalized Pattern)
 
 The Variant A vs B comparison above is an instance of a general pattern: **pipeline ablation**. Any linear pipeline can be evaluated with a node removed to measure its marginal value. The system accepts prior results, replays with a node skipped, and produces a statistical comparison with p-values (McNemar's test for accuracy, Wilcoxon signed-rank for latency).
 
-Pipeline nodes are typed (`LLMGeneration`, `DeterministicFunction`, `WebSearch`) with visible input/output schemas. Clients auto-detect node capabilities and surface relevant parameters (prompt text, temperature, threshold, etc.). This pattern becomes a self-service feature when PromptPotter is deployed as a web service — users upload experiment data, select which component to remove, and see the comparison.
+Pipeline nodes are typed (`LLMGeneration`, `DeterministicFunction`, `ExternalService`) with visible input/output schemas, discoverable via `GET /pipeline`. Clients auto-detect node capabilities and surface relevant parameters (prompt text, temperature, threshold, etc.) from the discovered parameter schema. This pattern becomes a self-service feature when PromptPotter is deployed as a web service — users upload experiment data, the system discovers the pipeline structure, and they select which component to remove and see the comparison.
 
 ### Decision Points
 

@@ -1,9 +1,9 @@
 # Product Requirements Document: PromptPotter Optimizer
 
-**Version:** 0.4.0
-**Date:** 2026-02-20
+**Version:** 0.5.0
+**Date:** 2026-02-22
 **Status:** Draft
-**Depends on:** [Project Charter v0.4.0](project-charter.md)
+**Depends on:** [Project Charter v0.5.0](project-charter.md)
 
 ---
 
@@ -22,7 +22,7 @@
 | P1.4 | Real Web Search Provider | P1 | Replace the mock web search node with a real search API provider |
 | P1.5 | Candidate Population and Selection | P1 | Support multiple strategies for evaluating and selecting the best candidate |
 | P1.6 | Ablation Comparison | P1 | Remove a pipeline component, replay, and compare with statistical significance tests (p-values) |
-| P1.7 | Pipeline Parameter Passthrough | P1 | Forward controllable pipeline knobs (search depth, LLM temperatures, candidate limits, score weights) to backend via execution requests |
+| P1.7 | Pipeline Parameter Passthrough | P1 | Discover available pipeline parameters via backend schema endpoint (`GET /pipeline`), forward controllable knobs (search depth, LLM temperatures, candidate limits, score weights) and `ranking_prompt` override to backend via execution requests |
 | P2.1 | Reflection-Based Learning | P2 | Generate natural language reflections after each iteration to inform the next |
 | P2.2 | Evolutionary Operators | P2 | Apply genetic algorithm operators (crossover, mutation) to evolve a population of configurations |
 | P2.3 | MCP Server Mode | P2 | Expose optimization as an MCP server for use by Claude Code and other MCP clients |
@@ -67,12 +67,12 @@ This document uses terms defined in the [Project Charter](project-charter.md): *
 
 **What the system does:**
 - Accepts an initial configuration and an evaluation dataset (list of input/expected-output pairs, loaded from the consuming project)
-- Executes the configured LLM call against each dataset item
+- Evaluates in one of two modes: **backend evaluation** (full pipeline via backend API with `ranking_prompt` override — primary) or **local evaluation** (cached pipeline data + local LLM reranker — fallback). See [ADD Evaluation Modes](add.md#evaluation-modes) for details.
 - Scores outputs using one or more evaluators (exact match, LLM-as-judge, custom)
 - Returns per-item scores and aggregate metrics
 - Logs all evaluations to Langfuse with parent-child trace hierarchy
 
-The core operation for the TermNorm validation (SC5) is evaluating both **Variant A** (table reranker only) and **Variant B** (table reranker + LLM2 semantic reranking) against the same dataset to produce comparable scores. Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). MedMentions 500-term subset serves as an additional biomedical benchmark. LCA dataset validation follows when deploying to real-world use.
+The core operation for the TermNorm validation (SC5) is evaluating both **Variant A** (table reranker only) and **Variant B** (table reranker + LLM2 semantic reranking) against the same dataset to produce comparable scores. Backend evaluation is required for accurate results because the token matching step needs the backend's loaded database. Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). MedMentions 500-term subset serves as an additional biomedical benchmark. LCA dataset validation follows when deploying to real-world use.
 
 **Acceptance criteria:**
 1. Given a configuration and a dataset of at least 500 items, the system returns aggregate scores and per-item results
@@ -189,14 +189,15 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 
 **What the system does:**
 - Accepts a workflow definition and identifies which step to optimize
-- Runs the full workflow end-to-end for each evaluation (not just the target step in isolation)
+- Runs the full workflow end-to-end for each evaluation via the backend API (not just the target step in isolation). For TermNorm, this means calling `/matches` with a `ranking_prompt` override — the backend executes the complete pipeline (web search → LLM1 → token matching → LLM2) and only the LLM2 ranking prompt varies between candidates.
 - Modifies only the target step's configuration between iterations; other steps remain fixed
 - Scores the overall workflow output, not just the target step's output
 
 **Acceptance criteria:**
 1. A developer can specify which step in a workflow to optimize
-2. The full workflow executes during evaluation, with only the target step's parameters changing
+2. The full workflow executes during evaluation via the backend, with only the target step's parameters changing
 3. Scoring reflects the end-to-end workflow output quality
+4. Backend evaluation is the primary mode; local evaluation with cached pipeline data is available as a fallback
 
 ### P1.3: Human-in-the-Loop Gates
 
@@ -269,6 +270,23 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 3. Per-query classification shows which queries were affected by the ablation
 4. All results are structured JSON consumable by any client (CLI, notebook, JS frontend)
 5. Report is reproducible from saved results without re-running the pipeline
+
+### P1.7: Pipeline Parameter Passthrough
+
+**As a** developer, **I want** PromptPotter to discover available pipeline parameters from the backend and forward my overrides during execution **so that** I can tune any backend knob without hardcoding parameter knowledge in PromptPotter.
+
+**What the system does:**
+- Calls the backend's pipeline discovery endpoint (`GET /pipeline`) to learn the pipeline topology (steps, types, input/output signatures) and the full set of tunable parameters (name, type, default, step, description)
+- Uses the discovered parameter schema to validate grid search configurations and generate parameter combinations
+- Forwards parameter overrides to the backend's execution endpoint (`POST /matches`) during optimization and grid search
+- Echoes applied `pipeline_params` in execution responses for traceability
+
+**Acceptance criteria:**
+1. PromptPotter discovers the pipeline schema from the backend at runtime, without hardcoded parameter lists
+2. Discovered parameters are available for grid search axis configuration and optimization
+3. New parameters added to the backend are automatically available to PromptPotter without code changes
+4. Parameter overrides are forwarded to the backend and echoed in execution responses
+5. Invalid parameter names (not in the discovered schema) are rejected with a clear error
 
 ---
 
