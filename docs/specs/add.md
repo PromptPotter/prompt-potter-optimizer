@@ -93,6 +93,12 @@
 | **Test suite** | Evaluators, workflow runner, PromptState, incremental writes, API endpoints | M1 |
 | **CI pipeline** | GitHub Actions: ruff lint + pytest on push/PR | M1 |
 | **Pipeline parameter passthrough** | Controllable knobs for all TermNorm pipeline stages (11 params: search, profiling, ranking, scoring) forwarded via `/matches` payload, echoed in response and training record | M1 |
+| **HITL Campaign Notebook** | Interactive optimization notebook (`optimization_campaign.ipynb`) with editable campaign config, candidate coverage diagnostics, iterative prompt optimization with local evaluation, LLM-generated phrase fragment suggestions, training-style progress display, and semi-automatic optimization loop with patience-based stopping | M2 (WP 2.8) |
+| **Grid search service** | `api/services/grid_search.py` — default axis library (`DEFAULT_GRID_AXES`), LLM context restructuring (`restructure_context()`), distance-weighted stratified sampling (`n_combos` + `exploration_rate`), grid execution with per-combo eval caching and partial-run resume, result analysis, winner selection | M2 (WP 2.9) |
+| **Prompt eval service** | `api/services/prompt_eval.py` — baseline extraction, batch evaluation, content-addressed eval caching (`eval_cache_key()`), incremental writes with crash protection (`.partial.jsonl`), partial-run resume | M2 (WP 2.8) |
+| **Prompt optimizer service** | `api/services/prompt_optimizer.py` — candidate generation, round winner selection, LLM suggestion generation, campaign winner save | M2 (WP 2.8) |
+| **Campaign library** | `notebooks/_campaign_lib.py` — thin notebook-facing wrappers with tqdm/print, `display_progress()`, `run_optimization_loop()` | M2 (WP 2.8) |
+| **Rate-limit backoff** | Groq client auto-retry with exponential backoff on 429 responses | M2 |
 
 ### Will Be Built
 
@@ -103,9 +109,9 @@
 | **Analysis + Evaluation node** (scoring + failure analysis + next_action decision) | M2 | P0.1, P0.2 |
 | **Feedback router** (Switch: generate / refine context / modify plan) | M2 | P0.4 |
 | **Optimization orchestrator** (DAG loop with counter-based stop condition) | M2 | P0.4 |
+| **REST API optimization endpoints** (wire optimize router to services) | M2 | P0.4 |
 | **Campaign registry** (file-based persistence) | M3 | P1.1 |
 | **Langfuse score integration** | M3 | SC3 |
-| **HITL Campaign Notebook** (interactive optimization with config editing, diagnostics, phrase fragment suggestions) | M2 | P1.3, P0.3 |
 | **Cycling mode** (enable feedback paths for iterative refinement) | Post-M2 | P0.4, P2.1 |
 | **Human-in-the-loop gates** | M4 | P1.3 |
 | **Real web search provider** | M4 | P1.4 |

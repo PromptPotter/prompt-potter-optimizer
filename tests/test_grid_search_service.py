@@ -10,7 +10,7 @@ from api.models.prompt_state import PromptState
 from api.services.llm_client import MockLLMClient
 from api.services.grid_search import (
     DEFAULT_GRID_AXES,
-    EXPLORATION_PRESETS,
+    SAMPLING_ALPHA,
     GRID_SEARCHABLE_FIELDS,
     validate_grid_config,
     build_grid_combinations,
@@ -19,6 +19,8 @@ from api.services.grid_search import (
     analyze_grid_results,
     select_grid_winner,
     load_eval_dataset,
+    _combo_distance,
+    _allocate_budget,
 )
 
 
@@ -56,14 +58,20 @@ def mock_hit():
 
 
 def test_constants_wellformed():
-    """DEFAULT_GRID_AXES and EXPLORATION_PRESETS are consistent."""
+    """DEFAULT_GRID_AXES keys are valid and SAMPLING_ALPHA is positive."""
     for key in DEFAULT_GRID_AXES:
         assert key in GRID_SEARCHABLE_FIELDS
         assert "" in DEFAULT_GRID_AXES[key]
         assert len(DEFAULT_GRID_AXES[key]) >= 2
 
-    for name, axes in EXPLORATION_PRESETS.items():
-        assert not (set(axes.keys()) - GRID_SEARCHABLE_FIELDS)
+    assert SAMPLING_ALPHA > 0
+
+
+def test_combo_distance():
+    """_combo_distance counts non-empty values."""
+    assert _combo_distance(("", "", "")) == 0
+    assert _combo_distance(("a", "", "b")) == 2
+    assert _combo_distance(("a", "b", "c")) == 3
 
 
 def test_validate_and_build(baseline):
@@ -71,8 +79,10 @@ def test_validate_and_build(baseline):
     meta = validate_grid_config(config, baseline)
     assert meta["total"] == 4
 
-    combos, lookup = build_grid_combinations(config, baseline)
+    combos, lookup, sampling_meta = build_grid_combinations(config, baseline)
     assert len(combos) == 4
+    assert sampling_meta["total_space"] == 4
+    assert sampling_meta["n_selected"] == 4
     for _, ps_id in combos:
         assert isinstance(lookup[ps_id], PromptState)
         assert lookup[ps_id].parent_id == baseline.id
@@ -81,9 +91,26 @@ def test_validate_and_build(baseline):
     with pytest.raises(ValueError):
         validate_grid_config({"bogus": ["a", "b"]}, baseline)
 
-    # Subsampling
-    combos2, _ = build_grid_combinations(config, baseline, max_combinations=2)
+    # Subsampling with n_combos
+    combos2, _, meta2 = build_grid_combinations(config, baseline, n_combos=2)
     assert len(combos2) == 2
+    assert meta2["n_selected"] == 2
+    assert meta2["total_space"] == 4
+
+
+def test_validate_n_combos_report(baseline):
+    """validate_grid_config reports capped status correctly."""
+    config = {"persona": ["", "Expert"], "thinking_style": ["", "Step by step"]}
+
+    meta_sub = validate_grid_config(config, baseline, n_combos=2)
+    assert meta_sub["is_subsampled"] is True
+    assert meta_sub["actual_count"] == 2
+    assert meta_sub["capped"] is False
+
+    meta_cap = validate_grid_config(config, baseline, n_combos=100)
+    assert meta_cap["is_subsampled"] is False
+    assert meta_cap["capped"] is True
+    assert meta_cap["actual_count"] == 4
 
 
 @pytest.mark.asyncio
@@ -101,7 +128,7 @@ async def test_restructure_context():
 @pytest.mark.asyncio
 async def test_run_grid_search_and_delay(baseline, eval_data, mock_hit):
     config = {"persona": ["", "Expert"]}
-    combos, lookup = build_grid_combinations(config, baseline)
+    combos, lookup, _ = build_grid_combinations(config, baseline)
     client = MockLLMClient(responses=[mock_hit])
 
     df = await run_grid_search(combos, lookup, eval_data, client, request_delay=0)
@@ -118,7 +145,7 @@ async def test_run_grid_search_and_delay(baseline, eval_data, mock_hit):
 
 def test_select_grid_winner(baseline):
     config = {"persona": ["", "Expert"]}
-    _, lookup = build_grid_combinations(config, baseline)
+    _, lookup, _ = build_grid_combinations(config, baseline)
     ps_ids = list(lookup.keys())
 
     grid_df = pd.DataFrame([
@@ -141,7 +168,7 @@ async def test_grid_search_caches_and_reuses(baseline, eval_data, mock_hit, tmp_
     ))
 
     config = {"persona": ["", "Expert"]}
-    combos, lookup = build_grid_combinations(config, baseline)
+    combos, lookup, _ = build_grid_combinations(config, baseline)
     client = MockLLMClient(responses=[mock_hit])
 
     # First run — evaluates all combos and saves to cache
@@ -178,7 +205,7 @@ async def test_grid_search_resumes_partial(baseline, eval_data, mock_hit, tmp_st
     ))
 
     config = {"persona": ["", "Expert"]}
-    combos, lookup = build_grid_combinations(config, baseline)
+    combos, lookup, _ = build_grid_combinations(config, baseline)
     client = MockLLMClient(responses=[mock_hit])
 
     # Pre-write a partial result for the first combo
@@ -219,6 +246,77 @@ async def test_grid_search_resumes_partial(baseline, eval_data, mock_hit, tmp_st
     # Both combos should be in the cache now
     entries = tmp_store.list_dataset_runs("b1")
     assert len(entries) == 2
+
+
+def test_exploration_rate_distance_bias(baseline):
+    """exploration_rate=0.0 favors low distance, 1.0 favors high distance."""
+    config = {
+        "persona": ["", "Expert A", "Expert B"],
+        "thinking_style": ["", "Step by step", "Focus on semantics"],
+        "task_intent": ["", "Identify the best match"],
+    }
+    # 3 * 3 * 2 = 18 total combos
+
+    # Conservative: favor low distance (many empty fields)
+    combos_low, _, meta_low = build_grid_combinations(
+        config, baseline, n_combos=6, exploration_rate=0.0, seed=42,
+    )
+    distances_low = []
+    for combo_dict, _ in combos_low:
+        d = sum(1 for v in combo_dict.values() if v > 0)
+        distances_low.append(d)
+
+    # Aggressive: favor high distance (many filled fields)
+    combos_high, _, meta_high = build_grid_combinations(
+        config, baseline, n_combos=6, exploration_rate=1.0, seed=42,
+    )
+    distances_high = []
+    for combo_dict, _ in combos_high:
+        d = sum(1 for v in combo_dict.values() if v > 0)
+        distances_high.append(d)
+
+    # Low exploration should have lower average distance than high
+    avg_low = sum(distances_low) / len(distances_low)
+    avg_high = sum(distances_high) / len(distances_high)
+    assert avg_low < avg_high, (
+        f"Expected low exploration avg distance ({avg_low}) < "
+        f"high exploration avg distance ({avg_high})"
+    )
+
+
+def test_n_combos_capped_at_full_space(baseline):
+    """When n_combos >= total space, return full grid and set capped=True."""
+    config = {"persona": ["", "Expert"], "thinking_style": ["", "Step by step"]}
+    # 2 * 2 = 4 combos
+
+    combos, lookup, meta = build_grid_combinations(config, baseline, n_combos=100)
+    assert len(combos) == 4
+    assert meta["capped"] is True
+    assert meta["total_space"] == 4
+    assert meta["n_selected"] == 4
+
+
+def test_exploration_rate_reproducible(baseline):
+    """Same seed produces same sampling result."""
+    config = {
+        "persona": ["", "Expert A", "Expert B"],
+        "thinking_style": ["", "Step by step", "Focus on semantics"],
+    }
+
+    combos_a, _, _ = build_grid_combinations(
+        config, baseline, n_combos=4, exploration_rate=0.5, seed=99,
+    )
+    combos_b, _, _ = build_grid_combinations(
+        config, baseline, n_combos=4, exploration_rate=0.5, seed=99,
+    )
+
+    ids_a = [ps_id for _, ps_id in combos_a]
+    ids_b = [ps_id for _, ps_id in combos_b]
+    # Note: ps_ids will differ because derive() generates new UUIDs,
+    # but the coord_dicts should be identical
+    coords_a = [cd for cd, _ in combos_a]
+    coords_b = [cd for cd, _ in combos_b]
+    assert coords_a == coords_b
 
 
 def test_load_eval_dataset(tmp_store):

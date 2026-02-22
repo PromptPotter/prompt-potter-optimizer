@@ -96,6 +96,47 @@ Optimization strategy — rarely changed:
 
 Grid search explores the prompt landscape by evaluating a cartesian product of field variants.
 
+### Two Primary Knobs
+
+The optimization system is controlled by two top-level parameters:
+
+| Knob | Range | Purpose |
+|------|-------|---------|
+| `n_samples` | integer | Queries per evaluation step — universal across grid search and optimization rounds |
+| `exploration_rate` | 0.0–1.0 | Controls exploration aggressiveness — biases grid sampling toward conservative (low distance) or aggressive (high distance) combinations |
+
+Set in the notebook's campaign config:
+```python
+campaign_config = {
+    "n_samples": 35,           # queries per evaluation step
+    "exploration_rate": 0.5,   # 0.0=conservative, 1.0=aggressive
+    ...
+}
+```
+
+### How `exploration_rate` Works
+
+Each grid combination has a **distance** = number of non-empty field values. The `exploration_rate` biases sampling toward different distance bands:
+
+- **0.0 (conservative)**: Favors combinations with few changes from baseline (low distance)
+- **0.5 (balanced)**: Even distribution across distance bands
+- **1.0 (aggressive)**: Favors combinations with many changes (high distance)
+
+The weight function is `w(d) = exp(-alpha * |d - target| / max_d)` where `target = exploration_rate * max_distance`.
+
+### Grid Budget (`n_combos`)
+
+Set `grid_search.n_combos` to control exactly how many combinations to evaluate:
+
+```python
+"grid_search": {
+    "n_combos": 35,   # exact budget (0=full grid)
+    ...
+}
+```
+
+When `n_combos` exceeds the full cartesian product size, the full grid is used (capped).
+
 ### Default Grid Axes
 
 ```python
@@ -105,21 +146,6 @@ DEFAULT_GRID_AXES = {
     "thinking_style": ["", "Think step by step.", "Focus on semantic meaning...", ...],
     "answer_format": ["", "Rank all candidates from most to least relevant."],
 }
-```
-
-### Exploration Strategy
-
-Controls how broadly the grid search explores the prompt space — analogous to a learning rate:
-
-| Strategy | Axes | Combos | When to use |
-|----------|------|--------|-------------|
-| `conservative` (1) | 2 (persona, thinking_style) | 4 | Quick sanity check, limited API budget |
-| `balanced` (2) | 4 (persona, task_intent, thinking_style, answer_format) | 96 | Default — good coverage vs cost trade-off |
-| `exploration` (3) | 5 (balanced + problem_description) | 288 | New domain, unknown which fields matter |
-
-Set in the notebook's Section 2.5:
-```python
-exploration_strategy = 2  # 1=conservative, 2=balanced, 3=exploration
 ```
 
 ### Improvement Areas
@@ -143,16 +169,70 @@ grid_config = {
 }
 ```
 
+## Progress Tracking
+
+After each round (grid search winner, optimization rounds), a training-style progress table is displayed:
+
+```
+Round  Accuracy  Rolling Avg (8)  Trend
+  0    62.9%     62.9%            -
+  G    71.4%     67.1%            +8.6%
+  1    74.3%     69.5%            +2.9%
+  2    74.3%     70.7%            +0.0%  <-- plateau
+```
+
+- **Rolling Avg**: Smoothed accuracy over the last 8 rounds
+- **Trend**: Per-round improvement indicator; plateau detection shows when accuracy stalls
+
+## Semi-Automatic Optimization
+
+The `run_optimization_loop()` function automates the generate → evaluate → select cycle:
+
+```python
+campaign_rounds = await run_optimization_loop(
+    campaign_rounds, eval_data, campaign_config, GROQ_API_KEY,
+    store=svc["store"], backend_id=svc["backend_id"],
+)
+```
+
+Behavior:
+- Subsamples `eval_data` to `n_samples` queries per round
+- Auto-continues while improvement exceeds `improvement_threshold`
+- Stops after `patience` consecutive rounds without improvement
+- Displays progress after each round
+
+Configure via `optimization` section:
+```python
+"optimization": {
+    "patience": 3,               # rounds without improvement before auto-stop
+    "improvement_threshold": 0.01,
+    "n_variants": 5,
+    "creativity": 0.7,
+}
+```
+
 ## Configuration Reference
 
 ### campaign_config
 
 ```python
 campaign_config = {
-    "n_variants": 3,           # Candidates per round
-    "creativity": 0.7,         # Meta-prompt temperature (0.0-1.0)
-    "improvement_threshold": 0.02,  # Min accuracy improvement to accept
-    "max_rounds": 5,           # Optimization iterations
+    "n_samples": 35,                # PRIMARY: queries per evaluation step
+    "exploration_rate": 0.5,        # PRIMARY: 0.0=conservative, 1.0=aggressive
+    "optimization": {
+        "n_variants": 5,            # Candidates per round
+        "creativity": 0.7,          # Meta-prompt temperature (0.0-1.0)
+        "improvement_threshold": 0.01,  # Min accuracy improvement to accept
+        "patience": 3,              # Rounds without improvement before auto-stop
+        "max_rounds": 10,
+    },
+    "eval_llm": { ... },
+    "grid_search": {
+        "n_combos": 35,             # Exact budget (0=full grid)
+        "seed": 42,
+        "top_k": 5,
+        "use_defaults": True,
+    },
 }
 ```
 
@@ -162,8 +242,8 @@ campaign_config = {
 eval_llm = {
     "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
     "provider_url": "https://api.groq.com/openai/v1/chat/completions",
-    "temperature": 0.1,
-    "max_tokens": 4096,
+    "temperature": 0,
+    "max_tokens": 4000,
 }
 ```
 
@@ -175,6 +255,6 @@ eval_llm = {
 
 **"No queries have entity_profile"** — Re-run replay with `skip_llm_ranking=False`. The entity_profile is populated by the full pipeline.
 
-**Grid search takes too long** — Reduce combinations with `max_combinations` parameter in `build_grid_combinations()`, or reduce `query_limit` in the evaluation dataset.
+**Grid search takes too long** — Reduce `n_combos` in `grid_search` config, or reduce `n_samples` for fewer queries per combination.
 
 **LLM errors / timeouts** — Check your API key in `.env`. Increase timeout in `eval_llm["max_tokens"]`. Groq has rate limits — add delays if hitting 429s.

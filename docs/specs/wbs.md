@@ -210,7 +210,7 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   - Counter-based stop condition works with configurable threshold
   - Integration test demonstrates multi-cycle optimization with feedback
 
-### 2.8 HITL Campaign Notebook
+### 2.8 HITL Campaign Notebook — Complete
 
 - **Scope:** Build an interactive Jupyter notebook for running optimization campaigns
   with full HITL control. Includes: editable campaign config JSON (all pipeline + optimization
@@ -225,12 +225,13 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   - Campaign config exposes all pipeline parameters + optimization settings as editable JSON
   - After each round, LLM produces categorized failure analysis and actionable phrase fragment suggestions
   - Winner PromptState is saved with full lineage chain
+- **Completed:** Exceeds original scope — also includes: Langfuse-style trace parsing and eval dataset loader (`load_eval_dataset()` with trace/replay priority chain), eval caching via content-addressed hashing (`eval_cache_key()`), incremental writes with crash protection (`.partial.jsonl`), partial-run resume, cache status summary, rate-limit backoff for Groq API, `_campaign_lib.py` extraction with thin wrappers over services, training-style progress display (`display_progress()`), and semi-automatic optimization loop with patience-based stopping (`run_optimization_loop()`). Key commits: `89d4a2f`, `534fa3e`, `c8c10a1`, `23717e5`, `ad5533d`.
 
-### 2.9 Grid Search (Initial Condition Exploration)
+### 2.9 Grid Search (Initial Condition Exploration) — Complete
 
 - **Scope:** Systematic exploration of PromptState Layer 1 fields via cartesian product sweep,
   with LLM-assisted input restructuring and result analysis. Integrated into campaign notebook
-  as pre-optimization chapter (Section 5.5).
+  as pre-optimization chapter (Section 4.5).
 - **Sessions:** 1
 - **Dependencies:** 2.1 (PromptState), 2.8 (campaign notebook + _campaign_lib.py)
 - **PRD Ref:** P1.3, P0.3
@@ -241,12 +242,15 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   - LLM result analysis (`analyze_grid_results()`)
   - Winner selection as campaign seed (`select_grid_winner()`)
   - Evaluation data loader (`load_eval_dataset()`) with trace/replay priority chain
+  - Distance-weighted stratified sampling (`n_combos` + `exploration_rate`) replacing fixed presets
+  - Per-combo eval caching and partial-run resume via `ProjectStore`
 - **Done when:**
   - Grid search produces ranked PromptState candidates sorted by accuracy
   - Marginal analysis shows per-axis mean accuracy for each variant value
   - Pairwise heatmaps visualize interaction effects between axes
   - LLM-generated insights identify strongest fields and recommended focus
   - Winner is selectable as optimization campaign seed
+- **Completed:** Key commits: `534fa3e`, `23717e5`, `ad5533d`. Distance-weighted sampling (replacing `EXPLORATION_PRESETS`) with two primary knobs (`n_combos`, `exploration_rate`) added in uncommitted work.
 
 **Phase 2 exit criteria:** POST optimize endpoint runs the linear mode DAG and returns scored prompt states. E2E test passes in CI. Cycling mode (2.7) is implemented and tested but not required for the M2 exit gate. HITL campaign notebook runs end-to-end in JupyterLab with config editing, replay, and LLM-generated suggestions. Grid search produces ranked exploration results with LLM-analyzed insights.
 

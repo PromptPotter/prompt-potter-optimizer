@@ -6,7 +6,9 @@ combination, and analyzes results to find optimal configurations.
 """
 import itertools
 import json
+import math
 import random
+from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -56,21 +58,7 @@ GRID_SEARCHABLE_FIELDS = {
     "instruction", "thinking_style", "answer_format",
 }
 
-EXPLORATION_PRESETS: Dict[str, Dict[str, List[str]]] = {
-    "conservative": {
-        "persona": ["", "You are a domain expert with deep knowledge of this field."],
-        "thinking_style": ["", "Think step by step."],
-    },
-    "balanced": dict(DEFAULT_GRID_AXES),
-    "exploration": {
-        **DEFAULT_GRID_AXES,
-        "problem_description": [
-            "",
-            "This is a terminology matching task requiring domain expertise.",
-            "Match informal descriptions to standardized catalog terms.",
-        ],
-    },
-}
+SAMPLING_ALPHA = 3.0
 
 REQUIRED_TEMPLATE_VARS = {"{{core_concept}}", "{{entity_profile_json}}", "{{matches}}"}
 
@@ -83,15 +71,18 @@ REQUIRED_TEMPLATE_VARS = {"{{core_concept}}", "{{entity_profile_json}}", "{{matc
 def validate_grid_config(
     grid_config: dict,
     baseline_ps: PromptState,
+    n_combos: int = 0,
 ) -> dict:
     """Validate grid axes and compute cartesian product size.
 
     Args:
         grid_config: Dict mapping field names to lists of variant values.
         baseline_ps: The baseline PromptState (for reference).
+        n_combos: If >0, planned sample size (used for capped reporting).
 
     Returns:
-        Metadata dict: {axes, axis_names, total, actual_count, is_subsampled}.
+        Metadata dict: {axes, axis_names, total, actual_count, is_subsampled,
+        capped}.
 
     Raises:
         ValueError: If axis keys are invalid or instruction variants lack
@@ -123,41 +114,168 @@ def validate_grid_config(
     for values in axes.values():
         total *= len(values)
 
+    actual_count = min(n_combos, total) if n_combos > 0 else total
+    capped = n_combos > 0 and n_combos >= total
+
     return {
         "axes": axes,
         "axis_names": axis_names,
         "total": total,
-        "actual_count": total,
-        "is_subsampled": False,
+        "actual_count": actual_count,
+        "is_subsampled": n_combos > 0 and n_combos < total,
+        "capped": capped,
     }
+
+
+def _combo_distance(combo: tuple) -> int:
+    """Count non-empty field values in a combination."""
+    return sum(1 for v in combo if v)
+
+
+def _allocate_budget(
+    buckets: Dict[int, list],
+    n_combos: int,
+    exploration_rate: float,
+    max_distance: int,
+) -> Dict[int, int]:
+    """Allocate budget across distance bands using weighted sampling.
+
+    Weight function: w(d) = exp(-alpha * |d - target| / max_d)
+    where target = exploration_rate * max_distance.
+    Uses largest-remainder method to ensure exact n_combos total.
+
+    Args:
+        buckets: Dict mapping distance -> list of combos at that distance.
+        n_combos: Total budget to allocate.
+        exploration_rate: 0.0 (conservative/low distance) to 1.0 (aggressive/high distance).
+        max_distance: Maximum possible distance.
+
+    Returns:
+        Dict mapping distance -> number of combos to sample from that band.
+    """
+    if max_distance == 0:
+        # All combos have the same distance; distribute evenly
+        for d in buckets:
+            return {d: min(n_combos, len(buckets[d]))}
+
+    target = exploration_rate * max_distance
+
+    # Compute raw weights
+    raw_weights: Dict[int, float] = {}
+    for d in buckets:
+        raw_weights[d] = math.exp(-SAMPLING_ALPHA * abs(d - target) / max_distance)
+
+    total_weight = sum(raw_weights.values())
+    if total_weight == 0:
+        total_weight = 1.0
+
+    # Ideal (fractional) allocation, capped at bucket size
+    ideal: Dict[int, float] = {}
+    for d in buckets:
+        ideal[d] = min(
+            (raw_weights[d] / total_weight) * n_combos,
+            len(buckets[d]),
+        )
+
+    # Largest-remainder method
+    floored = {d: int(v) for d, v in ideal.items()}
+    remainders = {d: ideal[d] - floored[d] for d in ideal}
+    allocated = sum(floored.values())
+    deficit = n_combos - allocated
+
+    # Sort by remainder descending, break ties by distance
+    sorted_ds = sorted(remainders, key=lambda d: (-remainders[d], d))
+    for d in sorted_ds:
+        if deficit <= 0:
+            break
+        room = len(buckets[d]) - floored[d]
+        if room > 0:
+            floored[d] += 1
+            deficit -= 1
+
+    return floored
 
 
 def build_grid_combinations(
     grid_config: dict,
     baseline_ps: PromptState,
-    max_combinations: int = 0,
+    n_combos: int = 0,
+    exploration_rate: float = 0.5,
     seed: int = 42,
-) -> Tuple[list, dict]:
+) -> Tuple[list, dict, dict]:
     """Build cartesian product of grid axes as PromptState variants.
+
+    Uses distance-weighted stratified sampling when ``n_combos > 0``.
+    Distance = number of non-empty field values in a combination.
+    ``exploration_rate`` biases sampling toward low-distance (conservative)
+    or high-distance (aggressive) bands.
 
     Args:
         grid_config: Dict mapping field names to lists of variant values.
         baseline_ps: The baseline PromptState to derive from.
-        max_combinations: If >0, subsample to this many combos.
-        seed: Random seed for reproducible subsampling.
+        n_combos: If >0, sample exactly this many combos (capped at full
+            space size). 0 = full grid (backward compat).
+        exploration_rate: 0.0 = favor low-distance combos (conservative),
+            1.0 = favor high-distance combos (aggressive). Default 0.5.
+        seed: Random seed for reproducible sampling.
 
     Returns:
-        Tuple of (combinations list, ps_lookup dict).
-        Each combination is (coord_dict, ps_id).
-        ps_lookup maps ps_id -> PromptState.
+        Tuple of (combinations, ps_lookup, sampling_meta).
+        combinations: list of (coord_dict, ps_id).
+        ps_lookup: dict mapping ps_id -> PromptState.
+        sampling_meta: dict with total_space, n_selected, exploration_rate,
+            distance_distribution, capped.
     """
     axis_names = list(grid_config.keys())
     axis_values = [grid_config[name] for name in axis_names]
     all_combos = list(itertools.product(*axis_values))
+    total_space = len(all_combos)
 
-    if max_combinations > 0 and len(all_combos) > max_combinations:
+    capped = False
+    if n_combos > 0 and n_combos < total_space:
+        # Bucket by distance
+        buckets: Dict[int, list] = defaultdict(list)
+        for combo in all_combos:
+            d = _combo_distance(combo)
+            buckets[d].append(combo)
+
+        max_distance = max(buckets.keys()) if buckets else 0
+
+        allocation = _allocate_budget(buckets, n_combos, exploration_rate, max_distance)
+
         rng = random.Random(seed)
-        all_combos = rng.sample(all_combos, max_combinations)
+        selected = []
+        distance_distribution: Dict[int, int] = {}
+        for d in sorted(allocation):
+            count = allocation[d]
+            pool = buckets[d]
+            if count >= len(pool):
+                sampled = pool
+            else:
+                sampled = rng.sample(pool, count)
+            selected.extend(sampled)
+            distance_distribution[d] = len(sampled)
+
+        all_combos = selected
+    elif n_combos > 0:
+        # n_combos >= total_space: use full grid
+        capped = True
+        distance_distribution = {}
+        buckets_for_meta: Dict[int, list] = defaultdict(list)
+        for combo in all_combos:
+            d = _combo_distance(combo)
+            buckets_for_meta[d].append(combo)
+        for d in sorted(buckets_for_meta):
+            distance_distribution[d] = len(buckets_for_meta[d])
+    else:
+        # Full grid mode
+        distance_distribution = {}
+        buckets_for_meta = defaultdict(list)
+        for combo in all_combos:
+            d = _combo_distance(combo)
+            buckets_for_meta[d].append(combo)
+        for d in sorted(buckets_for_meta):
+            distance_distribution[d] = len(buckets_for_meta[d])
 
     combinations = []
     ps_lookup = {}
@@ -179,7 +297,15 @@ def build_grid_combinations(
         combinations.append((coord_dict, ps.id))
         ps_lookup[ps.id] = ps
 
-    return combinations, ps_lookup
+    sampling_meta = {
+        "total_space": total_space,
+        "n_selected": len(combinations),
+        "exploration_rate": exploration_rate,
+        "distance_distribution": distance_distribution,
+        "capped": capped,
+    }
+
+    return combinations, ps_lookup, sampling_meta
 
 
 # ---------------------------------------------------------------------------

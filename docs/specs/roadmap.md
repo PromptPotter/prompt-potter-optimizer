@@ -91,6 +91,17 @@
   - Grid search produces ranked exploration results with LLM-analyzed insights
   - Decision: does the linear mode produce useful prompt states? Is the DAG architecture right for adding cycling later?
 
+- **Progress:**
+  - 2.1 Initialization Node — Not started
+  - 2.2 Grow/Filter Node — Not started
+  - 2.3 Analysis + Evaluation Node — Not started
+  - 2.4 Linear Mode Orchestrator — Not started
+  - 2.5 Optimize Router — Not started
+  - 2.6 E2E Test — Not started
+  - 2.7 Cycling Mode — Not started
+  - 2.8 HITL Campaign Notebook — **Complete** (exceeds scope: trace parsing, eval caching, incremental writes, crash protection, rate-limit backoff, `_campaign_lib.py` service extraction, training-style progress display, semi-automatic optimization loop with patience-based stopping)
+  - 2.9 Grid Search — **Complete** (default axes, LLM restructuring, grid execution/visualization/analysis, winner selection, distance-weighted stratified sampling with `n_combos` + `exploration_rate`, per-combo caching + partial-run resume)
+
 - **Risks:**
   - LLM-based structured output quality may vary (initialization node depends on Groq + Llama 4 Maverick producing valid structured responses)
   - Grow/Filter node may produce insufficiently diverse enrichments without cycling feedback

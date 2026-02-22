@@ -45,7 +45,7 @@ from api.services.prompt_optimizer import (
 )
 from api.services.grid_search import (
     DEFAULT_GRID_AXES,
-    EXPLORATION_PRESETS,
+    SAMPLING_ALPHA,
     GRID_SEARCHABLE_FIELDS,
     REQUIRED_TEMPLATE_VARS,
     validate_grid_config as _validate_grid_config,
@@ -60,7 +60,7 @@ from api.services.grid_search import (
 # Re-export constants for notebooks
 __all__ = [
     "DEFAULT_GRID_AXES",
-    "EXPLORATION_PRESETS",
+    "SAMPLING_ALPHA",
     "GRID_SEARCHABLE_FIELDS",
     "REQUIRED_TEMPLATE_VARS",
 ]
@@ -737,17 +737,36 @@ def validate_grid_config(grid_config: dict, baseline: PromptState) -> dict:
 def build_grid_combinations(
     grid_config: dict,
     baseline: PromptState,
-    max_combinations: int = 0,
+    n_combos: int = 0,
+    exploration_rate: float = 0.5,
     seed: int = 42,
 ):
-    """Build cartesian product of grid axes as PromptState variants."""
-    combos, lookup = _build_grid_combinations(
-        grid_config, baseline, max_combinations, seed,
+    """Build cartesian product of grid axes as PromptState variants.
+
+    Returns (combinations, ps_lookup) — the sampling_meta is printed
+    and not forwarded to keep the notebook interface simple.
+    """
+    combos, lookup, meta = _build_grid_combinations(
+        grid_config, baseline, n_combos, exploration_rate, seed,
     )
 
-    if max_combinations > 0 and len(combos) < max_combinations:
-        pass  # no subsampling message needed
-    print(f"Built {len(combos)} grid combinations")
+    # Print sampling summary
+    if meta["capped"]:
+        print(
+            f"Built {meta['n_selected']} grid combinations "
+            f"(requested {n_combos}, capped at full space of {meta['total_space']})"
+        )
+    elif n_combos > 0:
+        print(
+            f"Sampled {meta['n_selected']}/{meta['total_space']} combinations "
+            f"(exploration_rate={meta['exploration_rate']:.2f})"
+        )
+    else:
+        print(f"Built {meta['n_selected']} grid combinations (full grid)")
+
+    if meta["distance_distribution"]:
+        parts = [f"d{d}={c}" for d, c in sorted(meta["distance_distribution"].items())]
+        print(f"  Distance distribution: {', '.join(parts)}")
 
     return combos, lookup
 
@@ -998,3 +1017,173 @@ def save_campaign_winner(
     print(f"  Rounds completed: {result['campaign_rounds'] - 1}")
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Progress display
+# ---------------------------------------------------------------------------
+
+
+def display_progress(campaign_rounds: list, window: int = 8) -> None:
+    """Print training-style progress summary after each round.
+
+    Shows: round-by-round accuracy, rolling average over last ``window``
+    rounds, trend indicator (improving/plateau/declining).
+    """
+    if not campaign_rounds:
+        print("No rounds to display.")
+        return
+
+    print(f"\n{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>8s}")
+    accuracies = []
+
+    for rd in campaign_rounds:
+        acc = rd["accuracy"]
+        accuracies.append(acc)
+        n = len(accuracies)
+
+        # Rolling average over last `window` entries
+        window_slice = accuracies[-window:]
+        rolling_avg = sum(window_slice) / len(window_slice)
+
+        # Trend
+        if n <= 1:
+            trend_str = "-"
+        else:
+            delta = acc - accuracies[-2]
+            if abs(delta) < 0.001:
+                trend_str = "+0.0%  <-- plateau"
+            elif delta > 0:
+                trend_str = f"+{delta:.1%}"
+            else:
+                trend_str = f"{delta:.1%}"
+
+        round_label = str(rd["round"])
+        if rd.get("round") == "grid":
+            round_label = "G"
+
+        print(
+            f"  {round_label:<5s} {acc:>8.1%} {rolling_avg:>12.1%}  {trend_str}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Semi-automatic optimization loop
+# ---------------------------------------------------------------------------
+
+
+async def run_optimization_loop(
+    campaign_rounds: list,
+    eval_data: list,
+    campaign_config: dict,
+    api_key: str,
+    *,
+    store: "ProjectStore | None" = None,
+    backend_id: str = "",
+    max_rounds: int = 10,
+    patience: int = 3,
+) -> list:
+    """Run optimization rounds until patience exhausted or max_rounds reached.
+
+    After each round:
+    - Display progress (accuracy + rolling avg)
+    - If improvement > threshold: auto-continue
+    - If no improvement for ``patience`` rounds: stop and print summary
+
+    Args:
+        campaign_rounds: Existing rounds list (modified in place and returned).
+        eval_data: Full evaluation dataset.
+        campaign_config: Campaign configuration dict (must have ``eval_llm``,
+            ``optimization``, and optionally ``n_samples``).
+        api_key: LLM API key.
+        store: Optional ProjectStore for caching.
+        backend_id: Backend identifier (required when store is provided).
+        max_rounds: Hard cap on optimization rounds.
+        patience: Rounds without improvement before auto-stop.
+
+    Returns:
+        Updated campaign_rounds list.
+    """
+    import random as _random
+
+    opt = campaign_config.get("optimization", {})
+    eval_llm = campaign_config["eval_llm"]
+    n_samples = campaign_config.get("n_samples", 0)
+    n_variants = opt.get("n_variants", 5)
+    creativity = opt.get("creativity", 0.7)
+    threshold = opt.get("improvement_threshold", 0.01)
+    patience = opt.get("patience", patience)
+
+    # Subsample eval_data if n_samples is set
+    if n_samples > 0 and len(eval_data) > n_samples:
+        rng = _random.Random(42)
+        round_eval_data = rng.sample(eval_data, n_samples)
+        print(f"Subsampled eval_data to {n_samples}/{len(eval_data)} queries")
+    else:
+        round_eval_data = eval_data
+
+    rounds_without_improvement = 0
+
+    for _ in range(max_rounds):
+        current_best = campaign_rounds[-1]
+        round_num = len(campaign_rounds)
+        print(
+            f"\n{'=' * 70}\n"
+            f"=== ROUND {round_num} === Current best: "
+            f"{current_best['label']} ({current_best['accuracy']:.1%})\n"
+            f"{'=' * 70}"
+        )
+
+        candidates = await generate_candidates(
+            current_best["prompt_state"],
+            current_best["accuracy"],
+            current_best["results"],
+            n_variants,
+            creativity,
+            eval_llm,
+            api_key,
+        )
+
+        all_candidate_results = {}
+        for idx, c in enumerate(candidates):
+            all_candidate_results[c.id] = await evaluate_prompt(
+                c, round_eval_data, eval_llm, api_key,
+                label=f"Candidate {idx + 1}",
+                store=store,
+                backend_id=backend_id,
+            )
+
+        round_entry = select_round_winner(
+            candidates, all_candidate_results, current_best, threshold,
+        )
+        round_entry["round"] = round_num
+        campaign_rounds.append(round_entry)
+
+        # Display progress
+        display_progress(campaign_rounds)
+
+        # Check improvement
+        improved = round_entry["accuracy"] > current_best["accuracy"] + threshold
+        if improved:
+            rounds_without_improvement = 0
+            print(f"\nImprovement detected, auto-continuing...")
+        else:
+            rounds_without_improvement += 1
+            print(
+                f"\nNo improvement ({rounds_without_improvement}/{patience} patience)"
+            )
+            if rounds_without_improvement >= patience:
+                print(
+                    f"\nStopping: no improvement for {patience} consecutive rounds."
+                )
+                break
+
+    # Final summary
+    best = max(campaign_rounds, key=lambda r: r["accuracy"])
+    print(f"\n{'=' * 70}")
+    print("OPTIMIZATION COMPLETE")
+    print(f"  Rounds run: {len(campaign_rounds) - 1}")
+    print(f"  Best accuracy: {best['accuracy']:.1%} (round {best['round']})")
+    print(f"{'=' * 70}")
+
+    return campaign_rounds
