@@ -7,6 +7,7 @@ interactive notebook use.
 All existing function signatures are preserved for backward compatibility.
 """
 
+import json
 import sys
 from pathlib import Path
 from typing import Tuple
@@ -32,6 +33,8 @@ from api.services.prompt_eval import (
     local_reranker_eval as _local_reranker_eval,
     evaluate_prompt_batch,
     compute_accuracy,
+    eval_cache_key,
+    build_dataset_run_data,
 )
 from api.services.prompt_optimizer import (
     generate_candidates as _generate_candidates,
@@ -450,8 +453,39 @@ async def evaluate_prompt(
     api_key: str,
     label: str = "Eval",
     verbose: bool = True,
+    *,
+    store: "ProjectStore | None" = None,
+    backend_id: str = "",
+    force: bool = False,
 ) -> list:
-    """Evaluate a prompt on all eval_data with progress bar."""
+    """Evaluate a prompt on all eval_data with progress bar.
+
+    Args:
+        store: If provided, enables caching via ProjectStore dataset_runs.
+        backend_id: Required when store is provided.
+        force: Skip cache lookup and re-evaluate (overwrites existing cache).
+    """
+    rendered = prompt_state.render()
+    model = eval_llm.get("model", "")
+    temperature = eval_llm.get("temperature", 0.1)
+    content_hash = eval_cache_key(rendered, eval_data, model, temperature)
+
+    # --- cache lookup ---
+    if store and backend_id and not force:
+        cached = store.load_dataset_run_by_hash(backend_id, content_hash)
+        if cached:
+            results = cached["dataset_run_items"]
+            acc = cached.get("scores", {})
+            hits = acc.get("hits", sum(1 for r in results if r.get("hit")))
+            total = acc.get("total", len(results))
+            accuracy = acc.get("accuracy", hits / total if total else 0)
+            print(
+                f"[cached] {label}: {hits}/{total} ({accuracy:.1%})"
+                f"  |  Errors: {acc.get('errors', 0)}"
+            )
+            return results
+
+    # --- evaluate via LLM ---
     client = _make_llm_client(eval_llm, api_key)
     _pbar = tqdm(total=len(eval_data), desc=f"{label} eval", unit="query")
 
@@ -467,8 +501,8 @@ async def evaluate_prompt(
 
     results = await evaluate_prompt_batch(
         prompt_state, eval_data, client,
-        model=eval_llm.get("model"),
-        temperature=eval_llm.get("temperature", 0.1),
+        model=model,
+        temperature=temperature,
         max_tokens=eval_llm.get("max_tokens", 4096),
         on_result=on_result,
     )
@@ -479,6 +513,17 @@ async def evaluate_prompt(
         f"\n{label}: {acc['hits']}/{acc['total']} ({acc['accuracy']:.1%})"
         f"  |  Errors: {acc['errors']}"
     )
+
+    # --- save to cache ---
+    if store and backend_id:
+        safe_label = label.lower().replace(" ", "_")
+        run_id = f"{safe_label}_{content_hash[:8]}"
+        run_data = build_dataset_run_data(
+            run_id, label, content_hash, prompt_state.id,
+            rendered, model, temperature, acc, results,
+        )
+        store.save_dataset_run(backend_id, run_id, run_data)
+        print(f"[cached] Saved {run_id}")
 
     return results
 
@@ -684,6 +729,9 @@ async def run_grid_search(
     eval_data: list,
     eval_llm: dict,
     api_key: str,
+    *,
+    store: "ProjectStore | None" = None,
+    backend_id: str = "",
 ) -> pd.DataFrame:
     """Evaluate each grid combination on eval_data."""
     client = _make_llm_client(eval_llm, api_key)
@@ -699,6 +747,8 @@ async def run_grid_search(
         max_tokens=eval_llm.get("max_tokens", 4096),
         on_combo_done=on_combo_done,
         request_delay=eval_llm.get("request_delay", 1.0),
+        store=store,
+        backend_id=backend_id,
     )
     pbar.close()
     return df

@@ -1,0 +1,97 @@
+"""Tests for ProjectStore dataset_runs (eval result caching)."""
+import json
+
+import pytest
+
+
+def _make_run_data(run_id="baseline_aabbccdd", content_hash="aabbccdd11223344", name="Baseline"):
+    return {
+        "run_id": run_id,
+        "name": name,
+        "content_hash": content_hash,
+        "prompt_state_id": "ps-123",
+        "rendered_prompt_hash": "rp-456",
+        "model": "test-model",
+        "temperature": 0,
+        "item_count": 2,
+        "scores": {"hits": 1, "total": 2, "accuracy": 0.5, "errors": 0},
+        "created_at": "2026-02-22T14:00:00Z",
+        "dataset_run_items": [
+            {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True, "confidence": 0.9, "error": None},
+            {"query": "q2", "predicted": "p2", "ground_truth": "gt2", "hit": False, "confidence": 0.3, "error": None},
+        ],
+    }
+
+
+def test_save_and_load_by_hash(tmp_store):
+    data = _make_run_data()
+    path = tmp_store.save_dataset_run("b1", data["run_id"], data)
+    assert path.exists()
+
+    loaded = tmp_store.load_dataset_run_by_hash("b1", data["content_hash"])
+    assert loaded is not None
+    assert loaded["run_id"] == data["run_id"]
+    assert loaded["scores"]["accuracy"] == 0.5
+    assert len(loaded["dataset_run_items"]) == 2
+
+
+def test_load_miss_returns_none(tmp_store):
+    assert tmp_store.load_dataset_run_by_hash("b1", "nonexistent") is None
+
+
+def test_load_miss_no_index(tmp_store):
+    """No index file at all → None, no crash."""
+    assert tmp_store.load_dataset_run_by_hash("no-backend", "anything") is None
+
+
+def test_list_dataset_runs(tmp_store):
+    run1 = _make_run_data("run_a", "hash_a", "Run A")
+    run2 = _make_run_data("run_b", "hash_b", "Run B")
+
+    tmp_store.save_dataset_run("b1", run1["run_id"], run1)
+    tmp_store.save_dataset_run("b1", run2["run_id"], run2)
+
+    entries = tmp_store.list_dataset_runs("b1")
+    assert len(entries) == 2
+    assert entries[0]["run_id"] == "run_a"
+    assert entries[1]["run_id"] == "run_b"
+
+
+def test_list_empty(tmp_store):
+    assert tmp_store.list_dataset_runs("b1") == []
+
+
+def test_index_integrity_after_multiple_saves(tmp_store):
+    """Index total matches actual entry count."""
+    for i in range(3):
+        data = _make_run_data(f"run_{i}", f"hash_{i:016d}", f"Run {i}")
+        tmp_store.save_dataset_run("b1", data["run_id"], data)
+
+    index_path = tmp_store._dataset_runs_index_path("b1")
+    index = json.loads(index_path.read_text())
+    assert index["total"] == 3
+    assert len(index["dataset_runs"]) == 3
+
+
+def test_upsert_replaces_same_hash(tmp_store):
+    """Saving with the same content_hash replaces the index entry (no duplicates)."""
+    data1 = _make_run_data("run_v1", "same_hash_1234", "V1")
+    data2 = _make_run_data("run_v2", "same_hash_1234", "V2")
+    data2["scores"]["accuracy"] = 0.75
+
+    tmp_store.save_dataset_run("b1", data1["run_id"], data1)
+    tmp_store.save_dataset_run("b1", data2["run_id"], data2)
+
+    entries = tmp_store.list_dataset_runs("b1")
+    assert len(entries) == 1
+    assert entries[0]["run_id"] == "run_v2"
+    assert entries[0]["scores"]["accuracy"] == 0.75
+
+
+def test_detail_file_written_correctly(tmp_store):
+    data = _make_run_data()
+    path = tmp_store.save_dataset_run("b1", data["run_id"], data)
+
+    detail = json.loads(path.read_text())
+    assert detail["run_id"] == data["run_id"]
+    assert detail["dataset_run_items"][0]["query"] == "q1"

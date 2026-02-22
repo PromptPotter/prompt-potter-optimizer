@@ -14,7 +14,12 @@ import pandas as pd
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
 from api.services.project_store import ProjectStore
-from api.services.prompt_eval import evaluate_prompt_batch, compute_accuracy
+from api.services.prompt_eval import (
+    evaluate_prompt_batch,
+    compute_accuracy,
+    eval_cache_key,
+    build_dataset_run_data,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +299,8 @@ async def run_grid_search(
     max_tokens: int = 4096,
     on_combo_done: Optional[Callable] = None,
     request_delay: float = 1.0,
+    store: Optional["ProjectStore"] = None,
+    backend_id: str = "",
 ) -> pd.DataFrame:
     """Evaluate each grid combination on eval_data.
 
@@ -309,6 +316,8 @@ async def run_grid_search(
             after each combination is evaluated.
         request_delay: Seconds to sleep between LLM calls within each
             combination (default 1.0). Prevents hitting API rate limits.
+        store: Optional ProjectStore for per-combo eval caching.
+        backend_id: Required when store is provided.
 
     Returns:
         DataFrame with columns: axis indices, prompt_state_id,
@@ -318,13 +327,32 @@ async def run_grid_search(
 
     for combo_idx, (coord_dict, ps_id) in enumerate(combinations):
         ps = ps_lookup[ps_id]
-        results = await evaluate_prompt_batch(
-            ps, eval_data, llm_client,
-            model=model, temperature=temperature, max_tokens=max_tokens,
-            request_delay=request_delay,
-        )
+        rendered = ps.render()
+        content_hash = eval_cache_key(rendered, eval_data, model or "", temperature)
 
-        acc = compute_accuracy(results)
+        # Check cache
+        cached_run = None
+        if store and backend_id:
+            cached_run = store.load_dataset_run_by_hash(backend_id, content_hash)
+
+        if cached_run:
+            acc = cached_run["scores"]
+        else:
+            results = await evaluate_prompt_batch(
+                ps, eval_data, llm_client,
+                model=model, temperature=temperature, max_tokens=max_tokens,
+                request_delay=request_delay,
+            )
+            acc = compute_accuracy(results)
+
+            # Save to cache
+            if store and backend_id:
+                run_id = f"grid_{content_hash[:8]}"
+                run_data = build_dataset_run_data(
+                    run_id, f"grid_combo_{combo_idx}", content_hash,
+                    ps_id, rendered, model or "", temperature, acc, results,
+                )
+                store.save_dataset_run(backend_id, run_id, run_data)
 
         row = dict(coord_dict)
         row["prompt_state_id"] = ps_id

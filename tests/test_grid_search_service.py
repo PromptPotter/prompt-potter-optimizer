@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pandas as pd
 import pytest
 
+from api.models.backend import BackendConnection
 from api.models.prompt_state import PromptState
 from api.services.llm_client import MockLLMClient
 from api.services.grid_search import (
@@ -132,8 +133,44 @@ def test_select_grid_winner(baseline):
     assert result["round"] == "grid"
 
 
+@pytest.mark.asyncio
+async def test_grid_search_caches_and_reuses(baseline, eval_data, mock_hit, tmp_store):
+    """First run saves to cache; second run skips LLM calls entirely."""
+    tmp_store.register_backend(BackendConnection(
+        id="b1", name="Test", backend_type="test", base_url="http://test",
+    ))
+
+    config = {"persona": ["", "Expert"]}
+    combos, lookup = build_grid_combinations(config, baseline)
+    client = MockLLMClient(responses=[mock_hit])
+
+    # First run — evaluates all combos and saves to cache
+    df1 = await run_grid_search(
+        combos, lookup, eval_data, client,
+        request_delay=0, store=tmp_store, backend_id="b1",
+    )
+    assert len(df1) == 2
+    entries = tmp_store.list_dataset_runs("b1")
+    assert len(entries) == 2
+
+    # Record call count after first run
+    calls_after_first = client._call_count
+
+    # Second run — should hit cache, no new LLM calls
+    df2 = await run_grid_search(
+        combos, lookup, eval_data, client,
+        request_delay=0, store=tmp_store, backend_id="b1",
+    )
+    assert len(df2) == 2
+    assert client._call_count == calls_after_first  # no new calls
+
+    # Accuracy values should match between runs
+    acc1 = df1.sort_values("prompt_state_id")["accuracy"].tolist()
+    acc2 = df2.sort_values("prompt_state_id")["accuracy"].tolist()
+    assert acc1 == acc2
+
+
 def test_load_eval_dataset(tmp_store):
-    from api.models.backend import BackendConnection
     tmp_store.register_backend(BackendConnection(
         id="test", name="Test", backend_type="test", base_url="http://test",
     ))

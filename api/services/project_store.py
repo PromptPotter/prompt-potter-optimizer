@@ -11,6 +11,9 @@ Layout:
             {experiment_id}.json      # GET /experiments/{id} (verbatim)
         executions/
           {execution_id}.json         # Replay results
+        dataset_runs.json             # INDEX — eval run summaries
+        dataset_runs/
+          {name}_{hash}.json          # DETAIL — full DatasetRun with items
 """
 
 import json
@@ -222,3 +225,93 @@ class ProjectStore:
                 }
             )
         return items
+
+    # -- dataset runs (eval result caching) --------------------------------
+
+    def _dataset_runs_dir(self, backend_id: str) -> Path:
+        return self._backend_dir(backend_id) / "dataset_runs"
+
+    def _dataset_runs_index_path(self, backend_id: str) -> Path:
+        return self._backend_dir(backend_id) / "dataset_runs.json"
+
+    def save_dataset_run(
+        self, backend_id: str, run_id: str, data: Dict[str, Any]
+    ) -> Path:
+        """Write detail file and append/update the index.
+
+        ``data`` must include at least ``run_id``, ``content_hash``, and
+        ``scores``.  The detail file is written to
+        ``dataset_runs/{run_id}.json`` and a summary entry is upserted into
+        ``dataset_runs.json``.
+        """
+        # Write detail file
+        detail_path = self._dataset_runs_dir(backend_id) / f"{run_id}.json"
+        self._write_json(detail_path, data)
+
+        # Build summary entry for the index
+        summary = {
+            "run_id": data["run_id"],
+            "name": data.get("name", run_id),
+            "experiment_id": data.get("experiment_id", ""),
+            "prompt_state_id": data.get("prompt_state_id", ""),
+            "model": data.get("model", ""),
+            "temperature": data.get("temperature", 0),
+            "item_count": data.get("item_count", 0),
+            "scores": data.get("scores", {}),
+            "content_hash": data.get("content_hash", ""),
+            "created_at": data.get("created_at", ""),
+        }
+
+        # Load or create index
+        index_path = self._dataset_runs_index_path(backend_id)
+        if index_path.exists():
+            index = self._read_json(index_path)
+        else:
+            index = {"dataset_runs": [], "total": 0}
+
+        # Upsert: replace existing entry with same content_hash, else append
+        content_hash = data.get("content_hash", "")
+        entries = index["dataset_runs"]
+        replaced = False
+        for i, entry in enumerate(entries):
+            if entry.get("content_hash") == content_hash:
+                entries[i] = summary
+                replaced = True
+                break
+        if not replaced:
+            entries.append(summary)
+
+        index["total"] = len(entries)
+        self._write_json(index_path, index)
+
+        return detail_path
+
+    def load_dataset_run_by_hash(
+        self, backend_id: str, content_hash: str
+    ) -> Optional[Dict[str, Any]]:
+        """Scan the index for a matching content_hash, load and return detail.
+
+        Returns None on miss.
+        """
+        index_path = self._dataset_runs_index_path(backend_id)
+        if not index_path.exists():
+            return None
+
+        index = self._read_json(index_path)
+        for entry in index.get("dataset_runs", []):
+            if entry.get("content_hash") == content_hash:
+                detail_path = (
+                    self._dataset_runs_dir(backend_id)
+                    / f"{entry['run_id']}.json"
+                )
+                if detail_path.exists():
+                    return self._read_json(detail_path)
+        return None
+
+    def list_dataset_runs(self, backend_id: str) -> List[Dict[str, Any]]:
+        """Return the index entries (summaries without full items)."""
+        index_path = self._dataset_runs_index_path(backend_id)
+        if not index_path.exists():
+            return []
+        index = self._read_json(index_path)
+        return index.get("dataset_runs", [])

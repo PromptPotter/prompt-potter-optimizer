@@ -5,12 +5,63 @@ Extracts baseline prompts from experiment data, filters evaluation datasets,
 and evaluates reranker prompts against cached pipeline data using LLMClientBase.
 """
 import asyncio
+import hashlib
 import json
 import random
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
+
+
+def eval_cache_key(
+    rendered_prompt: str,
+    eval_data: list,
+    model: str,
+    temperature: float,
+) -> str:
+    """Content-addressed cache key for evaluation results.
+
+    ``sha256(rendered_prompt + sorted_query_gt_pairs + model + temperature)[:16]``
+
+    Order of eval_data queries does not affect the hash.
+    """
+    pairs = sorted(
+        (d.get("query", ""), d.get("ground_truth", "")) for d in eval_data
+    )
+    blob = json.dumps(
+        {"prompt": rendered_prompt, "pairs": pairs, "model": model, "temperature": temperature},
+        sort_keys=True,
+    )
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def build_dataset_run_data(
+    run_id: str,
+    name: str,
+    content_hash: str,
+    prompt_state_id: str,
+    rendered_prompt: str,
+    model: str,
+    temperature: float,
+    scores: dict,
+    results: list,
+) -> dict:
+    """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
+    return {
+        "run_id": run_id,
+        "name": name,
+        "content_hash": content_hash,
+        "prompt_state_id": prompt_state_id,
+        "rendered_prompt_hash": hashlib.sha256(rendered_prompt.encode()).hexdigest()[:16],
+        "model": model,
+        "temperature": temperature,
+        "item_count": scores["total"],
+        "scores": scores,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "dataset_run_items": results,
+    }
 
 
 def extract_baseline_prompt(exp_data: dict) -> PromptState:

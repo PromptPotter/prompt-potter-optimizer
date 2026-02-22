@@ -79,6 +79,9 @@ workflows/examples/              # CWL-inspired YAML workflow definitions
       optimization/              # Saved PromptState winners from optimization runs
     executions/
       {execution_id}.json        # Replay results (with pipeline_data per query)
+    dataset_runs.json            # INDEX — eval run summaries (Langfuse naming)
+    dataset_runs/
+      {name}_{hash}.json         # DETAIL — full DatasetRun with DatasetRunItems
 ```
 
 ## Key Endpoints
@@ -103,9 +106,9 @@ workflows/examples/              # CWL-inspired YAML workflow definitions
 
 ## Key Services
 
-- **`prompt_eval`** — `extract_baseline_prompt()`, `filter_eval_data()`, `local_reranker_eval()`, `evaluate_prompt_batch()`, `compute_accuracy()`. All LLM calls use `LLMClientBase`.
+- **`prompt_eval`** — `extract_baseline_prompt()`, `filter_eval_data()`, `local_reranker_eval()`, `evaluate_prompt_batch()`, `compute_accuracy()`, `eval_cache_key()`, `build_dataset_run_data()`. All LLM calls use `LLMClientBase`. Cache utilities are shared by `_campaign_lib` and `grid_search`.
 - **`prompt_optimizer`** — `generate_candidates()`, `select_round_winner()`, `generate_suggestions()`, `save_campaign_winner()`. All LLM calls use `LLMClientBase`.
-- **`grid_search`** — `validate_grid_config()`, `build_grid_combinations()`, `restructure_context()`, `run_grid_search()`, `analyze_grid_results()`, `select_grid_winner()`, `load_eval_dataset()`. Constants: `DEFAULT_GRID_AXES`, `EXPLORATION_PRESETS` (conservative/balanced/exploration strategy modes), `GRID_SEARCHABLE_FIELDS`, `REQUIRED_TEMPLATE_VARS`. `restructure_context()` accepts optional `improvement_areas` for domain-expert guidance and returns a `consultation` key with strategic advice.
+- **`grid_search`** — `validate_grid_config()`, `build_grid_combinations()`, `restructure_context()`, `run_grid_search()`, `analyze_grid_results()`, `select_grid_winner()`, `load_eval_dataset()`. Constants: `DEFAULT_GRID_AXES`, `EXPLORATION_PRESETS` (conservative/balanced/exploration strategy modes), `GRID_SEARCHABLE_FIELDS`, `REQUIRED_TEMPLATE_VARS`. `restructure_context()` accepts optional `improvement_areas` for domain-expert guidance and returns a `consultation` key with strategic advice. `run_grid_search()` accepts optional `store`/`backend_id` for content-addressed per-combo caching via `dataset_runs/`.
 - **`_campaign_lib.py`** — Thin notebook-facing wrapper over the services above. Adds tqdm, print, IPython.display. Preserves legacy `(eval_llm, api_key)` signatures via `_make_llm_client()` adapter.
 
 ## Configuration
