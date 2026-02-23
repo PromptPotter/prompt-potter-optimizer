@@ -71,7 +71,7 @@ def test_index_integrity_after_multiple_saves(tmp_store):
         data = _make_run_data(f"run_{i}", f"hash_{i:016d}", f"Run {i}")
         tmp_store.save_dataset_run("b1", data["run_id"], data)
 
-    index_path = tmp_store._dataset_runs_index_path("b1")
+    index_path = tmp_store.base_dir / "b1" / "dataset_runs.json"
     index = json.loads(index_path.read_text())
     assert index["total"] == 3
     assert len(index["dataset_runs"]) == 3
@@ -132,7 +132,7 @@ def test_finalize_eval_run_removes_partial(tmp_store):
     tmp_store.append_eval_item("b1", "run_xyz", {"query": "q1", "hit": True, "error": None})
     tmp_store.append_eval_item("b1", "run_xyz", {"query": "q2", "hit": False, "error": None})
 
-    partial_path = tmp_store._dataset_runs_dir("b1") / "run_xyz.partial.jsonl"
+    partial_path = tmp_store.base_dir / "b1" / "dataset_runs" / "run_xyz.partial.jsonl"
     assert partial_path.exists()
 
     run_data = _make_run_data("run_xyz", "hash_xyz")
