@@ -1,33 +1,30 @@
 """
-Health check endpoints
+Health check endpoints.
 """
-from fastapi import APIRouter
 from datetime import datetime, timezone
+
+from fastapi import APIRouter
+
+from api.config.settings import APP_VERSION
 
 router = APIRouter()
 
 
 @router.get("/health")
 async def health_check():
-    """
-    Health check endpoint
-    Returns service status and timestamp
-    """
+    """Return service status, timestamp, and version."""
     return {
         "status": "healthy",
         "service": "PromptPotter Optimizer",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "version": "0.4.0"
+        "version": APP_VERSION,
     }
 
 
 @router.get("/ready")
 async def readiness_check():
-    """
-    Readiness check endpoint
-    Verifies all dependencies are available
-    """
+    """Verify all dependencies are available."""
     return {
         "status": "ready",
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }

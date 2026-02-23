@@ -1,29 +1,32 @@
 """
-PromptPotter Optimizer API
-Main FastAPI application entry point
+PromptPotter Optimizer API — main FastAPI application entry point.
 """
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.config.settings import settings
+
+from api.config.settings import APP_VERSION, settings
 from api.routers import backends, health, workflows
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown lifecycle."""
-    print(f"Starting {app.title} v{app.version}")
-    print(f"Environment: {settings.ENVIRONMENT}")
-    print("Docs available at: /docs")
+    logger.info("Starting %s v%s", app.title, app.version)
+    logger.info("Environment: %s", settings.ENVIRONMENT)
+    logger.info("Docs available at: /docs")
     yield
-    print("Shutting down PromptPotter Optimizer")
+    logger.info("Shutting down PromptPotter Optimizer")
 
 
 app = FastAPI(
     title="PromptPotter Optimizer",
     description="API-first prompt optimization service",
-    version="0.6.0",
+    version=APP_VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,

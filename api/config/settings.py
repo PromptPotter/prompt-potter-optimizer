@@ -1,12 +1,13 @@
 """
-Application settings and configuration
+Application settings and configuration.
 """
 from pydantic_settings import BaseSettings
-from typing import List
+
+APP_VERSION: str = "0.6.0"
 
 
 class Settings(BaseSettings):
-    """Application configuration settings"""
+    """Application configuration settings."""
 
     # Environment
     ENVIRONMENT: str = "development"
@@ -20,13 +21,13 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "*"
 
     @property
-    def allowed_origins_list(self) -> List[str]:
+    def allowed_origins_list(self) -> list[str]:
         """Parse ALLOWED_ORIGINS as comma-separated list."""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
     # LLM Provider Settings
     LLM_PROVIDER: str = "groq"  # "groq", "openai", or "anthropic"
-    LLM_MODEL: str = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Model to use
+    LLM_MODEL: str = "meta-llama/llama-4-maverick-17b-128e-instruct"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GROQ_API_KEY: str = ""

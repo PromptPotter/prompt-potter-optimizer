@@ -1,12 +1,5 @@
 """Tests for PromptState model."""
-import pytest
-
-from api.models.prompt_state import (
-    LAYER_FIELDS,
-    FewShotExample,
-    PromptState,
-    diff,
-)
+from api.models.prompt_state import PromptState, diff
 
 
 def test_create_and_derive():

@@ -1,8 +1,6 @@
 """Tests for ProjectStore dataset_runs (eval result caching)."""
 import json
 
-import pytest
-
 
 def _make_run_data(run_id="baseline_aabbccdd", content_hash="aabbccdd11223344", name="Baseline"):
     return {
@@ -17,8 +15,14 @@ def _make_run_data(run_id="baseline_aabbccdd", content_hash="aabbccdd11223344", 
         "scores": {"hits": 1, "total": 2, "accuracy": 0.5, "errors": 0},
         "created_at": "2026-02-22T14:00:00Z",
         "dataset_run_items": [
-            {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True, "confidence": 0.9, "error": None},
-            {"query": "q2", "predicted": "p2", "ground_truth": "gt2", "hit": False, "confidence": 0.3, "error": None},
+            {
+                "query": "q1", "predicted": "p1", "ground_truth": "p1",
+                "hit": True, "confidence": 0.9, "error": None,
+            },
+            {
+                "query": "q2", "predicted": "p2", "ground_truth": "gt2",
+                "hit": False, "confidence": 0.3, "error": None,
+            },
         ],
     }
 

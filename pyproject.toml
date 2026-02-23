@@ -1,3 +1,44 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "promptpotter-optimizer"
+version = "0.6.0"
+description = "Backend-first prompt optimization service"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.5.3",
+    "pydantic-settings>=2.1.0",
+    "openai>=1.10.0",
+    "anthropic>=0.18.0",
+    "groq>=0.4.0",
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.6",
+    "aiofiles>=23.2.1",
+    "pandas>=2.2.0",
+    "numpy>=1.26.3",
+    "httpx>=0.26.0",
+    "langfuse>=2.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+jupyter = [
+    "jupyterlab>=4.0",
+    "tqdm>=4.66",
+]
+stats = [
+    "scipy>=1.12.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.3.0",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
