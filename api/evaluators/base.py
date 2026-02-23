@@ -8,10 +8,14 @@ Supports three-tier validation following the query-preprocessing-workflow patter
 
 Integrates with Langfuse for score logging when trace_id is provided.
 """
+import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class EvalResult(str, Enum):
@@ -33,15 +37,15 @@ class EvaluationOutput(BaseModel):
     )
     expected: Any = Field(..., description="Expected value")
     actual: Any = Field(..., description="Actual value from workflow")
-    reason: Optional[str] = Field(
+    reason: str | None = Field(
         None,
         description="Explanation for the result"
     )
-    field_results: Optional[Dict[str, Dict[str, Any]]] = Field(
+    field_results: dict[str, dict[str, Any]] | None = Field(
         None,
         description="Per-field evaluation results (for structured outputs)"
     )
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional evaluation metadata"
     )
@@ -66,7 +70,7 @@ class BatchEvaluationOutput(BaseModel):
         le=1.0,
         description="Average score across all items"
     )
-    results: List[EvaluationOutput] = Field(
+    results: list[EvaluationOutput] = Field(
         default_factory=list,
         description="Individual evaluation results"
     )
@@ -83,7 +87,7 @@ class EvaluatorBase(ABC):
     comparison strategies (exact match, substring, LLM-based, etc.).
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """
         Initialize evaluator with configuration.
 
@@ -108,7 +112,7 @@ class EvaluatorBase(ABC):
 
     def evaluate_batch(
         self,
-        examples: List[Dict[str, Any]]
+        examples: list[dict[str, Any]]
     ) -> BatchEvaluationOutput:
         """
         Evaluate a batch of examples.
@@ -119,7 +123,7 @@ class EvaluatorBase(ABC):
         Returns:
             Aggregate metrics and individual results
         """
-        results: List[EvaluationOutput] = []
+        results: list[EvaluationOutput] = []
 
         for ex in examples:
             try:
@@ -151,9 +155,9 @@ class EvaluatorBase(ABC):
 
     def evaluate_workflow_output(
         self,
-        expected: Dict[str, Any],
-        actual: Dict[str, Any],
-        field_rules: Optional[Dict[str, str]] = None
+        expected: dict[str, Any],
+        actual: dict[str, Any],
+        field_rules: dict[str, str] | None = None
     ) -> EvaluationOutput:
         """
         Evaluate workflow output with optional field-level rules.
@@ -167,7 +171,7 @@ class EvaluatorBase(ABC):
         Returns:
             EvaluationOutput with field-level details
         """
-        field_results: Dict[str, Dict[str, Any]] = {}
+        field_results: dict[str, dict[str, Any]] = {}
         all_passed = True
         total_score = 0.0
         field_count = 0
@@ -216,8 +220,8 @@ class EvaluatorBase(ABC):
         self,
         expected: Any,
         actual: Any,
-        trace_id: Optional[str] = None,
-        score_name: Optional[str] = None,
+        trace_id: str | None = None,
+        score_name: str | None = None,
     ) -> EvaluationOutput:
         """
         Evaluate and optionally log score to Langfuse.
@@ -248,7 +252,7 @@ class EvaluatorBase(ABC):
         trace_id: str,
         score_name: str,
         score: float,
-        comment: Optional[str] = None,
+        comment: str | None = None,
     ) -> None:
         """
         Log evaluation score to Langfuse.
@@ -270,14 +274,14 @@ class EvaluatorBase(ABC):
             )
         except Exception as e:
             # Don't fail evaluation if logging fails
-            print(f"Warning: Failed to log score to Langfuse: {e}")
+            logger.warning("Failed to log score to Langfuse: %s", e)
 
 
 def log_evaluation_score(
     trace_id: str,
     evaluator_name: str,
     score: float,
-    comment: Optional[str] = None,
+    comment: str | None = None,
 ) -> bool:
     """
     Convenience function to log an evaluation score to Langfuse.
