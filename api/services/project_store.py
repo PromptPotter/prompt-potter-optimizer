@@ -349,6 +349,29 @@ class ProjectStore:
         data["status"] = status
         self._write_json(path, data)
 
+    def list_grid_plans(self, backend_id: str) -> List[Dict[str, Any]]:
+        """Return summary metadata for all grid plans on disk."""
+        plans_dir = self._grid_plans_dir(backend_id)
+        if not plans_dir.exists():
+            return []
+        results = []
+        for path in sorted(plans_dir.glob("gridplan_*.json")):
+            data = self._read_json(path)
+            sm = data.get("sampling_meta", {})
+            axes = data.get("grid_axes", {})
+            points = data.get(
+                "grid_points", data.get("combinations", [])
+            )
+            results.append({
+                "plan_id": data.get("plan_id", path.stem),
+                "status": data.get("status", "unknown"),
+                "n_points": len(points),
+                "total_space": sm.get("total_space", "?"),
+                "axes": list(axes.keys()),
+                "exploration_rate": sm.get("exploration_rate", "?"),
+            })
+        return results
+
     # -- incremental eval writes ---------------------------------------------
 
     def append_eval_item(

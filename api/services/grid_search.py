@@ -10,7 +10,7 @@ import json
 import math
 import random
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import pandas as pd
 
@@ -395,6 +395,62 @@ def deserialize_grid_plan(
 
 
 # ---------------------------------------------------------------------------
+# Per-point eval resolution (shared by run_grid_search + notebook callers)
+# ---------------------------------------------------------------------------
+
+
+class PointEvalInfo(NamedTuple):
+    """Pre-computed eval data and cache key for a single grid point."""
+    point_idx: int
+    coord_dict: dict
+    ps_id: str
+    point_eval: list
+    content_hash: str
+
+
+def resolve_point_evals(
+    grid_points: list,
+    state_lookup: dict,
+    eval_data: list,
+    eval_queries_per_point: int = 0,
+    shared_queries: bool = True,
+    seed: int = 42,
+) -> list:
+    """Compute per-point eval query sets and content hashes.
+
+    Centralizes the sampling logic so run_grid_search(), pre-scan,
+    and load_grid_plan_results() all produce identical cache keys.
+    """
+    if eval_queries_per_point > 0 and shared_queries:
+        rng = random.Random(seed)
+        shared_eval = rng.sample(
+            eval_data, min(eval_queries_per_point, len(eval_data)),
+        )
+    else:
+        shared_eval = None
+
+    result = []
+    for point_idx, (coord_dict, ps_id) in enumerate(grid_points):
+        ps = state_lookup[ps_id]
+        rendered = ps.render()
+
+        if eval_queries_per_point > 0 and not shared_queries:
+            rng = random.Random(seed + point_idx)
+            point_eval = rng.sample(
+                eval_data, min(eval_queries_per_point, len(eval_data)),
+            )
+        elif shared_eval is not None:
+            point_eval = shared_eval
+        else:
+            point_eval = eval_data
+
+        content_hash = eval_cache_key(rendered, point_eval, "", 0.0)
+        result.append(PointEvalInfo(point_idx, coord_dict, ps_id, point_eval, content_hash))
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # LLM-assisted context restructuring
 # ---------------------------------------------------------------------------
 
@@ -560,49 +616,34 @@ async def run_grid_search(
     if session_terms:
         await backend_client.init_session(session_terms)
 
-    # Pre-compute shared query set if needed
-    if eval_queries_per_point > 0 and shared_queries:
-        rng = random.Random(seed)
-        shared_eval = rng.sample(eval_data, min(eval_queries_per_point, len(eval_data)))
-    else:
-        shared_eval = None
+    eval_plan = resolve_point_evals(
+        grid_points, state_lookup, eval_data,
+        eval_queries_per_point, shared_queries, seed,
+    )
 
     rows = []
 
-    for point_idx, (coord_dict, ps_id) in enumerate(grid_points):
-        ps = state_lookup[ps_id]
+    for info in eval_plan:
+        ps = state_lookup[info.ps_id]
         rendered = ps.render()
-
-        # Per-point query sampling
-        if eval_queries_per_point > 0 and not shared_queries:
-            rng = random.Random(seed + point_idx)
-            point_eval = rng.sample(
-                eval_data, min(eval_queries_per_point, len(eval_data))
-            )
-        elif shared_eval is not None:
-            point_eval = shared_eval
-        else:
-            point_eval = eval_data
-
-        content_hash = eval_cache_key(rendered, point_eval, "", 0.0)
 
         # Check cache
         cached_run = None
         if store and backend_id:
-            cached_run = store.load_dataset_run_by_hash(backend_id, content_hash)
+            cached_run = store.load_dataset_run_by_hash(backend_id, info.content_hash)
 
         if cached_run:
             acc = cached_run["scores"]
             if on_point_cached is not None:
-                cache_row = dict(coord_dict)
-                cache_row["prompt_state_id"] = ps_id
+                cache_row = dict(info.coord_dict)
+                cache_row["prompt_state_id"] = info.ps_id
                 cache_row["hits"] = acc["hits"]
                 cache_row["total"] = acc["total"]
                 cache_row["accuracy"] = acc["accuracy"]
                 cache_row["errors"] = acc["errors"]
-                on_point_cached(point_idx, cache_row)
+                on_point_cached(info.point_idx, cache_row)
         else:
-            run_id = f"grid_{content_hash[:8]}"
+            run_id = f"grid_{info.content_hash[:8]}"
 
             # Partial resume
             partial = (
@@ -610,13 +651,13 @@ async def run_grid_search(
                 if store and backend_id
                 else []
             )
-            if partial and len(partial) < len(point_eval):
-                remaining = point_eval[len(partial):]
-            elif partial and len(partial) >= len(point_eval):
+            if partial and len(partial) < len(info.point_eval):
+                remaining = info.point_eval[len(partial):]
+            elif partial and len(partial) >= len(info.point_eval):
                 remaining = []
             else:
                 partial = []
-                remaining = point_eval
+                remaining = info.point_eval
 
             writer = (
                 make_incremental_writer(store, backend_id, run_id)
@@ -637,7 +678,7 @@ async def run_grid_search(
                     writer(result, qi, len(remaining))
                 if on_query_done is not None:
                     on_query_done(
-                        point_idx, len(partial) + qi, len(point_eval), result,
+                        info.point_idx, len(partial) + qi, len(info.point_eval), result,
                     )
 
                 await asyncio.sleep(request_delay)
@@ -648,13 +689,13 @@ async def run_grid_search(
             # Finalize: save complete run, delete .partial.jsonl
             if store and backend_id:
                 run_data = build_dataset_run_data(
-                    run_id, f"grid_point_{point_idx}", content_hash,
-                    ps_id, rendered, "", 0.0, acc, results,
+                    run_id, f"grid_point_{info.point_idx}", info.content_hash,
+                    info.ps_id, rendered, "", 0.0, acc, results,
                 )
                 store.finalize_eval_run(backend_id, run_id, run_data)
 
-        row = dict(coord_dict)
-        row["prompt_state_id"] = ps_id
+        row = dict(info.coord_dict)
+        row["prompt_state_id"] = info.ps_id
         row["hits"] = acc["hits"]
         row["total"] = acc["total"]
         row["accuracy"] = acc["accuracy"]
@@ -662,7 +703,7 @@ async def run_grid_search(
         rows.append(row)
 
         if on_point_done is not None:
-            on_point_done(point_idx, row)
+            on_point_done(info.point_idx, row)
 
     df = pd.DataFrame(rows)
     df = df.sort_values("accuracy", ascending=False).reset_index(drop=True)

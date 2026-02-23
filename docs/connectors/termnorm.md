@@ -60,7 +60,37 @@ Full pipeline execution for a single query. Four-stage pipeline:
 }
 ```
 
-Set `skip_llm_ranking: true` to skip stage 3 and return raw token-match scores.
+Set `skip_llm_ranking: true` to skip stage 4 and return raw token-match scores.
+
+#### Pipeline Step Control (`steps`)
+
+The `steps` parameter controls which pipeline stages execute. When provided, it takes precedence over `skip_llm_ranking`. When absent, the backend falls back to `skip_llm_ranking` (full backward compatibility).
+
+**Request with `steps` (shortened pipeline — no LLM reranking):**
+```json
+{
+  "query": "Kupferblech CW004A / Laserschneiden",
+  "steps": ["web_search", "entity_profiling", "token_matching"]
+}
+```
+
+**Request with `steps` (full pipeline):**
+```json
+{
+  "query": "Kupferblech CW004A / Laserschneiden",
+  "steps": ["web_search", "entity_profiling", "token_matching", "llm_ranking"],
+  "ranking_prompt": "You are a domain expert..."
+}
+```
+
+The response `pipeline_params.steps` echoes the actual steps that ran, regardless of how stage control was specified.
+
+| Step name | Always runs | Description |
+|-----------|-------------|-------------|
+| `web_search` | Yes | External web search and page scraping |
+| `entity_profiling` | Yes | LLM builds structured entity profile |
+| `token_matching` | Yes | Deterministic token-overlap scoring |
+| `llm_ranking` | No | LLM reranks candidates (controlled by `steps` or `skip_llm_ranking`) |
 
 #### Pipeline Parameter Overrides
 
@@ -153,9 +183,11 @@ PromptPotter forwards `pipeline_params` into the `/matches` request body, giving
 | `web_search_status` | `string` | `"success"` or `"failed"` for the web research step. |
 | `web_search_error` | `string\|null` | Error message if web search failed, else `null`. |
 
-#### `skip_llm_ranking` Behavior
+#### `skip_llm_ranking` Behavior (legacy)
 
-When `true`, the pipeline stops after token matching. `ranked_candidates` contains raw token-match results formatted as:
+**Preferred:** Use `steps` to control which stages execute. `skip_llm_ranking` is supported for backward compatibility.
+
+When `true` (or when `steps` omits `"llm_ranking"`), the pipeline stops after token matching. `ranked_candidates` contains raw token-match results formatted as:
 ```json
 { "candidate": "term", "relevance_score": 0.85, "core_concept_score": 0.85, "spec_score": 0 }
 ```
@@ -337,7 +369,7 @@ PromptPotter grid_search.py
   ├─ POST /sessions (once per grid search run)
   │
   └─ for each combo × query:
-       POST /matches { query, ranking_prompt: ps.render(), skip_llm_ranking: false }
+       POST /matches { query, steps: [...], ranking_prompt: ps.render() }
          ├─ Web search → entity_profile       (re-runs every time)
          ├─ Token matching against DB          (re-runs every time)
          └─ LLM2 reranking with ranking_prompt (only step that varies)

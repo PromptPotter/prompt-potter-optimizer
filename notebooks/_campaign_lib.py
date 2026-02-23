@@ -56,6 +56,7 @@ from api.services.grid_search import (
     grid_plan_identity as _grid_plan_identity,
     serialize_grid_plan as _serialize_grid_plan,
     deserialize_grid_plan as _deserialize_grid_plan,
+    resolve_point_evals as _resolve_point_evals,
 )
 
 # Re-export constants for notebooks
@@ -65,6 +66,89 @@ __all__ = [
     "GRID_SEARCHABLE_FIELDS",
     "REQUIRED_TEMPLATE_VARS",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Pipeline config
+# ---------------------------------------------------------------------------
+
+# Maps each pipeline step name to the set of parameter names it uses.
+PIPELINE_STEP_PARAMS = {
+    "web_search": {"max_sites", "num_results", "content_char_limit"},
+    "entity_profiling": {"raw_content_limit", "profiling_temperature", "profiling_max_tokens"},
+    "token_matching": {"max_token_candidates", "relevance_weight_core"},
+    "llm_ranking": {
+        "ranking_temperature", "ranking_max_tokens",
+        "ranking_sample_size", "ranking_prompt",
+    },
+}
+
+
+def load_pipeline_config(exp_data: dict) -> dict:
+    """Extract pipeline config (steps + params) from synced experiment data."""
+    runs = exp_data.get("runs", [])
+    if not runs:
+        return {"steps": [], "notation": "unknown", "name": "", "version": ""}
+    pipeline = runs[0].get("pipeline", {})
+    config = pipeline.get("config", {})
+    return {
+        "steps": config.get("steps", []),
+        "notation": pipeline.get("notation", ""),
+        "name": config.get("name", ""),
+        "version": config.get("version", ""),
+    }
+
+
+def build_pipeline_params(
+    pipeline_config: dict, overrides: dict | None = None,
+) -> dict:
+    """Build pipeline_params from a (possibly shortened) pipeline config.
+
+    Returns dict ready for evaluate_prompt(..., pipeline_params=params).
+    Includes 'steps' list (sent to TermNorm) and any user overrides.
+    """
+    step_names = [s["name"] for s in pipeline_config["steps"]]
+    params: dict = {"steps": step_names}
+
+    active_param_names: set = set()
+    for name in step_names:
+        active_param_names |= PIPELINE_STEP_PARAMS.get(name, set())
+
+    if overrides:
+        for k, v in overrides.items():
+            if k in active_param_names:
+                params[k] = v
+
+    return params
+
+
+def show_pipeline_config(svc: dict, campaign_config: dict) -> dict:
+    """Import pipeline config from backend, apply overrides, print summary.
+
+    Replaces the Pipeline Config notebook cell. Sets
+    ``campaign_config["pipeline_params"]`` as a side-effect.
+
+    Returns:
+        pipeline_params dict ready for evaluate_prompt().
+    """
+    pipeline_config = load_pipeline_config(svc["exp_data"])
+
+    print(f"Pipeline: {pipeline_config['name']} ({pipeline_config['version']})")
+    print(f"Notation: {pipeline_config['notation']}")
+    print(f"Steps ({len(pipeline_config['steps'])}):")
+    for i, step in enumerate(pipeline_config["steps"]):
+        print(f"  {i + 1}. {step['name']} ({step['type']})")
+
+    print(f"\nActive steps: {' -> '.join(s['name'] for s in pipeline_config['steps'])}")
+
+    pipeline_params = build_pipeline_params(
+        pipeline_config,
+        overrides=campaign_config.get("pipeline_overrides"),
+    )
+    campaign_config["pipeline_params"] = pipeline_params
+    print(f"Pipeline params: {pipeline_params}")
+
+    return pipeline_params
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +640,59 @@ async def evaluate_prompt(
     return results
 
 
+async def run_baseline_eval(
+    baseline: PromptState,
+    eval_data: list,
+    campaign_config: dict,
+    api_key: str,
+    svc: dict,
+) -> tuple:
+    """Evaluate baseline prompt and initialize campaign_rounds.
+
+    Replaces the evaluate-baseline notebook cell.
+
+    Returns:
+        (campaign_rounds, baseline_results) where campaign_rounds is a
+        list with a single baseline entry.
+    """
+    if not eval_data:
+        eval_data = load_eval_dataset(
+            svc["store"], svc["backend_id"], svc["experiment_id"],
+        )
+        if not eval_data:
+            raise RuntimeError(
+                "No evaluation data in project store. "
+                "Generate data first (e.g. run termnorm_backend.ipynb)."
+            )
+
+    baseline_results = await evaluate_prompt(
+        baseline, eval_data, campaign_config["eval_llm"], api_key,
+        label="Baseline",
+        store=svc["store"], backend_id=svc["backend_id"],
+        backend_client=svc.get("backend_client"),
+        pipeline_params=campaign_config.get("pipeline_params"),
+    )
+    baseline_hits = sum(1 for r in baseline_results if r["hit"])
+    baseline_accuracy = baseline_hits / len(baseline_results) if baseline_results else 0
+
+    campaign_rounds = [{
+        "round": 0, "label": "baseline", "prompt_state": baseline,
+        "accuracy": baseline_accuracy, "hits": baseline_hits,
+        "total": len(baseline_results), "results": baseline_results,
+    }]
+
+    display_progress(campaign_rounds)
+
+    failures = [r for r in baseline_results if not r["hit"] and not r["error"]]
+    for r in failures[:5]:
+        print(
+            f"  MISS: {r['query'][:55]}  |  "
+            f"Pred: {r['predicted'][:35]}  |  GT: {r['ground_truth'][:35]}"
+        )
+
+    return campaign_rounds, baseline_results
+
+
 # ---------------------------------------------------------------------------
 # Optimization  (thin wrappers adding print/display)
 # ---------------------------------------------------------------------------
@@ -688,6 +825,161 @@ def display_suggestions(suggestions: dict, round_num: int) -> None:
         print(f"    Text: \"{pf.get('text', '')}\"")
         print(f"    Rationale: {pf.get('rationale', '')}")
         print()
+
+
+# ---------------------------------------------------------------------------
+# Grid Plan Discovery
+# ---------------------------------------------------------------------------
+
+
+def list_grid_plans(store: ProjectStore, backend_id: str) -> list:
+    """List all grid search plans with their status.
+
+    Shows plan metadata only (no cache count — that requires knowing the
+    eval sampling params which this function doesn't have).
+    """
+    plans = store.list_grid_plans(backend_id)
+    if not plans:
+        print("No grid plans found.")
+        return plans
+
+    print(f"Grid plans ({len(plans)}):")
+    for p in plans:
+        status_icon = {
+            "completed": "[done]",
+            "in_progress": "[run..]",
+        }.get(p["status"], f"[{p['status']}]")
+
+        print(
+            f"  {status_icon} {p['plan_id']}  "
+            f"{p['n_points']} points  "
+            f"(space={p['total_space']}, axes={','.join(p['axes'])})"
+        )
+
+    return plans
+
+
+def load_grid_plan_results(
+    store: ProjectStore,
+    backend_id: str,
+    plan_id: str,
+    eval_data: list,
+    eval_queries_per_point: int = 0,
+    shared_queries: bool = True,
+    seed: int = 42,
+) -> "pd.DataFrame | None":
+    """Load cached eval results for a grid plan and return a results DataFrame.
+
+    Rebuilds the same DataFrame shape that ``run_grid_search`` returns,
+    but purely from cached data (no backend calls).  Returns None if
+    the plan doesn't exist or has no cached results.
+
+    Must receive the same eval sampling params as the grid search that
+    produced the cached runs, so that cache keys match.
+    """
+    plan_data = store.load_grid_plan(backend_id, plan_id)
+    if not plan_data:
+        return None
+
+    from api.services.grid_search import deserialize_grid_plan as _deser
+    grid_points, state_lookup, _, grid_axes, _, _ = _deser(plan_data)
+
+    eval_plan = _resolve_point_evals(
+        grid_points, state_lookup, eval_data,
+        eval_queries_per_point, shared_queries, seed,
+    )
+    rows = []
+    for info in eval_plan:
+        cached = store.load_dataset_run_by_hash(backend_id, info.content_hash)
+        if not cached:
+            continue
+        scores = cached.get("scores", {})
+        row = dict(info.coord_dict) if isinstance(info.coord_dict, dict) else {}
+        row.update({
+            "prompt_state_id": info.ps_id,
+            "accuracy": scores.get("accuracy", 0),
+            "hits": scores.get("hits", 0),
+            "total": scores.get("total", 0),
+            "errors": scores.get("errors", 0),
+        })
+        rows.append(row)
+
+    if not rows:
+        return None
+
+    df = pd.DataFrame(rows).sort_values("accuracy", ascending=False).reset_index(drop=True)
+    print(f"  {plan_id}: {len(rows)}/{len(grid_points)} cached")
+    return df
+
+
+def merge_grid_results(*dataframes: "pd.DataFrame") -> "pd.DataFrame":
+    """Merge multiple grid result DataFrames, keeping the best accuracy per prompt_state_id."""
+    combined = pd.concat(dataframes, ignore_index=True)
+    combined = (
+        combined.sort_values("accuracy", ascending=False)
+        .drop_duplicates(subset=["prompt_state_id"], keep="first")
+        .sort_values("accuracy", ascending=False)
+        .reset_index(drop=True)
+    )
+    print(f"Merged: {len(combined)} unique grid points from {len(dataframes)} plans")
+    return combined
+
+
+def show_grid_overview(
+    svc: dict,
+    campaign_config: dict,
+    merge_plans: bool = False,
+) -> dict:
+    """List grid plans and load cached results for each.
+
+    Replaces the Grid Campaign Overview notebook cell.
+
+    Returns:
+        Dict with keys: plans, plan_dfs, merged_grid_df (or None).
+    """
+    store = svc["store"]
+    backend_id = svc["backend_id"]
+
+    plans = list_grid_plans(store, backend_id)
+
+    gs = campaign_config["grid_search"]
+    eval_queries_per_point = gs.get("eval_queries_per_point", 0)
+    shared_queries_flag = gs.get("shared_queries", True)
+    seed = gs.get("seed", 42)
+
+    plan_dfs: dict = {}
+    if plans:
+        eval_data = load_eval_dataset(
+            store, backend_id, svc["experiment_id"],
+        )
+        for p in plans:
+            df = load_grid_plan_results(
+                store, backend_id, p["plan_id"], eval_data,
+                eval_queries_per_point=eval_queries_per_point,
+                shared_queries=shared_queries_flag,
+                seed=seed,
+            )
+            if df is not None and len(df) > 0:
+                plan_dfs[p["plan_id"]] = df
+                print(f"    best acc={df['accuracy'].max():.1%}")
+
+        if len(plan_dfs) > 1:
+            print("\nMultiple plans have results. Set merge_plans=True to combine.")
+        elif len(plan_dfs) == 1:
+            print("\nOne plan has results. Proceed to 4.5a.")
+        else:
+            print("\nNo cached results yet. Run 4.5a then 4.5c.")
+
+    merged_grid_df = None
+    if merge_plans and len(plan_dfs) > 1:
+        merged_grid_df = merge_grid_results(*plan_dfs.values())
+        print(f"\nMerged grid results: {len(merged_grid_df)} unique points")
+
+    return {
+        "plans": plans,
+        "plan_dfs": plan_dfs,
+        "merged_grid_df": merged_grid_df,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -909,15 +1201,14 @@ async def run_grid_search(
             "svc.get('backend_client') from init_services()."
         )
 
-    # Pre-scan grid points for cached ones
-    from api.services.prompt_eval import eval_cache_key as _eval_cache_key
-
+    eval_plan = _resolve_point_evals(
+        grid_points, state_lookup, eval_data,
+        eval_queries_per_point, shared_queries, grid_seed,
+    )
     n_cached = 0
     if store and backend_id:
-        for _, ps_id in grid_points:
-            ps = state_lookup[ps_id]
-            content_hash = _eval_cache_key(ps.render(), eval_data, "", 0.0)
-            if store.load_dataset_run_by_hash(backend_id, content_hash):
+        for info in eval_plan:
+            if store.load_dataset_run_by_hash(backend_id, info.content_hash):
                 n_cached += 1
 
     n_total = len(grid_points)
@@ -935,7 +1226,7 @@ async def run_grid_search(
     else:
         print(f"Evaluating {n_total} grid points x {q_label} each")
 
-    _point_counter = [n_cached]  # mutable counter for closures
+    _point_counter = [0]  # mutable counter for closures
 
     def on_query_done(point_idx, qi, total_q, result):
         hit = result.get("hit")
@@ -1045,6 +1336,67 @@ def select_grid_winner(grid_df: pd.DataFrame, state_lookup: dict) -> dict:
     print(f"  PromptState: {ps.id[:12]}")
 
     return result
+
+
+def select_and_seed_grid_winner(
+    grid_df: "pd.DataFrame | None",
+    merged_grid_df: "pd.DataFrame | None",
+    grid_state_lookup: dict,
+    plan_dfs: dict,
+    svc: dict,
+    campaign_rounds: list,
+) -> dict:
+    """Select grid winner, build combined lookup if needed, seed campaign.
+
+    Replaces the 4.5f notebook cell. Appends the winner to
+    ``campaign_rounds`` as a side-effect.
+
+    Returns:
+        The grid_winner dict.
+    """
+    winner_df = merged_grid_df if merged_grid_df is not None else grid_df
+
+    # Build combined state_lookup when using merged results
+    if merged_grid_df is not None and plan_dfs:
+        combined_lookup: dict = {}
+        for pid in plan_dfs:
+            plan_data = svc["store"].load_grid_plan(svc["backend_id"], pid)
+            if plan_data:
+                _, sl, _, _, _, _ = _deserialize_grid_plan(plan_data)
+                combined_lookup.update(sl)
+        grid_winner = select_grid_winner(winner_df, combined_lookup)
+    else:
+        grid_winner = select_grid_winner(winner_df, grid_state_lookup)
+
+    campaign_rounds.append(grid_winner)
+
+    # Print Layer 1 breakdown
+    winner_ps = grid_winner["prompt_state"]
+    print("\nLayer 1 breakdown of grid winner:")
+    for field in (
+        "persona", "task_intent", "problem_description",
+        "instruction", "thinking_style", "answer_format",
+    ):
+        val = getattr(winner_ps, field)
+        if val:
+            print(f"  {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
+        else:
+            print(f"  {field}: (empty)")
+
+    rendered = winner_ps.render()
+    print(f"\nRendered prompt preview ({len(rendered)} chars):")
+    print(rendered[:500])
+    if len(rendered) > 500:
+        print("...")
+
+    display_progress(campaign_rounds)
+
+    print(
+        f"\nGrid winner appended to campaign_rounds as round "
+        f"'{grid_winner['round']}'. Proceed to Section 5 for optimization."
+    )
+
+    return grid_winner
 
 
 async def analyze_grid_results(
@@ -1252,6 +1604,68 @@ def display_progress(campaign_rounds: list, window: int = 8) -> None:
         print(
             f"  {round_label:<5s} {acc:>8.1%} {rolling_avg:>12.1%}  {trend_str}"
         )
+
+
+async def run_manual_round(
+    campaign_rounds: list,
+    eval_data: list,
+    campaign_config: dict,
+    api_key: str,
+    svc: dict,
+) -> dict:
+    """Run a single manual optimization round.
+
+    Replaces the optimization-round notebook cell.
+
+    Returns:
+        The round entry dict (also appended to campaign_rounds).
+    """
+    import random as _random
+
+    opt = campaign_config["optimization"]
+    eval_llm = campaign_config["eval_llm"]
+    current_best = campaign_rounds[-1]
+    queries_per_eval = campaign_config.get("queries_per_eval", 0)
+    round_num = len(campaign_rounds)
+
+    print(
+        f"=== ROUND {round_num} === Current best: "
+        f"{current_best['label']} ({current_best['accuracy']:.1%})\n"
+    )
+
+    if queries_per_eval > 0 and len(eval_data) > queries_per_eval:
+        rng = _random.Random(42)
+        round_eval_data = rng.sample(eval_data, queries_per_eval)
+        print(f"Subsampled eval_data to {queries_per_eval}/{len(eval_data)} queries")
+    else:
+        round_eval_data = eval_data
+
+    candidates = await generate_candidates(
+        current_best["prompt_state"], current_best["accuracy"],
+        current_best["results"],
+        opt["n_variants"], opt["creativity"], eval_llm, api_key,
+    )
+
+    all_candidate_results = {}
+    for idx, c in enumerate(candidates):
+        all_candidate_results[c.id] = await evaluate_prompt(
+            c, round_eval_data, eval_llm, api_key,
+            label=f"Candidate {idx + 1}",
+            store=svc["store"], backend_id=svc["backend_id"],
+            backend_client=svc.get("backend_client"),
+            pipeline_params=campaign_config.get("pipeline_params"),
+        )
+
+    round_entry = select_round_winner(
+        candidates, all_candidate_results, current_best,
+        opt["improvement_threshold"],
+    )
+    round_entry["round"] = round_num
+    campaign_rounds.append(round_entry)
+
+    display_progress(campaign_rounds)
+
+    return round_entry
 
 
 # ---------------------------------------------------------------------------
