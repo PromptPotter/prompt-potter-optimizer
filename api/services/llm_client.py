@@ -1,18 +1,33 @@
 """
 LLM client abstraction layer.
 
-Provides a unified interface for OpenAI and Anthropic APIs,
+Provides a unified interface for Groq (default), OpenAI, and Anthropic APIs,
 with support for chat completions, JSON mode, and token tracking.
 """
+import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Literal
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
-import json
 
 from api.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Provider-specific constants
+# ---------------------------------------------------------------------------
+
+OPENAI_MAX_RETRIES = 5
+GROQ_MAX_RETRIES = 3
+GROQ_TIMEOUT = 60.0
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+
+# ---------------------------------------------------------------------------
+# Response model
+# ---------------------------------------------------------------------------
 
 
 class LLMResponse(BaseModel):
@@ -20,12 +35,17 @@ class LLMResponse(BaseModel):
 
     content: str = Field(..., description="Response content")
     model: str = Field(..., description="Model used")
-    usage: Dict[str, int] = Field(
+    usage: dict[str, int] = Field(
         default_factory=dict,
-        description="Token usage: prompt_tokens, completion_tokens, total_tokens"
+        description="Token usage: prompt_tokens, completion_tokens, total_tokens",
     )
-    finish_reason: Optional[str] = Field(None, description="Why generation stopped")
-    parsed: Optional[Any] = Field(None, description="Parsed JSON if output_format='json'")
+    finish_reason: str | None = Field(None, description="Why generation stopped")
+    parsed: Any | None = Field(None, description="Parsed JSON if output_format='json'")
+
+
+# ---------------------------------------------------------------------------
+# Base client
+# ---------------------------------------------------------------------------
 
 
 class LLMClientBase(ABC):
@@ -34,252 +54,221 @@ class LLMClientBase(ABC):
     @abstractmethod
     async def chat(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1000,
         output_format: Literal["text", "json"] = "text",
-        **kwargs
+        **kwargs,
     ) -> LLMResponse:
-        """
-        Send a chat completion request.
+        """Send a chat completion request.
 
         Args:
-            messages: List of message dicts with 'role' and 'content'
-            model: Model identifier (uses default if not specified)
-            temperature: Sampling temperature (0.0 = deterministic)
-            max_tokens: Maximum response tokens
-            output_format: "text" or "json" (enables JSON mode)
-            **kwargs: Additional provider-specific parameters
+            messages: List of message dicts with 'role' and 'content'.
+            model: Model identifier (uses default if not specified).
+            temperature: Sampling temperature (0.0 = deterministic).
+            max_tokens: Maximum response tokens.
+            output_format: "text" or "json" (enables JSON mode).
+            **kwargs: Additional provider-specific parameters.
 
         Returns:
-            LLMResponse with content and usage info
+            LLMResponse with content and usage info.
         """
-        pass
+        ...
 
 
-class OpenAIClient(LLMClientBase):
+def _try_parse_json(content: str, provider: str) -> Any | None:
+    """Parse JSON from response content, return None on failure."""
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        logger.debug("%s response not valid JSON: %s", provider, content[:200])
+        return None
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-compatible client (shared by OpenAI and Groq)
+# ---------------------------------------------------------------------------
+
+
+class _OpenAICompatibleClient(LLMClientBase):
+    """Base for clients that use the OpenAI SDK (OpenAI, Groq, etc.)."""
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str | None = None,
+        max_retries: int = OPENAI_MAX_RETRIES,
+        timeout: float | None = None,
+        default_model: str | None = None,
+        provider_name: str = "openai",
+    ):
+        self._api_key = api_key
+        self._base_url = base_url
+        self._max_retries = max_retries
+        self._timeout = timeout
+        self._default_model = default_model or settings.LLM_MODEL
+        self._provider_name = provider_name
+        self._client = None
+
+    def _ensure_client(self):
+        """Lazy-initialize the async OpenAI client."""
+        if self._client is None:
+            try:
+                from openai import AsyncOpenAI
+            except ImportError:
+                raise ImportError("openai package not installed. Run: pip install openai")
+
+            kwargs: dict[str, Any] = {
+                "api_key": self._api_key,
+                "max_retries": self._max_retries,
+            }
+            if self._base_url:
+                kwargs["base_url"] = self._base_url
+            if self._timeout:
+                kwargs["timeout"] = self._timeout
+            self._client = AsyncOpenAI(**kwargs)
+        return self._client
+
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 1000,
+        output_format: Literal["text", "json"] = "text",
+        **kwargs,
+    ) -> LLMResponse:
+        client = self._ensure_client()
+
+        request_params: dict[str, Any] = {
+            "model": model or self._default_model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if output_format == "json":
+            request_params["response_format"] = {"type": "json_object"}
+
+        request_params.update(kwargs)
+        response = await client.chat.completions.create(**request_params)
+
+        content = response.choices[0].message.content or ""
+        parsed = (
+            _try_parse_json(content, self._provider_name)
+            if output_format == "json" and content
+            else None
+        )
+
+        usage = response.usage
+        return LLMResponse(
+            content=content,
+            model=response.model,
+            usage={
+                "prompt_tokens": usage.prompt_tokens if usage else 0,
+                "completion_tokens": usage.completion_tokens if usage else 0,
+                "total_tokens": usage.total_tokens if usage else 0,
+            },
+            finish_reason=response.choices[0].finish_reason,
+            parsed=parsed,
+        )
+
+
+class OpenAIClient(_OpenAICompatibleClient):
     """OpenAI API client."""
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or settings.OPENAI_API_KEY
-        self._client = None
-
-    def _get_client(self):
-        """Lazy-load the OpenAI client."""
-        if self._client is None:
-            try:
-                from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(api_key=self.api_key, max_retries=5)
-            except ImportError:
-                raise ImportError("openai package not installed. Run: pip install openai")
-        return self._client
-
-    async def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        temperature: float = 0.0,
-        max_tokens: int = 1000,
-        output_format: Literal["text", "json"] = "text",
-        **kwargs
-    ) -> LLMResponse:
-        client = self._get_client()
-
-        # Prepare request
-        request_params = {
-            "model": model or settings.LLM_MODEL,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-
-        # Enable JSON mode if requested
-        if output_format == "json":
-            request_params["response_format"] = {"type": "json_object"}
-
-        # Add any extra params
-        request_params.update(kwargs)
-
-        # Make request
-        response = await client.chat.completions.create(**request_params)
-
-        # Extract content
-        content = response.choices[0].message.content or ""
-
-        # Parse JSON if requested
-        parsed = None
-        if output_format == "json" and content:
-            try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError:
-                logger.debug("OpenAI response not valid JSON: %s", content[:200])
-
-        return LLMResponse(
-            content=content,
-            model=response.model,
-            usage={
-                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
-                "total_tokens": response.usage.total_tokens if response.usage else 0,
-            },
-            finish_reason=response.choices[0].finish_reason,
-            parsed=parsed
+    def __init__(self, api_key: str | None = None):
+        super().__init__(
+            api_key=api_key or settings.OPENAI_API_KEY,
+            max_retries=OPENAI_MAX_RETRIES,
+            provider_name="OpenAI",
         )
 
 
-class GroqClient(LLMClientBase):
+class GroqClient(_OpenAICompatibleClient):
     """Groq API client (OpenAI-compatible)."""
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or settings.GROQ_API_KEY
-        self._client = None
-
-    def _get_client(self):
-        """Lazy-load the Groq client (uses OpenAI SDK with Groq base URL)."""
-        if self._client is None:
-            try:
-                from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(
-                    api_key=self.api_key,
-                    base_url="https://api.groq.com/openai/v1",
-                    max_retries=3,
-                    timeout=60.0,
-                )
-            except ImportError:
-                raise ImportError("openai package not installed. Run: pip install openai")
-        return self._client
-
-    async def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        temperature: float = 0.0,
-        max_tokens: int = 1000,
-        output_format: Literal["text", "json"] = "text",
-        **kwargs
-    ) -> LLMResponse:
-        client = self._get_client()
-
-        # Use configured model or default Groq model
-        model_name = model or settings.LLM_MODEL
-
-        # Prepare request
-        request_params = {
-            "model": model_name,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-
-        # Enable JSON mode if requested
-        if output_format == "json":
-            request_params["response_format"] = {"type": "json_object"}
-
-        # Add any extra params
-        request_params.update(kwargs)
-
-        # Make request
-        response = await client.chat.completions.create(**request_params)
-
-        # Extract content
-        content = response.choices[0].message.content or ""
-
-        # Parse JSON if requested
-        parsed = None
-        if output_format == "json" and content:
-            try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError:
-                logger.debug("Groq response not valid JSON: %s", content[:200])
-
-        return LLMResponse(
-            content=content,
-            model=response.model,
-            usage={
-                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
-                "total_tokens": response.usage.total_tokens if response.usage else 0,
-            },
-            finish_reason=response.choices[0].finish_reason,
-            parsed=parsed
+    def __init__(self, api_key: str | None = None):
+        super().__init__(
+            api_key=api_key or settings.GROQ_API_KEY,
+            base_url=GROQ_BASE_URL,
+            max_retries=GROQ_MAX_RETRIES,
+            timeout=GROQ_TIMEOUT,
+            provider_name="Groq",
         )
+
+
+# ---------------------------------------------------------------------------
+# Anthropic client
+# ---------------------------------------------------------------------------
 
 
 class AnthropicClient(LLMClientBase):
     """Anthropic API client."""
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or settings.ANTHROPIC_API_KEY
+    DEFAULT_MODEL = "claude-3-sonnet-20240229"
+
+    def __init__(self, api_key: str | None = None):
+        self._api_key = api_key or settings.ANTHROPIC_API_KEY
         self._client = None
 
-    def _get_client(self):
-        """Lazy-load the Anthropic client."""
+    def _ensure_client(self):
+        """Lazy-initialize the async Anthropic client."""
         if self._client is None:
             try:
                 from anthropic import AsyncAnthropic
-                self._client = AsyncAnthropic(api_key=self.api_key)
             except ImportError:
-                raise ImportError("anthropic package not installed. Run: pip install anthropic")
+                raise ImportError(
+                    "anthropic package not installed. Run: pip install anthropic"
+                )
+            self._client = AsyncAnthropic(api_key=self._api_key)
         return self._client
 
     async def chat(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1000,
         output_format: Literal["text", "json"] = "text",
-        **kwargs
+        **kwargs,
     ) -> LLMResponse:
-        client = self._get_client()
+        client = self._ensure_client()
 
-        # Convert messages format (extract system message)
+        # Separate system message (Anthropic API convention)
         system_message = None
         anthropic_messages = []
-
         for msg in messages:
             if msg["role"] == "system":
                 system_message = msg["content"]
             else:
-                anthropic_messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
+                anthropic_messages.append(
+                    {"role": msg["role"], "content": msg["content"]}
+                )
 
-        # Use default model or map to Anthropic model
-        model_name = model or "claude-3-sonnet-20240229"
+        model_name = model or self.DEFAULT_MODEL
         if model_name.startswith("gpt"):
-            # Map OpenAI model names to Anthropic
-            model_name = "claude-3-sonnet-20240229"
+            model_name = self.DEFAULT_MODEL
 
-        # Prepare request
-        request_params = {
+        request_params: dict[str, Any] = {
             "model": model_name,
             "messages": anthropic_messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-
         if system_message:
             request_params["system"] = system_message
 
-        # Make request
         response = await client.messages.create(**request_params)
 
-        # Extract content
-        content = ""
-        for block in response.content:
-            if hasattr(block, "text"):
-                content += block.text
-
-        # Parse JSON if requested
-        parsed = None
-        if output_format == "json" and content:
-            try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError:
-                logger.debug("Anthropic response not valid JSON: %s", content[:200])
+        content = "".join(
+            block.text for block in response.content if hasattr(block, "text")
+        )
+        parsed = (
+            _try_parse_json(content, "Anthropic")
+            if output_format == "json" and content
+            else None
+        )
 
         return LLMResponse(
             content=content,
@@ -287,44 +276,44 @@ class AnthropicClient(LLMClientBase):
             usage={
                 "prompt_tokens": response.usage.input_tokens,
                 "completion_tokens": response.usage.output_tokens,
-                "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                "total_tokens": (
+                    response.usage.input_tokens + response.usage.output_tokens
+                ),
             },
             finish_reason=response.stop_reason,
-            parsed=parsed
+            parsed=parsed,
         )
 
 
+# ---------------------------------------------------------------------------
+# Mock client (testing)
+# ---------------------------------------------------------------------------
+
+
 class MockLLMClient(LLMClientBase):
-    """
-    Mock LLM client for testing.
+    """Mock LLM client for testing — returns configurable responses."""
 
-    Returns configurable responses without making API calls.
-    """
-
-    def __init__(self, responses: Optional[List[str]] = None):
+    def __init__(self, responses: list[str] | None = None):
         self.responses = responses or ["Mock LLM response"]
         self._call_count = 0
 
     async def chat(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1000,
         output_format: Literal["text", "json"] = "text",
-        **kwargs
+        **kwargs,
     ) -> LLMResponse:
-        # Cycle through responses
         content = self.responses[self._call_count % len(self.responses)]
         self._call_count += 1
 
-        # Parse JSON if requested
-        parsed = None
-        if output_format == "json":
-            try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError:
-                logger.debug("Mock response not valid JSON: %s", content[:200])
+        parsed = (
+            _try_parse_json(content, "Mock")
+            if output_format == "json"
+            else None
+        )
 
         return LLMResponse(
             content=content,
@@ -335,67 +324,71 @@ class MockLLMClient(LLMClientBase):
                 "total_tokens": 150,
             },
             finish_reason="stop",
-            parsed=parsed
+            parsed=parsed,
         )
 
 
-# Global client instance
-_llm_client: Optional[LLMClientBase] = None
+# ---------------------------------------------------------------------------
+# Global singleton
+# ---------------------------------------------------------------------------
+
+_llm_client: LLMClientBase | None = None
+
+_PLACEHOLDER_KEYS = {"your_openai_api_key_here", "your_anthropic_api_key_here"}
 
 
-def get_llm_client(provider: Optional[str] = None) -> LLMClientBase:
-    """
-    Get the configured LLM client.
+def get_llm_client(provider: str | None = None) -> LLMClientBase:
+    """Get the configured LLM client.
 
     Args:
-        provider: "openai", "anthropic", "groq", or "mock". Auto-detects if not specified.
+        provider: "openai", "anthropic", "groq", or "mock".
+            Auto-detects from settings if not specified.
 
     Returns:
-        LLM client instance
+        LLM client instance.
     """
     global _llm_client
 
     if provider:
-        if provider == "openai":
-            return OpenAIClient()
-        elif provider == "anthropic":
-            return AnthropicClient()
-        elif provider == "groq":
-            return GroqClient()
-        elif provider == "mock":
-            return MockLLMClient()
-        else:
+        _providers = {
+            "openai": OpenAIClient,
+            "anthropic": AnthropicClient,
+            "groq": GroqClient,
+            "mock": MockLLMClient,
+        }
+        factory = _providers.get(provider)
+        if factory is None:
             raise ValueError(f"Unknown provider: {provider}")
+        return factory()
 
     if _llm_client is None:
-        # Check LLM_PROVIDER setting first
-        configured_provider = getattr(settings, "LLM_PROVIDER", "").lower()
-        if configured_provider == "groq" and settings.GROQ_API_KEY:
+        configured = getattr(settings, "LLM_PROVIDER", "").lower()
+
+        if configured == "groq" and settings.GROQ_API_KEY:
             _llm_client = GroqClient()
-        elif configured_provider == "anthropic" and settings.ANTHROPIC_API_KEY:
+        elif configured == "anthropic" and settings.ANTHROPIC_API_KEY:
             _llm_client = AnthropicClient()
-        elif configured_provider == "openai" and settings.OPENAI_API_KEY:
+        elif configured == "openai" and settings.OPENAI_API_KEY:
             _llm_client = OpenAIClient()
-        # Auto-detect based on available API keys
         elif settings.GROQ_API_KEY:
             _llm_client = GroqClient()
-        elif settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "your_openai_api_key_here":
+        elif (
+            settings.OPENAI_API_KEY
+            and settings.OPENAI_API_KEY not in _PLACEHOLDER_KEYS
+        ):
             _llm_client = OpenAIClient()
-        elif settings.ANTHROPIC_API_KEY and settings.ANTHROPIC_API_KEY != "your_anthropic_api_key_here":
+        elif (
+            settings.ANTHROPIC_API_KEY
+            and settings.ANTHROPIC_API_KEY not in _PLACEHOLDER_KEYS
+        ):
             _llm_client = AnthropicClient()
         else:
-            # Fall back to mock for testing
             _llm_client = MockLLMClient()
 
     return _llm_client
 
 
 def set_llm_client(client: LLMClientBase) -> None:
-    """
-    Set a custom LLM client (useful for testing).
-
-    Args:
-        client: LLM client instance to use
-    """
+    """Set a custom LLM client (useful for testing)."""
     global _llm_client
     _llm_client = client
