@@ -4,7 +4,7 @@ Pydantic models for CWL-inspired workflow definitions.
 Based on Common Workflow Language v1.2 structure with extensions
 for LLM-specific metadata (model, temperature, etc.).
 """
-from typing import Dict, Any, List, Optional, Union
+from typing import Any
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
@@ -28,13 +28,13 @@ class StepMetadata(BaseModel):
 
     type: StepType = Field(..., description="Step classification")
     deterministic: bool = Field(True, description="Whether output is reproducible")
-    scientific_name: Optional[str] = Field(
+    scientific_name: str | None = Field(
         None, description="Canonical algorithm name (for algorithm type)"
     )
-    model: Optional[str] = Field(None, description="Model identifier (for llm type)")
-    temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Sampling temperature")
-    max_tokens: Optional[int] = Field(None, gt=0, description="Maximum response tokens")
-    algorithm_params: Optional[Dict[str, Any]] = Field(
+    model: str | None = Field(None, description="Model identifier (for llm type)")
+    temperature: float | None = Field(None, ge=0.0, le=2.0, description="Sampling temperature")
+    max_tokens: int | None = Field(None, gt=0, description="Maximum response tokens")
+    algorithm_params: dict[str, Any] | None = Field(
         None, description="Algorithm-specific parameters"
     )
 
@@ -51,20 +51,20 @@ class StepDefinition(BaseModel):
         ...,
         description="Node type to execute (e.g., 'nodes/LLMNode' or 'LLMNode')"
     )
-    inputs: Dict[str, Any] = Field(
+    inputs: dict[str, Any] = Field(
         default_factory=dict,
         alias="in",
         description="Input mappings: {param_name: 'source_step/output' or literal}"
     )
-    outputs: List[str] = Field(
+    outputs: list[str] = Field(
         default_factory=list,
         alias="out",
         description="Output names to expose"
     )
-    config: Optional[Dict[str, Any]] = Field(
+    config: dict[str, Any] | None = Field(
         None, description="Node configuration (model, temperature, etc.)"
     )
-    metadata: Optional[StepMetadata] = Field(
+    metadata: StepMetadata | None = Field(
         None, description="Step classification and metadata"
     )
 
@@ -82,8 +82,8 @@ class WorkflowInput(BaseModel):
     """Definition of a workflow-level input."""
 
     type: str = Field(..., description="Input type (string, int, float, string[], File)")
-    description: Optional[str] = Field(None, description="Human-readable description")
-    default: Optional[Any] = Field(None, description="Default value if not provided")
+    description: str | None = Field(None, description="Human-readable description")
+    default: Any | None = Field(None, description="Default value if not provided")
 
 
 class WorkflowOutput(BaseModel):
@@ -104,17 +104,17 @@ class WorkflowDefinition(BaseModel):
     cwlVersion: str = Field("v1.2", description="CWL version for compatibility")
     class_: str = Field("Workflow", alias="class", description="Document class")
     id: str = Field(..., description="Unique workflow identifier")
-    label: Optional[str] = Field(None, description="Human-readable name")
-    description: Optional[str] = Field(None, description="Workflow description")
-    inputs: Dict[str, Union[WorkflowInput, str]] = Field(
+    label: str | None = Field(None, description="Human-readable name")
+    description: str | None = Field(None, description="Workflow description")
+    inputs: dict[str, WorkflowInput | str] = Field(
         default_factory=dict,
         description="Workflow-level inputs"
     )
-    steps: List[StepDefinition] = Field(
+    steps: list[StepDefinition] = Field(
         default_factory=list,
         description="Workflow steps (nodes)"
     )
-    outputs: Dict[str, WorkflowOutput] = Field(
+    outputs: dict[str, WorkflowOutput] = Field(
         default_factory=dict,
         description="Workflow-level outputs"
     )
@@ -123,7 +123,7 @@ class WorkflowDefinition(BaseModel):
 
     @field_validator("steps")
     @classmethod
-    def validate_unique_step_ids(cls, v: List[StepDefinition]) -> List[StepDefinition]:
+    def validate_unique_step_ids(cls, v: list[StepDefinition]) -> list[StepDefinition]:
         """Ensure all step IDs are unique."""
         ids = [step.id for step in v]
         if len(ids) != len(set(ids)):
@@ -131,14 +131,14 @@ class WorkflowDefinition(BaseModel):
             raise ValueError(f"Duplicate step IDs: {set(duplicates)}")
         return v
 
-    def get_step(self, step_id: str) -> Optional[StepDefinition]:
+    def get_step(self, step_id: str) -> StepDefinition | None:
         """Get a step by ID."""
         for step in self.steps:
             if step.id == step_id:
                 return step
         return None
 
-    def get_step_dependencies(self, step_id: str) -> List[str]:
+    def get_step_dependencies(self, step_id: str) -> list[str]:
         """
         Get IDs of steps that this step depends on.
 
@@ -160,16 +160,16 @@ class WorkflowDefinition(BaseModel):
 class WorkflowExecuteRequest(BaseModel):
     """Request to execute a workflow."""
 
-    workflow: Optional[WorkflowDefinition] = Field(
+    workflow: WorkflowDefinition | None = Field(
         None, description="Inline workflow definition"
     )
-    workflow_id: Optional[str] = Field(
+    workflow_id: str | None = Field(
         None, description="ID of registered workflow to load from disk"
     )
-    inputs: Dict[str, Any] = Field(
+    inputs: dict[str, Any] = Field(
         ..., description="Workflow input values"
     )
-    trace_id: Optional[str] = Field(
+    trace_id: str | None = Field(
         None, description="Custom trace ID for Langfuse integration"
     )
 
@@ -194,12 +194,12 @@ class WorkflowExecuteResponse(BaseModel):
     success: bool = Field(..., description="Whether execution completed successfully")
     trace_id: str = Field(..., description="Trace ID for Langfuse")
     workflow_id: str = Field(..., description="Executed workflow ID")
-    outputs: Dict[str, Any] = Field(..., description="Final workflow outputs")
-    step_outputs: Dict[str, Dict[str, Any]] = Field(
+    outputs: dict[str, Any] = Field(..., description="Final workflow outputs")
+    step_outputs: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Outputs from each step (step_id -> {output_name: value})"
     )
-    metrics: List[Dict[str, Any]] = Field(
+    metrics: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Execution metrics per step"
     )
@@ -210,8 +210,8 @@ class WorkflowExecuteResponse(BaseModel):
 class DatasetItem(BaseModel):
     """Single dataset item for workflow evaluation."""
 
-    inputs: Dict[str, Any] = Field(..., description="Workflow inputs")
-    expected_output: Dict[str, Any] = Field(
+    inputs: dict[str, Any] = Field(..., description="Workflow inputs")
+    expected_output: dict[str, Any] = Field(
         ..., description="Expected workflow outputs"
     )
 
@@ -219,16 +219,16 @@ class DatasetItem(BaseModel):
 class WorkflowEvaluateRequest(BaseModel):
     """Request to evaluate a workflow on a dataset."""
 
-    workflow: Optional[WorkflowDefinition] = Field(None)
-    workflow_id: Optional[str] = Field(None)
-    dataset: List[DatasetItem] = Field(
+    workflow: WorkflowDefinition | None = Field(None)
+    workflow_id: str | None = Field(None)
+    dataset: list[DatasetItem] = Field(
         ..., min_length=1, description="Dataset items to evaluate"
     )
     evaluator: str = Field(
         default="exact_match",
         description="Evaluator type: exact_match, substring, criteria"
     )
-    evaluator_config: Dict[str, Any] = Field(
+    evaluator_config: dict[str, Any] = Field(
         default_factory=dict,
         description="Evaluator-specific configuration"
     )
@@ -243,7 +243,7 @@ class WorkflowEvaluateResponse(BaseModel):
     failed: int = Field(..., description="Items that failed evaluation")
     accuracy: float = Field(..., ge=0.0, le=1.0, description="Pass rate")
     mean_score: float = Field(..., ge=0.0, le=1.0, description="Average score")
-    results: List[Dict[str, Any]] = Field(
+    results: list[dict[str, Any]] = Field(
         ..., description="Per-item evaluation results"
     )
     execution_time_ms: float

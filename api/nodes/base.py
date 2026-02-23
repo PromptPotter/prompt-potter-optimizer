@@ -5,7 +5,7 @@ Pattern inspired by AgentNodeBase[TInput, TOutput] from query-preprocessing-work
 Each node has strongly-typed input/output models and a consistent execution interface.
 """
 from abc import ABC, abstractmethod
-from typing import TypeVar, Generic, Type, Dict, Any, Optional
+from typing import Any, TypeVar, Generic, Type
 from pydantic import BaseModel, Field
 from datetime import datetime
 import time
@@ -23,11 +23,11 @@ class NodeMetrics(BaseModel):
     start_time: str = Field(..., description="ISO timestamp of execution start")
     end_time: str = Field(..., description="ISO timestamp of execution end")
     duration_ms: float = Field(..., description="Execution duration in milliseconds")
-    input_tokens: Optional[int] = Field(None, description="Input tokens (for LLM nodes)")
-    output_tokens: Optional[int] = Field(None, description="Output tokens (for LLM nodes)")
-    model: Optional[str] = Field(None, description="Model used (for LLM nodes)")
-    error: Optional[str] = Field(None, description="Error message if execution failed")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    input_tokens: int | None = Field(None, description="Input tokens (for LLM nodes)")
+    output_tokens: int | None = Field(None, description="Output tokens (for LLM nodes)")
+    model: str | None = Field(None, description="Model used (for LLM nodes)")
+    error: str | None = Field(None, description="Error message if execution failed")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
 class NodeBase(ABC, Generic[TInput, TOutput]):
@@ -53,7 +53,7 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
                 return MyOutput(...)
     """
 
-    def __init__(self, node_id: str, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, node_id: str, config: dict[str, Any] | None = None):
         """
         Initialize a node instance.
 
@@ -63,7 +63,7 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
         """
         self.node_id = node_id
         self.config = config or {}
-        self._last_metrics: Optional[NodeMetrics] = None
+        self._last_metrics: NodeMetrics | None = None
 
     @classmethod
     @abstractmethod
@@ -102,7 +102,7 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
         """
         pass
 
-    async def process(self, input_data: TInput | Dict[str, Any]) -> TOutput:
+    async def process(self, input_data: TInput | dict[str, Any]) -> TOutput:
         """
         Main entry point for node execution.
 
@@ -164,7 +164,7 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
                 metadata=self.config.copy()
             )
 
-    def get_last_metrics(self) -> Optional[NodeMetrics]:
+    def get_last_metrics(self) -> NodeMetrics | None:
         """Return metrics from the last execution."""
         return self._last_metrics
 
@@ -191,13 +191,21 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
         return cls.__name__
 
     @classmethod
-    def get_node_info(cls) -> Dict[str, Any]:
+    def get_node_info(cls) -> dict[str, Any]:
         """
         Return metadata about this node type for documentation/discovery.
         """
+        input_name = (
+            cls.get_input_model().__name__
+            if hasattr(cls, 'get_input_model') else None
+        )
+        output_name = (
+            cls.get_output_model().__name__
+            if hasattr(cls, 'get_output_model') else None
+        )
         return {
             "type": cls.get_node_type(),
-            "input_model": cls.get_input_model().__name__ if hasattr(cls, 'get_input_model') else None,
-            "output_model": cls.get_output_model().__name__ if hasattr(cls, 'get_output_model') else None,
+            "input_model": input_name,
+            "output_model": output_name,
             "doc": cls.__doc__
         }

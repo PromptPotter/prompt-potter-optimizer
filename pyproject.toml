@@ -6,6 +6,16 @@ build-backend = "setuptools.backends._legacy:_Backend"
 name = "promptpotter-optimizer"
 version = "0.6.0"
 description = "Backend-first prompt optimization service"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "PromptPotter Contributors"}]
+keywords = ["prompt-optimization", "llm", "fastapi", "evaluation", "grid-search"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+]
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.109.0",
@@ -38,6 +48,9 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "ruff>=0.3.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/runfish5/prompt-potter-optimizer"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

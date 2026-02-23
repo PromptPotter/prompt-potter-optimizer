@@ -7,7 +7,7 @@ Executes CWL-inspired workflow definitions by:
 3. Executing nodes with data flow routing
 4. Collecting traces for Langfuse integration
 """
-from typing import Dict, Any, List, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
 from datetime import datetime
 from pathlib import Path
@@ -25,20 +25,22 @@ class WorkflowContext(BaseModel):
 
     workflow_id: str = Field(..., description="Workflow identifier")
     trace_id: str = Field(..., description="Unique trace ID for this execution")
-    langfuse_trace_id: Optional[str] = Field(None, description="Langfuse trace ID (for cloud logging)")
-    inputs: Dict[str, Any] = Field(..., description="Workflow-level inputs")
-    step_outputs: Dict[str, Dict[str, Any]] = Field(
+    langfuse_trace_id: str | None = Field(
+        None, description="Langfuse trace ID (for cloud logging)"
+    )
+    inputs: dict[str, Any] = Field(..., description="Workflow-level inputs")
+    step_outputs: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Outputs from each step: {step_id: {output_name: value}}"
     )
-    metrics: List[Dict[str, Any]] = Field(
+    metrics: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Execution metrics per step"
     )
     start_time: str = Field(..., description="ISO timestamp of execution start")
-    end_time: Optional[str] = Field(None, description="ISO timestamp of execution end")
+    end_time: str | None = Field(None, description="ISO timestamp of execution end")
     status: str = Field(default="pending", description="pending, running, completed, failed")
-    error: Optional[str] = Field(None, description="Error message if failed")
+    error: str | None = Field(None, description="Error message if failed")
 
 
 def generate_trace_id() -> str:
@@ -67,10 +69,10 @@ class WorkflowRunner:
             workflow_def: Parsed workflow definition
         """
         self.workflow = workflow_def
-        self._execution_order: List[str] = []
-        self._node_registry: Dict[str, type] = {}
+        self._execution_order: list[str] = []
+        self._node_registry: dict[str, type] = {}
 
-    def _get_node_registry(self) -> Dict[str, type]:
+    def _get_node_registry(self) -> dict[str, type]:
         """
         Get the node registry (lazy load to avoid circular imports).
         """
@@ -79,7 +81,7 @@ class WorkflowRunner:
             self._node_registry = get_node_registry()
         return self._node_registry
 
-    def _topological_sort(self) -> List[str]:
+    def _topological_sort(self) -> list[str]:
         """
         Sort steps by dependency order using Kahn's algorithm.
 
@@ -90,8 +92,8 @@ class WorkflowRunner:
             ValueError: If workflow contains cycles
         """
         # Build dependency graph from step.in references
-        in_degree: Dict[str, int] = {step.id: 0 for step in self.workflow.steps}
-        graph: Dict[str, List[str]] = {step.id: [] for step in self.workflow.steps}
+        in_degree: dict[str, int] = {step.id: 0 for step in self.workflow.steps}
+        graph: dict[str, list[str]] = {step.id: [] for step in self.workflow.steps}
 
         for step in self.workflow.steps:
             deps = self.workflow.get_step_dependencies(step.id)
@@ -102,7 +104,7 @@ class WorkflowRunner:
 
         # Kahn's algorithm
         queue = [step_id for step_id, degree in in_degree.items() if degree == 0]
-        result: List[str] = []
+        result: list[str] = []
 
         while queue:
             node = queue.pop(0)
@@ -175,7 +177,7 @@ class WorkflowRunner:
         self,
         step: StepDefinition,
         context: WorkflowContext
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Resolve all inputs for a step.
 
@@ -193,8 +195,8 @@ class WorkflowRunner:
 
     async def execute(
         self,
-        inputs: Dict[str, Any],
-        trace_id: Optional[str] = None
+        inputs: dict[str, Any],
+        trace_id: str | None = None
     ) -> WorkflowContext:
         """
         Execute the workflow with given inputs.
@@ -355,7 +357,7 @@ class WorkflowRunner:
         except Exception:
             return 0.0
 
-    def get_final_outputs(self, context: WorkflowContext) -> Dict[str, Any]:
+    def get_final_outputs(self, context: WorkflowContext) -> dict[str, Any]:
         """
         Extract final workflow outputs from context.
 
@@ -409,7 +411,7 @@ class WorkflowRunner:
         return cls(workflow_def)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowRunner":
+    def from_dict(cls, data: dict[str, Any]) -> "WorkflowRunner":
         """
         Create a WorkflowRunner from a dictionary.
 

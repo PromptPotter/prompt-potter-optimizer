@@ -6,7 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-(Nothing yet.)
+### Changed
+- Modernized all type hints to PEP 604 (`X | None`, `list[str]`, `dict[K, V]`) across 12 files
+- Replaced `print()` with `logger.warning()` in `api/evaluators/base.py`
+- Fixed all 12 ruff lint errors (E501 line length, E402 import order)
+- Added project metadata to `pyproject.toml` (license, authors, keywords, classifiers, URLs)
+- Standardized `api/services/stores/` facade pattern in `ProjectStore`
+- Refactored grid search and API router conventions
 
 ## [0.6.0] — Spec rewrite and M2 close
 

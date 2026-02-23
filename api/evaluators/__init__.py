@@ -3,7 +3,7 @@ Evaluator registry for workflow evaluation.
 
 Provides registration and discovery of evaluator types.
 """
-from typing import Dict, Type, Optional, Any
+from typing import Any, Type
 
 from .base import (
     EvaluatorBase,
@@ -17,7 +17,7 @@ from .criteria import CriteriaEvaluator
 
 
 # Global evaluator registry
-_EVALUATOR_REGISTRY: Dict[str, Type[EvaluatorBase]] = {}
+_EVALUATOR_REGISTRY: dict[str, Type[EvaluatorBase]] = {}
 
 
 def register_evaluator(evaluator_class: Type[EvaluatorBase]) -> Type[EvaluatorBase]:
@@ -41,7 +41,7 @@ def register_evaluator(evaluator_class: Type[EvaluatorBase]) -> Type[EvaluatorBa
 
 def get_evaluator(
     evaluator_type: str,
-    config: Optional[Dict[str, Any]] = None
+    config: dict[str, Any] | None = None
 ) -> EvaluatorBase:
     """
     Get an evaluator instance by type name.

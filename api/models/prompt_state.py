@@ -12,7 +12,7 @@ Fields are organized into three optimization layers:
 import difflib
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 # Layer field mapping
 # ---------------------------------------------------------------------------
 
-LAYER_FIELDS: Dict[str, List[str]] = {
+LAYER_FIELDS: dict[str, list[str]] = {
     "generate": [
         "persona",
         "task_intent",
@@ -45,7 +45,7 @@ class FewShotExample(BaseModel):
 
     input: str
     output: str
-    explanation: Optional[str] = None
+    explanation: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +59,8 @@ class PromptState(BaseModel):
     model_config = {"frozen": True}
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
-    parent_id: Optional[str] = None
-    changes_description: Optional[str] = None
+    parent_id: str | None = None
+    changes_description: str | None = None
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -72,11 +72,11 @@ class PromptState(BaseModel):
     instruction: str = ""
     thinking_style: str = ""
     answer_format: str = ""
-    few_shot_examples: List[FewShotExample] = Field(default_factory=list)
+    few_shot_examples: list[FewShotExample] = Field(default_factory=list)
 
     # Layer 2: Refine Context (adjust when generation stalls)
     context: str = ""
-    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
 
     # Layer 3: Modify Plan (outermost, ideally at defaults)
     plan: str = ""
@@ -87,7 +87,7 @@ class PromptState(BaseModel):
         Skips empty fields. Sections are separated by double newlines.
         Few-shot examples are formatted as Input/Output pairs.
         """
-        parts: List[str] = []
+        parts: list[str] = []
         for field_name in (
             "persona",
             "task_intent",
@@ -101,7 +101,7 @@ class PromptState(BaseModel):
                 parts.append(value)
 
         if self.few_shot_examples:
-            examples_lines: List[str] = []
+            examples_lines: list[str] = []
             for ex in self.few_shot_examples:
                 examples_lines.append(f"Input: {ex.input}\nOutput: {ex.output}")
                 if ex.explanation:
@@ -140,7 +140,7 @@ class FieldChange(BaseModel):
 class PromptStateDiff(BaseModel):
     """Structured diff between two PromptState instances."""
 
-    field_changes: List[FieldChange] = Field(default_factory=list)
+    field_changes: list[FieldChange] = Field(default_factory=list)
 
     # Layer-level flags
     generate_changed: bool = False
@@ -148,19 +148,19 @@ class PromptStateDiff(BaseModel):
     plan_changed: bool = False
 
     # Rendered diff (comparing render() output)
-    rendered_diff: Optional[str] = None
+    rendered_diff: str | None = None
 
     # Preserved detailed sub-diffs
-    few_shot_added: List[FewShotExample] = Field(default_factory=list)
-    few_shot_removed: List[FewShotExample] = Field(default_factory=list)
-    parameters_added: Dict[str, Any] = Field(default_factory=dict)
-    parameters_removed: Dict[str, str] = Field(default_factory=dict)
-    parameters_changed: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    few_shot_added: list[FewShotExample] = Field(default_factory=list)
+    few_shot_removed: list[FewShotExample] = Field(default_factory=list)
+    parameters_added: dict[str, Any] = Field(default_factory=dict)
+    parameters_removed: dict[str, str] = Field(default_factory=dict)
+    parameters_changed: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
     """Compare two PromptState snapshots and return a structured diff."""
-    field_changes: List[FieldChange] = []
+    field_changes: list[FieldChange] = []
 
     # Compare Layer 1 string fields
     for field_name in ("persona", "task_intent", "problem_description",

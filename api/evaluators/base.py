@@ -305,5 +305,5 @@ def log_evaluation_score(
             comment=comment,
         )
     except Exception as e:
-        print(f"Warning: Failed to log score to Langfuse: {e}")
+        logger.warning("Failed to log score to Langfuse: %s", e)
         return False

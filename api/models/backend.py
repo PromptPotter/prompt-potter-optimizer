@@ -6,7 +6,7 @@ Execution captures results from pipeline replays triggered by PromptPotter.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -21,29 +21,29 @@ class BackendConnection(BaseModel):
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    last_synced_at: Optional[str] = None
+    last_synced_at: str | None = None
 
 
 class ExecutionResultItem(BaseModel):
     """One query's result from a pipeline execution replay."""
 
     query: str
-    bom_material: Optional[str] = None
-    process: Optional[str] = None
+    bom_material: str | None = None
+    process: str | None = None
     ground_truth: str
     predicted: str
     confidence: float = 0.0
-    ranked_candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    ranked_candidates: list[dict[str, Any]] = Field(default_factory=list)
     latency_ms: float = 0.0
-    web_search_status: Optional[str] = None
-    pipeline_data: Dict[str, Any] = Field(default_factory=dict)
+    web_search_status: str | None = None
+    pipeline_data: dict[str, Any] = Field(default_factory=dict)
     status: str = "success"
-    error: Optional[str] = None
-    timestamp: Optional[str] = None
+    error: str | None = None
+    timestamp: str | None = None
     # Original variant data for comparison
-    variant_b_predicted: Optional[str] = None
-    variant_b_latency_ms: Optional[float] = None
-    variant_b_confidence: Optional[float] = None
+    variant_b_predicted: str | None = None
+    variant_b_latency_ms: float | None = None
+    variant_b_confidence: float | None = None
 
 
 class Execution(BaseModel):
@@ -54,17 +54,17 @@ class Execution(BaseModel):
     experiment_id: str
     variant_label: str = ""
     pipeline_notation: str = ""
-    source_run_id: Optional[str] = None
-    session_terms_count: Optional[int] = None
-    limitations: List[str] = Field(default_factory=list)
+    source_run_id: str | None = None
+    session_terms_count: int | None = None
+    limitations: list[str] = Field(default_factory=list)
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    pipeline_params: Dict[str, Any] = Field(
+    pipeline_params: dict[str, Any] = Field(
         default_factory=dict,
         description="Pipeline parameter overrides forwarded to the backend",
     )
     query_count: int = 0
     successful_count: int = 0
     error_count: int = 0
-    results: List[ExecutionResultItem] = Field(default_factory=list)
+    results: list[ExecutionResultItem] = Field(default_factory=list)

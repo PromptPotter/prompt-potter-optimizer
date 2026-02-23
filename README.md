@@ -151,6 +151,10 @@ Edit `.env` (see `.env.example`):
 - `docs/registry-design.md` — Optimization tracking (MLflow/DSPy style)
 - `docs/specs/` — Formal specs (charter, PRD, ADD, WBS, roadmap)
 
+## Contributing
+
+See `CLAUDE.md` for architecture and conventions.
+
 ## License
 
 MIT License - see LICENSE file.

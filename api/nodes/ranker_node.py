@@ -3,7 +3,7 @@ Ranker node.
 
 Ranks candidates using LLM-based scoring against a query.
 """
-from typing import Type, Dict, Any, List, Optional
+from typing import Any, Type
 from pydantic import BaseModel, Field
 
 from .base import NodeBase
@@ -13,12 +13,12 @@ class RankerInput(BaseModel):
     """Input model for ranker node."""
 
     query: str = Field(..., description="Query to rank candidates against")
-    candidates: List[str] = Field(
+    candidates: list[str] = Field(
         ...,
         min_length=1,
         description="List of candidate strings to rank"
     )
-    context: Optional[Dict[str, Any]] = Field(
+    context: dict[str, Any] | None = Field(
         None,
         description="Additional context (e.g., entity profile, search results)"
     )
@@ -34,7 +34,7 @@ class RankedCandidate(BaseModel):
         le=1.0,
         description="Relevance score (0.0 = no match, 1.0 = perfect match)"
     )
-    reasoning: Optional[str] = Field(
+    reasoning: str | None = Field(
         None,
         description="Explanation for the score"
     )
@@ -43,7 +43,7 @@ class RankedCandidate(BaseModel):
 class RankerOutput(BaseModel):
     """Output model for ranker node."""
 
-    ranked_candidates: List[RankedCandidate] = Field(
+    ranked_candidates: list[RankedCandidate] = Field(
         default_factory=list,
         description="Candidates sorted by score (highest first)"
     )
@@ -70,7 +70,9 @@ class RankerNode(NodeBase[RankerInput, RankerOutput]):
         ranking_prompt: Custom ranking prompt template (optional)
     """
 
-    DEFAULT_RANKING_PROMPT = """You are a relevance ranking expert. Score each candidate's relevance to the query.
+    DEFAULT_RANKING_PROMPT = """\
+You are a relevance ranking expert. \
+Score each candidate's relevance to the query.
 
 Query: {query}
 
@@ -107,7 +109,8 @@ Return candidates sorted from highest to lowest score."""
     def format_user_prompt(self, input_data: RankerInput) -> str:
         """Format input for logging."""
         candidates_str = "\n".join(f"- {c}" for c in input_data.candidates[:5])
-        return f"Query: {input_data.query}\nCandidates ({len(input_data.candidates)}):\n{candidates_str}"
+        n = len(input_data.candidates)
+        return f"Query: {input_data.query}\nCandidates ({n}):\n{candidates_str}"
 
     async def _execute(self, input_data: RankerInput) -> RankerOutput:
         from api.services.llm_client import get_llm_client

@@ -4,7 +4,7 @@ Criteria evaluator (LLM-as-judge).
 Uses an LLM to semantically evaluate whether the actual output
 meets the criteria defined by the expected output.
 """
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .base import EvaluatorBase, EvaluationOutput, EvalResult
 
@@ -23,7 +23,9 @@ class CriteriaEvaluator(EvaluatorBase):
         threshold: Score threshold for pass (default: 0.7)
     """
 
-    DEFAULT_CRITERIA_PROMPT = """You are an evaluation expert. Compare the expected and actual outputs and determine if they are semantically equivalent.
+    DEFAULT_CRITERIA_PROMPT = """\
+You are an evaluation expert. Compare the expected and actual outputs \
+and determine if they are semantically equivalent.
 
 Expected output:
 {expected}
@@ -31,7 +33,8 @@ Expected output:
 Actual output:
 {actual}
 
-Evaluate whether the actual output conveys the same meaning, information, or intent as the expected output.
+Evaluate whether the actual output conveys the same meaning, \
+information, or intent as the expected output.
 
 Return a JSON object with this exact structure:
 {{
@@ -47,7 +50,7 @@ Scoring guidelines:
 - 0.4-0.5: Weak match (some overlap but significant differences)
 - 0.0-0.3: No match (different meaning or information)"""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)
         self.model = self.config.get("model")
         self.temperature = self.config.get("temperature", 0.0)
@@ -103,8 +106,14 @@ Scoring guidelines:
             )
 
         # Convert to strings for LLM
-        expected_str = json.dumps(expected, indent=2) if isinstance(expected, (dict, list)) else str(expected)
-        actual_str = json.dumps(actual, indent=2) if isinstance(actual, (dict, list)) else str(actual)
+        expected_str = (
+            json.dumps(expected, indent=2)
+            if isinstance(expected, (dict, list)) else str(expected)
+        )
+        actual_str = (
+            json.dumps(actual, indent=2)
+            if isinstance(actual, (dict, list)) else str(actual)
+        )
 
         # Build prompt
         prompt = self.criteria_prompt.format(

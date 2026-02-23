@@ -5,7 +5,7 @@ Assembles pipeline configuration parameters (e.g., skip_llm_ranking,
 model overrides, candidate limits) for forwarding to a backend.
 PromptPotter configures *what* the backend does, not executes it directly.
 """
-from typing import Any, Dict, Optional, Type
+from typing import Any, Type
 
 from pydantic import BaseModel, Field
 
@@ -16,10 +16,10 @@ class PipelineConfigInput(BaseModel):
     """Input model for pipeline config node."""
 
     query: str = Field(..., description="Query to configure the pipeline for")
-    skip_llm_ranking: Optional[bool] = Field(
+    skip_llm_ranking: bool | None = Field(
         None, description="Override: skip LLM ranking stage"
     )
-    pipeline_params: Dict[str, Any] = Field(
+    pipeline_params: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional pipeline parameters to forward to the backend",
     )
@@ -32,7 +32,7 @@ class PipelineConfigOutput(BaseModel):
     skip_llm_ranking: bool = Field(
         default=True, description="Whether to skip LLM ranking"
     )
-    pipeline_params: Dict[str, Any] = Field(
+    pipeline_params: dict[str, Any] = Field(
         default_factory=dict,
         description="Merged pipeline parameters for the backend",
     )

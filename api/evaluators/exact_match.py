@@ -4,7 +4,7 @@ Exact match evaluator.
 Compares expected and actual values for exact equality,
 with optional case-insensitive and whitespace-normalized modes.
 """
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .base import EvaluatorBase, EvaluationOutput, EvalResult
 
@@ -19,7 +19,7 @@ class ExactMatchEvaluator(EvaluatorBase):
         strip: Strip leading/trailing whitespace (default: True)
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)
         self.case_insensitive = self.config.get("case_insensitive", False)
         self.normalize_whitespace = self.config.get("normalize_whitespace", False)

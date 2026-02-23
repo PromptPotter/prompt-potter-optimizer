@@ -3,7 +3,7 @@ LLM inference node.
 
 Executes a single LLM call with configurable model, temperature, and prompts.
 """
-from typing import Type, Dict, Any, Optional, List
+from typing import Any, Type
 from pydantic import BaseModel, Field
 
 from .base import NodeBase
@@ -12,15 +12,15 @@ from .base import NodeBase
 class LLMInput(BaseModel):
     """Input model for LLM node."""
 
-    messages: List[Dict[str, str]] = Field(
+    messages: list[dict[str, str]] = Field(
         ...,
         description="Chat messages as [{role: 'user'|'system'|'assistant', content: '...'}]"
     )
-    system_prompt: Optional[str] = Field(
+    system_prompt: str | None = Field(
         None,
         description="System prompt (prepended to messages if provided)"
     )
-    variables: Dict[str, Any] = Field(
+    variables: dict[str, Any] = Field(
         default_factory=dict,
         description="Template variables for {{variable}} substitution in messages"
     )
@@ -31,11 +31,11 @@ class LLMOutput(BaseModel):
 
     content: str = Field(..., description="LLM response content")
     model: str = Field(..., description="Model used for inference")
-    usage: Dict[str, int] = Field(
+    usage: dict[str, int] = Field(
         default_factory=dict,
         description="Token usage: prompt_tokens, completion_tokens, total_tokens"
     )
-    parsed: Optional[Any] = Field(
+    parsed: Any | None = Field(
         None,
         description="Parsed JSON if output_format='json'"
     )
@@ -70,7 +70,7 @@ class LLMNode(NodeBase[LLMInput, LLMOutput]):
             f"{m['role']}: {m['content']}" for m in input_data.messages
         )
 
-    def _apply_variables(self, text: str, variables: Dict[str, Any]) -> str:
+    def _apply_variables(self, text: str, variables: dict[str, Any]) -> str:
         """
         Apply template variables to text.
 
