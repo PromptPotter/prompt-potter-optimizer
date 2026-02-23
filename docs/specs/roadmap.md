@@ -100,7 +100,7 @@
   - 2.6 E2E Test — Not started
   - 2.7 Cycling Mode — Not started
   - 2.8 HITL Campaign Notebook — **Complete** (exceeds scope: trace parsing, eval caching, incremental writes, crash protection, rate-limit backoff, `_campaign_lib.py` service extraction, training-style progress display, semi-automatic optimization loop with patience-based stopping, `init_services()` returns backend_client + session_terms for backend-driven evaluation)
-  - 2.9 Grid Search — **Complete** (default axes, LLM restructuring, grid execution with two eval modes: backend full-pipeline via `/matches` with `ranking_prompt` + local LLM fallback, per-query HIT/MISS progress logging, visualization/analysis, winner selection, distance-weighted stratified sampling with `n_combos` + `exploration_rate`, per-combo caching + incremental writes + partial-run resume)
+  - 2.9 Grid Search — **Complete** (default axes, LLM restructuring, grid execution with two eval modes: backend full-pipeline via `/matches` with `ranking_prompt` + local LLM fallback, per-query HIT/MISS progress logging, visualization/analysis, winner selection, distance-weighted stratified sampling with `grid_budget` + `exploration_rate`, per-point caching + incremental writes + partial-run resume, grid plan persistence with stable identity hash + plan serialization/deserialization + automatic resume on kernel restart)
   - 2.10 TermNorm `GET /pipeline` Endpoint — Not started (external repo: adds pipeline discovery endpoint)
   - 2.11 PromptPotter Discovery Integration — Not started (uses discovered schema in grid search instead of hardcoded `GRID_SEARCHABLE_FIELDS`)
 

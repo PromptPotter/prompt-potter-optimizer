@@ -23,8 +23,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with editable config, candidate coverage diagnostics, iterative prompt optimization,
   LLM-generated phrase fragment suggestions, patience-based stopping
 - **Grid Search** (`api/services/grid_search.py`): cartesian product over Layer 1 prompt axes,
-  distance-weighted stratified sampling with `n_combos` + `exploration_rate`, two eval modes
-  (backend full-pipeline via `/matches` + local LLM fallback), per-combo caching + incremental
+  distance-weighted stratified sampling with `grid_budget` + `exploration_rate`, two eval modes
+  (backend full-pipeline via `/matches` + local LLM fallback), per-point caching + incremental
   writes + partial-run resume
 - `_campaign_lib.py` notebook helper extracted from inline notebook code
 - Eval caching at service level with content-addressed SHA256 keys

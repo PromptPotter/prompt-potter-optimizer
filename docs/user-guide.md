@@ -102,13 +102,13 @@ The optimization system is controlled by two top-level parameters:
 
 | Knob | Range | Purpose |
 |------|-------|---------|
-| `n_samples` | integer | Queries per evaluation step — universal across grid search and optimization rounds |
-| `exploration_rate` | 0.0–1.0 | Controls exploration aggressiveness — biases grid sampling toward conservative (low distance) or aggressive (high distance) combinations |
+| `queries_per_eval` | integer | Queries per optimization evaluation step |
+| `exploration_rate` | 0.0–1.0 | Controls exploration aggressiveness — biases grid sampling toward conservative (low distance) or aggressive (high distance) grid points |
 
 Set in the notebook's campaign config:
 ```python
 campaign_config = {
-    "n_samples": 35,           # queries per evaluation step
+    "queries_per_eval": 35,    # queries per optimization evaluation step
     "exploration_rate": 0.5,   # 0.0=conservative, 1.0=aggressive
     ...
 }
@@ -116,26 +116,42 @@ campaign_config = {
 
 ### How `exploration_rate` Works
 
-Each grid combination has a **distance** = number of non-empty field values. The `exploration_rate` biases sampling toward different distance bands:
+Each grid point has a **distance** = number of non-empty field values. The `exploration_rate` biases sampling toward different distance bands:
 
-- **0.0 (conservative)**: Favors combinations with few changes from baseline (low distance)
+- **0.0 (conservative)**: Favors grid points with few changes from baseline (low distance)
 - **0.5 (balanced)**: Even distribution across distance bands
-- **1.0 (aggressive)**: Favors combinations with many changes (high distance)
+- **1.0 (aggressive)**: Favors grid points with many changes (high distance)
 
 The weight function is `w(d) = exp(-alpha * |d - target| / max_d)` where `target = exploration_rate * max_distance`.
 
-### Grid Budget (`n_combos`)
+### Grid Budget (`grid_budget`)
 
-Set `grid_search.n_combos` to control exactly how many combinations to evaluate:
+Set `grid_search.grid_budget` to control exactly how many grid points to evaluate:
 
 ```python
 "grid_search": {
-    "n_combos": 35,   # exact budget (0=full grid)
+    "grid_budget": 35,   # exact budget (0=full grid)
     ...
 }
 ```
 
-When `n_combos` exceeds the full cartesian product size, the full grid is used (capped).
+When `grid_budget` exceeds the full cartesian product size, the full grid is used (capped).
+
+### Per-Point Query Sampling (`eval_queries_per_point`)
+
+Controls how many queries each grid point is evaluated on:
+
+```python
+"grid_search": {
+    "eval_queries_per_point": 1,  # queries per grid point (0=use all eval_data)
+    "shared_queries": False,      # False=different random queries per point
+    ...
+}
+```
+
+- **`eval_queries_per_point=1`** (default): Each grid point gets 1 randomly chosen query — fast landscape scanning
+- **`shared_queries=False`** (default): Each point gets different random queries (seeded by `seed + point_index`)
+- **`shared_queries=True`**: All grid points use the same query set — for rigorous comparison
 
 ### Default Grid Axes
 
@@ -217,7 +233,7 @@ Configure via `optimization` section:
 
 ```python
 campaign_config = {
-    "n_samples": 35,                # PRIMARY: queries per evaluation step
+    "queries_per_eval": 35,         # Queries per optimization evaluation step
     "exploration_rate": 0.5,        # PRIMARY: 0.0=conservative, 1.0=aggressive
     "optimization": {
         "n_variants": 5,            # Candidates per round
@@ -228,7 +244,9 @@ campaign_config = {
     },
     "eval_llm": { ... },
     "grid_search": {
-        "n_combos": 35,             # Exact budget (0=full grid)
+        "grid_budget": 35,          # Exact budget (0=full grid)
+        "eval_queries_per_point": 1,  # Queries per grid point
+        "shared_queries": False,    # Different random queries per point
         "seed": 42,
         "top_k": 5,
         "use_defaults": True,
@@ -255,6 +273,6 @@ eval_llm = {
 
 **"No queries have entity_profile"** — Re-run replay with `skip_llm_ranking=False`. The entity_profile is populated by the full pipeline.
 
-**Grid search takes too long** — Reduce `n_combos` in `grid_search` config, or reduce `n_samples` for fewer queries per combination.
+**Grid search takes too long** — Reduce `grid_budget` in `grid_search` config, or reduce `eval_queries_per_point` for fewer queries per grid point.
 
 **LLM errors / timeouts** — Check your API key in `.env`. Increase timeout in `eval_llm["max_tokens"]`. Groq has rate limits — add delays if hitting 429s.

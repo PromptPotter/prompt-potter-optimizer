@@ -2,8 +2,9 @@
 Grid search service for prompt landscape exploration.
 
 Builds cartesian products of prompt field variants, evaluates each
-combination, and analyzes results to find optimal configurations.
+grid point, and analyzes results to find optimal configurations.
 """
+import hashlib
 import itertools
 import json
 import math
@@ -64,21 +65,21 @@ REQUIRED_TEMPLATE_VARS = {"{{core_concept}}", "{{entity_profile_json}}", "{{matc
 
 
 # ---------------------------------------------------------------------------
-# Validation & combination building
+# Validation & grid point building
 # ---------------------------------------------------------------------------
 
 
 def validate_grid_config(
     grid_config: dict,
     baseline_ps: PromptState,
-    n_combos: int = 0,
+    grid_budget: int = 0,
 ) -> dict:
     """Validate grid axes and compute cartesian product size.
 
     Args:
         grid_config: Dict mapping field names to lists of variant values.
         baseline_ps: The baseline PromptState (for reference).
-        n_combos: If >0, planned sample size (used for capped reporting).
+        grid_budget: If >0, planned sample size (used for capped reporting).
 
     Returns:
         Metadata dict: {axes, axis_names, total, actual_count, is_subsampled,
@@ -114,27 +115,27 @@ def validate_grid_config(
     for values in axes.values():
         total *= len(values)
 
-    actual_count = min(n_combos, total) if n_combos > 0 else total
-    capped = n_combos > 0 and n_combos >= total
+    actual_count = min(grid_budget, total) if grid_budget > 0 else total
+    capped = grid_budget > 0 and grid_budget >= total
 
     return {
         "axes": axes,
         "axis_names": axis_names,
         "total": total,
         "actual_count": actual_count,
-        "is_subsampled": n_combos > 0 and n_combos < total,
+        "is_subsampled": grid_budget > 0 and grid_budget < total,
         "capped": capped,
     }
 
 
-def _combo_distance(combo: tuple) -> int:
-    """Count non-empty field values in a combination."""
-    return sum(1 for v in combo if v)
+def _point_distance(grid_point: tuple) -> int:
+    """Count non-empty field values in a grid point."""
+    return sum(1 for v in grid_point if v)
 
 
 def _allocate_budget(
     buckets: Dict[int, list],
-    n_combos: int,
+    grid_budget: int,
     exploration_rate: float,
     max_distance: int,
 ) -> Dict[int, int]:
@@ -142,21 +143,21 @@ def _allocate_budget(
 
     Weight function: w(d) = exp(-alpha * |d - target| / max_d)
     where target = exploration_rate * max_distance.
-    Uses largest-remainder method to ensure exact n_combos total.
+    Uses largest-remainder method to ensure exact grid_budget total.
 
     Args:
-        buckets: Dict mapping distance -> list of combos at that distance.
-        n_combos: Total budget to allocate.
+        buckets: Dict mapping distance -> list of grid points at that distance.
+        grid_budget: Total budget to allocate.
         exploration_rate: 0.0 (conservative/low distance) to 1.0 (aggressive/high distance).
         max_distance: Maximum possible distance.
 
     Returns:
-        Dict mapping distance -> number of combos to sample from that band.
+        Dict mapping distance -> number of grid points to sample from that band.
     """
     if max_distance == 0:
-        # All combos have the same distance; distribute evenly
+        # All grid points have the same distance; distribute evenly
         for d in buckets:
-            return {d: min(n_combos, len(buckets[d]))}
+            return {d: min(grid_budget, len(buckets[d]))}
 
     target = exploration_rate * max_distance
 
@@ -173,7 +174,7 @@ def _allocate_budget(
     ideal: Dict[int, float] = {}
     for d in buckets:
         ideal[d] = min(
-            (raw_weights[d] / total_weight) * n_combos,
+            (raw_weights[d] / total_weight) * grid_budget,
             len(buckets[d]),
         )
 
@@ -181,7 +182,7 @@ def _allocate_budget(
     floored = {d: int(v) for d, v in ideal.items()}
     remainders = {d: ideal[d] - floored[d] for d in ideal}
     allocated = sum(floored.values())
-    deficit = n_combos - allocated
+    deficit = grid_budget - allocated
 
     # Sort by remainder descending, break ties by distance
     sorted_ds = sorted(remainders, key=lambda d: (-remainders[d], d))
@@ -196,52 +197,52 @@ def _allocate_budget(
     return floored
 
 
-def build_grid_combinations(
+def build_grid_points(
     grid_config: dict,
     baseline_ps: PromptState,
-    n_combos: int = 0,
+    grid_budget: int = 0,
     exploration_rate: float = 0.5,
     seed: int = 42,
 ) -> Tuple[list, dict, dict]:
     """Build cartesian product of grid axes as PromptState variants.
 
-    Uses distance-weighted stratified sampling when ``n_combos > 0``.
-    Distance = number of non-empty field values in a combination.
+    Uses distance-weighted stratified sampling when ``grid_budget > 0``.
+    Distance = number of non-empty field values in a grid point.
     ``exploration_rate`` biases sampling toward low-distance (conservative)
     or high-distance (aggressive) bands.
 
     Args:
         grid_config: Dict mapping field names to lists of variant values.
         baseline_ps: The baseline PromptState to derive from.
-        n_combos: If >0, sample exactly this many combos (capped at full
-            space size). 0 = full grid (backward compat).
-        exploration_rate: 0.0 = favor low-distance combos (conservative),
-            1.0 = favor high-distance combos (aggressive). Default 0.5.
+        grid_budget: If >0, sample exactly this many grid points (capped at
+            full space size). 0 = full grid.
+        exploration_rate: 0.0 = favor low-distance points (conservative),
+            1.0 = favor high-distance points (aggressive). Default 0.5.
         seed: Random seed for reproducible sampling.
 
     Returns:
-        Tuple of (combinations, ps_lookup, sampling_meta).
-        combinations: list of (coord_dict, ps_id).
-        ps_lookup: dict mapping ps_id -> PromptState.
+        Tuple of (grid_points, state_lookup, sampling_meta).
+        grid_points: list of (coord_dict, ps_id).
+        state_lookup: dict mapping ps_id -> PromptState.
         sampling_meta: dict with total_space, n_selected, exploration_rate,
             distance_distribution, capped.
     """
     axis_names = list(grid_config.keys())
     axis_values = [grid_config[name] for name in axis_names]
-    all_combos = list(itertools.product(*axis_values))
-    total_space = len(all_combos)
+    all_points = list(itertools.product(*axis_values))
+    total_space = len(all_points)
 
     capped = False
-    if n_combos > 0 and n_combos < total_space:
+    if grid_budget > 0 and grid_budget < total_space:
         # Bucket by distance
         buckets: Dict[int, list] = defaultdict(list)
-        for combo in all_combos:
-            d = _combo_distance(combo)
-            buckets[d].append(combo)
+        for grid_point in all_points:
+            d = _point_distance(grid_point)
+            buckets[d].append(grid_point)
 
         max_distance = max(buckets.keys()) if buckets else 0
 
-        allocation = _allocate_budget(buckets, n_combos, exploration_rate, max_distance)
+        allocation = _allocate_budget(buckets, grid_budget, exploration_rate, max_distance)
 
         rng = random.Random(seed)
         selected = []
@@ -256,36 +257,36 @@ def build_grid_combinations(
             selected.extend(sampled)
             distance_distribution[d] = len(sampled)
 
-        all_combos = selected
-    elif n_combos > 0:
-        # n_combos >= total_space: use full grid
+        all_points = selected
+    elif grid_budget > 0:
+        # grid_budget >= total_space: use full grid
         capped = True
         distance_distribution = {}
         buckets_for_meta: Dict[int, list] = defaultdict(list)
-        for combo in all_combos:
-            d = _combo_distance(combo)
-            buckets_for_meta[d].append(combo)
+        for grid_point in all_points:
+            d = _point_distance(grid_point)
+            buckets_for_meta[d].append(grid_point)
         for d in sorted(buckets_for_meta):
             distance_distribution[d] = len(buckets_for_meta[d])
     else:
         # Full grid mode
         distance_distribution = {}
         buckets_for_meta = defaultdict(list)
-        for combo in all_combos:
-            d = _combo_distance(combo)
-            buckets_for_meta[d].append(combo)
+        for grid_point in all_points:
+            d = _point_distance(grid_point)
+            buckets_for_meta[d].append(grid_point)
         for d in sorted(buckets_for_meta):
             distance_distribution[d] = len(buckets_for_meta[d])
 
-    combinations = []
-    ps_lookup = {}
+    grid_points = []
+    state_lookup = {}
 
-    for combo in all_combos:
+    for grid_point in all_points:
         coord_dict = {}
         changes = {}
         labels = []
 
-        for i, (name, value) in enumerate(zip(axis_names, combo)):
+        for i, (name, value) in enumerate(zip(axis_names, grid_point)):
             idx = grid_config[name].index(value)
             coord_dict[name] = idx
             labels.append(f"{name[:2]}={idx}")
@@ -294,18 +295,103 @@ def build_grid_combinations(
 
         desc = f"grid[{','.join(labels)}]"
         ps = baseline_ps.derive(**changes, changes_description=desc)
-        combinations.append((coord_dict, ps.id))
-        ps_lookup[ps.id] = ps
+        grid_points.append((coord_dict, ps.id))
+        state_lookup[ps.id] = ps
 
     sampling_meta = {
         "total_space": total_space,
-        "n_selected": len(combinations),
+        "n_selected": len(grid_points),
         "exploration_rate": exploration_rate,
         "distance_distribution": distance_distribution,
         "capped": capped,
     }
 
-    return combinations, ps_lookup, sampling_meta
+    return grid_points, state_lookup, sampling_meta
+
+
+# ---------------------------------------------------------------------------
+# Grid plan persistence
+# ---------------------------------------------------------------------------
+
+
+def grid_plan_identity(
+    grid_axes: dict,
+    baseline_instruction: str,
+    context_input: Any,
+    grid_budget: int,
+    exploration_rate: float,
+    seed: int,
+) -> str:
+    """Compute a stable identity hash for a grid search plan.
+
+    The hash covers user-controlled inputs only so the same config
+    produces the same plan ID across kernel restarts.
+    """
+    payload = json.dumps(
+        {
+            "grid_axes": grid_axes,
+            "baseline_instruction": baseline_instruction,
+            "context_input": context_input
+            if isinstance(context_input, str)
+            else json.dumps(context_input, sort_keys=True),
+            "grid_budget": grid_budget,
+            "exploration_rate": exploration_rate,
+            "seed": seed,
+        },
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(payload.encode()).hexdigest()[:12]
+    return f"gridplan_{digest}"
+
+
+def serialize_grid_plan(
+    plan_id: str,
+    grid_axes: dict,
+    baseline_ps: PromptState,
+    layer1_fields: dict,
+    grid_points: list,
+    state_lookup: dict,
+    sampling_meta: dict,
+) -> dict:
+    """Serialize a grid search plan to a JSON-safe dict."""
+    return {
+        "plan_id": plan_id,
+        "status": "in_progress",
+        "grid_axes": grid_axes,
+        "baseline_ps": baseline_ps.model_dump(),
+        "layer1_fields": layer1_fields,
+        "grid_points": grid_points,
+        "state_lookup": {
+            ps_id: ps.model_dump() for ps_id, ps in state_lookup.items()
+        },
+        "sampling_meta": sampling_meta,
+    }
+
+
+def deserialize_grid_plan(
+    plan_data: dict,
+) -> tuple:
+    """Reconstruct grid plan objects from saved data.
+
+    Returns:
+        (grid_points, state_lookup, sampling_meta, grid_axes,
+         layer1_fields, baseline_ps)
+    """
+    baseline_ps = PromptState(**plan_data["baseline_ps"])
+    state_lookup = {
+        ps_id: PromptState(**ps_data)
+        for ps_id, ps_data in plan_data.get(
+            "state_lookup", plan_data.get("ps_lookup", {})
+        ).items()
+    }
+    return (
+        plan_data.get("grid_points", plan_data.get("combinations", [])),
+        state_lookup,
+        plan_data["sampling_meta"],
+        plan_data["grid_axes"],
+        plan_data.get("layer1_fields", plan_data.get("structured_fields", {})),
+        baseline_ps,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -417,39 +503,52 @@ async def restructure_context(
 
 
 async def run_grid_search(
-    combinations: list,
-    ps_lookup: dict,
+    grid_points: list,
+    state_lookup: dict,
     eval_data: list,
     backend_client,
-    on_combo_done: Optional[Callable] = None,
+    on_point_done: Optional[Callable] = None,
     on_query_done: Optional[Callable] = None,
+    on_point_cached: Optional[Callable] = None,
     request_delay: float = 1.0,
     store: Optional["ProjectStore"] = None,
     backend_id: str = "",
     session_terms: Optional[list] = None,
     pipeline_params: Optional[dict] = None,
+    eval_queries_per_point: int = 0,
+    shared_queries: bool = True,
+    seed: int = 42,
 ) -> pd.DataFrame:
-    """Evaluate each grid combination on eval_data via the backend.
+    """Evaluate each grid point on eval_data via the backend.
 
     Args:
-        combinations: List of (coord_dict, ps_id) tuples.
-        ps_lookup: Dict mapping ps_id -> PromptState.
+        grid_points: List of (coord_dict, ps_id) tuples.
+        state_lookup: Dict mapping ps_id -> PromptState.
         eval_data: List of query dicts with ``query`` and ``ground_truth``.
         backend_client: BackendClient for backend-driven evaluation.
-            Each combo is evaluated by calling the backend's ``/matches``
+            Each grid point is evaluated by calling the backend's ``/matches``
             endpoint with the rendered prompt.
-        on_combo_done: Optional callback ``(combo_index, row_data)`` called
-            after each combination is evaluated.
+        on_point_done: Optional callback ``(point_index, row_data)`` called
+            after each grid point is evaluated.
         on_query_done: Optional callback
-            ``(combo_index, query_index, total_queries, result)`` called after
-            each individual query within a combo evaluation.
+            ``(point_index, query_index, total_queries, result)`` called after
+            each individual query within a grid point evaluation.
+        on_point_cached: Optional callback ``(point_index, row_data)`` called
+            when a grid point is resolved from cache (instead of evaluated).
         request_delay: Seconds to sleep between backend calls within each
-            combination (default 1.0).
-        store: Optional ProjectStore for per-combo eval caching.
+            grid point (default 1.0).
+        store: Optional ProjectStore for per-point eval caching.
         backend_id: Required when store is provided.
         session_terms: Session terms to initialize the backend session.
         pipeline_params: Optional pipeline parameter overrides forwarded to
             the backend's ``/matches`` endpoint.
+        eval_queries_per_point: Number of queries to evaluate per grid point.
+            0 = use all of eval_data. When >0 and shared_queries=False,
+            each point gets a different random sample.
+        shared_queries: If True (default), all grid points use the same
+            query set. If False, each grid point gets a different random
+            sample (seeded by seed + point_index).
+        seed: Random seed for per-point query sampling.
 
     Returns:
         DataFrame with columns: axis indices, prompt_state_id,
@@ -457,16 +556,35 @@ async def run_grid_search(
     """
     import asyncio
 
-    # Initialize backend session once (not per combo)
+    # Initialize backend session once (not per grid point)
     if session_terms:
         await backend_client.init_session(session_terms)
 
+    # Pre-compute shared query set if needed
+    if eval_queries_per_point > 0 and shared_queries:
+        rng = random.Random(seed)
+        shared_eval = rng.sample(eval_data, min(eval_queries_per_point, len(eval_data)))
+    else:
+        shared_eval = None
+
     rows = []
 
-    for combo_idx, (coord_dict, ps_id) in enumerate(combinations):
-        ps = ps_lookup[ps_id]
+    for point_idx, (coord_dict, ps_id) in enumerate(grid_points):
+        ps = state_lookup[ps_id]
         rendered = ps.render()
-        content_hash = eval_cache_key(rendered, eval_data, "", 0.0)
+
+        # Per-point query sampling
+        if eval_queries_per_point > 0 and not shared_queries:
+            rng = random.Random(seed + point_idx)
+            point_eval = rng.sample(
+                eval_data, min(eval_queries_per_point, len(eval_data))
+            )
+        elif shared_eval is not None:
+            point_eval = shared_eval
+        else:
+            point_eval = eval_data
+
+        content_hash = eval_cache_key(rendered, point_eval, "", 0.0)
 
         # Check cache
         cached_run = None
@@ -475,6 +593,14 @@ async def run_grid_search(
 
         if cached_run:
             acc = cached_run["scores"]
+            if on_point_cached is not None:
+                cache_row = dict(coord_dict)
+                cache_row["prompt_state_id"] = ps_id
+                cache_row["hits"] = acc["hits"]
+                cache_row["total"] = acc["total"]
+                cache_row["accuracy"] = acc["accuracy"]
+                cache_row["errors"] = acc["errors"]
+                on_point_cached(point_idx, cache_row)
         else:
             run_id = f"grid_{content_hash[:8]}"
 
@@ -484,13 +610,13 @@ async def run_grid_search(
                 if store and backend_id
                 else []
             )
-            if partial and len(partial) < len(eval_data):
-                remaining = eval_data[len(partial):]
-            elif partial and len(partial) >= len(eval_data):
+            if partial and len(partial) < len(point_eval):
+                remaining = point_eval[len(partial):]
+            elif partial and len(partial) >= len(point_eval):
                 remaining = []
             else:
                 partial = []
-                remaining = eval_data
+                remaining = point_eval
 
             writer = (
                 make_incremental_writer(store, backend_id, run_id)
@@ -511,7 +637,7 @@ async def run_grid_search(
                     writer(result, qi, len(remaining))
                 if on_query_done is not None:
                     on_query_done(
-                        combo_idx, len(partial) + qi, len(eval_data), result,
+                        point_idx, len(partial) + qi, len(point_eval), result,
                     )
 
                 await asyncio.sleep(request_delay)
@@ -522,7 +648,7 @@ async def run_grid_search(
             # Finalize: save complete run, delete .partial.jsonl
             if store and backend_id:
                 run_data = build_dataset_run_data(
-                    run_id, f"grid_combo_{combo_idx}", content_hash,
+                    run_id, f"grid_point_{point_idx}", content_hash,
                     ps_id, rendered, "", 0.0, acc, results,
                 )
                 store.finalize_eval_run(backend_id, run_id, run_data)
@@ -535,8 +661,8 @@ async def run_grid_search(
         row["errors"] = acc["errors"]
         rows.append(row)
 
-        if on_combo_done is not None:
-            on_combo_done(combo_idx, row)
+        if on_point_done is not None:
+            on_point_done(point_idx, row)
 
     df = pd.DataFrame(rows)
     df = df.sort_values("accuracy", ascending=False).reset_index(drop=True)
@@ -563,8 +689,8 @@ async def analyze_grid_results(
     """
     axis_names = list(grid_config.keys())
 
-    top_combos = grid_df.head(5).to_dict("records")
-    worst_combos = grid_df.tail(3).to_dict("records")
+    top_points = grid_df.head(5).to_dict("records")
+    worst_points = grid_df.tail(3).to_dict("records")
 
     marginals = {}
     for name in axis_names:
@@ -581,9 +707,9 @@ async def analyze_grid_results(
         "You are an optimization advisor. Analyze the results of a grid search "
         "over prompt configuration fields.\n\n"
         f"GRID AXES: {axis_names}\n"
-        f"TOTAL COMBINATIONS: {len(grid_df)}\n\n"
-        f"TOP 5 COMBINATIONS:\n{json.dumps(top_combos, indent=2, default=str)}\n\n"
-        f"WORST 3 COMBINATIONS:\n{json.dumps(worst_combos, indent=2, default=str)}\n\n"
+        f"TOTAL GRID POINTS: {len(grid_df)}\n\n"
+        f"TOP 5 GRID POINTS:\n{json.dumps(top_points, indent=2, default=str)}\n\n"
+        f"WORST 3 GRID POINTS:\n{json.dumps(worst_points, indent=2, default=str)}\n\n"
         f"MARGINAL STATS (mean accuracy per axis value):\n"
         f"{json.dumps(marginals, indent=2, default=str)}\n\n"
         "Return a JSON object with:\n"
@@ -605,13 +731,13 @@ async def analyze_grid_results(
 
 def select_grid_winner(
     grid_df: pd.DataFrame,
-    ps_lookup: dict,
+    state_lookup: dict,
 ) -> dict:
-    """Select the best-performing grid combination.
+    """Select the best-performing grid point.
 
     Args:
         grid_df: DataFrame from run_grid_search() (sorted by accuracy desc).
-        ps_lookup: Dict mapping ps_id -> PromptState.
+        state_lookup: Dict mapping ps_id -> PromptState.
 
     Returns:
         Campaign round entry dict with keys: round, label, prompt_state,
@@ -619,7 +745,7 @@ def select_grid_winner(
     """
     best_row = grid_df.iloc[0]
     ps_id = best_row["prompt_state_id"]
-    ps = ps_lookup[ps_id]
+    ps = state_lookup[ps_id]
 
     return {
         "round": "grid",

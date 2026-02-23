@@ -42,10 +42,10 @@ All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py
 | Service | Purpose |
 |---------|---------|
 | `prompt_eval.py` | Evaluate prompts against datasets via backend `/matches` endpoint. Content-addressed caching via `eval_cache_key()`. Incremental writes (`.partial.jsonl`) for crash recovery. |
-| `grid_search.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. |
+| `grid_search.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. Grid plan persistence (`grid_plan_identity()`, `serialize_grid_plan()`, `deserialize_grid_plan()`). |
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation, round winner selection, improvement suggestions. |
 | `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions). |
-| `project_store.py` | File I/O for `.promptpotter/projects/` — backends, synced experiments, executions, dataset runs. |
+| `project_store.py` | File I/O for `.promptpotter/projects/` — backends, synced experiments, executions, dataset runs, grid plans. |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI, Anthropic, Mock). Global singleton via `get_llm_client()`. |
 | `comparison.py` | Statistical comparison (hit@k, McNemar, Wilcoxon). |
 | `langfuse_client.py` | Langfuse observability integration. |
@@ -68,13 +68,14 @@ PromptState is frozen (`model_config = {"frozen": True}`). Use `derive(**changes
   dataset_runs/{run_id}.json       # completed eval runs
   dataset_runs/{run_id}.partial.jsonl  # in-progress (crash recovery)
   dataset_runs.json                # index of all runs
+  grid_plans/{plan_id}.json        # persisted grid search plans (resume on restart)
 ```
 
 ### Evaluation flow
 
 Backend evaluation is the primary path: `prompt_eval.backend_reranker_eval()` calls the backend's `POST /matches` with a rendered ranking prompt override, then checks if the top-ranked candidate matches ground truth (exact string match = hit@1).
 
-Grid search (`grid_search.run_grid_search()`) iterates over cartesian products of Layer 1 field variants, evaluating each combination against the full dataset via backend calls. Results are cached by content hash.
+Grid search (`grid_search.run_grid_search()`) iterates over cartesian products of Layer 1 field variants, evaluating each grid point against the eval dataset via backend calls. Per-point query sampling is supported: `eval_queries_per_point` controls how many queries each point gets, and `shared_queries` controls whether all points share the same query set. Results are cached by content hash.
 
 ## Project Conventions
 

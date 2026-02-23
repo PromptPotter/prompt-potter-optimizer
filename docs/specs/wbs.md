@@ -244,15 +244,16 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
   - LLM result analysis (`analyze_grid_results()`)
   - Winner selection as campaign seed (`select_grid_winner()`)
   - Evaluation data loader (`load_eval_dataset()`) with trace/replay priority chain
-  - Distance-weighted stratified sampling (`n_combos` + `exploration_rate`) replacing fixed presets
-  - Per-combo eval caching and partial-run resume via `ProjectStore`
+  - Distance-weighted stratified sampling (`grid_budget` + `exploration_rate`) replacing fixed presets
+  - Per-point eval caching and partial-run resume via `ProjectStore`
+  - Grid plan persistence and resume: stable identity hash, plan serialization/deserialization, automatic resume on kernel restart (skips LLM restructure call)
 - **Done when:**
   - Grid search produces ranked PromptState candidates sorted by accuracy
   - Marginal analysis shows per-axis mean accuracy for each variant value
   - Pairwise heatmaps visualize interaction effects between axes
   - LLM-generated insights identify strongest fields and recommended focus
   - Winner is selectable as optimization campaign seed
-- **Completed:** Key commits: `534fa3e`, `23717e5`, `ad5533d`, `b0fb375`, `beaf662`. Distance-weighted sampling (replacing `EXPLORATION_PRESETS`) with two primary knobs (`n_combos`, `exploration_rate`). Backend-driven grid search evaluation via `/matches` with `ranking_prompt` override, including incremental writes, partial-run resume, and per-query HIT/MISS progress logging. `backend_client.run_match()` accepts `ranking_prompt` parameter.
+- **Completed:** Key commits: `534fa3e`, `23717e5`, `ad5533d`, `b0fb375`, `beaf662`. Distance-weighted sampling (replacing `EXPLORATION_PRESETS`) with two primary knobs (`grid_budget`, `exploration_rate`). Backend-driven grid search evaluation via `/matches` with `ranking_prompt` override, including incremental writes, partial-run resume, and per-query HIT/MISS progress logging. `backend_client.run_match()` accepts `ranking_prompt` parameter. **Grid plan persistence:** stable identity hash over user-controlled inputs (`grid_plan_identity()`), plan serialization/deserialization preserving PromptState IDs and `render()`, `resume_or_build_grid()` orchestrator in `_campaign_lib.py`, `on_point_cached` callback for cache-hit grid points, plan status tracking (`in_progress`/`completed`), notebook cells merged (4.5a+4.5b) for single-cell resume flow.
 
 ### 2.10 TermNorm `GET /pipeline` Endpoint (External Repo)
 

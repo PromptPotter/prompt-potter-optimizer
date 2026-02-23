@@ -47,12 +47,15 @@ from api.services.grid_search import (
     GRID_SEARCHABLE_FIELDS,
     REQUIRED_TEMPLATE_VARS,
     validate_grid_config as _validate_grid_config,
-    build_grid_combinations as _build_grid_combinations,
+    build_grid_points as _build_grid_points,
     restructure_context as _restructure_context,
     run_grid_search as _run_grid_search,
     analyze_grid_results as _analyze_grid_results,
     select_grid_winner as _select_grid_winner,
     load_eval_dataset as _load_eval_dataset,
+    grid_plan_identity as _grid_plan_identity,
+    serialize_grid_plan as _serialize_grid_plan,
+    deserialize_grid_plan as _deserialize_grid_plan,
 )
 
 # Re-export constants for notebooks
@@ -718,112 +721,271 @@ async def restructure_context(
     return result
 
 
-def validate_grid_config(grid_config: dict, baseline: PromptState, n_combos: int = 0) -> dict:
+def validate_grid_config(
+    grid_config: dict, baseline: PromptState, grid_budget: int = 0,
+) -> dict:
     """Validate grid axes and compute cartesian product size."""
-    meta = _validate_grid_config(grid_config, baseline, n_combos=n_combos)
+    meta = _validate_grid_config(grid_config, baseline, grid_budget=grid_budget)
 
     print("Grid config validated:")
     for name, values in meta["axes"].items():
         print(f"  {name}: {len(values)} variants")
-    print(f"  Total combinations: {meta['total']}")
+    print(f"  Total grid points: {meta['total']}")
 
     return meta
 
 
-def build_grid_combinations(
+def build_grid_points(
     grid_config: dict,
     baseline: PromptState,
-    n_combos: int = 0,
+    grid_budget: int = 0,
     exploration_rate: float = 0.5,
     seed: int = 42,
 ):
     """Build cartesian product of grid axes as PromptState variants.
 
-    Returns (combinations, ps_lookup) — the sampling_meta is printed
+    Returns (grid_points, state_lookup) — the sampling_meta is printed
     and not forwarded to keep the notebook interface simple.
     """
-    combos, lookup, meta = _build_grid_combinations(
-        grid_config, baseline, n_combos, exploration_rate, seed,
+    points, lookup, meta = _build_grid_points(
+        grid_config, baseline, grid_budget, exploration_rate, seed,
     )
 
     # Print sampling summary
     if meta["capped"]:
         print(
-            f"Built {meta['n_selected']} grid combinations "
-            f"(requested {n_combos}, capped at full space of {meta['total_space']})"
+            f"Built {meta['n_selected']} grid points "
+            f"(requested {grid_budget}, capped at full space of {meta['total_space']})"
         )
-    elif n_combos > 0:
+    elif grid_budget > 0:
         print(
-            f"Sampled {meta['n_selected']}/{meta['total_space']} combinations "
+            f"Sampled {meta['n_selected']}/{meta['total_space']} grid points "
             f"(exploration_rate={meta['exploration_rate']:.2f})"
         )
     else:
-        print(f"Built {meta['n_selected']} grid combinations (full grid)")
+        print(f"Built {meta['n_selected']} grid points (full grid)")
 
     if meta["distance_distribution"]:
         parts = [f"d{d}={c}" for d, c in sorted(meta["distance_distribution"].items())]
         print(f"  Distance distribution: {', '.join(parts)}")
 
-    return combos, lookup
+    return points, lookup
+
+
+async def resume_or_build_grid(
+    campaign_config: dict,
+    baseline: PromptState,
+    eval_llm: dict,
+    api_key: str,
+    store: ProjectStore,
+    backend_id: str,
+    improvement_areas: str = "",
+) -> tuple:
+    """Resume an existing grid plan or build a new one.
+
+    Computes a stable plan_id from user-controlled config inputs. If a
+    matching plan exists on disk and is not completed, it is deserialized
+    and returned (skipping the LLM restructure call). Otherwise, a new
+    plan is built, serialized, and saved.
+
+    Returns:
+        (plan_id, grid_points, grid_state_lookup, grid_axes,
+         layer1_fields, grid_baseline)
+    """
+    gs = campaign_config["grid_search"]
+    grid_budget = gs.get("grid_budget", 0)
+    exploration_rate = campaign_config.get("exploration_rate", 0.5)
+    seed = gs.get("seed", 42)
+    context_input = gs.get("context_fields", gs.get("context", ""))
+
+    # Build grid axes
+    if gs.get("use_defaults", True):
+        grid_axes = dict(DEFAULT_GRID_AXES)
+    else:
+        grid_axes = {}
+    if gs.get("custom_axes"):
+        grid_axes.update(gs["custom_axes"])
+
+    plan_id = _grid_plan_identity(
+        grid_axes, baseline.instruction, context_input,
+        grid_budget, exploration_rate, seed,
+    )
+
+    # Check for existing plan
+    existing = store.load_grid_plan(backend_id, plan_id)
+    if existing and existing.get("status") != "completed":
+        print(f"[RESUME] Found existing grid plan: {plan_id}")
+        (
+            grid_points, grid_state_lookup, sampling_meta,
+            grid_axes, layer1_fields, grid_baseline,
+        ) = _deserialize_grid_plan(existing)
+        print(
+            f"  Grid points: {len(grid_points)}  |  "
+            f"Status: {existing.get('status', '?')}"
+        )
+        return (
+            plan_id, grid_points, grid_state_lookup,
+            grid_axes, layer1_fields, grid_baseline,
+        )
+
+    # Build new plan: LLM restructure + grid points
+    print(f"[NEW] Building grid plan: {plan_id}")
+    layer1_fields = await restructure_context(
+        context_input, eval_llm, api_key,
+        improvement_areas=improvement_areas,
+    )
+
+    grid_baseline = baseline.derive(
+        **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
+        changes_description="grid_baseline",
+    )
+
+    _validate_grid_config(grid_axes, grid_baseline, grid_budget=grid_budget)
+    points, state_lookup, sampling_meta = _build_grid_points(
+        grid_axes, grid_baseline,
+        grid_budget=grid_budget,
+        exploration_rate=exploration_rate,
+        seed=seed,
+    )
+
+    # Print sampling summary
+    if sampling_meta["capped"]:
+        print(
+            f"Built {sampling_meta['n_selected']} grid points "
+            f"(requested {grid_budget}, capped at full space of "
+            f"{sampling_meta['total_space']})"
+        )
+    elif grid_budget > 0:
+        print(
+            f"Sampled {sampling_meta['n_selected']}/"
+            f"{sampling_meta['total_space']} grid points "
+            f"(exploration_rate={sampling_meta['exploration_rate']:.2f})"
+        )
+    else:
+        print(f"Built {sampling_meta['n_selected']} grid points (full grid)")
+
+    if sampling_meta["distance_distribution"]:
+        parts = [
+            f"d{d}={c}"
+            for d, c in sorted(sampling_meta["distance_distribution"].items())
+        ]
+        print(f"  Distance distribution: {', '.join(parts)}")
+
+    # Persist
+    plan_data = _serialize_grid_plan(
+        plan_id, grid_axes, grid_baseline, layer1_fields,
+        points, state_lookup, sampling_meta,
+    )
+    store.save_grid_plan(backend_id, plan_id, plan_data)
+    print(f"  Saved grid plan to disk: {plan_id}")
+
+    return (
+        plan_id, points, state_lookup,
+        grid_axes, layer1_fields, grid_baseline,
+    )
 
 
 async def run_grid_search(
-    combinations: list,
-    ps_lookup: dict,
+    grid_points: list,
+    state_lookup: dict,
     eval_data: list,
     eval_llm: dict,
     api_key: str,
     *,
+    plan_id: str = "",
     store: "ProjectStore | None" = None,
     backend_id: str = "",
     backend_client=None,
     session_terms: "list | None" = None,
     pipeline_params: "dict | None" = None,
+    eval_queries_per_point: int = 0,
+    shared_queries: bool = True,
+    grid_seed: int = 42,
 ) -> pd.DataFrame:
-    """Evaluate each grid combination on eval_data via the backend."""
+    """Evaluate each grid point on eval_data via the backend."""
     if backend_client is None:
         raise ValueError(
             "backend_client is required. Start the TermNorm backend and pass "
             "svc.get('backend_client') from init_services()."
         )
 
-    pbar = tqdm(total=len(combinations), desc="Grid search (backend)", unit="combo")
+    # Pre-scan grid points for cached ones
+    from api.services.prompt_eval import eval_cache_key as _eval_cache_key
 
-    query_pbar = tqdm(
-        total=len(eval_data), desc="  queries", unit="q", leave=False,
+    n_cached = 0
+    if store and backend_id:
+        for _, ps_id in grid_points:
+            ps = state_lookup[ps_id]
+            content_hash = _eval_cache_key(ps.render(), eval_data, "", 0.0)
+            if store.load_dataset_run_by_hash(backend_id, content_hash):
+                n_cached += 1
+
+    n_total = len(grid_points)
+    n_remaining = n_total - n_cached
+    q_label = (
+        f"{eval_queries_per_point} quer{'y' if eval_queries_per_point == 1 else 'ies'}"
+        if eval_queries_per_point > 0
+        else f"{len(eval_data)} queries"
     )
-
-    def on_query_done(combo_idx, qi, total_q, result):
-        tag = "HIT " if result["hit"] else "MISS"
-        done = qi + 1
-        tqdm.write(
-            f"    [{done}/{total_q}] {tag}  {result['query'][:50]:<50s} "
-            f"| pred: {result['predicted'][:35]:<35s} "
-            f"| gt: {result['ground_truth'][:35]}"
+    if n_cached > 0:
+        print(
+            f"[resume] Skipping {n_cached}/{n_total} cached grid points, "
+            f"evaluating {n_remaining} remaining"
         )
-        query_pbar.update(1)
-        if done >= total_q:  # combo finished, reset for next
-            query_pbar.reset()
+    else:
+        print(f"Evaluating {n_total} grid points x {q_label} each")
 
-    def on_combo_done(idx, row):
-        tqdm.write(
-            f"  [{idx + 1}/{len(combinations)}] "
+    _point_counter = [n_cached]  # mutable counter for closures
+
+    def on_query_done(point_idx, qi, total_q, result):
+        hit = result.get("hit")
+        err = result.get("error")
+        if err:
+            print(
+                f"    [{qi + 1}/{total_q}] ERROR  {result['query'][:50]:<50s} "
+                f"| {err}"
+            )
+        else:
+            tag = "HIT " if hit else "MISS"
+            print(
+                f"    [{qi + 1}/{total_q}] {tag}  {result['query'][:50]:<50s} "
+                f"| pred: {result['predicted'][:35]:<35s} "
+                f"| gt: {result['ground_truth'][:35]}"
+            )
+
+    def on_point_done(idx, row):
+        _point_counter[0] += 1
+        print(
+            f"  [{_point_counter[0]}/{n_total}] "
             f"acc={row['accuracy']:.1%} ({row['hits']}/{row['total']})"
         )
-        pbar.update(1)
+
+    def on_point_cached(idx, row):
+        pass  # already counted in n_cached summary
 
     df = await _run_grid_search(
-        combinations, ps_lookup, eval_data, backend_client,
-        on_combo_done=on_combo_done,
+        grid_points, state_lookup, eval_data, backend_client,
+        on_point_done=on_point_done,
         on_query_done=on_query_done,
+        on_point_cached=on_point_cached,
         request_delay=eval_llm.get("request_delay", 1.0),
         store=store,
         backend_id=backend_id,
         session_terms=session_terms,
         pipeline_params=pipeline_params,
+        eval_queries_per_point=eval_queries_per_point,
+        shared_queries=shared_queries,
+        seed=grid_seed,
     )
-    pbar.close()
-    query_pbar.close()
+
+    # Mark plan as completed
+    if plan_id and store and backend_id:
+        try:
+            store.update_grid_plan_status(backend_id, plan_id, "completed")
+            print(f"Grid plan {plan_id} marked as completed.")
+        except Exception:
+            pass  # Non-critical; plan may not exist if run without resume_or_build_grid
+
     return df
 
 
@@ -873,9 +1035,9 @@ def display_grid_results(
                 ipy_display(styled)
 
 
-def select_grid_winner(grid_df: pd.DataFrame, ps_lookup: dict) -> dict:
-    """Select the best-performing grid combination."""
-    result = _select_grid_winner(grid_df, ps_lookup)
+def select_grid_winner(grid_df: pd.DataFrame, state_lookup: dict) -> dict:
+    """Select the best-performing grid point."""
+    result = _select_grid_winner(grid_df, state_lookup)
 
     ps = result["prompt_state"]
     print(f"Grid winner: {ps.changes_description or ps.id[:12]}")
@@ -1121,7 +1283,7 @@ async def run_optimization_loop(
         campaign_rounds: Existing rounds list (modified in place and returned).
         eval_data: Full evaluation dataset.
         campaign_config: Campaign configuration dict (must have ``eval_llm``,
-            ``optimization``, and optionally ``n_samples``).
+            ``optimization``, and optionally ``queries_per_eval``).
         api_key: LLM API key.
         store: Optional ProjectStore for caching.
         backend_id: Backend identifier (required when store is provided).
@@ -1137,17 +1299,17 @@ async def run_optimization_loop(
 
     opt = campaign_config.get("optimization", {})
     eval_llm = campaign_config["eval_llm"]
-    n_samples = campaign_config.get("n_samples", 0)
+    queries_per_eval = campaign_config.get("queries_per_eval", 0)
     n_variants = opt.get("n_variants", 5)
     creativity = opt.get("creativity", 0.7)
     threshold = opt.get("improvement_threshold", 0.01)
     patience = opt.get("patience", patience)
 
-    # Subsample eval_data if n_samples is set
-    if n_samples > 0 and len(eval_data) > n_samples:
+    # Subsample eval_data if queries_per_eval is set
+    if queries_per_eval > 0 and len(eval_data) > queries_per_eval:
         rng = _random.Random(42)
-        round_eval_data = rng.sample(eval_data, n_samples)
-        print(f"Subsampled eval_data to {n_samples}/{len(eval_data)} queries")
+        round_eval_data = rng.sample(eval_data, queries_per_eval)
+        print(f"Subsampled eval_data to {queries_per_eval}/{len(eval_data)} queries")
     else:
         round_eval_data = eval_data
 

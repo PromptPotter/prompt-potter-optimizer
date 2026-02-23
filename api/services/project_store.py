@@ -14,6 +14,8 @@ Layout:
         dataset_runs.json             # INDEX — eval run summaries
         dataset_runs/
           {name}_{hash}.json          # DETAIL — full DatasetRun with items
+        grid_plans/
+          {plan_id}.json              # Persisted grid search plans (resume on restart)
 """
 
 import json
@@ -315,6 +317,37 @@ class ProjectStore:
             return []
         index = self._read_json(index_path)
         return index.get("dataset_runs", [])
+
+    # -- grid plans -----------------------------------------------------------
+
+    def _grid_plans_dir(self, backend_id: str) -> Path:
+        return self._backend_dir(backend_id) / "grid_plans"
+
+    def save_grid_plan(
+        self, backend_id: str, plan_id: str, plan_data: Dict[str, Any]
+    ) -> Path:
+        """Write a grid search plan to disk."""
+        path = self._grid_plans_dir(backend_id) / f"{plan_id}.json"
+        self._write_json(path, plan_data)
+        return path
+
+    def load_grid_plan(
+        self, backend_id: str, plan_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Read a grid search plan. Returns None if not found."""
+        path = self._grid_plans_dir(backend_id) / f"{plan_id}.json"
+        if not path.exists():
+            return None
+        return self._read_json(path)
+
+    def update_grid_plan_status(
+        self, backend_id: str, plan_id: str, status: str
+    ) -> None:
+        """Update the status field of an existing grid plan in-place."""
+        path = self._grid_plans_dir(backend_id) / f"{plan_id}.json"
+        data = self._read_json(path)
+        data["status"] = status
+        self._write_json(path, data)
 
     # -- incremental eval writes ---------------------------------------------
 

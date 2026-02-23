@@ -86,7 +86,7 @@
 | **LLM client** | Multi-provider abstraction (Groq, OpenAI, Anthropic) | Pre-M1 |
 | **Optimize router** | Placeholder — not yet a real implementation | Pre-M1 (placeholder; real implementation in M2 via 2.5) |
 | **PromptState model** | Immutable, versioned prompt snapshot with `derive()` and structured diff | M1 |
-| **ProjectStore** | File-based backend data storage (`.promptpotter/projects/`) with incremental writes | M1 |
+| **ProjectStore** | File-based backend data storage (`.promptpotter/projects/`) with incremental writes, grid plan persistence (`grid_plans/`) | M1, extended M2 |
 | **Backends router** | `/backends/*` — register, sync, execute, compare | M1 |
 | **Backend client** | HTTP client for external backend APIs (TermNorm) | M1 |
 | **Comparison service** | Statistical comparison with McNemar's test, Wilcoxon signed-rank, hit@k, MRR | M1 |
@@ -94,10 +94,10 @@
 | **CI pipeline** | GitHub Actions: ruff lint + pytest on push/PR | M1 |
 | **Pipeline parameter passthrough** | Controllable knobs for all TermNorm pipeline stages (11 params: search, profiling, ranking, scoring) forwarded via `/matches` payload, echoed in response and training record | M1 |
 | **HITL Campaign Notebook** | Interactive optimization notebook (`optimization_campaign.ipynb`) with editable campaign config, candidate coverage diagnostics, iterative prompt optimization with local evaluation, LLM-generated phrase fragment suggestions, training-style progress display, and semi-automatic optimization loop with patience-based stopping | M2 (WP 2.8) |
-| **Grid search service** | `api/services/grid_search.py` — default axis library (`DEFAULT_GRID_AXES`), LLM context restructuring (`restructure_context()`), distance-weighted stratified sampling (`n_combos` + `exploration_rate`), grid execution with two eval modes (backend full-pipeline via `/matches` with `ranking_prompt`, or local LLM with cached pipeline data), per-combo eval caching, incremental writes with crash protection, partial-run resume, per-query progress callback, result analysis, winner selection | M2 (WP 2.9) |
+| **Grid search service** | `api/services/grid_search.py` — default axis library (`DEFAULT_GRID_AXES`), LLM context restructuring (`restructure_context()`), distance-weighted stratified sampling (`grid_budget` + `exploration_rate`), grid execution with two eval modes (backend full-pipeline via `/matches` with `ranking_prompt`, or local LLM with cached pipeline data), per-point eval caching, incremental writes with crash protection, partial-run resume, per-query progress callback, result analysis, winner selection. **Grid plan persistence:** stable identity hash (`grid_plan_identity()`) over user-controlled inputs, plan serialization/deserialization with full PromptState round-trip, plan status tracking (`in_progress`/`completed`), automatic resume on kernel restart (skips LLM restructure call when existing plan found) | M2 (WP 2.9) |
 | **Prompt eval service** | `api/services/prompt_eval.py` — baseline extraction, batch evaluation, content-addressed eval caching (`eval_cache_key()`), incremental writes with crash protection (`.partial.jsonl`), partial-run resume | M2 (WP 2.8) |
 | **Prompt optimizer service** | `api/services/prompt_optimizer.py` — candidate generation, round winner selection, LLM suggestion generation, campaign winner save | M2 (WP 2.8) |
-| **Campaign library** | `notebooks/_campaign_lib.py` — thin notebook-facing wrappers with tqdm/print, per-query HIT/MISS progress logging (backend mode), `display_progress()`, `run_optimization_loop()`, `init_services()` (returns backend_client + session_terms for backend eval) | M2 (WP 2.8) |
+| **Campaign library** | `notebooks/_campaign_lib.py` — thin notebook-facing wrappers with tqdm/print, per-query HIT/MISS progress logging (backend mode), `display_progress()`, `run_optimization_loop()`, `init_services()` (returns backend_client + session_terms for backend eval), `resume_or_build_grid()` (grid plan resume orchestrator) | M2 (WP 2.8) |
 | **Rate-limit backoff** | Groq client auto-retry with exponential backoff on 429 responses | M2 |
 
 ### Will Be Built
@@ -342,7 +342,7 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 | **PROMPT_STATE as first-class model** | Track all tunable params (not just prompt text); enable structured diffs | Open-ended parameters dict means no schema enforcement on values |
 | **LLM-as-judge for evaluation** | Non-deterministic outputs need criteria-based scoring beyond exact match | Judge quality depends on judge prompt; cost scales with dataset x iterations x candidates |
 | **Target-agnostic optimization loop** | DAG operates on a pluggable state schema so the same loop can optimize prompts, schemas, scoring functions, fuzzy matchers, and other parameter types post-M4 | Adds abstraction layer between loop and state; mitigated by building the concrete prompt case first (M2-M4) and generalizing only after the loop is proven |
-| **Backend evaluation as primary mode** | Grid search and optimization must run the full TermNorm pipeline per query because the token matching step requires the backend's loaded database — it cannot be replicated locally. The `ranking_prompt` parameter injects candidate prompts into the backend's LLM2 step. Local evaluation (reusing cached `pipeline_data`) is a fallback only. | Backend evaluation re-runs web search and LLM1 for every query even though only LLM2 varies between combos. A future `/rerank` endpoint on TermNorm would eliminate this redundancy (~10x speedup for grid search). |
+| **Backend evaluation as primary mode** | Grid search and optimization must run the full TermNorm pipeline per query because the token matching step requires the backend's loaded database — it cannot be replicated locally. The `ranking_prompt` parameter injects candidate prompts into the backend's LLM2 step. Local evaluation (reusing cached `pipeline_data`) is a fallback only. | Backend evaluation re-runs web search and LLM1 for every query even though only LLM2 varies between grid points. A future `/rerank` endpoint on TermNorm would eliminate this redundancy (~10x speedup for grid search). |
 | **Stateless API with pluggable auth** | Public deployment requires credential-based access and data isolation; designing the API stateless from day one avoids costly rewrites | Auth middleware adds latency; mitigated by keeping it as a thin middleware layer that can be toggled off for local use |
 
 ---
@@ -400,7 +400,7 @@ The API is already designed with public deployment in mind:
 |--------|-----------|----------|--------|
 | **LLM providers** (Groq, OpenAI, Anthropic) | PromptPotter sends inference requests | OpenAI chat completions API | Exists |
 | **Langfuse** | PromptPotter sends traces + scores | Langfuse Python SDK | Exists |
-| **ProjectStore** (backend data) | Read/write backend connections, synced experiments, executions | JSON files in `.promptpotter/projects/` | Exists (M1) |
+| **ProjectStore** (backend data) | Read/write backend connections, synced experiments, executions, grid plans | JSON files in `.promptpotter/projects/` | Exists (M1, extended M2) |
 | **File system** (campaigns) | Read/write campaigns, trials, lineage | JSON/JSONL in `.promptpotter/campaigns/` | Planned (M3) |
 | **Streamlit** | Streamlit calls the API | HTTP | Exists (prototype) |
 | **Consuming projects** (e.g., TermNorm) | PromptPotter loads external datasets | File path or URL | Exists (loader) |
@@ -458,9 +458,9 @@ Development and testing uses the **BC5CDR 500-term subset** as the primary bench
 
 Grid search and optimization evaluate candidate prompts against the evaluation dataset via the TermNorm backend (see [TermNorm connector docs](../connectors/termnorm.md#evaluation-mode) for protocol details). Each query runs the **full pipeline** via `/matches` with a `ranking_prompt` override: web search → LLM1 → token matching (DB) → LLM2. This gives ground truth accuracy with fresh intermediate data per query (~10-30s/query).
 
-**Redundancy:** For grid search, only the `ranking_prompt` (LLM2) varies between combos. Steps 1-3 (web search → LLM1 → token matching) produce identical results for the same query regardless of the ranking prompt. A future `/rerank` endpoint on TermNorm (see [connector docs](../connectors/termnorm.md#future-optimization-rerank-endpoint)) would eliminate this redundancy by accepting pre-computed intermediates and only running LLM2.
+**Redundancy:** For grid search, only the `ranking_prompt` (LLM2) varies between grid points. Steps 1-3 (web search → LLM1 → token matching) produce identical results for the same query regardless of the ranking prompt. A future `/rerank` endpoint on TermNorm (see [connector docs](../connectors/termnorm.md#future-optimization-rerank-endpoint)) would eliminate this redundancy by accepting pre-computed intermediates and only running LLM2.
 
-Crash protection infrastructure: incremental writes to `.partial.jsonl` after each query, content-addressed caching of completed combos, and partial-run resume on restart.
+Crash protection infrastructure: incremental writes to `.partial.jsonl` after each query, content-addressed caching of completed grid points, partial-run resume on restart, and grid plan persistence (saves the full plan — grid points, PromptStates, Layer 1 fields — to `grid_plans/` so kernel restarts skip the non-deterministic LLM restructure call and reload the exact same plan).
 
 ### Ablation Comparison (Generalized Pattern)
 
