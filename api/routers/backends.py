@@ -5,10 +5,11 @@ Manages backend connections, syncs experiments from backends in their
 native format, and triggers pipeline replays via the backend API.
 """
 
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -17,6 +18,8 @@ from api.models.backend import BackendConnection, Execution, ExecutionResultItem
 from api.services.backend_client import BackendClient
 from api.services.comparison import compute_comparison
 from api.services.project_store import ProjectStore
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/backends", tags=["Backends"])
 
@@ -33,8 +36,8 @@ class RegisterBackendRequest(BaseModel):
     name: str = Field(..., description="Human-readable name")
     backend_type: str = Field(..., description="Backend type, e.g. 'termnorm'")
     base_url: str = Field(..., description="Backend API base URL")
-    id: Optional[str] = Field(
-        None, description="Custom ID (auto-generated from name if omitted)"
+    id: str | None = Field(
+        None, description="Custom ID (auto-generated from name if omitted)",
     )
 
 
@@ -55,18 +58,18 @@ class SyncResponse(BaseModel):
 class ExecuteRequest(BaseModel):
     experiment_id: str = Field(..., description="Synced experiment to replay")
     variant_label: str = Field(
-        default="LLM1-TokenMatching (no LLM2)",
+        default="",
         description="Human-readable variant label",
     )
     pipeline_notation: str = Field(
-        default="LLM1-TokenMatching",
+        default="",
         description="Pipeline notation string",
     )
     skip_llm_ranking: bool = Field(
         default=True,
-        description="Whether to skip LLM2 ranking in the backend",
+        description="Whether to skip LLM ranking in the backend",
     )
-    pipeline_params: Dict[str, Any] = Field(
+    pipeline_params: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional pipeline parameters forwarded to the backend",
     )
@@ -84,7 +87,7 @@ class ExecuteResponse(BaseModel):
     execution_id: str
     backend_id: str
     experiment_id: str
-    pipeline_params: Dict[str, Any] = Field(default_factory=dict)
+    pipeline_params: dict[str, Any] = Field(default_factory=dict)
     query_count: int
     successful_count: int
     error_count: int
@@ -93,11 +96,11 @@ class ExecuteResponse(BaseModel):
 
 class ComparisonResponse(BaseModel):
     execution_id: str
-    pipeline: Dict[str, Any]
-    dataset: Dict[str, Any]
-    metrics: Dict[str, Any]
-    classification: Dict[str, Any]
-    limitations: List[str]
+    pipeline: dict[str, Any]
+    dataset: dict[str, Any]
+    metrics: dict[str, Any]
+    classification: dict[str, Any]
+    limitations: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +153,7 @@ async def register_backend(request: RegisterBackendRequest):
     )
 
 
-@router.get("", response_model=List[RegisterBackendResponse])
+@router.get("", response_model=list[RegisterBackendResponse])
 async def list_backends():
     """List all registered backends."""
     return [

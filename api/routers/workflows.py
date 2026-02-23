@@ -6,11 +6,12 @@ Provides REST API for:
 - Evaluating workflows on datasets
 - Managing workflow definitions
 """
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any, List, Optional
-from pathlib import Path
-import yaml
 import time
+from pathlib import Path
+from typing import Any
+
+import yaml
+from fastapi import APIRouter, HTTPException
 
 from api.models.workflow import (
     WorkflowDefinition,
@@ -18,7 +19,6 @@ from api.models.workflow import (
     WorkflowExecuteResponse,
     WorkflowEvaluateRequest,
     WorkflowEvaluateResponse,
-    DatasetItem,
 )
 from api.core.workflow_runner import WorkflowRunner
 from api.evaluators import get_evaluator
@@ -113,7 +113,7 @@ async def evaluate_workflow(request: WorkflowEvaluateRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     runner = WorkflowRunner(workflow_def)
 
     for item in request.dataset:
@@ -175,7 +175,7 @@ async def evaluate_workflow(request: WorkflowEvaluateRequest):
 # Workflow Management
 # ============================================================================
 
-@router.post("/workflows", response_model=Dict[str, Any])
+@router.post("/workflows", response_model=dict[str, Any])
 async def create_workflow(workflow: WorkflowDefinition):
     """
     Register a new workflow definition.
@@ -213,7 +213,7 @@ async def list_workflows():
     workflows_dir = Path("workflows")
     examples_dir = workflows_dir / "examples"
 
-    workflow_files: List[Dict[str, str]] = []
+    workflow_files: list[dict[str, str]] = []
 
     # Check main workflows directory
     if workflows_dir.exists():
