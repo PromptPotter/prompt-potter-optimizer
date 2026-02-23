@@ -11,6 +11,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+P95_PERCENTILE = 0.95
+
 
 def hit_at_k(ranked: list[dict], ground_truth: str, k: int) -> bool:
     """Check if ground_truth appears in top-k ranked candidates."""
@@ -34,7 +36,7 @@ def latency_stats(lats: list[float]) -> dict[str, float]:
     if not lats:
         return {"mean": 0.0, "median": 0.0, "p95": 0.0}
     s = sorted(lats)
-    p95_idx = int(len(s) * 0.95)
+    p95_idx = int(len(s) * P95_PERCENTILE)
     return {
         "mean": round(stats.mean(s), 1),
         "median": round(stats.median(s), 1),

@@ -7,6 +7,7 @@ winners, generates improvement suggestions, and saves campaign results.
 
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
@@ -53,8 +54,8 @@ async def generate_candidates(
     failures = [r for r in current_results if not r["hit"] and not r.get("error")]
     failure_examples = "\n".join(
         f"  Query: {r['query'][:DISPLAY_TRUNCATE]}  |  "
-        f"Predicted: {r['predicted'][:40]}  |  "
-        f"GT: {r['ground_truth'][:40]}"
+        f"Predicted: {r['predicted'][:DISPLAY_TRUNCATE]}  |  "
+        f"GT: {r['ground_truth'][:DISPLAY_TRUNCATE]}"
         for r in failures[:MAX_FAILURES_GENERATE]
     )
 
@@ -115,11 +116,11 @@ async def generate_candidates(
 
 
 def select_round_winner(
-    candidates: list,
-    all_candidate_results: dict,
-    current_best: dict,
+    candidates: list[PromptState],
+    all_candidate_results: dict[str, list[dict]],
+    current_best: dict[str, Any],
     improvement_threshold: float,
-) -> dict:
+) -> dict[str, Any]:
     """Compare candidates and select the round winner.
 
     Args:
@@ -164,7 +165,7 @@ def select_round_winner(
         rows.append({
             "prompt": (
                 candidate.changes_description or candidate.id[:12]
-            )[:40],
+            )[:DISPLAY_TRUNCATE],
             "hit@1": f"{c_acc:.1%}",
             "delta": f"{delta:+.1%}",
         })
@@ -185,9 +186,9 @@ def select_round_winner(
 
 
 async def generate_suggestions(
-    campaign_rounds: list,
-    eval_data: list,
-    campaign_config: dict,
+    campaign_rounds: list[dict],
+    eval_data: list[dict],
+    campaign_config: dict[str, Any],
     llm_client: LLMClientBase,
     model: str | None = None,
 ) -> dict:
@@ -230,8 +231,8 @@ async def generate_suggestions(
 
         failure_detail.append(
             f"  Query: {r['query'][:DISPLAY_TRUNCATE]}\n"
-            f"    Predicted: {r['predicted'][:50]}\n"
-            f"    Ground truth: {r['ground_truth'][:50]}\n"
+            f"    Predicted: {r['predicted'][:DISPLAY_TRUNCATE]}\n"
+            f"    Ground truth: {r['ground_truth'][:DISPLAY_TRUNCATE]}\n"
             f"    GT in candidates: {gt_in_candidates}\n"
             f"    Top candidates: {candidate_names[:5]}\n"
             f"    Core concept: {profile.get('core_concept', '?')}\n"
@@ -240,7 +241,7 @@ async def generate_suggestions(
     history_lines = []
     for rd in campaign_rounds:
         history_lines.append(
-            f"  Round {rd['round']}: {rd['label'][:40]} -> {rd['accuracy']:.1%}"
+            f"  Round {rd['round']}: {rd['label'][:DISPLAY_TRUNCATE]} -> {rd['accuracy']:.1%}"
         )
 
     suggestion_prompt = (

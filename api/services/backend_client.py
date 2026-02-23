@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+MATCH_TIMEOUT = 120.0
+
 
 def _build_result_dict(
     query_data: dict[str, Any],
@@ -134,7 +136,7 @@ class BackendClient:
             resp = await client.post(
                 f"{self.base_url}/matches",
                 json=payload,
-                timeout=120.0,
+                timeout=MATCH_TIMEOUT,
             )
             resp.raise_for_status()
             return resp.json()

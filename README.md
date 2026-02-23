@@ -103,10 +103,12 @@ api/                             # FastAPI application
 │   ├── prompt_eval.py           # Prompt evaluation (baseline, filter, batch eval)
 │   ├── prompt_optimizer.py      # Candidate generation, selection, suggestions
 │   ├── grid_search.py           # Grid search over prompt component axes
-│   ├── project_store.py         # File I/O for .promptpotter/projects/
+│   ├── project_store.py         # Facade over stores/ for .promptpotter/projects/
+│   ├── stores/                  # Focused store modules (BackendStore, ExecutionStore, etc.)
 │   ├── backend_client.py        # HTTP client for backend APIs (TermNorm)
 │   ├── comparison.py            # Statistical comparison (hit@k, McNemar, Wilcoxon)
 │   ├── llm_client.py            # OpenAI/Anthropic/Groq abstraction
+│   ├── query_utils.py           # Shared query-parsing utilities
 │   └── langfuse_client.py       # Langfuse integration
 ├── core/
 │   └── workflow_runner.py       # DAG execution engine

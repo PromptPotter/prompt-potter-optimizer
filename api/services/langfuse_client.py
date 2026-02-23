@@ -79,7 +79,7 @@ class LangfuseLogger:
         metadata: dict[str, Any] | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
-        tags: list | None = None,
+        tags: list[str] | None = None,
     ) -> str | None:
         """Create a new trace for a workflow execution.
 

@@ -125,9 +125,11 @@ The optimizer is implemented as a **service-based architecture** where each serv
 | **prompt_optimizer** | `api/services/prompt_optimizer.py` | LLM-driven candidate generation and campaign management | `generate_candidates()`, `select_round_winner()`, `generate_suggestions()`, `save_campaign_winner()` |
 | **prompt_eval** | `api/services/prompt_eval.py` | Backend evaluation and deduplication | `backend_reranker_eval()`, `evaluate_prompt_batch()`, `compute_accuracy()`, `eval_content_hash()`, `extract_baseline_prompt()`, `make_incremental_writer()` |
 | **backend_client** | `api/services/backend_client.py` | HTTP client for TermNorm backend | `sync_experiments()`, `fetch_experiment()`, `init_session()`, `run_match()`, `replay_queries()`, `extract_session_terms()`, `extract_replay_queries()` |
-| **project_store** | `api/services/project_store.py` | File-based project persistence | Backend CRUD, sync save/load, execution save/load, dataset run storage, grid plan persistence, incremental eval writes |
+| **project_store** | `api/services/project_store.py` | Facade over focused store modules | Backend CRUD, sync save/load, execution save/load, dataset run storage, grid plan persistence, incremental eval writes |
+| **stores/** | `api/services/stores/` | Focused store modules | `BackendStore`, `ExecutionStore`, `DatasetRunStore`, `GridPlanStore`. Shared I/O in `stores/base.py`. |
 | **llm_client** | `api/services/llm_client.py` | LLM abstraction | `OpenAIClient`, `GroqClient`, `get_llm_client()` |
 | **comparison** | `api/services/comparison.py` | Statistical A/B comparison | `compute_comparison()`, `hit_at_k()`, `mcnemar_test()`, `wilcoxon_test()` |
+| **query_utils** | `api/services/query_utils.py` | Shared query-parsing utilities | `parse_bom_material()` |
 | **langfuse_client** | `api/services/langfuse_client.py` | Langfuse observability wrapper | `get_instance()`, `create_trace()` (stubs: create_generation, create_score) |
 ---
 

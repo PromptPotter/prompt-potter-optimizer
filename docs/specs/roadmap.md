@@ -13,7 +13,7 @@
 |-----------|-------|----------|--------|
 | M0 | Specifications | Week 1 | Complete |
 | M1 | Foundation | Weeks 2-3 | Complete |
-| M2 | Core Optimizer (Services) | Weeks 4-6 | Largely Complete |
+| M2 | Core Optimizer (Services) | Weeks 4-6 | Complete |
 | M3 | Workflow Engine Migration | Weeks 7-9 | Planned |
 | M4 | Integration and Polish | Weeks 10-12 | Planned |
 
@@ -45,7 +45,7 @@
 
 ---
 
-## M2: Core Optimizer — Largely Complete
+## M2: Core Optimizer — Complete
 
 M2 delivers the optimization capabilities as standalone services, with the notebook as the primary interface.
 
@@ -58,13 +58,11 @@ M2 delivers the optimization capabilities as standalone services, with the noteb
   - **Per-Point Query Sampling**: `resolve_point_evals()` centralizes deterministic query assignment for grid search
   - **Discovery Protocol**: `GET /pipeline` endpoint implemented in TermNorm; integrated into PromptPotter for grid search config validation
 
-- **Deliverables (Remaining):**
-  - Spec rewrite v0.6.0 (WP 2.7) — in progress
-
 - **Exit gate:**
-  - Grid search and optimization loop produce measurably improved prompts
+  - Grid search and optimization services are functional (prototype quality; measurable improvement validation deferred to M4)
   - HITL campaign notebook runs end-to-end with config editing, grid search, optimization, and LLM suggestions
   - Services are tested via PromptState and ProjectStore tests
+  - Code quality audit complete (PEP 604, logging, store decomposition, named constants)
   - Decision: are services ready for migration into workflow engine nodes?
 
 - **Risks:**
@@ -86,7 +84,7 @@ M3 migrates the service-based optimizer into the existing workflow engine (`api/
   - **E2E Optimization Test**: integration test verifying workflow execution and campaign persistence
   - **Langfuse Integration**: per-trial tracing with score attachment, campaign-level grouping
 
-- **Entry criteria:** M2 exit gate passed; services are stable and tested
+- **Entry criteria:** M2 exit gate passed; services are functional and code is clean
 
 - **Exit gate:**
   - Optimization workflow runs end-to-end in the workflow engine

@@ -1,3 +1,5 @@
+> **Status: WIP — planned for M3 (WP 3.3).** Design research, not yet implemented.
+
 Prevalent Registry Strategies for Prompt Optimization
 
   Based on industry standards (DSPy, OpenAI Evals, MLflow), here's the registry pattern that addresses your needs:

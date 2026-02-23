@@ -4,14 +4,20 @@ Prompt evaluation service.
 Extracts baseline prompts from experiment data, filters evaluation datasets,
 and evaluates reranker prompts via the TermNorm backend's /matches endpoint.
 """
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from api.models.prompt_state import PromptState
+
+if TYPE_CHECKING:
+    from api.services.backend_client import BackendClient
+    from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +78,12 @@ def build_dataset_run_data(
     }
 
 
-def make_incremental_writer(store, backend_id: str, run_id: str):
+def make_incremental_writer(
+    store: ProjectStore, backend_id: str, run_id: str,
+) -> Callable[[dict, int, int], None]:
     """Return an on_result callback that appends each eval item to a .partial.jsonl."""
 
-    def writer(result, index, total):
+    def writer(result: dict, index: int, total: int) -> None:
         store.append_eval_item(backend_id, run_id, result)
 
     return writer
@@ -138,7 +146,7 @@ def filter_eval_data(replay_results: list) -> list:
 
 async def backend_reranker_eval(
     query_data: dict,
-    backend_client,
+    backend_client: BackendClient,
     rendered_prompt: str,
     pipeline_params: dict | None = None,
     request_delay: float = 0,
@@ -196,7 +204,7 @@ async def backend_reranker_eval(
 async def evaluate_prompt_batch(
     prompt_state: PromptState,
     eval_data: list,
-    backend_client,
+    backend_client: BackendClient,
     pipeline_params: dict | None = None,
     on_result: Callable | None = None,
     request_delay: float = 0,

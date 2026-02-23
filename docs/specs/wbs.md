@@ -96,7 +96,7 @@
 
 ---
 
-## Phase 2: Core Optimizer (M2) — Largely Complete
+## Phase 2: Core Optimizer (M2) — Complete
 
 Phase 2 delivers the service-based optimization capabilities: grid search, iterative candidate generation, backend evaluation with deduplication, the HITL campaign notebook, and discovery protocol integration.
 
@@ -188,7 +188,7 @@ Phase 2 delivers the service-based optimization capabilities: grid search, itera
 - **PRD Ref:** P1.5
 - **Completed:** Discovery protocol integrated and working.
 
-**Phase 2 exit criteria:** Grid search and optimization loop produce measurably improved prompts. HITL campaign notebook runs end-to-end with config editing, grid search, optimization, and LLM suggestions. Services are tested via PromptState and ProjectStore tests.
+**Phase 2 exit criteria:** Grid search and optimization services are functional (prototype quality). HITL campaign notebook runs end-to-end. Code quality audit complete. Services are tested via PromptState and ProjectStore tests.
 
 ---
 
@@ -361,14 +361,14 @@ M1 Foundation (Complete)
  |    +-- 1.8 Params         |
  |                           |
  v                           v
-M2 Core Optimizer (Largely Complete)
+M2 Core Optimizer (Complete)
  |-- 2.1 Campaign Notebook <-- 1.1 .......... [Complete]
  |-- 2.2 Grid Search <-- 1.1, 2.1 .......... [Complete]
  |-- 2.3 Prompt Eval <-- 1.1 ............... [Complete]
  |-- 2.4 Prompt Optimizer <-- 1.1 .......... [Complete]
  |-- 2.5 Backend-Only Eval <-- 2.3 ......... [Complete]
  |-- 2.6 Per-Point Sampling <-- 2.2 ........ [Complete]
- |-- 2.7 Spec Rewrite ...................... [In Progress]
+ |-- 2.7 Spec Rewrite ...................... [Complete]
  |-- 2.8 TermNorm GET /pipeline (external) . [Complete]
  |    |
  |    +-- 2.9 Discovery Integration ........ [Complete]
