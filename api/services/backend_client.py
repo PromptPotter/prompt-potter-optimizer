@@ -5,13 +5,20 @@ Fetches experiments, syncs data into the project store, and replays
 pipeline queries. All API responses stored verbatim.
 """
 
+from __future__ import annotations
+
 import asyncio
+import inspect
 import time
 from datetime import datetime, timezone
-import inspect
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 import httpx
+
+from api.services.query_utils import parse_bom_material
+
+if TYPE_CHECKING:
+    from api.services.project_store import ProjectStore
 
 
 class BackendClient:
@@ -102,8 +109,6 @@ class BackendClient:
         include_traces: bool = True,
     ) -> int:
         """Fetch all experiments and store verbatim. Returns count."""
-        from api.services.project_store import ProjectStore  # avoid circular
-
         data = await self.fetch_experiments()
         store.save_sync(backend_id, "experiments.json", data)
 
@@ -164,13 +169,7 @@ class BackendClient:
 
         for er in eval_results:
             query = er["query"]
-            if "/" in query:
-                last_slash = query.rfind("/")
-                bom_material = query[:last_slash].strip()
-                process = query[last_slash + 1 :].strip()
-            else:
-                bom_material = query.strip()
-                process = ""
+            bom_material, process = parse_bom_material(query)
 
             if bom_material not in bom_to_gt:
                 continue
