@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import time
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 
@@ -19,6 +20,47 @@ from api.services.query_utils import parse_bom_material
 
 if TYPE_CHECKING:
     from api.services.project_store import ProjectStore
+
+logger = logging.getLogger(__name__)
+
+
+def _build_result_dict(
+    query_data: dict[str, Any],
+    *,
+    predicted: str,
+    confidence: float,
+    ranked_candidates: list,
+    latency_ms: float,
+    status: str,
+    pipeline_data: dict | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """Build an ExecutionResultItem-compatible dict.
+
+    Centralizes the field assembly shared between success and error
+    paths in ``replay_queries()``.
+    """
+    result: dict[str, Any] = {
+        "query": query_data["query"],
+        "bom_material": query_data["bom_material"],
+        "process": query_data["process"],
+        "ground_truth": query_data["ground_truth"],
+        "predicted": predicted,
+        "confidence": confidence,
+        "ranked_candidates": ranked_candidates,
+        "latency_ms": latency_ms,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "variant_b_predicted": query_data.get("original_predicted", ""),
+        "variant_b_latency_ms": query_data.get("original_latency_ms", 0),
+        "variant_b_confidence": query_data.get("original_confidence", 0),
+    }
+    if pipeline_data is not None:
+        result["pipeline_data"] = pipeline_data
+        result["web_search_status"] = pipeline_data.get("web_search_status")
+    if error is not None:
+        result["error"] = error
+    return result
 
 
 class BackendClient:
@@ -30,29 +72,24 @@ class BackendClient:
 
     # -- sync operations (fetch verbatim API responses) -------------------
 
-    async def fetch_experiments(self) -> Dict[str, Any]:
+    async def fetch_experiments(self) -> dict[str, Any]:
         """GET /experiments — returns full response verbatim."""
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{self.base_url}/experiments", timeout=self.timeout
+                f"{self.base_url}/experiments", timeout=self.timeout,
             )
             resp.raise_for_status()
             return resp.json()
 
     async def fetch_experiment(
         self, experiment_id: str, include_traces: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """GET /experiments/{id}/mappings — returns full response verbatim.
 
         Uses the /mappings sub-endpoint which includes mappings, runs,
         and evaluation_results needed for replay.
-
-        Args:
-            experiment_id: Experiment identifier.
-            include_traces: When True, request Langfuse-style trace data
-                from the backend (pipeline observations per query).
         """
-        params: Dict[str, str] = {}
+        params: dict[str, str] = {}
         if include_traces:
             params["include_traces"] = "true"
         async with httpx.AsyncClient() as client:
@@ -66,7 +103,7 @@ class BackendClient:
 
     # -- replay operations ------------------------------------------------
 
-    async def init_session(self, terms: List[str]) -> Dict[str, Any]:
+    async def init_session(self, terms: list[str]) -> dict[str, Any]:
         """POST /sessions with terms array."""
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -81,11 +118,11 @@ class BackendClient:
         self,
         query: str,
         skip_llm_ranking: bool = True,
-        pipeline_params: Optional[Dict[str, Any]] = None,
-        ranking_prompt: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        pipeline_params: dict[str, Any] | None = None,
+        ranking_prompt: str | None = None,
+    ) -> dict[str, Any]:
         """POST /matches — run a single query through the backend pipeline."""
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "query": query,
             "skip_llm_ranking": skip_llm_ranking,
         }
@@ -105,7 +142,7 @@ class BackendClient:
     # -- high-level sync --------------------------------------------------
 
     async def sync_experiments(
-        self, store: "ProjectStore", backend_id: str,
+        self, store: ProjectStore, backend_id: str,
         include_traces: bool = True,
     ) -> int:
         """Fetch all experiments and store verbatim. Returns count."""
@@ -120,14 +157,14 @@ class BackendClient:
                     exp_id, include_traces=include_traces,
                 )
                 store.save_sync(
-                    backend_id, f"experiments/{exp_id}.json", detail
+                    backend_id, f"experiments/{exp_id}.json", detail,
                 )
         return len(experiments)
 
     async def sync_experiment(
-        self, store: "ProjectStore", backend_id: str, experiment_id: str,
+        self, store: ProjectStore, backend_id: str, experiment_id: str,
         include_traces: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetch one experiment and store verbatim."""
         detail = await self.fetch_experiment(
             experiment_id, include_traces=include_traces,
@@ -138,7 +175,7 @@ class BackendClient:
     # -- replay helpers ---------------------------------------------------
 
     @staticmethod
-    def extract_session_terms(experiment_data: Dict) -> List[str]:
+    def extract_session_terms(experiment_data: dict) -> list[str]:
         """Extract unique non-empty dataset_entry values from mappings."""
         entries = set()
         for m in experiment_data.get("mappings", []):
@@ -148,12 +185,14 @@ class BackendClient:
         return sorted(entries)
 
     @staticmethod
-    def extract_replay_queries(experiment_data: Dict) -> List[Dict[str, Any]]:
+    def extract_replay_queries(
+        experiment_data: dict,
+    ) -> list[dict[str, Any]]:
         """Extract queries with valid ground truth from experiment data.
 
         Matches evaluation_result queries back to mappings via bom_material.
         """
-        bom_to_gt: Dict[str, str] = {}
+        bom_to_gt: dict[str, str] = {}
         for m in experiment_data.get("mappings", []):
             bom = m["bom_material"]
             entry = m.get("dataset_entry", "").strip()
@@ -174,29 +213,27 @@ class BackendClient:
             if bom_material not in bom_to_gt:
                 continue
 
-            queries.append(
-                {
-                    "query": query,
-                    "bom_material": bom_material,
-                    "process": process,
-                    "ground_truth": bom_to_gt[bom_material],
-                    "original_predicted": er.get("predicted", ""),
-                    "original_latency_ms": er.get("latency_ms", 0),
-                    "original_confidence": er.get("confidence", 0),
-                }
-            )
+            queries.append({
+                "query": query,
+                "bom_material": bom_material,
+                "process": process,
+                "ground_truth": bom_to_gt[bom_material],
+                "original_predicted": er.get("predicted", ""),
+                "original_latency_ms": er.get("latency_ms", 0),
+                "original_confidence": er.get("confidence", 0),
+            })
 
         return queries
 
     async def replay_queries(
         self,
-        queries: List[Dict[str, Any]],
-        terms: List[str],
+        queries: list[dict[str, Any]],
+        terms: list[str],
         skip_llm_ranking: bool = True,
         delay_between: float = 2.0,
-        on_result: Optional[Callable[[Dict[str, Any], int, int], Any]] = None,
-        pipeline_params: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        on_result: Callable[[dict[str, Any], int, int], Any] | None = None,
+        pipeline_params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Replay queries sequentially against the backend.
 
         Initializes a session with ``terms``, then runs each query.
@@ -207,7 +244,7 @@ class BackendClient:
         """
         await self.init_session(terms)
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         total = len(queries)
         for i, q in enumerate(queries):
             start = time.time()
@@ -222,45 +259,26 @@ class BackendClient:
                 ranked = data.get("ranked_candidates", [])
                 top = ranked[0] if ranked else {}
 
-                results.append(
-                    {
-                        "query": q["query"],
-                        "bom_material": q["bom_material"],
-                        "process": q["process"],
-                        "ground_truth": q["ground_truth"],
-                        "predicted": top.get("candidate", "NO_RESULT"),
-                        "confidence": top.get("relevance_score", 0),
-                        "ranked_candidates": ranked[:20],
-                        "latency_ms": round(elapsed * 1000, 1),
-                        "web_search_status": data.get("web_search_status"),
-                        "pipeline_data": data,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "status": "success",
-                        "variant_b_predicted": q.get("original_predicted", ""),
-                        "variant_b_latency_ms": q.get("original_latency_ms", 0),
-                        "variant_b_confidence": q.get("original_confidence", 0),
-                    }
-                )
+                results.append(_build_result_dict(
+                    q,
+                    predicted=top.get("candidate", "NO_RESULT"),
+                    confidence=top.get("relevance_score", 0),
+                    ranked_candidates=ranked[:20],
+                    latency_ms=round(elapsed * 1000, 1),
+                    status="success",
+                    pipeline_data=data,
+                ))
             except Exception as e:
                 elapsed = time.time() - start
-                results.append(
-                    {
-                        "query": q["query"],
-                        "bom_material": q["bom_material"],
-                        "process": q["process"],
-                        "ground_truth": q["ground_truth"],
-                        "status": "error",
-                        "error": str(e),
-                        "predicted": "ERROR",
-                        "confidence": 0.0,
-                        "ranked_candidates": [],
-                        "latency_ms": round(elapsed * 1000, 1),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "variant_b_predicted": q.get("original_predicted", ""),
-                        "variant_b_latency_ms": q.get("original_latency_ms", 0),
-                        "variant_b_confidence": q.get("original_confidence", 0),
-                    }
-                )
+                results.append(_build_result_dict(
+                    q,
+                    predicted="ERROR",
+                    confidence=0.0,
+                    ranked_candidates=[],
+                    latency_ms=round(elapsed * 1000, 1),
+                    status="error",
+                    error=str(e),
+                ))
 
             if on_result is not None:
                 cb_result = on_result(results[-1], i, total)

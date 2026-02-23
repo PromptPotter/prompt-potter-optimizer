@@ -5,16 +5,19 @@ Computes statistical metrics (hit@k, MRR, McNemar's, Wilcoxon) for
 variant A vs variant B pipeline comparisons.
 """
 
+import logging
 import statistics as stats
-from typing import Any, Dict, List
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
-def hit_at_k(ranked: List[Dict], ground_truth: str, k: int) -> bool:
+def hit_at_k(ranked: list[dict], ground_truth: str, k: int) -> bool:
     """Check if ground_truth appears in top-k ranked candidates."""
     return any(c.get("candidate") == ground_truth for c in ranked[:k])
 
 
-def reciprocal_rank(ranked: List[Dict], ground_truth: str) -> float:
+def reciprocal_rank(ranked: list[dict], ground_truth: str) -> float:
     """1 / (rank of ground_truth) or 0.0 if not found."""
     for i, c in enumerate(ranked):
         if c.get("candidate") == ground_truth:
@@ -22,8 +25,12 @@ def reciprocal_rank(ranked: List[Dict], ground_truth: str) -> float:
     return 0.0
 
 
-def latency_stats(lats: List[float]) -> Dict[str, float]:
-    """Compute mean, median, p95 for a list of latencies."""
+def latency_stats(lats: list[float]) -> dict[str, float]:
+    """Compute mean, median, p95 for a list of latencies.
+
+    p95 is the value at the 95th percentile index (``int(n * 0.95)``),
+    clamped to the last element.
+    """
     if not lats:
         return {"mean": 0.0, "median": 0.0, "p95": 0.0}
     s = sorted(lats)
@@ -36,12 +43,22 @@ def latency_stats(lats: List[float]) -> Dict[str, float]:
 
 
 def mcnemar_test(
-    a_correct: List[bool], b_correct: List[bool]
-) -> Dict[str, Any]:
-    """McNemar's chi-squared test for paired binary outcomes."""
+    a_correct: list[bool], b_correct: list[bool],
+) -> dict[str, Any]:
+    """McNemar's chi-squared test for paired binary outcomes.
+
+    Returns:
+        Dict with keys ``statistic``, ``p_value``, and optional ``note``.
+        ``statistic`` and ``p_value`` are None when scipy is unavailable.
+    """
     n01 = sum(1 for a, b in zip(a_correct, b_correct) if not a and b)
     n10 = sum(1 for a, b in zip(a_correct, b_correct) if a and not b)
-    result: Dict[str, Any] = {"n_a_only": n10, "n_b_only": n01}
+    result: dict[str, Any] = {
+        "statistic": None,
+        "p_value": None,
+        "n_a_only": n10,
+        "n_b_only": n01,
+    }
 
     if n01 + n10 == 0:
         result["p_value"] = 1.0
@@ -55,28 +72,48 @@ def mcnemar_test(
         result["statistic"] = round(stat, 4)
         result["p_value"] = round(1 - chi2.cdf(stat, df=1), 4)
     except ImportError:
-        result["p_value"] = None
+        logger.warning(
+            "scipy not installed — McNemar test unavailable. "
+            "Install with: pip install scipy"
+        )
         result["note"] = "scipy not installed"
 
     return result
 
 
 def wilcoxon_test(
-    a_latencies: List[float], b_latencies: List[float]
-) -> Dict[str, Any]:
-    """Wilcoxon signed-rank test for paired latency comparison."""
+    a_latencies: list[float], b_latencies: list[float],
+) -> dict[str, Any]:
+    """Wilcoxon signed-rank test for paired latency comparison.
+
+    Returns:
+        Dict with keys ``statistic``, ``p_value``, and optional ``note``.
+        ``statistic`` and ``p_value`` are None when scipy is unavailable
+        or the test cannot be computed.
+    """
+    result: dict[str, Any] = {"statistic": None, "p_value": None}
     try:
         from scipy.stats import wilcoxon
 
         stat, p = wilcoxon(a_latencies, b_latencies)
-        return {"statistic": round(float(stat), 4), "p_value": round(float(p), 4)}
+        result["statistic"] = round(float(stat), 4)
+        result["p_value"] = round(float(p), 4)
     except ImportError:
-        return {"p_value": None, "note": "scipy not installed"}
+        logger.warning(
+            "scipy not installed — Wilcoxon test unavailable. "
+            "Install with: pip install scipy"
+        )
+        result["note"] = "scipy not installed"
     except ValueError as e:
-        return {"p_value": None, "note": str(e)}
+        result["note"] = str(e)
+
+    return result
 
 
-def compute_comparison(results: List[Dict], metadata: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def compute_comparison(
+    results: list[dict],
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Compute full statistical comparison between variant A and B.
 
     Each result dict must contain both variant's data (variant_b_* fields).
@@ -89,14 +126,14 @@ def compute_comparison(results: List[Dict], metadata: Dict[str, Any] | None = No
     if n == 0:
         raise ValueError("No successful results to compare")
 
-    a_correct: List[bool] = []
-    b_correct: List[bool] = []
-    a_latencies: List[float] = []
-    b_latencies: List[float] = []
+    a_correct: list[bool] = []
+    b_correct: list[bool] = []
+    a_latencies: list[float] = []
+    b_latencies: list[float] = []
     a_hit3 = a_hit5 = 0
     a_rr_sum = 0.0
 
-    classification: Dict[str, List[Dict]] = {
+    classification: dict[str, list[dict]] = {
         "both_correct": [],
         "a_only_correct": [],
         "b_only_correct": [],
@@ -166,8 +203,12 @@ def compute_comparison(results: List[Dict], metadata: Dict[str, Any] | None = No
                 "b_count": b_hit1,
                 "mcnemar": mcnemar,
             },
-            "hit_at_3": {"a": round(a_hit3 / n, 4), "a_count": a_hit3, "b": None},
-            "hit_at_5": {"a": round(a_hit5 / n, 4), "a_count": a_hit5, "b": None},
+            "hit_at_3": {
+                "a": round(a_hit3 / n, 4), "a_count": a_hit3, "b": None,
+            },
+            "hit_at_5": {
+                "a": round(a_hit5 / n, 4), "a_count": a_hit5, "b": None,
+            },
             "mrr": {"a": round(a_rr_sum / n, 4), "b": None},
             "latency_ms": {
                 "a": latency_stats(a_latencies),

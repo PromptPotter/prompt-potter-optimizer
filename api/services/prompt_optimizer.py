@@ -4,13 +4,24 @@ Prompt optimization service.
 Generates candidate prompt variants via LLM meta-prompts, selects round
 winners, generates improvement suggestions, and saves campaign results.
 """
+
 import json
 from datetime import datetime, timezone
-from typing import List, Optional
 
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
 from api.services.project_store import ProjectStore
+
+MAX_FAILURES_GENERATE = 15
+MAX_FAILURES_SUGGEST = 20
+DISPLAY_TRUNCATE = 60
+
+
+def _compute_accuracy(results: list) -> float:
+    """Hit-rate accuracy from a list of result dicts with ``hit`` keys."""
+    if not results:
+        return 0.0
+    return sum(1 for r in results if r["hit"]) / len(results)
 
 
 async def generate_candidates(
@@ -20,15 +31,15 @@ async def generate_candidates(
     n_variants: int,
     creativity: float,
     llm_client: LLMClientBase,
-    model: Optional[str] = None,
-) -> List[PromptState]:
+    model: str | None = None,
+) -> list[PromptState]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
     Args:
         current_ps: Current best PromptState.
         current_accuracy: Current accuracy (0.0-1.0).
         current_results: List of result dicts from evaluation.
-        n_variants: Number of variants to generate.
+        n_variants: Number of variants to generate (must be >0).
         creativity: Temperature for the meta-prompt LLM call.
         llm_client: LLM client implementing LLMClientBase.
         model: Model identifier (uses client default if None).
@@ -36,12 +47,15 @@ async def generate_candidates(
     Returns:
         List of derived PromptState candidates.
     """
+    if n_variants <= 0:
+        raise ValueError(f"n_variants must be >0, got {n_variants}")
+
     failures = [r for r in current_results if not r["hit"] and not r.get("error")]
     failure_examples = "\n".join(
-        f"  Query: {r['query'][:60]}  |  "
+        f"  Query: {r['query'][:DISPLAY_TRUNCATE]}  |  "
         f"Predicted: {r['predicted'][:40]}  |  "
         f"GT: {r['ground_truth'][:40]}"
-        for r in failures[:15]
+        for r in failures[:MAX_FAILURES_GENERATE]
     )
 
     rendered_prompt = current_ps.render()
@@ -92,7 +106,7 @@ async def generate_candidates(
         ps = current_ps.derive(
             instruction=v["prompt_text"],
             changes_description=v.get(
-                "changes_description", v.get("variant_name", "")
+                "changes_description", v.get("variant_name", ""),
             ),
         )
         candidates.append(ps)
@@ -129,18 +143,13 @@ def select_round_winner(
 
     for candidate in candidates:
         c_results = all_candidate_results[candidate.id]
-        c_acc = (
-            sum(1 for r in c_results if r["hit"]) / len(c_results)
-            if c_results
-            else 0
-        )
+        c_acc = _compute_accuracy(c_results)
         if c_acc > best_acc:
             best_acc = c_acc
             best_ps = candidate
             best_results = c_results
             best_label = candidate.changes_description or candidate.id[:12]
 
-    # Build comparison rows for display
     rows = [
         {
             "prompt": f"current_best ({current_best['label'][:30]})",
@@ -150,14 +159,12 @@ def select_round_winner(
     ]
     for candidate in candidates:
         c_results = all_candidate_results[candidate.id]
-        c_acc = (
-            sum(1 for r in c_results if r["hit"]) / len(c_results)
-            if c_results
-            else 0
-        )
+        c_acc = _compute_accuracy(c_results)
         delta = c_acc - current_acc
         rows.append({
-            "prompt": (candidate.changes_description or candidate.id[:12])[:40],
+            "prompt": (
+                candidate.changes_description or candidate.id[:12]
+            )[:40],
             "hit@1": f"{c_acc:.1%}",
             "delta": f"{delta:+.1%}",
         })
@@ -182,7 +189,7 @@ async def generate_suggestions(
     eval_data: list,
     campaign_config: dict,
     llm_client: LLMClientBase,
-    model: Optional[str] = None,
+    model: str | None = None,
 ) -> dict:
     """Generate improvement suggestions via LLM analysis.
 
@@ -204,7 +211,7 @@ async def generate_suggestions(
 
     failures = [r for r in current_results if not r["hit"] and not r.get("error")]
     failure_detail = []
-    for r in failures[:20]:
+    for r in failures[:MAX_FAILURES_SUGGEST]:
         pd_data = next(
             (
                 rd.get("pipeline_data", {})
@@ -222,7 +229,7 @@ async def generate_suggestions(
         profile = pd_data.get("entity_profile", {})
 
         failure_detail.append(
-            f"  Query: {r['query'][:60]}\n"
+            f"  Query: {r['query'][:DISPLAY_TRUNCATE]}\n"
             f"    Predicted: {r['predicted'][:50]}\n"
             f"    Ground truth: {r['ground_truth'][:50]}\n"
             f"    GT in candidates: {gt_in_candidates}\n"
@@ -287,17 +294,7 @@ def save_campaign_winner(
     store: ProjectStore,
     backend_id: str,
 ) -> dict:
-    """Find best round, save to store. Returns save_data dict.
-
-    Args:
-        campaign_rounds: List of round dicts from the campaign.
-        campaign_config: Campaign configuration dict.
-        store: ProjectStore instance.
-        backend_id: Backend identifier.
-
-    Returns:
-        Dict with winner data including accuracy, improvement, and file path.
-    """
+    """Find best round, save to store. Returns save_data dict."""
     winner = campaign_rounds[-1]["prompt_state"]
     winner_acc = campaign_rounds[-1]["accuracy"]
 

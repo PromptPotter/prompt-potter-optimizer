@@ -7,10 +7,18 @@ and evaluates reranker prompts via the TermNorm backend's /matches endpoint.
 import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Callable
 
 from api.models.prompt_state import PromptState
+
+logger = logging.getLogger(__name__)
+
+# SHA256 truncated to 16 hex chars (64 bits) — sufficient for content-addressed
+# deduplication within a single project.  Collision probability stays negligible
+# for the expected dataset sizes (<100k eval runs).
+HASH_TRUNCATE = 16
 
 
 def eval_content_hash(
@@ -32,7 +40,7 @@ def eval_content_hash(
         {"prompt": rendered_prompt, "pairs": pairs, "model": model, "temperature": temperature},
         sort_keys=True,
     )
-    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
 
 
 def build_dataset_run_data(
@@ -52,7 +60,9 @@ def build_dataset_run_data(
         "name": name,
         "content_hash": content_hash,
         "prompt_state_id": prompt_state_id,
-        "rendered_prompt_hash": hashlib.sha256(rendered_prompt.encode()).hexdigest()[:16],
+        "rendered_prompt_hash": hashlib.sha256(
+            rendered_prompt.encode(),
+        ).hexdigest()[:HASH_TRUNCATE],
         "model": model,
         "temperature": temperature,
         "item_count": scores["total"],
@@ -130,7 +140,7 @@ async def backend_reranker_eval(
     query_data: dict,
     backend_client,
     rendered_prompt: str,
-    pipeline_params: Optional[dict] = None,
+    pipeline_params: dict | None = None,
     request_delay: float = 0,
 ) -> dict:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint.
@@ -173,6 +183,7 @@ async def backend_reranker_eval(
             "error": None,
         }
     except Exception as exc:
+        logger.warning("backend_reranker_eval failed for %s: %s", query[:60], exc)
         return {
             "query": query,
             "predicted": "ERROR",
@@ -186,8 +197,8 @@ async def evaluate_prompt_batch(
     prompt_state: PromptState,
     eval_data: list,
     backend_client,
-    pipeline_params: Optional[dict] = None,
-    on_result: Optional[Callable] = None,
+    pipeline_params: dict | None = None,
+    on_result: Callable | None = None,
     request_delay: float = 0,
 ) -> list:
     """Evaluate a prompt on all eval_data queries via the backend.
