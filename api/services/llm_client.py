@@ -143,7 +143,8 @@ class GroqClient(LLMClientBase):
                 self._client = AsyncOpenAI(
                     api_key=self.api_key,
                     base_url="https://api.groq.com/openai/v1",
-                    max_retries=5,
+                    max_retries=3,
+                    timeout=60.0,
                 )
             except ImportError:
                 raise ImportError("openai package not installed. Run: pip install openai")

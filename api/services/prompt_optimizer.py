@@ -77,7 +77,7 @@ async def generate_candidates(
         messages=[{"role": "user", "content": meta_prompt}],
         model=model,
         temperature=creativity,
-        max_tokens=16000,
+        max_tokens=8192,
         output_format="json",
     )
     generated = response.parsed or json.loads(response.content)

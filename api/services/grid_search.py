@@ -710,6 +710,44 @@ async def run_grid_search(
     return df
 
 
+def build_grid_analysis_prompt(
+    grid_df: pd.DataFrame,
+    grid_config: dict,
+) -> str:
+    """Build the LLM prompt for grid result analysis (no LLM call)."""
+    axis_names = list(grid_config.keys())
+
+    top_points = grid_df.head(5).to_dict("records")
+    worst_points = grid_df.tail(3).to_dict("records")
+
+    marginals = {}
+    for name in axis_names:
+        marginal = grid_df.groupby(name)["accuracy"].mean()
+        marginals[name] = {
+            int(idx): {
+                "accuracy": float(acc),
+                "label": grid_config[name][idx][:80] if grid_config[name][idx] else "(empty)",
+            }
+            for idx, acc in marginal.items()
+        }
+
+    return (
+        "You are an optimization advisor. Analyze the results of a grid search "
+        "over prompt configuration fields.\n\n"
+        f"GRID AXES: {axis_names}\n"
+        f"TOTAL GRID POINTS: {len(grid_df)}\n\n"
+        f"TOP 5 GRID POINTS:\n{json.dumps(top_points, indent=2, default=str)}\n\n"
+        f"WORST 3 GRID POINTS:\n{json.dumps(worst_points, indent=2, default=str)}\n\n"
+        f"MARGINAL STATS (mean accuracy per axis value):\n"
+        f"{json.dumps(marginals, indent=2, default=str)}\n\n"
+        "Return a JSON object with:\n"
+        '- "key_findings": array of 3-5 concise findings\n'
+        '- "strongest_fields": array of field names that matter most for accuracy\n'
+        '- "recommended_focus": which fields to prioritize in optimization\n'
+        '- "campaign_advice": 2-3 sentence advice for the optimization campaign'
+    )
+
+
 async def analyze_grid_results(
     grid_df: pd.DataFrame,
     grid_config: dict,
@@ -728,40 +766,9 @@ async def analyze_grid_results(
         Dict with keys: key_findings, strongest_fields, recommended_focus,
         campaign_advice.
     """
-    axis_names = list(grid_config.keys())
-
-    top_points = grid_df.head(5).to_dict("records")
-    worst_points = grid_df.tail(3).to_dict("records")
-
-    marginals = {}
-    for name in axis_names:
-        marginal = grid_df.groupby(name)["accuracy"].mean()
-        marginals[name] = {
-            int(idx): {
-                "accuracy": float(acc),
-                "label": grid_config[name][idx][:80] if grid_config[name][idx] else "(empty)",
-            }
-            for idx, acc in marginal.items()
-        }
-
-    analysis_prompt = (
-        "You are an optimization advisor. Analyze the results of a grid search "
-        "over prompt configuration fields.\n\n"
-        f"GRID AXES: {axis_names}\n"
-        f"TOTAL GRID POINTS: {len(grid_df)}\n\n"
-        f"TOP 5 GRID POINTS:\n{json.dumps(top_points, indent=2, default=str)}\n\n"
-        f"WORST 3 GRID POINTS:\n{json.dumps(worst_points, indent=2, default=str)}\n\n"
-        f"MARGINAL STATS (mean accuracy per axis value):\n"
-        f"{json.dumps(marginals, indent=2, default=str)}\n\n"
-        "Return a JSON object with:\n"
-        '- "key_findings": array of 3-5 concise findings\n'
-        '- "strongest_fields": array of field names that matter most for accuracy\n'
-        '- "recommended_focus": which fields to prioritize in optimization\n'
-        '- "campaign_advice": 2-3 sentence advice for the optimization campaign'
-    )
-
+    prompt = build_grid_analysis_prompt(grid_df, grid_config)
     response = await llm_client.chat(
-        messages=[{"role": "user", "content": analysis_prompt}],
+        messages=[{"role": "user", "content": prompt}],
         model=model,
         temperature=0,
         max_tokens=2000,

@@ -51,6 +51,7 @@ from api.services.grid_search import (
     restructure_context as _restructure_context,
     run_grid_search as _run_grid_search,
     analyze_grid_results as _analyze_grid_results,
+    build_grid_analysis_prompt as _build_grid_analysis_prompt,
     select_grid_winner as _select_grid_winner,
     load_eval_dataset as _load_eval_dataset,
     grid_plan_identity as _grid_plan_identity,
@@ -1105,8 +1106,8 @@ async def resume_or_build_grid(
 
     # Check for existing plan
     existing = store.load_grid_plan(backend_id, plan_id)
-    if existing and existing.get("status") != "completed":
-        print(f"[RESUME] Found existing grid plan: {plan_id}")
+    if existing:
+        print(f"[RESUME] Found existing grid plan: {plan_id} (status: {existing.get('status', '?')})")
         (
             grid_points, grid_state_lookup, sampling_meta,
             grid_axes, layer1_fields, grid_baseline,
@@ -1406,13 +1407,29 @@ async def analyze_grid_results(
     api_key: str,
 ) -> dict:
     """LLM analysis of grid search results."""
+    if not api_key:
+        raise RuntimeError(
+            "No API key provided. Set GROQ_API_KEY in your .env file "
+            "and restart the kernel."
+        )
+
+    # Build and display the prompt before calling the LLM
+    prompt = _build_grid_analysis_prompt(grid_df, grid_config)
+    print("LLM ANALYSIS PROMPT")
+    print("=" * 70)
+    print(prompt)
+    print("=" * 70)
+
+    model = eval_llm.get("model", "?")
+    print(f"\nCalling {model} ...")
+
     client = _make_llm_client(eval_llm, api_key)
     analysis = await _analyze_grid_results(
         grid_df, grid_config, client, model=eval_llm.get("model"),
     )
 
     print(f"\n{'=' * 70}")
-    print("GRID ANALYSIS (LLM)")
+    print("GRID ANALYSIS (LLM response)")
     print(f"{'=' * 70}")
     for finding in analysis.get("key_findings", []):
         print(f"  - {finding}")
