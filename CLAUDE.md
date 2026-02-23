@@ -45,10 +45,12 @@ All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py
 | `grid_search.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. Grid plan persistence (`grid_plan_identity()`, `serialize_grid_plan()`, `deserialize_grid_plan()`). |
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation, round winner selection, improvement suggestions. |
 | `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions). |
-| `project_store.py` | File I/O for `.promptpotter/projects/` — backends, synced experiments, executions, dataset runs, grid plans. |
-| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI). Global singleton via `get_llm_client()`. |
+| `project_store.py` | Facade over focused store modules in `stores/`. File I/O for `.promptpotter/projects/`. |
+| `stores/` | Focused store modules: `BackendStore`, `ExecutionStore`, `DatasetRunStore`, `GridPlanStore`. Shared I/O in `stores/base.py`. |
+| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with `_OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. |
+| `query_utils.py` | Shared query-parsing utilities (e.g. `parse_bom_material()`). |
 | `comparison.py` | Statistical comparison (hit@k, McNemar, Wilcoxon). |
-| `langfuse_client.py` | Langfuse observability integration. |
+| `langfuse_client.py` | Langfuse v2 observability integration. |
 
 ### Data model
 
@@ -81,6 +83,9 @@ Grid search (`grid_search.run_grid_search()`) iterates over cartesian products o
 
 - **No backward compatibility** — freely break signatures, rename, restructure. No compat shims.
 - **Python**: 3.13, ruff for linting (line-length 100, select E/F rules)
+- **Type hints**: PEP 604 (`X | None`, not `Optional[X]`), lowercase generics (`list[str]`, not `List[str]`)
+- **Logging**: `logging` module (no `print()` in non-notebook code). Setup in `api/config/logging.py`.
 - **Default LLM**: `meta-llama/llama-4-maverick-17b-128e-instruct` via Groq
 - **Config**: Pydantic `BaseSettings` loading from `.env` (see `api/config/settings.py`)
+- **Version**: Centralized in `api/config/settings.py` as `APP_VERSION`
 - **API versioning**: all endpoints under `/api/v1/`

@@ -98,7 +98,7 @@ class ExactMatchEvaluator(EvaluatorBase):
                 score=score,
                 expected=expected,
                 actual=actual,
-                reason=f"Values do not match"
+                reason="Values do not match"
             )
 
     def _string_similarity(self, s1: str, s2: str) -> float:

@@ -11,14 +11,13 @@ from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from pydantic import BaseModel, Field
 from datetime import datetime
 from pathlib import Path
-import time
 import uuid
 import yaml
 
 from api.models.workflow import WorkflowDefinition, StepDefinition
 
 if TYPE_CHECKING:
-    from api.nodes.base import NodeBase
+    pass
 
 
 class WorkflowContext(BaseModel):

@@ -6,7 +6,7 @@ Executes a single LLM call with configurable model, temperature, and prompts.
 from typing import Type, Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 
-from .base import NodeBase, TInput, TOutput
+from .base import NodeBase
 
 
 class LLMInput(BaseModel):
