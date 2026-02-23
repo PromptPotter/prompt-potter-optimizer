@@ -379,25 +379,13 @@ PromptPotter grid_search.py
 
 **Crash protection:** Incremental writes to `.partial.jsonl` after each query. On restart, resumes from last completed query. Completed combos are cached via content-addressed hashing and skipped on re-run.
 
-### Future Optimization: `/rerank` Endpoint
+### Future Optimization: Cached Intermediates in Grid Search
 
 The backend eval mode is accurate but wasteful: steps 1-3 (web search → LLM1 → token matching) produce identical results for the same query regardless of the ranking prompt. Only LLM2 varies between grid search combos.
 
-A dedicated `/rerank` endpoint on TermNorm would accept pre-computed `entity_profile` + `token_matched_candidates` and only run LLM2 with the candidate prompt:
+Since `/matches` already accepts pre-computed `entity_profile` + `token_matched_candidates`, PromptPotter can cache these after the first full pipeline run and pass them on subsequent calls for the same query:
 
-```
-# Proposed (not yet implemented)
-POST /rerank {
-  "entity_profile": { ... },
-  "token_matched_candidates": [ ... ],
-  "ranking_prompt": "..."
-}
-```
+1. Run full pipeline once per query to get `entity_profile` + candidates (~10-30s × N queries)
+2. For each grid combo, call `/matches` with the cached intermediates + candidate prompt (~2s × N queries × M combos)
 
-This would give backend-accurate results at local-eval speed: ~2s per query instead of ~10-30s, with **fresh** LLM2 output against the **correct** intermediate data.
-
-**Workflow with `/rerank`:**
-1. Run full pipeline once per query to get entity_profile + candidates (~10-30s × N queries)
-2. For each grid combo, call `/rerank` with the cached intermediates + candidate prompt (~2s × N queries × M combos)
-
-This reduces grid search time from O(N × M × 20s) to O(N × 20s + N × M × 2s) — a ~10x speedup for typical grid sizes.
+This reduces grid search time from O(N × M × 20s) to O(N × 20s + N × M × 2s) — a ~10x speedup for typical grid sizes. PromptPotter-side change only.

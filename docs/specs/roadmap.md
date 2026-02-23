@@ -13,9 +13,8 @@
 |-----------|-------|----------|--------|
 | M0 | Specifications | Week 1 | Complete |
 | M1 | Foundation | Weeks 2-3 | Complete |
-| M2 | Core Optimizer | Weeks 4-6 | In Progress |
-| M3 | Registry and Tracking | Weeks 7-8 | Planned |
-| M4 | Integration and Polish | Weeks 9-11 | Planned |
+| M2 | Core Optimizer + Registry | Weeks 4-8 | In Progress |
+| M3 | Integration and Polish | Weeks 9-11 | Planned |
 
 ---
 
@@ -62,7 +61,7 @@
 
 ---
 
-## M2: Core Optimizer (DAG-Based Workflow) — Weeks 4-6
+## M2: Core Optimizer + Registry — Weeks 4-8
 
 - **Deliverables:**
   - **Phase 1 (linear mode)** of the DAG-based optimization workflow:
@@ -80,6 +79,12 @@
     - Feedback router (Switch: generate / refine context / modify plan)
     - Context refinement and plan update nodes
     - Counter-based stop condition with configurable threshold
+  - **Registry and Tracking** (absorbed from former M3):
+    - Lineage tracking via `PromptState.parent_id` + `derive()` (already implemented)
+    - Campaign/trial persistence via `ProjectStore` dataset_runs + grid_plans (already implemented)
+    - Langfuse score integration: wire `LangfuseLogger.create_trace()` + `create_score()` into grid search and optimization loop
+    - Dataset run + grid plan API endpoints: `GET /{backend_id}/dataset-runs`, `GET /{backend_id}/grid-plans`
+    - JSONL export for dataset runs
 
 - **Entry criteria:** M1 exit gate passed; CI green; PROMPT_STATE model finalized. **Entry criteria satisfied.**
 
@@ -89,6 +94,8 @@
   - E2E test passes in CI
   - HITL campaign notebook produces actionable suggestions after optimization rounds
   - Grid search produces ranked exploration results with LLM-analyzed insights
+  - Dataset runs and grid plans viewable via API endpoints
+  - Langfuse shows traces with scores for optimization runs
   - Decision: does the linear mode produce useful prompt states? Is the DAG architecture right for adding cycling later?
 
 - **Progress:**
@@ -103,6 +110,9 @@
   - 2.9 Grid Search — **Complete** (default axes, LLM restructuring, grid execution with two eval modes: backend full-pipeline via `/matches` with `ranking_prompt` + local LLM fallback, per-query HIT/MISS progress logging, visualization/analysis, winner selection, distance-weighted stratified sampling with `grid_budget` + `exploration_rate`, per-point caching + incremental writes + partial-run resume, grid plan persistence with stable identity hash + plan serialization/deserialization + automatic resume on kernel restart)
   - 2.10 TermNorm `GET /pipeline` Endpoint — Not started (external repo: adds pipeline discovery endpoint)
   - 2.11 PromptPotter Discovery Integration — Not started (uses discovered schema in grid search instead of hardcoded `GRID_SEARCHABLE_FIELDS`)
+  - 2.12 Langfuse Integration — Not started (wire `LangfuseLogger.create_trace()` + `create_score()` into grid search and optimization loop)
+  - 2.13 Dataset Run & Grid Plan API Endpoints — Not started (`GET /{backend_id}/dataset-runs`, `GET /{backend_id}/grid-plans` routes in `backends.py`)
+  - 2.14 JSONL Export — Not started (export endpoint or CLI for dataset runs)
 
 - **Risks:**
   - LLM-based structured output quality may vary (initialization node depends on Groq + Llama 4 Maverick producing valid structured responses)
@@ -111,30 +121,7 @@
 
 ---
 
-## M3: Registry and Tracking — Weeks 7-8
-
-- **Deliverables:**
-  - File-based CampaignRegistry with campaign/trial persistence (P1.1)
-  - Registry integrated into the optimization loop
-  - Lineage tracking: trial parent-child tree (P0.5)
-  - Langfuse score integration: per-trial traces with scores (SC3)
-  - JSONL export and campaign list/detail endpoints
-
-- **Entry criteria:** M2 exit gate passed; optimization loop works end-to-end
-
-- **Exit gate:**
-  - Optimization runs automatically persist to `.promptpotter/campaigns/`
-  - Campaigns viewable and exportable via API
-  - Langfuse shows correct parent-child traces with scores
-  - Decision: is the persisted data useful for comparing runs? Is the file layout right?
-
-- **Risks:**
-  - File-based storage may have concurrency issues if parallel execution is added later
-  - JSONL format choices become a compatibility contract; changing later breaks consumers
-
----
-
-## M4: Integration and Polish — Weeks 9-11
+## M3: Integration and Polish — Weeks 9-11
 
 - **Deliverables:**
   - TermNorm Variant A vs Variant B comparison on BC5CDR 500-term subset (SC5)
@@ -145,11 +132,11 @@
   - Docker compose for optimizer + Langfuse
   - Documentation update (README, notebooks)
 
-- **Entry criteria:** M3 exit gate passed; registry and Langfuse working
+- **Entry criteria:** M2 exit gate passed; registry, tracking, and Langfuse working
 
 - **Exit gate:**
   - **Variant A vs Variant B comparison completes** on the BC5CDR 500-term subset: Variant A baseline established, `llm_ranking` prompt optimized (v2+), best Variant B score compared against Variant A, clear recommendation produced (SC5)
-  - Results are persisted in the campaign registry and traceable in Langfuse
+  - Results are persisted in ProjectStore and traceable in Langfuse
   - Time to first optimization under 15 minutes (SC4)
   - Docker deployment works with `docker-compose up`
   - Decision: does the optimized LLM2 call justify its cost? Ready for others to use? Which P2 features to prioritize next?
@@ -162,11 +149,7 @@
 
 ---
 
-## Future (Post-M4, Unscheduled)
-
-### Next Optimization: TermNorm `/rerank` Endpoint
-
-A dedicated `/rerank` endpoint on TermNorm would accept pre-computed `entity_profile` + `token_matched_candidates`.
+## Future (Post-M3, Unscheduled)
 
 ### Next Validation: Web Scrape Ablation
 
@@ -205,7 +188,7 @@ Systematic benchmarks for archival publication:
 | Feature | PRD | Notes |
 |---------|-----|-------|
 | Discovery-driven pipeline protocol | P1.7 | M2 (WP 2.10-2.11). `GET /pipeline` endpoint on TermNorm + `get_pipeline_schema()` on PromptPotter. Replaces hardcoded pipeline knowledge with runtime discovery. Requires changes in both repos. |
-| TermNorm `/rerank` endpoint | -- | Eliminate redundant web search + LLM1 + token matching during grid search; ~10x speedup. Requires TermNorm backend change. |
+| Pass cached intermediates in grid search | -- | Pass cached `entity_profile` + `token_matched_candidates` to `/matches` to skip steps 1-3; ~10x speedup. PromptPotter-side change only. |
 | Web scrape count ablation | -- | Vary number of websites scraped, measure quality vs. cost/latency |
 | LCA dataset validation | -- | Real-world use case validation after BC5CDR development is complete |
 | Full cycling mode (if not completed in M2) | P0.4, P2.1 | Enable feedback paths with iterative refinement; "refine context" path provides reflection-like capability |
@@ -213,7 +196,7 @@ Systematic benchmarks for archival publication:
 | MCP server mode | P2.3 | Expose optimization tools to Claude Code and MCP clients |
 | Workflow-based optimization | P1.2 | Optimize single steps within multi-step pipelines |
 
-Prioritization decided at the M4 exit gate based on Variant A vs Variant B results.
+Prioritization decided at the M3 exit gate based on Variant A vs Variant B results.
 
 ---
 
