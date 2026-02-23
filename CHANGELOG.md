@@ -6,17 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
-- Discovery-driven pipeline protocol in specs (P1.7): `GET /pipeline` endpoint contract,
-  `get_pipeline_schema()` integration, 4-stage pipeline schema discovery
-- WP 2.10-2.11 work packages in WBS and roadmap for schema discovery
-- Evaluation constraint added to project charter
+(Nothing yet.)
+
+## [0.6.0] — Spec rewrite and M2 close
 
 ### Changed
-- Project charter version bump to 0.5.0
-- API version bump to 0.5.0
+- Complete rewrite of all spec documents (project-charter, PRD, ADD, WBS, roadmap) to v0.6.0,
+  reflecting the actual codebase state after M2
+- M3 (Registry and Tracking) absorbed into M2; milestones renumbered
+- Evaluator/workflow infrastructure documented as architectural north star for M3 migration
+- Removed unused settings `MAX_DATASET_SIZE` and `MAX_ITERATIONS`
+- Removed dead code: `OptimizationDefaults`, `_layer_for_field()`
+- Migrated Pydantic V1 `class Config` to V2 `model_config` in settings and workflow models
+- API version bump to 0.6.0
 
-## [0.4.0] — M2: Core Optimizer (in progress)
+## [0.4.0] — M2: Core Optimizer
 
 ### Added
 - **HITL Campaign Notebook** (`notebooks/optimization_campaign.ipynb`): interactive optimization

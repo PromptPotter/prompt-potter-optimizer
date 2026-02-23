@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.13
 - A running backend (e.g. TermNorm at `http://localhost:8000`)
 - An LLM API key (Groq recommended for speed/cost)
 

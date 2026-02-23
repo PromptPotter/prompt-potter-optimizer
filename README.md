@@ -38,7 +38,7 @@ cd prompt-potter-optimizer
 pip install -r requirements.txt
 ```
 
-### Notebooks (recommended)
+### Notebooks
 
 Two notebooks cover the full workflow:
 
@@ -145,8 +145,6 @@ Edit `.env` (see `.env.example`):
 | `ANTHROPIC_API_KEY` | Anthropic API key (alternative provider) |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key for observability |
 | `LANGFUSE_SECRET_KEY` | Langfuse secret key for observability |
-| `MAX_ITERATIONS` | Max optimization iterations (default: 5) |
-
 ## Documentation
 
 - `docs/user-guide.md` — Setup, optimization workflow, configuration

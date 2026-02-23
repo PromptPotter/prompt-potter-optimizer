@@ -1,6 +1,6 @@
 # TermNorm Connector
 
-**Version:** 0.5.0
+**Version:** 0.6.0
 **Date:** 2026-02-22
 
 Validated connector contract for TermNorm backend integration.

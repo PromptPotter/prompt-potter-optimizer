@@ -93,9 +93,9 @@
 | **Backends router** | `api/routers/backends.py` | M1 | `/api/v1/backends/*` — register, sync, execute, compare, list dataset runs |
 | **Workflows router** | `api/routers/workflows.py` | Pre-M1 | `/api/v1/workflows/*` — execute workflow, evaluate, list nodes |
 | **Health router** | `api/routers/health.py` | Pre-M1 | `/api/v1/health`, `/api/v1/ready` |
-| **Workflow engine** | `api/core/workflow_runner.py` | Pre-M1 | DAG execution with topological sort and context passing. Used by workflows router. Target for optimizer migration (M3). |
+| **Workflow engine** | `api/core/workflow_runner.py` | Pre-M1 | DAG execution with topological sort and context passing. This is the canonical execution engine for the project. M2 services operate outside it as a pragmatic shortcut; M3 migrates them in as proper nodes (P1.1). |
 | **Workflow nodes** | `api/nodes/` | Pre-M1 | LLMNode, RankerNode, PipelineConfigNode |
-| **Evaluators** | `api/evaluators/` | Pre-M1 | ExactMatchEvaluator, CriteriaEvaluator (LLM-as-judge). Currently only exact match is used in the backend eval path. |
+| **Evaluators** | `api/evaluators/` | Pre-M1 | ExactMatchEvaluator, CriteriaEvaluator (LLM-as-judge). The evaluator framework is the target architecture for all scoring. The current inline `==` check in `prompt_eval.py` is a pragmatic M2 shortcut; M3 should migrate evaluation through the evaluator registry, enabling pluggable scoring strategies and Langfuse score logging. |
 | **Test suite** | `tests/` | M1 | `test_prompt_state.py` (3 tests), `test_project_store_evals.py` (18+ tests). Evaluator and workflow tests were pruned in `ceb9031`. |
 | **CI pipeline** | `.github/workflows/` | M1 | GitHub Actions: ruff lint + pytest on push/PR |
 | **Pipeline parameter passthrough** | via `backend_client.run_match()` | M1 | Forward controllable knobs to backend `/matches` payload |

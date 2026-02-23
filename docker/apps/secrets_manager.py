@@ -171,9 +171,6 @@ if st.button("Save Configuration", type="primary", use_container_width=True):
     env_vars.setdefault("API_HOST", "0.0.0.0")
     env_vars.setdefault("API_PORT", "8001")
     env_vars.setdefault("ALLOWED_ORIGINS", "*")
-    env_vars.setdefault("MAX_DATASET_SIZE", "1000")
-    env_vars.setdefault("MAX_ITERATIONS", "5")
-
     try:
         save_env_file(env_vars)
         st.success("Configuration saved successfully!")

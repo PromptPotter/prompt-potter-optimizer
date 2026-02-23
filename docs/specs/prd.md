@@ -54,7 +54,7 @@ This document uses terms defined in the [Project Charter](project-charter.md): *
 | Term | Definition |
 |------|-----------|
 | **Configuration** | The complete set of tunable parameters for an optimization target: prompt text, few-shot examples, temperature, retrieval counts, similarity thresholds, and any other non-code values that affect LLM behavior. |
-| **Evaluator** | A scoring function that compares actual outputs to expected outputs. Currently: exact string match (hit@1). LLM-as-judge evaluator exists in code but is not wired into the backend evaluation path. |
+| **Evaluator** | A scoring function that compares actual outputs to expected outputs. Currently: exact string match (hit@1). LLM-as-judge evaluator exists in code but is not wired into the backend evaluation path. This is an architectural gap: M3 should wire backend evaluation through the evaluator framework (`api/evaluators/`), replacing the inline `==` check in `prompt_eval.py` with `ExactMatchEvaluator` and enabling future use of `CriteriaEvaluator` for semantic evaluation. |
 
 ---
 

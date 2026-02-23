@@ -16,10 +16,10 @@ uvicorn api.main:app --port 8001 --reload
 pytest -v --tb=short
 
 # Run a single test file
-pytest tests/test_grid_search_service.py -v
+pytest tests/test_project_store_evals.py -v
 
 # Run a single test function
-pytest tests/test_prompt_state.py::test_derive -v
+pytest tests/test_prompt_state.py::test_create_and_derive -v
 
 # Lint
 ruff check api/ tests/

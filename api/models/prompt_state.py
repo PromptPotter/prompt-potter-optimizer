@@ -48,20 +48,6 @@ class FewShotExample(BaseModel):
     explanation: Optional[str] = None
 
 
-class OptimizationDefaults(BaseModel):
-    """Layer 3 strategy defaults. Should rarely need changing."""
-
-    n_variants: int = 5
-    creativity: float = 0.7  # 0.0-1.0
-    selection_strategy: str = "best_of_n"
-    improvement_threshold: float = 0.01
-    max_context_refinements: int = 3  # Layer 2 patience
-    max_plan_modifications: int = 2  # Layer 3 patience
-    max_iterations: int = 5
-    target_score: Optional[float] = None
-    seed: Optional[int] = None
-
-
 # ---------------------------------------------------------------------------
 # PromptState
 # ---------------------------------------------------------------------------
@@ -170,14 +156,6 @@ class PromptStateDiff(BaseModel):
     parameters_added: Dict[str, Any] = Field(default_factory=dict)
     parameters_removed: Dict[str, str] = Field(default_factory=dict)
     parameters_changed: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-
-
-def _layer_for_field(field_name: str) -> str:
-    """Return the layer name for a given field."""
-    for layer, fields in LAYER_FIELDS.items():
-        if field_name in fields:
-            return layer
-    return "metadata"
 
 
 def diff(a: PromptState, b: PromptState) -> PromptStateDiff:

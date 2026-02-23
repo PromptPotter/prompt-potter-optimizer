@@ -68,8 +68,7 @@ class StepDefinition(BaseModel):
         None, description="Step classification and metadata"
     )
 
-    class Config:
-        populate_by_name = True
+    model_config = {"populate_by_name": True}
 
     @property
     def node_type(self) -> str:
@@ -120,8 +119,7 @@ class WorkflowDefinition(BaseModel):
         description="Workflow-level outputs"
     )
 
-    class Config:
-        populate_by_name = True
+    model_config = {"populate_by_name": True}
 
     @field_validator("steps")
     @classmethod

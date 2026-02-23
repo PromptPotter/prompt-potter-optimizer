@@ -37,14 +37,7 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     LANGFUSE_ENABLED: bool = True
 
-    # Optimization Settings
-    MAX_DATASET_SIZE: int = 1000  # Maximum number of examples in dataset
-    MAX_ITERATIONS: int = 5  # Maximum optimization iterations
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"
+    model_config = {"env_file": ".env", "case_sensitive": True, "extra": "ignore"}
 
 
 settings = Settings()

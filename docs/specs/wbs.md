@@ -164,7 +164,7 @@ Phase 2 delivers the service-based optimization capabilities: grid search, itera
 - **PRD Ref:** P0.6
 - **Completed:** `fcd6ae6 feat: centralize per-point query sampling via resolve_point_evals()`
 
-### 2.7 Spec Rewrite v0.6.0 — In Progress
+### 2.7 Spec Rewrite v0.6.0 — Complete
 
 - **Scope:** Complete rewrite of all 5 spec documents to match actual codebase state.
 - **Sessions:** 1
@@ -214,7 +214,7 @@ Phase 3 migrates the service-based optimizer into the existing workflow engine a
 - **Scope:** Create three optimization nodes wrapping existing service logic:
   - **InitNode** — wraps `restructure_context()` to produce initial PROMPT_STATE from context
   - **GrowFilterNode** — wraps `generate_candidates()` to produce N variant PROMPT_STATEs
-  - **AnalysisEvalNode** — wraps `evaluate_prompt_batch()` + `generate_suggestions()` to score and analyze
+  - **AnalysisEvalNode** — wraps `evaluate_prompt_batch()` + `generate_suggestions()` to score and analyze. **Note:** AnalysisEvalNode should route evaluation through the existing evaluator framework (`api/evaluators/`) rather than reimplementing scoring inline. This closes the architectural gap between the M2 inline `==` check and the target evaluator registry pattern.
 - **Sessions:** 2
 - **Dependencies:** 3.0
 - **PRD Ref:** P1.1
@@ -222,6 +222,7 @@ Phase 3 migrates the service-based optimizer into the existing workflow engine a
   - All three nodes are registered in `api/nodes/`
   - Each node follows the existing node pattern (typed inputs/outputs, Pydantic models)
   - Nodes are thin wrappers — existing service logic is reused, not reimplemented
+  - AnalysisEvalNode uses the evaluator framework for scoring
   - Unit tests verify each node independently with mock inputs
 
 ### 3.2 Optimization Workflow Definition
@@ -333,7 +334,7 @@ Phase 3 migrates the service-based optimizer into the existing workflow engine a
 |-------|:--------:|:--------:|
 | M0: Specifications | 6 | 6 |
 | M1: Foundation | 8 | 8 |
-| M2: Core Optimizer | 9 | ~8 (8 complete, 1 in progress) |
+| M2: Core Optimizer | 9 | 9 |
 | M3: Workflow Engine Migration | 7 | 10 |
 | M4: Integration and Polish | 4 | 6 |
 | **Total** | **34** | **~38** |
