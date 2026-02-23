@@ -20,7 +20,7 @@ from api.services.project_store import ProjectStore
 from api.services.prompt_eval import (
     backend_reranker_eval,
     compute_accuracy,
-    eval_cache_key,
+    eval_content_hash,
     build_dataset_run_data,
     make_incremental_writer,
 )
@@ -400,7 +400,7 @@ def deserialize_grid_plan(
 
 
 class PointEvalInfo(NamedTuple):
-    """Pre-computed eval data and cache key for a single grid point."""
+    """Pre-computed eval data and content hash for a single grid point."""
     point_idx: int
     coord_dict: dict
     ps_id: str
@@ -419,7 +419,7 @@ def resolve_point_evals(
     """Compute per-point eval query sets and content hashes.
 
     Centralizes the sampling logic so run_grid_search(), pre-scan,
-    and load_grid_plan_results() all produce identical cache keys.
+    and load_grid_plan_results() all produce identical content hashes.
     """
     if eval_queries_per_point > 0 and shared_queries:
         rng = random.Random(seed)
@@ -444,7 +444,7 @@ def resolve_point_evals(
         else:
             point_eval = eval_data
 
-        content_hash = eval_cache_key(rendered, point_eval, "", 0.0)
+        content_hash = eval_content_hash(rendered, point_eval, "", 0.0)
         result.append(PointEvalInfo(point_idx, coord_dict, ps_id, point_eval, content_hash))
 
     return result
@@ -565,7 +565,7 @@ async def run_grid_search(
     backend_client,
     on_point_done: Optional[Callable] = None,
     on_query_done: Optional[Callable] = None,
-    on_point_cached: Optional[Callable] = None,
+    on_point_reused: Optional[Callable] = None,
     request_delay: float = 1.0,
     store: Optional["ProjectStore"] = None,
     backend_id: str = "",
@@ -589,8 +589,8 @@ async def run_grid_search(
         on_query_done: Optional callback
             ``(point_index, query_index, total_queries, result)`` called after
             each individual query within a grid point evaluation.
-        on_point_cached: Optional callback ``(point_index, row_data)`` called
-            when a grid point is resolved from cache (instead of evaluated).
+        on_point_reused: Optional callback ``(point_index, row_data)`` called
+            when a grid point is resolved from stored results (instead of evaluated).
         request_delay: Seconds to sleep between backend calls within each
             grid point (default 1.0).
         store: Optional ProjectStore for per-point eval caching.
@@ -627,21 +627,21 @@ async def run_grid_search(
         ps = state_lookup[info.ps_id]
         rendered = ps.render()
 
-        # Check cache
-        cached_run = None
+        # Check for existing run
+        existing_run = None
         if store and backend_id:
-            cached_run = store.load_dataset_run_by_hash(backend_id, info.content_hash)
+            existing_run = store.load_dataset_run_by_hash(backend_id, info.content_hash)
 
-        if cached_run:
-            acc = cached_run["scores"]
-            if on_point_cached is not None:
-                cache_row = dict(info.coord_dict)
-                cache_row["prompt_state_id"] = info.ps_id
-                cache_row["hits"] = acc["hits"]
-                cache_row["total"] = acc["total"]
-                cache_row["accuracy"] = acc["accuracy"]
-                cache_row["errors"] = acc["errors"]
-                on_point_cached(info.point_idx, cache_row)
+        if existing_run:
+            acc = existing_run["scores"]
+            if on_point_reused is not None:
+                reused_row = dict(info.coord_dict)
+                reused_row["prompt_state_id"] = info.ps_id
+                reused_row["hits"] = acc["hits"]
+                reused_row["total"] = acc["total"]
+                reused_row["accuracy"] = acc["accuracy"]
+                reused_row["errors"] = acc["errors"]
+                on_point_reused(info.point_idx, reused_row)
         else:
             run_id = f"grid_{info.content_hash[:8]}"
 
@@ -884,11 +884,11 @@ def load_eval_dataset(
     experiment_id: str,
     query_limit: int = 0,
 ) -> list:
-    """Load per-query evaluation data from synced experiments or replay cache.
+    """Load per-query evaluation data from synced experiments or stored replays.
 
     Priority:
         1. Langfuse-style traces from ``runs[0].traces[]``
-        2. Replay cache from existing executions
+        2. Stored replay executions
         3. Empty list if neither found
 
     Args:
@@ -912,7 +912,7 @@ def load_eval_dataset(
                 eval_data = rng.sample(eval_data, query_limit)
             return eval_data
 
-    # Priority 2: replay cache from existing executions
+    # Priority 2: stored replay executions
     executions = store.list_executions(backend_id)
     for ex_summary in executions:
         if ex_summary.get("experiment_id") == experiment_id:

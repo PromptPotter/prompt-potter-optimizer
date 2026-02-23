@@ -31,7 +31,7 @@ from api.services.prompt_eval import (
     backend_reranker_eval as _backend_reranker_eval,
     evaluate_prompt_batch,
     compute_accuracy,
-    eval_cache_key,
+    eval_content_hash,
     build_dataset_run_data,
     make_incremental_writer,
 )
@@ -208,7 +208,7 @@ async def init_services(
 
     exp_data = store.load_sync(backend_id, f"experiments/{experiment_id}.json")
 
-    # Detect stale cache: data exists but has no traces
+    # Detect stale sync data: data exists but has no traces
     _has_traces = bool(
         exp_data
         and exp_data.get("runs")
@@ -217,7 +217,7 @@ async def init_services(
 
     # Auto-sync when experiment data is missing or lacks traces
     if not exp_data or not _has_traces:
-        reason = "No cached experiment data" if not exp_data else "Cached data has no traces"
+        reason = "No stored experiment data" if not exp_data else "Stored data has no traces"
         print(f"{reason} — syncing from {backend_url} ...")
         try:
             await client.sync_experiments(store, backend_id, include_traces=True)
@@ -286,7 +286,7 @@ async def run_or_load_replay(
     replay_config: dict,
     pipeline_params: dict,
 ) -> Tuple[Execution, list]:
-    """Run replay or load from cache. Returns (Execution, replay_results)."""
+    """Run replay or load from stored results. Returns (Execution, replay_results)."""
     import uuid
 
     rc = replay_config
@@ -300,8 +300,8 @@ async def run_or_load_replay(
     replay_queries_list = queries[:rc["query_limit"]] if rc["query_limit"] else queries
     total = len(replay_queries_list)
 
-    # Check cache
-    _cached = None
+    # Check for existing execution
+    _existing = None
     if not pp:
         for _ex in store.list_executions(backend_id):
             if (
@@ -309,17 +309,17 @@ async def run_or_load_replay(
                 and _ex["variant_label"] == variant_label
                 and _ex["pipeline_notation"] == pipeline_notation
             ):
-                _cached = store.load_execution(backend_id, _ex["execution_id"])
-                if _cached:
+                _existing = store.load_execution(backend_id, _ex["execution_id"])
+                if _existing:
                     break
 
-    if _cached:
-        execution = _cached
-        replay_results = [r.model_dump() for r in _cached.results]
+    if _existing:
+        execution = _existing
+        replay_results = [r.model_dump() for r in _existing.results]
         _hits = sum(
             1 for r in replay_results if r.get("predicted") == r["ground_truth"]
         )
-        print(f"Using cached execution {execution.execution_id}")
+        print(f"Using stored execution {execution.execution_id}")
         print(f"  Queries: {len(replay_results)}")
         print(
             f"  hit@1: {_hits}/{len(replay_results)} "
@@ -540,11 +540,11 @@ async def evaluate_prompt(
     """Evaluate a prompt on all eval_data via the backend with progress bar.
 
     Args:
-        store: If provided, enables caching via ProjectStore dataset_runs.
+        store: If provided, enables deduplication via ProjectStore dataset_runs.
             Also enables incremental writes (.partial.jsonl) for crash
             protection and partial-run resume.
         backend_id: Required when store is provided.
-        force: Skip cache lookup and re-evaluate (overwrites existing cache).
+        force: Skip dedup lookup and re-evaluate (overwrites existing run).
         backend_client: BackendClient for evaluation via /matches endpoint.
             Required — raises ValueError if not provided.
         pipeline_params: Optional pipeline parameter overrides.
@@ -558,19 +558,19 @@ async def evaluate_prompt(
     rendered = prompt_state.render()
     model = eval_llm.get("model", "")
     temperature = eval_llm.get("temperature", 0.1)
-    content_hash = eval_cache_key(rendered, eval_data, model, temperature)
+    content_hash = eval_content_hash(rendered, eval_data, model, temperature)
 
-    # --- cache lookup ---
+    # --- dedup lookup ---
     if store and backend_id and not force:
-        cached = store.load_dataset_run_by_hash(backend_id, content_hash)
-        if cached:
-            results = cached["dataset_run_items"]
-            acc = cached.get("scores", {})
+        existing = store.load_dataset_run_by_hash(backend_id, content_hash)
+        if existing:
+            results = existing["dataset_run_items"]
+            acc = existing.get("scores", {})
             hits = acc.get("hits", sum(1 for r in results if r.get("hit")))
             total = acc.get("total", len(results))
             accuracy = acc.get("accuracy", hits / total if total else 0)
             print(
-                f"[cached] {label}: {hits}/{total} ({accuracy:.1%})"
+                f"[stored] {label}: {hits}/{total} ({accuracy:.1%})"
                 f"  |  Errors: {acc.get('errors', 0)}"
             )
             return results
@@ -636,7 +636,7 @@ async def evaluate_prompt(
             rendered, model, temperature, acc, results,
         )
         store.finalize_eval_run(backend_id, run_id, run_data)
-        print(f"[cached] Saved {run_id}")
+        print(f"[stored] Saved {run_id}")
 
     return results
 
@@ -836,7 +836,7 @@ def display_suggestions(suggestions: dict, round_num: int) -> None:
 def list_grid_plans(store: ProjectStore, backend_id: str) -> list:
     """List all grid search plans with their status.
 
-    Shows plan metadata only (no cache count — that requires knowing the
+    Shows plan metadata only (no stored result count — that requires knowing the
     eval sampling params which this function doesn't have).
     """
     plans = store.list_grid_plans(backend_id)
@@ -869,14 +869,14 @@ def load_grid_plan_results(
     shared_queries: bool = True,
     seed: int = 42,
 ) -> "pd.DataFrame | None":
-    """Load cached eval results for a grid plan and return a results DataFrame.
+    """Load stored eval results for a grid plan and return a results DataFrame.
 
     Rebuilds the same DataFrame shape that ``run_grid_search`` returns,
-    but purely from cached data (no backend calls).  Returns None if
-    the plan doesn't exist or has no cached results.
+    but purely from stored data (no backend calls).  Returns None if
+    the plan doesn't exist or has no stored results.
 
     Must receive the same eval sampling params as the grid search that
-    produced the cached runs, so that cache keys match.
+    produced the runs, so that content hashes match.
     """
     plan_data = store.load_grid_plan(backend_id, plan_id)
     if not plan_data:
@@ -891,10 +891,10 @@ def load_grid_plan_results(
     )
     rows = []
     for info in eval_plan:
-        cached = store.load_dataset_run_by_hash(backend_id, info.content_hash)
-        if not cached:
+        existing = store.load_dataset_run_by_hash(backend_id, info.content_hash)
+        if not existing:
             continue
-        scores = cached.get("scores", {})
+        scores = existing.get("scores", {})
         row = dict(info.coord_dict) if isinstance(info.coord_dict, dict) else {}
         row.update({
             "prompt_state_id": info.ps_id,
@@ -909,7 +909,7 @@ def load_grid_plan_results(
         return None
 
     df = pd.DataFrame(rows).sort_values("accuracy", ascending=False).reset_index(drop=True)
-    print(f"  {plan_id}: {len(rows)}/{len(grid_points)} cached")
+    print(f"  {plan_id}: {len(rows)}/{len(grid_points)} stored")
     return df
 
 
@@ -969,7 +969,7 @@ def show_grid_overview(
         elif len(plan_dfs) == 1:
             print("\nOne plan has results. Proceed to 4.5a.")
         else:
-            print("\nNo cached results yet. Run 4.5a then 4.5c.")
+            print("\nNo stored results yet. Run 4.5a then 4.5c.")
 
     merged_grid_df = None
     if merge_plans and len(plan_dfs) > 1:
@@ -1206,22 +1206,22 @@ async def run_grid_search(
         grid_points, state_lookup, eval_data,
         eval_queries_per_point, shared_queries, grid_seed,
     )
-    n_cached = 0
+    n_stored = 0
     if store and backend_id:
         for info in eval_plan:
             if store.load_dataset_run_by_hash(backend_id, info.content_hash):
-                n_cached += 1
+                n_stored += 1
 
     n_total = len(grid_points)
-    n_remaining = n_total - n_cached
+    n_remaining = n_total - n_stored
     q_label = (
         f"{eval_queries_per_point} quer{'y' if eval_queries_per_point == 1 else 'ies'}"
         if eval_queries_per_point > 0
         else f"{len(eval_data)} queries"
     )
-    if n_cached > 0:
+    if n_stored > 0:
         print(
-            f"[resume] Skipping {n_cached}/{n_total} cached grid points, "
+            f"[resume] Skipping {n_stored}/{n_total} stored grid points, "
             f"evaluating {n_remaining} remaining"
         )
     else:
@@ -1252,14 +1252,14 @@ async def run_grid_search(
             f"acc={row['accuracy']:.1%} ({row['hits']}/{row['total']})"
         )
 
-    def on_point_cached(idx, row):
-        pass  # already counted in n_cached summary
+    def on_point_reused(idx, row):
+        pass  # already counted in n_stored summary
 
     df = await _run_grid_search(
         grid_points, state_lookup, eval_data, backend_client,
         on_point_done=on_point_done,
         on_query_done=on_query_done,
-        on_point_cached=on_point_cached,
+        on_point_reused=on_point_reused,
         request_delay=eval_llm.get("request_delay", 1.0),
         store=store,
         backend_id=backend_id,
@@ -1440,7 +1440,7 @@ async def analyze_grid_results(
     return analysis
 
 
-def print_cache_summary(store: ProjectStore, backend_id: str) -> None:
+def print_eval_summary(store: ProjectStore, backend_id: str) -> None:
     """Print a summary table of completed and in-progress eval runs."""
     completed = store.list_dataset_runs(backend_id)
     partials = store.list_partial_evals(backend_id)
@@ -1450,7 +1450,7 @@ def print_cache_summary(store: ProjectStore, backend_id: str) -> None:
     partials = [p for p in partials if p["run_id"] not in completed_ids]
 
     if not completed and not partials:
-        print("Cache: empty (no eval runs yet)")
+        print("Eval runs: none")
         return
 
     n_completed = len(completed)
@@ -1460,7 +1460,7 @@ def print_cache_summary(store: ProjectStore, backend_id: str) -> None:
         parts.append(f"{n_completed} completed run{'s' if n_completed != 1 else ''}")
     if n_partial:
         parts.append(f"{n_partial} in-progress")
-    print(f"Cache: {', '.join(parts)}")
+    print(f"Eval runs: {', '.join(parts)}")
 
     # Build rows
     rows = []
@@ -1530,7 +1530,7 @@ def load_eval_dataset(
     experiment_id: str,
     query_limit: int = 0,
 ) -> list:
-    """Load per-query evaluation data from synced experiments or replay cache."""
+    """Load per-query evaluation data from synced experiments or stored replays."""
     eval_data = _load_eval_dataset(store, backend_id, experiment_id, query_limit)
 
     if eval_data:
@@ -1541,7 +1541,7 @@ def load_eval_dataset(
             "replay first."
         )
 
-    print_cache_summary(store, backend_id)
+    print_eval_summary(store, backend_id)
 
     return eval_data
 

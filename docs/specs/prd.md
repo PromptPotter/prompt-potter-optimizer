@@ -1,44 +1,44 @@
 # Product Requirements Document: PromptPotter Optimizer
 
-**Version:** 0.5.0
-**Date:** 2026-02-22
-**Status:** Draft
-**Depends on:** [Project Charter v0.5.0](project-charter.md)
+**Version:** 0.6.0
+**Date:** 2026-02-23
+**Status:** Active
+**Depends on:** [Project Charter v0.6.0](project-charter.md)
 
 ---
 
 ## Requirements Summary
 
-| ID | Name | Priority | Description |
-|----|------|----------|-------------|
-| P0.1 | Evaluation on Dataset | P0 | Score a configuration against a labeled dataset to establish a quantitative baseline |
-| P0.2 | Failure Analysis | P0 | Analyze evaluation results to identify and categorize failure patterns |
-| P0.3 | Candidate Generation | P0 | Generate improved parameter configurations informed by failure analysis |
-| P0.4 | Optimization Loop | P0 | Orchestrate the full evaluate-analyze-generate-select cycle without manual intervention |
-| P0.5 | PROMPT_STATE Tracking | P0 | Version every configuration snapshot with structured metadata and a parameters dictionary |
-| P1.1 | File-Based Registry | P1 | Persist campaigns and trials to disk in a standard format for comparison and audit |
-| P1.2 | Workflow-Based Optimization | P1 | Optimize a single step within a multi-step pipeline while running the full workflow for scoring |
-| P1.3 | Human-in-the-Loop Gates | P1 | Pause optimization for developer review and approval of candidates before promotion |
-| P1.4 | Real Web Search Provider | P1 | Replace the mock web search node with a real search API provider |
-| P1.5 | Candidate Population and Selection | P1 | Support multiple strategies for evaluating and selecting the best candidate |
-| P1.6 | Ablation Comparison | P1 | Remove a pipeline component, replay, and compare with statistical significance tests (p-values) |
-| P1.7 | Pipeline Parameter Passthrough | P1 | Discover available pipeline parameters via backend schema endpoint (`GET /pipeline`), forward controllable knobs (search depth, LLM temperatures, candidate limits, score weights) and `ranking_prompt` override to backend via execution requests |
-| P2.1 | Reflection-Based Learning | P2 | Generate natural language reflections after each iteration to inform the next |
-| P2.2 | Evolutionary Operators | P2 | Apply genetic algorithm operators (crossover, mutation) to evolve a population of configurations |
-| P2.3 | MCP Server Mode | P2 | Expose optimization as an MCP server for use by Claude Code and other MCP clients |
-| P2.4 | Streamlit Dashboard | P2 | Provide a visual interface for browsing campaigns, comparing trials, and exploring datasets |
-| P2.5 | Non-Prompt Optimization Targets | P2 | Generalize the optimization loop to non-prompt parameter types (schemas, scoring functions, fuzzy matchers, GA settings) |
-| P2.6 | Public Deployment Readiness | P2 | Stateless API design with API key authentication and rate limiting readiness for public deployment |
+| ID | Name | Priority | Status | Description |
+|----|------|----------|--------|-------------|
+| P0.1 | Backend Evaluation on Dataset | P0 | Implemented | Evaluate a prompt against a labeled dataset via the backend's `/matches` endpoint with content-addressed deduplication and crash recovery |
+| P0.2 | Failure Analysis | P0 | Implemented | Analyze evaluation results to categorize failure patterns and generate actionable suggestions |
+| P0.3 | Candidate Generation | P0 | Implemented | Generate improved prompt configurations via LLM meta-prompt informed by failure analysis |
+| P0.4 | Optimization Loop | P0 | Implemented | Semi-automatic or manual optimization rounds with patience-based stopping |
+| P0.5 | PROMPT_STATE Tracking | P0 | Implemented | Immutable, versioned prompt snapshots with structured metadata and lineage |
+| P0.6 | Grid Search Exploration | P0 | Implemented | Systematic exploration of Layer 1 prompt field variants with sampling, deduplication, and LLM analysis |
+| P1.1 | Workflow Engine Migration | P1 | Planned (M3) | Migrate optimizer services into existing workflow runner as proper nodes |
+| P1.2 | Iterative Feedback Cycling | P1 | Planned (M3) | 3-path routing (generate/refine context/modify plan) via workflow engine nodes |
+| P1.3 | Campaign Registry | P1 | Planned (M3) | Formal campaign/trial persistence with Langfuse/MLflow-compatible structure |
+| P1.4 | Full Langfuse Integration | P1 | Planned (M3) | Per-trial tracing with score attachment and campaign-level grouping |
+| P1.5 | Discovery Protocol | P1 | Implemented | Discover backend pipeline parameters via `GET /pipeline` for dynamic grid search config |
+| P1.6 | Ablation Comparison | P1 | Implemented | Statistical comparison with McNemar's, Wilcoxon, hit@k |
+| P1.7 | Pipeline Parameter Passthrough | P1 | Implemented | Forward parameter overrides to backend execution requests |
+| P2.1 | Evolutionary Operators | P2 | Planned | GA/DE population-based optimization |
+| P2.2 | MCP Server Mode | P2 | Planned | Expose optimization as MCP tools |
+| P2.3 | Streamlit Dashboard | P2 | Planned | Visual campaign browser and trial comparison |
+| P2.4 | Non-Prompt Optimization Targets | P2 | Planned | Generalize to schemas, scoring functions, fuzzy matchers |
+| P2.5 | Public Deployment Readiness | P2 | Planned | Authentication, rate limiting, multi-tenancy |
 
 ---
 
 ## User Personas
 
 **Solo Developer ("Prompt Engineer Pat")**
-Builds LLM-powered features and needs to iterate on parameters systematically. Defines a dataset, runs an optimization campaign, and gets back a better configuration with evidence. Uses JupyterLab or the API directly. Values reproducibility and the ability to compare runs.
+Builds LLM-powered features and needs to iterate on parameters systematically. Defines a dataset, runs an optimization campaign via the notebook, and gets back a better configuration with evidence. Uses JupyterLab as the primary interface. Values reproducibility and the ability to compare runs.
 
 **Pipeline Operator ("CI/CD Casey")**
-Integrates parameter optimization into automated workflows. Calls the REST API from scripts or CI pipelines. Needs structured responses and clear status reporting. Cares about idempotency and error handling.
+Integrates parameter optimization into automated workflows. Calls the REST API from scripts or CI pipelines. Needs structured responses and clear status reporting. Cares about idempotency and error handling. Currently uses the backends API for sync, execute, and compare; API-driven optimization becomes available after the workflow engine migration (P1.1).
 
 **Benchmarking Researcher ("Dataset Dana")**
 Runs systematic benchmarks against established datasets (MedMentions, BC5CDR, domain-specific LCA corpora). Values reproducibility, statistical rigor, and structured outputs suitable for publication. Uses PromptPotter to compare pipeline variants with p-values and per-query breakdowns, then exports results for inclusion in research papers.
@@ -47,355 +47,170 @@ Runs systematic benchmarks against established datasets (MedMentions, BC5CDR, do
 
 ## Key Terms
 
-This document uses terms defined in the [Project Charter](project-charter.md): **Campaign**, **Trial**, **PROMPT_STATE**, and **Evaluation dataset**. Refer to the charter's Key Terms table for definitions.
+This document uses terms defined in the [Project Charter](project-charter.md): **Campaign**, **Trial**, **PROMPT_STATE**, **Evaluation dataset**, and **Grid Search**. Refer to the charter's Key Terms table for definitions.
 
 **Additional terms used in requirements:**
 
 | Term | Definition |
 |------|-----------|
 | **Configuration** | The complete set of tunable parameters for an optimization target: prompt text, few-shot examples, temperature, retrieval counts, similarity thresholds, and any other non-code values that affect LLM behavior. |
-| **Evaluator** | A scoring function that compares actual outputs to expected outputs. Examples: exact string match, LLM-as-judge with criteria, custom metric functions. |
-| **Candidate** | A proposed new configuration generated during optimization, paired with a rationale explaining what it changes and why. |
+| **Evaluator** | A scoring function that compares actual outputs to expected outputs. Currently: exact string match (hit@1). LLM-as-judge evaluator exists in code but is not wired into the backend evaluation path. |
 
 ---
 
 ## P0 — Must Have (Core Optimizer)
 
-### P0.1: Evaluation on Dataset
+All P0 requirements are implemented and working. See the referenced source files for implementation details.
 
-**As a** developer, **I want to** evaluate a configuration against a labeled dataset **so that** I have a quantitative baseline before optimization.
+### P0.1: Backend Evaluation on Dataset
 
-**What the system does:**
-- Accepts an initial configuration and an evaluation dataset (list of input/expected-output pairs, loaded from the consuming project)
-- Evaluates in one of two modes: **backend evaluation** (full pipeline via backend API with `ranking_prompt` override — primary) or **local evaluation** (cached pipeline data + local LLM reranker — fallback). See [ADD Evaluation Modes](add.md#evaluation-modes) for details.
-- Scores outputs using one or more evaluators (exact match, LLM-as-judge, custom)
-- Returns per-item scores and aggregate metrics
-- Logs all evaluations to Langfuse with parent-child trace hierarchy
+Evaluate prompts against labeled datasets via the backend's `POST /matches` with `ranking_prompt` override. Content-addressed deduplication, incremental `.partial.jsonl` writes for crash recovery, partial-run resume.
 
-The core operation for the TermNorm validation (SC5) is evaluating both **Variant A** (table reranker only) and **Variant B** (table reranker + LLM2 semantic reranking) against the same dataset to produce comparable scores. Backend evaluation is required for accurate results because the token matching step needs the backend's loaded database. Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). MedMentions 500-term subset serves as an additional biomedical benchmark. LCA dataset validation follows when deploying to real-world use.
+**Implementation:** `api/services/prompt_eval.py`
 
-**Acceptance criteria:**
-1. Given a configuration and a dataset of at least 500 items, the system returns aggregate scores and per-item results
-2. At least two evaluator types are supported: exact match and LLM-as-judge
-3. Every evaluation is logged to Langfuse as a trace with scores attached
-4. Evaluation datasets are loaded from an external source (file path or URL); PromptPotter does not host them
+### P0.2: Failure Analysis and Suggestions
 
-### P0.2: Failure Analysis
+Analyze evaluation results to categorize failure patterns and generate structured suggestions: failure categories, parameter suggestions, prompt phrase fragments, suggested config JSON.
 
-**As a** developer, **I want** the system to analyze where my configuration fails **so that** I understand what to improve before generating candidates.
-
-**What the system does:**
-- Given evaluation results, identifies failing examples (score below a configurable threshold)
-- Categorizes failures into patterns (e.g., wrong format, missing information, hallucination, edge cases, ambiguous inputs)
-- Produces a structured analysis report with specific failure examples cited
-- Passes the analysis forward to the candidate generation step
-
-**Acceptance criteria:**
-1. Analysis identifies at least three distinct failure categories with example citations from the dataset
-2. The failure report is structured (not free-text prose) so it can be consumed programmatically
-3. Analysis is stored as part of the optimization trace in Langfuse
+**Implementation:** `api/services/prompt_optimizer.py` — `generate_suggestions()`
 
 ### P0.3: Candidate Generation
 
-**As a** developer, **I want** the system to generate improved prompt configurations **so that** I do not have to manually rewrite parameters through trial and error.
+Generate N variant PROMPT_STATEs via LLM meta-prompt informed by failure examples. Each candidate is a derived state with lineage tracking.
 
-**What the system does:**
-
-The candidate generation process has two stages:
-
-1. **Initialization** — An AI agent analyzes the user-provided context (domain description, task requirements, constraints) and produces structured prompt components via structured output parsing:
-   - `task_intent` — what the prompt needs to accomplish
-   - `instruction` — step-by-step reasoning directive (e.g., "Let's think step by step.")
-   - `answer_format` — output format specification (e.g., "Wrap your final answer in `<ANS>` tags.")
-
-2. **Grow/Filter** — Given the current prompt state's **Layer 1 fields** (persona, task_intent, problem_description, instruction, thinking_style, answer_format), enriches and expands the prompt. This node operates on structured prompt components, not raw text, enabling targeted modifications.
-
-Candidates are generated as structured prompt states with typed fields, not opaque prompt strings. Each field can be independently modified based on analysis feedback.
-
-**Acceptance criteria:**
-1. Initialization produces structured prompt components from arbitrary context input
-2. Grow/Filter produces enriched prompt states with all required fields populated
-3. In Phase 1 (linear mode), N independent runs produce meaningfully different prompt variants through breadth
-4. Candidates can modify any prompt component field (persona, task_intent, problem_description, instruction, thinking_style) when analysis suggests it
-5. Each candidate state is a valid PromptState with lineage tracking via `parent_id`
+**Implementation:** `api/services/prompt_optimizer.py` — `generate_candidates()`
 
 ### P0.4: Optimization Loop
 
-**As a** developer, **I want** an automated DAG-based optimization loop that initializes, evaluates, analyzes, and adapts **so that** optimization runs without manual intervention.
+Semi-automatic loop with patience-based stopping, or manual per-round control. Configurable via campaign JSON (`n_variants`, `creativity`, `improvement_threshold`, `patience`, `max_rounds`).
 
-**What the system does:**
-- Implements a DAG-based iterative workflow (derived from the reference n8n design in `docs/design/optimization-workflow.n8n.json`)
-- **Initialization:** AI agent analyzes context and produces structured prompt components
-- **Main loop per iteration:** prompt state flows through Grow/Filter --> Analysis + Evaluation --> counter increment --> stop condition check
-- **Feedback routing:** Analysis produces a `next_action` decision that routes to one of three feedback paths:
-  - `"generate"` — **Layer 1**: loop back to main_data to create new variants
-  - `"refine context"` — **Layer 2**: update context, then update plan, then loop back
-  - `"modify plan"` — **Layer 3**: update the optimization plan, then loop back
-- **Stop condition:** counter-based (counter >= N), configurable iteration limit
-- Layer 3 ships with `OptimizationDefaults` providing sensible strategy parameters (n_variants, creativity, selection_strategy, improvement_threshold, max_iterations). These should rarely need changing.
-- Returns the best-performing prompt state with full lineage
-
-**Phased rollout:**
-- **Phase 1 (M2):** Linear mode — initialization --> grow/filter --> analysis+evaluation --> output. No feedback cycling. Run N independent times for breadth-first exploration.
-- **Phase 2 (post-M2):** Full cycling mode with feedback paths enabled. Counter threshold set to N (configurable). Iterative depth-first refinement.
-
-**Acceptance criteria:**
-1. Phase 1: linear mode runs end-to-end and returns a scored prompt state
-2. Phase 1: N independent linear runs produce diverse candidates; the best is selectable by score
-3. Phase 2: the full DAG with feedback cycling runs and stops when counter >= N
-4. Each iteration's results are traceable in Langfuse with parent-child relationships
-5. The returned result includes the full lineage from initialization to best configuration
-6. The `next_action` routing correctly dispatches to the three feedback paths (Phase 2)
+**Implementation:** `notebooks/_campaign_lib.py` — `run_optimization_loop()`, `run_manual_round()`
 
 ### P0.5: PROMPT_STATE Tracking
 
-**As a** developer, **I want** each configuration version to carry structured metadata **so that** I can trace how parameters evolved across trials.
+Immutable, versioned prompt snapshots organized into 3 optimization layers. `render()`, `derive()`, `diff()`.
 
-**What the system does:**
-- Maintains a PROMPT_STATE model that snapshots the full configuration at each trial: structured prompt components organized into three optimization layers (Generate, Refine Context, Modify Plan), plus few-shot examples and a `parameters` dictionary for all other tunable values (temperature, retrieval counts, thresholds, etc.)
-- Each optimization trial produces a new PROMPT_STATE
-- State transitions are logged with diffs showing what changed between parent and child
+**Implementation:** `api/models/prompt_state.py`
 
-**Acceptance criteria:**
-1. PROMPT_STATE includes a `parameters` dictionary that can hold arbitrary key-value pairs for non-prompt configuration (e.g., temperature, retrieval_count, similarity_threshold)
-2. Every trial references its parent state and describes the changes made
-3. Given two PROMPT_STATE snapshots, the system can produce a structured diff
+### P0.6: Grid Search Exploration
+
+Systematic exploration of Layer 1 prompt field variants. Default axis library, LLM context restructuring, distance-weighted stratified sampling, plan persistence with automatic resume, per-point query sampling, content-addressed deduplication, LLM result analysis.
+
+**Implementation:** `api/services/grid_search.py`
 
 ---
 
-## P1 — Should Have (Registry and Integration)
+## P1 — Should Have (Workflow Engine Migration and Integration)
 
-### P1.1: File-Based Registry
+### P1.1: Workflow Engine Migration
 
-**As a** developer, **I want** optimization campaigns and trials persisted to disk **so that** I can review, compare, and audit runs after they complete.
-
-**What the system does:**
-- Implements the campaign/trial hierarchy described in the registry design document
-- Campaigns contain metadata, configuration, and a list of trials
-- Trials contain PROMPT_STATE snapshots, scores, and parent references
-- Results are stored in JSONL format (OpenAI Evals standard)
-- Lineage tracking records which trial spawned which
-
-**Acceptance criteria:**
-1. Starting an optimization creates a campaign directory with metadata
-2. Each trial writes its metadata and per-item results
-3. Lineage is tracked so the full parent-child tree can be reconstructed
-4. Progress events are written as an append-only event stream
-5. Campaign data can be listed, retrieved, and exported through the API
-
-### P1.2: Workflow-Based Optimization
-
-**As a** developer, **I want** to optimize parameters for a single step within a multi-step pipeline **so that** I can improve complex systems like TermNorm's retrieval-ranking-classification chain.
+**As a** developer, **I want** the optimizer migrated into the existing workflow engine **so that** optimization runs as a proper DAG with reusable nodes and API-driven orchestration.
 
 **What the system does:**
-- Accepts a workflow definition and identifies which step to optimize
-- Runs the full workflow end-to-end for each evaluation via the backend API (not just the target step in isolation). For TermNorm, this means calling `/matches` with a `ranking_prompt` override — the backend executes the complete pipeline (web search → LLM1 → token matching → LLM2) and only the LLM2 ranking prompt varies between candidates.
-- Modifies only the target step's configuration between iterations; other steps remain fixed
-- Scores the overall workflow output, not just the target step's output
+- Creates optimization nodes wrapping existing service logic:
+  - **InitNode** — wraps `restructure_context()` to produce initial PROMPT_STATE from context
+  - **GrowFilterNode** — wraps `generate_candidates()` to produce N variant PROMPT_STATEs
+  - **AnalysisEvalNode** — wraps `evaluate_prompt_batch()` + `generate_suggestions()` to score and analyze
+- Nodes run inside the existing workflow engine (`api/core/workflow_runner.py`)
+- Optimization workflow definition (CWL-style) wires nodes into a linear pipeline
+
+**Target architecture:** The existing workflow engine provides DAG execution, node reuse, and context passing. The optimizer currently works as standalone services orchestrated by the notebook. This migration formalizes the architecture without changing the underlying optimization logic.
 
 **Acceptance criteria:**
-1. A developer can specify which step in a workflow to optimize
-2. The full workflow executes during evaluation via the backend, with only the target step's parameters changing
-3. Scoring reflects the end-to-end workflow output quality
-4. Backend evaluation is the primary mode; local evaluation with cached pipeline data is available as a fallback
+1. InitNode, GrowFilterNode, and AnalysisEvalNode are registered as workflow nodes
+2. An optimization workflow definition runs end-to-end in the workflow runner
+3. The workflow produces scored PROMPT_STATEs with full lineage
+4. Existing service logic is reused (nodes are thin wrappers, not reimplementations)
 
-### P1.3: Human-in-the-Loop Gates
+### P1.2: Iterative Feedback Cycling
 
-**As a** developer, **I want** to review and approve parameter candidates before they are promoted **so that** I maintain control over configuration quality.
+**As a** developer, **I want** the optimizer to automatically route between three feedback paths **so that** it can adapt its strategy based on analysis results.
 
 **What the system does:**
-- After candidate generation, pauses the optimization loop and presents candidates for review
-- The developer can approve, reject, or edit candidates
-- Approved candidates proceed to evaluation; rejected ones are discarded
-- Works through both the API (polling-based) and notebooks (interactive)
+- Analysis node produces a `next_action` decision routing to one of three feedback paths:
+  - `"generate"` — **Layer 1**: create new prompt variants (vary persona, instruction, etc.)
+  - `"refine context"` — **Layer 2**: update context and parameters
+  - `"modify plan"` — **Layer 3**: change the optimization strategy
+- Counter-based iteration with configurable limit (N iterations)
+- Switch-based routing via workflow engine
 
 **Acceptance criteria:**
-1. Optimization can be configured to require human approval before evaluating candidates
-2. The API reports candidates with a status indicating they are awaiting review
-3. A follow-up call accepts approve/reject/edit decisions for each candidate
-4. Rejected candidates are not evaluated, saving LLM costs
-5. In notebook mode, the system generates LLM-powered suggestions after each optimization
-   round: failure pattern analysis, parameter change recommendations, and prompt phrase
-   fragments (atomic text snippets) the user can select or modify before the next iteration
-6. Campaign configuration is exposed as a single editable JSON object containing all
-   pipeline parameters, optimization settings, and eval LLM settings
-7. Grid search exploration: LLM-assisted context restructuring into Layer 1 fields,
-   systematic sweep using shipped default axis library, ranked results with interaction
-   heatmaps, LLM consultation on results
+1. The `next_action` field correctly routes to the three feedback paths
+2. Counter-based stopping ends the loop after N iterations
+3. Each feedback path modifies the appropriate optimization layer
+4. The full cycling workflow runs end-to-end
 
-### P1.4: Real Web Search Provider
+### P1.3: Campaign Registry
 
-**As a** developer, **I want** the web search node to use a real search API **so that** research workflows produce actual results.
+**As a** developer, **I want** formal campaign/trial persistence **so that** optimization data is structured for Langfuse/MLflow compatibility from the start.
 
 **What the system does:**
-- Integrates at least one real search provider (Brave Search or SearxNG)
-- The web search node uses the configured provider instead of the current mock
-- Provider selection is configurable through environment variables
+- Campaigns persist to `.promptpotter/campaigns/` with structured metadata, trial JSONL results, and lineage tracking
+- Registry hierarchy: Campaign → Trial → PROMPT_STATE + scores
+- API endpoints for listing, detail, and export
+- Data format designed for Langfuse trace correlation and MLflow experiment mapping
 
 **Acceptance criteria:**
-1. At least one real search provider is supported
-2. Provider is selected through configuration, not code changes
-3. When no API key is configured, the system falls back gracefully to mock results with a warning
+1. Campaigns persist to disk with metadata, trials, and lineage
+2. List/detail/export API endpoints work
+3. Full lineage is reconstructable from registry files
+4. Data format is compatible with Langfuse trace IDs and MLflow run IDs
 
-### P1.5: Candidate Population and Selection
+### P1.4: Full Langfuse Integration
 
-**As a** developer, **I want** multiple candidate evaluation strategies **so that** I can choose the selection approach that best fits my optimization task.
+**As a** developer, **I want** every optimization trial traced in Langfuse **so that** I have full observability of campaign progress.
 
 **What the system does:**
-- Supports multiple strategies for selecting the best candidate: best-of-N (simple score ranking), tournament (ELO-style head-to-head comparison), and weighted multi-metric scoring
-- Strategy is configurable per optimization campaign
-- Selection rationale is recorded in trial metadata
+- Each evaluation round creates a Langfuse trace with scores attached
+- Campaign-level trace grouping links all trials
+- The Langfuse wrapper (`langfuse_client.py`) is extended from stub to full integration
 
 **Acceptance criteria:**
-1. At least two selection strategies are implemented and usable
-2. Strategy is configurable at campaign start
-3. Each selection decision includes a rationale explaining why that candidate was chosen
+1. Every evaluation round has a Langfuse trace with accuracy scores
+2. Campaign traces are grouped with parent-child relationships
+3. Langfuse dashboard shows optimization progress over rounds
+
+### P1.5: Discovery Protocol
+
+Backend pipeline parameter discovery via `GET /pipeline`. TermNorm exposes pipeline topology and tunable parameters; PromptPotter uses the schema for grid search config validation and parameter passthrough.
+
+**Implementation:** `api/services/backend_client.py` — `GET /pipeline` integration. **Status:** Implemented (M2).
 
 ### P1.6: Ablation Comparison
 
-**As a** developer, **I want to** remove a pipeline component and compare the results against the full pipeline **so that** I can determine whether that component justifies its cost and latency.
+Statistical comparison with McNemar's test, Wilcoxon signed-rank, hit@k, MRR. Per-query classification of where each variant won/lost.
 
-**What the system does:**
-- Accepts experiment data (evaluation results from a pipeline run) and a component to ablate (skip)
-- Replays the experiment with the specified component removed (e.g., skip the LLM2 reranking step)
-- Computes paired ML metrics: hit@k, MRR, latency, confidence
-- Runs statistical significance tests (McNemar's test for classification agreement, Wilcoxon signed-rank for latency) and reports p-values
-- Returns a structured comparison (JSON) with per-query classification (where the removed component helped, hurt, or made no difference)
-
-**User story:** A developer runs a TermNorm pipeline with web search, entity profiling (LLM1), token matching, and LLM2 semantic reranking. They want to know if LLM2 is worth the extra cost. They upload the experiment results, select "skip LLM2," and the system replays all queries without LLM2, then produces a statistical comparison showing hit@1 with McNemar's p-value and latency savings with Wilcoxon's p-value, plus a per-query breakdown of where LLM2 helped or hurt.
-
-**Acceptance criteria:**
-1. Given experiment data and a component to skip, the system produces ablated variant results
-2. Comparison includes hit@1 with McNemar's test p-value and latency with Wilcoxon p-value
-3. Per-query classification shows which queries were affected by the ablation
-4. All results are structured JSON consumable by any client (CLI, notebook, JS frontend)
-5. Report is reproducible from saved results without re-running the pipeline
+**Implementation:** `api/services/comparison.py`. **Status:** Implemented (M1). Endpoint: `POST /api/v1/backends/{id}/compare`.
 
 ### P1.7: Pipeline Parameter Passthrough
 
-**As a** developer, **I want** PromptPotter to discover available pipeline parameters from the backend and forward my overrides during execution **so that** I can tune any backend knob without hardcoding parameter knowledge in PromptPotter.
+Forward `pipeline_params` and `ranking_prompt` override to backend `/matches`. Echoed in execution responses.
 
-**What the system does:**
-- Calls the backend's pipeline discovery endpoint (`GET /pipeline`) to learn the pipeline topology (steps, types, input/output signatures) and the full set of tunable parameters (name, type, default, step, description)
-- Uses the discovered parameter schema to validate grid search configurations and generate parameter combinations
-- Forwards parameter overrides to the backend's execution endpoint (`POST /matches`) during optimization and grid search
-- Echoes applied `pipeline_params` in execution responses for traceability
-
-**Acceptance criteria:**
-1. PromptPotter discovers the pipeline schema from the backend at runtime, without hardcoded parameter lists
-2. Discovered parameters are available for grid search axis configuration and optimization
-3. New parameters added to the backend are automatically available to PromptPotter without code changes
-4. Parameter overrides are forwarded to the backend and echoed in execution responses
-5. Invalid parameter names (not in the discovered schema) are rejected with a clear error
+**Implementation:** `api/services/backend_client.py`. **Status:** Implemented (M1). Endpoint: `POST /api/v1/backends/{id}/execute`.
 
 ---
 
 ## P2 — Nice to Have (Advanced Capabilities)
 
-### P2.1: Reflection-Based Learning
+### P2.1: Evolutionary Operators
 
-**As a** developer, **I want** the system to generate natural language reflections after each iteration **so that** accumulated insights improve candidate generation over time.
+GA/DE population-based optimization: maintain a population of N configurations, apply crossover and mutation, selection pressure per generation. Inspired by EvoPrompt.
 
-**What the system does:**
-- After each iteration, the system generates a structured reflection summarizing what was learned: which changes helped, which did not, and what patterns are emerging
-- Reflections are chained across iterations and fed into the next iteration's generation context
-- The reflection chain is stored as part of the campaign record
+### P2.2: MCP Server Mode
 
-**User story:** A developer optimizing TermNorm's system prompt runs a 5-iteration campaign. By iteration 3, the reflection chain has accumulated insights like "adding explicit instructions for rare disease abbreviations improved accuracy on edge cases but slightly degraded performance on common terms." The generator in iteration 4 uses this history to propose candidates that balance both concerns.
+Expose optimization as MCP tools for Claude Code and other MCP-capable clients. At minimum: start campaign, check status, get results.
 
-**Acceptance criteria:**
-1. Each iteration produces a structured reflection (not just raw scores)
-2. The reflection from iteration N is included in the generation context for iteration N+1
-3. The full reflection chain is stored and retrievable from the campaign record
-4. Reflections reference specific failure patterns and candidate changes, not generic observations
+### P2.3: Streamlit Dashboard
 
-### P2.2: Evolutionary Operators
+Visual interface: campaign browser with score trajectories, trial comparison with structured diffs, dataset explorer with per-item scores.
 
-**As a** developer, **I want** genetic algorithm operators applied to configuration evolution **so that** the optimizer explores a wider search space than single-candidate rewriting allows.
+### P2.4: Non-Prompt Optimization Targets
 
-**What the system does:**
-- Maintains a population of configurations across generations (not just a single "best so far")
-- Applies crossover (combining parts of two configurations) and mutation (random perturbation of parameters) to produce new candidates
-- Supports both genetic algorithm (GA) and differential evolution (DE) strategies, inspired by the EvoPrompt framework
-- Selection pressure is applied each generation to keep the population focused on high-performing regions
+Generalize the optimization loop to schemas, scoring functions, fuzzy matching thresholds, retrieval queries, GA settings. Pluggable state schema replacing PROMPT_STATE.
 
-**User story:** A developer has a pipeline with 6 tunable parameters. Single-candidate rewriting tends to get stuck in local optima. They switch to evolutionary mode, which maintains a population of 10 configurations. Crossover combines the prompt from one high-scorer with the temperature and retrieval count from another, discovering a combination that neither parent had.
+### P2.5: Public Deployment Readiness
 
-**Acceptance criteria:**
-1. The optimizer can maintain a population of N configurations across generations (configurable N)
-2. Crossover produces child configurations by combining elements from two parents
-3. Mutation introduces controlled random changes to parameters
-4. Both GA and DE strategies are selectable at campaign start
-5. Population fitness improves over generations on the evaluation dataset
-
-### P2.3: MCP Server Mode
-
-**As a** developer, **I want** PromptPotter exposed as an MCP server **so that** Claude Code and other MCP-capable clients can invoke optimization directly from the development environment.
-
-**What the system does:**
-- Exposes core optimization capabilities (start campaign, check status, get results) as MCP tools
-- MCP clients can discover and invoke these tools without manual API calls
-- Campaign results are returned in structured format consumable by the MCP client
-
-**User story:** A developer working in Claude Code on a prompt engineering task types a command that triggers a PromptPotter optimization campaign through MCP. The results come back directly in the IDE context, showing the best configuration and score trajectory without switching to a browser or terminal.
-
-**Acceptance criteria:**
-1. PromptPotter runs as an MCP server alongside or integrated with the FastAPI service
-2. At minimum, three MCP tools are exposed: start a campaign, check campaign status, get campaign results
-3. An MCP client (e.g., Claude Code) can discover and invoke these tools
-4. Results include the best configuration and score trajectory in structured format
-
-### P2.4: Streamlit Dashboard
-
-**As a** developer, **I want** a visual dashboard for browsing optimization results **so that** I can quickly compare campaigns and understand score trajectories without writing code.
-
-**What the system does:**
-- Provides a Streamlit application with three views: campaign browser, trial comparison, and dataset explorer
-- Campaign browser shows all campaigns with their score trajectories over time
-- Trial comparison displays side-by-side diffs of configurations and scores between any two trials
-- Dataset explorer shows per-item scores with filtering and sorting to identify persistent failure cases
-
-**User story:** After running three optimization campaigns against the TermNorm MedMentions dataset, a developer opens the dashboard to compare them. The campaign browser shows that campaign 2 achieved the highest final score. Drilling into trial comparison, they see that the key improvement was adding few-shot examples for rare disease abbreviations. The dataset explorer reveals 12 items that failed across all campaigns, suggesting a dataset quality issue rather than a configuration problem.
-
-**Acceptance criteria:**
-1. Campaign browser lists all campaigns with metadata and a score trajectory chart
-2. Trial comparison view shows structured diffs between two selected trials (configuration changes and score deltas)
-3. Dataset explorer displays per-item scores with the ability to filter by score range and sort by any metric
-4. Dashboard reads from the file-based registry (P1.1) with no additional data store required
-
-### P2.5: Non-Prompt Optimization Targets
-
-**As a** developer, **I want** to optimize non-prompt parameters (schemas, scoring functions, fuzzy matching thresholds, retrieval queries, GA settings) using the same optimization loop **so that** I can improve any tunable configuration, not just prompts.
-
-**What the system does:**
-- Accepts a pluggable parameter type (state schema) that defines the tunable parameters for the optimization target
-- Runs the same DAG-based analyze-generate-evaluate loop regardless of parameter type
-- Evaluates using the same evaluator framework (exact match, LLM-as-judge, custom metrics)
-- Tracks state lineage and scores identically to prompt optimization
-
-**Acceptance criteria:**
-1. At least one non-prompt parameter type can be optimized using the same DAG loop (e.g., scoring function weights or fuzzy matching thresholds)
-2. The optimization produces measurable improvement on the evaluation dataset
-3. State lineage and scoring work identically to prompt optimization
-4. No changes to the core optimization loop are required to support the new parameter type
-
-### P2.6: Public Deployment Readiness
-
-**As a** platform operator, **I want** the API designed for stateless public deployment **so that** PromptPotter can eventually serve as an accessible optimization service.
-
-**What the system does:**
-- All API endpoints handle requests statelessly — no server-side session state between requests
-- API key authentication middleware is available (disabled by default for local use)
-- Rate limiting hooks are defined but not enforced in M1-M4
-- API contracts are stable and versioned for external consumers
-
-**Acceptance criteria:**
-1. All API endpoints are stateless — no in-memory session state across requests
-2. API key authentication middleware exists and can be enabled via configuration
-3. Rate limiting middleware exists as a no-op placeholder configurable for future enforcement
-4. API versioning (e.g., `/api/v1/`) is consistent across all endpoints
-5. Three access tiers are supported: **anonymous** (health/ready only), **authenticated** (full API scoped to own data), and **admin** (user management, global config, system metrics)
-6. Authenticated users' data (campaigns, backends, executions, project store) is isolated — no cross-user data access
+Stateless API, API key authentication, rate limiting, multi-tenancy, per-user data isolation.
 
 ---
 
@@ -405,11 +220,11 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 |-------------|--------|
 | Single evaluation (500-item dataset) | Completes within 10 minutes |
 | Full optimization run (5 iterations, 500 items) | Completes within 60 minutes |
-| Registry storage per campaign | Less than 10 MB |
+| Project store storage per campaign | Less than 10 MB |
 | Concurrent optimizations | 1 for MVP; 3+ in future |
-| LLM provider support | Any provider exposing the OpenAI chat completions API (Groq, OpenAI, Anthropic) |
-| Python version | 3.10+ |
-| Langfuse trace coverage | 100% of trials have associated traces and scores |
+| LLM provider support | Groq and OpenAI (any provider exposing the OpenAI chat completions API) |
+| Python version | 3.13 |
+| Primary evaluation mode | Backend via `/matches` endpoint (no local evaluation fallback) |
 | Dataset location | External (consuming project's repository, not PromptPotter) |
 | API design | Stateless request handling; no server-side session state between requests |
 
@@ -417,42 +232,37 @@ Candidates are generated as structured prompt states with typed fields, not opaq
 
 ## Traceability Matrix
 
-This matrix maps PRD requirements to charter success criteria (bidirectional).
-
 **Requirements to Charter Success Criteria:**
 
 | Requirement | SC1: Measurable Improvement | SC2: Reproducibility | SC3: Langfuse Observability | SC4: Time to First Optimization | SC5: TermNorm Validation | SC6: Generalization Beyond Prompts |
 |-------------|:---:|:---:|:---:|:---:|:---:|:---:|
-| P0.1 Evaluation on Dataset | x | x | x | x | x | |
-| P0.2 Failure Analysis | x | | x | | x | |
+| P0.1 Backend Evaluation | x | x | | x | x | |
+| P0.2 Failure Analysis | x | | | | x | |
 | P0.3 Candidate Generation | x | | | | x | |
-| P0.4 Optimization Loop | x | x | x | x | x | x |
+| P0.4 Optimization Loop | x | x | | x | x | |
 | P0.5 PROMPT_STATE Tracking | | x | | | | |
-| P1.1 File-Based Registry | | x | | | | |
-| P1.2 Workflow-Based Optimization | | | | | x | |
-| P1.3 Human-in-the-Loop Gates | | | | | | |
-| P1.4 Real Web Search Provider | | | | | | |
-| P1.5 Candidate Population and Selection | x | | | | x | |
+| P0.6 Grid Search | x | x | | x | x | |
+| P1.1 Workflow Engine Migration | | | | | | x |
+| P1.2 Feedback Cycling | x | | | | | |
+| P1.3 Campaign Registry | | x | x | | | |
+| P1.4 Langfuse Integration | | | x | | | |
+| P1.5 Discovery Protocol | | | | | x | |
 | P1.6 Ablation Comparison | x | x | | | x | |
-| P2.1 Reflection-Based Learning | x | | | | | |
-| P2.2 Evolutionary Operators | x | | | | | |
-| P2.3 MCP Server Mode | | | | x | | |
-| P2.4 Streamlit Dashboard | | x | | | | |
-| P2.5 Non-Prompt Optimization Targets | x | | | | | x |
-| P2.6 Public Deployment Readiness | | | | x | | |
+| P1.7 Parameter Passthrough | | | | | x | |
+| P2.4 Non-Prompt Targets | x | | | | | x |
 
 **Charter Success Criteria to Requirements (reverse mapping):**
 
 | Charter Success Criterion | Required By (P0/P1) | Enhanced By (P2) |
 |--------------------------|---------------------|------------------|
-| SC1: Measurable Improvement | P0.1, P0.2, P0.3, P0.4, P1.5 | P2.1, P2.2, P2.5 |
-| SC2: Reproducibility | P0.1, P0.4, P0.5, P1.1 | P2.4 |
-| SC3: Langfuse Observability | P0.1, P0.2, P0.4 | — |
-| SC4: Time to First Optimization | P0.1, P0.4 | P2.3, P2.6 |
-| SC5: TermNorm Validation | P0.1, P0.2, P0.3, P0.4, P1.2, P1.5, P1.6 | — |
-| SC6: Generalization Beyond Prompts | P0.4 | P2.5 |
+| SC1: Measurable Improvement | P0.1, P0.2, P0.3, P0.4, P0.6, P1.2, P1.6 | P2.1, P2.4 |
+| SC2: Reproducibility | P0.1, P0.4, P0.5, P0.6, P1.3, P1.6 | — |
+| SC3: Langfuse Observability | P1.3, P1.4 | — |
+| SC4: Time to First Optimization | P0.1, P0.4, P0.6 | P2.2 |
+| SC5: TermNorm Validation | P0.1, P0.2, P0.3, P0.4, P0.6, P1.5, P1.6, P1.7 | — |
+| SC6: Generalization Beyond Prompts | P1.1 (foundation) | P2.4 |
 
 **Coverage notes:**
-- P1.3 (HITL Gates) and P1.4 (Web Search) do not directly map to a success criterion. They are included as P1 because they support the charter's vision of human-controlled optimization and full workflow support, respectively.
-- SC6 is post-M4 and has P0.4 as its foundation (the optimization loop must be target-agnostic by design). P2.5 is the specific implementation requirement.
-- All six success criteria have at least one P0 requirement ensuring they are achievable or foundationally supported.
+- SC3 (Langfuse) is currently unmet — Langfuse wrapper exists but full per-trial tracing is P1.4 (planned for M3). P1.3 (Campaign Registry) ensures the data layer is Langfuse-compatible from the start.
+- SC6 is post-M4 and has P1.1 as its foundation — the workflow engine migration makes the architecture pluggable for non-prompt targets.
+- All six success criteria have at least one P0 or P1 requirement ensuring they are achievable.

@@ -1,9 +1,9 @@
 # Work Breakdown Structure: PromptPotter Optimizer
 
-**Version:** 0.5.0
-**Date:** 2026-02-22
-**Status:** Draft
-**Depends on:** [PRD v0.5.0](prd.md), [ADD v0.5.0](add.md)
+**Version:** 0.6.0
+**Date:** 2026-02-23
+**Status:** Active
+**Depends on:** [PRD v0.6.0](prd.md), [ADD v0.6.0](add.md)
 
 ---
 
@@ -23,7 +23,8 @@
 | 0.2 | Write PRD | 1 | 0.1 | — |
 | 0.3 | Write ADD | 1 | 0.2 | — |
 | 0.4 | Write WBS and roadmap | 1 | 0.2, 0.3 | — |
-| 0.5 | Update CLAUDE.md and create CHANGELOG | 1 | 0.4 | — |
+| 0.5 | Update CLAUDE.md | 1 | 0.4 | — |
+| 0.6 | Spec rewrite v0.6.0 | 1 | — | — |
 
 ---
 
@@ -31,411 +32,298 @@
 
 ### 1.1 Add PROMPT_STATE Model — Complete
 
-- **Scope:** Create the Pydantic model that snapshots prompt text, few-shot examples, and an open parameters dictionary (temperature, retrieval count, thresholds, etc.). Include structured diff generation between two states.
+- **Scope:** Pydantic model with 3-layer architecture, structured diff, `derive()` for lineage-tracked children.
 - **Sessions:** 1
 - **Dependencies:** —
 - **PRD Ref:** P0.5
-- **Done when:**
-  - PROMPT_STATE model is importable with typed fields for structured prompt components (3-layer architecture), few-shot examples, and a parameters dict
-  - Diff function produces a structured comparison between two PROMPT_STATE instances
 - **Completed:** `06b6635 feat: add PromptState model with diff and derive`
 
 ### 1.2 Add Test Fixtures and Dataset Helpers — Complete
 
-- **Scope:** Create shared test infrastructure: conftest fixtures, sample evaluation datasets, and factory functions for PROMPT_STATE and workflow objects.
+- **Scope:** conftest fixtures, sample datasets, factory functions.
 - **Sessions:** 1
 - **Dependencies:** 1.1
 - **PRD Ref:** —
-- **Done when:**
-  - Shared fixtures provide mock LLM client, sample datasets, and PROMPT_STATE factories
-  - At least one sample dataset with 10+ input/expected-output pairs is available for tests
-- **Completed:** `28833e3`, `7664b52` — conftest.py with mock_llm_client, tmp_store, auto-reset Langfuse singleton
+- **Completed:** `28833e3`, `7664b52`
 
 ### 1.3 Write Tests for Existing Evaluators — Complete
 
-- **Scope:** Unit tests for ExactMatchEvaluator and CriteriaEvaluator covering expected passes, expected failures, and edge cases (empty input, special characters, normalization).
+- **Scope:** Unit tests for ExactMatchEvaluator and CriteriaEvaluator.
 - **Sessions:** 1
 - **Dependencies:** 1.2
 - **PRD Ref:** P0.1
-- **Done when:**
-  - Tests cover both evaluator types with at least 5 test cases each
-  - Edge cases (empty strings, Unicode, case sensitivity) are exercised
-- **Completed:** `7664b52` — test_evaluators.py with ExactMatch and CriteriaEvaluator tests, registry alias coverage
+- **Completed:** `7664b52` — later pruned in `ceb9031` (test suite reduced to core-only: PromptState + ProjectStore)
 
 ### 1.4 Write Tests for Workflow Runner — Complete
 
-- **Scope:** Unit tests for the workflow execution engine covering single-node workflows, multi-step DAGs, error propagation, and Langfuse trace emission.
+- **Scope:** Unit tests for workflow execution engine.
 - **Sessions:** 1
 - **Dependencies:** 1.2
-- **PRD Ref:** P0.1, P1.2
-- **Done when:**
-  - Tests verify correct topological execution order for multi-step workflows
-  - Error in one node propagates correctly without silent failure
-  - Langfuse tracing is invoked (mocked) during execution
-- **Completed:** `7664b52`, `0d2acc1` — test_workflow_runner.py with DAG sort, input resolution, execution tests
+- **PRD Ref:** P0.1
+- **Completed:** `7664b52`, `0d2acc1` — later pruned in `ceb9031` (test suite reduced to core-only)
 
 ### 1.5 Set Up CI Pipeline — Complete
 
-- **Scope:** GitHub Actions workflow running lint (ruff) and test (pytest) on every push and PR. Fail-fast on lint errors, report test results.
+- **Scope:** GitHub Actions: ruff lint + pytest on push/PR.
 - **Sessions:** 1
 - **Dependencies:** 1.3, 1.4
 - **PRD Ref:** —
-- **Done when:**
-  - CI runs on push to main and on all PRs
-  - Lint and test steps both pass on current codebase
-  - Failed lint or test blocks merge
-- **Completed:** `7664b52` — .github/workflows/ci.yml with ruff + pytest steps
+- **Completed:** `7664b52`
 
 ### 1.6 Update CLAUDE.md with M1 Status — Complete
 
-- **Scope:** Mark M1 complete, update current milestone to M2, document any new conventions or patterns introduced during M1.
 - **Sessions:** 1
 - **Dependencies:** 1.5
-- **PRD Ref:** —
-- **Done when:**
-  - CLAUDE.md reflects M1 as complete and M2 as current
-  - Any new file patterns or test conventions are documented
-- **Completed:** `3cc31f1` — CLAUDE.md cleaned up to reflect current project state
+- **Completed:** `3cc31f1`
 
-### 1.7 Ablation Comparison Scripts — Complete
+### 1.7 Ablation Comparison — Complete
 
-- **Scope:** Replay script (calls external pipeline API with component skipped) + comparison script (offline statistical analysis with McNemar's and Wilcoxon p-values, structured JSON output). Validates against TermNorm experiment fixture.
+- **Scope:** Replay + statistical comparison (McNemar's, Wilcoxon). Exceeded scope to include ProjectStore, backends router, and REST API endpoints.
 - **Sessions:** 1
 - **Dependencies:** 1.1
 - **PRD Ref:** P1.6
-- **Done when:**
-  - Replay script produces Variant A results from TermNorm API with `skip_llm_ranking=true`
-  - Comparison script outputs structured JSON with hit@k, MRR, p-values, and per-query classification
-  - Both scripts work offline from saved fixture files (replay only needs API for initial run)
-- **Completed:** Exceeds original scope — now includes project-based backend storage (`ProjectStore`), notebook exploration workflow, incremental writes with `on_result` callback, and REST API endpoints (`/backends/*`). Key commits: `88e3b83`, `ab154d7`, `244714d`, `7bfde52`.
+- **Completed:** `88e3b83`, `ab154d7`, `244714d`, `7bfde52`
 
 ### 1.8 Pipeline Parameter Passthrough — Complete
 
-- **Scope:** Forward controllable pipeline knobs (`max_sites`, LLM temperatures, candidate limits, score weights) from PromptPotter execution requests through to the backend `/matches` endpoint. Echo `pipeline_params` in the execution response.
+- **Scope:** Forward pipeline knobs to backend `/matches` endpoint.
 - **Sessions:** 1
 - **Dependencies:** 1.7
 - **PRD Ref:** P1.7
-- **Completed:** `19b975f feat: pipeline parameter passthrough (PromptPotter → TermNorm)`
+- **Completed:** `19b975f`
 
-**Phase 1 exit criteria:** All tests pass, CI is green, PROMPT_STATE model exists and is importable, ablation comparison produces statistical report, CLAUDE.md updated. **All exit criteria met.**
+**Phase 1 exit criteria met:** All tests pass, CI green, PROMPT_STATE model exists, ablation comparison works, pipeline params forwarded.
 
 ---
 
-## Phase 2: Core Optimizer — DAG-Based Workflow (M2)
+## Phase 2: Core Optimizer (M2) — Largely Complete
 
-Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization workflow. The full cycling mode with feedback paths is deferred to post-M2.
+Phase 2 delivers the service-based optimization capabilities: grid search, iterative candidate generation, backend evaluation with deduplication, the HITL campaign notebook, and discovery protocol integration.
 
-### 2.1 Implement Initialization Node
+### 2.1 HITL Campaign Notebook — Complete
 
-- **Scope:** Build the initialization node that loads evaluation dataset + context, then uses an AI Agent with structured output parsing to produce typed prompt components (task_intent, instruction, answer_format). Uses Groq + Llama 4 Maverick with structured output.
-- **Sessions:** 1
+- **Scope:** Interactive Jupyter notebook for optimization campaigns with full HITL control. Editable campaign config JSON, candidate coverage diagnostics, baseline eval, iterative optimization with patience-based stopping, LLM-generated suggestions with phrase fragments.
+- **Sessions:** 2
 - **Dependencies:** 1.1
-- **PRD Ref:** P0.3
-- **Done when:**
-  - Accepts arbitrary context input and produces structured prompt components
-  - Structured output parser validates the AI Agent's response against the schema
-  - Eval dataset is loaded and available for downstream nodes
-  - Unit tests with mock context verify component extraction
+- **PRD Ref:** P0.3, P0.4
+- **Deliverables:**
+  - `notebooks/optimization_campaign.ipynb` — full campaign workflow
+  - `notebooks/_campaign_lib.py` — thin wrapper delegating to `api/services/`
+  - Semi-automatic loop (`run_optimization_loop()`) and manual rounds (`run_manual_round()`)
+  - LLM suggestion generation with failure patterns, parameter suggestions, phrase fragments
+  - Campaign summary with comparison table, flip tracking, lineage chain, winner save
+- **Completed:** Exceeds scope — includes eval caching, incremental writes, crash recovery, rate-limit backoff, training-style progress display, `init_services()`. Key commits: `89d4a2f`, `534fa3e`, `c8c10a1`, `23717e5`, `ad5533d`, `beaf662`.
 
-### 2.2 Implement Grow/Filter Node
+### 2.2 Grid Search Service — Complete
 
-- **Scope:** Build the Grow/Filter node that takes the current prompt state (persona, task_intent, problem_description, instruction, thinking_style, answer_format) and enriches it. The node expands, refines, or constrains prompt components based on the current plan and context.
+- **Scope:** Systematic exploration of Layer 1 prompt field variants via cartesian product sweep with LLM-assisted restructuring and analysis.
 - **Sessions:** 1
 - **Dependencies:** 1.1, 2.1
-- **PRD Ref:** P0.3
-- **Done when:**
-  - Accepts a prompt state and produces an enriched prompt state (`main_data_plus`)
-  - All prompt component fields are populated and meaningful
-  - Output is a valid PromptState with `parent_id` linking to the input state
-  - Unit tests verify enrichment produces meaningfully different output
-
-### 2.3 Implement Analysis + Evaluation Node
-
-- **Scope:** Build the combined analysis and evaluation node. Evaluates the current prompt state against the dataset, produces scores, identifies failure patterns, and decides the `next_action` (one of: "generate", "refine context", "modify plan"). For Phase 1 (linear mode), `next_action` is informational only; for Phase 2 it drives the feedback router.
-- **Sessions:** 1
-- **Dependencies:** 1.1
-- **PRD Ref:** P0.1, P0.2
-- **Done when:**
-  - Evaluates a prompt state against the dataset and returns aggregate + per-item scores
-  - Produces a structured report with failure categories and cited examples
-  - Report includes a `next_action` field with one of the three valid values
-  - At least two evaluator types supported: exact match and LLM-as-judge
-
-### 2.4 Implement Linear Mode Orchestrator (Phase 1)
-
-- **Scope:** Build the orchestrator for Phase 1 (linear mode): initialization --> grow/filter --> analysis+evaluation --> output. No feedback cycling. Supports running N independent linear passes to generate diverse candidates, then selects the best by score. Manages the counter-based stop condition (counter >= 1 for linear mode).
-- **Sessions:** 2
-- **Dependencies:** 2.1, 2.2, 2.3
-- **PRD Ref:** P0.4
-- **Done when:**
-  - Runs a single linear pass: init --> grow/filter --> evaluate --> output
-  - Supports N parallel linear runs producing diverse prompt states
-  - Selects the best prompt state by score from the N runs
-  - Each run is traceable with parent-child PromptState references
-  - Returns the best prompt state with lineage and score trajectory
-
-### 2.5 Wire Optimize Router to Orchestrator
-
-- **Scope:** Replace the placeholder optimize endpoint with a real implementation that accepts an optimization request (context + dataset), invokes the linear mode orchestrator, and returns structured results.
-- **Sessions:** 1
-- **Dependencies:** 2.4
-- **PRD Ref:** P0.4
-- **Done when:**
-  - POST optimize endpoint accepts context + dataset and returns optimization results
-  - Response includes best prompt state, score, and run metadata
-  - Error cases return structured error responses
-
-### 2.6 End-to-End Optimization Test
-
-- **Scope:** Integration test that runs the linear mode optimization against a small sample dataset (10-20 items), verifying the API contract, prompt state quality, and Langfuse trace emission.
-- **Sessions:** 1
-- **Dependencies:** 2.5
-- **PRD Ref:** P0.1, P0.4
-- **Done when:**
-  - Test runs N linear optimization passes and selects the best result
-  - Langfuse traces are emitted (mocked) with parent-child structure
-  - Test completes within CI time limits
-
-### 2.7 Implement Feedback Router and Cycling Mode (Phase 2)
-
-- **Scope:** Add the Switch-based feedback router and the three feedback paths (generate, refine context, modify plan). Enable counter thresholds > 1 for iterative cycling. Implement the `updated_context` and `updated_plan` nodes.
-- **Sessions:** 2
-- **Dependencies:** 2.4
-- **PRD Ref:** P0.4, P2.1
-- **Done when:**
-  - Switch correctly routes to the three feedback paths based on `next_action`
-  - "refine context" path updates context with critiques and metrics, then updates plan
-  - "modify plan" path updates the plan directly
-  - "generate" path loops back to main_data for new variant generation
-  - Counter-based stop condition works with configurable threshold
-  - Integration test demonstrates multi-cycle optimization with feedback
-
-### 2.8 HITL Campaign Notebook — Complete
-
-- **Scope:** Build an interactive Jupyter notebook for running optimization campaigns
-  with full HITL control. Includes: editable campaign config JSON (all pipeline + optimization
-  parameters), integrated replay, candidate coverage diagnostics, iterative prompt optimization
-  with local evaluation, and LLM-generated suggestions with phrase fragments for user selection.
-  Grid search winner serves as optional campaign starting seed.
-- **Sessions:** 2
-- **Dependencies:** 1.1 (PromptState, ProjectStore, BackendClient)
-- **PRD Ref:** P1.3, P0.3
-- **Done when:**
-  - Notebook runs end-to-end: config → replay → diagnostics → baseline eval → optimization round → suggestions
-  - Campaign config exposes all pipeline parameters + optimization settings as editable JSON
-  - After each round, LLM produces categorized failure analysis and actionable phrase fragment suggestions
-  - Winner PromptState is saved with full lineage chain
-- **Completed:** Exceeds original scope — also includes: Langfuse-style trace parsing and eval dataset loader (`load_eval_dataset()` with trace/replay priority chain), eval caching via content-addressed hashing (`eval_cache_key()`), incremental writes with crash protection (`.partial.jsonl`), partial-run resume, cache status summary, rate-limit backoff for Groq API, `_campaign_lib.py` extraction with thin wrappers over services, training-style progress display (`display_progress()`), semi-automatic optimization loop with patience-based stopping (`run_optimization_loop()`), and `init_services()` returning `backend_client` + `session_terms` for backend-driven grid search evaluation. Key commits: `89d4a2f`, `534fa3e`, `c8c10a1`, `23717e5`, `ad5533d`, `beaf662`.
-
-### 2.9 Grid Search (Initial Condition Exploration) — Complete
-
-- **Scope:** Systematic exploration of PromptState Layer 1 fields via cartesian product sweep,
-  with LLM-assisted input restructuring and result analysis. Integrated into campaign notebook
-  as pre-optimization chapter (Section 4.5).
-- **Sessions:** 1
-- **Dependencies:** 2.1 (PromptState), 2.8 (campaign notebook + _campaign_lib.py)
-- **PRD Ref:** P1.3, P0.3
+- **PRD Ref:** P0.6
 - **Deliverables:**
-  - Default grid axes library (`DEFAULT_GRID_AXES`) with shipped variations for persona, task_intent, thinking_style, answer_format
-  - LLM context restructuring (`restructure_context()`) — parse raw context into Layer 1 fields
-  - Grid search execution + visualization (`run_grid_search()`, `display_grid_results()`)
-  - Two evaluation modes: backend full-pipeline via `/matches` with `ranking_prompt` (primary) and local LLM with cached pipeline data (fallback)
-  - Backend eval features: `ranking_prompt` parameter on `BackendClient.run_match()`, per-query progress callback (`on_query_done`), incremental writes (`.partial.jsonl`), partial-run resume, per-query HIT/MISS logging in notebook
-  - LLM result analysis (`analyze_grid_results()`)
-  - Winner selection as campaign seed (`select_grid_winner()`)
-  - Evaluation data loader (`load_eval_dataset()`) with trace/replay priority chain
-  - Distance-weighted stratified sampling (`grid_budget` + `exploration_rate`) replacing fixed presets
-  - Per-point eval caching and partial-run resume via `ProjectStore`
-  - Grid plan persistence and resume: stable identity hash, plan serialization/deserialization, automatic resume on kernel restart (skips LLM restructure call)
-- **Done when:**
-  - Grid search produces ranked PromptState candidates sorted by accuracy
-  - Marginal analysis shows per-axis mean accuracy for each variant value
-  - Pairwise heatmaps visualize interaction effects between axes
-  - LLM-generated insights identify strongest fields and recommended focus
-  - Winner is selectable as optimization campaign seed
-- **Completed:** Key commits: `534fa3e`, `23717e5`, `ad5533d`, `b0fb375`, `beaf662`. Distance-weighted sampling (replacing `EXPLORATION_PRESETS`) with two primary knobs (`grid_budget`, `exploration_rate`). Backend-driven grid search evaluation via `/matches` with `ranking_prompt` override, including incremental writes, partial-run resume, and per-query HIT/MISS progress logging. `backend_client.run_match()` accepts `ranking_prompt` parameter. **Grid plan persistence:** stable identity hash over user-controlled inputs (`grid_plan_identity()`), plan serialization/deserialization preserving PromptState IDs and `render()`, `resume_or_build_grid()` orchestrator in `_campaign_lib.py`, `on_point_cached` callback for cache-hit grid points, plan status tracking (`in_progress`/`completed`), notebook cells merged (4.5a+4.5b) for single-cell resume flow.
+  - `api/services/grid_search.py` — default axis library, LLM context restructuring, distance-weighted stratified sampling, grid execution, result analysis, winner selection
+  - Grid plan persistence with stable identity hash and automatic resume
+  - Per-point query sampling (`eval_queries_per_point`, `shared_queries`)
+  - Backend evaluation via `/matches` with `ranking_prompt` override
+  - Marginal stats, pairwise heatmaps, LLM-analyzed insights
+- **Completed:** Key commits: `534fa3e`, `23717e5`, `ad5533d`, `b0fb375`, `beaf662`.
 
-### 2.10 TermNorm `GET /pipeline` Endpoint (External Repo)
+### 2.3 Prompt Evaluation Service — Complete
 
-- **Scope:** Add `GET /pipeline` endpoint to TermNorm's `api/system.py` that returns the full pipeline topology with typed steps and tunable parameter schema. The endpoint builds the response by loading the existing `pipeline_config.json`, adding `web_search` as an explicit `ExternalService` step, and adding the `parameters` array extracted from the hardcoded defaults in `research_pipeline.py`. Also update `pipeline_config.json` to include the `web_search` step.
+- **Scope:** Backend evaluation with content-addressed deduplication and crash recovery.
+- **Sessions:** (part of 2.1/2.2 work)
+- **Dependencies:** 1.1
+- **PRD Ref:** P0.1
+- **Deliverables:**
+  - `api/services/prompt_eval.py` — `backend_reranker_eval()`, `evaluate_prompt_batch()`, `compute_accuracy()`, `eval_content_hash()`, incremental writes, partial-run resume
+- **Completed:** Delivered as part of campaign notebook and grid search work.
+
+### 2.4 Prompt Optimizer Service — Complete
+
+- **Scope:** LLM-driven candidate generation, winner selection, and suggestion generation.
+- **Sessions:** (part of 2.1 work)
+- **Dependencies:** 1.1
+- **PRD Ref:** P0.2, P0.3
+- **Deliverables:**
+  - `api/services/prompt_optimizer.py` — `generate_candidates()`, `select_round_winner()`, `generate_suggestions()`, `save_campaign_winner()`
+- **Completed:** Delivered as part of campaign notebook work.
+
+### 2.5 Backend-Only Evaluation — Complete
+
+- **Scope:** Remove local evaluation fallback. Backend evaluation via `/matches` with `ranking_prompt` is the only evaluation path.
+- **Sessions:** (part of ongoing work)
+- **Dependencies:** 2.3
+- **PRD Ref:** P0.1
+- **Completed:** `82157ef feat: remove local evaluation path, backend-only evaluation`
+
+### 2.6 Per-Point Query Sampling — Complete
+
+- **Scope:** Centralize per-point query sampling logic for grid search. `resolve_point_evals()` ensures deterministic query assignment and stable content hashes.
+- **Sessions:** 1
+- **Dependencies:** 2.2
+- **PRD Ref:** P0.6
+- **Completed:** `fcd6ae6 feat: centralize per-point query sampling via resolve_point_evals()`
+
+### 2.7 Spec Rewrite v0.6.0 — In Progress
+
+- **Scope:** Complete rewrite of all 5 spec documents to match actual codebase state.
 - **Sessions:** 1
 - **Dependencies:** —
-- **PRD Ref:** P1.7
-- **Repo:** `TermNorm-excel/backend-api`
-- **Files:**
-  - `api/system.py` — Add `GET /pipeline` endpoint
-  - `logs/experiments/.../artifacts/pipeline_config.json` — Add `web_search` step
-- **Done when:**
-  - `GET /pipeline` returns the full pipeline schema with 4 steps and 12 parameters
-  - Response matches the contract specified in [TermNorm connector docs](../connectors/termnorm.md#get-pipeline--discover-pipeline-schema)
-  - Parameter defaults match the existing hardcoded values in `research_pipeline.py`
+- **PRD Ref:** —
 
-### 2.11 PromptPotter Discovery Protocol Integration
+### 2.8 TermNorm `GET /pipeline` Endpoint — Complete
 
-- **Scope:** Integrate the discovery-driven pipeline protocol into PromptPotter. Add `get_pipeline_schema()` to `backend_client.py` to call `GET /pipeline`. Update `init_services()` in `_campaign_lib.py` to call it at initialization and return the schema in the `svc` dict. Update `grid_search.py` to validate/build grid config from the discovered parameter schema instead of the hardcoded `GRID_SEARCHABLE_FIELDS`.
+- **Scope:** Add `GET /pipeline` endpoint to TermNorm backend returning pipeline topology and tunable parameter schema.
 - **Sessions:** 1
-- **Dependencies:** 2.10, 2.9
-- **PRD Ref:** P1.7
-- **Files:**
-  - `api/services/backend_client.py` — Add `get_pipeline_schema()` method
-  - `notebooks/_campaign_lib.py` — `init_services()` calls `get_pipeline_schema()` and returns it
-  - `api/services/grid_search.py` — Use discovered parameter schema to validate/build grid config
-- **Done when:**
-  - `backend_client.get_pipeline_schema()` calls `GET /pipeline` and returns parsed schema
-  - `init_services()` includes the pipeline schema in its return value
-  - Grid search validates parameter names against the discovered schema
-  - Hardcoded `GRID_SEARCHABLE_FIELDS` is replaced or augmented by discovered parameters
-  - Tests verify graceful fallback when `GET /pipeline` is unavailable (backward compatibility)
+- **Dependencies:** —
+- **PRD Ref:** P1.5
+- **Repo:** `TermNorm-excel/backend-api` (external)
+- **Completed:** Endpoint implemented and working in TermNorm backend.
 
-**Phase 2 exit criteria:** POST optimize endpoint runs the linear mode DAG and returns scored prompt states. E2E test passes in CI. Cycling mode (2.7) is implemented and tested but not required for the M2 exit gate. HITL campaign notebook runs end-to-end in JupyterLab with config editing, replay, and LLM-generated suggestions. Grid search produces ranked exploration results with LLM-analyzed insights.
+### 2.9 Discovery Protocol Integration — Complete
+
+- **Scope:** Integrate `GET /pipeline` into PromptPotter. Use discovered schema for grid search config validation and parameter passthrough.
+- **Sessions:** 1
+- **Dependencies:** 2.8, 2.2
+- **PRD Ref:** P1.5
+- **Completed:** Discovery protocol integrated and working.
+
+**Phase 2 exit criteria:** Grid search and optimization loop produce measurably improved prompts. HITL campaign notebook runs end-to-end with config editing, grid search, optimization, and LLM suggestions. Services are tested via PromptState and ProjectStore tests.
 
 ---
 
-## Phase 3: Registry and Tracking (M3)
+## Phase 3: Workflow Engine Migration (M3)
 
-### 3.1 Implement Campaign Registry
+Phase 3 migrates the service-based optimizer into the existing workflow engine as proper nodes, enabling API-driven orchestration and iterative feedback cycling.
 
-- **Scope:** Build the file-based registry that persists campaigns and trials to disk. Campaigns contain metadata and trial references; trials contain PROMPT_STATE snapshots and per-item results in JSONL format.
+### 3.0 Promote Campaign Library to Services
+
+- **Scope:** Move orchestration logic from `notebooks/_campaign_lib.py` into `api/services/`. Target: `evaluate_prompt()` dedup/resume/finalize → `prompt_eval.py`, grid pre-scan + `resume_or_build_grid()` plan lifecycle → `grid_search.py`, `run_or_load_replay()` execution reuse → `backend_client.py`, `init_services()` → new or existing service module. `_campaign_lib.py` retains only tqdm/IPython/print wrappers that delegate to services.
 - **Sessions:** 1
-- **Dependencies:** 2.4
+- **Dependencies:** 2.7
+- **PRD Ref:** P0.1, P0.6
+- **Rationale:** This logic is broadly useful beyond notebooks and should not be gated behind a notebook import. Unblocks clean node wrapping in 3.1.
+- **Done when:**
+  - All business logic (dedup decisions, partial resume, plan lifecycle) lives in `api/services/`
+  - `_campaign_lib.py` contains only UI formatting (tqdm, print, IPython display) + delegation
+  - All existing tests still pass
+  - Notebook runs identically
+
+### 3.1 Implement Optimizer Nodes
+
+- **Scope:** Create three optimization nodes wrapping existing service logic:
+  - **InitNode** — wraps `restructure_context()` to produce initial PROMPT_STATE from context
+  - **GrowFilterNode** — wraps `generate_candidates()` to produce N variant PROMPT_STATEs
+  - **AnalysisEvalNode** — wraps `evaluate_prompt_batch()` + `generate_suggestions()` to score and analyze
+- **Sessions:** 2
+- **Dependencies:** 3.0
 - **PRD Ref:** P1.1
 - **Done when:**
-  - Creating a campaign writes metadata to the expected directory structure
-  - Trials write metadata and JSONL results
-  - Campaigns and trials can be listed and retrieved by ID
+  - All three nodes are registered in `api/nodes/`
+  - Each node follows the existing node pattern (typed inputs/outputs, Pydantic models)
+  - Nodes are thin wrappers — existing service logic is reused, not reimplemented
+  - Unit tests verify each node independently with mock inputs
 
-### 3.2 Integrate Registry into Optimization Loop
+### 3.2 Optimization Workflow Definition
 
-- **Scope:** Wire the orchestrator to write campaign and trial records during optimization. Every iteration persists its PROMPT_STATE, scores, and analysis.
-- **Sessions:** 1
-- **Dependencies:** 3.1, 2.4
-- **PRD Ref:** P1.1
-- **Done when:**
-  - Running an optimization creates a campaign directory with trials
-  - Progress events are appended during execution
-  - After optimization, the full run is reconstructable from registry files
-
-### 3.3 Add Lineage Tracking
-
-- **Scope:** Record parent-child relationships between trials so the full tree from baseline to best configuration can be reconstructed.
+- **Scope:** Create a CWL-style workflow definition wiring optimizer nodes into a linear pipeline: InitNode → GrowFilterNode → AnalysisEvalNode → output.
 - **Sessions:** 1
 - **Dependencies:** 3.1
-- **PRD Ref:** P0.5, P1.1
+- **PRD Ref:** P1.1
 - **Done when:**
-  - Lineage file records which trial spawned which
-  - Given any trial, the full chain back to baseline is traversable
-  - Lineage survives process restart (persisted, not in-memory only)
+  - Workflow definition runs end-to-end in the existing workflow runner
+  - Produces scored PROMPT_STATEs with full lineage
+  - Linear mode (single pass, N independent runs) works
 
-### 3.4 Add Langfuse Score Logging for Trials
+### 3.3 Campaign Registry
 
-- **Scope:** Ensure every trial's evaluation scores are logged to Langfuse with correct parent-child trace hierarchy.
+- **Scope:** Formal campaign/trial persistence with Langfuse/MLflow-compatible data structure. Campaign directories with metadata, trial JSONL results, lineage tracking, API endpoints for list/detail/export.
+- **Sessions:** 2
+- **Dependencies:** 3.2
+- **PRD Ref:** P1.3
+- **Done when:**
+  - Campaigns persist to `.promptpotter/campaigns/` directory structure
+  - Registry hierarchy: Campaign → Trial → PROMPT_STATE + scores
+  - List/detail/export API endpoints work
+  - Full lineage is reconstructable from registry files
+  - Data format compatible with Langfuse trace IDs and MLflow run IDs
+
+### 3.4 Feedback Cycling
+
+- **Scope:** Add 3-path feedback routing (generate / refine context / modify plan) via workflow engine. Counter-based iteration with configurable limit. Analysis node produces `next_action` decision.
+- **Sessions:** 2
+- **Dependencies:** 3.2
+- **PRD Ref:** P1.2
+- **Done when:**
+  - Switch node routes to three feedback paths based on `next_action`
+  - Counter-based stopping works with configurable threshold
+  - Integration test demonstrates multi-cycle optimization
+
+### 3.5 E2E Optimization Test
+
+- **Scope:** Integration test running the optimization workflow against a sample dataset. Verifies workflow execution, prompt state quality, lineage, and campaign registry persistence.
+- **Sessions:** 1
+- **Dependencies:** 3.2, 3.3
+- **PRD Ref:** P1.1, P1.3
+- **Done when:**
+  - Test runs optimization workflow and verifies output structure
+  - Test verifies campaign registry persistence
+  - Test completes within CI time limits
+
+### 3.6 Langfuse Integration
+
+- **Scope:** Extend Langfuse wrapper from stubs to full per-trial tracing. Each eval round creates a trace with accuracy scores. Campaign-level grouping.
 - **Sessions:** 1
 - **Dependencies:** 3.2
-- **PRD Ref:** P0.1, SC3
+- **PRD Ref:** P1.4
 - **Done when:**
-  - 100% of trials have associated Langfuse traces
-  - Scores are attached to the correct trial spans
-  - Campaign-level trace groups all child trial traces
+  - Every evaluation round has a Langfuse trace with scores
+  - Campaign traces are grouped with parent-child relationships
+  - Tests verify trace emission (mocked)
 
-### 3.5 JSONL Export Endpoint
-
-- **Scope:** Add an API endpoint that exports a campaign's trial results in JSONL format compatible with OpenAI Evals conventions.
-- **Sessions:** 1
-- **Dependencies:** 3.1
-- **PRD Ref:** P1.1
-- **Done when:**
-  - GET export endpoint returns JSONL with per-item results for a given campaign
-  - Format follows OpenAI Evals conventions
-  - Returns 404 for nonexistent campaign IDs
-
-### 3.6 Campaign List and Detail Endpoints
-
-- **Scope:** Add API endpoints to list all campaigns and retrieve details for a single campaign including trial summaries and score trajectory.
-- **Sessions:** 1
-- **Dependencies:** 3.1
-- **PRD Ref:** P1.1
-- **Done when:**
-  - GET campaigns endpoint returns a list of all campaigns with metadata
-  - GET campaign detail returns full info including trial summaries
-  - Responses are bounded for large registries
-
-**Phase 3 exit criteria:** Optimization runs persist to the file registry, campaigns are viewable via API, Langfuse scores are populated for all trials.
+**Phase 3 exit criteria:** Optimization workflow runs end-to-end in the workflow engine. Campaign registry persists trials with Langfuse/MLflow-compatible structure. Feedback cycling routes correctly. E2E test passes in CI. Langfuse traces are emitted for all trials.
 
 ---
 
 ## Phase 4: Integration and Polish (M4)
 
-### 4.1 TermNorm Variant Comparison (Pinnacle Validation)
+### 4.1 TermNorm Variant Comparison (SC5)
 
-- **Scope:** Run the **Variant A vs Variant B** comparison that proves the whole system works (SC5). Evaluate Variant A (`entity_profiling` v1 + table reranker, no LLM2) once to establish the baseline score. Then run the optimization loop on Variant B's `llm_ranking` prompt -- generating v2, v3, etc. -- to find the best LLM2 prompt. Compare the best Variant B score against the Variant A baseline and produce a clear recommendation on whether the LLM2 call is worth the extra cost/latency. Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth). LCA dataset validation follows when deploying to real-world use.
+- **Scope:** Run Variant A vs Variant B comparison on BC5CDR 500-term subset. Optimize `llm_ranking` prompt. Produce recommendation.
 - **Sessions:** 2
-- **Dependencies:** 2.6, 3.2
+- **Dependencies:** 3.2
 - **PRD Ref:** SC5
 - **Done when:**
-  - Variant A baseline score is established on the BC5CDR 500-term subset
-  - Optimization campaign runs on `llm_ranking` prompt (Variant B), producing at least one improved version
-  - Variant A and best Variant B scores are compared, with a clear recommendation produced
-  - Full campaign is persisted and traceable in Langfuse
-  - Optimized prompt versions are written back to TermNorm's prompt registry
+  - Variant A baseline established
+  - Optimization campaign improves `llm_ranking` prompt
+  - Clear recommendation: is LLM2 worth it?
 
-### 4.2 Real Web Search Provider
+### 4.2 Streamlit Dashboard
 
-- **Scope:** Replace the mock web search node with a real search API (Brave Search or SearxNG). Configurable via environment variables with fallback to mock.
-- **Sessions:** 1
-- **Dependencies:** —
-- **PRD Ref:** P1.4
-- **Done when:**
-  - At least one real search provider is functional
-  - Provider selected via env var, not code changes
-  - Missing API key falls back to mock with a warning
-
-### 4.3 Human-in-the-Loop Gates
-
-- **Scope:** Pause the optimization loop after candidate generation for review. Supports approve/reject/edit via API (polling) and notebooks (interactive).
+- **Scope:** Campaign browser (score trajectories), trial comparison (structured diffs), dataset explorer (per-item scores).
 - **Sessions:** 2
-- **Dependencies:** 2.5
-- **PRD Ref:** P1.3
+- **Dependencies:** 3.3
+- **PRD Ref:** P2.3
 - **Done when:**
-  - Optimization configurable to require human approval before evaluating candidates
-  - API reports candidates awaiting review
-  - Approve/reject/edit decisions respected by the loop
-  - Rejected candidates are not evaluated
+  - Campaign browser lists campaigns with score trajectory chart
+  - Trial comparison shows diffs and score deltas
+  - Reads from campaign registry, no extra data store
 
-### 4.4 Streamlit Optimization Dashboard
+### 4.3 Docker Compose Update
 
-- **Scope:** Campaign browser (list + score trajectories), trial comparison (side-by-side diffs), dataset explorer (per-item scores with filtering).
-- **Sessions:** 2
-- **Dependencies:** 3.6
-- **PRD Ref:** P2.4
-- **Done when:**
-  - Campaign browser lists campaigns with score trajectory visualization
-  - Trial comparison shows structured diffs between two trials
-  - Dataset explorer supports filtering and sorting
-  - Reads from the file-based registry, no additional data store
-
-### 4.5 Docker Compose Update
-
-- **Scope:** Update Docker Compose for optimizer + Langfuse with correct env var passthrough and health checks.
+- **Scope:** Docker Compose for optimizer + Langfuse with env var passthrough and health checks.
 - **Sessions:** 1
-- **Dependencies:** 2.5
+- **Dependencies:** 3.2
 - **PRD Ref:** —
-- **Done when:**
-  - `docker-compose up` starts optimizer and Langfuse
-  - API keys and model config pass through
-  - Health check confirms readiness
 
-### 4.6 Documentation Update
+### 4.4 Documentation Update
 
-- **Scope:** Update README, notebooks, and stale docs to reflect the complete optimization workflow.
+- **Scope:** README, notebooks, docs updated to reflect complete optimization workflow.
 - **Sessions:** 1
-- **Dependencies:** 2.6
+- **Dependencies:** 3.5
 - **PRD Ref:** —
-- **Done when:**
-  - README documents optimization workflow and quickstart
-  - At least one notebook demonstrates a full campaign
-  - No references to removed or renamed components
 
-**Phase 4 exit criteria:** Variant A vs Variant B comparison completes on BC5CDR 500-term subset with clear recommendation, optimized `llm_ranking` prompt versions written to TermNorm registry, dashboard shows campaign results, Docker works, HITL gates functional.
+**Phase 4 exit criteria:** Variant A vs B comparison completes with clear recommendation. Dashboard shows campaigns. Docker works.
 
 ---
 
@@ -443,66 +331,69 @@ Phase 2 implements the **Phase 1 (linear mode)** of the DAG-based optimization w
 
 | Phase | Packages | Sessions |
 |-------|:--------:|:--------:|
-| M0: Specifications | 5 | 5 |
-| M1: Foundation | 7 | 7 |
-| M2: Core Optimizer (DAG Workflow) | 11 | 14 |
-| M3: Registry and Tracking | 6 | 6 |
-| M4: Integration and Polish | 6 | 9 |
-| **Total** | **35** | **41** |
+| M0: Specifications | 6 | 6 |
+| M1: Foundation | 8 | 8 |
+| M2: Core Optimizer | 9 | ~8 (8 complete, 1 in progress) |
+| M3: Workflow Engine Migration | 7 | 10 |
+| M4: Integration and Polish | 4 | 6 |
+| **Total** | **34** | **~38** |
 
 ---
 
 ## Dependency Graph
 
 ```
-M0 (0.1-0.5)
+M0 (0.1-0.6)
  |
  v
-M1 Foundation
- |-- 1.1 PROMPT_STATE ---+---+
- |-- 1.2 Fixtures -----+  |   |
- |   |-- 1.3 Eval Tests |  |   |
- |   |-- 1.4 WF Tests   |  |   |
- |       |                  |   |
- |       +-- 1.5 CI         |   |
- |            |              |   |
- |            +-- 1.6 Docs   |   |
- |                           |   |
- v                           v   v
-M2 Core Optimizer (DAG)      |   |
- |-- 2.1 Initialization -----+   |
- |-- 2.2 Grow/Filter <-- 2.1     |
- |-- 2.3 Analysis+Eval ----------+
- |       |                        |
- |       +-- 2.4 Linear Orchestrator (x2) <-- 2.1, 2.2, 2.3
- |            |
- |            +-- 2.5 Router
- |            |    |
- |            |    +-- 2.6 E2E Test
- |            |         |
- |            +-- 2.7 Cycling Mode (x2) [Phase 2]
- |                      |
- |-- 2.10 TermNorm GET /pipeline (external repo, independent)
+M1 Foundation (Complete)
+ |-- 1.1 PROMPT_STATE ----+
+ |-- 1.2 Fixtures -----+  |
+ |   |-- 1.3 Eval Tests |  |
+ |   |-- 1.4 WF Tests   |  |
+ |       |                  |
+ |       +-- 1.5 CI         |
+ |            |              |
+ |            +-- 1.6 Docs   |
+ |-- 1.7 Ablation <-- 1.1   |
+ |    |                      |
+ |    +-- 1.8 Params         |
+ |                           |
+ v                           v
+M2 Core Optimizer (Largely Complete)
+ |-- 2.1 Campaign Notebook <-- 1.1 .......... [Complete]
+ |-- 2.2 Grid Search <-- 1.1, 2.1 .......... [Complete]
+ |-- 2.3 Prompt Eval <-- 1.1 ............... [Complete]
+ |-- 2.4 Prompt Optimizer <-- 1.1 .......... [Complete]
+ |-- 2.5 Backend-Only Eval <-- 2.3 ......... [Complete]
+ |-- 2.6 Per-Point Sampling <-- 2.2 ........ [Complete]
+ |-- 2.7 Spec Rewrite ...................... [In Progress]
+ |-- 2.8 TermNorm GET /pipeline (external) . [Complete]
  |    |
- |    +-- 2.11 Discovery Integration <-- 2.10, 2.9
+ |    +-- 2.9 Discovery Integration ........ [Complete]
  |
- v                      v
-M3 Registry              |
- |-- 3.1 Registry <----- 2.4
- |    |-- 3.2 Integration
- |    |    |-- 3.4 Langfuse
- |    |-- 3.3 Lineage
- |    |-- 3.5 Export
- |    |-- 3.6 Endpoints
+ v
+M3 Workflow Engine Migration
+ |-- 3.0 Promote Campaign Lib <-- 2.7
+ |    |
+ |    +-- 3.1 Optimizer Nodes (x2) <-- 3.0
  |         |
- v         v
-M4 Integration
- |-- 4.1 TermNorm E2E (x2) <-- 2.6, 3.2
- |-- 4.2 Web Search (independent)
- |-- 4.3 HITL (x2) <-- 2.5
- |-- 4.4 Dashboard (x2) <-- 3.6
- |-- 4.5 Docker <-- 2.5
- |-- 4.6 Docs <-- 2.6
+ |         +-- 3.2 Workflow Definition <-- 3.1
+ |         |
+ |         +-- 3.3 Campaign Registry (x2) <-- 3.2
+ |         |    |
+ |         |    +-- 3.5 E2E Test <-- 3.2, 3.3
+ |         |
+ |         +-- 3.4 Feedback Cycling (x2) <-- 3.2
+ |         |
+ |         +-- 3.6 Langfuse <-- 3.2
+ |
+ v
+M4 Integration and Polish
+ |-- 4.1 TermNorm Variant Comparison (x2) <-- 3.2
+ |-- 4.2 Streamlit Dashboard (x2) <-- 3.3
+ |-- 4.3 Docker <-- 3.2
+ |-- 4.4 Docs <-- 3.5
 ```
 
 ---
@@ -511,20 +402,18 @@ M4 Integration
 
 | PRD Req | Work Packages | Phase |
 |---------|--------------|-------|
-| P0.1 | 1.3, 1.4, 2.3, 2.6 | M1, M2 |
-| P0.2 | 2.3 | M2 |
-| P0.3 | 2.1, 2.2 | M2 |
-| P0.4 | 2.4, 2.5, 2.7 | M2 |
-| P0.5 | 1.1, 3.3 | M1, M3 |
-| P1.1 | 3.1, 3.2, 3.3, 3.5, 3.6 | M3 |
-| P1.2 | 1.4 | M1 |
-| P1.3 | 2.8, 2.9, 4.3 | M2, M4 |
-| P1.4 | 4.2 | M4 |
-| P1.5 | 2.4 | M2 |
-| P1.6 | 1.7 | M1 |
-| P1.7 | 1.8, 2.10, 2.11 | M1, M2 |
-| P2.1 | 2.7 | M2 (Phase 2) |
-| P2.2-P2.3 | -- | Unscheduled |
-| P2.4 | 4.4 | M4 |
-| P2.5 | -- | Unscheduled (post-M4) |
-| P2.6 | -- | Unscheduled (post-M4) |
+| P0.1 Backend Evaluation | 2.3, 2.5, 3.0 | M2, M3 |
+| P0.2 Failure Analysis | 2.4 | M2 |
+| P0.3 Candidate Generation | 2.1, 2.4 | M2 |
+| P0.4 Optimization Loop | 2.1 | M2 |
+| P0.5 PROMPT_STATE Tracking | 1.1 | M1 |
+| P0.6 Grid Search | 2.2, 2.6, 3.0 | M2, M3 |
+| P1.1 Workflow Engine Migration | 3.1, 3.2 | M3 |
+| P1.2 Feedback Cycling | 3.4 | M3 |
+| P1.3 Campaign Registry | 3.3, 3.5 | M3 |
+| P1.4 Langfuse Integration | 3.6 | M3 |
+| P1.5 Discovery Protocol | 2.8, 2.9 | M2 (Complete) |
+| P1.6 Ablation Comparison | 1.7 | M1 |
+| P1.7 Parameter Passthrough | 1.8 | M1 |
+| P2.3 Streamlit Dashboard | 4.2 | M4 |
+| SC5 TermNorm Validation | 4.1 | M4 |

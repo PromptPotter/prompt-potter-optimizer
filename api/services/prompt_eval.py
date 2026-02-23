@@ -13,13 +13,13 @@ from typing import Callable, Optional
 from api.models.prompt_state import PromptState
 
 
-def eval_cache_key(
+def eval_content_hash(
     rendered_prompt: str,
     eval_data: list,
     model: str,
     temperature: float,
 ) -> str:
-    """Content-addressed cache key for evaluation results.
+    """Content-addressed hash for evaluation deduplication.
 
     ``sha256(rendered_prompt + sorted_query_gt_pairs + model + temperature)[:16]``
 

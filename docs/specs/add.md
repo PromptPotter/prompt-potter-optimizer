@@ -1,21 +1,22 @@
 # Architecture Design Document: PromptPotter Optimizer
 
-**Version:** 0.5.0
-**Date:** 2026-02-22
-**Status:** Draft
-**Depends on:** [Project Charter v0.5.0](project-charter.md), [PRD v0.5.0](prd.md)
+**Version:** 0.6.0
+**Date:** 2026-02-23
+**Status:** Active
+**Depends on:** [Project Charter v0.6.0](project-charter.md), [PRD v0.6.0](prd.md)
 
 ---
 
 ## Table of Contents
 
 - [System Context](#system-context)
-- [What Exists vs. What Gets Built](#what-exists-vs-what-gets-built)
-- [Component Architecture](#component-architecture)
+- [What Exists Today](#what-exists-today)
+- [Service Architecture](#service-architecture)
 - [The Optimization Loop](#the-optimization-loop)
 - [Data Model](#data-model)
 - [Architectural Decisions](#architectural-decisions)
-- [Deployment Model & Access Control](#deployment-model--access-control)
+- [Target Architecture: Workflow Engine Migration](#target-architecture-workflow-engine-migration)
+- [Deployment Model](#deployment-model)
 - [Integration Points](#integration-points)
 - [Validation Scenario](#validation-scenario)
 
@@ -25,138 +26,109 @@
 
 ```
 +-----------------------------------------------------------+
-|                   Developer / CI Pipeline                  |
-|           (REST API, notebooks, Streamlit)                 |
-+--------------+----------------------------+---------------+
-               |                            |
-               | HTTP (REST)                | Direct (Python)
-               v                            v
-+-----------------------------------------------------------+
-|                 PromptPotter Optimizer                     |
-|                                                           |
-|  +-------------+  +---------------+  +----------------+   |
-|  | Optimization |  |   Workflow    |  |  Evaluation    |   |
-|  | Orchestrator |  |   Engine      |  |  Framework     |   |
-|  +------+------+  +-------+-------+  +--------+-------+   |
-|         |                 |                    |           |
-|         +--------+--------+--------------------+           |
-|                  |                                         |
-|                  v                                         |
-|          +-------+-------+          +----------------+     |
-|          |  LLM Client   |          |    Registry     |    |
-|          +-------+-------+          |  (file-based)   |    |
-|                  |                  +--------+---------+    |
-+------------------+---------------------------+-------------+
-                   |                           |
-          +--------+--------+          +-------+--------+
-          |  LLM Providers  |          |  File System   |
-          | (Groq, OpenAI,  |          | (.promptpotter |
-          |  Anthropic)     |          |  /projects/)   |  ← exists (M1)
-          +--------+--------+          |  /campaigns/)  |  ← planned (M3)
-                                       +----------------+
-                   |
-          +--------+--------+
-          |    Langfuse      |
-          | (traces, scores) |
-          +------------------+
+|               Developer / CI Pipeline                     |
++-----------+---------------------------+-------------------+
+            |                           |
+            | Notebook (Python)         | HTTP (REST)
+            v                           v
++-----------+-----------+  +------------+-------------------+
+| _campaign_lib.py      |  |  FastAPI (api/main.py)         |
+| (tqdm, IPython,       |  |  +----------+ +-----------+    |
+|  progress display)    |  |  | backends | | workflows |    |
++-----------+-----------+  |  | router   | | router    |    |
+            |              |  +----------+ +-----------+    |
+            |              |  +----------+                  |
+            |              |  | health   |                  |
+            |              |  | router   |                  |
+            |              +--+----------+------------------+
+            |                           |
+            +-------------+-------------+
+                          |
+          +---------------+----------------+
+          |         Service Layer           |
+          |  grid_search.py                |
+          |  prompt_optimizer.py           |
+          |  prompt_eval.py               |
+          |  backend_client.py            |
+          |  project_store.py             |
+          |  llm_client.py                |
+          |  comparison.py                |
+          |  langfuse_client.py           |
+          +---------------+----------------+
+                          |
+          +---------------+----------------+
+          |       External Systems         |
+          |  - TermNorm backend API        |
+          |  - LLM Providers (Groq,OpenAI) |
+          |  - Langfuse (partial)          |
+          |  - File system                 |
+          +--------------------------------+
 ```
 
-- **Developers** send optimization requests via REST API or run notebooks interactively
-- **CI pipelines** call the API programmatically for automated runs
-- **LLM providers** handle inference through an OpenAI-compatible client
-- **Langfuse** receives traces and scores for every trial
-- **File system** stores campaign/trial records
-
-**Multi-client architecture:** PromptPotter is consumed by multiple client types — CLI / Python scripts, Jupyter notebooks, and lightweight JS frontends. All share the same REST API; no client gets special treatment. Every API response is structured JSON so any client can render it.
+- **Developers** run optimization campaigns via notebooks or call the REST API for sync/execute/compare
+- **The notebook** is the primary optimization interface. `_campaign_lib.py` wraps services with progress bars and display formatting; it never implements business logic.
+- **The API** provides backend management, experiment sync, pipeline replay, and statistical comparison. Optimization itself is currently notebook-driven; API-driven orchestration is planned for M3 (P1.1).
+- **LLM providers** handle inference through an OpenAI-compatible client (Groq with Llama 4 Maverick as default, OpenAI as alternative)
+- **Langfuse** wrapper exists (singleton + trace creation); full per-trial integration is planned for M3
 
 ---
 
-## What Exists vs. What Gets Built
+## What Exists Today
 
-### Exists Today
+### Implemented Components
 
-| Component | Role | Since |
-|-----------|------|-------|
-| **Workflow engine** | DAG execution with topological sort and Langfuse tracing | Pre-M1 |
-| **LLM node** | Multi-provider inference with template variables and JSON mode | Pre-M1 |
-| **Web search node** | Mock placeholder | Pre-M1 |
-| **Ranker node** | LLM-based candidate ranking | Pre-M1 |
-| **Exact match evaluator** | String matching with normalization | Pre-M1 |
-| **Criteria evaluator** | LLM-as-judge for non-deterministic outputs | Pre-M1 |
-| **LLM client** | Multi-provider abstraction (Groq, OpenAI, Anthropic) | Pre-M1 |
-| **Optimize router** | Placeholder — not yet a real implementation | Pre-M1 (placeholder; real implementation in M2 via 2.5) |
-| **PromptState model** | Immutable, versioned prompt snapshot with `derive()` and structured diff | M1 |
-| **ProjectStore** | File-based backend data storage (`.promptpotter/projects/`) with incremental writes, grid plan persistence (`grid_plans/`) | M1, extended M2 |
-| **Backends router** | `/backends/*` — register, sync, execute, compare | M1 |
-| **Backend client** | HTTP client for external backend APIs (TermNorm) | M1 |
-| **Comparison service** | Statistical comparison with McNemar's test, Wilcoxon signed-rank, hit@k, MRR | M1 |
-| **Test suite** | Evaluators, workflow runner, PromptState, incremental writes, API endpoints | M1 |
-| **CI pipeline** | GitHub Actions: ruff lint + pytest on push/PR | M1 |
-| **Pipeline parameter passthrough** | Controllable knobs for all TermNorm pipeline stages (11 params: search, profiling, ranking, scoring) forwarded via `/matches` payload, echoed in response and training record | M1 |
-| **HITL Campaign Notebook** | Interactive optimization notebook (`optimization_campaign.ipynb`) with editable campaign config, candidate coverage diagnostics, iterative prompt optimization with local evaluation, LLM-generated phrase fragment suggestions, training-style progress display, and semi-automatic optimization loop with patience-based stopping | M2 (WP 2.8) |
-| **Grid search service** | `api/services/grid_search.py` — default axis library (`DEFAULT_GRID_AXES`), LLM context restructuring (`restructure_context()`), distance-weighted stratified sampling (`grid_budget` + `exploration_rate`), grid execution with two eval modes (backend full-pipeline via `/matches` with `ranking_prompt`, or local LLM with cached pipeline data), per-point eval caching, incremental writes with crash protection, partial-run resume, per-query progress callback, result analysis, winner selection. **Grid plan persistence:** stable identity hash (`grid_plan_identity()`) over user-controlled inputs, plan serialization/deserialization with full PromptState round-trip, plan status tracking (`in_progress`/`completed`), automatic resume on kernel restart (skips LLM restructure call when existing plan found) | M2 (WP 2.9) |
-| **Prompt eval service** | `api/services/prompt_eval.py` — baseline extraction, batch evaluation, content-addressed eval caching (`eval_cache_key()`), incremental writes with crash protection (`.partial.jsonl`), partial-run resume | M2 (WP 2.8) |
-| **Prompt optimizer service** | `api/services/prompt_optimizer.py` — candidate generation, round winner selection, LLM suggestion generation, campaign winner save | M2 (WP 2.8) |
-| **Campaign library** | `notebooks/_campaign_lib.py` — thin notebook-facing wrappers with tqdm/print, per-query HIT/MISS progress logging (backend mode), `display_progress()`, `run_optimization_loop()`, `init_services()` (returns backend_client + session_terms for backend eval), `resume_or_build_grid()` (grid plan resume orchestrator) | M2 (WP 2.8) |
-| **Rate-limit backoff** | Groq client auto-retry with exponential backoff on 429 responses | M2 |
+| Component | File(s) | Since | Description |
+|-----------|---------|-------|-------------|
+| **Grid search service** | `api/services/grid_search.py` | M2 | Default axis library, LLM context restructuring, distance-weighted stratified sampling, plan persistence with stable identity hash, per-point query sampling, content-addressed deduplication, crash recovery, LLM result analysis |
+| **Prompt optimizer service** | `api/services/prompt_optimizer.py` | M2 | LLM meta-prompt candidate generation, round winner selection, improvement suggestions with phrase fragments, campaign winner save |
+| **Prompt eval service** | `api/services/prompt_eval.py` | M2 | Backend evaluation via `/matches` with `ranking_prompt` override, content-addressed deduplication (`eval_content_hash()`), incremental `.partial.jsonl` writes, partial-run resume |
+| **Backend client** | `api/services/backend_client.py` | M1 | HTTP client for TermNorm backend: sync experiments, replay queries, init sessions, extract eval data |
+| **Project store** | `api/services/project_store.py` | M1 | File-based storage for backends, synced experiments, executions, dataset runs (evaluation records), grid plans. Incremental writes + crash recovery. |
+| **LLM client** | `api/services/llm_client.py` | Pre-M1 | OpenAI-compatible abstraction. Providers: Groq (default), OpenAI. JSON mode support. Global singleton via `get_llm_client()`. |
+| **Comparison service** | `api/services/comparison.py` | M1 | hit@k, MRR, McNemar's test, Wilcoxon signed-rank, per-query A/B classification |
+| **Langfuse client** | `api/services/langfuse_client.py` | Pre-M1 | Singleton wrapper with `create_trace()`. Stubs for create_generation, create_score, flush. |
+| **PromptState model** | `api/models/prompt_state.py` | M1 | Immutable, versioned, 3-layer prompt snapshot. `render()`, `derive()`, `diff()`. |
+| **Campaign notebook** | `notebooks/optimization_campaign.ipynb` | M2 | Full HITL optimization: config editing, diagnostics, baseline eval, grid search, optimization loop, LLM suggestions, campaign summary |
+| **Campaign library** | `notebooks/_campaign_lib.py` | M2 | Notebook-facing layer with tqdm progress and IPython display. Currently also contains orchestration logic (dedup-aware eval, grid plan lifecycle, replay reuse) pending promotion to `api/services/` in M3 (WP 3.0). |
+| **Backends router** | `api/routers/backends.py` | M1 | `/api/v1/backends/*` — register, sync, execute, compare, list dataset runs |
+| **Workflows router** | `api/routers/workflows.py` | Pre-M1 | `/api/v1/workflows/*` — execute workflow, evaluate, list nodes |
+| **Health router** | `api/routers/health.py` | Pre-M1 | `/api/v1/health`, `/api/v1/ready` |
+| **Workflow engine** | `api/core/workflow_runner.py` | Pre-M1 | DAG execution with topological sort and context passing. Used by workflows router. Target for optimizer migration (M3). |
+| **Workflow nodes** | `api/nodes/` | Pre-M1 | LLMNode, RankerNode, PipelineConfigNode |
+| **Evaluators** | `api/evaluators/` | Pre-M1 | ExactMatchEvaluator, CriteriaEvaluator (LLM-as-judge). Currently only exact match is used in the backend eval path. |
+| **Test suite** | `tests/` | M1 | `test_prompt_state.py` (3 tests), `test_project_store_evals.py` (18+ tests). Evaluator and workflow tests were pruned in `ceb9031`. |
+| **CI pipeline** | `.github/workflows/` | M1 | GitHub Actions: ruff lint + pytest on push/PR |
+| **Pipeline parameter passthrough** | via `backend_client.run_match()` | M1 | Forward controllable knobs to backend `/matches` payload |
 
-### Will Be Built
+### Planned (Not Yet Built)
 
 | Component | Milestone | PRD Req |
 |-----------|-----------|---------|
-| **Initialization node** (context analysis + structured prompt component extraction) | M2 | P0.3 |
-| **Grow/Filter node** (prompt state enrichment) | M2 | P0.3 |
-| **Analysis + Evaluation node** (scoring + failure analysis + next_action decision) | M2 | P0.1, P0.2 |
-| **Feedback router** (Switch: generate / refine context / modify plan) | M2 | P0.4 |
-| **Optimization orchestrator** (DAG loop with counter-based stop condition) | M2 | P0.4 |
-| **REST API optimization endpoints** (wire optimize router to services) | M2 | P0.4 |
-| **Campaign registry** (file-based persistence) | M3 | P1.1 |
-| **Langfuse score integration** | M3 | SC3 |
-| **Cycling mode** (enable feedback paths for iterative refinement) | Post-M2 | P0.4, P2.1 |
-| **Human-in-the-loop gates** | M4 | P1.3 |
-| **Real web search provider** | M4 | P1.4 |
-| **Streamlit dashboard** | M4 | P2.4 |
+| **Optimizer nodes** (InitNode, GrowFilterNode, AnalysisEvalNode wrapping existing services) | M3 | P1.1 |
+| **Optimization workflow definition** (CWL-style, wires nodes into DAG) | M3 | P1.1 |
+| **Campaign registry** (formal campaign/trial persistence, Langfuse/MLflow-compatible) | M3 | P1.3 |
+| **Feedback cycling** (3-path routing via workflow engine) | M3 | P1.2 |
+| **Full Langfuse integration** (per-trial tracing with scores) | M3 | P1.4 |
+| **Streamlit dashboard** | M4 | P2.3 |
 
 ---
 
-## Component Architecture
+## Service Architecture
 
-The optimizer implements a **DAG-based iterative workflow** derived from the reference design (`docs/design/optimization-workflow.n8n.json`). Rather than a rigid linear pipeline, the optimization loop is a directed graph with conditional feedback paths that allow the system to adapt its strategy (generate new variants, refine context, or modify the plan) based on evaluation results.
+The optimizer is implemented as a **service-based architecture** where each service module has a single responsibility. The notebook (`_campaign_lib.py`) orchestrates the workflow by calling services in sequence. Services are stateless — all persistence goes through `ProjectStore`.
 
-| Component | Responsibility | Depends On |
-|-----------|---------------|------------|
-| **Optimization orchestrator** | Manages the DAG-based optimization loop: initialization, iteration cycling, stop condition checking, and feedback routing | Workflow engine, all optimizer nodes |
-| **Workflow engine** | DAG execution with tracing; used for both user workflows and the optimization loop | LLM client, node registry |
-| **Initialization node** | Loads eval dataset + context; AI agent analyzes context and produces structured prompt components (task_intent, instruction, answer_format) | LLM client |
-| **Grow/Filter node** | Enriches the current prompt state — expands, refines, or constrains prompt components based on the current plan | LLM client |
-| **Analysis + Evaluation node** | Evaluates the current prompt state against the dataset, produces scores, and decides the next action (generate, refine context, or modify plan) | LLM client, Evaluation framework |
-| **Feedback router (Switch)** | Routes to one of three feedback paths based on `next_action` from the analysis report | None |
-| **Context refinement node** | Updates optimization context with critiques and applied metrics, then updates the plan | LLM client |
-| **Plan update node** | Modifies the optimization plan based on feedback from analysis | LLM client |
-| **Evaluation framework** | Scores configurations against datasets; logs to Langfuse | LLM client, Langfuse |
-| **LLM client** | OpenAI-compatible inference with provider auto-detection (Groq with Llama 4 Maverick as default) | External providers |
-| **Campaign registry** | Persists campaigns, trials, lineage, progress events | File system |
+### Service Layer
 
-### Node Pattern
-
-All nodes follow the same pattern:
-- **Typed inputs and outputs** — structured Pydantic models in, structured models out
-- **Single responsibility** — one node does one thing
-- **Composable** — wire together in the DAG or call individually
-- **Testable** — unit test with mock inputs
-- **Stateless** — prompt state flows through the DAG; nodes do not hold state
-
-### Target Abstraction
-
-The DAG-based optimization loop is parameterized by a **state schema** — the Pydantic model that defines the tunable parameters flowing through the graph. M2-M4 implement the concrete `PromptState` schema (persona, task_intent, problem_description, instruction, thinking_style, answer_format). The architecture is designed so that the core loop (initialize → grow/filter → analyze+evaluate → feedback) operates on any state schema without modification.
-
-Post-M4, new target types (scoring function weights, fuzzy matching thresholds, retrieval query templates, GA parameters) can be added by:
-1. Defining a new state schema (Pydantic model)
-2. Implementing target-specific initialization and grow/filter logic
-3. Reusing the existing evaluation framework and feedback routing
-
-The abstraction boundary is **designed but not implemented** until post-M4. M2-M4 build and validate the concrete prompt case; generalization follows once the loop is proven.
-
+| Service | File | Responsibility | Key Functions |
+|---------|------|---------------|---------------|
+| **grid_search** | `api/services/grid_search.py` | Grid search over Layer 1 prompt fields | `validate_grid_config()`, `build_grid_points()`, `run_grid_search()`, `resolve_point_evals()`, `restructure_context()`, `analyze_grid_results()`, `select_grid_winner()`, `grid_plan_identity()`, `serialize_grid_plan()`, `deserialize_grid_plan()`, `load_eval_dataset()` |
+| **prompt_optimizer** | `api/services/prompt_optimizer.py` | LLM-driven candidate generation and campaign management | `generate_candidates()`, `select_round_winner()`, `generate_suggestions()`, `save_campaign_winner()` |
+| **prompt_eval** | `api/services/prompt_eval.py` | Backend evaluation and deduplication | `backend_reranker_eval()`, `evaluate_prompt_batch()`, `compute_accuracy()`, `eval_content_hash()`, `extract_baseline_prompt()`, `make_incremental_writer()` |
+| **backend_client** | `api/services/backend_client.py` | HTTP client for TermNorm backend | `sync_experiments()`, `fetch_experiment()`, `init_session()`, `run_match()`, `replay_queries()`, `extract_session_terms()`, `extract_replay_queries()` |
+| **project_store** | `api/services/project_store.py` | File-based project persistence | Backend CRUD, sync save/load, execution save/load, dataset run storage, grid plan persistence, incremental eval writes |
+| **llm_client** | `api/services/llm_client.py` | LLM abstraction | `OpenAIClient`, `GroqClient`, `get_llm_client()` |
+| **comparison** | `api/services/comparison.py` | Statistical A/B comparison | `compute_comparison()`, `hit_at_k()`, `mcnemar_test()`, `wilcoxon_test()` |
+| **langfuse_client** | `api/services/langfuse_client.py` | Langfuse observability wrapper | `get_instance()`, `create_trace()` (stubs: create_generation, create_score) |
 ---
 
 ## The Optimization Loop
@@ -168,163 +140,97 @@ The optimization loop is a **DAG-based iterative workflow** with an initializati
 The three feedback paths form **nested optimization layers** with escalation.
 The innermost layer runs first; outer layers activate only when inner ones stall:
 
-| Layer | Feedback Path | PromptState Fields | Escalation Trigger |
-|-------|--------------|--------------------|--------------------|
-| **1 - Generate** (innermost) | `"generate"` → main_data | persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples | Default — always runs |
-| **2 - Refine Context** (middle) | `"refine context"` → updated_context → updated_plan → main_data | context, parameters | Layer 1 shows no improvement |
-| **3 - Modify Plan** (outermost) | `"modify plan"` → updated_plan → main_data | plan | Layer 2 shows no improvement |
+| Layer | Fields | When to Change |
+|-------|--------|---------------|
+| **1 - Generate** (innermost) | persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples | Every optimization pass (grid search + iterative generation) |
+| **2 - Refine Context** (middle) | context, parameters | When Layer 1 stalls — user adjusts via campaign config |
+| **3 - Modify Plan** (outermost) | plan | Rarely — strategy defaults that control generation behavior |
 
-**Layer 1 mutation strategy:** The primary mutation is **substitution** — replacing a building block with a new version. Secondary mutations (elimination, addition) are possible but not preferred. Layer 1 fields are extensible: users can register additional building blocks beyond the 6 defaults.
+Currently, Layer 1 is varied automatically (grid search + candidate generation). Layers 2 and 3 are adjusted manually via the campaign config JSON. Automated 3-layer escalation is planned for M3 (P1.2: Feedback Cycling).
 
-Layer 3 ships with `OptimizationDefaults` — sensible strategy parameters that should
-rarely need changing. The escalation design means most optimization runs complete
-using only Layer 1 (generating divergent variants in one pass).
+### Mode 1: Grid Search (Landscape Exploration)
 
-### Initialization Phase
+Systematic exploration of Layer 1 field variants before iterative refinement.
 
-```
-  +----------------+     +----------------+     +------------------+
-  | context_input  | --> | Load eval      | --> | AI Agent:        |
-  | (user context) |     | dataset        |     | Analyze context, |
-  |                |     | (training/test)|     | produce prompt   |
-  +----------------+     +----------------+     | components       |
-                                                +--------+---------+
-                                                         |
-                                              Structured output:
-                                              - task_intent
-                                              - instruction
-                                              - answer_format
-                                                         |
-                                                         v
-                                                   [main_data]
-```
+**Flow:**
+1. **LLM Context Restructuring** — `restructure_context()` uses LLM to parse user-provided context into structured Layer 1 fields, optionally guided by `improvement_areas`
+2. **Grid Plan Build** — `build_grid_points()` computes the cartesian product of axis variants and samples via distance-weighted stratification (`grid_budget`, `exploration_rate`, `SAMPLING_ALPHA = 3.0`)
+3. **Plan Persistence** — `grid_plan_identity()` computes a stable hash over user-controlled inputs. Plans survive kernel restarts and resume automatically (skipping the non-deterministic LLM restructure call).
+4. **Grid Execution** — `run_grid_search()` evaluates each point via backend `/matches` with rendered prompt. Per-point query sampling supported (`eval_queries_per_point`, `shared_queries`). Content-addressed deduplication prevents redundant backend calls.
+5. **Result Analysis** — `display_grid_results()` shows ranked table, marginal stats per axis, pairwise interaction heatmaps. `analyze_grid_results()` uses LLM to identify strongest fields.
+6. **Winner Selection** — `select_grid_winner()` picks the best point. Winner seeds the iterative campaign.
 
-**Campaign inputs and context lifecycle:** A campaign starts with three required inputs: `training_data`, `test_data`, and `context` (raw user-provided domain description). During initialization, the AI Agent refines the raw context according to the Plan to produce the initial PromptState. This refined context lives on the PromptState (Layer 2) and can be further refined during escalation via the "refine context" feedback path.
+### Mode 2: Iterative Candidate Generation (Refinement)
 
-The AI Agent uses **structured output parsing** (Groq + Llama 4 Maverick) to transform raw context into prompt components that seed the main loop.
+LLM-driven candidate generation with patience-based stopping.
 
-### Main Loop
+**Flow:**
+1. **Baseline Evaluation** — extract baseline prompt from synced experiment, evaluate via backend, create round 0
+2. **Generate Candidates** — `generate_candidates()` produces N variant PROMPT_STATEs via LLM meta-prompt analyzing failures
+3. **Evaluate Candidates** — each candidate evaluated on subsampled eval data (`queries_per_eval`)
+4. **Select Winner** — `select_round_winner()` picks best if improvement > threshold
+5. **Continue or Stop** — semi-automatic: continue if improved, stop after `patience` rounds without improvement. Manual: user decides per round.
+6. **LLM Suggestions** — `generate_suggestions()` produces failure patterns, parameter suggestions, phrase fragments, and suggested config JSON for the next round
 
-```
-                +-----------------------------------------------+
-                |                                               |
-                v                                               |
-  +-------------+-----------+                                   |
-  |       main_data         |  Prompt state:                    |
-  |  persona, task_intent,  |  - persona                        |
-  |  problem_description,   |  - task_intent                    |
-  |  instruction,           |  - problem_description            |
-  |  thinking_style, plan   |  - instruction                    |
-  |  + counter              |  - thinking_style                 |
-  +-------------+-----------+  - plan                           |
-                |                                               |
-                v                                               |
-  +-------------+-----------+                                   |
-  |       Grow/Filter       |  Enrich prompt state              |
-  +-------------+-----------+                                   |
-                |                                               |
-                v                                               |
-  +-------------+-----------+                                   |
-  | Analysis + Evaluation   |  Evaluate, produce scores,        |
-  |                         |  decide next_action               |
-  +-------------+-----------+                                   |
-                |                                               |
-                v                                               |
-  +-------------+-----------+                                   |
-  |     count_plus_one      |  Increment iteration counter      |
-  +-------------+-----------+                                   |
-                |                                               |
-                v                                               |
-  +-------------+-----------+                                   |
-  |   counter >= N ?        |                                   |
-  +---yes---+---no----------+                                   |
-      |               |                                         |
-      v               v                                         |
-  [output]    +-------+---------+                               |
-              |     Switch      |  Route on next_action:        |
-              +--+------+---+---+                               |
-                 |      |   |                                   |
-     "generate"  | "refine  | "modify                           |
-                 | context" |  plan"                             |
-                 |      |   |                                   |
-                 |      v   +---+                               |
-                 |  [updated_   |                               |
-                 |   context]   v                               |
-                 |      |   [updated_                           |
-                 |      +-->  plan]                             |
-                 |             |                                |
-                 +------+------+                                |
-                        |                                       |
-                        +---------------------------------------+
-```
+### Evaluation Flow
 
-### Feedback Paths
+Backend evaluation is the only path. `prompt_eval.backend_reranker_eval()`:
 
-The Switch node routes based on the `next_action` field from the analysis report:
+1. Calls `POST /matches` on the backend with `ranking_prompt` = rendered PROMPT_STATE
+2. Backend runs its pipeline with the overridden prompt (pipeline topology discovered via `GET /pipeline`)
+3. Top-ranked candidate is compared to ground truth via exact string match (hit@1)
+4. Result deduplicated by content hash (`eval_content_hash()`)
+5. Written incrementally to `.partial.jsonl` for crash recovery
 
-| next_action | Path | Effect |
-|-------------|------|--------|
-| **"generate"** | Loop directly back to `main_data` | **Layer 1**: Create new prompt variants — the innermost loop, runs every pass |
-| **"refine context"** | `updated_context` --> `updated_plan` --> `main_data` | **Layer 2**: Update context with critiques and metrics, then revise plan — escalation when Layer 1 stalls |
-| **"modify plan"** | `updated_plan` --> `main_data` | **Layer 3**: Change optimization strategy — last resort escalation when Layer 2 stalls |
+### Deduplication and Crash Recovery
 
-### Phased Rollout
-
-The DAG supports two operational modes:
-
-**Phase 1 — Linear Mode (0 cycles):**
-- Initialization --> Grow/Filter --> Analysis + Evaluation --> Output
-- No looping. The counter starts at 0 and the stop condition (counter >= 1) triggers immediately after the first pass.
-- Phase 1 breadth includes: (a) systematic grid search over Layer 1 fields using default axis library, with LLM input restructuring and result analysis, and (b) N random linear runs for further diversity. Grid search winner serves as an optional campaign starting seed.
-- This is the MVP implementation for M2.
-
-**Phase 2 — Cycling Mode (1+ cycles):**
-- Full DAG with the Switch feedback paths enabled.
-- Counter threshold set to N (configurable, default 5).
-- Each cycle refines the prompt state based on the feedback path chosen by the analysis.
-- This is the target for post-M2 enhancement.
-
-### Step-to-PRD Mapping
-
-| DAG Node | PRD | Summary |
-|----------|-----|---------|
-| Initialization (AI Agent) | P0.3 | Analyze context, produce structured prompt components |
-| main_data | P0.5 | Prompt state snapshot (maps to PromptState model) |
-| Grow/Filter | P0.3 | Enrich and expand prompt candidates |
-| Analysis + Evaluation | P0.1, P0.2 | Score against dataset, analyze failures, decide next action |
-| Switch (feedback router) | P0.4 | Route to appropriate feedback path |
-| count_plus_one + stop condition | P0.4 | Manage iteration counter and stopping criteria |
-| updated_context | P2.1 | Context refinement with critiques and metrics (reflection-like) |
-| updated_plan | P0.4 | Adaptive strategy modification |
-
-**Workflow-based optimization (P1.2):** For multi-step pipelines like TermNorm, the optimizer targets one step — the full workflow runs end-to-end for scoring, but only the target step's parameters change between iterations.
+| Mechanism | Purpose |
+|-----------|---------|
+| **Content-addressed eval dedup** | `sha256(prompt + sorted_queries + model + temp)[:16]` — identical inputs skip backend calls |
+| **Incremental writes** | `.partial.jsonl` appended after each query — crash recovery for long evaluations |
+| **Partial-run resume** | On restart, load completed items from partial file, continue from where it stopped |
+| **Grid plan persistence** | `grid_plan_identity()` hash + `serialize_grid_plan()` — plans survive kernel restarts |
 
 ---
 
 ## Data Model
 
-Three models are central. See [Charter Key Terms](project-charter.md) for definitions and [PRD P0.5](prd.md) for PROMPT_STATE acceptance criteria.
+### PROMPT_STATE
 
-- **PROMPT_STATE** — versioned snapshot organized into three optimization layers: **Layer 1 (Generate)** structured prompt components (persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples), **Layer 2 (Refine Context)** optimization context and hypervariables (context, parameters), and **Layer 3 (Modify Plan)** optimization strategy (plan). Immutable; each trial creates a new one. Includes `render()` to assemble Layer 1 fields into a prompt string.
-- **Campaign** — one optimization run: config, initial state, status, best trial reference.
-- **Trial** — one iteration: PROMPT_STATE snapshot, scores, analysis, rationale, parent reference.
+Immutable, versioned prompt configuration organized into three optimization layers (see [PRD P0.5](prd.md#p05-prompt_state-tracking)):
 
-### File Layout
+- **Layer 1 (Generate):** persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples
+- **Layer 2 (Refine Context):** context, parameters (dict)
+- **Layer 3 (Modify Plan):** plan
+- **Metadata:** id (uuid.hex), parent_id, created_at, changes_description
+
+`render()` assembles Layer 1 fields into prompt text. `derive(**changes)` creates a child with parent_id set. `diff(a, b)` produces structured comparison.
+
+### ProjectStore File Layout
 
 ```
-.promptpotter/
-+-- campaigns/
-    +-- {campaign-id}/
-        +-- metadata.json      Campaign config + status
-        +-- lineage.json       Trial parent-child tree
-        +-- progress.jsonl     Event stream
-        +-- trials/
-            +-- {trial-id}/
-                +-- metadata.json  Trial details + scores
-                +-- results.jsonl  Per-item results
+.promptpotter/projects/{backend_id}/
+  backend.json                     # BackendConnection config
+  sync/
+    experiments.json               # Verbatim backend API response
+    experiments/{exp_id}.json      # Individual experiment with traces
+  executions/
+    {execution_id}.json            # Pipeline replay results
+  dataset_runs.json                # Index of eval runs (by content_hash)
+  dataset_runs/
+    {run_id}.json                  # Completed eval run detail
+    {run_id}.partial.jsonl         # In-progress eval (crash recovery)
+  grid_plans/
+    {plan_id}.json                 # Persisted grid search plans
 ```
 
-JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry Design](../registry-design.md) for full spec.
+**Key design:** Dataset runs are indexed by `content_hash` (content-addressed). Looking up an existing run is a hash comparison, not a file scan. Grid plans use a separate `plan_id` hash over user-controlled inputs (axes, baseline, budget, exploration_rate, seed).
+
+### API Models
+
+- **BackendConnection** — id, name, backend_type, base_url, created_at, last_synced_at
+- **Execution** — execution_id, backend_id, experiment_id, variant_label, results[], counts
+- **ExecutionResultItem** — query, ground_truth, predicted, confidence, ranked_candidates, latency_ms, pipeline_data
 
 ---
 
@@ -333,64 +239,88 @@ JSON for metadata, JSONL for results (OpenAI Evals compatible). See [Registry De
 | Decision | Why | Tradeoff |
 |----------|-----|----------|
 | **No framework dependency** (no DSPy, LangChain, TextGrad) | Avoid lock-in; borrow ideas from [literature review](../literature-review.md), build on own abstractions | More initial work, but strategies are swappable |
-| **DAG-based optimization loop with conditional feedback** | Reference n8n workflow proves the pattern works; three feedback paths (generate, refine context, modify plan) let the system adapt its strategy per iteration instead of rigidly repeating the same cycle | More complex than a linear loop; requires routing logic and state management across feedback paths |
-| **Phased rollout: linear first, cycling later** | Phase 1 (linear mode, 0 cycles) is simpler to build and test; breadth-first (N parallel runs) provides value without the complexity of feedback cycling | Phase 1 may miss optimization opportunities that require iterative refinement; Phase 2 adds that capability |
-| **Structured prompt state as DAG data flow** | Prompt components organized into 3 optimization layers (Generate, Refine Context, Modify Plan) flow through the DAG as structured data, not opaque strings; `OptimizationDefaults` provides sensible Layer 3 strategy parameters; enables targeted modification by each node at the appropriate layer | More fields to maintain; adding a new prompt component requires updating the state schema and `LAYER_FIELDS` mapping |
-| **AI Agent initialization with structured output** | LLM analyzes raw context and produces typed prompt components (task_intent, instruction, answer_format) via structured output parsing; avoids manual prompt decomposition | Quality of initialization depends on the LLM's ability to parse arbitrary context; may need domain-specific examples |
-| **Optimizer built on workflow engine** | Reuse existing DAG execution, tracing, error handling | Optimization steps are nodes -- testable, composable, traceable for free |
-| **File-based registry first** | No database for MVP; JSON/JSONL is human-readable and OpenAI Evals compatible | Limited query capability; acceptable at single-user scale. Swappable later behind interface. |
-| **PROMPT_STATE as first-class model** | Track all tunable params (not just prompt text); enable structured diffs | Open-ended parameters dict means no schema enforcement on values |
-| **LLM-as-judge for evaluation** | Non-deterministic outputs need criteria-based scoring beyond exact match | Judge quality depends on judge prompt; cost scales with dataset x iterations x candidates |
-| **Target-agnostic optimization loop** | DAG operates on a pluggable state schema so the same loop can optimize prompts, schemas, scoring functions, fuzzy matchers, and other parameter types post-M4 | Adds abstraction layer between loop and state; mitigated by building the concrete prompt case first (M2-M4) and generalizing only after the loop is proven |
-| **Backend evaluation as primary mode** | Grid search and optimization must run the full TermNorm pipeline per query because the token matching step requires the backend's loaded database — it cannot be replicated locally. The `ranking_prompt` parameter injects candidate prompts into the backend's LLM2 step. Local evaluation (reusing cached `pipeline_data`) is a fallback only. | Backend evaluation re-runs web search and LLM1 for every query even though only LLM2 varies between grid points. A future `/rerank` endpoint on TermNorm would eliminate this redundancy (~10x speedup for grid search). |
-| **Stateless API with pluggable auth** | Public deployment requires credential-based access and data isolation; designing the API stateless from day one avoids costly rewrites | Auth middleware adds latency; mitigated by keeping it as a thin middleware layer that can be toggled off for local use |
+| **Service-based architecture with notebook orchestration** | Delivered working optimization faster than building formal DAG nodes. Services are independently testable and composable. The notebook provides natural HITL control. | No API-driven orchestration yet; notebook dependency for optimization. Migration to workflow engine planned for M3. |
+| **Workflow engine as target architecture** | The existing `api/core/workflow_runner.py` provides DAG execution, node reuse, and context passing. Migrating service logic into nodes gives API-driven orchestration without reimplementation. | M3 investment; current services work well for notebook-driven use. |
+| **Content-addressed deduplication** | Identical prompt+queries+model+temp produces identical results. Deduplicate by hash, not by run ID. Enables cross-session result reuse. | Hash collisions theoretically possible but SHA256 truncated to 16 hex chars (64 bits) is sufficient for this scale. |
+| **Incremental writes for crash recovery** | Backend evaluation takes 10-30s/query. A 500-query evaluation must survive kernel crashes, rate limit errors, and network interruptions. | `.partial.jsonl` files need cleanup; finalization step merges partial into detail file. |
+| **Grid plan persistence with stable identity** | Grid plans involve a non-deterministic LLM restructure call. Persisting the plan means kernel restarts resume the exact same grid (same points, same prompt states) without re-calling the LLM. | Plan files on disk accumulate; `grid_plans/` may need cleanup utilities. |
+| **Backend evaluation only** | The token matching step requires the backend's loaded database — it cannot be replicated locally. Local evaluation was removed (`82157ef`) to simplify the codebase. | Every evaluation requires a running backend instance. No offline optimization. |
+| **File-based project store** | No database for MVP; JSON files are human-readable and debuggable | Limited query capability; acceptable at single-user scale. Swappable later behind interface. |
+| **PROMPT_STATE as first-class model** | Track all tunable params (not just prompt text); enable structured diffs and lineage | Open-ended parameters dict means no schema enforcement on values |
+| **Notebook-first HITL** | Campaign config as editable JSON, manual round control, LLM suggestions with phrase fragments — the notebook is a natural fit for HITL optimization | Requires Jupyter environment; not usable from CLI/CI. Workflow engine migration (P1.1) enables API-driven orchestration. |
 
 ---
 
-## Deployment Model & Access Control
+## Target Architecture: Workflow Engine Migration
 
-PromptPotter is designed for a staged deployment progression, from a local development tool to a publicly accessible optimization service. This section describes the deployment model and the layered access control that enables safe multi-tenant operation.
+The existing workflow engine (`api/core/workflow_runner.py`) is the target for the optimizer's next evolution (M3, PRD P1.1).
 
-### Deployment Progression
+### Current State (M2)
+
+```
+Notebook → _campaign_lib.py → services (grid_search, prompt_optimizer, prompt_eval)
+                                   ↓
+                              backend_client → TermNorm API
+```
+
+Services implement optimization logic. The notebook orchestrates the flow (which service to call, when to stop, how to display results). This works well for HITL but cannot be driven by an API endpoint.
+
+### Target State (M3)
+
+```
+API Endpoint (/api/v1/optimize)
+        ↓
+  Workflow Runner (api/core/workflow_runner.py)
+        ↓
+  Optimization Workflow Definition (CWL-style)
+        ↓
+  +--------+     +-----------+     +-------------+
+  |InitNode| --> |GrowFilter | --> |AnalysisEval |
+  |        |     |Node       |     |Node         |
+  +--------+     +-----------+     +------+------+
+                                          |
+                                    next_action
+                                          |
+                              +-----------+-----------+
+                              |           |           |
+                          "generate"  "refine"   "modify"
+                              |       context      plan
+                              |           |           |
+                              +-----------+-----------+
+                                          |
+                                    [loop back]
+```
+
+**Key principle:** Nodes are thin wrappers around existing service functions. No reimplementation.
+
+- **InitNode** wraps `restructure_context()` → initial PROMPT_STATE
+- **GrowFilterNode** wraps `generate_candidates()` → N variant PROMPT_STATEs
+- **AnalysisEvalNode** wraps `evaluate_prompt_batch()` + `generate_suggestions()` → scores + `next_action`
+
+The workflow runner provides DAG execution, node reuse, tracing, and error handling. The workflow definition makes optimization available to API clients and CI pipelines.
+
+### Node Pattern
+
+All nodes follow the pattern established by existing nodes (`LLMNode`, `RankerNode`):
+- Typed inputs and outputs (Pydantic models)
+- Single responsibility
+- Composable (wire into any workflow definition)
+- Testable (unit test with mock inputs)
+- Stateless (state flows through the DAG)
+
+---
+
+## Deployment Model
+
+Currently: **single-user localhost** only. No authentication, no multi-tenancy.
 
 | Stage | Timeframe | Auth | Users | Hosting |
 |-------|-----------|------|-------|---------|
-| **Local** | M1–M4 | None | Single user | `localhost` only |
-| **Private server** | Post-M4 | API key authentication | Team-level access | Self-hosted |
-| **Public service** | Post-M4 | Multi-tenant with user accounts | Any developer | Cloud-hosted with rate limiting |
+| **Local** | M1–M4 | None | Single user | `localhost` |
+| **Private server** | Post-M4 | API key | Team | Self-hosted |
+| **Public service** | Post-M4 | Multi-tenant | Any developer | Cloud |
 
-During local development (M1–M4), no authentication is required. The API runs on `localhost` and serves a single user. Private server deployment adds API key authentication for team-level access within an organization. Public service deployment introduces full multi-tenancy with user accounts, role-based access, and rate limiting.
-
-### Layered Access Model
-
-When deployed publicly, the API enforces three access tiers:
-
-| Tier | Access | Scope |
-|------|--------|-------|
-| **Anonymous** | Health and readiness endpoints only (`/health`, `/ready`) | No data access |
-| **Authenticated (API key)** | Full API access | Scoped to own data — campaigns, backends, executions, project store |
-| **Admin** | User management, global configuration, system metrics | Cross-tenant visibility |
-
-Each tier is additive — authenticated users have anonymous access, and admins have authenticated access.
-
-### Data Isolation
-
-Each authenticated user's data is fully isolated:
-
-- **Campaigns** — a user can only list, read, and modify their own campaigns and trials
-- **Backends** — backend connections and synced experiments are per-user
-- **Project store** — the `.promptpotter/projects/` directory is scoped per user; no cross-user data access
-- **Executions** — replay results belong to the user who initiated them
-
-Cross-user data access is not permitted at any tier except admin.
-
-### Design Constraints for Today
-
-The API is already designed with public deployment in mind:
-
-- **Stateless request handling** — no server-side session state between requests. Each request carries all context needed for processing. This is the foundation for horizontal scaling and multi-tenancy.
-- **Pluggable auth middleware** — authentication is designed as a thin middleware layer that is disabled for local use and enabled on deployment. No endpoint logic changes are required to add auth.
-- **Versioned API contracts** — all endpoints use `/api/v1/` prefixing, ensuring stable contracts for external consumers across deployment stages.
+The API is designed stateless (no server-side session state) to enable future horizontal scaling. Auth middleware, rate limiting, and data isolation are post-M4 concerns.
 
 ---
 
@@ -398,79 +328,48 @@ The API is already designed with public deployment in mind:
 
 | System | Direction | Protocol | Status |
 |--------|-----------|----------|--------|
-| **LLM providers** (Groq, OpenAI, Anthropic) | PromptPotter sends inference requests | OpenAI chat completions API | Exists |
-| **Langfuse** | PromptPotter sends traces + scores | Langfuse Python SDK | Exists |
-| **ProjectStore** (backend data) | Read/write backend connections, synced experiments, executions, grid plans | JSON files in `.promptpotter/projects/` | Exists (M1, extended M2) |
-| **File system** (campaigns) | Read/write campaigns, trials, lineage | JSON/JSONL in `.promptpotter/campaigns/` | Planned (M3) |
-| **Streamlit** | Streamlit calls the API | HTTP | Exists (prototype) |
-| **Consuming projects** (e.g., TermNorm) | PromptPotter loads external datasets | File path or URL | Exists (loader) |
-| **TermNorm backend API** | PromptPotter discovers pipeline topology and tunable parameters via `GET /pipeline`, syncs experiments, replays pipelines, forwards pipeline parameter overrides (search depth, LLM temperatures, candidate limits, score weights), and runs backend-driven grid search evaluation via `/matches` with `ranking_prompt` override. Discovery-driven protocol replaces hardcoded pipeline knowledge — see [connector docs](../connectors/termnorm.md#discovery-driven-pipeline-protocol). | HTTP REST | Exists (M1, extended M2); discovery endpoint planned |
-| **TermNorm prompt registry** | PromptPotter reads current prompts from `logs/prompts/{family}/{version}/prompt.txt` and writes optimized versions back as new version numbers (v2, v3, ...) | File system (TermNorm's `PromptRegistry` with `{{variable}}` templates) | Planned (M4) |
-| **MCP clients** (e.g., Claude Code) | Clients invoke optimization tools | MCP | Planned (P2.3) |
-| **Public API gateway** | External consumers access PromptPotter as a hosted service | HTTP REST with API key auth | Post-M4 |
+| **LLM providers** (Groq, OpenAI) | Inference requests | OpenAI chat completions API | Implemented |
+| **Langfuse** | Traces | Langfuse Python SDK | Partial (singleton + create_trace) |
+| **TermNorm backend API** | Sync experiments, replay pipelines, backend evaluation via `/matches` with `ranking_prompt` override | HTTP REST | Implemented |
+| **TermNorm discovery** | `GET /pipeline` for pipeline topology and tunable parameters | HTTP REST | Implemented |
+| **ProjectStore** | Backend data, eval records, grid plans | JSON files in `.promptpotter/projects/` | Implemented |
+| **File system** (campaigns) | Formal campaign/trial persistence | JSON/JSONL in `.promptpotter/campaigns/` | Planned (M3, P1.3) |
 
 ---
 
 ## Validation Scenario
 
-The pinnacle validation for PromptPotter is the **TermNorm pipeline variant comparison** (SC5). This section describes how the architecture supports the concrete validation that proves the system works.
+The pinnacle validation for PromptPotter is the **TermNorm pipeline variant comparison** (SC5).
 
 ### TermNorm Pipeline
-
-TermNorm is a terminology normalization system (primary domain: LCA -- Life Cycle Assessment) that matches free-form text to standardized database identifiers. Its pipeline has three stages, two of which are LLM calls with prompts managed by TermNorm's versioned prompt registry:
 
 | Stage | Component | Type | Prompt Family |
 |-------|-----------|------|---------------|
 | 1 | Web scrape | External | -- |
-| 2 | Entity profiling (LLM1) | LLM call | `entity_profiling` (vars: `query`, `format_string`, `combined_text`) |
-| 3 | Table Reranker | Non-LLM | -- (token/string matching, no semantic understanding) |
-| 4 | Semantic reranking (LLM2) | LLM call | `llm_ranking` (vars: `core_concept`, `entity_profile_json`, `matches`) |
-
-All pipeline stages expose configurable parameters via the `/matches` payload (see [TermNorm connector docs](../connectors/termnorm.md#pipeline-parameter-overrides) for the full catalog). The pipeline topology and available parameters are **discoverable at runtime** via `GET /pipeline` (see [discovery protocol](../connectors/termnorm.md#discovery-driven-pipeline-protocol)), replacing hardcoded pipeline knowledge in PromptPotter. This enables human-in-the-loop experimentation (manually varying knobs in the notebook) and automated optimization (the DAG loop systematically exploring the parameter space discovered from the backend schema).
+| 2 | Entity profiling (LLM1) | LLM call | `entity_profiling` |
+| 3 | Table Reranker | Non-LLM | -- (token/string matching) |
+| 4 | Semantic reranking (LLM2) | LLM call | `llm_ranking` |
 
 ### Variant Comparison
 
-The two pipeline variants under comparison:
-
-- **Variant A**: Web scrape --> LLM1 (`entity_profiling` v1) --> Table Reranker --> done (skip LLM2)
-- **Variant B**: Web scrape --> LLM1 (`entity_profiling` v1) --> Table Reranker --> LLM2 (`llm_ranking`) --> done
+- **Variant A**: Web scrape --> LLM1 --> Table Reranker --> done (skip LLM2)
+- **Variant B**: Web scrape --> LLM1 --> Table Reranker --> LLM2 (`llm_ranking`) --> done
 
 **Research question:** Does LLM2 semantic reranking add enough accuracy over the table reranker to justify the extra LLM cost and latency?
 
 ### Optimization Strategy
 
-Variant A serves as the **fixed baseline** -- `entity_profiling` v1 plus the table reranker, with no LLM2 call. Its score on the evaluation dataset is the bar that Variant B must clear.
+1. Evaluate Variant A (once) to establish baseline score
+2. Evaluate Variant B with `llm_ranking` v1 as initial candidate
+3. Run grid search to explore Layer 1 field combinations
+4. Run iterative optimization on best grid winner: analyze failures, generate candidates (v2, v3, ...), evaluate, select best
+5. Compare optimized Variant B against Variant A baseline
+6. Produce recommendation: is the optimized LLM2 call worth it?
 
-PromptPotter's job is to **optimize the `llm_ranking` prompt** (generating v2, v3, ...) so that Variant B beats Variant A. The `entity_profiling` prompt stays at v1 throughout; only the `llm_ranking` prompt changes between trials. This is the concrete test of whether an optimized LLM2 call adds enough value to justify its cost.
+**Evaluation mode:** Each query runs the full pipeline via `/matches` with `ranking_prompt` override (~10-30s/query). A future `/rerank` endpoint on TermNorm (accepting pre-computed intermediates) would eliminate redundant steps 1-3.
 
-The optimization loop:
-1. Evaluate Variant A (once) to establish the baseline score
-2. Evaluate Variant B with `llm_ranking` v1 as the initial candidate
-3. Run the optimize cycle on `llm_ranking`: analyze failures, generate candidate prompts (v2, v3, ...), evaluate each, select best
-4. Compare the best Variant B score against the Variant A baseline
-5. Produce a clear recommendation: is the optimized LLM2 call worth it?
+**Benchmark:** BC5CDR 500-term subset (primary, publication-suitable). MedMentions 500-term subset (additional biomedical benchmark). LCA dataset validation follows for real-world deployment.
 
-Optimized prompt versions are written back to TermNorm's prompt registry as new version numbers.
+### Ablation Pattern
 
-Development and testing uses the **BC5CDR 500-term subset** as the primary benchmark (well-known ground truth, scientifically reproducible, suitable for archival publication). LCA dataset validation follows when deploying to real-world use. MedMentions 500-term subset serves as an additional biomedical benchmark.
-
-### Evaluation Mode
-
-Grid search and optimization evaluate candidate prompts against the evaluation dataset via the TermNorm backend (see [TermNorm connector docs](../connectors/termnorm.md#evaluation-mode) for protocol details). Each query runs the **full pipeline** via `/matches` with a `ranking_prompt` override: web search → LLM1 → token matching (DB) → LLM2. This gives ground truth accuracy with fresh intermediate data per query (~10-30s/query).
-
-**Redundancy:** For grid search, only the `ranking_prompt` (LLM2) varies between grid points. Steps 1-3 (web search → LLM1 → token matching) produce identical results for the same query regardless of the ranking prompt. Since `/matches` already accepts pre-computed `entity_profile` + `token_matched_candidates`, a future optimization (see [connector docs](../connectors/termnorm.md#future-optimization-cached-intermediates-in-grid-search)) would cache these after the first run and pass them on subsequent calls, skipping steps 1-3.
-
-Crash protection infrastructure: incremental writes to `.partial.jsonl` after each query, content-addressed caching of completed grid points, partial-run resume on restart, and grid plan persistence (saves the full plan — grid points, PromptStates, Layer 1 fields — to `grid_plans/` so kernel restarts skip the non-deterministic LLM restructure call and reload the exact same plan).
-
-### Ablation Comparison (Generalized Pattern)
-
-The Variant A vs B comparison above is an instance of a general pattern: **pipeline ablation**. Any linear pipeline can be evaluated with a node removed to measure its marginal value. The system accepts prior results, replays with a node skipped, and produces a statistical comparison with p-values (McNemar's test for accuracy, Wilcoxon signed-rank for latency).
-
-Pipeline nodes are typed (`LLMGeneration`, `DeterministicFunction`, `ExternalService`) with visible input/output schemas, discoverable via `GET /pipeline`. Clients auto-detect node capabilities and surface relevant parameters (prompt text, temperature, threshold, etc.) from the discovered parameter schema. This pattern becomes a self-service feature when PromptPotter is deployed as a web service — users upload experiment data, the system discovers the pipeline structure, and they select which component to remove and see the comparison.
-
-### Decision Points
-
-| # | Decision | Method | Milestone |
-|---|----------|--------|-----------|
-| 1 | LLM2 on/off -- can an optimized `llm_ranking` prompt make Variant B beat Variant A? | Optimize `llm_ranking` prompt, compare best Variant B score against Variant A baseline, results persisted and traceable in Langfuse | M4 |
-| 2 | How many websites to scrape for entity profiling? | Ablation study varying scrape count via `pipeline_params` passthrough (infrastructure exists); measuring quality vs. cost/latency | M4 |
+The Variant A vs B comparison is an instance of **pipeline ablation**: remove a component, replay, compare with statistical significance (McNemar's test for accuracy, Wilcoxon signed-rank for latency). Implemented via `comparison.py` and exposed at `POST /api/v1/backends/{id}/compare`.

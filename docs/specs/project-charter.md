@@ -1,8 +1,8 @@
 # Project Charter: PromptPotter Optimizer
 
-**Version:** 0.5.0
-**Date:** 2026-02-22
-**Status:** Draft
+**Version:** 0.6.0
+**Date:** 2026-02-23
+**Status:** Active
 
 ---
 
@@ -10,10 +10,11 @@
 
 | Term | Definition |
 |------|-----------|
-| **Campaign** | A single optimization run from start to finish. A campaign starts with a baseline configuration, runs one or more trials, and ends with a recommended best configuration. |
+| **Campaign** | A single optimization run from start to finish. A campaign starts with a baseline configuration, runs one or more trials (manual rounds or automated optimization loops), and ends with a recommended best configuration. Currently driven through the HITL campaign notebook. |
 | **Trial** | One iteration within a campaign. Each trial tests a candidate configuration against the evaluation dataset and records the results. |
-| **PROMPT_STATE** | The tracked, versioned snapshot of a prompt organized into three optimization layers: **Layer 1 (Generate)** structured prompt components (persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples), **Layer 2 (Refine Context)** optimization context and hypervariables (context, parameters), **Layer 3 (Modify Plan)** optimization strategy (plan). Immutable; includes `render()` to assemble Layer 1 into prompt text, `derive()` for lineage-tracked children, and `OptimizationDefaults` for Layer 3 strategy parameters. Every trial produces a new PROMPT_STATE. |
+| **PROMPT_STATE** | The tracked, versioned snapshot of a prompt organized into three optimization layers: **Layer 1 (Generate)** structured prompt components (persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples), **Layer 2 (Refine Context)** optimization context and hypervariables (context, parameters), **Layer 3 (Modify Plan)** optimization strategy (plan). Immutable; includes `render()` to assemble Layer 1 into prompt text, `derive()` for lineage-tracked children. Every trial produces a new PROMPT_STATE. |
 | **Evaluation dataset** | A labeled set of input/expected-output pairs used to score how well a configuration performs. Datasets are owned by the consuming project, not by PromptPotter. |
+| **Grid Search** | Systematic exploration of Layer 1 prompt field variants via cartesian product sweep with distance-weighted stratified sampling, content-addressed deduplication, and LLM-assisted analysis. |
 
 ---
 
@@ -42,7 +43,7 @@ The central research question for PromptPotter validation is a **pipeline varian
 
 **Does LLM2 semantic reranking add enough accuracy over the "dumb" table reranker to justify the extra LLM cost and latency?** This is a concrete, testable question. When PromptPotter can run both variants against the same evaluation dataset and produce a clear, traceable recommendation, we know the whole system works.
 
-**Evaluation constraint:** Optimizing the `llm_ranking` prompt requires running the full TermNorm pipeline per query via the backend's `/matches` endpoint. The token matching step (Stage 2) queries a loaded database that cannot be replicated locally. PromptPotter injects candidate prompts via the `ranking_prompt` parameter — the backend runs web search → LLM1 → token matching → LLM2 with the candidate prompt (~10-30s/query). A future `/rerank` endpoint on TermNorm (accepting pre-computed intermediates) would eliminate the redundant steps 1-3.
+**Evaluation constraint:** Optimizing the `llm_ranking` prompt requires running the full TermNorm pipeline per query via the backend's `/matches` endpoint. The token matching step (Stage 2) queries a loaded database that cannot be replicated locally. PromptPotter injects candidate prompts via the `ranking_prompt` parameter — the backend runs web search -> LLM1 -> token matching -> LLM2 with the candidate prompt (~10-30s/query). A future `/rerank` endpoint on TermNorm (accepting pre-computed intermediates) would eliminate the redundant steps 1-3.
 
 A future decision point (post-M4) extends this: **how many websites to scrape** for entity profiling -- a quality vs. cost/latency tradeoff that becomes the second ablation study.
 
@@ -62,14 +63,14 @@ PromptPotter is designed for eventual deployment as a publicly accessible optimi
 
 ### North Star: Diverse Optimization Targets
 
-While M2-M4 implement the concrete prompt optimization case, the DAG-based optimization loop is designed to be target-agnostic. The same analyze-generate-evaluate cycle works for any structured parameter: schemas, scoring functions, fuzzy matching thresholds, retrieval queries, GA/DE settings. The architecture separates the optimization loop from the parameter type so that new target types can be added without rewriting the core engine.
+While M2-M4 implement the concrete prompt optimization case, the optimization loop is designed to be target-agnostic. The same analyze-generate-evaluate cycle works for any structured parameter: schemas, scoring functions, fuzzy matching thresholds, retrieval queries, GA/DE settings. The architecture separates the optimization loop from the parameter type so that new target types can be added without rewriting the core engine.
 
 **Core principles:**
 
 - **Framework-agnostic** — no runtime dependency on LangChain, DSPy, or any other framework. Borrows ideas from the research literature, builds on its own abstractions.
-- **Observable by default** — every optimization run is traced in **Langfuse** (an open-source LLM observability platform) with structured scores, parent-child run hierarchy, and full lineage.
-- **Dual-mode delivery** — available as both a FastAPI REST service for automation and a JupyterLab environment for interactive exploration.
-- **Target-agnostic** — the optimization loop works on any structured parameter, not just prompt strings. The DAG operates on a pluggable state schema; M2-M4 build the concrete prompt case, post-M4 generalizes.
+- **Observable by default** — optimization runs are designed for **Langfuse** tracing with structured scores, parent-child run hierarchy, and full lineage. Langfuse integration exists at the wrapper level (singleton client, trace creation); full per-trial tracing with score attachment is planned for M3.
+- **Dual-mode delivery** — available as both a FastAPI REST service for automation and a JupyterLab environment for interactive exploration. The notebook is currently the primary optimization interface; the API provides data sync, backend evaluation, and comparison endpoints.
+- **Target-agnostic** — the optimization loop works on any structured parameter, not just prompt strings. The service layer operates on a pluggable state schema (PROMPT_STATE); M2-M4 build the concrete prompt case, post-M4 generalizes.
 
 ---
 
@@ -77,13 +78,13 @@ While M2-M4 implement the concrete prompt optimization case, the DAG-based optim
 
 ### In Scope
 
-- **Parameter optimization** — iterative improvement of any tunable non-code configuration: prompts, schemas, scoring functions, fuzzy matching parameters, retrieval queries, GA settings, few-shot examples, temperature, retrieval counts, thresholds, and other structured parameters through automated failure analysis, candidate generation, and evaluation
-- **Workflow-based optimization** — optimization of individual steps within multi-step pipelines (e.g., retrieval followed by ranking followed by classification), using the existing workflow engine
-- **API-first delivery** — FastAPI REST service with structured Pydantic input/output contracts
-- **Human-in-the-loop gates** — decision points where developers review and approve candidates before promotion
-- **Evaluation framework** — automated scoring against labeled datasets with multiple evaluator strategies (exact match, LLM-as-judge, custom)
-- **Langfuse integration** — tracing, scoring, and lineage tracking for every campaign and trial (required for MVP, not optional)
-- **Campaign and trial tracking** — persistent registry of optimization runs with JSONL export, following the parent-child run hierarchy pattern
+- **Parameter optimization** — iterative improvement of prompts through automated failure analysis, LLM-driven candidate generation, and backend evaluation. Currently implemented as service modules (`grid_search.py`, `prompt_optimizer.py`, `prompt_eval.py`) orchestrated via notebook.
+- **Grid search exploration** — systematic exploration of Layer 1 prompt field variants via cartesian product sweep with distance-weighted stratified sampling, plan persistence, per-point query sampling, and LLM-assisted result analysis.
+- **Backend evaluation** — evaluation via the backend's `/matches` endpoint with `ranking_prompt` override. Content-addressed caching, incremental `.partial.jsonl` writes for crash recovery, and partial-run resume.
+- **Notebook-first HITL** — the Jupyter notebook (`optimization_campaign.ipynb`) with `_campaign_lib.py` is the primary optimization interface. Supports config editing, manual and semi-automatic rounds, LLM-generated suggestions with phrase fragments, and campaign summary with lineage tracking.
+- **API-first delivery** — FastAPI REST service with structured Pydantic input/output contracts. Three routers: health, backends (sync, execute, compare), workflows.
+- **File-based project store** — persistent storage of backends, synced experiments, executions, dataset runs (evaluation records), and grid plans under `.promptpotter/projects/`.
+- **Campaign and trial tracking** — campaign rounds tracked in-memory during notebook sessions, with winner save to project store. Formal campaign registry planned for M3.
 
 ### Out of Scope
 
@@ -91,19 +92,18 @@ While M2-M4 implement the concrete prompt optimization case, the DAG-based optim
 - **Public deployment infrastructure (M1-M4)** — no authentication, billing, or multi-tenancy in M1-M4. The API is designed stateless to enable future public deployment, but hosting infrastructure is post-M4
 - **Agent training or reinforcement learning** — no reward-model training or policy gradient methods
 - **Production prompt serving** — PromptPotter finds better configurations, it does not serve them at inference time
-- **GUI/dashboard beyond prototypes** — Streamlit apps for development use, not a production dashboard
 - **Dataset hosting** — evaluation datasets live in the consuming project's repository (e.g., the TermNorm repo), not in PromptPotter
 
 ### Future Scope
 
 These items are explicitly deferred, not permanently excluded:
 
+- **Workflow engine migration** — migrate the current service-based optimizer into the existing workflow engine (`api/core/workflow_runner.py`) as proper nodes (InitNode, GrowFilterNode, AnalysisEvalNode). This gives DAG execution, node reuse, and API-driven orchestration without notebook dependency. Planned for M3.
+- **Iterative feedback cycling** — 3-path routing (generate new variants / refine context / modify plan) with counter-based iteration, implemented as workflow engine nodes. Planned for M3.
+- **Full Langfuse integration** — per-trial tracing with score attachment, campaign-level trace grouping. Planned for M3.
 - **Public service deployment** — authentication, rate limiting, multi-tenancy, and hosting infrastructure for making PromptPotter accessible as a public API (north star)
 - **Non-prompt optimization targets** — generalizing the optimization loop to schemas, scoring functions, fuzzy matchers, retrieval queries, and GA parameters (north star)
-- **Layered access control** — anonymous, API-key-authenticated, and admin tiers with per-user data isolation, enabling safe multi-tenant deployment
 - **Benchmarking and publication** — systematic benchmarks against MedMentions, BC5CDR, and LCA datasets for archival publication
-
-**Future direction:** The ablation comparison workflow (upload experiment data, remove a pipeline component, see statistical comparison with p-values) is designed for self-service use across multiple client types (CLI, notebooks, JS frontend). When PromptPotter is deployed as a web service with user credentials, this becomes a first-class UI flow with pipeline visualization.
 
 ---
 
@@ -112,11 +112,11 @@ These items are explicitly deferred, not permanently excluded:
 | # | Criterion | Measurement | Target |
 |---|-----------|-------------|--------|
 | 1 | **Measurable improvement** | Score delta between initial and best configuration on the evaluation dataset | **10%+ improvement** on at least one user-defined metric (e.g., accuracy, F1) within a single campaign |
-| 2 | **Reproducibility** | Given identical inputs (initial configuration, dataset, campaign settings), the optimizer produces a consistent improvement trajectory | Scores for the same trial vary by **less than 5%** across repeated runs (accounting for LLM non-determinism with temperature 0) |
-| 3 | **Langfuse observability** | Optimization campaigns appear in Langfuse with correct parent-child trace hierarchy and per-trial scores | **100%** of trials have associated Langfuse traces and scores |
-| 4 | **Time to first optimization** | A developer with API keys configured can run their first optimization campaign | **Under 15 minutes** from `pip install` to completed campaign, using the API or a notebook |
-| 5 | **TermNorm validation** | Compare Variant A (table reranker only) vs Variant B (table reranker + LLM2 semantic reranking) on the same evaluation dataset | Produces a clear result showing **which variant is better and by how much**, with full campaign persisted and traceable in Langfuse |
-| 6 | **Generalization beyond prompts** | Optimize at least one non-prompt parameter type (e.g., scoring function weights, fuzzy matching thresholds) using the same DAG loop | Successful optimization with measurable improvement, demonstrating target-agnostic architecture. **Post-M4** |
+| 2 | **Reproducibility** | Given identical inputs (initial configuration, dataset, campaign settings), the optimizer produces a consistent improvement trajectory | Content-addressed caching and grid plan persistence ensure **identical results** for the same inputs. Scores for the same trial vary by **less than 5%** across repeated runs (accounting for LLM non-determinism with temperature 0) |
+| 3 | **Langfuse observability** | Optimization campaigns appear in Langfuse with correct parent-child trace hierarchy and per-trial scores | Langfuse wrapper exists with trace creation capability. Full per-trial tracing is **planned for M3**. |
+| 4 | **Time to first optimization** | A developer with API keys configured can run their first optimization campaign | **Under 15 minutes** from `pip install` to completed campaign, using the notebook |
+| 5 | **TermNorm validation** | Compare Variant A (table reranker only) vs Variant B (table reranker + LLM2 semantic reranking) on the same evaluation dataset | Produces a clear result showing **which variant is better and by how much**, with full campaign persisted and traceable |
+| 6 | **Generalization beyond prompts** | Optimize at least one non-prompt parameter type (e.g., scoring function weights, fuzzy matching thresholds) using the same optimization loop | Successful optimization with measurable improvement, demonstrating target-agnostic architecture. **Post-M4** |
 
 ---
 
@@ -135,11 +135,11 @@ These items are explicitly deferred, not permanently excluded:
 | Constraint | Rationale |
 |------------|-----------|
 | **Framework-agnostic** — no LangChain, DSPy, or similar runtime dependency | Avoids vendor lock-in; users keep their existing architecture |
-| **OpenAI-compatible LLM providers** — must work with Groq, OpenAI, Anthropic, or any provider exposing the OpenAI chat completions API | Supports the user's current provider (Groq with Llama 4 Maverick) and allows switching without code changes |
-| **Langfuse required for MVP** — not an optional integration | Observability is core to the value proposition, not an afterthought |
+| **OpenAI-compatible LLM providers** — currently Groq and OpenAI; any provider exposing the OpenAI chat completions API | Supports the user's current provider (Groq with Llama 4 Maverick) and allows switching without code changes |
 | **File-based registry first** — no database dependency for MVP | Keeps deployment simple (Docker + filesystem); can migrate to SQLite or a database later behind the same interface |
 | **Datasets are external** — evaluation datasets live in the consuming project, not in PromptPotter | PromptPotter is a tool, not a data store; datasets are domain-specific and versioned with their own project |
 | **Docker-deployable** — minimal configuration to run | Single `docker-compose up` with environment variables for API keys |
+| **Backend evaluation only** — no local evaluation fallback | The backend's `/matches` endpoint is the single source of truth. Local evaluation was removed (`82157ef`) because the token matching step requires the backend's loaded database. |
 
 ---
 
