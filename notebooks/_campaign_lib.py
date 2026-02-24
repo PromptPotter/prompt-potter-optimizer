@@ -1731,8 +1731,43 @@ async def resume_or_build_diagnostic(
                 plan["diag_summary"],
                 cached_profiles,
             )
-        # diagnostic_built → don't resume, rebuild fresh
-        print(f"[REBUILD] Plan {plan_id} (status: {status}), rebuilding diagnostic")
+        # diagnostic_built → reuse saved baseline; prefer sibling with scan data
+        siblings = [
+            s for s in store.list_smart_search_plans(backend_id)
+            if s["plan_id"] != plan_id
+            and s["status"] in ("scan_complete", "search_complete")
+            and s.get("variant_library_hash") == existing.get("variant_library_hash", "")
+            and s.get("n_axis_profiles", 0) > 0
+        ]
+        if siblings:
+            # Prefer matching n_diagnostic, then scan_complete status
+            current_n_diag = plan.get("config", {}).get("n_diagnostic", 6)
+            siblings.sort(key=lambda s: (
+                s.get("n_diagnostic") != current_n_diag,
+                s["status"] != "scan_complete",
+            ))
+            sib_data = store.load_smart_search_plan(backend_id, siblings[0]["plan_id"])
+            sib_plan = _deserialize_smart_search_plan(sib_data)
+            sib_profiles = (sib_plan.get("scan_results") or {}).get("axis_profiles", [])
+            print(f"[RESUME] Adopting scan data from plan {siblings[0]['plan_id']} "
+                  f"({len(sib_profiles)} axis profiles)")
+            return (
+                plan_id,
+                sib_plan["search_baseline_ps"],
+                sib_plan["diagnostic"],
+                sib_plan["diag_summary"],
+                sib_profiles,
+            )
+
+        # No sibling with data — return saved baseline (no LLM rebuild)
+        print(f"[RESUME] Plan {plan_id} (status: {status}), reusing saved diagnostic")
+        return (
+            plan_id,
+            plan["search_baseline_ps"],
+            plan["diagnostic"],
+            plan["diag_summary"],
+            [],
+        )
 
     # Build new plan: LLM restructure + diagnostic set
     print(f"[NEW] Building smart search plan: {plan_id}")
@@ -1860,7 +1895,15 @@ def show_scan_coverage(
 
     saved = summary["backend_calls_saved"]
     needed = summary["backend_calls_needed"]
-    print(f"  Summary: {saved} backend calls saved, {needed} still needed")
+    pf_needed = summary.get("prompt_field_calls_needed", 0)
+    pp_needed = summary.get("pipeline_param_calls_needed", 0)
+    parts = []
+    if pf_needed:
+        parts.append(f"{pf_needed} prompt-field")
+    if pp_needed:
+        parts.append(f"{pp_needed} pipeline-param")
+    breakdown = f" ({' + '.join(parts)})" if parts else ""
+    print(f"  Summary: {saved} cached, {needed} still needed{breakdown}")
     print(f"  >> {result['recommendation']}")
 
     if (summary["backend_calls_saved"] == 0

@@ -59,5 +59,6 @@ class SmartSearchStore:
                 "n_diagnostic": config.get("n_diagnostic", "?"),
                 "max_rounds": config.get("max_rounds", "?"),
                 "n_axis_profiles": len(scan.get("axis_profiles", [])),
+                "variant_library_hash": data.get("variant_library_hash", ""),
             })
         return results

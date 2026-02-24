@@ -1079,6 +1079,8 @@ def assess_scan_coverage(
 
         variants_detail: list[dict] = []
         usable_count = 0
+        axis_saved = 0
+        axis_needed = 0
 
         for value in non_baseline:
             perturbed = baseline_ps.derive(**{axis_name: value})
@@ -1089,8 +1091,8 @@ def assess_scan_coverage(
             is_usable = n_cached >= min_queries
             if is_usable:
                 usable_count += 1
-            total_calls_saved += n_cached
-            total_calls_needed += max(0, n_diagnostic - n_cached)
+            axis_saved += n_cached
+            axis_needed += max(0, n_diagnostic - n_cached)
             variants_detail.append({
                 "value_preview": _preview(value),
                 "n_cached": n_cached,
@@ -1098,17 +1100,22 @@ def assess_scan_coverage(
             })
 
         required = axis_requirements.get(axis_name, len(non_baseline))
+        sufficient = usable_count >= required
+        total_calls_saved += axis_saved
+        if not sufficient:
+            total_calls_needed += axis_needed
         axes_detail.append({
             "axis": axis_name,
             "axis_type": "prompt_field",
             "n_values": len(non_baseline),
             "n_usable": usable_count,
             "n_required": required,
-            "sufficient": usable_count >= required,
+            "sufficient": sufficient,
             "variants": variants_detail,
         })
 
     # --- Pipeline-param axes ---
+    pp_calls_needed = 0
     base_params = dict(pipeline_params or {})
     for axis_name, values in pipeline_param_defs.items():
         current_val = base_params.get(axis_name)
@@ -1116,6 +1123,7 @@ def assess_scan_coverage(
         if not non_baseline:
             continue
         n_calls = len(non_baseline) * n_diagnostic
+        pp_calls_needed += n_calls
         total_calls_needed += n_calls
         required = axis_requirements.get(axis_name, len(non_baseline))
         axes_detail.append({
@@ -1166,6 +1174,8 @@ def assess_scan_coverage(
             "prompt_field_axes_total": len(pf_axes),
             "pipeline_param_axes": len(pp_axes),
             "backend_calls_needed": total_calls_needed,
+            "prompt_field_calls_needed": total_calls_needed - pp_calls_needed,
+            "pipeline_param_calls_needed": pp_calls_needed,
             "backend_calls_saved": total_calls_saved,
             "all_satisfied": all_satisfied,
         },

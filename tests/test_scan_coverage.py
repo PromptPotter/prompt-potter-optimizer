@@ -178,3 +178,35 @@ def test_pipeline_params_always_unsatisfied():
     assert pp_axes[0]["n_usable"] == 0
     assert pp_axes[0]["sufficient"] is False
     assert "Pipeline params" in pp_axes[0].get("note", "")
+
+
+def test_sufficient_axes_excluded_from_needed():
+    """When an axis becomes sufficient, its uncached calls drop from needed."""
+    baseline = _make_baseline()
+    diag = _diagnostic(6)
+    query_strings = [d["query"] for d in diag]
+
+    # Give task_intent full coverage (2 variants × 6 queries each)
+    entries: dict[str, list[str]] = {}
+    for ti_val in ["Identify the best match.", "Rank candidates by relevance."]:
+        rendered = baseline.derive(task_intent=ti_val).render()
+        entries[rendered] = query_strings
+    index = _build_index(entries)
+
+    # No pipeline params — isolate prompt-field logic
+    lib_no_pp = {k: v for k, v in VARIANT_LIBRARY.items() if k != "pipeline_params"}
+
+    # At min_queries=6: task_intent sufficient, persona not
+    result = assess_scan_coverage(
+        baseline, lib_no_pp, diag, index, min_queries=6,
+    )
+    ti_axis = next(a for a in result["axes"] if a["axis"] == "task_intent")
+    persona_axis = next(a for a in result["axes"] if a["axis"] == "persona")
+    assert ti_axis["sufficient"] is True
+    assert persona_axis["sufficient"] is False
+
+    # "needed" should only include persona's uncached calls (3 variants × 6 = 18)
+    assert result["summary"]["backend_calls_needed"] == 3 * 6
+
+    # "saved" should include task_intent's cached queries (2 × 6 = 12)
+    assert result["summary"]["backend_calls_saved"] == 2 * 6
