@@ -18,11 +18,14 @@ Layout on disk::
         dataset_runs.json
         grid_plans/{plan_id}.json
         smart_search_plans/{plan_id}.json
+        campaigns/{campaign_id}.json
+        campaigns/{campaign_id}/trial_NNNN.json
 """
 
 from pathlib import Path
 
 from api.services.stores.backend_store import BackendStore
+from api.services.stores.campaign_store import CampaignStore
 from api.services.stores.dataset_run_store import DatasetRunStore
 from api.services.stores.execution_store import ExecutionStore
 from api.services.stores.grid_plan_store import GridPlanStore
@@ -37,6 +40,7 @@ class ProjectStore:
     def __init__(self, base_dir: Path | None = None):
         self.base_dir = base_dir or BASE_DIR
         self.backends = BackendStore(self.base_dir)
+        self.campaigns = CampaignStore(self.base_dir)
         self.executions = ExecutionStore(self.base_dir)
         self.dataset_runs = DatasetRunStore(self.base_dir)
         self.grid_plans = GridPlanStore(self.base_dir)
