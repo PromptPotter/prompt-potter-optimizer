@@ -370,6 +370,92 @@ def deserialize_grid_plan(
 
 
 # ---------------------------------------------------------------------------
+# Smart search plan persistence
+# ---------------------------------------------------------------------------
+
+SSPLAN_PREFIX = "ssplan_"
+
+
+def smart_search_plan_identity(
+    baseline_instruction: str,
+    variant_library: dict,
+    smart_search_config: dict,
+    improvement_areas: str,
+    seed: int = 42,
+) -> str:
+    """Compute a stable identity hash for a smart search plan.
+
+    Hashes user-controlled inputs so the same config produces the same
+    plan ID across kernel restarts.
+    """
+    prompt_keys = sorted(variant_library.get("prompt_fields", {}).keys())
+    param_keys = sorted(variant_library.get("pipeline_params", {}).keys())
+    payload = json.dumps(
+        {
+            "baseline_instruction": baseline_instruction,
+            "prompt_field_keys": prompt_keys,
+            "pipeline_param_keys": param_keys,
+            "n_diagnostic": smart_search_config.get("n_diagnostic", 6),
+            "max_rounds": smart_search_config.get("max_rounds", 3),
+            "stop_threshold": smart_search_config.get("stop_threshold", 0.0),
+            "improvement_areas": improvement_areas,
+            "seed": seed,
+        },
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(payload.encode()).hexdigest()[:12]
+    return f"{SSPLAN_PREFIX}{digest}"
+
+
+def serialize_smart_search_plan(
+    plan_id: str,
+    config: dict,
+    baseline_ps: PromptState,
+    search_baseline_ps: PromptState,
+    layer1_fields: dict,
+    diagnostic: list,
+    diag_summary: dict,
+    variant_library_hash: str,
+) -> dict:
+    """Serialize a smart search plan to a JSON-safe dict.
+
+    Returns a dict with status ``"diagnostic_built"``.
+    """
+    return {
+        "plan_id": plan_id,
+        "status": "diagnostic_built",
+        "config": config,
+        "baseline_ps": baseline_ps.model_dump(),
+        "search_baseline_ps": search_baseline_ps.model_dump(),
+        "layer1_fields": layer1_fields,
+        "diagnostic": diagnostic,
+        "diag_summary": diag_summary,
+        "variant_library_hash": variant_library_hash,
+    }
+
+
+def deserialize_smart_search_plan(plan_data: dict) -> dict:
+    """Reconstruct smart search plan objects from saved data.
+
+    Returns a dict with all fields for easy access, including
+    reconstructed PromptState objects.
+    """
+    return {
+        "plan_id": plan_data["plan_id"],
+        "status": plan_data["status"],
+        "config": plan_data.get("config", {}),
+        "baseline_ps": PromptState(**plan_data["baseline_ps"]),
+        "search_baseline_ps": PromptState(**plan_data["search_baseline_ps"]),
+        "layer1_fields": plan_data.get("layer1_fields", {}),
+        "diagnostic": plan_data.get("diagnostic", []),
+        "diag_summary": plan_data.get("diag_summary", {}),
+        "variant_library_hash": plan_data.get("variant_library_hash", ""),
+        "scan_results": plan_data.get("scan_results"),
+        "search_results": plan_data.get("search_results"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Per-point eval resolution (shared by run_grid_search + notebook callers)
 # ---------------------------------------------------------------------------
 
@@ -1140,8 +1226,22 @@ async def _eval_config(
             }
 
     run_id = f"scan_{content_hash[:8]}"
-    results = []
-    for qi, qd in enumerate(eval_data):
+
+    # Resume from partial results if available
+    results: list[dict] = []
+    start_idx = 0
+    if store and backend_id:
+        partial = store.load_partial_eval(backend_id, run_id)
+        if partial:
+            results = partial
+            start_idx = len(partial)
+            logger.info(
+                "_eval_config [%s] resuming from query %d/%d (partial)",
+                run_id, start_idx + 1, len(eval_data),
+            )
+
+    for qi in range(start_idx, len(eval_data)):
+        qd = eval_data[qi]
         logger.info(
             "_eval_config [%s] query %d/%d: %s",
             run_id, qi + 1, len(eval_data), qd["query"][:60],
@@ -1157,6 +1257,8 @@ async def _eval_config(
             (result.get("predicted") or "")[:50],
         )
         results.append(result)
+        if store and backend_id:
+            store.append_eval_item(backend_id, run_id, result)
         if request_delay > 0:
             await asyncio.sleep(request_delay)
 

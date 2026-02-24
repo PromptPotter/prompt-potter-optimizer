@@ -17,6 +17,7 @@ Layout on disk::
         dataset_runs/{run_id}.partial.jsonl
         dataset_runs.json
         grid_plans/{plan_id}.json
+        smart_search_plans/{plan_id}.json
 """
 
 from pathlib import Path
@@ -27,6 +28,7 @@ from api.services.stores.backend_store import BackendStore
 from api.services.stores.dataset_run_store import DatasetRunStore
 from api.services.stores.execution_store import ExecutionStore
 from api.services.stores.grid_plan_store import GridPlanStore
+from api.services.stores.smart_search_store import SmartSearchStore
 
 BASE_DIR = Path(".promptpotter") / "projects"
 
@@ -44,6 +46,7 @@ class ProjectStore:
         self._executions = ExecutionStore(self.base_dir)
         self._dataset_runs = DatasetRunStore(self.base_dir)
         self._grid_plans = GridPlanStore(self.base_dir)
+        self._smart_search = SmartSearchStore(self.base_dir)
 
     # -- backend CRUD -----------------------------------------------------
 
@@ -188,3 +191,29 @@ class ProjectStore:
         return self._dataset_runs.finalize_eval_run(
             backend_id, run_id, run_data,
         )
+
+    # -- smart search plans ------------------------------------------------
+
+    def save_smart_search_plan(
+        self, backend_id: str, plan_id: str, plan_data: dict[str, Any],
+    ) -> Path:
+        """Write a smart search plan to disk."""
+        return self._smart_search.save(backend_id, plan_id, plan_data)
+
+    def load_smart_search_plan(
+        self, backend_id: str, plan_id: str,
+    ) -> dict[str, Any] | None:
+        """Read a smart search plan. Returns None if not found."""
+        return self._smart_search.load(backend_id, plan_id)
+
+    def update_smart_search_plan(
+        self, backend_id: str, plan_id: str, updates: dict[str, Any],
+    ) -> None:
+        """Merge updates into an existing smart search plan."""
+        self._smart_search.update(backend_id, plan_id, updates)
+
+    def list_smart_search_plans(
+        self, backend_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return summary metadata for all smart search plans on disk."""
+        return self._smart_search.list_all(backend_id)
