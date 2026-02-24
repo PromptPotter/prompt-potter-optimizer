@@ -8,8 +8,6 @@ build_prompt_result_index builds the cross-run query lookup.
 import hashlib
 import logging
 from collections import defaultdict
-from typing import Any
-
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
 from api.services.search.plan_persistence import (
@@ -17,16 +15,9 @@ from api.services.search.plan_persistence import (
     deserialize_smart_search_plan,
 )
 from api.services.search.smart_search import DEFAULT_DIAGNOSTIC_QUERIES
+from api.services.search.utils import preview as _preview
 
 logger = logging.getLogger(__name__)
-
-
-def _preview(value: Any, max_len: int = 40) -> str:
-    """Truncated preview of a variant value."""
-    s = str(value)
-    if not s:
-        return "(empty)"
-    return s[:max_len] + ("..." if len(s) > max_len else "")
 
 
 def build_prompt_result_index(

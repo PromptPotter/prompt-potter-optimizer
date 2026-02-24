@@ -399,3 +399,28 @@ def set_llm_client(client: LLMClientBase) -> None:
     """Set a custom LLM client (useful for testing)."""
     global _llm_client
     _llm_client = client
+
+
+# ---------------------------------------------------------------------------
+# Factory helpers (used by notebooks + future M3 nodes)
+# ---------------------------------------------------------------------------
+
+
+def make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase:
+    """Create an LLM client from a provider URL or key."""
+    if "groq.com" in provider_url:
+        return GroqClient(api_key=api_key)
+    elif "openai.com" in provider_url:
+        return OpenAIClient(api_key=api_key)
+    return GroqClient(api_key=api_key)
+
+
+def setup_llm(campaign_config: dict, api_key: str) -> tuple[LLMClientBase, str]:
+    """Create LLM client + model from campaign_config['eval_llm'].
+
+    Returns:
+        (llm_client, model) tuple for passing to service functions.
+    """
+    eval_llm = campaign_config["eval_llm"]
+    client = make_llm_client(eval_llm.get("provider_url", ""), api_key)
+    return client, eval_llm.get("model", "")

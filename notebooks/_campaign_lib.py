@@ -24,12 +24,13 @@ from api.services.backend_client import (
     build_pipeline_params,
     load_pipeline_config,
 )
-from api.services.llm_client import LLMClientBase, GroqClient, OpenAIClient
+from api.services.llm_client import LLMClientBase, setup_llm
 from api.services.project_store import ProjectStore
 
 # --- Service imports (core logic) ---
 from api.services.campaign_init import init_services as _init_services
 from api.services.prompt_eval import (
+    analyze_candidate_coverage as _analyze_candidate_coverage,
     extract_baseline_prompt as load_baseline_prompt,
     compute_accuracy,
     evaluate_prompt_cached as _evaluate_prompt_cached,
@@ -53,12 +54,13 @@ from api.services.search import (
     DEFAULT_DIAGNOSTIC_QUERIES,
     validate_grid_config,
     build_grid_points as _build_grid_points,
+    build_combined_state_lookup as _build_combined_state_lookup,
+    merge_grid_results as _merge_grid_results,
     run_grid_search as _run_grid_search,
     analyze_grid_results as _analyze_grid_results,
     build_grid_analysis_prompt as _build_grid_analysis_prompt,
     select_grid_winner,
     load_eval_dataset as _load_eval_dataset,
-    deserialize_grid_plan as _deserialize_grid_plan,
     resolve_point_evals as _resolve_point_evals,
     build_diagnostic_set,
     sensitivity_scan as _sensitivity_scan,
@@ -144,32 +146,7 @@ def show_pipeline_config(svc: dict, campaign_config: dict) -> dict:
     return pipeline_params
 
 
-# ---------------------------------------------------------------------------
-# LLM client adapter
-# ---------------------------------------------------------------------------
-
-
-def _make_llm_client(eval_llm: dict, api_key: str) -> LLMClientBase:
-    """Bridge notebook's eval_llm dict config to an LLMClientBase."""
-    provider_url = eval_llm.get("provider_url", "")
-    if "groq.com" in provider_url:
-        return GroqClient(api_key=api_key)
-    elif "openai.com" in provider_url:
-        return OpenAIClient(api_key=api_key)
-    else:
-        return GroqClient(api_key=api_key)
-
-
-def setup_llm(campaign_config: dict, api_key: str) -> tuple:
-    """Create an LLM client once from campaign_config["eval_llm"].
-
-    Returns:
-        (llm_client, model) tuple for passing to service functions.
-    """
-    eval_llm = campaign_config["eval_llm"]
-    client = _make_llm_client(eval_llm, api_key)
-    model = eval_llm.get("model", "")
-    return client, model
+# setup_llm and make_llm_client imported from api.services.llm_client above
 
 
 # ---------------------------------------------------------------------------
@@ -220,39 +197,14 @@ async def init_services(
 
 def analyze_candidate_coverage(replay_results: list) -> pd.DataFrame:
     """Analyze candidate coverage and print diagnostic summary."""
-    coverage_rows = []
-    for r in replay_results:
-        if r.get("status") != "success":
-            continue
-        pd_data = r.get("pipeline_data", {})
-        candidates = pd_data.get("token_matched_candidates", [])
-        gt = r["ground_truth"]
+    result = _analyze_candidate_coverage(replay_results)
+    rows = result["rows"]
+    covered = result["covered"]
+    total_cov = result["total"]
+    coverage_pct = result["coverage_pct"]
+    rank_dist = result["rank_distribution"]
 
-        candidate_names = []
-        for c in candidates:
-            if isinstance(c, (list, tuple)):
-                candidate_names.append(c[0])
-            else:
-                candidate_names.append(str(c))
-
-        gt_rank = None
-        for i, name in enumerate(candidate_names):
-            if name == gt:
-                gt_rank = i + 1
-                break
-
-        coverage_rows.append({
-            "query": r["query"][:50],
-            "ground_truth": gt[:40],
-            "in_candidates": gt_rank is not None,
-            "gt_rank": gt_rank,
-            "num_candidates": len(candidate_names),
-        })
-
-    cov_df = pd.DataFrame(coverage_rows)
-    covered = cov_df["in_candidates"].sum()
-    total_cov = len(cov_df)
-    coverage_pct = covered / total_cov * 100 if total_cov else 0
+    cov_df = pd.DataFrame(rows)
 
     print("CANDIDATE COVERAGE")
     print("=" * 50)
@@ -260,28 +212,18 @@ def analyze_candidate_coverage(replay_results: list) -> pd.DataFrame:
     print(f"  Missing from candidates:    {total_cov - covered}/{total_cov}")
     print()
 
-    found = cov_df[cov_df["in_candidates"]]
-    if not found.empty:
+    if rank_dist:
         print("Rank distribution (ground truth position in candidate list):")
-        print(f"  Rank 1 (already top):  {(found['gt_rank'] == 1).sum()}")
-        print(
-            f"  Rank 2-5:              "
-            f"{((found['gt_rank'] >= 2) & (found['gt_rank'] <= 5)).sum()}"
-        )
-        print(
-            f"  Rank 6-10:             "
-            f"{((found['gt_rank'] >= 6) & (found['gt_rank'] <= 10)).sum()}"
-        )
-        print(
-            f"  Rank 11-20:            "
-            f"{((found['gt_rank'] >= 11) & (found['gt_rank'] <= 20)).sum()}"
-        )
-        print(f"  Rank >20:              {(found['gt_rank'] > 20).sum()}")
-        print(f"  Mean rank:             {found['gt_rank'].mean():.1f}")
-        print(f"  Median rank:           {found['gt_rank'].median():.0f}")
+        print(f"  Rank 1 (already top):  {rank_dist['rank_1']}")
+        print(f"  Rank 2-5:              {rank_dist['rank_2_5']}")
+        print(f"  Rank 6-10:             {rank_dist['rank_6_10']}")
+        print(f"  Rank 11-20:            {rank_dist['rank_11_20']}")
+        print(f"  Rank >20:              {rank_dist['rank_gt_20']}")
+        print(f"  Mean rank:             {rank_dist['mean_rank']:.1f}")
+        print(f"  Median rank:           {rank_dist['median_rank']:.0f}")
 
     print()
-    if coverage_pct > 50:
+    if result["viable"]:
         print(
             f"DECISION: Coverage {coverage_pct:.0f}% > 50% threshold "
             "-> Reranker optimization is VIABLE."
@@ -545,13 +487,7 @@ def load_grid_plan_results(
 
 def merge_grid_results(*dataframes: "pd.DataFrame") -> "pd.DataFrame":
     """Merge multiple grid result DataFrames, keeping the best accuracy per prompt_state_id."""
-    combined = pd.concat(dataframes, ignore_index=True)
-    combined = (
-        combined.sort_values("accuracy", ascending=False)
-        .drop_duplicates(subset=["prompt_state_id"], keep="first")
-        .sort_values("accuracy", ascending=False)
-        .reset_index(drop=True)
-    )
+    combined = _merge_grid_results(*dataframes)
     print(f"Merged: {len(combined)} unique grid points from {len(dataframes)} plans")
     return combined
 
@@ -772,15 +708,11 @@ async def run_grid_search(
         eval_queries_per_point=eval_queries_per_point,
         shared_queries=shared_queries,
         seed=grid_seed,
+        plan_id=plan_id,
     )
 
-    # Mark plan as completed
-    if plan_id and store and backend_id:
-        try:
-            store.grid_plans.update_status(backend_id, plan_id, "completed")
-            print(f"Grid plan {plan_id} marked as completed.")
-        except Exception:
-            pass
+    if plan_id:
+        print(f"Grid plan {plan_id} marked as completed.")
 
     return df
 
@@ -843,12 +775,9 @@ def select_and_seed_grid_winner(
     winner_df = merged_grid_df if merged_grid_df is not None else grid_df
 
     if merged_grid_df is not None and plan_dfs:
-        combined_lookup: dict = {}
-        for pid in plan_dfs:
-            plan_data = svc["store"].grid_plans.load(svc["backend_id"], pid)
-            if plan_data:
-                _, sl, _, _, _, _ = _deserialize_grid_plan(plan_data)
-                combined_lookup.update(sl)
+        combined_lookup = _build_combined_state_lookup(
+            svc["store"], svc["backend_id"], list(plan_dfs.keys()),
+        )
         grid_winner = select_grid_winner(winner_df, combined_lookup)
     else:
         grid_winner = select_grid_winner(winner_df, grid_state_lookup)
@@ -1560,9 +1489,8 @@ async def run_manual_round(
         The round entry dict (also appended to campaign_rounds).
     """
     opt = campaign_config["optimization"]
+    llm_client, llm_model = setup_llm(campaign_config, api_key)
     eval_llm = campaign_config["eval_llm"]
-    llm_client = _make_llm_client(eval_llm, api_key)
-    llm_model = eval_llm.get("model", "")
     current_best = campaign_rounds[-1]
     round_num = len(campaign_rounds)
 
@@ -1616,8 +1544,7 @@ async def run_optimization_loop(
     """
     opt = campaign_config.get("optimization", {})
     eval_llm = campaign_config["eval_llm"]
-    llm_client = _make_llm_client(eval_llm, api_key)
-    llm_model = eval_llm.get("model", "")
+    llm_client, llm_model = setup_llm(campaign_config, api_key)
     patience = opt.get("patience", patience)
 
     def _on_round(round_entry, round_num, improved, stale_count):

@@ -456,6 +456,7 @@ async def run_grid_search(
     eval_queries_per_point: int = 0,
     shared_queries: bool = True,
     seed: int = 42,
+    plan_id: str = "",
 ) -> pd.DataFrame:
     """Evaluate each grid point on eval_data via the backend.
 
@@ -493,7 +494,42 @@ async def run_grid_search(
 
     df = pd.DataFrame(rows)
     df = df.sort_values("accuracy", ascending=False).reset_index(drop=True)
+
+    if plan_id and store and backend_id:
+        store.grid_plans.update_status(backend_id, plan_id, "completed")
+
     return df
+
+
+# ---------------------------------------------------------------------------
+# Grid result merging & lookup helpers
+# ---------------------------------------------------------------------------
+
+
+def merge_grid_results(*dataframes: pd.DataFrame) -> pd.DataFrame:
+    """Merge multiple grid result DataFrames, keeping best accuracy per prompt_state_id."""
+    combined = pd.concat(dataframes, ignore_index=True)
+    return (
+        combined.sort_values("accuracy", ascending=False)
+        .drop_duplicates(subset=["prompt_state_id"], keep="first")
+        .sort_values("accuracy", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+def build_combined_state_lookup(
+    store: ProjectStore, backend_id: str, plan_ids: list[str],
+) -> dict:
+    """Build a combined state lookup from multiple grid plans."""
+    from api.services.search.plan_persistence import deserialize_grid_plan
+
+    combined: dict = {}
+    for pid in plan_ids:
+        plan_data = store.grid_plans.load(backend_id, pid)
+        if plan_data:
+            _, sl, _, _, _, _ = deserialize_grid_plan(plan_data)
+            combined.update(sl)
+    return combined
 
 
 # ---------------------------------------------------------------------------

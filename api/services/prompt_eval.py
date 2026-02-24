@@ -93,6 +93,69 @@ def make_incremental_writer(
     return writer
 
 
+def analyze_candidate_coverage(replay_results: list) -> dict:
+    """Analyze ground truth presence in candidate lists.
+
+    Returns dict with keys: rows (list of dicts), covered, total, coverage_pct,
+    rank_distribution (dict), viable (bool).
+    """
+    rows = []
+    for r in replay_results:
+        if r.get("status") != "success":
+            continue
+        pd_data = r.get("pipeline_data", {})
+        candidates = pd_data.get("token_matched_candidates", [])
+        gt = r["ground_truth"]
+
+        candidate_names = []
+        for c in candidates:
+            if isinstance(c, (list, tuple)):
+                candidate_names.append(c[0])
+            else:
+                candidate_names.append(str(c))
+
+        gt_rank = None
+        for i, name in enumerate(candidate_names):
+            if name == gt:
+                gt_rank = i + 1
+                break
+
+        rows.append({
+            "query": r["query"][:50],
+            "ground_truth": gt[:40],
+            "in_candidates": gt_rank is not None,
+            "gt_rank": gt_rank,
+            "num_candidates": len(candidate_names),
+        })
+
+    total = len(rows)
+    covered = sum(1 for r in rows if r["in_candidates"])
+    coverage_pct = covered / total * 100 if total else 0
+
+    # Rank distribution
+    found_ranks = [r["gt_rank"] for r in rows if r["gt_rank"] is not None]
+    rank_distribution = {}
+    if found_ranks:
+        rank_distribution = {
+            "rank_1": sum(1 for r in found_ranks if r == 1),
+            "rank_2_5": sum(1 for r in found_ranks if 2 <= r <= 5),
+            "rank_6_10": sum(1 for r in found_ranks if 6 <= r <= 10),
+            "rank_11_20": sum(1 for r in found_ranks if 11 <= r <= 20),
+            "rank_gt_20": sum(1 for r in found_ranks if r > 20),
+            "mean_rank": sum(found_ranks) / len(found_ranks),
+            "median_rank": sorted(found_ranks)[len(found_ranks) // 2],
+        }
+
+    return {
+        "rows": rows,
+        "covered": covered,
+        "total": total,
+        "coverage_pct": coverage_pct,
+        "rank_distribution": rank_distribution,
+        "viable": coverage_pct > 50,
+    }
+
+
 def extract_baseline_prompt(exp_data: dict) -> PromptState:
     """Extract the llm_ranking prompt from experiment data, wrap in PromptState.
 

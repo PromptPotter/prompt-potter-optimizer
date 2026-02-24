@@ -145,13 +145,8 @@ def classify_axis(
 # Helpers
 # ---------------------------------------------------------------------------
 
-
-def _preview(value: Any, max_len: int = 40) -> str:
-    """Truncated preview of a variant value."""
-    s = str(value)
-    if not s:
-        return "(empty)"
-    return s[:max_len] + ("..." if len(s) > max_len else "")
+# Re-export for backward compatibility (synthesis.py imports from here)
+from api.services.search.utils import preview as _preview  # noqa: E402
 
 
 async def _eval_config(
