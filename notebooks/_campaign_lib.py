@@ -18,7 +18,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from api.models.backend import BackendConnection, Execution, ExecutionResultItem
+from api.models.backend import BackendConnection
 from api.models.prompt_state import PromptState
 from api.services.backend_client import BackendClient
 from api.services.llm_client import LLMClientBase, GroqClient, OpenAIClient
@@ -26,9 +26,7 @@ from api.services.project_store import ProjectStore
 
 # --- Service imports (core logic) ---
 from api.services.prompt_eval import (
-    extract_baseline_prompt,
-    filter_eval_data as _filter_eval_data,
-    backend_reranker_eval as _backend_reranker_eval,
+    extract_baseline_prompt as load_baseline_prompt,
     evaluate_prompt_batch,
     compute_accuracy,
     eval_content_hash,
@@ -36,10 +34,10 @@ from api.services.prompt_eval import (
     make_incremental_writer,
 )
 from api.services.prompt_optimizer import (
-    generate_candidates as _generate_candidates,
+    generate_candidates,
+    generate_suggestions,
+    save_campaign_winner,
     select_round_winner as _select_round_winner,
-    generate_suggestions as _generate_suggestions,
-    save_campaign_winner as _save_campaign_winner,
 )
 from api.config.settings import load_variant_library
 from api.services.grid_search import (
@@ -49,31 +47,31 @@ from api.services.grid_search import (
     REQUIRED_TEMPLATE_VARS,
     MIN_DIAGNOSTIC_QUERIES,
     DEFAULT_DIAGNOSTIC_QUERIES,
-    validate_grid_config as _validate_grid_config,
+    validate_grid_config,
     build_grid_points as _build_grid_points,
     restructure_context as _restructure_context,
     run_grid_search as _run_grid_search,
     analyze_grid_results as _analyze_grid_results,
     build_grid_analysis_prompt as _build_grid_analysis_prompt,
-    select_grid_winner as _select_grid_winner,
+    select_grid_winner,
     load_eval_dataset as _load_eval_dataset,
     grid_plan_identity as _grid_plan_identity,
     serialize_grid_plan as _serialize_grid_plan,
     deserialize_grid_plan as _deserialize_grid_plan,
     resolve_point_evals as _resolve_point_evals,
-    build_diagnostic_set as _build_diagnostic_set,
+    build_diagnostic_set,
     sensitivity_scan as _sensitivity_scan,
     adaptive_search as _adaptive_search,
     smart_search_plan_identity as _smart_search_plan_identity,
     serialize_smart_search_plan as _serialize_smart_search_plan,
     deserialize_smart_search_plan as _deserialize_smart_search_plan,
-    build_prompt_result_index as _build_prompt_result_index,
-    synthesize_sensitivity_from_grid as _synthesize_sensitivity_from_grid,
+    build_prompt_result_index as build_historical_index,
+    synthesize_sensitivity_from_grid as synthesize_sensitivity,
     assess_scan_coverage as _assess_scan_coverage,
     build_data_inventory as _build_data_inventory,
 )
 
-# Re-export constants for notebooks
+# Re-export constants and service functions for notebooks
 __all__ = [
     "DEFAULT_GRID_AXES",
     "SAMPLING_ALPHA",
@@ -82,6 +80,16 @@ __all__ = [
     "MIN_DIAGNOSTIC_QUERIES",
     "DEFAULT_DIAGNOSTIC_QUERIES",
     "load_variant_library",
+    # Direct re-exports (no local wrapper)
+    "load_baseline_prompt",
+    "generate_candidates",
+    "generate_suggestions",
+    "save_campaign_winner",
+    "validate_grid_config",
+    "select_grid_winner",
+    "build_diagnostic_set",
+    "build_historical_index",
+    "synthesize_sensitivity",
 ]
 
 
@@ -212,6 +220,18 @@ def _make_llm_client(eval_llm: dict, api_key: str) -> LLMClientBase:
         return GroqClient(api_key=api_key)
 
 
+def setup_llm(campaign_config: dict, api_key: str) -> tuple:
+    """Create an LLM client once from campaign_config["eval_llm"].
+
+    Returns:
+        (llm_client, model) tuple for passing to service functions.
+    """
+    eval_llm = campaign_config["eval_llm"]
+    client = _make_llm_client(eval_llm, api_key)
+    model = eval_llm.get("model", "")
+    return client, model
+
+
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
@@ -300,136 +320,6 @@ async def init_services(
         "backend_client": client,
         "session_terms": BackendClient.extract_session_terms(exp_data) if exp_data else [],
     }
-
-
-# ---------------------------------------------------------------------------
-# Replay
-# ---------------------------------------------------------------------------
-
-
-async def run_or_load_replay(
-    client: BackendClient,
-    store: ProjectStore,
-    queries: list,
-    terms: list,
-    backend_id: str,
-    experiment_id: str,
-    replay_config: dict,
-    pipeline_params: dict,
-) -> tuple[Execution, list]:
-    """Run replay or load from stored results. Returns (Execution, replay_results)."""
-    import uuid
-
-    rc = replay_config
-    pp = pipeline_params
-
-    variant_label = "full-pipeline" if not rc["skip_llm_ranking"] else "no-llm2"
-    pipeline_notation = (
-        "LLM1-TokenMatch-LLM2" if not rc["skip_llm_ranking"] else "LLM1-TokenMatch"
-    )
-
-    replay_queries_list = queries[:rc["query_limit"]] if rc["query_limit"] else queries
-    total = len(replay_queries_list)
-
-    # Check for existing execution
-    _existing = None
-    if not pp:
-        for _ex in store.list_executions(backend_id):
-            if (
-                _ex["experiment_id"] == experiment_id
-                and _ex["variant_label"] == variant_label
-                and _ex["pipeline_notation"] == pipeline_notation
-            ):
-                _existing = store.load_execution(backend_id, _ex["execution_id"])
-                if _existing:
-                    break
-
-    if _existing:
-        execution = _existing
-        replay_results = [r.model_dump() for r in _existing.results]
-        _hits = sum(
-            1 for r in replay_results if r.get("predicted") == r["ground_truth"]
-        )
-        print(f"Using stored execution {execution.execution_id}")
-        print(f"  Queries: {len(replay_results)}")
-        print(
-            f"  hit@1: {_hits}/{len(replay_results)} "
-            f"({_hits / len(replay_results) * 100:.1f}%)"
-        )
-    else:
-        execution_id = uuid.uuid4().hex[:12]
-        if pp:
-            print(f"Pipeline overrides: {pp}")
-        print(f"Replaying {total} queries against {client.base_url}...")
-
-        _hits_counter = [0]
-        _pbar = tqdm(total=total, desc="Replay", unit="query")
-
-        async def on_result(result, index, total):
-            store.append_result(backend_id, execution_id, result)
-            hit = result.get("predicted", "") == result["ground_truth"]
-            if hit:
-                _hits_counter[0] += 1
-            done = index + 1
-            tag = "HIT " if hit else "MISS"
-            tqdm.write(
-                f"[{done}/{total}] {tag}  {result['query'][:50]:<50s} "
-                f"| pred: {result.get('predicted', '?')[:35]:<35s} "
-                f"| Running: {_hits_counter[0]}/{done} "
-                f"({_hits_counter[0] / done * 100:.1f}%)"
-            )
-            _pbar.update(1)
-
-        replay_results = await client.replay_queries(
-            queries=replay_queries_list,
-            terms=terms,
-            skip_llm_ranking=rc["skip_llm_ranking"],
-            delay_between=rc["delay_between"],
-            on_result=on_result,
-            pipeline_params=pp,
-        )
-        _pbar.close()
-
-        successful = sum(1 for r in replay_results if r["status"] == "success")
-        errors = sum(1 for r in replay_results if r["status"] == "error")
-        execution = Execution(
-            execution_id=execution_id,
-            backend_id=backend_id,
-            experiment_id=experiment_id,
-            variant_label=variant_label,
-            pipeline_notation=pipeline_notation,
-            session_terms_count=len(terms),
-            pipeline_params=pp,
-            query_count=len(replay_results),
-            successful_count=successful,
-            error_count=errors,
-            results=[ExecutionResultItem(**r) for r in replay_results],
-        )
-        store.finalize_execution(execution)
-        replay_results = [
-            r if isinstance(r, dict) else r.model_dump() for r in replay_results
-        ]
-
-    # Summary
-    total_r = len(replay_results)
-    hits = sum(1 for r in replay_results if r.get("predicted") == r["ground_truth"])
-    avg_lat = (
-        sum(r.get("latency_ms", 0) for r in replay_results) / total_r
-        if total_r
-        else 0
-    )
-    avg_conf = (
-        sum(r.get("confidence", 0) for r in replay_results) / total_r
-        if total_r
-        else 0
-    )
-
-    print("\nReplay Summary")
-    print(f"  hit@1:          {hits}/{total_r} ({hits / total_r * 100:.1f}%)")
-    print(f"  Avg latency:    {avg_lat:,.0f} ms")
-    print(f"  Avg confidence: {avg_conf:.3f}")
-
-    return execution, replay_results
 
 
 # ---------------------------------------------------------------------------
@@ -525,33 +415,6 @@ def analyze_candidate_coverage(replay_results: list) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Baseline & Eval  (thin wrappers adding print output)
 # ---------------------------------------------------------------------------
-
-
-def load_baseline_prompt(exp_data: dict) -> PromptState:
-    """Extract the llm_ranking prompt from experiment data, wrap in PromptState."""
-    baseline = extract_baseline_prompt(exp_data)
-
-    print(f"Baseline prompt loaded: {baseline.id[:12]}")
-    print(f"  Family: {baseline.parameters['family']}")
-    print(f"  Version: {baseline.parameters['version']}")
-    print(f"  Template length: {len(baseline.instruction)} chars")
-
-    return baseline
-
-
-def filter_eval_data(replay_results: list) -> list:
-    """Filter replay results to those with entity_profile in pipeline_data."""
-    eval_data = _filter_eval_data(replay_results)
-
-    print(
-        f"Evaluation data: {len(eval_data)}/{len(replay_results)} "
-        "queries with entity_profile"
-    )
-    if not eval_data:
-        print("WARNING: No queries have entity_profile in pipeline_data.")
-        print("Re-run replay with skip_llm_ranking=False.")
-
-    return eval_data
 
 
 async def evaluate_prompt(
@@ -725,39 +588,6 @@ async def run_baseline_eval(
     return campaign_rounds, baseline_results
 
 
-# ---------------------------------------------------------------------------
-# Optimization  (thin wrappers adding print/display)
-# ---------------------------------------------------------------------------
-
-
-async def generate_candidates(
-    current_ps: PromptState,
-    current_accuracy: float,
-    current_results: list,
-    n_variants: int,
-    creativity: float,
-    eval_llm: dict,
-    api_key: str,
-) -> list:
-    """Generate candidate prompt variants via LLM meta-prompt."""
-    client = _make_llm_client(eval_llm, api_key)
-    print(f"Generating {n_variants} candidate prompts...")
-
-    candidates = await _generate_candidates(
-        current_ps, current_accuracy, current_results,
-        n_variants, creativity, client,
-        model=eval_llm.get("model"),
-    )
-
-    for c in candidates:
-        print(
-            f"  {c.changes_description or c.id[:12]}: "
-            f"{(c.changes_description or '')[:80]}"
-        )
-
-    return candidates
-
-
 def select_round_winner(
     candidates: list,
     all_candidate_results: dict,
@@ -802,28 +632,6 @@ def select_round_winner(
         "results": result["results"],
         "candidates_evaluated": result["candidates_evaluated"],
     }
-
-
-# ---------------------------------------------------------------------------
-# Suggestions  (thin wrapper adding print output)
-# ---------------------------------------------------------------------------
-
-
-async def generate_suggestions(
-    campaign_rounds: list,
-    eval_data: list,
-    campaign_config: dict,
-    eval_llm: dict,
-    api_key: str,
-) -> dict:
-    """Build suggestion prompt, call LLM, return parsed JSON."""
-    client = _make_llm_client(eval_llm, api_key)
-    print("Generating suggestions...")
-
-    return await _generate_suggestions(
-        campaign_rounds, eval_data, campaign_config,
-        client, model=eval_llm.get("model"),
-    )
 
 
 def display_suggestions(suggestions: dict, round_num: int) -> None:
@@ -1014,51 +822,6 @@ def show_grid_overview(
     }
 
 
-# ---------------------------------------------------------------------------
-# Grid Search  (thin wrappers adding tqdm/print/display)
-# ---------------------------------------------------------------------------
-
-
-async def restructure_context(
-    context_input,
-    eval_llm: dict,
-    api_key: str,
-    improvement_areas: str = "",
-) -> dict:
-    """LLM-assisted restructuring of user context into Layer 1 fields."""
-    client = _make_llm_client(eval_llm, api_key)
-    result = await _restructure_context(
-        context_input, client,
-        model=eval_llm.get("model"),
-        improvement_areas=improvement_areas,
-    )
-
-    mode = "validate" if isinstance(context_input, dict) else "parse"
-    print(f"Context restructured ({mode} mode):")
-    for k, v in result.items():
-        if k in GRID_SEARCHABLE_FIELDS and v:
-            print(f"  {k}: {v[:80]}{'...' if len(v) > 80 else ''}")
-
-    if result.get("consultation"):
-        print(f"\nConsultation:\n  {result['consultation']}")
-
-    return result
-
-
-def validate_grid_config(
-    grid_config: dict, baseline: PromptState, grid_budget: int = 0,
-) -> dict:
-    """Validate grid axes and compute cartesian product size."""
-    meta = _validate_grid_config(grid_config, baseline, grid_budget=grid_budget)
-
-    print("Grid config validated:")
-    for name, values in meta["axes"].items():
-        print(f"  {name}: {len(values)} variants")
-    print(f"  Total grid points: {meta['total']}")
-
-    return meta
-
-
 def build_grid_points(
     grid_config: dict,
     baseline: PromptState,
@@ -1099,8 +862,8 @@ def build_grid_points(
 async def resume_or_build_grid(
     campaign_config: dict,
     baseline: PromptState,
-    eval_llm: dict,
-    api_key: str,
+    llm_client: "LLMClientBase",
+    model: str,
     store: ProjectStore,
     backend_id: str,
     improvement_areas: str = "",
@@ -1138,7 +901,8 @@ async def resume_or_build_grid(
     # Check for existing plan
     existing = store.load_grid_plan(backend_id, plan_id)
     if existing:
-        print(f"[RESUME] Found existing grid plan: {plan_id} (status: {existing.get('status', '?')})")
+        status = existing.get('status', '?')
+        print(f"[RESUME] Found existing grid plan: {plan_id} (status: {status})")
         (
             grid_points, grid_state_lookup, sampling_meta,
             grid_axes, layer1_fields, grid_baseline,
@@ -1154,8 +918,9 @@ async def resume_or_build_grid(
 
     # Build new plan: LLM restructure + grid points
     print(f"[NEW] Building grid plan: {plan_id}")
-    layer1_fields = await restructure_context(
-        context_input, eval_llm, api_key,
+    layer1_fields = await _restructure_context(
+        context_input, llm_client,
+        model=model,
         improvement_areas=improvement_areas,
     )
 
@@ -1164,7 +929,7 @@ async def resume_or_build_grid(
         changes_description="grid_baseline",
     )
 
-    _validate_grid_config(grid_axes, grid_baseline, grid_budget=grid_budget)
+    validate_grid_config(grid_axes, grid_baseline, grid_budget=grid_budget)
     points, state_lookup, sampling_meta = _build_grid_points(
         grid_axes, grid_baseline,
         grid_budget=grid_budget,
@@ -1358,18 +1123,6 @@ def display_grid_results(
                 ipy_display(styled)
 
 
-def select_grid_winner(grid_df: pd.DataFrame, state_lookup: dict) -> dict:
-    """Select the best-performing grid point."""
-    result = _select_grid_winner(grid_df, state_lookup)
-
-    ps = result["prompt_state"]
-    print(f"Grid winner: {ps.changes_description or ps.id[:12]}")
-    print(f"  Accuracy: {result['accuracy']:.1%} ({result['hits']}/{result['total']})")
-    print(f"  PromptState: {ps.id[:12]}")
-
-    return result
-
-
 def select_and_seed_grid_winner(
     grid_df: "pd.DataFrame | None",
     merged_grid_df: "pd.DataFrame | None",
@@ -1434,16 +1187,10 @@ def select_and_seed_grid_winner(
 async def analyze_grid_results(
     grid_df: pd.DataFrame,
     grid_config: dict,
-    eval_llm: dict,
-    api_key: str,
+    llm_client: "LLMClientBase",
+    model: str = "",
 ) -> dict:
     """LLM analysis of grid search results."""
-    if not api_key:
-        raise RuntimeError(
-            "No API key provided. Set GROQ_API_KEY in your .env file "
-            "and restart the kernel."
-        )
-
     # Build and display the prompt before calling the LLM
     prompt = _build_grid_analysis_prompt(grid_df, grid_config)
     print("LLM ANALYSIS PROMPT")
@@ -1451,12 +1198,10 @@ async def analyze_grid_results(
     print(prompt)
     print("=" * 70)
 
-    model = eval_llm.get("model", "?")
-    print(f"\nCalling {model} ...")
+    print(f"\nCalling {model or '?'} ...")
 
-    client = _make_llm_client(eval_llm, api_key)
     analysis = await _analyze_grid_results(
-        grid_df, grid_config, client, model=eval_llm.get("model"),
+        grid_df, grid_config, llm_client, model=model,
     )
 
     print(f"\n{'=' * 70}")
@@ -1578,35 +1323,6 @@ def load_eval_dataset(
 
 
 # ---------------------------------------------------------------------------
-# Save
-# ---------------------------------------------------------------------------
-
-
-def save_campaign_winner(
-    campaign_rounds: list,
-    campaign_config: dict,
-    store: ProjectStore,
-    backend_id: str,
-) -> dict:
-    """Find best round, save to store, print confirmation."""
-    result = _save_campaign_winner(
-        campaign_rounds, campaign_config, store, backend_id,
-    )
-
-    print("WINNER SAVED")
-    print(f"  PromptState: {result['winner_id'][:12]}")
-    print(
-        f"  Accuracy: {result['accuracy']:.1%} "
-        f"(baseline: {result['baseline_accuracy']:.1%}, "
-        f"delta: {result['improvement']:+.1%})"
-    )
-    print(f"  File: .promptpotter/projects/{backend_id}/sync/{result['filename']}")
-    print(f"  Rounds completed: {result['campaign_rounds'] - 1}")
-
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Progress display
 # ---------------------------------------------------------------------------
 
@@ -1659,36 +1375,12 @@ def display_progress(campaign_rounds: list, window: int = 8) -> None:
 # ---------------------------------------------------------------------------
 
 
-def build_diagnostic_set(
-    eval_data: list,
-    baseline_results: list,
-    n_queries: int = DEFAULT_DIAGNOSTIC_QUERIES,
-    seed: int = 42,
-) -> tuple[list, dict]:
-    """Build a stratified diagnostic query set and print summary."""
-    diagnostic, summary = _build_diagnostic_set(
-        eval_data, baseline_results, n_queries=n_queries, seed=seed,
-    )
-
-    print("Diagnostic set built:")
-    print(
-        f"  Queries: {summary['n_queries']} "
-        f"({summary['n_hits']} hits + {summary['n_misses']} misses)"
-    )
-    print(
-        f"  Pool: {summary['total_pool_hits']} hits, "
-        f"{summary['total_pool_misses']} misses"
-    )
-
-    return diagnostic, summary
-
-
 async def resume_or_build_diagnostic(
     campaign_config: dict,
     baseline: PromptState,
     baseline_results: list,
-    eval_llm: dict,
-    api_key: str,
+    llm_client: "LLMClientBase",
+    model: str,
     store: "ProjectStore",
     backend_id: str,
     eval_data: list,
@@ -1771,8 +1463,9 @@ async def resume_or_build_diagnostic(
 
     # Build new plan: LLM restructure + diagnostic set
     print(f"[NEW] Building smart search plan: {plan_id}")
-    layer1_fields = await restructure_context(
-        baseline.instruction, eval_llm, api_key,
+    layer1_fields = await _restructure_context(
+        baseline.instruction, llm_client,
+        model=model,
         improvement_areas=improvement_areas,
     )
     search_baseline = baseline.derive(
@@ -1804,24 +1497,6 @@ async def resume_or_build_diagnostic(
     print(f"  Saved smart search plan to disk: {plan_id}")
 
     return plan_id, search_baseline, diagnostic, diag_summary, []
-
-
-def list_smart_search_plans(store: "ProjectStore", backend_id: str) -> list[dict]:
-    """List all smart search plans on disk (for notebook inspection)."""
-    return store.list_smart_search_plans(backend_id)
-
-
-def build_historical_index(store: "ProjectStore", backend_id: str) -> dict:
-    """Build prompt result index from all historical dataset runs.
-
-    Returns the index dict: ``rendered_prompt_hash -> {query -> result}``.
-    """
-    index = _build_prompt_result_index(store, backend_id)
-    n_prompts = len(index)
-    n_results = sum(len(v) for v in index.values())
-    print(f"Historical index: {n_prompts} unique prompts, "
-          f"{n_results} total query results cached")
-    return index
 
 
 def show_scan_coverage(
@@ -1974,29 +1649,6 @@ def show_data_inventory(
     print("=" * 70)
 
     return inv
-
-
-def synthesize_sensitivity(
-    store: "ProjectStore",
-    backend_id: str,
-    prompt_index: dict,
-    diagnostic: list,
-) -> tuple | None:
-    """Try to derive sensitivity profiles from grid search data.
-
-    Returns ``(df, profiles)`` or ``None`` if insufficient coverage.
-    """
-    result = _synthesize_sensitivity_from_grid(
-        store, backend_id, prompt_index, diagnostic,
-    )
-    if result is None:
-        print("Grid synthesis: insufficient coverage for sensitivity derivation")
-        return None
-    df, profiles = result
-    n_active = sum(1 for p in profiles if p["exploration_budget"] != "skip")
-    print(f"Grid synthesis: {len(profiles)} axes profiled, "
-          f"{n_active} active (non-skip)")
-    return result
 
 
 async def sensitivity_scan(
@@ -2369,10 +2021,14 @@ async def run_manual_round(
     else:
         round_eval_data = eval_data
 
+    llm_client = _make_llm_client(eval_llm, api_key)
+    llm_model = eval_llm.get("model", "")
+
     candidates = await generate_candidates(
         current_best["prompt_state"], current_best["accuracy"],
         current_best["results"],
-        opt["n_variants"], opt["creativity"], eval_llm, api_key,
+        opt["n_variants"], opt["creativity"], llm_client,
+        model=llm_model,
     )
 
     all_candidate_results = {}
@@ -2442,6 +2098,8 @@ async def run_optimization_loop(
 
     opt = campaign_config.get("optimization", {})
     eval_llm = campaign_config["eval_llm"]
+    llm_client = _make_llm_client(eval_llm, api_key)
+    llm_model = eval_llm.get("model", "")
     queries_per_eval = campaign_config.get("queries_per_eval", 0)
     n_variants = opt.get("n_variants", 5)
     creativity = opt.get("creativity", 0.7)
@@ -2474,8 +2132,8 @@ async def run_optimization_loop(
             current_best["results"],
             n_variants,
             creativity,
-            eval_llm,
-            api_key,
+            llm_client,
+            model=llm_model,
         )
 
         all_candidate_results = {}
@@ -2502,7 +2160,7 @@ async def run_optimization_loop(
         improved = round_entry["accuracy"] > current_best["accuracy"] + threshold
         if improved:
             rounds_without_improvement = 0
-            print(f"\nImprovement detected, auto-continuing...")
+            print("\nImprovement detected, auto-continuing...")
         else:
             rounds_without_improvement += 1
             print(
