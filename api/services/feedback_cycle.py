@@ -68,6 +68,7 @@ class CycleResult(BaseModel):
     stop_reason: str
     started_at: str
     finished_at: str
+    langfuse_trace_id: str | None = None
 
 
 async def run_feedback_cycle(
@@ -76,6 +77,7 @@ async def run_feedback_cycle(
     config: CycleConfig,
     *,
     improvement_areas: str = "",
+    langfuse_session_id: str | None = None,
 ) -> CycleResult:
     """Run iterative optimization with feedback cycling.
 
@@ -83,6 +85,11 @@ async def run_feedback_cycle(
     1. InitNode — create baseline PromptState
     2. Loop: GrowFilterNode → AnalysisEvalNode → route by next_action
     3. Stop when patience exhausted, max_rounds reached, or perfect score
+
+    Args:
+        langfuse_session_id: Optional session ID for grouping traces.
+            When provided, each round gets its own Langfuse trace with
+            accuracy scores, all grouped under this session.
 
     Returns:
         CycleResult with all rounds and final winner.
@@ -92,8 +99,19 @@ async def run_feedback_cycle(
         GrowFilterNode,
         InitNode,
     )
+    from api.services.langfuse_client import LangfuseLogger
 
+    langfuse = LangfuseLogger.get_instance()
     started_at = datetime.now(timezone.utc).isoformat()
+
+    # Create campaign-level trace
+    campaign_trace_id = langfuse.create_trace(
+        name="feedback_cycle",
+        input={"instruction": instruction, "max_rounds": config.max_rounds},
+        metadata={"config": config.model_dump()},
+        session_id=langfuse_session_id,
+        tags=["campaign", "feedback_cycle"],
+    )
 
     # -- Step 1: Initialize baseline --
     init_node = InitNode(
@@ -176,6 +194,34 @@ async def run_feedback_cycle(
         )
         rounds.append(round_result)
 
+        # Log per-round Langfuse trace with accuracy score
+        if campaign_trace_id:
+            langfuse.create_span(
+                trace_id=campaign_trace_id,
+                name=f"round_{round_num}",
+                input={
+                    "n_candidates": len(grow_out.candidates),
+                    "baseline_accuracy": current_accuracy,
+                },
+                output={
+                    "winner_accuracy": eval_out.winner_accuracy,
+                    "improved": eval_out.improved,
+                    "next_action": eval_out.next_action,
+                },
+                metadata={
+                    "round": round_num,
+                    "candidates_evaluated": eval_out.winner.get(
+                        "candidates_evaluated", 0,
+                    ),
+                },
+            )
+            langfuse.create_score(
+                trace_id=campaign_trace_id,
+                name=f"accuracy_round_{round_num}",
+                value=eval_out.winner_accuracy,
+                comment=f"Round {round_num}: {'improved' if eval_out.improved else 'no change'}",
+            )
+
         # Update current best
         current_ps = eval_out.winner_prompt_state
         current_accuracy = eval_out.winner_accuracy
@@ -212,6 +258,25 @@ async def run_feedback_cycle(
 
     finished_at = datetime.now(timezone.utc).isoformat()
 
+    # Update campaign trace with final results
+    if campaign_trace_id:
+        langfuse.create_score(
+            trace_id=campaign_trace_id,
+            name="best_accuracy",
+            value=best_accuracy,
+            comment=f"Best at round {best_round}, stop: {stop_reason}",
+        )
+        langfuse.update_trace(
+            trace_id=campaign_trace_id,
+            output={
+                "best_accuracy": best_accuracy,
+                "n_rounds": len(rounds),
+                "stop_reason": stop_reason,
+            },
+            metadata={"stop_reason": stop_reason, "best_round": best_round},
+        )
+        langfuse.flush()
+
     return CycleResult(
         rounds=rounds,
         n_rounds=len(rounds),
@@ -222,4 +287,5 @@ async def run_feedback_cycle(
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,
+        langfuse_trace_id=campaign_trace_id,
     )
