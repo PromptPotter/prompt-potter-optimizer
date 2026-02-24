@@ -1,0 +1,310 @@
+"""E2E optimization test (WP 3.5).
+
+Integration test that:
+1. Runs the single-pass optimizer workflow via WorkflowRunner
+2. Records results to the campaign registry
+3. Verifies workflow output structure, PromptState lineage, and
+   campaign registry persistence
+"""
+
+import pytest
+from pathlib import Path
+
+from api.core.workflow_runner import WorkflowRunner
+from api.models.prompt_state import PromptState
+from api.services.campaign_registry import (
+    complete_campaign,
+    create_campaign,
+    get_campaign_lineage,
+    record_trial,
+)
+from api.services.project_store import ProjectStore
+
+
+WORKFLOW_PATH = Path(__file__).parent.parent / "workflows" / "optimizer_single_pass.yaml"
+BACKEND_ID = "e2e-test-backend"
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def store(tmp_path):
+    return ProjectStore(base_dir=tmp_path)
+
+
+@pytest.fixture
+def eval_data():
+    return [
+        {"query": "aspirin", "ground_truth": "Aspirin"},
+        {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
+        {"query": "acetaminophen", "ground_truth": "Acetaminophen"},
+        {"query": "naproxen", "ground_truth": "Naproxen"},
+    ]
+
+
+def _apply_all_mocks(monkeypatch):
+    """Apply all service mocks for E2E testing."""
+    # Mock restructure_context
+    async def mock_restructure(context_input, llm_client, **kwargs):
+        return {
+            "persona": "You are a pharmacology expert.",
+            "task_intent": "Match drug names to canonical terms.",
+            "problem_description": "Drug name normalization.",
+            "instruction": "Rank candidates by relevance to the query.",
+            "thinking_style": "Compare each candidate systematically.",
+            "answer_format": "Return the best match.",
+        }
+
+    monkeypatch.setattr(
+        "api.services.search.context.restructure_context",
+        mock_restructure,
+    )
+
+    # Mock generate_candidates
+    async def mock_generate(current_ps, accuracy, results, n, creativity,
+                            llm_client, **kwargs):
+        return [
+            current_ps.derive(
+                instruction=f"Match query to canonical drug name (variant {i})",
+                changes_description=f"e2e_candidate_{i}",
+            )
+            for i in range(n)
+        ]
+
+    monkeypatch.setattr(
+        "api.services.prompt_optimizer.generate_candidates",
+        mock_generate,
+    )
+
+    # Mock evaluate_prompt_cached — first candidate: 75%, others: 25%
+    async def mock_eval(ps, data, backend_client, **kwargs):
+        label = kwargs.get("label", "")
+        if label == "candidate_0":
+            hits = 3  # 3 out of 4
+            results = []
+            for i, d in enumerate(data):
+                hit = i < hits
+                results.append({
+                    "query": d["query"],
+                    "predicted": d["ground_truth"] if hit else "WRONG",
+                    "ground_truth": d["ground_truth"],
+                    "hit": hit,
+                    "score": 1.0 if hit else 0.0,
+                    "error": None,
+                })
+            scores = {"hits": hits, "total": len(data),
+                      "accuracy": hits / len(data), "errors": 0}
+        else:
+            results = [
+                {"query": d["query"], "predicted": "WRONG",
+                 "ground_truth": d["ground_truth"], "hit": False,
+                 "score": 0.0, "error": None}
+                for d in data
+            ]
+            scores = {"hits": 0, "total": len(data),
+                      "accuracy": 0.0, "errors": 0}
+        return results, scores, False
+
+    monkeypatch.setattr(
+        "api.services.prompt_eval.evaluate_prompt_cached",
+        mock_eval,
+    )
+
+    # Mock LLM client
+    from api.services.llm_client import MockLLMClient
+    monkeypatch.setattr(
+        "api.services.llm_client.get_llm_client",
+        lambda provider=None: MockLLMClient(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# E2E test: workflow + campaign registry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e2e_workflow_and_campaign_registry(
+    monkeypatch, store, eval_data,
+):
+    """Full E2E: run workflow → record to campaign registry → verify."""
+    _apply_all_mocks(monkeypatch)
+
+    # -- 1. Run the single-pass optimizer workflow --
+    runner = WorkflowRunner.from_yaml(WORKFLOW_PATH)
+
+    # Override backend_url in evaluate step config
+    eval_step = runner.workflow.get_step("evaluate")
+    eval_step.config["backend_url"] = "http://mock-backend:8000"
+
+    context = await runner.execute(
+        inputs={
+            "instruction": "Normalize drug names to their canonical form.",
+            "improvement_areas": "Focus on brand-name vs generic mapping.",
+            "eval_data": eval_data,
+            "initial_accuracy": 0.0,
+        },
+    )
+
+    # Verify workflow completed
+    assert context.status == "completed"
+    assert "init" in context.step_outputs
+    assert "grow" in context.step_outputs
+    assert "evaluate" in context.step_outputs
+
+    # Extract workflow outputs
+    final = runner.get_final_outputs(context)
+    assert final["improved"] is True
+    assert final["winner_accuracy"] == 0.75
+    assert final["n_candidates"] == 5
+
+    # -- 2. Record results to campaign registry --
+    campaign = create_campaign(
+        store, BACKEND_ID,
+        name="E2E Drug Name Optimization",
+        config={"instruction": "Normalize drug names"},
+    )
+    campaign_id = campaign["campaign_id"]
+
+    # Record baseline trial from init step
+    init_out = context.step_outputs["init"]
+    record_trial(
+        store, BACKEND_ID, campaign_id,
+        round_num=0,
+        prompt_state=init_out["prompt_state"],
+        accuracy=0.0,
+        hits=0,
+        total=len(eval_data),
+        label="baseline",
+    )
+
+    # Record optimization trial from evaluate step
+    eval_out = context.step_outputs["evaluate"]
+    record_trial(
+        store, BACKEND_ID, campaign_id,
+        round_num=1,
+        prompt_state=eval_out["winner_prompt_state"],
+        accuracy=eval_out["winner_accuracy"],
+        hits=eval_out["winner"]["hits"],
+        total=eval_out["winner"]["total"],
+        label="single_pass_winner",
+        improved=eval_out["improved"],
+        candidates_evaluated=eval_out["winner"]["candidates_evaluated"],
+    )
+
+    complete_campaign(store, BACKEND_ID, campaign_id)
+
+    # -- 3. Verify campaign registry persistence --
+    loaded = store.campaigns.load(BACKEND_ID, campaign_id)
+    assert loaded is not None
+    assert loaded["status"] == "completed"
+    assert loaded["n_trials"] == 2
+    assert loaded["best_accuracy"] == 0.75
+    assert loaded["baseline_accuracy"] == 0.0
+
+    # Verify trial details on disk
+    baseline_trial = store.campaigns.load_trial(BACKEND_ID, campaign_id, 0)
+    assert baseline_trial is not None
+    assert baseline_trial["accuracy"] == 0.0
+
+    winner_trial = store.campaigns.load_trial(BACKEND_ID, campaign_id, 1)
+    assert winner_trial is not None
+    assert winner_trial["accuracy"] == 0.75
+    assert winner_trial["improved"] is True
+
+    # -- 4. Verify PromptState lineage --
+    lineage = get_campaign_lineage(store, BACKEND_ID, campaign_id)
+    assert len(lineage) == 2
+
+    # Baseline has no parent
+    assert lineage[0]["parent_prompt_state_id"] is None
+
+    # Winner's parent is the baseline
+    baseline_ps_id = lineage[0]["prompt_state_id"]
+    assert lineage[1]["parent_prompt_state_id"] == baseline_ps_id
+
+    # Reconstruct and verify PromptState objects
+    winner_ps = PromptState(**winner_trial["prompt_state"])
+    baseline_ps = PromptState(**baseline_trial["prompt_state"])
+    assert winner_ps.parent_id == baseline_ps.id
+    assert "variant 0" in winner_ps.instruction  # From mock generate
+
+    # -- 5. Verify full export --
+    export = store.campaigns.export(BACKEND_ID, campaign_id)
+    assert export is not None
+    assert len(export["trials_detail"]) == 2
+    assert export["status"] == "completed"
+
+    # -- 6. Verify campaign appears in list --
+    all_campaigns = store.campaigns.list_all(BACKEND_ID)
+    assert len(all_campaigns) == 1
+    assert all_campaigns[0]["name"] == "E2E Drug Name Optimization"
+
+
+# ---------------------------------------------------------------------------
+# E2E test: feedback cycle + campaign registry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e2e_feedback_cycle_with_registry(
+    monkeypatch, store, eval_data,
+):
+    """Feedback cycle results persist to campaign registry."""
+    _apply_all_mocks(monkeypatch)
+
+    from api.services.feedback_cycle import CycleConfig, run_feedback_cycle
+    from api.services.campaign_registry import record_campaign_rounds
+
+    config = CycleConfig(
+        max_rounds=3,
+        patience=2,
+        n_variants=2,
+        backend_url="http://mock:8000",
+        generate_suggestions=False,
+    )
+
+    result = await run_feedback_cycle(
+        instruction="Normalize drug names.",
+        eval_data=eval_data,
+        config=config,
+    )
+
+    assert result.n_rounds > 0
+
+    # Record to campaign registry
+    campaign = create_campaign(
+        store, BACKEND_ID,
+        name="E2E Feedback Cycle",
+        config={"max_rounds": 3},
+    )
+    campaign_id = campaign["campaign_id"]
+
+    # Convert cycle rounds to campaign round format
+    rounds_for_registry = []
+    for rd in result.rounds:
+        ps = PromptState(**rd.prompt_state)
+        rounds_for_registry.append({
+            "round": rd.round,
+            "label": rd.label,
+            "prompt_state": ps,
+            "accuracy": rd.accuracy,
+            "hits": rd.hits,
+            "total": rd.total,
+            "improved": rd.improved,
+            "candidates_evaluated": rd.candidates_evaluated,
+        })
+
+    trial_ids = record_campaign_rounds(
+        store, BACKEND_ID, campaign_id, rounds_for_registry,
+    )
+    complete_campaign(store, BACKEND_ID, campaign_id)
+
+    assert len(trial_ids) == result.n_rounds
+
+    loaded = store.campaigns.load(BACKEND_ID, campaign_id)
+    assert loaded["status"] == "completed"
+    assert loaded["n_trials"] == result.n_rounds
