@@ -163,7 +163,14 @@ class GrowFilterNode(NodeBase[GrowFilterInput, GrowFilterOutput]):
 
 
 class AnalysisEvalInput(BaseModel):
-    """Input for AnalysisEvalNode."""
+    """Input for AnalysisEvalNode.
+
+    ``current_best`` can be supplied as a pre-built dict **or** assembled
+    from flat fields (``baseline_prompt_state``, ``baseline_accuracy``,
+    ``baseline_results``, ``baseline_label``).  Flat fields are used when
+    the node is wired inside a CWL workflow where each input resolves to
+    a single source reference.
+    """
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -171,13 +178,30 @@ class AnalysisEvalInput(BaseModel):
         ..., description="Candidate PromptStates (serialized)",
     )
     eval_data: list = Field(..., description="Evaluation query dicts")
+
+    # Option A: pre-built current_best dict
     current_best: dict = Field(
-        ...,
+        default_factory=dict,
         description=(
             "Current best round entry with keys: accuracy, prompt_state, "
-            "results, label"
+            "results, label.  Leave empty when using flat baseline_* fields."
         ),
     )
+
+    # Option B: flat baseline fields (for CWL workflow wiring)
+    baseline_prompt_state: dict | None = Field(
+        None, description="Baseline PromptState (serialized) — flat alternative",
+    )
+    baseline_accuracy: float = Field(
+        0.0, description="Baseline accuracy — flat alternative",
+    )
+    baseline_results: list = Field(
+        default_factory=list, description="Baseline eval results — flat alternative",
+    )
+    baseline_label: str = Field(
+        "baseline", description="Baseline label — flat alternative",
+    )
+
     campaign_rounds: list[dict] = Field(
         default_factory=list,
         description="Full campaign rounds history (for suggestion generation)",
@@ -285,8 +309,23 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
                 "cached": cached,
             })
 
-        # Reconstruct current_best with PromptState object for select_round_winner
-        current_best = dict(input_data.current_best)
+        # Assemble current_best — prefer pre-built dict, fall back to flat fields
+        if input_data.current_best:
+            current_best = dict(input_data.current_best)
+        elif input_data.baseline_prompt_state is not None:
+            current_best = {
+                "accuracy": input_data.baseline_accuracy,
+                "prompt_state": input_data.baseline_prompt_state,
+                "results": input_data.baseline_results,
+                "label": input_data.baseline_label,
+            }
+        else:
+            raise ValueError(
+                "AnalysisEvalNode requires either 'current_best' dict or "
+                "'baseline_prompt_state' flat field"
+            )
+
+        # Reconstruct PromptState object for select_round_winner
         if isinstance(current_best.get("prompt_state"), dict):
             current_best["prompt_state"] = PromptState(
                 **current_best["prompt_state"],

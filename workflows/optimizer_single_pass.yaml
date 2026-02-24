@@ -1,0 +1,119 @@
+# Optimizer Single-Pass Workflow
+# Linear pipeline: InitNode → GrowFilterNode → AnalysisEvalNode
+#
+# This workflow runs one optimization pass:
+# 1. Decompose instruction into Layer 1 fields, create baseline PromptState
+# 2. Generate N candidate PromptState variants via LLM meta-prompt
+# 3. Evaluate candidates against eval dataset, select winner
+#
+# For iterative optimization (multiple passes), see feedback cycling (WP 3.4).
+
+class: Workflow
+cwlVersion: v1.2
+id: optimizer_single_pass
+label: "Optimizer Single Pass"
+description: >
+  One-shot prompt optimization: decompose instruction into Layer 1 fields,
+  generate candidate variants, evaluate against dataset, select winner.
+
+inputs:
+  instruction:
+    type: string
+    description: "Raw prompt instruction text to optimize"
+  improvement_areas:
+    type: string
+    description: "Domain-expert observations about where improvement is likely"
+    default: ""
+  eval_data:
+    type: array
+    description: "Evaluation dataset — list of {query, ground_truth} dicts"
+  initial_accuracy:
+    type: float
+    description: "Baseline accuracy before optimization (0.0 if unknown)"
+    default: 0.0
+
+steps:
+  - id: init
+    run: nodes/InitNode
+    in:
+      instruction: instruction
+      improvement_areas: improvement_areas
+    out:
+      - prompt_state
+      - prompt_state_id
+      - layer1_fields
+      - rendered_prompt
+    config:
+      # model/provider inherited from settings when omitted
+      provider: groq
+    metadata:
+      type: llm
+      deterministic: false
+
+  - id: grow
+    run: nodes/GrowFilterNode
+    in:
+      prompt_state: init/prompt_state
+      accuracy: initial_accuracy
+      results: []
+    out:
+      - candidates
+      - n_generated
+    config:
+      provider: groq
+      n_variants: 5
+      creativity: 0.7
+    metadata:
+      type: llm
+      deterministic: false
+
+  - id: evaluate
+    run: nodes/AnalysisEvalNode
+    in:
+      candidates: grow/candidates
+      eval_data: eval_data
+      baseline_prompt_state: init/prompt_state
+      baseline_accuracy: initial_accuracy
+      baseline_results: []
+      baseline_label: "baseline"
+    out:
+      - winner
+      - winner_prompt_state
+      - winner_accuracy
+      - improved
+      - suggestions
+      - candidate_scores
+    config:
+      # backend_url must be set at registration or execution time
+      backend_url: ""
+      improvement_threshold: 0.01
+      generate_suggestions: false
+    metadata:
+      type: algorithm
+      deterministic: false
+
+outputs:
+  winner_prompt_state:
+    type: object
+    outputSource: evaluate/winner_prompt_state
+  winner_accuracy:
+    type: float
+    outputSource: evaluate/winner_accuracy
+  improved:
+    type: boolean
+    outputSource: evaluate/improved
+  suggestions:
+    type: object
+    outputSource: evaluate/suggestions
+  candidate_scores:
+    type: array
+    outputSource: evaluate/candidate_scores
+  baseline_prompt:
+    type: string
+    outputSource: init/rendered_prompt
+  layer1_fields:
+    type: object
+    outputSource: init/layer1_fields
+  n_candidates:
+    type: int
+    outputSource: grow/n_generated
