@@ -219,6 +219,14 @@ class AnalysisEvalOutput(BaseModel):
     winner_prompt_state: dict = Field(..., description="Winner PromptState (serialized)")
     winner_accuracy: float = Field(..., description="Winner accuracy")
     improved: bool = Field(..., description="Whether improvement exceeded threshold")
+    next_action: str = Field(
+        "generate",
+        description=(
+            "Routing hint for feedback cycling: "
+            "'generate' (Layer 1), 'refine_context' (Layer 2), "
+            "'modify_plan' (Layer 3), or 'stop'"
+        ),
+    )
     suggestions: dict = Field(
         default_factory=dict,
         description="LLM suggestions for next round",
@@ -349,6 +357,11 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
                 llm_client, model=model,
             )
 
+        # Determine next_action routing hint
+        next_action = suggestions.get("next_action", "generate")
+        if next_action not in ("generate", "refine_context", "modify_plan", "stop"):
+            next_action = "generate"
+
         winner_ps = winner_entry["prompt_state"]
         return AnalysisEvalOutput(
             winner={
@@ -362,6 +375,7 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
             winner_prompt_state=winner_ps.model_dump(),
             winner_accuracy=winner_entry["accuracy"],
             improved=winner_entry["improved"],
+            next_action=next_action,
             suggestions=suggestions,
             candidate_scores=candidate_scores,
         )
