@@ -130,6 +130,12 @@ class ProjectStore:
         """Write detail file and upsert the index."""
         return self._dataset_runs.save(backend_id, run_id, data)
 
+    def load_dataset_run(
+        self, backend_id: str, run_id: str,
+    ) -> dict[str, Any] | None:
+        """Load a dataset run detail file directly by run_id."""
+        return self._dataset_runs.load_by_id(backend_id, run_id)
+
     def load_dataset_run_by_hash(
         self, backend_id: str, content_hash: str,
     ) -> dict[str, Any] | None:

@@ -53,6 +53,50 @@ DEFAULT_DIAGNOSTIC_QUERIES = 6
 DIAGNOSTIC_HIT_RATIO = 0.75
 
 
+def build_prompt_result_index(
+    store: ProjectStore,
+    backend_id: str,
+) -> dict[str, dict[str, dict]]:
+    """Index: rendered_prompt_hash -> {query_string -> result_dict}.
+
+    Scans all completed dataset runs, loads their items, and builds
+    a cross-run lookup.  Enables accuracy estimation on any query subset
+    for any previously evaluated prompt — regardless of which plan or
+    run originally produced the result.
+    """
+    index: dict[str, dict[str, dict]] = {}
+    summaries = store.list_dataset_runs(backend_id)
+    loaded = 0
+    for summary in summaries:
+        run_id = summary.get("run_id", "")
+        if not run_id:
+            continue
+        detail = store.load_dataset_run(backend_id, run_id)
+        if not detail:
+            continue
+        rp_hash = detail.get("rendered_prompt_hash", "")
+        if not rp_hash:
+            continue
+        items = detail.get("dataset_run_items", [])
+        if not items:
+            continue
+        if rp_hash not in index:
+            index[rp_hash] = {}
+        for item in items:
+            query = item.get("query", "")
+            if query:
+                index[rp_hash][query] = item
+        loaded += 1
+
+    logger.info(
+        "build_prompt_result_index: %d runs -> %d unique prompts, %d total query results",
+        loaded,
+        len(index),
+        sum(len(v) for v in index.values()),
+    )
+    return index
+
+
 def _load_default_grid_axes() -> dict[str, list[str]]:
     """Load default grid axes from the variant library."""
     return load_variant_library()["prompt_fields"]
@@ -976,6 +1020,296 @@ def classify_axis(
 
 
 # ---------------------------------------------------------------------------
+# Coverage advisor
+# ---------------------------------------------------------------------------
+
+
+def assess_scan_coverage(
+    baseline_ps: PromptState,
+    variant_library: dict,
+    diagnostic_queries: list,
+    prompt_result_index: dict[str, dict[str, dict]],
+    pipeline_params: dict | None = None,
+    min_queries: int = DEFAULT_DIAGNOSTIC_QUERIES,
+    axis_requirements: dict[str, int] | None = None,
+) -> dict:
+    """Check whether the historical index already covers the OAT scan needs.
+
+    For each prompt-field axis: derive perturbed PromptStates, render them,
+    hash, and check the index for cached diagnostic-query results.  Pipeline
+    param axes always require fresh backend calls (same rendered prompt,
+    different params → index can't distinguish).
+
+    Args:
+        baseline_ps: The search baseline PromptState.
+        variant_library: Full variant library dict.
+        diagnostic_queries: List of diagnostic query dicts (must have ``"query"``).
+        prompt_result_index: Historical index from ``build_prompt_result_index``.
+        pipeline_params: Base pipeline parameters (for pipeline-param axes).
+        min_queries: Minimum cached queries for a variant to count as "usable".
+        axis_requirements: Per-axis: how many non-baseline values must be usable.
+            ``None`` → require all non-baseline values.
+
+    Returns:
+        Dict with per-axis detail, summary counts, and recommendation string.
+    """
+    axis_requirements = axis_requirements or {}
+    diag_query_strings = {q["query"] for q in diagnostic_queries if q.get("query")}
+    n_diagnostic = len(diag_query_strings)
+
+    # --- Baseline coverage ---
+    baseline_rendered = baseline_ps.render()
+    baseline_rp_hash = hashlib.sha256(baseline_rendered.encode()).hexdigest()[:16]
+    baseline_cached = prompt_result_index.get(baseline_rp_hash, {})
+    baseline_hits = sum(1 for q in diag_query_strings if q in baseline_cached)
+
+    axes_detail: list[dict] = []
+    total_calls_saved = 0
+    total_calls_needed = 0
+
+    prompt_fields = variant_library.get("prompt_fields", {})
+    pipeline_param_defs = variant_library.get("pipeline_params", {})
+
+    # --- Prompt-field axes ---
+    for axis_name, values in prompt_fields.items():
+        current_val = getattr(baseline_ps, axis_name, "")
+        non_baseline = [v for v in values if v != current_val]
+        if not non_baseline:
+            continue
+
+        variants_detail: list[dict] = []
+        usable_count = 0
+
+        for value in non_baseline:
+            perturbed = baseline_ps.derive(**{axis_name: value})
+            rendered = perturbed.render()
+            rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:16]
+            cached = prompt_result_index.get(rp_hash, {})
+            n_cached = sum(1 for q in diag_query_strings if q in cached)
+            is_usable = n_cached >= min_queries
+            if is_usable:
+                usable_count += 1
+            total_calls_saved += n_cached
+            total_calls_needed += max(0, n_diagnostic - n_cached)
+            variants_detail.append({
+                "value_preview": _preview(value),
+                "n_cached": n_cached,
+                "usable": is_usable,
+            })
+
+        required = axis_requirements.get(axis_name, len(non_baseline))
+        axes_detail.append({
+            "axis": axis_name,
+            "axis_type": "prompt_field",
+            "n_values": len(non_baseline),
+            "n_usable": usable_count,
+            "n_required": required,
+            "sufficient": usable_count >= required,
+            "variants": variants_detail,
+        })
+
+    # --- Pipeline-param axes ---
+    base_params = dict(pipeline_params or {})
+    for axis_name, values in pipeline_param_defs.items():
+        current_val = base_params.get(axis_name)
+        non_baseline = [v for v in values if v != current_val]
+        if not non_baseline:
+            continue
+        n_calls = len(non_baseline) * n_diagnostic
+        total_calls_needed += n_calls
+        required = axis_requirements.get(axis_name, len(non_baseline))
+        axes_detail.append({
+            "axis": axis_name,
+            "axis_type": "pipeline_param",
+            "n_values": len(non_baseline),
+            "n_usable": 0,
+            "n_required": required,
+            "sufficient": False,
+            "note": "Pipeline params require fresh backend calls",
+        })
+
+    # --- Summary ---
+    pf_axes = [a for a in axes_detail if a["axis_type"] == "prompt_field"]
+    pp_axes = [a for a in axes_detail if a["axis_type"] == "pipeline_param"]
+    pf_satisfied = sum(1 for a in pf_axes if a["sufficient"])
+    all_satisfied = all(a["sufficient"] for a in axes_detail)
+
+    # Recommendation text
+    if all_satisfied:
+        recommendation = (
+            f"All {len(pf_axes)} prompt field axes covered. "
+            "Scan can be skipped — historical data is sufficient."
+        )
+    else:
+        gap_names = [a["axis"] for a in axes_detail if not a["sufficient"]]
+        recommendation = (
+            f"{pf_satisfied}/{len(pf_axes)} prompt field axes covered. "
+            f"Run scan to fill gaps on: {', '.join(gap_names)}."
+        )
+        if total_calls_needed > 0:
+            recommendation += (
+                " Tip: lower min_queries or reduce axis_requirements"
+                " to accept sparser coverage."
+            )
+
+    return {
+        "n_diagnostic": n_diagnostic,
+        "min_queries": min_queries,
+        "baseline_coverage": {
+            "n_cached": baseline_hits,
+            "n_needed": n_diagnostic,
+            "sufficient": baseline_hits >= n_diagnostic,
+        },
+        "axes": axes_detail,
+        "summary": {
+            "prompt_field_axes_satisfied": pf_satisfied,
+            "prompt_field_axes_total": len(pf_axes),
+            "pipeline_param_axes": len(pp_axes),
+            "backend_calls_needed": total_calls_needed,
+            "backend_calls_saved": total_calls_saved,
+            "all_satisfied": all_satisfied,
+        },
+        "recommendation": recommendation,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Data inventory
+# ---------------------------------------------------------------------------
+
+# Layer 1 fields worth tracking as axes (skip instruction — always changes
+# between baselines due to the decomposition, and few_shot_examples).
+_INVENTORY_AXES = (
+    "persona", "task_intent", "problem_description",
+    "thinking_style", "answer_format",
+)
+
+
+def build_data_inventory(
+    prompt_result_index: dict[str, dict[str, dict]],
+    store: ProjectStore,
+    backend_id: str,
+) -> dict:
+    """Summarise what the historical index contains, organised by axis.
+
+    Discovers plan baselines from stored grid / smart-search plans, then
+    for every indexed prompt that belongs to a plan, compares it to **its
+    own plan baseline** and tallies which Layer 1 axes were changed.
+
+    Returns a dict with total counts, per-axis breakdown, and unmatched
+    prompt counts (prompts in the index that don't belong to any plan).
+    """
+    # 1. Collect PromptStates + their plan baselines from stored plans ------
+    #    rp_hash → (PromptState, plan_baseline_ps)
+    rp_to_ps: dict[str, tuple[PromptState, PromptState]] = {}
+    baseline_rp_hashes: set[str] = set()
+
+    # Grid plans
+    for summary in store.list_grid_plans(backend_id):
+        plan_id = summary.get("plan_id", "")
+        if not plan_id:
+            continue
+        plan_data = store.load_grid_plan(backend_id, plan_id)
+        if not plan_data:
+            continue
+        (_, state_lookup, _, _, _, baseline_ps) = deserialize_grid_plan(plan_data)
+        bl_hash = hashlib.sha256(baseline_ps.render().encode()).hexdigest()[:16]
+        baseline_rp_hashes.add(bl_hash)
+        rp_to_ps.setdefault(bl_hash, (baseline_ps, baseline_ps))
+        for ps in state_lookup.values():
+            h = hashlib.sha256(ps.render().encode()).hexdigest()[:16]
+            rp_to_ps.setdefault(h, (ps, baseline_ps))
+
+    # Smart search plans
+    pipeline_params: dict[str, dict] = {}
+    for summary in store.list_smart_search_plans(backend_id):
+        plan_id = summary.get("plan_id", "")
+        if not plan_id:
+            continue
+        plan_data = store.load_smart_search_plan(backend_id, plan_id)
+        if not plan_data:
+            continue
+        ss = deserialize_smart_search_plan(plan_data)
+        search_bl = ss["search_baseline_ps"]
+        bl_hash = hashlib.sha256(search_bl.render().encode()).hexdigest()[:16]
+        baseline_rp_hashes.add(bl_hash)
+        rp_to_ps.setdefault(bl_hash, (search_bl, search_bl))
+
+        # Collect pipeline param profiles from scan results
+        scan = ss.get("scan_results") or {}
+        for profile in scan.get("axis_profiles", []):
+            if profile.get("axis_type") != "pipeline_param":
+                continue
+            axis_name = profile["axis"]
+            pipeline_params[axis_name] = {
+                "scanned": True,
+                "cardinality": profile.get("cardinality", 0),
+                "sensitivity_range": profile.get("sensitivity_range", 0.0),
+                "best_delta": profile.get("best_delta", 0.0),
+                "exploration_budget": profile.get("exploration_budget", "skip"),
+            }
+
+    # 2. Walk the index and classify each prompt --------------------------
+    total_prompts = len(prompt_result_index)
+    total_results = sum(len(v) for v in prompt_result_index.values())
+
+    matched_prompts = 0
+    matched_results = 0
+    baseline_prompts = 0
+    baseline_queries = 0
+
+    axis_prompts: dict[str, int] = defaultdict(int)
+    axis_queries: dict[str, int] = defaultdict(int)
+    axis_values: dict[str, set] = defaultdict(set)
+
+    for rp_hash, queries in prompt_result_index.items():
+        n_queries = len(queries)
+        entry = rp_to_ps.get(rp_hash)
+        if entry is None:
+            continue  # unmatched
+
+        ps, plan_baseline = entry
+        matched_prompts += 1
+        matched_results += n_queries
+
+        if rp_hash in baseline_rp_hashes:
+            baseline_prompts += 1
+            baseline_queries += n_queries
+
+        # Identify changed axes vs the plan's own baseline
+        for field in _INVENTORY_AXES:
+            ps_val = getattr(ps, field)
+            bl_val = getattr(plan_baseline, field)
+            if ps_val != bl_val:
+                axis_prompts[field] += 1
+                axis_queries[field] += n_queries
+                axis_values[field].add(ps_val)
+
+    # 3. Build return shape -----------------------------------------------
+    axes_dict: dict[str, dict] = {}
+    for field in _INVENTORY_AXES:
+        if axis_prompts.get(field, 0) > 0:
+            axes_dict[field] = {
+                "n_prompts": axis_prompts[field],
+                "n_queries": axis_queries[field],
+                "distinct_values": len(axis_values[field]),
+            }
+
+    return {
+        "total_prompts": total_prompts,
+        "total_results": total_results,
+        "matched_prompts": matched_prompts,
+        "matched_results": matched_results,
+        "baseline_prompts": baseline_prompts,
+        "baseline_queries": baseline_queries,
+        "axes": axes_dict,
+        "unmatched_prompts": total_prompts - matched_prompts,
+        "unmatched_results": total_results - matched_results,
+        "pipeline_params": pipeline_params,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Sensitivity scan
 # ---------------------------------------------------------------------------
 
@@ -992,6 +1326,7 @@ async def sensitivity_scan(
     request_delay: float = 1.0,
     session_terms: list | None = None,
     progress_cb: Callable | None = None,
+    prompt_result_index: dict | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -1032,6 +1367,7 @@ async def sensitivity_scan(
         pipeline_params=base_params,
         request_delay=request_delay,
         store=store, backend_id=backend_id,
+        prompt_result_index=prompt_result_index,
     )
     baseline_acc = baseline_scores["accuracy"]
     _cb({
@@ -1105,6 +1441,7 @@ async def sensitivity_scan(
                     pipeline_params=base_params,
                     request_delay=request_delay,
                     store=store, backend_id=backend_id,
+                    prompt_result_index=prompt_result_index,
                 )
             else:
                 # Pipeline param
@@ -1139,6 +1476,7 @@ async def sensitivity_scan(
                     pipeline_params=perturbed_params,
                     request_delay=request_delay,
                     store=store, backend_id=backend_id,
+                    prompt_result_index=prompt_result_index,
                 )
 
             acc = scores["accuracy"]
@@ -1204,18 +1542,21 @@ async def _eval_config(
     request_delay: float = 1.0,
     store: ProjectStore | None = None,
     backend_id: str = "",
+    prompt_result_index: dict | None = None,
 ) -> dict:
     """Evaluate a single config against the diagnostic set.
 
     Returns dict with keys: hits, total, accuracy, errors, results, cached.
     ``results`` contains per-query dicts; ``cached`` indicates cache hit.
-    Uses content-hash caching when store is available.
+    Uses content-hash caching when store is available, then falls back to
+    the cross-run ``prompt_result_index`` for query-level historical lookups.
     """
     import asyncio
+    from api.services.prompt_eval import HASH_TRUNCATE
 
     content_hash = eval_content_hash(rendered_prompt, eval_data, "", 0.0)
 
-    # Check cache
+    # Check exact content-hash cache (prompt + exact query set)
     if store and backend_id:
         existing = store.load_dataset_run_by_hash(backend_id, content_hash)
         if existing:
@@ -1224,6 +1565,36 @@ async def _eval_config(
                 "results": existing.get("dataset_run_items", []),
                 "cached": True,
             }
+
+    # Check cross-run historical index (query-level lookups)
+    if prompt_result_index and eval_data:
+        rp_hash = hashlib.sha256(
+            rendered_prompt.encode(),
+        ).hexdigest()[:HASH_TRUNCATE]
+        cached_by_query = prompt_result_index.get(rp_hash, {})
+        if cached_by_query:
+            n_matched = sum(
+                1 for qd in eval_data if qd.get("query", "") in cached_by_query
+            )
+            coverage = n_matched / len(eval_data)
+            if coverage >= 1.0:
+                # Full historical coverage — skip backend entirely
+                matched = [
+                    cached_by_query[qd["query"]] for qd in eval_data
+                ]
+                acc = compute_accuracy(matched)
+                logger.info(
+                    "_eval_config [historical] full coverage (%d/%d queries)",
+                    n_matched, len(eval_data),
+                )
+                return {**acc, "results": matched, "cached": True}
+            if coverage > 0:
+                logger.info(
+                    "_eval_config [historical] partial coverage: "
+                    "%.0f%% (%d/%d queries)",
+                    coverage * 100, n_matched, len(eval_data),
+                )
+                # Continue below — evaluate only missing queries
 
     run_id = f"scan_{content_hash[:8]}"
 
@@ -1240,11 +1611,30 @@ async def _eval_config(
                 run_id, start_idx + 1, len(eval_data),
             )
 
-    for qi in range(start_idx, len(eval_data)):
-        qd = eval_data[qi]
+    # Determine which queries still need backend evaluation
+    # If we got partial historical coverage, only evaluate missing queries
+    queries_to_eval = eval_data
+    historical_results: list[dict] = []
+    if prompt_result_index and eval_data and not results:
+        rp_hash = hashlib.sha256(
+            rendered_prompt.encode(),
+        ).hexdigest()[:HASH_TRUNCATE]
+        cached_by_query = prompt_result_index.get(rp_hash, {})
+        if cached_by_query:
+            queries_to_eval = []
+            for qd in eval_data:
+                q = qd.get("query", "")
+                if q in cached_by_query:
+                    historical_results.append(cached_by_query[q])
+                else:
+                    queries_to_eval.append(qd)
+
+    n_to_eval = len(queries_to_eval)
+    for qi in range(start_idx, n_to_eval):
+        qd = queries_to_eval[qi]
         logger.info(
             "_eval_config [%s] query %d/%d: %s",
-            run_id, qi + 1, len(eval_data), qd["query"][:60],
+            run_id, qi + 1, n_to_eval, qd["query"][:60],
         )
         result = await backend_reranker_eval(
             qd, backend_client, rendered_prompt,
@@ -1253,7 +1643,7 @@ async def _eval_config(
         hit_str = "HIT" if result.get("hit") else "MISS"
         logger.info(
             "_eval_config [%s] query %d/%d -> %s  pred=%s",
-            run_id, qi + 1, len(eval_data), hit_str,
+            run_id, qi + 1, n_to_eval, hit_str,
             (result.get("predicted") or "")[:50],
         )
         results.append(result)
@@ -1262,16 +1652,22 @@ async def _eval_config(
         if request_delay > 0:
             await asyncio.sleep(request_delay)
 
-    acc = compute_accuracy(results)
+    # Merge historical results with freshly evaluated results
+    all_results = historical_results + results
+    acc = compute_accuracy(all_results)
 
     if store and backend_id:
         run_data = build_dataset_run_data(
             run_id, "scan", content_hash, "",
-            rendered_prompt, "", 0.0, acc, results,
+            rendered_prompt, "", 0.0, acc, all_results,
         )
         store.finalize_eval_run(backend_id, run_id, run_data)
 
-    return {**acc, "results": results, "cached": False}
+    return {
+        **acc,
+        "results": all_results,
+        "cached": len(results) == 0 and len(historical_results) > 0,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1293,6 +1689,7 @@ async def adaptive_search(
     request_delay: float = 1.0,
     session_terms: list | None = None,
     progress_cb: Callable | None = None,
+    prompt_result_index: dict | None = None,
 ) -> tuple[PromptState, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.
 
@@ -1344,6 +1741,7 @@ async def adaptive_search(
         pipeline_params=current_params,
         request_delay=request_delay,
         store=store, backend_id=backend_id,
+        prompt_result_index=prompt_result_index,
     )
     current_acc = baseline_scores["accuracy"]
 
@@ -1410,6 +1808,7 @@ async def adaptive_search(
                     pipeline_params=test_params,
                     request_delay=request_delay,
                     store=store, backend_id=backend_id,
+                    prompt_result_index=prompt_result_index,
                 )
 
                 delta = scores["accuracy"] - current_acc
@@ -1484,6 +1883,151 @@ async def adaptive_search(
         })
 
     return current_ps, current_params, pd.DataFrame(log_rows)
+
+
+# ---------------------------------------------------------------------------
+# Synthesize sensitivity from grid data
+# ---------------------------------------------------------------------------
+
+
+def synthesize_sensitivity_from_grid(
+    store: ProjectStore,
+    backend_id: str,
+    prompt_result_index: dict[str, dict[str, dict]],
+    diagnostic_queries: list,
+) -> tuple[pd.DataFrame, list[dict]] | None:
+    """Derive OAT sensitivity profiles from grid search data.
+
+    Loads all grid plans, resolves each grid point's rendered_prompt_hash,
+    checks the ``prompt_result_index`` for coverage on ``diagnostic_queries``,
+    and computes per-axis marginal accuracy.
+
+    Returns ``(per_variant_df, axis_profiles)`` in the same format as
+    ``sensitivity_scan()``, or ``None`` if insufficient coverage.
+    """
+    from api.services.prompt_eval import HASH_TRUNCATE
+
+    plan_summaries = store.list_grid_plans(backend_id)
+    if not plan_summaries:
+        logger.info("synthesize_sensitivity: no grid plans found")
+        return None
+
+    diag_query_strings = {qd.get("query", "") for qd in diagnostic_queries}
+    if not diag_query_strings:
+        return None
+
+    # Collect (axis_name -> value -> list[accuracy]) across all grid points
+    axis_value_accs: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: defaultdict(list),
+    )
+    grid_axes_combined: dict[str, list] = {}
+    covered_points = 0
+    total_points = 0
+
+    for summary in plan_summaries:
+        plan_id = summary["plan_id"]
+        plan_data = store.load_grid_plan(backend_id, plan_id)
+        if not plan_data:
+            continue
+        grid_points, state_lookup, _, grid_axes, _, _ = deserialize_grid_plan(
+            plan_data,
+        )
+        # Merge axes for profile building
+        for ax_name, ax_values in grid_axes.items():
+            if ax_name not in grid_axes_combined:
+                grid_axes_combined[ax_name] = ax_values
+
+        axis_names = list(grid_axes.keys())
+
+        for coord_dict, ps_id in grid_points:
+            total_points += 1
+            ps = state_lookup.get(ps_id)
+            if not ps:
+                continue
+            rendered = ps.render()
+            rp_hash = hashlib.sha256(
+                rendered.encode(),
+            ).hexdigest()[:HASH_TRUNCATE]
+
+            cached_by_query = prompt_result_index.get(rp_hash, {})
+            matched = [
+                cached_by_query[q] for q in diag_query_strings
+                if q in cached_by_query
+            ]
+            coverage = len(matched) / len(diag_query_strings)
+            if coverage < 0.5:
+                continue
+
+            covered_points += 1
+            acc = compute_accuracy(matched)["accuracy"]
+
+            # Attribute this accuracy to each axis value at this grid point
+            for ax_name in axis_names:
+                ax_idx = coord_dict.get(ax_name, 0)
+                ax_values = grid_axes.get(ax_name, [])
+                if ax_idx < len(ax_values):
+                    value_key = str(ax_values[ax_idx])
+                    axis_value_accs[ax_name][value_key].append(acc)
+
+    if covered_points == 0:
+        logger.info(
+            "synthesize_sensitivity: 0/%d grid points have "
+            "sufficient diagnostic coverage", total_points,
+        )
+        return None
+
+    logger.info(
+        "synthesize_sensitivity: %d/%d grid points covered, "
+        "%d axes available",
+        covered_points, total_points, len(axis_value_accs),
+    )
+
+    # Compute marginal accuracy per axis value and build profiles
+    overall_mean = 0.0
+    n_total = 0
+    for ax_values in axis_value_accs.values():
+        for accs in ax_values.values():
+            overall_mean += sum(accs)
+            n_total += len(accs)
+    overall_mean = overall_mean / n_total if n_total else 0.0
+
+    rows: list[dict] = []
+    profiles: list[dict] = []
+
+    for ax_name, value_accs in axis_value_accs.items():
+        deltas: list[float] = []
+        for value_key, accs in value_accs.items():
+            mean_acc = sum(accs) / len(accs) if accs else 0.0
+            delta = mean_acc - overall_mean
+            deltas.append(delta)
+            rows.append({
+                "axis": ax_name,
+                "axis_type": "prompt_field",
+                "value_idx": 0,
+                "value_preview": _preview(value_key),
+                "hits": 0,
+                "total": len(diagnostic_queries),
+                "accuracy": mean_acc,
+                "delta": delta,
+            })
+
+        sens_range = max(deltas) - min(deltas) if deltas else 0.0
+        card = len(value_accs)
+        budget = classify_axis(card, sens_range, len(diagnostic_queries))
+        profiles.append({
+            "axis": ax_name,
+            "axis_type": "prompt_field",
+            "cardinality": card,
+            "sensitivity_range": round(sens_range, 4),
+            "best_delta": round(max(deltas), 4) if deltas else 0.0,
+            "worst_delta": round(min(deltas), 4) if deltas else 0.0,
+            "exploration_budget": budget,
+            "estimated_eval_cost": card * len(diagnostic_queries),
+            "source": "grid_synthesis",
+        })
+
+    profiles.sort(key=lambda p: -p["sensitivity_range"])
+    return pd.DataFrame(rows), profiles
 
 
 # ---------------------------------------------------------------------------

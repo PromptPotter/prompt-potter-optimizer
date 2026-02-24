@@ -1,0 +1,180 @@
+"""Tests for assess_scan_coverage()."""
+import hashlib
+
+from api.models.prompt_state import PromptState
+from api.services.grid_search import assess_scan_coverage
+from api.services.prompt_eval import HASH_TRUNCATE
+
+
+def _rp_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:HASH_TRUNCATE]
+
+
+def _make_baseline() -> PromptState:
+    return PromptState(
+        family="test",
+        instruction="Rank the candidates.",
+        persona="",
+        task_intent="",
+        thinking_style="",
+        answer_format="",
+    )
+
+
+def _diagnostic(n: int = 6) -> list[dict]:
+    return [{"query": f"q{i}", "ground_truth": f"gt{i}"} for i in range(n)]
+
+
+def _build_index(entries: dict[str, list[str]]) -> dict[str, dict[str, dict]]:
+    """Build a fake index: rendered_text -> list of covered query strings."""
+    index: dict[str, dict[str, dict]] = {}
+    for rendered_text, queries in entries.items():
+        rp_hash = _rp_hash(rendered_text)
+        index[rp_hash] = {q: {"query": q, "hit": True} for q in queries}
+    return index
+
+
+VARIANT_LIBRARY = {
+    "prompt_fields": {
+        "persona": [
+            "",
+            "You are a domain expert.",
+            "You are a precise system.",
+            "You are a careful assistant.",
+        ],
+        "task_intent": [
+            "",
+            "Identify the best match.",
+            "Rank candidates by relevance.",
+        ],
+    },
+    "pipeline_params": {
+        "ranking_temperature": [0.0, 0.3, 0.7],
+    },
+}
+
+
+def test_empty_index_nothing_usable():
+    """Empty index -> 0 usable variants, nothing satisfied."""
+    baseline = _make_baseline()
+    result = assess_scan_coverage(
+        baseline, VARIANT_LIBRARY, _diagnostic(6), {},
+        min_queries=6,
+    )
+    assert result["summary"]["all_satisfied"] is False
+    for axis in result["axes"]:
+        assert axis["n_usable"] == 0
+        assert axis["sufficient"] is False
+
+
+def test_full_coverage_all_prompt_fields_satisfied():
+    """All prompt-field variants have full query coverage -> all prompt axes satisfied.
+
+    Pipeline-param axes are never satisfied by index, so all_satisfied stays False.
+    """
+    baseline = _make_baseline()
+    diag = _diagnostic(6)
+    query_strings = [d["query"] for d in diag]
+
+    # Build index with full coverage for baseline + all persona/task_intent variants
+    entries: dict[str, list[str]] = {}
+    entries[baseline.render()] = query_strings
+
+    for persona_val in ["You are a domain expert.", "You are a precise system.",
+                        "You are a careful assistant."]:
+        rendered = baseline.derive(persona=persona_val).render()
+        entries[rendered] = query_strings
+
+    for ti_val in ["Identify the best match.", "Rank candidates by relevance."]:
+        rendered = baseline.derive(task_intent=ti_val).render()
+        entries[rendered] = query_strings
+
+    index = _build_index(entries)
+    result = assess_scan_coverage(
+        baseline, VARIANT_LIBRARY, diag, index, min_queries=6,
+    )
+
+    # Prompt field axes should all be satisfied
+    pf_axes = [a for a in result["axes"] if a["axis_type"] == "prompt_field"]
+    for a in pf_axes:
+        assert a["sufficient"] is True, f"{a['axis']} not satisfied"
+
+    # Pipeline param axes are never satisfied by index
+    pp_axes = [a for a in result["axes"] if a["axis_type"] == "pipeline_param"]
+    for a in pp_axes:
+        assert a["sufficient"] is False
+
+    # all_satisfied is False because of pipeline params
+    assert result["summary"]["all_satisfied"] is False
+    assert result["summary"]["prompt_field_axes_satisfied"] == len(pf_axes)
+
+
+def test_min_queries_threshold():
+    """Variant with 3/6 queries: not usable at min_queries=6, usable at min_queries=3."""
+    baseline = _make_baseline()
+    diag = _diagnostic(6)
+    partial_queries = [d["query"] for d in diag[:3]]
+
+    rendered = baseline.derive(persona="You are a domain expert.").render()
+    index = _build_index({rendered: partial_queries})
+
+    # min_queries=6 -> not usable
+    result_strict = assess_scan_coverage(
+        baseline, VARIANT_LIBRARY, diag, index, min_queries=6,
+    )
+    persona_axis = next(a for a in result_strict["axes"] if a["axis"] == "persona")
+    expert_variant = next(
+        v for v in persona_axis["variants"] if "domain" in v["value_preview"]
+    )
+    assert expert_variant["n_cached"] == 3
+    assert expert_variant["usable"] is False
+
+    # min_queries=3 -> usable
+    result_lenient = assess_scan_coverage(
+        baseline, VARIANT_LIBRARY, diag, index, min_queries=3,
+    )
+    persona_axis = next(a for a in result_lenient["axes"] if a["axis"] == "persona")
+    expert_variant = next(
+        v for v in persona_axis["variants"] if "domain" in v["value_preview"]
+    )
+    assert expert_variant["usable"] is True
+
+
+def test_axis_requirements_partial():
+    """Require 2 of 3 persona values, have 2 -> satisfied."""
+    baseline = _make_baseline()
+    diag = _diagnostic(6)
+    query_strings = [d["query"] for d in diag]
+
+    # Cover 2 of 3 persona variants
+    entries: dict[str, list[str]] = {}
+    for val in ["You are a domain expert.", "You are a precise system."]:
+        rendered = baseline.derive(persona=val).render()
+        entries[rendered] = query_strings
+
+    index = _build_index(entries)
+    result = assess_scan_coverage(
+        baseline, VARIANT_LIBRARY, diag, index,
+        min_queries=6,
+        axis_requirements={"persona": 2},
+    )
+    persona_axis = next(a for a in result["axes"] if a["axis"] == "persona")
+    assert persona_axis["n_usable"] == 2
+    assert persona_axis["n_required"] == 2
+    assert persona_axis["sufficient"] is True
+
+
+def test_pipeline_params_always_unsatisfied():
+    """Pipeline-param axes always show sufficient=False, n_usable=0."""
+    baseline = _make_baseline()
+    result = assess_scan_coverage(
+        baseline, VARIANT_LIBRARY, _diagnostic(6), {},
+        pipeline_params={"ranking_temperature": 0.0},
+        min_queries=6,
+    )
+    pp_axes = [a for a in result["axes"] if a["axis_type"] == "pipeline_param"]
+    assert len(pp_axes) == 1
+    assert pp_axes[0]["axis"] == "ranking_temperature"
+    assert pp_axes[0]["n_usable"] == 0
+    assert pp_axes[0]["sufficient"] is False
+    assert "Pipeline params" in pp_axes[0].get("note", "")

@@ -69,6 +69,15 @@ class DatasetRunStore:
 
         return detail_path
 
+    def load_by_id(
+        self, backend_id: str, run_id: str,
+    ) -> dict[str, Any] | None:
+        """Load a dataset run detail file directly by run_id (no index scan)."""
+        detail_path = self._runs_dir(backend_id) / f"{run_id}.json"
+        if not detail_path.exists():
+            return None
+        return read_json(detail_path)
+
     def load_by_hash(
         self, backend_id: str, content_hash: str,
     ) -> dict[str, Any] | None:

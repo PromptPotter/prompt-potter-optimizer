@@ -67,6 +67,10 @@ from api.services.grid_search import (
     smart_search_plan_identity as _smart_search_plan_identity,
     serialize_smart_search_plan as _serialize_smart_search_plan,
     deserialize_smart_search_plan as _deserialize_smart_search_plan,
+    build_prompt_result_index as _build_prompt_result_index,
+    synthesize_sensitivity_from_grid as _synthesize_sensitivity_from_grid,
+    assess_scan_coverage as _assess_scan_coverage,
+    build_data_inventory as _build_data_inventory,
 )
 
 # Re-export constants for notebooks
@@ -160,6 +164,25 @@ def show_pipeline_config(svc: dict, campaign_config: dict) -> dict:
     )
     campaign_config["pipeline_params"] = pipeline_params
     print(f"Pipeline params: {pipeline_params}")
+
+    # Show tunable parameters per active step with variant library search ranges
+    variant_lib = load_variant_library()
+    pp_search = variant_lib.get("pipeline_params", {})
+    step_names = [s["name"] for s in pipeline_config["steps"]]
+    print("\nTunable parameters:")
+    for step_name in step_names:
+        params = sorted(PIPELINE_STEP_PARAMS.get(step_name, set()))
+        if not params:
+            continue
+        print(f"  {step_name}:")
+        for param in params:
+            search_vals = pp_search.get(param)
+            if search_vals:
+                print(f"    {param:<34s} search: {search_vals}")
+            elif param == "ranking_prompt":
+                print(f"    {param:<34s} (overridden by optimizer)")
+            else:
+                print(f"    {param:<34s} (no search values defined)")
 
     return pipeline_params
 
@@ -1696,20 +1719,20 @@ async def resume_or_build_diagnostic(
     existing = store.load_smart_search_plan(backend_id, plan_id)
     if existing:
         status = existing.get("status", "?")
-        print(f"[RESUME] Found smart search plan: {plan_id} (status: {status})")
         plan = _deserialize_smart_search_plan(existing)
 
-        cached_profiles: list = []
         if plan["scan_results"] and status in ("scan_complete", "search_complete"):
             cached_profiles = plan["scan_results"].get("axis_profiles", [])
-
-        return (
-            plan_id,
-            plan["search_baseline_ps"],
-            plan["diagnostic"],
-            plan["diag_summary"],
-            cached_profiles,
-        )
+            print(f"[RESUME] Scan complete in plan {plan_id}, reusing profiles")
+            return (
+                plan_id,
+                plan["search_baseline_ps"],
+                plan["diagnostic"],
+                plan["diag_summary"],
+                cached_profiles,
+            )
+        # diagnostic_built → don't resume, rebuild fresh
+        print(f"[REBUILD] Plan {plan_id} (status: {status}), rebuilding diagnostic")
 
     # Build new plan: LLM restructure + diagnostic set
     print(f"[NEW] Building smart search plan: {plan_id}")
@@ -1753,6 +1776,186 @@ def list_smart_search_plans(store: "ProjectStore", backend_id: str) -> list[dict
     return store.list_smart_search_plans(backend_id)
 
 
+def build_historical_index(store: "ProjectStore", backend_id: str) -> dict:
+    """Build prompt result index from all historical dataset runs.
+
+    Returns the index dict: ``rendered_prompt_hash -> {query -> result}``.
+    """
+    index = _build_prompt_result_index(store, backend_id)
+    n_prompts = len(index)
+    n_results = sum(len(v) for v in index.values())
+    print(f"Historical index: {n_prompts} unique prompts, "
+          f"{n_results} total query results cached")
+    return index
+
+
+def show_scan_coverage(
+    baseline_ps,
+    variant_library: dict,
+    diagnostic: list,
+    prompt_index: dict,
+    pipeline_params: dict | None = None,
+    min_queries: int = 6,
+    axis_requirements: dict[str, int] | None = None,
+) -> dict:
+    """Print a formatted coverage report and return the raw dict.
+
+    Calls ``assess_scan_coverage()`` from ``grid_search`` and displays
+    a human-readable table showing which axes are covered by cached data.
+    """
+    result = _assess_scan_coverage(
+        baseline_ps, variant_library, diagnostic, prompt_index,
+        pipeline_params=pipeline_params,
+        min_queries=min_queries,
+        axis_requirements=axis_requirements,
+    )
+
+    bl = result["baseline_coverage"]
+    axes = result["axes"]
+    summary = result["summary"]
+
+    print("=" * 70)
+    print(f"  COVERAGE ADVISOR  (min_queries={result['min_queries']})")
+    print("=" * 70)
+    print(f"  Baseline: {bl['n_cached']}/{bl['n_needed']} queries cached"
+          f" {'✓' if bl['sufficient'] else '✗'}")
+    print()
+
+    pf_axes = [a for a in axes if a["axis_type"] == "prompt_field"]
+    pp_axes = [a for a in axes if a["axis_type"] == "pipeline_param"]
+
+    if pf_axes:
+        print("  Prompt field axes:")
+        for a in pf_axes:
+            label = "value" if a["n_values"] == 1 else "values"
+            usable_parts = []
+            if a.get("variants"):
+                n_partial = sum(
+                    1 for v in a["variants"]
+                    if 0 < v["n_cached"] < min_queries
+                )
+                usable_parts.append(f"{a['n_usable']} usable")
+                if n_partial:
+                    usable_parts.append(f"{n_partial} partial")
+                n_uncovered = sum(
+                    1 for v in a["variants"] if v["n_cached"] == 0
+                )
+                if n_uncovered:
+                    usable_parts.append(f"{n_uncovered} uncovered")
+            detail = f"  ({', '.join(usable_parts)})" if usable_parts else ""
+            mark = "✓" if a["sufficient"] else "✗"
+            print(f"    {a['axis']:<22s} {a['n_values']} {label:<6s} "
+                  f"| {a['n_usable']}/{a['n_required']} required  "
+                  f"{mark}{detail}")
+        print()
+
+    if pp_axes:
+        print("  Pipeline params (always need backend):")
+        n_diag = result["n_diagnostic"]
+        for a in pp_axes:
+            n_calls = a["n_values"] * n_diag
+            print(f"    {a['axis']:<22s} {a['n_values']} variants "
+                  f"× {n_diag} queries = {n_calls} calls")
+        print()
+
+    saved = summary["backend_calls_saved"]
+    needed = summary["backend_calls_needed"]
+    print(f"  Summary: {saved} backend calls saved, {needed} still needed")
+    print(f"  >> {result['recommendation']}")
+
+    if (summary["backend_calls_saved"] == 0
+            and sum(len(v) for v in prompt_index.values()) > 0):
+        n_total = sum(len(v) for v in prompt_index.values())
+        print(f"\n  Note: {n_total} results exist in the index under other baselines.")
+        print("  The current search_baseline was rebuilt and has no cached data yet.")
+
+    print("=" * 70)
+
+    return result
+
+
+def show_data_inventory(
+    prompt_index: dict,
+    store: "ProjectStore",
+    backend_id: str,
+) -> dict:
+    """Print a formatted data inventory table and return the raw dict.
+
+    Calls ``build_data_inventory()`` from ``grid_search`` and displays
+    a per-axis breakdown of what the historical index contains.
+    """
+    inv = _build_data_inventory(prompt_index, store, backend_id)
+
+    tp = inv["total_prompts"]
+    tr = inv["total_results"]
+    print("=" * 70)
+    print(f"  DATA INVENTORY  ({tp} prompts, {tr} query results)")
+    print("=" * 70)
+
+    bp = inv["baseline_prompts"]
+    bq = inv["baseline_queries"]
+    print(f"  Baselines: {bp} plan baseline(s) — {bq} queries cached")
+    print()
+
+    axes = inv["axes"]
+    if axes:
+        print(f"  {'Axis':<22s} {'Prompts':>8s} {'Queries':>8s} {'Distinct values':>16s}")
+        for axis_name, info in axes.items():
+            print(f"  {axis_name:<22s} {info['n_prompts']:>8d} "
+                  f"{info['n_queries']:>8d} {info['distinct_values']:>16d}")
+        print()
+    else:
+        print("  No axis variations found in stored plans.")
+        print()
+
+    pp = inv.get("pipeline_params", {})
+    if pp:
+        print("  Pipeline parameters (from sensitivity scans):")
+        for pname, info in pp.items():
+            card = info["cardinality"]
+            sens = info["sensitivity_range"]
+            budget = info["exploration_budget"]
+            print(f"    {pname:<24s} {card} values scanned  "
+                  f"sensitivity: {sens:.3f}  [{budget}]")
+        print()
+    else:
+        print("  Pipeline parameters: not yet scanned")
+        print()
+
+    mp = inv["matched_prompts"]
+    mr = inv["matched_results"]
+    up = inv["unmatched_prompts"]
+    ur = inv["unmatched_results"]
+    print(f"  Identified: {mp}/{tp} prompts ({mr}/{tr} queries) via stored plans")
+    print(f"  Unmatched:  {up} prompts ({ur} queries)")
+    print("=" * 70)
+
+    return inv
+
+
+def synthesize_sensitivity(
+    store: "ProjectStore",
+    backend_id: str,
+    prompt_index: dict,
+    diagnostic: list,
+) -> tuple | None:
+    """Try to derive sensitivity profiles from grid search data.
+
+    Returns ``(df, profiles)`` or ``None`` if insufficient coverage.
+    """
+    result = _synthesize_sensitivity_from_grid(
+        store, backend_id, prompt_index, diagnostic,
+    )
+    if result is None:
+        print("Grid synthesis: insufficient coverage for sensitivity derivation")
+        return None
+    df, profiles = result
+    n_active = sum(1 for p in profiles if p["exploration_budget"] != "skip")
+    print(f"Grid synthesis: {len(profiles)} axes profiled, "
+          f"{n_active} active (non-skip)")
+    return result
+
+
 async def sensitivity_scan(
     baseline_ps,
     variant_library: dict,
@@ -1765,6 +1968,7 @@ async def sensitivity_scan(
     request_delay: float = 1.0,
     session_terms: list | None = None,
     plan_id: str = "",
+    prompt_result_index: dict | None = None,
 ) -> tuple:
     """Run a sensitivity scan over all axes with progress output.
 
@@ -1815,6 +2019,7 @@ async def sensitivity_scan(
             request_delay=request_delay,
             session_terms=session_terms,
             progress_cb=cb,
+            prompt_result_index=prompt_result_index,
         )
     finally:
         _httpx_log.setLevel(_prev_httpx)
@@ -1926,6 +2131,7 @@ async def adaptive_search(
     request_delay: float = 1.0,
     session_terms: list | None = None,
     plan_id: str = "",
+    prompt_result_index: dict | None = None,
 ) -> tuple:
     """Run adaptive coordinate descent search with progress output.
 
@@ -1959,6 +2165,7 @@ async def adaptive_search(
             request_delay=request_delay,
             session_terms=session_terms,
             progress_cb=cb,
+            prompt_result_index=prompt_result_index,
         )
     finally:
         _httpx_log.setLevel(_prev_httpx)
