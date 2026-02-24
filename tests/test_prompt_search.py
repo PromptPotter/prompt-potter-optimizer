@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from api.config.settings import load_variant_library
-from api.services.grid_search import (
+from api.services.search import (
     build_diagnostic_set,
     classify_axis,
     select_grid_winner,
@@ -129,7 +129,7 @@ def test_select_grid_winner_warns_small_sample(caplog):
         "errors": 0,
     }])
 
-    with caplog.at_level(logging.WARNING, logger="api.services.grid_search"):
+    with caplog.at_level(logging.WARNING, logger="api.services.search.grid_core"):
         result = select_grid_winner(grid_df, {ps.id: ps})
 
     assert result["accuracy"] == 0.5

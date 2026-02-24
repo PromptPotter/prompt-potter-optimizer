@@ -2,7 +2,7 @@
 import hashlib
 
 from api.models.prompt_state import PromptState
-from api.services.grid_search import assess_scan_coverage
+from api.services.search import assess_scan_coverage
 from api.services.prompt_eval import HASH_TRUNCATE
 
 

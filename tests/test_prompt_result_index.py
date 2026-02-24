@@ -1,7 +1,7 @@
 """Tests for build_prompt_result_index and historical lookup in _eval_config."""
 import hashlib
 
-from api.services.grid_search import build_prompt_result_index
+from api.services.search import build_prompt_result_index
 from api.services.prompt_eval import HASH_TRUNCATE
 
 

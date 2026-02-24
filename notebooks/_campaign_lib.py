@@ -40,7 +40,7 @@ from api.services.prompt_optimizer import (
     select_round_winner as _select_round_winner,
 )
 from api.config.settings import load_variant_library
-from api.services.grid_search import (
+from api.services.search import (
     DEFAULT_GRID_AXES,
     SAMPLING_ALPHA,
     GRID_SEARCHABLE_FIELDS,
@@ -721,7 +721,7 @@ def load_grid_plan_results(
     if not plan_data:
         return None
 
-    from api.services.grid_search import deserialize_grid_plan as _deser
+    from api.services.search import deserialize_grid_plan as _deser
     grid_points, state_lookup, _, grid_axes, _, _ = _deser(plan_data)
 
     eval_plan = _resolve_point_evals(

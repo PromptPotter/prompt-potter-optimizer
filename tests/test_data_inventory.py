@@ -2,7 +2,7 @@
 import hashlib
 
 from api.models.prompt_state import PromptState
-from api.services.grid_search import (
+from api.services.search import (
     build_data_inventory,
     serialize_grid_plan,
     serialize_smart_search_plan,
@@ -64,7 +64,7 @@ def _build_index(store, backend_id, runs):
     """Save runs then build index via the real function."""
     for run in runs:
         store.save_dataset_run(backend_id, run["run_id"], run)
-    from api.services.grid_search import build_prompt_result_index
+    from api.services.search import build_prompt_result_index
     return build_prompt_result_index(store, backend_id)
 
 
