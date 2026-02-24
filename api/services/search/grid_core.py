@@ -586,3 +586,160 @@ def select_grid_winner(
         "total": int(best_row["total"]),
         "results": [],
     }
+
+
+# ---------------------------------------------------------------------------
+# Grid plan resume / build
+# ---------------------------------------------------------------------------
+
+
+async def resume_or_build_grid(
+    campaign_config: dict,
+    baseline: PromptState,
+    llm_client: LLMClientBase,
+    model: str,
+    store: "ProjectStore",
+    backend_id: str,
+    improvement_areas: str = "",
+) -> tuple:
+    """Resume an existing grid plan or build a new one.
+
+    Computes a stable plan_id from user-controlled config inputs. If a
+    matching plan exists on disk and is not completed, it is deserialized
+    and returned (skipping the LLM restructure call). Otherwise, a new
+    plan is built, serialized, and saved.
+
+    Returns:
+        (plan_id, grid_points, grid_state_lookup, grid_axes,
+         layer1_fields, grid_baseline, resumed: bool)
+    """
+    from api.services.search.context import restructure_context
+    from api.services.search.plan_persistence import (
+        deserialize_grid_plan,
+        grid_plan_identity,
+        serialize_grid_plan,
+    )
+
+    gs = campaign_config["grid_search"]
+    grid_budget = gs.get("grid_budget", 0)
+    exploration_rate = campaign_config.get("exploration_rate", 0.5)
+    seed = gs.get("seed", 42)
+    context_input = gs.get("context_fields", gs.get("context", ""))
+
+    # Build grid axes
+    if gs.get("use_defaults", True):
+        grid_axes = dict(DEFAULT_GRID_AXES)
+    else:
+        grid_axes = {}
+    if gs.get("custom_axes"):
+        grid_axes.update(gs["custom_axes"])
+
+    plan_id = grid_plan_identity(
+        grid_axes, baseline.instruction, context_input,
+        grid_budget, exploration_rate, seed,
+    )
+
+    # Check for existing plan
+    existing = store.load_grid_plan(backend_id, plan_id)
+    if existing:
+        (
+            grid_points, grid_state_lookup, sampling_meta,
+            grid_axes, layer1_fields, grid_baseline,
+        ) = deserialize_grid_plan(existing)
+        logger.info(
+            "Resuming grid plan %s (status: %s, %d points)",
+            plan_id, existing.get("status", "?"), len(grid_points),
+        )
+        return (
+            plan_id, grid_points, grid_state_lookup,
+            grid_axes, layer1_fields, grid_baseline, True,
+        )
+
+    # Build new plan: LLM restructure + grid points
+    logger.info("Building new grid plan: %s", plan_id)
+    layer1_fields = await restructure_context(
+        context_input, llm_client,
+        model=model,
+        improvement_areas=improvement_areas,
+    )
+
+    grid_baseline = baseline.derive(
+        **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
+        changes_description="grid_baseline",
+    )
+
+    validate_grid_config(grid_axes, grid_baseline, grid_budget=grid_budget)
+    points, state_lookup, sampling_meta = build_grid_points(
+        grid_axes, grid_baseline,
+        grid_budget=grid_budget,
+        exploration_rate=exploration_rate,
+        seed=seed,
+    )
+
+    # Persist
+    plan_data = serialize_grid_plan(
+        plan_id, grid_axes, grid_baseline, layer1_fields,
+        points, state_lookup, sampling_meta,
+    )
+    store.save_grid_plan(backend_id, plan_id, plan_data)
+
+    return (
+        plan_id, points, state_lookup,
+        grid_axes, layer1_fields, grid_baseline, False,
+    )
+
+
+def load_grid_plan_results(
+    store: "ProjectStore",
+    backend_id: str,
+    plan_id: str,
+    eval_data: list,
+    eval_queries_per_point: int = 0,
+    shared_queries: bool = True,
+    seed: int = 42,
+) -> pd.DataFrame | None:
+    """Load stored eval results for a grid plan and return a results DataFrame.
+
+    Rebuilds the same DataFrame shape that ``run_grid_search`` returns,
+    but purely from stored data (no backend calls).  Returns None if
+    the plan doesn't exist or has no stored results.
+
+    Must receive the same eval sampling params as the grid search that
+    produced the runs, so that content hashes match.
+    """
+    from api.services.search.plan_persistence import deserialize_grid_plan
+
+    plan_data = store.load_grid_plan(backend_id, plan_id)
+    if not plan_data:
+        return None
+
+    grid_points, state_lookup, _, grid_axes, _, _ = deserialize_grid_plan(plan_data)
+
+    eval_plan = resolve_point_evals(
+        grid_points, state_lookup, eval_data,
+        eval_queries_per_point, shared_queries, seed,
+    )
+    rows = []
+    for info in eval_plan:
+        existing = store.load_dataset_run_by_hash(backend_id, info.content_hash)
+        if not existing:
+            continue
+        scores = existing.get("scores", {})
+        row = dict(info.coord_dict) if isinstance(info.coord_dict, dict) else {}
+        row.update({
+            "prompt_state_id": info.ps_id,
+            "accuracy": scores.get("accuracy", 0),
+            "hits": scores.get("hits", 0),
+            "total": scores.get("total", 0),
+            "errors": scores.get("errors", 0),
+        })
+        rows.append(row)
+
+    if not rows:
+        return None
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("accuracy", ascending=False)
+        .reset_index(drop=True)
+    )

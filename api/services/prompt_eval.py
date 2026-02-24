@@ -13,7 +13,11 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
+from api.evaluators.base import EvalResult
+from api.evaluators.exact_match import ExactMatchEvaluator
 from api.models.prompt_state import PromptState
+
+_evaluator = ExactMatchEvaluator({"strip": True})
 
 if TYPE_CHECKING:
     from api.services.backend_client import BackendClient
@@ -162,7 +166,7 @@ async def backend_reranker_eval(
         request_delay: Seconds to sleep before the call (0 = no delay).
 
     Returns:
-        Dict with keys: query, predicted, ground_truth, hit, error.
+        Dict with keys: query, predicted, ground_truth, hit, score, error.
     """
     query = query_data["query"]
     ground_truth = query_data["ground_truth"]
@@ -183,11 +187,13 @@ async def backend_reranker_eval(
         predicted = (
             ranked[0].get("candidate", "NO_RESULT") if ranked else "NO_RESULT"
         )
+        eval_output = _evaluator.evaluate(ground_truth, predicted)
         return {
             "query": query,
             "predicted": predicted,
             "ground_truth": ground_truth,
-            "hit": predicted == ground_truth,
+            "hit": eval_output.result == EvalResult.PASS,
+            "score": eval_output.score,
             "error": None,
         }
     except Exception as exc:
@@ -197,6 +203,7 @@ async def backend_reranker_eval(
             "predicted": "ERROR",
             "ground_truth": ground_truth,
             "hit": False,
+            "score": 0.0,
             "error": str(exc),
         }
 
@@ -256,3 +263,160 @@ def compute_accuracy(results: list) -> dict:
     errors = sum(1 for r in results if r.get("error"))
     accuracy = hits / total if total else 0.0
     return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
+
+
+async def evaluate_prompt_cached(
+    prompt_state: PromptState,
+    eval_data: list,
+    backend_client: "BackendClient",
+    pipeline_params: dict | None = None,
+    store: "ProjectStore | None" = None,
+    backend_id: str = "",
+    force: bool = False,
+    label: str = "Eval",
+    model: str = "",
+    temperature: float = 0.0,
+    on_result: Callable | None = None,
+) -> tuple[list, dict, bool]:
+    """Evaluate a prompt with deduplication, partial resume, and finalization.
+
+    Core evaluation logic without UI output. Handles:
+    - Content-hash deduplication via ProjectStore
+    - Partial result resume after crash
+    - Incremental writes for crash protection
+    - Final run storage
+
+    Args:
+        prompt_state: PromptState to evaluate.
+        eval_data: List of query dicts with ``query`` and ``ground_truth``.
+        backend_client: BackendClient with ``run_match()`` method.
+        pipeline_params: Optional pipeline parameter overrides.
+        store: Optional ProjectStore for caching/persistence.
+        backend_id: Backend identifier (required when store is provided).
+        force: Skip dedup lookup and re-evaluate.
+        label: Human-readable label for the run.
+        model: Model identifier for content hash.
+        temperature: Temperature for content hash.
+        on_result: Optional callback ``(result, index, total)`` called after
+            each query evaluation (for progress reporting).
+
+    Returns:
+        Tuple of (results, scores_dict, was_cached).
+    """
+    rendered = prompt_state.render()
+    content_hash = eval_content_hash(rendered, eval_data, model, temperature)
+
+    # --- dedup lookup ---
+    if store and backend_id and not force:
+        existing = store.load_dataset_run_by_hash(backend_id, content_hash)
+        if existing:
+            results = existing["dataset_run_items"]
+            scores = existing.get("scores", compute_accuracy(results))
+            return results, scores, True
+
+    # --- compute run_id for incremental writes ---
+    safe_label = label.lower().replace(" ", "_")
+    run_id = f"{safe_label}_{content_hash[:8]}"
+
+    # --- check for partial results (resume after crash) ---
+    partial_results: list = []
+    remaining_data = eval_data
+    if store and backend_id:
+        partial_results = store.load_partial_eval(backend_id, run_id)
+        if partial_results and len(partial_results) < len(eval_data):
+            remaining_data = eval_data[len(partial_results):]
+        elif partial_results and len(partial_results) >= len(eval_data):
+            remaining_data = []
+        else:
+            partial_results = []
+
+    # --- evaluate via backend ---
+    _incremental_writer = None
+    if store and backend_id:
+        _incremental_writer = make_incremental_writer(store, backend_id, run_id)
+
+    def _on_result(result: dict, index: int, total: int) -> None:
+        if _incremental_writer is not None:
+            _incremental_writer(result, index, total)
+        if on_result is not None:
+            on_result(result, len(partial_results) + index, len(eval_data))
+
+    new_results = await evaluate_prompt_batch(
+        prompt_state, remaining_data, backend_client,
+        pipeline_params=pipeline_params,
+        on_result=_on_result,
+    )
+
+    results = partial_results + new_results
+    scores = compute_accuracy(results)
+
+    # --- finalize: save complete run, delete .partial.jsonl ---
+    if store and backend_id:
+        run_data = build_dataset_run_data(
+            run_id, label, content_hash, prompt_state.id,
+            rendered, model, temperature, scores, results,
+        )
+        store.finalize_eval_run(backend_id, run_id, run_data)
+
+    return results, scores, False
+
+
+async def run_baseline_eval(
+    baseline: PromptState,
+    eval_data: list,
+    backend_client: "BackendClient",
+    pipeline_params: dict | None = None,
+    store: "ProjectStore | None" = None,
+    backend_id: str = "",
+    experiment_id: str = "",
+    model: str = "",
+    temperature: float = 0.0,
+    on_result: Callable | None = None,
+) -> tuple[list, list]:
+    """Evaluate baseline prompt and build initial campaign_rounds list.
+
+    Args:
+        baseline: Baseline PromptState.
+        eval_data: Evaluation data. If empty and store+experiment_id are
+            provided, attempts to load from store.
+        backend_client: BackendClient for evaluation.
+        pipeline_params: Optional pipeline parameter overrides.
+        store: Optional ProjectStore.
+        backend_id: Backend identifier.
+        experiment_id: Experiment to load eval data from if eval_data is empty.
+        model: Model identifier for content hash.
+        temperature: Temperature for content hash.
+        on_result: Optional callback for progress reporting.
+
+    Returns:
+        Tuple of (campaign_rounds, baseline_results).
+
+    Raises:
+        RuntimeError: If no evaluation data is available.
+    """
+    if not eval_data and store and experiment_id:
+        from api.services.search.eval_dataset import load_eval_dataset
+        eval_data = load_eval_dataset(store, backend_id, experiment_id)
+
+    if not eval_data:
+        raise RuntimeError(
+            "No evaluation data available. "
+            "Generate data first (e.g. run termnorm_backend.ipynb)."
+        )
+
+    baseline_results, scores, _cached = await evaluate_prompt_cached(
+        baseline, eval_data, backend_client,
+        pipeline_params=pipeline_params,
+        store=store, backend_id=backend_id,
+        label="Baseline",
+        model=model, temperature=temperature,
+        on_result=on_result,
+    )
+
+    campaign_rounds = [{
+        "round": 0, "label": "baseline", "prompt_state": baseline,
+        "accuracy": scores["accuracy"], "hits": scores["hits"],
+        "total": scores["total"], "results": baseline_results,
+    }]
+
+    return campaign_rounds, baseline_results

@@ -25,6 +25,55 @@ logger = logging.getLogger(__name__)
 
 MATCH_TIMEOUT = 120.0
 
+# Maps each pipeline step name to the set of parameter names it uses.
+PIPELINE_STEP_PARAMS = {
+    "web_search": {"max_sites", "num_results", "content_char_limit"},
+    "entity_profiling": {"raw_content_limit", "profiling_temperature", "profiling_max_tokens"},
+    "token_matching": {"max_token_candidates", "relevance_weight_core"},
+    "llm_ranking": {
+        "ranking_temperature", "ranking_max_tokens",
+        "ranking_sample_size", "ranking_prompt",
+    },
+}
+
+
+def load_pipeline_config(exp_data: dict) -> dict:
+    """Extract pipeline config (steps + params) from synced experiment data."""
+    runs = exp_data.get("runs", [])
+    if not runs:
+        return {"steps": [], "notation": "unknown", "name": "", "version": ""}
+    pipeline = runs[0].get("pipeline", {})
+    config = pipeline.get("config", {})
+    return {
+        "steps": config.get("steps", []),
+        "notation": pipeline.get("notation", ""),
+        "name": config.get("name", ""),
+        "version": config.get("version", ""),
+    }
+
+
+def build_pipeline_params(
+    pipeline_config: dict, overrides: dict | None = None,
+) -> dict:
+    """Build pipeline_params from a (possibly shortened) pipeline config.
+
+    Returns dict ready for evaluate_prompt(..., pipeline_params=params).
+    Includes 'steps' list (sent to TermNorm) and any user overrides.
+    """
+    step_names = [s["name"] for s in pipeline_config["steps"]]
+    params: dict = {"steps": step_names}
+
+    active_param_names: set = set()
+    for name in step_names:
+        active_param_names |= PIPELINE_STEP_PARAMS.get(name, set())
+
+    if overrides:
+        for k, v in overrides.items():
+            if k in active_param_names:
+                params[k] = v
+
+    return params
+
 
 def _build_result_dict(
     query_data: dict[str, Any],

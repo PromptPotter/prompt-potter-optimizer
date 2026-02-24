@@ -307,6 +307,7 @@ async def sensitivity_scan(
     session_terms: list | None = None,
     progress_cb: Callable | None = None,
     prompt_result_index: dict | None = None,
+    plan_id: str = "",
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -503,6 +504,19 @@ async def sensitivity_scan(
 
     profiles.sort(key=lambda p: -p["sensitivity_range"])
 
+    # Persist scan results to plan
+    if store and backend_id and plan_id:
+        df = pd.DataFrame(rows)
+        store.update_smart_search_plan(backend_id, plan_id, {
+            "status": "scan_complete",
+            "scan_results": {
+                "rows": df.to_dict(orient="records"),
+                "axis_profiles": profiles,
+            },
+        })
+        logger.info("Saved scan results to plan: %s", plan_id)
+        return df, profiles
+
     return pd.DataFrame(rows), profiles
 
 
@@ -526,6 +540,7 @@ async def adaptive_search(
     session_terms: list | None = None,
     progress_cb: Callable | None = None,
     prompt_result_index: dict | None = None,
+    plan_id: str = "",
 ) -> tuple[PromptState, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.
 
@@ -718,4 +733,154 @@ async def adaptive_search(
             "accuracy": current_acc,
         })
 
-    return current_ps, current_params, pd.DataFrame(log_rows)
+    log_df = pd.DataFrame(log_rows)
+
+    # Persist search results to plan
+    if store and backend_id and plan_id:
+        store.update_smart_search_plan(backend_id, plan_id, {
+            "status": "search_complete",
+            "search_results": {
+                "best_ps": current_ps.model_dump(),
+                "best_params": current_params,
+                "log_rows": log_df.to_dict(orient="records")
+                if not log_df.empty else [],
+            },
+        })
+        logger.info("Saved search results to plan: %s", plan_id)
+
+    return current_ps, current_params, log_df
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic set resume / build
+# ---------------------------------------------------------------------------
+
+
+async def resume_or_build_diagnostic(
+    campaign_config: dict,
+    baseline: PromptState,
+    baseline_results: list,
+    llm_client: Any,
+    model: str,
+    store: "ProjectStore",
+    backend_id: str,
+    eval_data: list,
+    improvement_areas: str = "",
+) -> tuple[str, PromptState, list, dict, list]:
+    """Resume or build smart search diagnostic set.
+
+    Returns:
+        (plan_id, search_baseline, diagnostic, diag_summary, axis_profiles_or_empty)
+
+    If a plan already exists on disk, skips LLM restructure and diagnostic
+    building. If the plan status is ``scan_complete`` or later, also returns
+    cached axis profiles.
+    """
+    import hashlib as _hashlib
+    import json as _json
+
+    from api.config.settings import load_variant_library
+    from api.services.search.context import restructure_context
+    from api.services.search.plan_persistence import (
+        deserialize_smart_search_plan,
+        serialize_smart_search_plan,
+        smart_search_plan_identity,
+    )
+
+    ss = campaign_config.get("smart_search", {})
+    variant_library = load_variant_library()
+
+    plan_id = smart_search_plan_identity(
+        baseline.instruction,
+        variant_library,
+        ss,
+        improvement_areas,
+        seed=ss.get("seed", 42),
+    )
+
+    existing = store.load_smart_search_plan(backend_id, plan_id)
+    if existing:
+        status = existing.get("status", "?")
+        plan = deserialize_smart_search_plan(existing)
+
+        if plan["scan_results"] and status in ("scan_complete", "search_complete"):
+            cached_profiles = plan["scan_results"].get("axis_profiles", [])
+            logger.info("Scan complete in plan %s, reusing profiles", plan_id)
+            return (
+                plan_id,
+                plan["search_baseline_ps"],
+                plan["diagnostic"],
+                plan["diag_summary"],
+                cached_profiles,
+            )
+        # diagnostic_built -> reuse saved baseline; prefer sibling with scan data
+        siblings = [
+            s for s in store.list_smart_search_plans(backend_id)
+            if s["plan_id"] != plan_id
+            and s["status"] in ("scan_complete", "search_complete")
+            and s.get("variant_library_hash") == existing.get("variant_library_hash", "")
+            and s.get("n_axis_profiles", 0) > 0
+        ]
+        if siblings:
+            current_n_diag = plan.get("config", {}).get("n_diagnostic", 6)
+            siblings.sort(key=lambda s: (
+                s.get("n_diagnostic") != current_n_diag,
+                s["status"] != "scan_complete",
+            ))
+            sib_data = store.load_smart_search_plan(backend_id, siblings[0]["plan_id"])
+            sib_plan = deserialize_smart_search_plan(sib_data)
+            sib_profiles = (sib_plan.get("scan_results") or {}).get("axis_profiles", [])
+            logger.info(
+                "Adopting scan data from sibling plan %s (%d profiles)",
+                siblings[0]["plan_id"], len(sib_profiles),
+            )
+            return (
+                plan_id,
+                sib_plan["search_baseline_ps"],
+                sib_plan["diagnostic"],
+                sib_plan["diag_summary"],
+                sib_profiles,
+            )
+
+        logger.info("Plan %s (status: %s), reusing saved diagnostic", plan_id, status)
+        return (
+            plan_id,
+            plan["search_baseline_ps"],
+            plan["diagnostic"],
+            plan["diag_summary"],
+            [],
+        )
+
+    # Build new plan: LLM restructure + diagnostic set
+    logger.info("Building new smart search plan: %s", plan_id)
+    layer1_fields = await restructure_context(
+        baseline.instruction, llm_client,
+        model=model,
+        improvement_areas=improvement_areas,
+    )
+    search_baseline = baseline.derive(
+        **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
+        changes_description="search_baseline (decomposed)",
+    )
+
+    diagnostic, diag_summary = build_diagnostic_set(
+        eval_data, baseline_results,
+        n_queries=ss.get("n_diagnostic", 6),
+    )
+
+    # Compute a short hash of the full variant library for traceability
+    vl_json = _json.dumps(variant_library, sort_keys=True)
+    vl_hash = _hashlib.sha256(vl_json.encode()).hexdigest()[:12]
+
+    config = {
+        "n_diagnostic": ss.get("n_diagnostic", 6),
+        "max_rounds": ss.get("max_rounds", 3),
+        "stop_threshold": ss.get("stop_threshold", 0.0),
+    }
+    plan_data = serialize_smart_search_plan(
+        plan_id, config, baseline, search_baseline,
+        layer1_fields, diagnostic, diag_summary, vl_hash,
+    )
+    store.save_smart_search_plan(backend_id, plan_id, plan_data)
+
+    return plan_id, search_baseline, diagnostic, diag_summary, []

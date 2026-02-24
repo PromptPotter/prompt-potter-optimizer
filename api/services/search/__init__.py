@@ -16,7 +16,9 @@ from api.services.search.grid_core import (
     analyze_grid_results,
     build_grid_analysis_prompt,
     build_grid_points,
+    load_grid_plan_results,
     resolve_point_evals,
+    resume_or_build_grid,
     run_grid_search,
     select_grid_winner,
     validate_grid_config,
@@ -30,6 +32,7 @@ from api.services.search.smart_search import (
     adaptive_search,
     build_diagnostic_set,
     classify_axis,
+    resume_or_build_diagnostic,
     sensitivity_scan,
 )
 
@@ -78,7 +81,9 @@ __all__ = [
     "analyze_grid_results",
     "build_grid_analysis_prompt",
     "build_grid_points",
+    "load_grid_plan_results",
     "resolve_point_evals",
+    "resume_or_build_grid",
     "run_grid_search",
     "select_grid_winner",
     "validate_grid_config",
@@ -89,6 +94,7 @@ __all__ = [
     "adaptive_search",
     "build_diagnostic_set",
     "classify_axis",
+    "resume_or_build_diagnostic",
     "sensitivity_scan",
     # plan_persistence
     "GRIDPLAN_PREFIX",

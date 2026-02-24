@@ -6,13 +6,19 @@ winners, generates improvement suggestions, and saves campaign results.
 """
 
 import json
+import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
 from api.services.project_store import ProjectStore
-from api.services.prompt_eval import compute_accuracy
+from api.services.prompt_eval import compute_accuracy, evaluate_prompt_cached
+
+if TYPE_CHECKING:
+    from api.services.backend_client import BackendClient
+
+logger = logging.getLogger(__name__)
 
 MAX_FAILURES_GENERATE = 15
 MAX_FAILURES_SUGGEST = 20
@@ -392,3 +398,200 @@ def save_campaign_winner(
         "filename": filename,
         "backend_id": backend_id,
     }
+
+
+async def run_manual_round(
+    campaign_rounds: list,
+    eval_data: list,
+    backend_client: "BackendClient",
+    llm_client: LLMClientBase,
+    *,
+    model: str = "",
+    temperature: float = 0.0,
+    n_variants: int = 5,
+    creativity: float = 0.7,
+    improvement_threshold: float = 0.01,
+    pipeline_params: dict | None = None,
+    store: "ProjectStore | None" = None,
+    backend_id: str = "",
+    queries_per_eval: int = 0,
+    seed: int = 42,
+    variant_library: dict | None = None,
+    on_candidate_evaluated: Callable | None = None,
+) -> dict:
+    """Run a single optimization round (generate, evaluate, select).
+
+    Args:
+        campaign_rounds: Existing rounds list (modified in place).
+        eval_data: Full evaluation dataset.
+        backend_client: BackendClient for evaluation.
+        llm_client: LLM client for candidate generation.
+        model: Model identifier.
+        temperature: Temperature for content hash.
+        n_variants: Number of candidate variants to generate.
+        creativity: Temperature for meta-prompt LLM call.
+        improvement_threshold: Minimum accuracy improvement to accept.
+        pipeline_params: Optional pipeline parameter overrides.
+        store: Optional ProjectStore for caching.
+        backend_id: Backend identifier.
+        queries_per_eval: Subsample size (0 = use all).
+        seed: Random seed for subsampling.
+        variant_library: Optional variant library for constrained generation.
+        on_candidate_evaluated: Optional callback
+            ``(candidate, idx, results, scores, cached)`` after each eval.
+
+    Returns:
+        Round entry dict (also appended to campaign_rounds).
+    """
+    import random as _random
+
+    current_best = campaign_rounds[-1]
+    round_num = len(campaign_rounds)
+
+    if queries_per_eval > 0 and len(eval_data) > queries_per_eval:
+        rng = _random.Random(seed)
+        round_eval_data = rng.sample(eval_data, queries_per_eval)
+    else:
+        round_eval_data = eval_data
+
+    candidates = await generate_candidates(
+        current_best["prompt_state"],
+        current_best["accuracy"],
+        current_best["results"],
+        n_variants, creativity, llm_client,
+        model=model,
+        variant_library=variant_library,
+    )
+
+    all_candidate_results: dict[str, list] = {}
+    for idx, c in enumerate(candidates):
+        results, scores, cached = await evaluate_prompt_cached(
+            c, round_eval_data, backend_client,
+            pipeline_params=pipeline_params,
+            store=store, backend_id=backend_id,
+            label=f"Candidate {idx + 1}",
+            model=model, temperature=temperature,
+        )
+        all_candidate_results[c.id] = results
+        if on_candidate_evaluated:
+            on_candidate_evaluated(c, idx, results, scores, cached)
+
+    round_entry = select_round_winner(
+        candidates, all_candidate_results, current_best,
+        improvement_threshold,
+    )
+    round_entry["round"] = round_num
+    campaign_rounds.append(round_entry)
+
+    return round_entry
+
+
+async def run_optimization_loop(
+    campaign_rounds: list,
+    eval_data: list,
+    backend_client: "BackendClient",
+    llm_client: LLMClientBase,
+    *,
+    model: str = "",
+    temperature: float = 0.0,
+    n_variants: int = 5,
+    creativity: float = 0.7,
+    improvement_threshold: float = 0.01,
+    pipeline_params: dict | None = None,
+    store: "ProjectStore | None" = None,
+    backend_id: str = "",
+    max_rounds: int = 10,
+    patience: int = 3,
+    queries_per_eval: int = 0,
+    seed: int = 42,
+    variant_library: dict | None = None,
+    on_round_complete: Callable | None = None,
+) -> list:
+    """Run optimization rounds until patience exhausted or max_rounds reached.
+
+    Args:
+        campaign_rounds: Existing rounds list (modified in place and returned).
+        eval_data: Full evaluation dataset.
+        backend_client: BackendClient for evaluation.
+        llm_client: LLM client for candidate generation.
+        model: Model identifier.
+        temperature: Temperature for content hash.
+        n_variants: Number of candidate variants per round.
+        creativity: Temperature for meta-prompt LLM call.
+        improvement_threshold: Minimum accuracy improvement to accept.
+        pipeline_params: Optional pipeline parameter overrides.
+        store: Optional ProjectStore for caching.
+        backend_id: Backend identifier.
+        max_rounds: Hard cap on optimization rounds.
+        patience: Rounds without improvement before auto-stop.
+        queries_per_eval: Subsample size (0 = use all).
+        seed: Random seed for subsampling.
+        variant_library: Optional variant library for constrained generation.
+        on_round_complete: Optional callback
+            ``(round_entry, round_num, improved, rounds_without_improvement)``
+            after each round.
+
+    Returns:
+        Updated campaign_rounds list.
+    """
+    import random as _random
+
+    if queries_per_eval > 0 and len(eval_data) > queries_per_eval:
+        rng = _random.Random(seed)
+        round_eval_data = rng.sample(eval_data, queries_per_eval)
+    else:
+        round_eval_data = eval_data
+
+    rounds_without_improvement = 0
+
+    for _ in range(max_rounds):
+        current_best = campaign_rounds[-1]
+        round_num = len(campaign_rounds)
+
+        candidates = await generate_candidates(
+            current_best["prompt_state"],
+            current_best["accuracy"],
+            current_best["results"],
+            n_variants, creativity, llm_client,
+            model=model,
+            variant_library=variant_library,
+        )
+
+        all_candidate_results: dict[str, list] = {}
+        for idx, c in enumerate(candidates):
+            results, scores, cached = await evaluate_prompt_cached(
+                c, round_eval_data, backend_client,
+                pipeline_params=pipeline_params,
+                store=store, backend_id=backend_id,
+                label=f"Candidate {idx + 1}",
+                model=model, temperature=temperature,
+            )
+            all_candidate_results[c.id] = results
+
+        round_entry = select_round_winner(
+            candidates, all_candidate_results, current_best,
+            improvement_threshold,
+        )
+        round_entry["round"] = round_num
+        campaign_rounds.append(round_entry)
+
+        improved = (
+            round_entry["accuracy"] > current_best["accuracy"] + improvement_threshold
+        )
+        if improved:
+            rounds_without_improvement = 0
+        else:
+            rounds_without_improvement += 1
+
+        if on_round_complete:
+            on_round_complete(
+                round_entry, round_num, improved, rounds_without_improvement,
+            )
+
+        if rounds_without_improvement >= patience:
+            logger.info(
+                "Stopping: no improvement for %d consecutive rounds.", patience,
+            )
+            break
+
+    return campaign_rounds
