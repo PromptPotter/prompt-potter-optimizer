@@ -1,6 +1,9 @@
 """
 Application settings and configuration.
 """
+import json
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 APP_VERSION: str = "0.6.0"
@@ -41,3 +44,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def load_variant_library() -> dict:
+    """Load the prompt variant library from ``prompt_variants.json``."""
+    path = Path(__file__).parent / "prompt_variants.json"
+    with open(path) as f:
+        return json.load(f)

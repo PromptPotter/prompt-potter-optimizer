@@ -6,6 +6,7 @@ interactive notebook use.
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -40,11 +41,14 @@ from api.services.prompt_optimizer import (
     generate_suggestions as _generate_suggestions,
     save_campaign_winner as _save_campaign_winner,
 )
+from api.config.settings import load_variant_library
 from api.services.grid_search import (
     DEFAULT_GRID_AXES,
     SAMPLING_ALPHA,
     GRID_SEARCHABLE_FIELDS,
     REQUIRED_TEMPLATE_VARS,
+    MIN_DIAGNOSTIC_QUERIES,
+    DEFAULT_DIAGNOSTIC_QUERIES,
     validate_grid_config as _validate_grid_config,
     build_grid_points as _build_grid_points,
     restructure_context as _restructure_context,
@@ -57,6 +61,9 @@ from api.services.grid_search import (
     serialize_grid_plan as _serialize_grid_plan,
     deserialize_grid_plan as _deserialize_grid_plan,
     resolve_point_evals as _resolve_point_evals,
+    build_diagnostic_set as _build_diagnostic_set,
+    sensitivity_scan as _sensitivity_scan,
+    adaptive_search as _adaptive_search,
 )
 
 # Re-export constants for notebooks
@@ -65,6 +72,9 @@ __all__ = [
     "SAMPLING_ALPHA",
     "GRID_SEARCHABLE_FIELDS",
     "REQUIRED_TEMPLATE_VARS",
+    "MIN_DIAGNOSTIC_QUERIES",
+    "DEFAULT_DIAGNOSTIC_QUERIES",
+    "load_variant_library",
 ]
 
 
@@ -1615,6 +1625,341 @@ def display_progress(campaign_rounds: list, window: int = 8) -> None:
 
         print(
             f"  {round_label:<5s} {acc:>8.1%} {rolling_avg:>12.1%}  {trend_str}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Smart Prompt Search wrappers
+# ---------------------------------------------------------------------------
+
+
+def build_diagnostic_set(
+    eval_data: list,
+    baseline_results: list,
+    n_queries: int = DEFAULT_DIAGNOSTIC_QUERIES,
+    seed: int = 42,
+) -> tuple[list, dict]:
+    """Build a stratified diagnostic query set and print summary."""
+    diagnostic, summary = _build_diagnostic_set(
+        eval_data, baseline_results, n_queries=n_queries, seed=seed,
+    )
+
+    print("Diagnostic set built:")
+    print(
+        f"  Queries: {summary['n_queries']} "
+        f"({summary['n_hits']} hits + {summary['n_misses']} misses)"
+    )
+    print(
+        f"  Pool: {summary['total_pool_hits']} hits, "
+        f"{summary['total_pool_misses']} misses"
+    )
+
+    return diagnostic, summary
+
+
+async def sensitivity_scan(
+    baseline_ps,
+    variant_library: dict,
+    eval_data: list,
+    backend_client,
+    user_focus: str = "",
+    store=None,
+    backend_id: str = "",
+    pipeline_params: dict | None = None,
+    request_delay: float = 1.0,
+    session_terms: list | None = None,
+) -> tuple:
+    """Run a sensitivity scan over all axes with progress output.
+
+    Returns (per_variant_df, axis_profiles).
+    """
+    print("Running sensitivity scan...")
+    if user_focus:
+        print(f"  User focus: {user_focus}")
+
+    # Show baseline field values (initial conditions for each axis)
+    print("\n  Baseline field values:")
+    for field in ("persona", "task_intent", "problem_description",
+                  "instruction", "thinking_style", "answer_format"):
+        val = getattr(baseline_ps, field, "")
+        if val:
+            print(f"    {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
+        else:
+            print(f"    {field}: (empty)")
+    print()
+
+    n_configs = sum(
+        len(v)
+        for v in variant_library.get("prompt_fields", {}).values()
+        if len(v) > 1
+    ) + sum(
+        len(v)
+        for v in variant_library.get("pipeline_params", {}).values()
+        if len(v) > 1
+    )
+    print(f"  Estimated configs: ~{n_configs} x {len(eval_data)} queries")
+
+    cb = _make_scan_progress_cb()
+
+    # Suppress httpx noise during scan (our own logger still shows per-query progress)
+    _httpx_log = logging.getLogger("httpx")
+    _httpcore_log = logging.getLogger("httpcore")
+    _prev_httpx = _httpx_log.level
+    _prev_httpcore = _httpcore_log.level
+    _httpx_log.setLevel(logging.WARNING)
+    _httpcore_log.setLevel(logging.WARNING)
+    try:
+        print("  Evaluating baseline...")
+        df, profiles = await _sensitivity_scan(
+            baseline_ps, variant_library, eval_data, backend_client,
+            user_focus=user_focus,
+            store=store, backend_id=backend_id,
+            pipeline_params=pipeline_params,
+            request_delay=request_delay,
+            session_terms=session_terms,
+            progress_cb=cb,
+        )
+    finally:
+        _httpx_log.setLevel(_prev_httpx)
+        _httpcore_log.setLevel(_prev_httpcore)
+
+    print(f"\nSensitivity scan complete: {len(df)} variants evaluated")
+    display_axis_profiles(profiles)
+
+    return df, profiles
+
+
+def _make_scan_progress_cb():
+    """Build a progress callback for sensitivity_scan with flip tracking."""
+    baseline_results: list = []
+
+    def _cb(event: dict) -> None:
+        t = event["type"]
+
+        if t == "baseline_done":
+            baseline_results.clear()
+            baseline_results.extend(event.get("results", []))
+            cached = " [cached]" if event.get("cached") else ""
+            print(f"  Baseline: {event['hits']}/{event['total']} "
+                  f"({event['accuracy']:.1%}){cached}")
+
+        elif t == "axis_start":
+            ai = event["axis_index"] + 1
+            total = event["total_axes"]
+            card = event["cardinality"]
+            print(f"\n{'=' * 70}")
+            print(f"  Axis {ai}/{total}: {event['axis']} "
+                  f"({event['axis_type']}, {card} values)")
+            print(f"{'=' * 70}")
+
+        elif t == "variant_done":
+            vi = event["value_idx"]
+            preview = event["value_preview"]
+            hits = event["hits"]
+            total = event["total"]
+            acc = event["accuracy"]
+            delta = event["delta"]
+            is_bl = event["is_baseline_value"]
+            cached = event.get("cached", False)
+
+            if is_bl:
+                delta_str = "(baseline)"
+                marker = ""
+            elif delta > 0:
+                delta_str = f"+{delta:.1%}"
+                marker = " ^"
+            elif delta < 0:
+                delta_str = f"{delta:.1%}"
+                marker = " v"
+            else:
+                delta_str = "+0.0%"
+                marker = ""
+
+            cache_str = " [cached]" if cached else ""
+            print(f"  [{vi}] {preview:<42s} {hits}/{total}  "
+                  f"{acc:.1%}  {delta_str}{marker}{cache_str}")
+
+            # Show flips vs baseline (GAINED / LOST queries)
+            results = event.get("results", [])
+            if results and baseline_results and not is_bl:
+                for br, vr in zip(baseline_results, results):
+                    b_hit = br.get("hit", False)
+                    v_hit = vr.get("hit", False)
+                    if b_hit != v_hit:
+                        q = (vr.get("query") or "")[:40]
+                        pred = (vr.get("predicted") or "")[:35]
+                        if v_hit:
+                            print(f"        GAINED  {q:<40s}  -> {pred}")
+                        else:
+                            print(f"        LOST    {q:<40s}  -> {pred}")
+
+        elif t == "axis_done":
+            budget = event["exploration_budget"]
+            sr = event["sensitivity_range"]
+            bd = event["best_delta"]
+            wd = event["worst_delta"]
+            print(f"  >> {event['axis']}: range={sr:.1%}, "
+                  f"best={bd:+.1%}, worst={wd:+.1%}, budget={budget}")
+
+    return _cb
+
+
+async def adaptive_search(
+    baseline_ps,
+    variant_library: dict,
+    eval_data: list,
+    backend_client,
+    axis_profiles: list[dict],
+    max_rounds: int = 3,
+    stop_threshold: float = 0.0,
+    store=None,
+    backend_id: str = "",
+    pipeline_params: dict | None = None,
+    request_delay: float = 1.0,
+    session_terms: list | None = None,
+) -> tuple:
+    """Run adaptive coordinate descent search with progress output.
+
+    Returns (best_ps, best_pipeline_params, search_log_df).
+    """
+    active = [p for p in axis_profiles if p["exploration_budget"] != "skip"]
+    print(f"Adaptive search: {len(active)} active axes, max {max_rounds} rounds")
+    for p in active:
+        print(
+            f"  {p['axis']} ({p['axis_type']}): "
+            f"card={p['cardinality']}, budget={p['exploration_budget']}"
+        )
+
+    cb = _make_search_progress_cb()
+
+    # Suppress httpx noise during search
+    _httpx_log = logging.getLogger("httpx")
+    _httpcore_log = logging.getLogger("httpcore")
+    _prev_httpx = _httpx_log.level
+    _prev_httpcore = _httpcore_log.level
+    _httpx_log.setLevel(logging.WARNING)
+    _httpcore_log.setLevel(logging.WARNING)
+    try:
+        best_ps, best_params, log_df = await _adaptive_search(
+            baseline_ps, variant_library, eval_data, backend_client,
+            axis_profiles,
+            max_rounds=max_rounds,
+            stop_threshold=stop_threshold,
+            store=store, backend_id=backend_id,
+            pipeline_params=pipeline_params,
+            request_delay=request_delay,
+            session_terms=session_terms,
+            progress_cb=cb,
+        )
+    finally:
+        _httpx_log.setLevel(_prev_httpx)
+        _httpcore_log.setLevel(_prev_httpcore)
+
+    # Print search path summary
+    if not log_df.empty:
+        print(f"\nSearch log: {len(log_df)} evaluations across "
+              f"{log_df['round'].nunique()} rounds")
+        best_row = log_df.loc[log_df["accuracy"].idxmax()]
+        print(
+            f"  Best found: {best_row['axis']}={best_row['value_preview']} "
+            f"({best_row['accuracy']:.1%})"
+        )
+    else:
+        print("\nNo evaluations performed (all axes skipped).")
+
+    return best_ps, best_params, log_df
+
+
+def _make_search_progress_cb():
+    """Build a progress callback for adaptive_search."""
+
+    def _cb(event: dict) -> None:
+        t = event["type"]
+
+        if t == "round_start":
+            r = event["round"]
+            max_r = event["max_rounds"]
+            acc = event["current_accuracy"]
+            axes = event["active_axes"]
+            print(f"\n{'=' * 70}")
+            print(f"  Round {r}/{max_r} | current accuracy: {acc:.1%}")
+            print(f"  Active axes: {', '.join(axes)}")
+            print(f"{'=' * 70}")
+
+        elif t == "axis_start":
+            axis = event["axis"]
+            card = event["cardinality"]
+            budget = event["budget"]
+            print(f"\n  -- {axis} ({event['axis_type']}, "
+                  f"{card} values, budget={budget}) --")
+
+        elif t == "variant_done":
+            preview = event["value_preview"]
+            hits = event["hits"]
+            total = event["total"]
+            acc = event["accuracy"]
+            delta = event["delta"]
+            cached = event.get("cached", False)
+
+            if delta > 0:
+                delta_str = f"+{delta:.1%}"
+                marker = " ^"
+            elif delta < 0:
+                delta_str = f"{delta:.1%}"
+                marker = " v"
+            else:
+                delta_str = "+0.0%"
+                marker = ""
+
+            cache_str = " [cached]" if cached else ""
+            print(f"    {preview:<42s} {hits}/{total}  "
+                  f"{acc:.1%}  {delta_str}{marker}{cache_str}")
+
+            # Show per-query results (diagnostic set is small)
+            results = event.get("results", [])
+            for r in results:
+                hit_str = "HIT " if r.get("hit") else "MISS"
+                q = (r.get("query") or "")[:35]
+                pred = (r.get("predicted") or "")[:30]
+                print(f"      {hit_str}  {q:<35s}  -> {pred}")
+
+        elif t == "axis_resolved":
+            action = event["action"]
+            axis = event["axis"]
+            if action == "improved":
+                imp = event["improvement"]
+                bv = event["best_value"]
+                new_acc = event["new_accuracy"]
+                print(f"  ** {axis} IMPROVED +{imp:.1%} -> "
+                      f"{new_acc:.1%} (best: {bv})")
+            else:
+                print(f"  -- {axis}: no improvement, resolved")
+
+        elif t == "round_done":
+            r = event["round"]
+            acc = event["accuracy"]
+            if event["improved"]:
+                print(f"\n  Round {r} done: accuracy now {acc:.1%}")
+            else:
+                print(f"\n  Round {r}: no improvement, stopping.")
+
+    return _cb
+
+
+def display_axis_profiles(profiles: list[dict]) -> None:
+    """Display axis profiles as a formatted table."""
+    if not profiles:
+        print("No axis profiles to display.")
+        return
+
+    print(f"\n{'Rank':<5s} {'Axis':<25s} {'Type':<15s} "
+          f"{'Card':<5s} {'Range':<8s} {'Budget':<8s}")
+    print("-" * 70)
+    for rank, p in enumerate(profiles, 1):
+        print(
+            f"  {rank:<3d} {p['axis']:<25s} {p['axis_type']:<15s} "
+            f"{p['cardinality']:<5d} {p['sensitivity_range']:<8.3f} "
+            f"{p['exploration_budget']:<8s}"
         )
 
 

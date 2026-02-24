@@ -27,6 +27,7 @@ async def generate_candidates(
     creativity: float,
     llm_client: LLMClientBase,
     model: str | None = None,
+    variant_library: dict | None = None,
 ) -> list[PromptState]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -38,6 +39,9 @@ async def generate_candidates(
         creativity: Temperature for the meta-prompt LLM call.
         llm_client: LLM client implementing LLMClientBase.
         model: Model identifier (uses client default if None).
+        variant_library: When provided, constrains non-instruction fields
+            to the library values. The LLM selects by index for those
+            fields and writes ``instruction`` freely.
 
     Returns:
         List of derived PromptState candidates.
@@ -55,32 +59,81 @@ async def generate_candidates(
 
     rendered_prompt = current_ps.render()
 
-    meta_prompt = (
-        f"You are a prompt engineering expert. Generate {n_variants} improved "
-        "variants\nof a candidate-ranking prompt used in a terminology "
-        "normalization pipeline.\n\n"
-        f"CURRENT PROMPT ({current_accuracy:.1%} accuracy on "
-        f"{len(current_results)} queries):\n"
-        f"---\n{rendered_prompt}\n---\n\n"
-        f"FAILURE EXAMPLES (predicted != ground_truth):\n{failure_examples}\n\n"
-        "The prompt uses template variables (double-brace syntax):\n"
-        "  {{core_concept}} -- core concept from entity profile\n"
-        "  {{entity_profile_json}} -- full JSON entity profile from web "
-        "research\n"
-        "  {{matches}} -- newline-separated list of \"- candidate_term\" "
-        "from token matching\n\n"
-        "For each variant:\n"
-        "1. Analyze WHY the current prompt fails on the examples above\n"
-        "2. Make targeted changes to improve ranking accuracy "
-        "(get correct candidate to rank #1)\n"
-        "3. Keep the same template variables and JSON output format\n\n"
-        "Return a JSON object with key \"variants\" containing an array of "
-        "objects:\n"
-        "  - \"variant_name\": short identifier\n"
-        "  - \"changes_description\": 1-2 sentence description of what "
-        "changed and why\n"
-        "  - \"prompt_text\": full prompt template text"
-    )
+    # Build constrained or free-form meta-prompt
+    if variant_library:
+        prompt_fields = variant_library.get("prompt_fields", {})
+        constrained_fields = {
+            k: v for k, v in prompt_fields.items()
+            if k != "instruction" and len(v) > 1
+        }
+
+        library_desc = "VARIANT LIBRARY (select by index):\n"
+        for field, options in constrained_fields.items():
+            library_desc += f"  {field}:\n"
+            for i, opt in enumerate(options):
+                label = opt[:60] if opt else "(empty)"
+                library_desc += f"    [{i}] {label}\n"
+
+        response_schema = (
+            "Return a JSON object with key \"variants\" containing an array "
+            f"of {n_variants} objects, each with:\n"
+            "  - \"variant_name\": short identifier\n"
+            "  - \"changes_description\": 1-2 sentence description\n"
+            "  - \"instruction\": full prompt template text "
+            "(modify freely, keep template variables)\n"
+        )
+        for field in constrained_fields:
+            response_schema += (
+                f"  - \"{field}_idx\": integer index into the {field} options\n"
+            )
+
+        meta_prompt = (
+            f"You are a prompt engineering expert. Generate {n_variants} "
+            "improved variants\nof a candidate-ranking prompt used in a "
+            "terminology normalization pipeline.\n\n"
+            f"CURRENT PROMPT ({current_accuracy:.1%} accuracy on "
+            f"{len(current_results)} queries):\n"
+            f"---\n{rendered_prompt}\n---\n\n"
+            f"FAILURE EXAMPLES (predicted != ground_truth):\n"
+            f"{failure_examples}\n\n"
+            f"{library_desc}\n"
+            "The prompt uses template variables (double-brace syntax):\n"
+            "  {{core_concept}} -- core concept from entity profile\n"
+            "  {{entity_profile_json}} -- full JSON entity profile\n"
+            "  {{matches}} -- newline-separated candidate list\n\n"
+            "RULES:\n"
+            "- Modify 'instruction' freely (keep template variables)\n"
+            "- For other fields, SELECT from the provided options by index\n\n"
+            f"{response_schema}"
+        )
+    else:
+        meta_prompt = (
+            f"You are a prompt engineering expert. Generate {n_variants} "
+            "improved variants\nof a candidate-ranking prompt used in a "
+            "terminology normalization pipeline.\n\n"
+            f"CURRENT PROMPT ({current_accuracy:.1%} accuracy on "
+            f"{len(current_results)} queries):\n"
+            f"---\n{rendered_prompt}\n---\n\n"
+            f"FAILURE EXAMPLES (predicted != ground_truth):\n"
+            f"{failure_examples}\n\n"
+            "The prompt uses template variables (double-brace syntax):\n"
+            "  {{core_concept}} -- core concept from entity profile\n"
+            "  {{entity_profile_json}} -- full JSON entity profile from web "
+            "research\n"
+            "  {{matches}} -- newline-separated list of \"- candidate_term\" "
+            "from token matching\n\n"
+            "For each variant:\n"
+            "1. Analyze WHY the current prompt fails on the examples above\n"
+            "2. Make targeted changes to improve ranking accuracy "
+            "(get correct candidate to rank #1)\n"
+            "3. Keep the same template variables and JSON output format\n\n"
+            "Return a JSON object with key \"variants\" containing an array "
+            "of objects:\n"
+            "  - \"variant_name\": short identifier\n"
+            "  - \"changes_description\": 1-2 sentence description of what "
+            "changed and why\n"
+            "  - \"prompt_text\": full prompt template text"
+        )
 
     response = await llm_client.chat(
         messages=[{"role": "user", "content": meta_prompt}],
@@ -98,12 +151,34 @@ async def generate_candidates(
 
     candidates = []
     for v in variants_list[:n_variants]:
-        ps = current_ps.derive(
-            instruction=v["prompt_text"],
-            changes_description=v.get(
-                "changes_description", v.get("variant_name", ""),
-            ),
-        )
+        if variant_library:
+            # Map indices back to library values
+            changes: dict[str, Any] = {
+                "instruction": v.get("instruction", v.get("prompt_text", "")),
+            }
+            prompt_fields = variant_library.get("prompt_fields", {})
+            for field, options in prompt_fields.items():
+                if field == "instruction" or len(options) <= 1:
+                    continue
+                idx_key = f"{field}_idx"
+                if idx_key in v:
+                    idx = int(v[idx_key])
+                    if 0 <= idx < len(options):
+                        changes[field] = options[idx]
+
+            ps = current_ps.derive(
+                **changes,
+                changes_description=v.get(
+                    "changes_description", v.get("variant_name", ""),
+                ),
+            )
+        else:
+            ps = current_ps.derive(
+                instruction=v["prompt_text"],
+                changes_description=v.get(
+                    "changes_description", v.get("variant_name", ""),
+                ),
+            )
         candidates.append(ps)
 
     return candidates

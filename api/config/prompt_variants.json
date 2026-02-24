@@ -1,0 +1,31 @@
+{
+  "prompt_fields": {
+    "persona": [
+      "",
+      "You are a domain expert with deep knowledge of this field.",
+      "You are a precise, analytical system that evaluates candidates methodically.",
+      "You are a careful assistant that considers all options before deciding."
+    ],
+    "task_intent": [
+      "",
+      "Your task is to identify the single best match from the candidates.",
+      "Rank candidates by how well they match the concept described."
+    ],
+    "thinking_style": [
+      "",
+      "Think step by step.",
+      "Focus on semantic meaning, not surface-level word overlap.",
+      "First understand the core concept, then evaluate each candidate against it."
+    ],
+    "answer_format": [
+      "",
+      "Rank all candidates from most to least relevant."
+    ],
+    "problem_description": [""]
+  },
+  "pipeline_params": {
+    "ranking_temperature": [0.0, 0.3, 0.7, 1.0],
+    "max_token_candidates": [5, 10, 20],
+    "ranking_sample_size": [3, 5, 10]
+  }
+}
