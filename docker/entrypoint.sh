@@ -21,9 +21,9 @@ jupyter lab \
     --port=8888 \
     --no-browser \
     --allow-root \
-    --NotebookApp.token="${JUPYTER_TOKEN:-}" \
-    --NotebookApp.password="" \
-    --NotebookApp.allow_origin="*" \
+    --ServerApp.token="${JUPYTER_TOKEN:-}" \
+    --ServerApp.password="" \
+    --ServerApp.allow_origin="*" \
     --ServerApp.allow_remote_access=True \
     --ServerApp.terminado_settings='{"shell_command": ["/bin/bash"]}' &
 JUPYTER_PID=$!

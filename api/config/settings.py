@@ -11,9 +11,8 @@ class Settings(BaseSettings):
 
     # Environment
     ENVIRONMENT: str = "development"
-    DEBUG: bool = True
 
-    # API Configuration
+    # API Configuration — consumed by docker/entrypoint.sh, not by Python
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8001
 

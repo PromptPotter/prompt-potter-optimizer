@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from api.services.stores.base import read_json, write_json
+from api.services.stores.base import read_json, validate_path_component, write_json
 
 
 class DatasetRunStore:
@@ -15,6 +15,7 @@ class DatasetRunStore:
         self._base_dir = base_dir
 
     def _runs_dir(self, backend_id: str) -> Path:
+        validate_path_component(backend_id)
         return self._base_dir / backend_id / "dataset_runs"
 
     def _index_path(self, backend_id: str) -> Path:

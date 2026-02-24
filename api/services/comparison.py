@@ -189,7 +189,9 @@ def compute_comparison(
                 "label": metadata.get("variant_label", ""),
             },
             "variant_b": {
-                "notation": "LLM1-TokenMatching-LLM2",
+                "notation": metadata.get(
+                    "variant_b_notation", "LLM1-TokenMatching-LLM2",
+                ),
                 "label": "Full pipeline",
             },
         },

@@ -173,13 +173,6 @@ class WorkflowExecuteRequest(BaseModel):
         None, description="Custom trace ID for Langfuse integration"
     )
 
-    @field_validator("workflow", "workflow_id")
-    @classmethod
-    def validate_workflow_source(cls, v, info):
-        """Ensure either workflow or workflow_id is provided."""
-        # This runs for each field; the model validator below does the cross-field check
-        return v
-
     def model_post_init(self, __context) -> None:
         """Validate that exactly one workflow source is provided."""
         if self.workflow is None and self.workflow_id is None:

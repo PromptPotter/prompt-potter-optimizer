@@ -206,8 +206,6 @@ class GroqClient(_OpenAICompatibleClient):
 class AnthropicClient(LLMClientBase):
     """Anthropic API client."""
 
-    DEFAULT_MODEL = "claude-3-sonnet-20240229"
-
     def __init__(self, api_key: str | None = None):
         self._api_key = api_key or settings.ANTHROPIC_API_KEY
         self._client = None
@@ -246,9 +244,7 @@ class AnthropicClient(LLMClientBase):
                     {"role": msg["role"], "content": msg["content"]}
                 )
 
-        model_name = model or self.DEFAULT_MODEL
-        if model_name.startswith("gpt"):
-            model_name = self.DEFAULT_MODEL
+        model_name = model or settings.LLM_MODEL
 
         request_params: dict[str, Any] = {
             "model": model_name,
@@ -334,7 +330,11 @@ class MockLLMClient(LLMClientBase):
 
 _llm_client: LLMClientBase | None = None
 
-_PLACEHOLDER_KEYS = {"your_openai_api_key_here", "your_anthropic_api_key_here"}
+_PLACEHOLDER_KEYS = {
+    "your_openai_api_key_here",
+    "your_anthropic_api_key_here",
+    "your_groq_api_key_here",
+}
 
 
 def get_llm_client(provider: str | None = None) -> LLMClientBase:
@@ -364,13 +364,20 @@ def get_llm_client(provider: str | None = None) -> LLMClientBase:
     if _llm_client is None:
         configured = getattr(settings, "LLM_PROVIDER", "").lower()
 
-        if configured == "groq" and settings.GROQ_API_KEY:
+        if (
+            configured == "groq"
+            and settings.GROQ_API_KEY
+            and settings.GROQ_API_KEY not in _PLACEHOLDER_KEYS
+        ):
             _llm_client = GroqClient()
         elif configured == "anthropic" and settings.ANTHROPIC_API_KEY:
             _llm_client = AnthropicClient()
         elif configured == "openai" and settings.OPENAI_API_KEY:
             _llm_client = OpenAIClient()
-        elif settings.GROQ_API_KEY:
+        elif (
+            settings.GROQ_API_KEY
+            and settings.GROQ_API_KEY not in _PLACEHOLDER_KEYS
+        ):
             _llm_client = GroqClient()
         elif (
             settings.OPENAI_API_KEY

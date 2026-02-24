@@ -86,7 +86,7 @@ def validate_grid_config(
 
     Returns:
         Metadata dict: {axes, axis_names, total, actual_count,
-        is_subsampled, capped}.
+        is_subsampled, is_uncapped}.
 
     Raises:
         ValueError: If axis keys are invalid or instruction variants lack
@@ -119,7 +119,7 @@ def validate_grid_config(
         total *= len(values)
 
     actual_count = min(grid_budget, total) if grid_budget > 0 else total
-    capped = grid_budget > 0 and grid_budget >= total
+    is_uncapped = grid_budget > 0 and grid_budget >= total
 
     return {
         "axes": axes,
@@ -127,7 +127,7 @@ def validate_grid_config(
         "total": total,
         "actual_count": actual_count,
         "is_subsampled": grid_budget > 0 and grid_budget < total,
-        "capped": capped,
+        "is_uncapped": is_uncapped,
     }
 
 
@@ -159,8 +159,7 @@ def _allocate_budget(
     Uses largest-remainder method to ensure exact ``grid_budget`` total.
     """
     if max_distance == 0:
-        for d in buckets:
-            return {d: min(grid_budget, len(buckets[d]))}
+        return {0: min(grid_budget, len(buckets.get(0, [])))}
 
     target = exploration_rate * max_distance
 
@@ -214,7 +213,7 @@ def build_grid_points(
     all_points = list(itertools.product(*axis_values))
     total_space = len(all_points)
 
-    capped = False
+    is_uncapped = False
     if grid_budget > 0 and grid_budget < total_space:
         buckets = _bucket_by_distance(all_points)
         max_distance = max(buckets.keys()) if buckets else 0
@@ -235,7 +234,7 @@ def build_grid_points(
         all_points = selected
     else:
         if grid_budget > 0:
-            capped = True
+            is_uncapped = True
         buckets = _bucket_by_distance(all_points)
         distance_distribution = {
             d: len(pts) for d, pts in sorted(buckets.items())
@@ -266,7 +265,7 @@ def build_grid_points(
         "n_selected": len(grid_points),
         "exploration_rate": exploration_rate,
         "distance_distribution": distance_distribution,
-        "capped": capped,
+        "is_uncapped": is_uncapped,
     }
 
     return grid_points, state_lookup, sampling_meta
@@ -542,7 +541,7 @@ async def _load_or_compute_point(
     backend_id: str,
     pipeline_params: dict | None,
     on_query_done: Callable | None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bool]:
     """Evaluate (or load from cache) a single grid point.
 
     Handles three cases in order:
@@ -551,7 +550,7 @@ async def _load_or_compute_point(
     3. Fresh evaluation — run all queries through the backend.
 
     Returns:
-        Dict with keys ``hits``, ``total``, ``accuracy``, ``errors``.
+        Tuple of (scores dict, was_cached bool).
     """
     import asyncio
 
@@ -564,7 +563,7 @@ async def _load_or_compute_point(
             backend_id, info.content_hash,
         )
         if existing_run:
-            return existing_run["scores"]
+            return existing_run["scores"], True
 
     # Determine resume state
     run_id = f"{GRID_PREFIX}{info.content_hash[:8]}"
@@ -604,7 +603,8 @@ async def _load_or_compute_point(
                 len(info.point_eval), result,
             )
 
-        await asyncio.sleep(request_delay)
+        if request_delay > 0:
+            await asyncio.sleep(request_delay)
 
     results = partial + new_results
     acc = compute_accuracy(results)
@@ -617,7 +617,7 @@ async def _load_or_compute_point(
         )
         store.finalize_eval_run(backend_id, run_id, run_data)
 
-    return acc
+    return acc, False
 
 
 async def run_grid_search(
@@ -653,16 +653,9 @@ async def run_grid_search(
 
     rows = []
     for info in eval_plan:
-        acc = await _load_or_compute_point(
+        acc, was_cached = await _load_or_compute_point(
             info, state_lookup, backend_client, request_delay,
             store, backend_id, pipeline_params, on_query_done,
-        )
-
-        # Notify reuse callback when result came from cache
-        is_cached = (
-            store and backend_id
-            and store.load_dataset_run_by_hash(backend_id, info.content_hash)
-            is not None
         )
 
         row = dict(info.coord_dict)
@@ -673,7 +666,7 @@ async def run_grid_search(
         row["errors"] = acc["errors"]
         rows.append(row)
 
-        if is_cached and on_point_reused is not None:
+        if was_cached and on_point_reused is not None:
             on_point_reused(info.point_idx, row)
         if on_point_done is not None:
             on_point_done(info.point_idx, row)

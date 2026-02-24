@@ -12,17 +12,11 @@ from typing import Any
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
 from api.services.project_store import ProjectStore
+from api.services.prompt_eval import compute_accuracy
 
 MAX_FAILURES_GENERATE = 15
 MAX_FAILURES_SUGGEST = 20
 DISPLAY_TRUNCATE = 60
-
-
-def _compute_accuracy(results: list) -> float:
-    """Hit-rate accuracy from a list of result dicts with ``hit`` keys."""
-    if not results:
-        return 0.0
-    return sum(1 for r in results if r["hit"]) / len(results)
 
 
 async def generate_candidates(
@@ -144,7 +138,7 @@ def select_round_winner(
 
     for candidate in candidates:
         c_results = all_candidate_results[candidate.id]
-        c_acc = _compute_accuracy(c_results)
+        c_acc = compute_accuracy(c_results)["accuracy"]
         if c_acc > best_acc:
             best_acc = c_acc
             best_ps = candidate
@@ -160,7 +154,7 @@ def select_round_winner(
     ]
     for candidate in candidates:
         c_results = all_candidate_results[candidate.id]
-        c_acc = _compute_accuracy(c_results)
+        c_acc = compute_accuracy(c_results)["accuracy"]
         delta = c_acc - current_acc
         rows.append({
             "prompt": (

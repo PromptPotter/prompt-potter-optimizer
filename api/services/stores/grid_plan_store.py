@@ -4,7 +4,7 @@ Grid search plan persistence.
 from pathlib import Path
 from typing import Any
 
-from api.services.stores.base import read_json, write_json
+from api.services.stores.base import read_json, validate_path_component, write_json
 
 
 class GridPlanStore:
@@ -14,6 +14,7 @@ class GridPlanStore:
         self._base_dir = base_dir
 
     def _plans_dir(self, backend_id: str) -> Path:
+        validate_path_component(backend_id)
         return self._base_dir / backend_id / "grid_plans"
 
     def save(

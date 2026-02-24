@@ -180,13 +180,7 @@ class EvaluatorBase(ABC):
             actual_value = actual.get(field_name)
             field_count += 1
 
-            # Use field-specific rule or default to this evaluator
-            if field_rules and field_name in field_rules:
-                # Would dispatch to appropriate evaluator
-                # For now, use self.evaluate
-                field_eval = self.evaluate(expected_value, actual_value)
-            else:
-                field_eval = self.evaluate(expected_value, actual_value)
+            field_eval = self.evaluate(expected_value, actual_value)
 
             field_results[field_name] = {
                 "expected": expected_value,

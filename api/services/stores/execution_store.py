@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from api.models.backend import Execution, ExecutionResultItem
-from api.services.stores.base import read_json, write_json
+from api.services.stores.base import read_json, validate_path_component, write_json
 
 
 class ExecutionStore:
@@ -16,6 +16,7 @@ class ExecutionStore:
         self._base_dir = base_dir
 
     def _executions_dir(self, backend_id: str) -> Path:
+        validate_path_component(backend_id)
         return self._base_dir / backend_id / "executions"
 
     # -- read / write ---------------------------------------------------------

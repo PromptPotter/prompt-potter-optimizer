@@ -8,7 +8,6 @@ interactive notebook use.
 import json
 import sys
 from pathlib import Path
-from typing import Tuple
 
 import pandas as pd
 from tqdm.auto import tqdm
@@ -254,10 +253,6 @@ async def init_services(
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
     print(f"Queries    : {len(queries)}  |  Session terms: {len(terms)}")
 
-    # Backend client for backend-driven grid search evaluation
-    backend_client = BackendClient(backend_url) if backend_url else None
-    session_terms = BackendClient.extract_session_terms(exp_data) if exp_data else []
-
     return {
         "store": store,
         "client": client,
@@ -266,8 +261,8 @@ async def init_services(
         "exp_data": exp_data,
         "backend_id": backend_id,
         "experiment_id": experiment_id,
-        "backend_client": backend_client,
-        "session_terms": session_terms,
+        "backend_client": client,
+        "session_terms": BackendClient.extract_session_terms(exp_data) if exp_data else [],
     }
 
 
@@ -285,7 +280,7 @@ async def run_or_load_replay(
     experiment_id: str,
     replay_config: dict,
     pipeline_params: dict,
-) -> Tuple[Execution, list]:
+) -> tuple[Execution, list]:
     """Run replay or load from stored results. Returns (Execution, replay_results)."""
     import uuid
 
@@ -1045,7 +1040,7 @@ def build_grid_points(
     )
 
     # Print sampling summary
-    if meta["capped"]:
+    if meta["is_uncapped"]:
         print(
             f"Built {meta['n_selected']} grid points "
             f"(requested {grid_budget}, capped at full space of {meta['total_space']})"
@@ -1142,7 +1137,7 @@ async def resume_or_build_grid(
     )
 
     # Print sampling summary
-    if sampling_meta["capped"]:
+    if sampling_meta["is_uncapped"]:
         print(
             f"Built {sampling_meta['n_selected']} grid points "
             f"(requested {grid_budget}, capped at full space of "

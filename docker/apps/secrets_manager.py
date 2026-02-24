@@ -143,8 +143,8 @@ llm_model = st.selectbox(
         "gpt-4",
         "gpt-4-turbo",
         "gpt-3.5-turbo",
-        "claude-3-opus-20240229",
-        "claude-3-sonnet-20240229",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
     ],
     index=0,
     help="Model to use for LLM calls (must match your provider)"
@@ -167,7 +167,6 @@ if st.button("Save Configuration", type="primary", use_container_width=True):
 
     # Ensure other required vars exist
     env_vars.setdefault("ENVIRONMENT", "development")
-    env_vars.setdefault("DEBUG", "true")
     env_vars.setdefault("API_HOST", "0.0.0.0")
     env_vars.setdefault("API_PORT", "8001")
     env_vars.setdefault("ALLOWED_ORIGINS", "*")
