@@ -85,7 +85,7 @@ def load_eval_dataset(
         2. Stored replay executions
         3. Empty list if neither found
     """
-    exp_data = store.load_sync(
+    exp_data = store.backends.load_sync(
         backend_id, f"experiments/{experiment_id}.json",
     )
 
@@ -97,10 +97,10 @@ def load_eval_dataset(
                 eval_data = rng.sample(eval_data, query_limit)
             return eval_data
 
-    executions = store.list_executions(backend_id)
+    executions = store.executions.list_all(backend_id)
     for ex_summary in executions:
         if ex_summary.get("experiment_id") == experiment_id:
-            execution = store.load_execution(
+            execution = store.executions.load(
                 backend_id, ex_summary["execution_id"],
             )
             if execution:

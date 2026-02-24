@@ -41,13 +41,13 @@ def build_prompt_result_index(
     run originally produced the result.
     """
     index: dict[str, dict[str, dict]] = {}
-    summaries = store.list_dataset_runs(backend_id)
+    summaries = store.dataset_runs.list_all(backend_id)
     loaded = 0
     for summary in summaries:
         run_id = summary.get("run_id", "")
         if not run_id:
             continue
-        detail = store.load_dataset_run(backend_id, run_id)
+        detail = store.dataset_runs.load_by_id(backend_id, run_id)
         if not detail:
             continue
         rp_hash = detail.get("rendered_prompt_hash", "")
@@ -264,11 +264,11 @@ def build_data_inventory(
     baseline_rp_hashes: set[str] = set()
 
     # Grid plans
-    for summary in store.list_grid_plans(backend_id):
+    for summary in store.grid_plans.list_all(backend_id):
         plan_id = summary.get("plan_id", "")
         if not plan_id:
             continue
-        plan_data = store.load_grid_plan(backend_id, plan_id)
+        plan_data = store.grid_plans.load(backend_id, plan_id)
         if not plan_data:
             continue
         (_, state_lookup, _, _, _, baseline_ps) = deserialize_grid_plan(plan_data)
@@ -281,11 +281,11 @@ def build_data_inventory(
 
     # Smart search plans
     pipeline_params: dict[str, dict] = {}
-    for summary in store.list_smart_search_plans(backend_id):
+    for summary in store.smart_search.list_all(backend_id):
         plan_id = summary.get("plan_id", "")
         if not plan_id:
             continue
-        plan_data = store.load_smart_search_plan(backend_id, plan_id)
+        plan_data = store.smart_search.load(backend_id, plan_id)
         if not plan_data:
             continue
         ss = deserialize_smart_search_plan(plan_data)

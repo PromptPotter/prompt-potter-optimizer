@@ -29,7 +29,7 @@ def synthesize_sensitivity_from_grid(
     Returns ``(per_variant_df, axis_profiles)`` in the same format as
     ``sensitivity_scan()``, or ``None`` if insufficient coverage.
     """
-    plan_summaries = store.list_grid_plans(backend_id)
+    plan_summaries = store.grid_plans.list_all(backend_id)
     if not plan_summaries:
         logger.info("synthesize_sensitivity: no grid plans found")
         return None
@@ -48,7 +48,7 @@ def synthesize_sensitivity_from_grid(
 
     for summary in plan_summaries:
         plan_id = summary["plan_id"]
-        plan_data = store.load_grid_plan(backend_id, plan_id)
+        plan_data = store.grid_plans.load(backend_id, plan_id)
         if not plan_data:
             continue
         grid_points, state_lookup, _, grid_axes, _, _ = deserialize_grid_plan(

@@ -390,7 +390,7 @@ def save_campaign_winner(
     }
 
     filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
-    store.save_sync(backend_id, filename, save_data)
+    store.backends.save_sync(backend_id, filename, save_data)
 
     return {
         **save_data,

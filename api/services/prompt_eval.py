@@ -88,7 +88,7 @@ def make_incremental_writer(
     """Return an on_result callback that appends each eval item to a .partial.jsonl."""
 
     def writer(result: dict, index: int, total: int) -> None:
-        store.append_eval_item(backend_id, run_id, result)
+        store.dataset_runs.append_eval_item(backend_id, run_id, result)
 
     return writer
 
@@ -308,7 +308,7 @@ async def evaluate_prompt_cached(
 
     # --- dedup lookup ---
     if store and backend_id and not force:
-        existing = store.load_dataset_run_by_hash(backend_id, content_hash)
+        existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
         if existing:
             results = existing["dataset_run_items"]
             scores = existing.get("scores", compute_accuracy(results))
@@ -322,7 +322,7 @@ async def evaluate_prompt_cached(
     partial_results: list = []
     remaining_data = eval_data
     if store and backend_id:
-        partial_results = store.load_partial_eval(backend_id, run_id)
+        partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
         if partial_results and len(partial_results) < len(eval_data):
             remaining_data = eval_data[len(partial_results):]
         elif partial_results and len(partial_results) >= len(eval_data):
@@ -356,7 +356,7 @@ async def evaluate_prompt_cached(
             run_id, label, content_hash, prompt_state.id,
             rendered, model, temperature, scores, results,
         )
-        store.finalize_eval_run(backend_id, run_id, run_data)
+        store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 
     return results, scores, False
 

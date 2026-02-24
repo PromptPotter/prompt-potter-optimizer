@@ -177,7 +177,7 @@ async def _eval_config(
 
     # Check exact content-hash cache (prompt + exact query set)
     if store and backend_id:
-        existing = store.load_dataset_run_by_hash(backend_id, content_hash)
+        existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
         if existing:
             return {
                 **existing["scores"],
@@ -221,7 +221,7 @@ async def _eval_config(
     results: list[dict] = []
     start_idx = 0
     if store and backend_id:
-        partial = store.load_partial_eval(backend_id, run_id)
+        partial = store.dataset_runs.load_partial_eval(backend_id, run_id)
         if partial:
             results = partial
             start_idx = len(partial)
@@ -267,7 +267,7 @@ async def _eval_config(
         )
         results.append(result)
         if store and backend_id:
-            store.append_eval_item(backend_id, run_id, result)
+            store.dataset_runs.append_eval_item(backend_id, run_id, result)
         if request_delay > 0:
             await asyncio.sleep(request_delay)
 
@@ -280,7 +280,7 @@ async def _eval_config(
             run_id, "scan", content_hash, "",
             rendered_prompt, "", 0.0, acc, all_results,
         )
-        store.finalize_eval_run(backend_id, run_id, run_data)
+        store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 
     return {
         **acc,
@@ -507,7 +507,7 @@ async def sensitivity_scan(
     # Persist scan results to plan
     if store and backend_id and plan_id:
         df = pd.DataFrame(rows)
-        store.update_smart_search_plan(backend_id, plan_id, {
+        store.smart_search.update(backend_id, plan_id, {
             "status": "scan_complete",
             "scan_results": {
                 "rows": df.to_dict(orient="records"),
@@ -737,7 +737,7 @@ async def adaptive_search(
 
     # Persist search results to plan
     if store and backend_id and plan_id:
-        store.update_smart_search_plan(backend_id, plan_id, {
+        store.smart_search.update(backend_id, plan_id, {
             "status": "search_complete",
             "search_results": {
                 "best_ps": current_ps.model_dump(),
@@ -798,7 +798,7 @@ async def resume_or_build_diagnostic(
         seed=ss.get("seed", 42),
     )
 
-    existing = store.load_smart_search_plan(backend_id, plan_id)
+    existing = store.smart_search.load(backend_id, plan_id)
     if existing:
         status = existing.get("status", "?")
         plan = deserialize_smart_search_plan(existing)
@@ -815,7 +815,7 @@ async def resume_or_build_diagnostic(
             )
         # diagnostic_built -> reuse saved baseline; prefer sibling with scan data
         siblings = [
-            s for s in store.list_smart_search_plans(backend_id)
+            s for s in store.smart_search.list_all(backend_id)
             if s["plan_id"] != plan_id
             and s["status"] in ("scan_complete", "search_complete")
             and s.get("variant_library_hash") == existing.get("variant_library_hash", "")
@@ -827,7 +827,7 @@ async def resume_or_build_diagnostic(
                 s.get("n_diagnostic") != current_n_diag,
                 s["status"] != "scan_complete",
             ))
-            sib_data = store.load_smart_search_plan(backend_id, siblings[0]["plan_id"])
+            sib_data = store.smart_search.load(backend_id, siblings[0]["plan_id"])
             sib_plan = deserialize_smart_search_plan(sib_data)
             sib_profiles = (sib_plan.get("scan_results") or {}).get("axis_profiles", [])
             logger.info(
@@ -881,6 +881,6 @@ async def resume_or_build_diagnostic(
         plan_id, config, baseline, search_baseline,
         layer1_fields, diagnostic, diag_summary, vl_hash,
     )
-    store.save_smart_search_plan(backend_id, plan_id, plan_data)
+    store.smart_search.save(backend_id, plan_id, plan_data)
 
     return plan_id, search_baseline, diagnostic, diag_summary, []

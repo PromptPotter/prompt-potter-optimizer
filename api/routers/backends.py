@@ -116,7 +116,7 @@ def _slugify(name: str) -> str:
 
 
 def _get_backend_or_404(backend_id: str) -> BackendConnection:
-    backend = store.get_backend(backend_id)
+    backend = store.backends.get(backend_id)
     if not backend:
         raise HTTPException(status_code=404, detail=f"Backend '{backend_id}' not found")
     return backend
@@ -131,7 +131,7 @@ def _get_backend_or_404(backend_id: str) -> BackendConnection:
 async def register_backend(request: RegisterBackendRequest):
     """Register a new backend connection."""
     backend_id = request.id or _slugify(request.name)
-    if store.get_backend(backend_id):
+    if store.backends.get(backend_id):
         raise HTTPException(
             status_code=409, detail=f"Backend '{backend_id}' already exists"
         )
@@ -142,7 +142,7 @@ async def register_backend(request: RegisterBackendRequest):
         backend_type=request.backend_type,
         base_url=request.base_url.rstrip("/"),
     )
-    store.register_backend(backend)
+    store.backends.register(backend)
 
     return RegisterBackendResponse(
         id=backend.id,
@@ -164,7 +164,7 @@ async def list_backends():
             base_url=b.base_url,
             created_at=b.created_at,
         )
-        for b in store.list_backends()
+        for b in store.backends.list_all()
     ]
 
 
@@ -184,7 +184,7 @@ async def get_backend(backend_id: str):
 @router.delete("/{backend_id}", status_code=204)
 async def delete_backend(backend_id: str):
     """Remove a backend and all its stored data."""
-    if not store.delete_backend(backend_id):
+    if not store.backends.delete(backend_id):
         raise HTTPException(status_code=404, detail=f"Backend '{backend_id}' not found")
 
 
@@ -209,7 +209,7 @@ async def sync_experiments(backend_id: str):
 
     now = datetime.now(timezone.utc).isoformat()
     backend.last_synced_at = now
-    store.update_backend(backend)
+    store.backends.update(backend)
 
     return SyncResponse(
         backend_id=backend_id,
@@ -224,12 +224,12 @@ async def list_experiments(backend_id: str):
     _get_backend_or_404(backend_id)
 
     # First try the experiments list file
-    data = store.load_sync(backend_id, "experiments.json")
+    data = store.backends.load_sync(backend_id, "experiments.json")
     if data:
         return data
 
     # Fall back to individual files
-    experiments = store.list_synced_experiments(backend_id)
+    experiments = store.backends.list_synced_experiments(backend_id)
     if not experiments:
         raise HTTPException(
             status_code=404,
@@ -242,7 +242,7 @@ async def list_experiments(backend_id: str):
 async def get_experiment(backend_id: str, experiment_id: str):
     """Get a synced experiment in native backend format."""
     _get_backend_or_404(backend_id)
-    data = store.load_sync(backend_id, f"experiments/{experiment_id}.json")
+    data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
     if not data:
         raise HTTPException(
             status_code=404,
@@ -267,7 +267,7 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
     backend = _get_backend_or_404(backend_id)
 
     # Load synced experiment
-    exp_data = store.load_sync(
+    exp_data = store.backends.load_sync(
         backend_id, f"experiments/{request.experiment_id}.json"
     )
     if not exp_data:
@@ -296,7 +296,7 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
     execution_id = uuid.uuid4().hex[:12]
 
     def _on_result(result: dict, index: int, total: int) -> None:
-        store.append_result(backend_id, execution_id, result)
+        store.executions.append_result(backend_id, execution_id, result)
 
     # Run replay with incremental persistence
     try:
@@ -340,7 +340,7 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
         error_count=errors,
         results=[ExecutionResultItem(**r) for r in results],
     )
-    store.finalize_execution(execution)
+    store.executions.finalize(execution)
 
     return ExecuteResponse(
         execution_id=execution_id,
@@ -358,14 +358,14 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
 async def list_executions(backend_id: str):
     """List all executions for a backend."""
     _get_backend_or_404(backend_id)
-    return store.list_executions(backend_id)
+    return store.executions.list_all(backend_id)
 
 
 @router.get("/{backend_id}/executions/{execution_id}")
 async def get_execution(backend_id: str, execution_id: str):
     """Get full execution results."""
     _get_backend_or_404(backend_id)
-    execution = store.load_execution(backend_id, execution_id)
+    execution = store.executions.load(backend_id, execution_id)
     if not execution:
         raise HTTPException(
             status_code=404, detail=f"Execution '{execution_id}' not found"
@@ -384,7 +384,7 @@ async def get_execution(backend_id: str, execution_id: str):
 async def compare_execution(backend_id: str, execution_id: str):
     """Compute statistical comparison for an execution."""
     _get_backend_or_404(backend_id)
-    execution = store.load_execution(backend_id, execution_id)
+    execution = store.executions.load(backend_id, execution_id)
     if not execution:
         raise HTTPException(
             status_code=404, detail=f"Execution '{execution_id}' not found"

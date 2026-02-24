@@ -29,10 +29,10 @@ def _make_run_data(run_id="baseline_aabbccdd", content_hash="aabbccdd11223344", 
 
 def test_save_and_load_by_hash(tmp_store):
     data = _make_run_data()
-    path = tmp_store.save_dataset_run("b1", data["run_id"], data)
+    path = tmp_store.dataset_runs.save("b1", data["run_id"], data)
     assert path.exists()
 
-    loaded = tmp_store.load_dataset_run_by_hash("b1", data["content_hash"])
+    loaded = tmp_store.dataset_runs.load_by_hash("b1", data["content_hash"])
     assert loaded is not None
     assert loaded["run_id"] == data["run_id"]
     assert loaded["scores"]["accuracy"] == 0.5
@@ -40,36 +40,36 @@ def test_save_and_load_by_hash(tmp_store):
 
 
 def test_load_miss_returns_none(tmp_store):
-    assert tmp_store.load_dataset_run_by_hash("b1", "nonexistent") is None
+    assert tmp_store.dataset_runs.load_by_hash("b1", "nonexistent") is None
 
 
 def test_load_miss_no_index(tmp_store):
     """No index file at all → None, no crash."""
-    assert tmp_store.load_dataset_run_by_hash("no-backend", "anything") is None
+    assert tmp_store.dataset_runs.load_by_hash("no-backend", "anything") is None
 
 
 def test_list_dataset_runs(tmp_store):
     run1 = _make_run_data("run_a", "hash_a", "Run A")
     run2 = _make_run_data("run_b", "hash_b", "Run B")
 
-    tmp_store.save_dataset_run("b1", run1["run_id"], run1)
-    tmp_store.save_dataset_run("b1", run2["run_id"], run2)
+    tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
+    tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
 
-    entries = tmp_store.list_dataset_runs("b1")
+    entries = tmp_store.dataset_runs.list_all("b1")
     assert len(entries) == 2
     assert entries[0]["run_id"] == "run_a"
     assert entries[1]["run_id"] == "run_b"
 
 
 def test_list_empty(tmp_store):
-    assert tmp_store.list_dataset_runs("b1") == []
+    assert tmp_store.dataset_runs.list_all("b1") == []
 
 
 def test_index_integrity_after_multiple_saves(tmp_store):
     """Index total matches actual entry count."""
     for i in range(3):
         data = _make_run_data(f"run_{i}", f"hash_{i:016d}", f"Run {i}")
-        tmp_store.save_dataset_run("b1", data["run_id"], data)
+        tmp_store.dataset_runs.save("b1", data["run_id"], data)
 
     index_path = tmp_store.base_dir / "b1" / "dataset_runs.json"
     index = json.loads(index_path.read_text())
@@ -83,10 +83,10 @@ def test_upsert_replaces_same_hash(tmp_store):
     data2 = _make_run_data("run_v2", "same_hash_1234", "V2")
     data2["scores"]["accuracy"] = 0.75
 
-    tmp_store.save_dataset_run("b1", data1["run_id"], data1)
-    tmp_store.save_dataset_run("b1", data2["run_id"], data2)
+    tmp_store.dataset_runs.save("b1", data1["run_id"], data1)
+    tmp_store.dataset_runs.save("b1", data2["run_id"], data2)
 
-    entries = tmp_store.list_dataset_runs("b1")
+    entries = tmp_store.dataset_runs.list_all("b1")
     assert len(entries) == 1
     assert entries[0]["run_id"] == "run_v2"
     assert entries[0]["scores"]["accuracy"] == 0.75
@@ -94,7 +94,7 @@ def test_upsert_replaces_same_hash(tmp_store):
 
 def test_detail_file_written_correctly(tmp_store):
     data = _make_run_data()
-    path = tmp_store.save_dataset_run("b1", data["run_id"], data)
+    path = tmp_store.dataset_runs.save("b1", data["run_id"], data)
 
     detail = json.loads(path.read_text())
     assert detail["run_id"] == data["run_id"]
@@ -114,9 +114,9 @@ def test_append_and_load_partial_eval(tmp_store):
         {"query": "q3", "hit": True, "error": None},
     ]
     for item in items:
-        tmp_store.append_eval_item("b1", "run_abc", item)
+        tmp_store.dataset_runs.append_eval_item("b1", "run_abc", item)
 
-    loaded = tmp_store.load_partial_eval("b1", "run_abc")
+    loaded = tmp_store.dataset_runs.load_partial_eval("b1", "run_abc")
     assert len(loaded) == 3
     assert loaded[0]["query"] == "q1"
     assert loaded[2]["hit"] is True
@@ -124,30 +124,34 @@ def test_append_and_load_partial_eval(tmp_store):
 
 def test_load_partial_eval_empty(tmp_store):
     """load_partial_eval returns empty list when no partial file exists."""
-    assert tmp_store.load_partial_eval("b1", "nonexistent") == []
+    assert tmp_store.dataset_runs.load_partial_eval("b1", "nonexistent") == []
 
 
 def test_finalize_eval_run_removes_partial(tmp_store):
     """finalize_eval_run saves detail file and deletes .partial.jsonl."""
-    tmp_store.append_eval_item("b1", "run_xyz", {"query": "q1", "hit": True, "error": None})
-    tmp_store.append_eval_item("b1", "run_xyz", {"query": "q2", "hit": False, "error": None})
+    tmp_store.dataset_runs.append_eval_item(
+        "b1", "run_xyz", {"query": "q1", "hit": True, "error": None},
+    )
+    tmp_store.dataset_runs.append_eval_item(
+        "b1", "run_xyz", {"query": "q2", "hit": False, "error": None},
+    )
 
     partial_path = tmp_store.base_dir / "b1" / "dataset_runs" / "run_xyz.partial.jsonl"
     assert partial_path.exists()
 
     run_data = _make_run_data("run_xyz", "hash_xyz")
-    detail_path = tmp_store.finalize_eval_run("b1", "run_xyz", run_data)
+    detail_path = tmp_store.dataset_runs.finalize_eval_run("b1", "run_xyz", run_data)
 
     assert not partial_path.exists()
     assert detail_path.exists()
-    entries = tmp_store.list_dataset_runs("b1")
+    entries = tmp_store.dataset_runs.list_all("b1")
     assert any(e["run_id"] == "run_xyz" for e in entries)
 
 
 def test_finalize_without_partial(tmp_store):
     """finalize_eval_run works even when no .partial.jsonl exists."""
     run_data = _make_run_data("run_nop", "hash_nop")
-    detail_path = tmp_store.finalize_eval_run("b1", "run_nop", run_data)
+    detail_path = tmp_store.dataset_runs.finalize_eval_run("b1", "run_nop", run_data)
     assert detail_path.exists()
 
 
@@ -158,15 +162,15 @@ def test_finalize_without_partial(tmp_store):
 
 def test_list_partial_evals_empty(tmp_store):
     """Returns empty list when no partial files exist."""
-    assert tmp_store.list_partial_evals("b1") == []
+    assert tmp_store.dataset_runs.list_partial_evals("b1") == []
 
 
 def test_list_partial_evals_single(tmp_store):
     """Returns metadata for a single partial file."""
-    tmp_store.append_eval_item("b1", "run_abc", {"query": "q1", "hit": True})
-    tmp_store.append_eval_item("b1", "run_abc", {"query": "q2", "hit": False})
+    tmp_store.dataset_runs.append_eval_item("b1", "run_abc", {"query": "q1", "hit": True})
+    tmp_store.dataset_runs.append_eval_item("b1", "run_abc", {"query": "q2", "hit": False})
 
-    partials = tmp_store.list_partial_evals("b1")
+    partials = tmp_store.dataset_runs.list_partial_evals("b1")
     assert len(partials) == 1
     assert partials[0]["run_id"] == "run_abc"
     assert partials[0]["items"] == 2
@@ -175,12 +179,12 @@ def test_list_partial_evals_single(tmp_store):
 
 def test_list_partial_evals_multiple(tmp_store):
     """Returns metadata for multiple partial files, sorted by name."""
-    tmp_store.append_eval_item("b1", "alpha_run", {"query": "q1", "hit": True})
-    tmp_store.append_eval_item("b1", "beta_run", {"query": "q1", "hit": True})
-    tmp_store.append_eval_item("b1", "beta_run", {"query": "q2", "hit": False})
-    tmp_store.append_eval_item("b1", "beta_run", {"query": "q3", "hit": True})
+    tmp_store.dataset_runs.append_eval_item("b1", "alpha_run", {"query": "q1", "hit": True})
+    tmp_store.dataset_runs.append_eval_item("b1", "beta_run", {"query": "q1", "hit": True})
+    tmp_store.dataset_runs.append_eval_item("b1", "beta_run", {"query": "q2", "hit": False})
+    tmp_store.dataset_runs.append_eval_item("b1", "beta_run", {"query": "q3", "hit": True})
 
-    partials = tmp_store.list_partial_evals("b1")
+    partials = tmp_store.dataset_runs.list_partial_evals("b1")
     assert len(partials) == 2
     assert partials[0]["run_id"] == "alpha_run"
     assert partials[0]["items"] == 1
@@ -190,10 +194,10 @@ def test_list_partial_evals_multiple(tmp_store):
 
 def test_list_partial_evals_ignores_finalized(tmp_store):
     """Finalized runs no longer appear in list_partial_evals."""
-    tmp_store.append_eval_item("b1", "run_fin", {"query": "q1", "hit": True})
-    assert len(tmp_store.list_partial_evals("b1")) == 1
+    tmp_store.dataset_runs.append_eval_item("b1", "run_fin", {"query": "q1", "hit": True})
+    assert len(tmp_store.dataset_runs.list_partial_evals("b1")) == 1
 
     run_data = _make_run_data("run_fin", "hash_fin")
-    tmp_store.finalize_eval_run("b1", "run_fin", run_data)
+    tmp_store.dataset_runs.finalize_eval_run("b1", "run_fin", run_data)
 
-    assert tmp_store.list_partial_evals("b1") == []
+    assert tmp_store.dataset_runs.list_partial_evals("b1") == []

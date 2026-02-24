@@ -501,7 +501,7 @@ def display_suggestions(suggestions: dict, round_num: int) -> None:
 
 def list_grid_plans(store: ProjectStore, backend_id: str) -> list:
     """List all grid search plans with their status."""
-    plans = store.list_grid_plans(backend_id)
+    plans = store.grid_plans.list_all(backend_id)
     if not plans:
         print("No grid plans found.")
         return plans
@@ -537,7 +537,7 @@ def load_grid_plan_results(
         eval_queries_per_point, shared_queries, seed,
     )
     if df is not None:
-        plan_data = store.load_grid_plan(backend_id, plan_id)
+        plan_data = store.grid_plans.load(backend_id, plan_id)
         n_points = len(plan_data.get("grid_points", [])) if plan_data else "?"
         print(f"  {plan_id}: {len(df)}/{n_points} stored")
     return df
@@ -713,7 +713,7 @@ async def run_grid_search(
     n_stored = 0
     if store and backend_id:
         for info in eval_plan:
-            if store.load_dataset_run_by_hash(backend_id, info.content_hash):
+            if store.dataset_runs.load_by_hash(backend_id, info.content_hash):
                 n_stored += 1
 
     n_total = len(grid_points)
@@ -777,7 +777,7 @@ async def run_grid_search(
     # Mark plan as completed
     if plan_id and store and backend_id:
         try:
-            store.update_grid_plan_status(backend_id, plan_id, "completed")
+            store.grid_plans.update_status(backend_id, plan_id, "completed")
             print(f"Grid plan {plan_id} marked as completed.")
         except Exception:
             pass
@@ -845,7 +845,7 @@ def select_and_seed_grid_winner(
     if merged_grid_df is not None and plan_dfs:
         combined_lookup: dict = {}
         for pid in plan_dfs:
-            plan_data = svc["store"].load_grid_plan(svc["backend_id"], pid)
+            plan_data = svc["store"].grid_plans.load(svc["backend_id"], pid)
             if plan_data:
                 _, sl, _, _, _, _ = _deserialize_grid_plan(plan_data)
                 combined_lookup.update(sl)
@@ -916,8 +916,8 @@ async def analyze_grid_results(
 
 def print_eval_summary(store: ProjectStore, backend_id: str) -> None:
     """Print a summary table of completed and in-progress eval runs."""
-    completed = store.list_dataset_runs(backend_id)
-    partials = store.list_partial_evals(backend_id)
+    completed = store.dataset_runs.list_all(backend_id)
+    partials = store.dataset_runs.list_partial_evals(backend_id)
 
     completed_ids = {r["run_id"] for r in completed}
     partials = [p for p in partials if p["run_id"] not in completed_ids]

@@ -52,7 +52,7 @@ def test_build_index_empty(tmp_store):
 def test_build_index_single_run(tmp_store):
     """Single run with 2 queries produces correct index."""
     run = _make_run("r1", "prompt A", [("q1", True), ("q2", False)])
-    tmp_store.save_dataset_run("b1", run["run_id"], run)
+    tmp_store.dataset_runs.save("b1", run["run_id"], run)
 
     index = build_prompt_result_index(tmp_store, "b1")
     rp_hash = _rp_hash("prompt A")
@@ -67,8 +67,8 @@ def test_build_index_multiple_runs_same_prompt(tmp_store):
     """Multiple runs with same rendered prompt merge queries."""
     run1 = _make_run("r1", "prompt A", [("q1", True), ("q2", False)])
     run2 = _make_run("r2", "prompt A", [("q3", True), ("q4", True)])
-    tmp_store.save_dataset_run("b1", run1["run_id"], run1)
-    tmp_store.save_dataset_run("b1", run2["run_id"], run2)
+    tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
+    tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
 
     index = build_prompt_result_index(tmp_store, "b1")
     rp_hash = _rp_hash("prompt A")
@@ -80,8 +80,8 @@ def test_build_index_different_prompts(tmp_store):
     """Runs with different prompts produce separate index entries."""
     run1 = _make_run("r1", "prompt A", [("q1", True)])
     run2 = _make_run("r2", "prompt B", [("q1", False)])
-    tmp_store.save_dataset_run("b1", run1["run_id"], run1)
-    tmp_store.save_dataset_run("b1", run2["run_id"], run2)
+    tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
+    tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
 
     index = build_prompt_result_index(tmp_store, "b1")
     assert len(index) == 2
@@ -92,8 +92,8 @@ def test_build_index_later_run_overwrites_query(tmp_store):
     the later save wins (last-write-wins)."""
     run1 = _make_run("r1", "prompt A", [("q1", True)])
     run2 = _make_run("r2", "prompt A", [("q1", False)])
-    tmp_store.save_dataset_run("b1", run1["run_id"], run1)
-    tmp_store.save_dataset_run("b1", run2["run_id"], run2)
+    tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
+    tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
 
     index = build_prompt_result_index(tmp_store, "b1")
     rp_hash = _rp_hash("prompt A")
@@ -105,9 +105,9 @@ def test_build_index_later_run_overwrites_query(tmp_store):
 def test_load_by_id(tmp_store):
     """ProjectStore.load_dataset_run() loads a run by ID."""
     run = _make_run("r1", "prompt A", [("q1", True)])
-    tmp_store.save_dataset_run("b1", run["run_id"], run)
+    tmp_store.dataset_runs.save("b1", run["run_id"], run)
 
-    loaded = tmp_store.load_dataset_run("b1", "r1")
+    loaded = tmp_store.dataset_runs.load_by_id("b1", "r1")
     assert loaded is not None
     assert loaded["run_id"] == "r1"
     assert len(loaded["dataset_run_items"]) == 1
@@ -115,14 +115,14 @@ def test_load_by_id(tmp_store):
 
 def test_load_by_id_missing(tmp_store):
     """load_dataset_run returns None for missing run."""
-    assert tmp_store.load_dataset_run("b1", "nonexistent") is None
+    assert tmp_store.dataset_runs.load_by_id("b1", "nonexistent") is None
 
 
 def test_index_ignores_runs_without_hash(tmp_store):
     """Runs missing rendered_prompt_hash are skipped."""
     run = _make_run("r1", "prompt A", [("q1", True)])
     del run["rendered_prompt_hash"]
-    tmp_store.save_dataset_run("b1", run["run_id"], run)
+    tmp_store.dataset_runs.save("b1", run["run_id"], run)
 
     index = build_prompt_result_index(tmp_store, "b1")
     assert index == {}
@@ -131,7 +131,7 @@ def test_index_ignores_runs_without_hash(tmp_store):
 def test_index_ignores_runs_without_items(tmp_store):
     """Runs with empty dataset_run_items are skipped."""
     run = _make_run("r1", "prompt A", [])
-    tmp_store.save_dataset_run("b1", run["run_id"], run)
+    tmp_store.dataset_runs.save("b1", run["run_id"], run)
 
     index = build_prompt_result_index(tmp_store, "b1")
     assert index == {}

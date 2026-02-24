@@ -57,13 +57,13 @@ def _save_grid_plan(store, backend_id, baseline_ps, variants):
         state_lookup=state_lookup,
         sampling_meta={"total_space": 1},
     )
-    store.save_grid_plan(backend_id, "gridplan_test1", plan_data)
+    store.grid_plans.save(backend_id, "gridplan_test1", plan_data)
 
 
 def _build_index(store, backend_id, runs):
     """Save runs then build index via the real function."""
     for run in runs:
-        store.save_dataset_run(backend_id, run["run_id"], run)
+        store.dataset_runs.save(backend_id, run["run_id"], run)
     from api.services.search import build_prompt_result_index
     return build_prompt_result_index(store, backend_id)
 
@@ -198,7 +198,7 @@ def test_pipeline_params_from_smart_search(tmp_store):
             },
         ],
     }
-    tmp_store.save_smart_search_plan("b1", "ssplan_abc123", plan_data)
+    tmp_store.smart_search.save("b1", "ssplan_abc123", plan_data)
 
     inv = build_data_inventory({}, tmp_store, "b1")
 

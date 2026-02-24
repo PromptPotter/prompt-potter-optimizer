@@ -8,9 +8,7 @@ from typing import Any, Type
 from .base import (
     EvaluatorBase,
     EvaluationOutput,
-    BatchEvaluationOutput,
     EvalResult,
-    log_evaluation_score,
 )
 from .exact_match import ExactMatchEvaluator
 from .criteria import CriteriaEvaluator
@@ -99,12 +97,10 @@ register_evaluator(CriteriaEvaluator)
 __all__ = [
     "EvaluatorBase",
     "EvaluationOutput",
-    "BatchEvaluationOutput",
     "EvalResult",
     "ExactMatchEvaluator",
     "CriteriaEvaluator",
     "register_evaluator",
     "get_evaluator",
     "list_evaluator_types",
-    "log_evaluation_score",
 ]

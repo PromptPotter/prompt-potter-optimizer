@@ -5,8 +5,6 @@ Supports three-tier validation following the query-preprocessing-workflow patter
 1. Field-level rules (Exact, OneOf, Substring, Criteria)
 2. Equality check against expected output
 3. Failure with detailed diagnostics
-
-Integrates with Langfuse for score logging when trace_id is provided.
 """
 import logging
 from abc import ABC, abstractmethod
@@ -51,31 +49,6 @@ class EvaluationOutput(BaseModel):
     )
 
 
-class BatchEvaluationOutput(BaseModel):
-    """Aggregate results from batch evaluation."""
-
-    total: int = Field(..., description="Total items evaluated")
-    passed: int = Field(..., description="Items that passed")
-    failed: int = Field(..., description="Items that failed")
-    errors: int = Field(default=0, description="Items that errored")
-    accuracy: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Pass rate (passed / total)"
-    )
-    mean_score: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Average score across all items"
-    )
-    results: list[EvaluationOutput] = Field(
-        default_factory=list,
-        description="Individual evaluation results"
-    )
-
-
 class EvaluatorBase(ABC):
     """
     Abstract base class for evaluators.
@@ -109,49 +82,6 @@ class EvaluatorBase(ABC):
             EvaluationOutput with result, score, and details
         """
         pass
-
-    def evaluate_batch(
-        self,
-        examples: list[dict[str, Any]]
-    ) -> BatchEvaluationOutput:
-        """
-        Evaluate a batch of examples.
-
-        Args:
-            examples: List of {expected, actual} dicts
-
-        Returns:
-            Aggregate metrics and individual results
-        """
-        results: list[EvaluationOutput] = []
-
-        for ex in examples:
-            try:
-                result = self.evaluate(ex["expected"], ex["actual"])
-                results.append(result)
-            except Exception as e:
-                results.append(EvaluationOutput(
-                    result=EvalResult.ERROR,
-                    score=0.0,
-                    expected=ex.get("expected"),
-                    actual=ex.get("actual"),
-                    reason=f"Evaluation error: {str(e)}"
-                ))
-
-        passed = sum(1 for r in results if r.result == EvalResult.PASS)
-        failed = sum(1 for r in results if r.result == EvalResult.FAIL)
-        errors = sum(1 for r in results if r.result == EvalResult.ERROR)
-        scores = [r.score for r in results]
-
-        return BatchEvaluationOutput(
-            total=len(results),
-            passed=passed,
-            failed=failed,
-            errors=errors,
-            accuracy=passed / len(results) if results else 0.0,
-            mean_score=sum(scores) / len(scores) if scores else 0.0,
-            results=results
-        )
 
     def evaluate_workflow_output(
         self,
@@ -209,95 +139,3 @@ class EvaluatorBase(ABC):
     def get_evaluator_type(cls) -> str:
         """Return the evaluator type identifier."""
         return cls.__name__
-
-    def evaluate_and_log(
-        self,
-        expected: Any,
-        actual: Any,
-        trace_id: str | None = None,
-        score_name: str | None = None,
-    ) -> EvaluationOutput:
-        """
-        Evaluate and optionally log score to Langfuse.
-
-        Args:
-            expected: Ground truth value
-            actual: Workflow output value
-            trace_id: Langfuse trace ID (if provided, logs score to Langfuse)
-            score_name: Custom score name (defaults to evaluator type)
-
-        Returns:
-            EvaluationOutput with result, score, and details
-        """
-        result = self.evaluate(expected, actual)
-
-        if trace_id:
-            self._log_score_to_langfuse(
-                trace_id=trace_id,
-                score_name=score_name or self.get_evaluator_type(),
-                score=result.score,
-                comment=result.reason,
-            )
-
-        return result
-
-    def _log_score_to_langfuse(
-        self,
-        trace_id: str,
-        score_name: str,
-        score: float,
-        comment: str | None = None,
-    ) -> None:
-        """
-        Log evaluation score to Langfuse.
-
-        Args:
-            trace_id: Langfuse trace ID
-            score_name: Score metric name
-            score: Score value (0.0 to 1.0)
-            comment: Optional explanation
-        """
-        try:
-            from api.services.langfuse_client import LangfuseLogger
-            langfuse = LangfuseLogger.get_instance()
-            langfuse.create_score(
-                trace_id=trace_id,
-                name=score_name,
-                value=score,
-                comment=comment,
-            )
-        except Exception as e:
-            # Don't fail evaluation if logging fails
-            logger.warning("Failed to log score to Langfuse: %s", e)
-
-
-def log_evaluation_score(
-    trace_id: str,
-    evaluator_name: str,
-    score: float,
-    comment: str | None = None,
-) -> bool:
-    """
-    Convenience function to log an evaluation score to Langfuse.
-
-    Args:
-        trace_id: Langfuse trace ID from workflow execution
-        evaluator_name: Name of the score metric
-        score: Score value (0.0 to 1.0)
-        comment: Optional explanation
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        from api.services.langfuse_client import LangfuseLogger
-        langfuse = LangfuseLogger.get_instance()
-        return langfuse.create_score(
-            trace_id=trace_id,
-            name=evaluator_name,
-            value=score,
-            comment=comment,
-        )
-    except Exception as e:
-        logger.warning("Failed to log score to Langfuse: %s", e)
-        return False

@@ -198,7 +198,7 @@ class BackendClient:
     ) -> int:
         """Fetch all experiments and store verbatim. Returns count."""
         data = await self.fetch_experiments()
-        store.save_sync(backend_id, "experiments.json", data)
+        store.backends.save_sync(backend_id, "experiments.json", data)
 
         experiments = data.get("experiments", [])
         for exp in experiments:
@@ -207,7 +207,7 @@ class BackendClient:
                 detail = await self.fetch_experiment(
                     exp_id, include_traces=include_traces,
                 )
-                store.save_sync(
+                store.backends.save_sync(
                     backend_id, f"experiments/{exp_id}.json", detail,
                 )
         return len(experiments)
@@ -220,7 +220,7 @@ class BackendClient:
         detail = await self.fetch_experiment(
             experiment_id, include_traces=include_traces,
         )
-        store.save_sync(backend_id, f"experiments/{experiment_id}.json", detail)
+        store.backends.save_sync(backend_id, f"experiments/{experiment_id}.json", detail)
         return detail
 
     # -- replay helpers ---------------------------------------------------

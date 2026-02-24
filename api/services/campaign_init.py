@@ -46,13 +46,13 @@ async def init_services(
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
     client = BackendClient(backend_url)
 
-    if not store.get_backend(backend_id):
-        store.register_backend(BackendConnection(
+    if not store.backends.get(backend_id):
+        store.backends.register(BackendConnection(
             id=backend_id, name="TermNorm Local",
             backend_type="termnorm", base_url=backend_url,
         ))
 
-    exp_data = store.load_sync(backend_id, f"experiments/{experiment_id}.json")
+    exp_data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
 
     # Detect stale sync data: data exists but has no traces
     _has_traces = bool(
@@ -67,7 +67,7 @@ async def init_services(
         logger.info("%s — syncing from %s ...", reason, backend_url)
         try:
             await client.sync_experiments(store, backend_id, include_traces=True)
-            exp_data = store.load_sync(
+            exp_data = store.backends.load_sync(
                 backend_id, f"experiments/{experiment_id}.json",
             )
             synced = True

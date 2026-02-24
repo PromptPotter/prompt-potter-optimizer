@@ -379,7 +379,7 @@ async def _load_or_compute_point(
 
     # Case 1: full cache hit
     if store and backend_id:
-        existing_run = store.load_dataset_run_by_hash(
+        existing_run = store.dataset_runs.load_by_hash(
             backend_id, info.content_hash,
         )
         if existing_run:
@@ -389,7 +389,7 @@ async def _load_or_compute_point(
     run_id = f"{GRID_PREFIX}{info.content_hash[:8]}"
     partial: list = []
     if store and backend_id:
-        partial = store.load_partial_eval(backend_id, run_id)
+        partial = store.dataset_runs.load_partial_eval(backend_id, run_id)
 
     if partial and len(partial) >= len(info.point_eval):
         # All queries already evaluated in partial; just need to finalize
@@ -435,7 +435,7 @@ async def _load_or_compute_point(
             run_id, f"grid_point_{info.point_idx}", info.content_hash,
             info.ps_id, rendered, "", 0.0, acc, results,
         )
-        store.finalize_eval_run(backend_id, run_id, run_data)
+        store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 
     return acc, False
 
@@ -640,7 +640,7 @@ async def resume_or_build_grid(
     )
 
     # Check for existing plan
-    existing = store.load_grid_plan(backend_id, plan_id)
+    existing = store.grid_plans.load(backend_id, plan_id)
     if existing:
         (
             grid_points, grid_state_lookup, sampling_meta,
@@ -681,7 +681,7 @@ async def resume_or_build_grid(
         plan_id, grid_axes, grid_baseline, layer1_fields,
         points, state_lookup, sampling_meta,
     )
-    store.save_grid_plan(backend_id, plan_id, plan_data)
+    store.grid_plans.save(backend_id, plan_id, plan_data)
 
     return (
         plan_id, points, state_lookup,
@@ -709,7 +709,7 @@ def load_grid_plan_results(
     """
     from api.services.search.plan_persistence import deserialize_grid_plan
 
-    plan_data = store.load_grid_plan(backend_id, plan_id)
+    plan_data = store.grid_plans.load(backend_id, plan_id)
     if not plan_data:
         return None
 
@@ -721,7 +721,7 @@ def load_grid_plan_results(
     )
     rows = []
     for info in eval_plan:
-        existing = store.load_dataset_run_by_hash(backend_id, info.content_hash)
+        existing = store.dataset_runs.load_by_hash(backend_id, info.content_hash)
         if not existing:
             continue
         scores = existing.get("scores", {})
