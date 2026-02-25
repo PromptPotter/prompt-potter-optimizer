@@ -1,34 +1,51 @@
 # PromptPotter Optimizer
 
-**Optimize prompts for any LLM application that logs in Langfuse-compatible format.**
+**Systematic prompt optimization for LLM pipelines. Two nested loops — human-guided landscape analysis and AI-driven candidate search — that build on each other.**
 
 ## How It Works
 
-PromptPotter connects to your backend (e.g. TermNorm), syncs experiment data, replays pipelines with different configurations, and runs optimization campaigns to systematically improve prompt accuracy.
+PromptPotter has two loops that work together:
+
+**The Human Loop (Sensitivity Scan)** — You analyze the prompt landscape. A one-at-a-time perturbation scan measures which prompt axes actually matter (persona, thinking style, pipeline temperature, etc.) and how sensitive accuracy is to each. The coverage advisor shows what's already been measured and what still needs exploration. You pick the best starting point.
+
+**The AI Loop (Potter)** — From that starting point, an automated feedback cycle generates candidate prompts via LLM, evaluates each against the backend, selects winners, and iterates. This is the 3-layer PromptState optimization: Layer 1 (prompt fields) changes every round, Layer 2 (context) adjusts when Layer 1 stalls, Layer 3 (strategy) rarely changes.
+
+**The key insight: every evaluation is saved.** When an optimization thread stops improving, its data isn't wasted — it's harvested. The next sensitivity scan automatically discovers all stored evaluations and knows the landscape better. A new starting point is computed, and a fresh optimization thread begins from higher ground.
+
+```
+  HUMAN LOOP                           AI LOOP (Potter)
+  ──────────                           ────────────────
+  Sensitivity Scan                     Feedback Cycle
+  ┌──────────────────┐                 ┌──────────────────┐
+  │ Measure axes     │  select best    │ Generate         │
+  │ Classify by      │───starting──────►  candidates      │
+  │  sensitivity     │  point          │ Evaluate via     │
+  │ Show coverage    │                 │  backend         │
+  └──────┬───────────┘                 │ Select winner    │
+         │                             │ Iterate until    │
+         │  all eval data              │  patience runs   │
+         │  feeds back                 │  out             │
+         │                             └────────┬─────────┘
+         │                                      │
+         └──────────────◄───────────────────────┘
+              richer landscape
+              → better starting point
+              → repeat
+```
 
 ```
 ┌─────────────────────┐         ┌─────────────────────┐
 │  Your Backend       │         │  PromptPotter        │
 │  (e.g. TermNorm)    │◄───────►│  Optimizer           │
 │                     │  sync   │                      │
-│  - Experiments      │  replay │  - Optimization      │
-│  - Pipeline API     │  compare│  - Grid search       │
-│  - Evaluation data  │         │  - Notebooks + API   │
+│  - Experiments      │  replay │  - Sensitivity scan  │
+│  - Pipeline API     │  eval   │  - Feedback cycle    │
+│  - Evaluation data  │         │  - Grid search       │
 └─────────────────────┘         └──────────────────────┘
 ```
 
-### Optimization Campaign Workflow
-
-1. **Sync** experiment data from your backend
-2. **Replay** the pipeline to establish baseline accuracy
-3. **Explore** the prompt landscape with grid search over prompt component axes
-4. **Optimize** iteratively — generate candidates, evaluate, select winners
-5. **Analyze** results and apply LLM-generated improvement suggestions
-
-Prompts are structured into three optimization layers (see [3-Layer PromptState](#3-layer-promptstate)).
-
 **Works with:**
-- Any FastAPI backend with [Langfuse-compatible](https://langfuse.com/docs) logging
+- Any FastAPI backend with a `/matches` evaluation endpoint
 - [TermNorm-excel](https://github.com/runfish5/TermNorm-excel) — AI terminology normalization
 
 ## Quick Start
@@ -88,50 +105,35 @@ Each `PromptState` is immutable. `derive()` creates children, forming a lineage 
 ## Project Structure
 
 ```
-api/                             # FastAPI application
-├── main.py                      # Entry point, router mounting
-├── config/settings.py           # Pydantic BaseSettings
-├── models/
-│   ├── backend.py               # BackendConnection, Execution, ExecutionResultItem
-│   ├── prompt_state.py          # PromptState (3-layer, immutable, versioned)
-│   └── workflow.py              # WorkflowDefinition, StepDefinition
-├── routers/
-│   ├── backends.py              # /backends/* — connect, sync, execute, compare
-│   ├── workflows.py             # /workflows/* — execute, evaluate
-│   └── health.py                # /health, /ready
+api/
 ├── services/
-│   ├── prompt_eval.py           # Prompt evaluation (baseline, filter, batch eval)
-│   ├── prompt_optimizer.py      # Candidate generation, selection, suggestions
-│   ├── grid_search.py           # Grid search over prompt component axes
+│   ├── prompt_eval.py           # evaluate_prompt_cached() — single gateway for all eval persistence
+│   ├── prompt_optimizer.py      # LLM candidate generation, winner selection, suggestions
+│   ├── feedback_cycle.py        # Iterative optimization orchestrator (the AI loop)
+│   ├── search/
+│   │   ├── smart_search.py      # Sensitivity scan, adaptive search, axis classification
+│   │   ├── grid_core.py         # Grid search evaluation engine
+│   │   └── coverage.py          # Historical index + coverage advisor (data reuse)
 │   ├── project_store.py         # Facade over stores/ for .promptpotter/projects/
-│   ├── stores/                  # Focused store modules (BackendStore, ExecutionStore, etc.)
-│   ├── backend_client.py        # HTTP client for backend APIs (TermNorm)
-│   ├── comparison.py            # Statistical comparison (hit@k, McNemar, Wilcoxon)
-│   ├── llm_client.py            # OpenAI/Anthropic/Groq abstraction
-│   ├── query_utils.py           # Shared query-parsing utilities
-│   └── langfuse_client.py       # Langfuse integration
-├── core/
-│   └── workflow_runner.py       # DAG execution engine
-├── nodes/                       # Composable workflow nodes (LLM, PipelineConfig, Ranker)
-└── evaluators/                  # ExactMatch, CriteriaEvaluator (LLM-judge)
+│   ├── stores/                  # BackendStore, DatasetRunStore, GridPlanStore, SmartSearchStore, CampaignStore
+│   ├── backend_client.py        # HTTP client for backend APIs
+│   ├── llm_client.py            # Groq/OpenAI abstraction
+│   └── langfuse_client.py       # Langfuse v2 observability
+├── nodes/
+│   └── optimizer_nodes.py       # InitNode, GrowFilterNode, AnalysisEvalNode
+├── models/
+│   └── prompt_state.py          # PromptState (3-layer, immutable, versioned)
+└── routers/                     # FastAPI routers (/backends, /workflows, /health)
 
 notebooks/
-├── termnorm_backend.ipynb       # Exploration: register → sync → replay → compare
-├── optimization_campaign.ipynb  # Optimization: eval → grid search → optimize → save
-└── _campaign_lib.py             # Notebook helper (thin wrapper over api/services/)
+├── optimization_campaign.ipynb  # Full HITL workflow: baseline → scan → optimize → save
+└── _campaign_lib.py             # Thin wrapper: progress bars, display, callbacks
 
-docs/
-├── specs/                       # Formal specs (project-charter, PRD, ADD, WBS, roadmap)
-├── connectors/                  # Backend connector contracts (termnorm.md)
-├── user-guide.md                # Setup, workflows, configuration reference
-└── *.md                         # Design docs (registry-design, literature-review)
-
-tests/                           # pytest suite
-scripts/                         # Utilities (sync_termnorm_to_langfuse.py)
-workflows/examples/              # CWL-inspired YAML workflow definitions
-docker/                          # Dockerfile, docker-compose
-├── apps/                        # Streamlit UIs (secrets_manager)
-└── launcher/                    # JupyterLab launcher config
+.promptpotter/projects/{backend_id}/
+├── dataset_runs/                # ALL eval results (shared across scan, grid, feedback cycle)
+├── smart_search_plans/          # Sensitivity scan plans + axis profiles
+├── grid_plans/                  # Grid search plans
+└── campaigns/                   # Campaign metadata + trials
 ```
 
 ## Configuration

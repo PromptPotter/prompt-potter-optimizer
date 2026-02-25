@@ -17,10 +17,11 @@
 | P0.4 | Optimization Loop | P0 | Implemented | Semi-automatic or manual optimization rounds with patience-based stopping |
 | P0.5 | PROMPT_STATE Tracking | P0 | Implemented | Immutable, versioned prompt snapshots with structured metadata and lineage |
 | P0.6 | Grid Search Exploration | P0 | Implemented | Systematic exploration of Layer 1 prompt field variants with sampling, deduplication, and LLM analysis |
-| P1.1 | Workflow Engine Migration | P1 | Planned (M3) | Migrate optimizer services into existing workflow runner as proper nodes |
-| P1.2 | Iterative Feedback Cycling | P1 | Planned (M3) | 3-path routing (generate/refine context/modify plan) via workflow engine nodes |
-| P1.3 | Campaign Registry | P1 | Planned (M3) | Formal campaign/trial persistence with Langfuse/MLflow-compatible structure |
-| P1.4 | Full Langfuse Integration | P1 | Planned (M3) | Per-trial tracing with score attachment and campaign-level grouping |
+| P1.1 | Workflow Engine Migration | P1 | Implemented (M3) | Optimizer nodes (Init, GrowFilter, AnalysisEval) running in feedback cycle |
+| P1.2 | Iterative Feedback Cycling | P1 | Implemented (M3) | 3-path routing with patience-based stopping and per-query progress callbacks |
+| P1.3 | Campaign Registry | P1 | Implemented (M3) | CampaignStore for campaign/trial persistence |
+| P1.4 | Full Langfuse Integration | P1 | Implemented (M3) | Per-trial tracing with score attachment and campaign-level grouping |
+| P1.8 | Data Loop (Eval Reuse) | P1 | In Progress (M3) | All eval data from any optimization path feeds back into sensitivity scan for fresh starting points |
 | P1.5 | Discovery Protocol | P1 | Implemented | Discover backend pipeline parameters via `GET /pipeline` for dynamic grid search config |
 | P1.6 | Ablation Comparison | P1 | Implemented | Statistical comparison with McNemar's, Wilcoxon, hit@k |
 | P1.7 | Pipeline Parameter Passthrough | P1 | Implemented | Forward parameter overrides to backend execution requests |
@@ -187,6 +188,24 @@ Statistical comparison with McNemar's test, Wilcoxon signed-rank, hit@k, MRR. Pe
 Forward `pipeline_params` and `ranking_prompt` override to backend `/matches`. Echoed in execution responses.
 
 **Implementation:** `api/services/backend_client.py`. **Status:** Implemented (M1). Endpoint: `POST /api/v1/backends/{id}/execute`.
+
+### P1.8: Data Loop (Eval Reuse Across Optimization Threads)
+
+**As a** prompt engineer, **I want** all evaluation data from completed optimization runs to be automatically available when starting a new optimization **so that** I build on prior work instead of re-evaluating from scratch.
+
+**What the system does:**
+- Every evaluation — grid search, sensitivity scan, or feedback cycle — writes to the shared `dataset_runs` store via `evaluate_prompt_cached()` with content-addressed deduplication
+- The coverage advisor (`search/coverage.py`) discovers all stored `dataset_runs` regardless of which optimization thread produced them
+- When starting a new optimization, the sensitivity scan skips axes/variants that already have sufficient cached data
+- The human workflow is: optimize → stop → re-scan → start fresh from a new calculated starting point
+
+**Implementation status:** The data persistence path already exists (`evaluate_prompt_cached` → `DatasetRunStore`). The coverage advisor and historical index (`build_prompt_result_index`) already discover stored runs. Remaining work: verify end-to-end that feedback cycle eval data is indexed by the coverage advisor, and clean up any duplication in the eval wrappers.
+
+**Acceptance criteria:**
+1. Feedback cycle candidate evaluations are stored in `dataset_runs` with content hashes
+2. Running sensitivity scan after a completed feedback cycle shows cached results from that cycle in the data inventory
+3. Coverage advisor correctly identifies feedback cycle data as reusable
+4. No eval data is siloed per campaign — all paths write to the same shared store
 
 ---
 

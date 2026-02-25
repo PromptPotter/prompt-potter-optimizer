@@ -71,32 +71,57 @@ M2 delivers the optimization capabilities as standalone services, with the noteb
 
 ---
 
-## M3: Workflow Engine Migration — Planned
+## North Star: The Optimization Data Loop
+
+The core human workflow is a repeatable loop where every optimization run enriches the data pool for the next:
+
+```
+Generate data → Explore (scan/grid) → Optimize (feedback cycle)
+      ↑                                         |
+      |         Human stops, reviews results     |
+      |                                         ↓
+      +←←←← All eval data feeds back into ←←←←←+
+              coverage advisor & historical
+              index for the next cycle
+```
+
+**Key principle:** Every backend evaluation — whether from grid search, sensitivity scan, or feedback cycle — writes to the same `dataset_runs` store with content-addressed deduplication. The coverage advisor (`search/coverage.py`) automatically discovers all stored results. No data is siloed per campaign or optimization thread.
+
+**Workflow steps:**
+1. **Generate** — sync from backend, build eval dataset, run baseline eval
+2. **Explore** — sensitivity scan classifies axes; coverage advisor shows what's already cached
+3. **Optimize** — feedback cycle generates + evaluates candidates iteratively
+4. **Stop** — human reviews, stops the thread. All candidate evaluations are already persisted
+5. **Restart** — human re-runs sensitivity scan with full data pool → gets a new starting point → optimizes again
+
+---
+
+## M3: Workflow Engine Migration — In Progress
 
 M3 migrates the service-based optimizer into the existing workflow engine (`api/core/workflow_runner.py`) as proper nodes. This gives DAG execution, node reuse, and API-driven orchestration.
 
-- **Deliverables:**
-  - **Service Layer Promotion**: Move orchestration logic from `_campaign_lib.py` into `api/services/` — dedup-aware evaluation (`evaluate_prompt()` logic → `prompt_eval.py`), grid pre-scan and plan lifecycle (`resume_or_build_grid()` → `grid_search.py`), replay execution reuse (`run_or_load_replay()` → `backend_client.py`). `_campaign_lib.py` becomes a genuinely thin wrapper (tqdm, IPython display, print formatting only). Prerequisite for node wrapping.
-  - **Optimizer Nodes**: InitNode (wraps `restructure_context()`), GrowFilterNode (wraps `generate_candidates()`), AnalysisEvalNode (wraps `evaluate_prompt_batch()` + `generate_suggestions()`)
-  - **Optimization Workflow Definition**: CWL-style wiring of nodes into a linear pipeline
-  - **Campaign Registry**: formal campaign/trial persistence with Langfuse/MLflow-compatible data structure
-  - **Feedback Cycling**: 3-path routing (generate / refine context / modify plan) with counter-based iteration
+- **Deliverables (Complete):**
+  - **Optimizer Nodes**: InitNode, GrowFilterNode, AnalysisEvalNode with progress callbacks
+  - **Feedback Cycling**: `run_feedback_cycle()` orchestrates nodes with patience-based stopping, 3-path routing, per-query/candidate progress callbacks
   - **E2E Optimization Test**: integration test verifying workflow execution and campaign persistence
   - **Langfuse Integration**: per-trial tracing with score attachment, campaign-level grouping
+  - **Campaign Registry**: `CampaignStore` for campaign/trial persistence
+  - **Notebook Integration**: `run_feedback_cycle_notebook()` wires callbacks to display progress, handles session init, passes session_terms
 
-- **Entry criteria:** M2 exit gate passed; services are functional and code is clean
+- **Deliverables (Remaining):**
+  - **Service Layer Cleanup**: reduce duplication between `_campaign_lib.py` eval wrappers and service-layer functions. `_campaign_lib.py` should be a genuinely thin wrapper (progress display only, no business logic).
+  - **Data loop verification**: confirm that feedback cycle eval data is discoverable by the coverage advisor and historical index for the north star workflow
 
 - **Exit gate:**
-  - Optimization workflow runs end-to-end in the workflow engine
-  - Campaign registry persists trials with Langfuse/MLflow-compatible structure
-  - Feedback cycling routes correctly between three paths
+  - Optimization workflow runs end-to-end with per-query progress output
+  - Feedback cycle eval data feeds back into sensitivity scan's historical index
   - E2E test passes in CI
   - Langfuse shows traces with scores for all optimization trials
   - Decision: is the workflow architecture right? Ready for TermNorm variant comparison?
 
 - **Risks:**
-  - Node wrapping may surface service interfaces that don't map cleanly to the workflow engine's input/output model
   - Feedback cycling adds state management complexity
+  - Groq rate limits / capacity: long optimization runs may hit 503 errors (needs retry with backoff)
   - Langfuse SDK version compatibility
 
 ---
