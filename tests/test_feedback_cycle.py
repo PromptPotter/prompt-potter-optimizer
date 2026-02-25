@@ -415,3 +415,180 @@ async def test_result_structure(monkeypatch, eval_data, cycle_config):
         assert isinstance(rd.accuracy, float)
         assert isinstance(rd.next_action, str)
         assert isinstance(rd.prompt_state, dict)
+
+
+# ---------------------------------------------------------------------------
+# Baseline acceptance test (skip InitNode)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
+    """Feedback cycle skips InitNode when baseline_prompt_state is provided."""
+    _apply_llm_mock(monkeypatch)
+    _apply_grow_mock(monkeypatch)
+
+    from api.models.prompt_state import PromptState
+
+    # Create a pre-existing baseline
+    baseline_ps = PromptState(
+        instruction="Pre-existing baseline",
+        persona="Expert pharmacologist",
+        changes_description="manual_baseline",
+    )
+
+    # All candidates score 0% → patience stops after 2 rounds
+    async def mock_eval(ps, data, backend_client, **kwargs):
+        results = [
+            {"query": d["query"], "predicted": "WRONG",
+             "ground_truth": d["ground_truth"], "hit": False,
+             "score": 0.0, "error": None}
+            for d in data
+        ]
+        scores = {"hits": 0, "total": len(data), "accuracy": 0.0, "errors": 0}
+        return results, scores, False
+
+    monkeypatch.setattr(
+        "api.services.prompt_eval.evaluate_prompt_cached",
+        mock_eval,
+    )
+
+    # Do NOT mock restructure_context — it should NOT be called
+    result = await run_feedback_cycle(
+        instruction="",
+        eval_data=eval_data,
+        config=cycle_config,
+        baseline_prompt_state=baseline_ps.model_dump(),
+        baseline_accuracy=0.5,
+        baseline_results=[{"query": "test", "hit": True}],
+    )
+
+    # Should have run without calling InitNode
+    assert result.n_rounds == 2  # patience=2, all 0% < 0.5 baseline
+    assert result.stop_reason == "patience_exhausted"
+
+
+# ---------------------------------------------------------------------------
+# Results tracking test (failure analysis data flows between rounds)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_config):
+    """Winner results are passed forward to next round's GrowFilterNode."""
+    _apply_init_mock(monkeypatch)
+    _apply_llm_mock(monkeypatch)
+
+    # Track what results GrowFilterNode receives each round
+    grow_results_received = []
+
+    async def mock_generate(current_ps, accuracy, results, n, creativity,
+                            llm_client, **kwargs):
+        grow_results_received.append(list(results))
+        return [
+            current_ps.derive(
+                instruction=f"variant_{i}",
+                changes_description=f"gen_{i}",
+            )
+            for i in range(n)
+        ]
+
+    monkeypatch.setattr(
+        "api.services.prompt_optimizer.generate_candidates",
+        mock_generate,
+    )
+
+    # First candidate always gets 1/3 accuracy with real results
+    async def mock_eval(ps, data, backend_client, **kwargs):
+        label = kwargs.get("label", "")
+        if label == "candidate_0":
+            results = [
+                {"query": data[0]["query"],
+                 "predicted": data[0]["ground_truth"],
+                 "ground_truth": data[0]["ground_truth"],
+                 "hit": True, "score": 1.0, "error": None},
+            ] + [
+                {"query": d["query"], "predicted": "WRONG",
+                 "ground_truth": d["ground_truth"],
+                 "hit": False, "score": 0.0, "error": None}
+                for d in data[1:]
+            ]
+            scores = {"hits": 1, "total": len(data),
+                      "accuracy": 1 / len(data), "errors": 0}
+        else:
+            results = [
+                {"query": d["query"], "predicted": "WRONG",
+                 "ground_truth": d["ground_truth"],
+                 "hit": False, "score": 0.0, "error": None}
+                for d in data
+            ]
+            scores = {"hits": 0, "total": len(data),
+                      "accuracy": 0.0, "errors": 0}
+        return results, scores, False
+
+    monkeypatch.setattr(
+        "api.services.prompt_eval.evaluate_prompt_cached",
+        mock_eval,
+    )
+
+    result = await run_feedback_cycle(
+        instruction="Test.", eval_data=eval_data, config=cycle_config,
+    )
+
+    # Round 0: starts with empty results (InitNode has no eval)
+    assert grow_results_received[0] == []
+
+    # Round 1+: should have winner results from previous round
+    for i in range(1, len(grow_results_received)):
+        assert len(grow_results_received[i]) > 0, (
+            f"Round {i} should have received results from previous round"
+        )
+
+    # CycleRoundResult.results should also be populated
+    for rd in result.rounds:
+        assert isinstance(rd.results, list)
+        assert len(rd.results) > 0
+
+
+# ---------------------------------------------------------------------------
+# on_round_complete callback test
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
+    """on_round_complete is called after each round with correct args."""
+    _apply_init_mock(monkeypatch)
+    _apply_llm_mock(monkeypatch)
+    _apply_grow_mock(monkeypatch)
+
+    async def mock_eval(ps, data, backend_client, **kwargs):
+        results = [
+            {"query": d["query"], "predicted": "WRONG",
+             "ground_truth": d["ground_truth"], "hit": False,
+             "score": 0.0, "error": None}
+            for d in data
+        ]
+        scores = {"hits": 0, "total": len(data), "accuracy": 0.0, "errors": 0}
+        return results, scores, False
+
+    monkeypatch.setattr(
+        "api.services.prompt_eval.evaluate_prompt_cached",
+        mock_eval,
+    )
+
+    callbacks = []
+
+    def on_round(round_result, stall_count):
+        callbacks.append((round_result.round, stall_count))
+
+    result = await run_feedback_cycle(
+        instruction="Test.", eval_data=eval_data, config=cycle_config,
+        on_round_complete=on_round,
+    )
+
+    assert len(callbacks) == result.n_rounds
+    # Each callback should have incrementing stall_count
+    for i, (round_num, stall) in enumerate(callbacks):
+        assert round_num == i
+        assert stall == i + 1  # All rounds are non-improving

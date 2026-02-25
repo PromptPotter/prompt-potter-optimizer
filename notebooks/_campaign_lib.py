@@ -93,6 +93,7 @@ __all__ = [
     "build_diagnostic_set",
     "build_historical_index",
     "synthesize_sensitivity",
+    "run_feedback_cycle_notebook",
 ]
 
 
@@ -1583,3 +1584,120 @@ async def run_optimization_loop(
     print(f"{'=' * 70}")
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Feedback cycle (M3 node-based optimization)
+# ---------------------------------------------------------------------------
+
+
+async def run_feedback_cycle_notebook(
+    campaign_rounds: list,
+    eval_data: list,
+    campaign_config: dict,
+    *,
+    store: "ProjectStore | None" = None,
+    backend_id: str = "",
+    backend_url: str = "http://127.0.0.1:8000",
+    pipeline_params: "dict | None" = None,
+    langfuse_session_id: str | None = None,
+) -> list:
+    """Run optimization via M3 feedback cycle (node-based architecture).
+
+    Drop-in replacement for ``run_optimization_loop()`` — accepts and returns
+    the same ``campaign_rounds`` list format for downstream notebook sections.
+
+    Internally uses InitNode → GrowFilterNode → AnalysisEvalNode with Langfuse
+    tracing and ``next_action`` routing.
+
+    Returns:
+        Updated campaign_rounds list.
+    """
+    from api.services.feedback_cycle import CycleConfig, run_feedback_cycle
+
+    opt = campaign_config.get("optimization", {})
+    eval_llm = campaign_config.get("eval_llm", {})
+
+    config = CycleConfig(
+        max_rounds=opt.get("max_rounds", 10),
+        patience=opt.get("patience", 3),
+        n_variants=opt.get("n_variants", 5),
+        creativity=opt.get("creativity", 0.7),
+        improvement_threshold=opt.get("improvement_threshold", 0.01),
+        model=eval_llm.get("model"),
+        provider=None,
+        backend_url=backend_url,
+        backend_id=backend_id,
+        project_root=str(store.base_dir) if store else "",
+        generate_suggestions=False,
+        pipeline_params=pipeline_params,
+        temperature=eval_llm.get("temperature", 0.0),
+        queries_per_eval=campaign_config.get("queries_per_eval", 0),
+        seed=42,
+    )
+
+    # Extract baseline from existing campaign_rounds (if any)
+    baseline_ps = None
+    baseline_acc = 0.0
+    baseline_results = None
+    if campaign_rounds:
+        last = campaign_rounds[-1]
+        ps = last["prompt_state"]
+        baseline_ps = ps.model_dump() if hasattr(ps, "model_dump") else ps
+        baseline_acc = last.get("accuracy", 0.0)
+        baseline_results = last.get("results", [])
+        instruction = ps.instruction if hasattr(ps, "instruction") else ""
+    else:
+        instruction = ""
+
+    patience = config.patience
+
+    def _on_round(round_result, stall_count):
+        # Convert to campaign_rounds-compatible format and append
+        ps = PromptState(**round_result.prompt_state)
+        round_entry = {
+            "round": len(campaign_rounds),
+            "label": round_result.label,
+            "prompt_state": ps,
+            "accuracy": round_result.accuracy,
+            "hits": round_result.hits,
+            "total": round_result.total,
+            "results": round_result.results,
+            "candidates_evaluated": round_result.candidates_evaluated,
+            "improved": round_result.improved,
+        }
+        campaign_rounds.append(round_entry)
+        display_progress(campaign_rounds)
+
+        if round_result.improved:
+            print("\nImprovement detected, auto-continuing...")
+        else:
+            print(f"\nNo improvement ({stall_count}/{patience} patience)")
+            if stall_count >= patience:
+                print(
+                    f"\nStopping: no improvement for {patience} consecutive rounds."
+                )
+
+    result = await run_feedback_cycle(
+        instruction=instruction,
+        eval_data=eval_data,
+        config=config,
+        baseline_prompt_state=baseline_ps,
+        baseline_accuracy=baseline_acc,
+        baseline_results=baseline_results,
+        on_round_complete=_on_round,
+        langfuse_session_id=langfuse_session_id,
+    )
+
+    # Final summary
+    best = max(campaign_rounds, key=lambda r: r["accuracy"])
+    print(f"\n{'=' * 70}")
+    print("OPTIMIZATION COMPLETE (feedback cycle)")
+    print(f"  Rounds run: {result.n_rounds}")
+    print(f"  Best accuracy: {best['accuracy']:.1%} (round {best['round']})")
+    print(f"  Stop reason: {result.stop_reason}")
+    if result.langfuse_trace_id:
+        print(f"  Langfuse trace: {result.langfuse_trace_id}")
+    print(f"{'=' * 70}")
+
+    return campaign_rounds
