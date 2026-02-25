@@ -235,6 +235,10 @@ class AnalysisEvalOutput(BaseModel):
         default_factory=list,
         description="Per-candidate accuracy summary",
     )
+    winner_results: list[dict] = Field(
+        default_factory=list,
+        description="Per-query eval results for the winner (for failure analysis)",
+    )
 
 
 class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
@@ -378,4 +382,5 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
             next_action=next_action,
             suggestions=suggestions,
             candidate_scores=candidate_scores,
+            winner_results=winner_entry.get("results", []),
         )

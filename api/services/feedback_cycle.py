@@ -17,6 +17,7 @@ Stopping conditions:
 """
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -39,6 +40,10 @@ class CycleConfig(BaseModel):
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
     generate_suggestions: bool = Field(False, description="LLM suggestions each round")
+    pipeline_params: dict | None = Field(None, description="Pipeline parameter overrides")
+    temperature: float = Field(0.0, description="Temperature for content hash")
+    queries_per_eval: int = Field(0, description="Subsample size (0 = use all)")
+    seed: int = Field(42, description="Random seed for subsampling")
 
 
 class CycleRoundResult(BaseModel):
@@ -52,6 +57,7 @@ class CycleRoundResult(BaseModel):
     improved: bool
     next_action: str
     prompt_state: dict
+    results: list[dict] = Field(default_factory=list)
     candidates_evaluated: int
     candidate_scores: list[dict] = Field(default_factory=list)
 
@@ -77,23 +83,38 @@ async def run_feedback_cycle(
     config: CycleConfig,
     *,
     improvement_areas: str = "",
+    baseline_prompt_state: dict | None = None,
+    baseline_accuracy: float = 0.0,
+    baseline_results: list | None = None,
+    on_round_complete: Callable | None = None,
     langfuse_session_id: str | None = None,
 ) -> CycleResult:
     """Run iterative optimization with feedback cycling.
 
     Executes:
-    1. InitNode — create baseline PromptState
+    1. InitNode — create baseline PromptState (skipped if baseline_prompt_state provided)
     2. Loop: GrowFilterNode → AnalysisEvalNode → route by next_action
     3. Stop when patience exhausted, max_rounds reached, or perfect score
 
     Args:
-        langfuse_session_id: Optional session ID for grouping traces.
-            When provided, each round gets its own Langfuse trace with
-            accuracy scores, all grouped under this session.
+        instruction: Raw prompt instruction text (used by InitNode if no baseline).
+        eval_data: Evaluation dataset (list of query dicts).
+        config: Cycle configuration.
+        improvement_areas: Domain-expert guidance for context restructuring.
+        baseline_prompt_state: Existing baseline PromptState (serialized dict).
+            If provided, InitNode is skipped and this is used as the starting point.
+        baseline_accuracy: Accuracy of the baseline (used when baseline_prompt_state
+            is provided).
+        baseline_results: Eval results for the baseline (for failure analysis).
+        on_round_complete: Optional callback after each round:
+            ``(round_result: CycleRoundResult, stall_count: int)``
+        langfuse_session_id: Optional session ID for grouping Langfuse traces.
 
     Returns:
         CycleResult with all rounds and final winner.
     """
+    import random as _random
+
     from api.nodes.optimizer_nodes import (
         AnalysisEvalNode,
         GrowFilterNode,
@@ -103,6 +124,13 @@ async def run_feedback_cycle(
 
     langfuse = LangfuseLogger.get_instance()
     started_at = datetime.now(timezone.utc).isoformat()
+
+    # Subsample eval data if configured
+    if config.queries_per_eval > 0 and len(eval_data) > config.queries_per_eval:
+        rng = _random.Random(config.seed)
+        round_eval_data = rng.sample(eval_data, config.queries_per_eval)
+    else:
+        round_eval_data = eval_data
 
     # Create campaign-level trace
     campaign_trace_id = langfuse.create_trace(
@@ -114,21 +142,30 @@ async def run_feedback_cycle(
     )
 
     # -- Step 1: Initialize baseline --
-    init_node = InitNode(
-        node_id="cycle_init",
-        config={"model": config.model, "provider": config.provider},
-    )
-    init_out = await init_node.process({
-        "instruction": instruction,
-        "improvement_areas": improvement_areas,
-    })
-
-    current_ps = init_out.prompt_state
-    current_accuracy = 0.0
-    current_results: list = []
+    if baseline_prompt_state is not None:
+        # Use provided baseline — skip InitNode
+        current_ps = baseline_prompt_state
+        current_accuracy = baseline_accuracy
+        current_results: list = baseline_results or []
+        logger.info(
+            "Using provided baseline (acc=%.3f)", current_accuracy,
+        )
+    else:
+        # Run InitNode to create baseline from instruction
+        init_node = InitNode(
+            node_id="cycle_init",
+            config={"model": config.model, "provider": config.provider},
+        )
+        init_out = await init_node.process({
+            "instruction": instruction,
+            "improvement_areas": improvement_areas,
+        })
+        current_ps = init_out.prompt_state
+        current_accuracy = 0.0
+        current_results = []
 
     rounds: list[CycleRoundResult] = []
-    best_accuracy = 0.0
+    best_accuracy = current_accuracy
     best_round = -1
     best_ps = current_ps
     stall_count = 0
@@ -168,11 +205,13 @@ async def run_feedback_cycle(
                 "project_root": config.project_root,
                 "improvement_threshold": config.improvement_threshold,
                 "generate_suggestions": config.generate_suggestions,
+                "pipeline_params": config.pipeline_params,
+                "temperature": config.temperature,
             },
         )
         eval_out = await eval_node.process({
             "candidates": grow_out.candidates,
-            "eval_data": eval_data,
+            "eval_data": round_eval_data,
             "baseline_prompt_state": current_ps,
             "baseline_accuracy": current_accuracy,
             "baseline_results": current_results,
@@ -189,6 +228,7 @@ async def run_feedback_cycle(
             improved=eval_out.improved,
             next_action=eval_out.next_action,
             prompt_state=eval_out.winner_prompt_state,
+            results=eval_out.winner_results,
             candidates_evaluated=eval_out.winner.get("candidates_evaluated", 0),
             candidate_scores=eval_out.candidate_scores,
         )
@@ -219,12 +259,14 @@ async def run_feedback_cycle(
                 trace_id=campaign_trace_id,
                 name=f"accuracy_round_{round_num}",
                 value=eval_out.winner_accuracy,
-                comment=f"Round {round_num}: {'improved' if eval_out.improved else 'no change'}",
+                comment=f"Round {round_num}: "
+                        f"{'improved' if eval_out.improved else 'no change'}",
             )
 
-        # Update current best
+        # Update current state — pass results forward for failure analysis
         current_ps = eval_out.winner_prompt_state
         current_accuracy = eval_out.winner_accuracy
+        current_results = eval_out.winner_results
 
         if current_accuracy > best_accuracy:
             best_accuracy = current_accuracy
@@ -236,6 +278,10 @@ async def run_feedback_cycle(
             stall_count = 0
         else:
             stall_count += 1
+
+        # Notify callback
+        if on_round_complete:
+            on_round_complete(round_result, stall_count)
 
         # Check stopping conditions
         if current_accuracy >= 1.0:
@@ -282,7 +328,7 @@ async def run_feedback_cycle(
         n_rounds=len(rounds),
         best_accuracy=best_accuracy,
         best_round=best_round,
-        baseline_accuracy=rounds[0].accuracy if rounds else 0.0,
+        baseline_accuracy=rounds[0].accuracy if rounds else current_accuracy,
         winner_prompt_state=best_ps,
         stop_reason=stop_reason,
         started_at=started_at,
