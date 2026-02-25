@@ -57,18 +57,19 @@
 
 ---
 
-## M5: Observability Layer -- Future
+## M5: Observability Layer -- In Progress
 
-Adopt TermNorm-excel's zero-dependency file-based patterns for production-grade logging.
+Adopt TermNorm-excel's zero-dependency file-based patterns for production-grade logging. Three layers of human-accessible data: `events.jsonl` (flat nav log), Langfuse traces (structured detail), MLflow experiments (metrics viewer).
 
-- **Langfuse file format** — replace custom eval logging in `evaluate_prompt_cached()` with Langfuse-compatible traces/observations/scores structure. Reference: `TermNorm-excel/backend-api/utils/langfuse_logger.py`
-- **MLflow experiment format** — feedback cycle campaigns as experiments, rounds as runs. Enables `mlflow ui --backend-store-uri file:./logs/experiments`. Reference: `TermNorm-excel/backend-api/utils/standards_logger.py`
-- **Prompt registry** — version PromptState Layer 1 fields with metadata. Reference: `TermNorm-excel/backend-api/utils/prompt_registry.py`
+- **`events.jsonl`** — flat human-readable event log as starting point for data exploration. Custom extension (not Langfuse/MLflow spec), each line has `trace_id`/`campaign_id` links to detailed files. Adapted from TermNorm `langfuse_logger._log_event()`.
+- **Langfuse file format** — Langfuse-compatible traces/observations/scores on disk. Reference: `TermNorm-excel/backend-api/utils/langfuse_logger.py`
+- **MLflow experiment format** — feedback cycle campaigns as experiments, rounds as runs. PromptPotter has zero MLflow dependency; viewer runs in a separate throwaway venv (`mlflow ui --backend-store-uri file:...`). Reference: `TermNorm-excel/backend-api/utils/standards_logger.py` and `FILE_ORGANIZATION_STRATEGY.md`.
+- **Prompt registry** — version PromptState Layer 1 fields with metadata. Write-only audit trail. Reference: `TermNorm-excel/backend-api/utils/prompt_registry.py`
 - **LLM retry logic** — exponential backoff for Groq 503s in `llm_client.py`
 
-**Entry criteria:** M4 exit gate passed.
+**Entry criteria:** M4 exit gate passed (or waived).
 
-**Exit gate:** Eval runs produce Langfuse-compatible trace files. Campaign runs produce MLflow-compatible experiment files. `mlflow ui` can visualize optimization history.
+**Exit gate:** Eval runs produce Langfuse-compatible trace files. Campaign runs produce MLflow-compatible experiment files. `events.jsonl` written for every significant action. `mlflow ui` can visualize optimization history. Full spec: [`docs/specs/m5-observability.md`](m5-observability.md).
 
 ---
 

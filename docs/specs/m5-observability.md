@@ -26,6 +26,8 @@
 | Module placement | `api/services/observability_logger.py` (new module) | Not a store — it writes to `obs/` outside ProjectStore's `dataset_runs/` scope |
 | Config flag | `OBS_ENABLED: bool = True` in settings | Allow disabling for tests and CI |
 | LLM retry | Exponential backoff in `llm_client.py` | Fixes known Groq 503 crash risk; independent of obs logger |
+| `events.jsonl` | Custom flat event log | Starting point for human data exploration. Not Langfuse/MLflow spec. Adapted from TermNorm `langfuse_logger._log_event()`. Every public ObsLogger method appends here. |
+| MLflow viewer | Separate venv, no PromptPotter dependency | PromptPotter writes MLflow FileStore format; `mlflow ui` runs in a throwaway venv pointing at the files. Reference: TermNorm `FILE_ORGANIZATION_STRATEGY.md` line 128. |
 
 ---
 
@@ -50,24 +52,23 @@ All observability output lives under the project directory, parallel to existing
 .promptpotter/projects/{backend_id}/
   obs/
     langfuse/
-      traces/{trace_id}.json            # One file per trace (campaign run, eval batch)
-      observations/{trace_id}/{obs_id}.json  # Nested observations (rounds, queries)
-      scores/{trace_id}.jsonl           # Appended accuracy scores
-    experiments/
+      events.jsonl                          # Flat nav log — START HERE for data exploration
+      traces/{trace_id}.json                # One file per trace (campaign run, eval batch)
+      observations/{trace_id}/{obs_id}.json # Nested observations (rounds, queries)
+      scores/{trace_id}.jsonl               # Appended accuracy scores
+    experiments/                            # MLflow FileStore format (read with mlflow ui)
       {experiment_id}/
-        meta.yaml                       # MLflow ExperimentInfo (campaign metadata)
+        meta.yaml                           # MLflow ExperimentInfo (campaign metadata)
         {run_id}/
-          meta.yaml                     # MLflow RunInfo (round metadata)
-          params/{param_name}           # Individual parameter files
-          metrics/{metric_name}         # Metric time-series (timestamp value step)
-          tags/{tag_name}               # Tags (model, provider, etc.)
-          artifacts/
-            traces/trace-{id}.json      # Langfuse-compatible trace copy
+          meta.yaml                         # MLflow RunInfo (round metadata)
+          params/{param_name}               # Individual parameter files
+          metrics/{metric_name}             # Metric time-series (timestamp value step)
+          tags/{tag_name}                   # Tags (model, provider, etc.)
     prompts/
       {prompt_family}/
         {version}/
-          metadata.json                 # Version metadata + template_variables
-          prompt.txt                    # Rendered Layer 1 prompt text
+          metadata.json                     # Version metadata + template_variables
+          prompt.txt                        # Rendered Layer 1 prompt text
 ```
 
 ---
@@ -86,6 +87,7 @@ Each TermNorm function maps to a PromptPotter equivalent. All TermNorm sources a
 | `get_or_create_item()` | Not adopted | PromptPotter uses content-addressed `dataset_runs`, not dataset items. |
 | `log_pipeline()` | Not adopted | TermNorm-specific (multi-step pipeline logging). |
 | `generate_dated_id()` | Adopt as `_generate_obs_id()` | DateTime-prefixed hex IDs for trace/observation files. |
+| `_log_event()` | `ObsLogger._log_event()` | Append to `obs/langfuse/events.jsonl` with auto-timestamp. Every public ObsLogger method calls this to maintain the flat navigation log. |
 
 ### From `standards_logger.py`
 
@@ -112,37 +114,52 @@ Each TermNorm function maps to a PromptPotter equivalent. All TermNorm sources a
 
 ```python
 class ObsLogger:
-    """File-based observability logger. Writes Langfuse + MLflow compatible files."""
+    """File-based observability logger. Writes Langfuse + MLflow compatible files.
+
+    Every public method also appends to events.jsonl — the flat navigation log
+    that humans read first when exploring accumulated research data.
+    """
 
     def __init__(self, project_root: str | Path, backend_id: str):
         self.obs_root = Path(project_root) / ".promptpotter/projects" / backend_id / "obs"
+        self._enabled = settings.OBS_ENABLED
+
+    # --- Internal helpers ---
+
+    def _log_event(self, event: dict) -> None:
+        """Append event to obs/langfuse/events.jsonl with auto-timestamp.
+        Adapted from TermNorm langfuse_logger._log_event().
+        Every public method calls this to maintain the flat navigation log."""
+
+    # --- Public API ---
 
     def log_dataset_run(
         self, run_id: str, content_hash: str, accuracy: float,
         total: int, hits: int, model: str, temperature: float,
-    ) -> Path:
-        """Write Langfuse trace for a completed eval run. Called from evaluate_prompt_cached()."""
+        prompt_state_id: str = "",
+    ) -> Path | None:
+        """Write Langfuse trace + events.jsonl line for a completed eval run."""
 
     def log_campaign_start(
         self, campaign_id: str, config: dict, baseline_accuracy: float,
-    ) -> Path:
-        """Create experiment dir + trace file for a new campaign."""
+    ) -> Path | None:
+        """Create experiment dir (MLflow meta.yaml) + Langfuse trace + events.jsonl line."""
 
     def log_round(
         self, campaign_id: str, round_num: int, accuracy: float,
         hits: int, total: int, improved: bool, next_action: str,
         winner_prompt_state_id: str, candidate_scores: list[dict],
-    ) -> Path:
-        """Write observation (span) + MLflow run for one optimization round."""
+    ) -> Path | None:
+        """Write observation + score + MLflow run dir + events.jsonl line."""
 
     def log_prompt_version(
         self, prompt_state_id: str, rendered_prompt: str,
         layer1_fields: dict, parent_id: str | None = None,
-    ) -> Path:
-        """Write prompt text + metadata to prompts/{family}/{version}/."""
+    ) -> Path | None:
+        """Write prompt.txt + metadata.json + events.jsonl line."""
 ```
 
-All methods are synchronous (file I/O only). All methods are no-ops when `OBS_ENABLED = False`.
+All methods are synchronous (file I/O only). All methods are no-ops when `OBS_ENABLED = False`. All methods are wrapped in try/except to never crash the main flow.
 
 ---
 
@@ -154,6 +171,59 @@ Add to `_OpenAICompatibleClient._chat_completion()` in `llm_client.py`:
 - **Strategy:** Exponential backoff: 1s, 2s, 4s, 8s (max 3 retries)
 - **Logging:** `logger.warning(f"LLM request failed ({status}), retrying in {delay}s...")`
 - **No retry on:** 400, 401, 404 (client errors are not transient)
+
+---
+
+## Data Exploration Guide
+
+**Start here:** `obs/langfuse/events.jsonl` — a flat, human-readable log where every significant action is one JSON line. This is a custom extension (not part of the Langfuse or MLflow spec), adapted from TermNorm's `langfuse_logger._log_event()`.
+
+### events.jsonl format
+
+Each line is a self-contained JSON object with `event`, `timestamp`, and navigation IDs:
+
+```jsonl
+{"event": "dataset_run", "trace_id": "260225...", "run_id": "baseline_816203b2", "accuracy": 0.75, "hits": 30, "total": 40, "model": "llama-4-maverick", "timestamp": "2026-02-25T14:00:00Z"}
+{"event": "campaign_start", "trace_id": "260225...", "campaign_id": "campaign_abc", "baseline_accuracy": 0.75, "timestamp": "2026-02-25T14:01:00Z"}
+{"event": "round_complete", "trace_id": "260225...", "campaign_id": "campaign_abc", "round": 0, "accuracy": 0.80, "improved": true, "next_action": "generate", "timestamp": "2026-02-25T14:05:00Z"}
+{"event": "prompt_version", "prompt_state_id": "abc12345", "family": "ranking_prompt", "parent_id": "def67890", "timestamp": "2026-02-25T14:05:01Z"}
+```
+
+### Navigating from events.jsonl
+
+| Field in event | Navigate to | What you'll find |
+|---------------|-------------|-----------------|
+| `trace_id` | `langfuse/traces/{trace_id}.json` | Full trace metadata (input, output, tags) |
+| `trace_id` | `langfuse/observations/{trace_id}/` | Detailed step-by-step observations |
+| `trace_id` | `langfuse/scores/{trace_id}.jsonl` | Evaluation scores over time |
+| `campaign_id` | `experiments/{campaign_id}/meta.yaml` | MLflow experiment metadata |
+| `campaign_id` | `experiments/{campaign_id}/{run_id}/` | Per-round MLflow runs with params/metrics |
+| `prompt_state_id` | `prompts/ranking_prompt/{id_prefix}/` | Rendered prompt text + Layer 1 field metadata |
+
+---
+
+## MLflow Viewer Setup
+
+PromptPotter has **zero MLflow dependency**. It writes experiment data in MLflow FileStore format using pure JSON/YAML file I/O. To visualize the data, use a separate throwaway Python environment:
+
+```bash
+# Create isolated viewer environment (do NOT install mlflow in PromptPotter's venv)
+python -m venv C:\temp\mlflow-viewer\venv
+C:\temp\mlflow-viewer\venv\Scripts\activate
+pip install mlflow
+
+# Point at the experiment data PromptPotter wrote
+mlflow ui --backend-store-uri file:./.promptpotter/projects/{backend_id}/obs/experiments
+# Opens at http://localhost:5000
+```
+
+This pattern is proven in production by TermNorm-excel (reference: `backend-api/docs/FILE_ORGANIZATION_STRATEGY.md` line 128).
+
+**What you'll see in mlflow ui:**
+- One experiment per optimization campaign
+- One run per optimization round (with params: model, temperature, n_variants)
+- Metrics: accuracy, hits, total (time-series per round)
+- Tags: provider, next_action, improved
 
 ---
 
@@ -191,10 +261,11 @@ Add to `_OpenAICompatibleClient._chat_completion()` in `llm_client.py`:
 - `evaluate_prompt_cached()` writes Langfuse-compatible trace files to `obs/langfuse/`
 - `run_feedback_cycle()` writes MLflow-compatible experiment files to `obs/experiments/`
 - Prompt versions written to `obs/prompts/` for each PromptState used in optimization
+- `events.jsonl` written for every dataset_run, campaign, round, and prompt version
 - `mlflow ui --backend-store-uri file:./.promptpotter/projects/{id}/obs/experiments` can read experiment data
 - LLM client retries transient 503/429 errors with exponential backoff
 - All existing tests still pass
-- New tests in `tests/test_observability.py` cover file output format and retry logic
+- New tests in `tests/test_observability.py` cover file output format, events.jsonl, and retry logic
 
 ## Test Strategy
 
@@ -204,8 +275,11 @@ Add to `_OpenAICompatibleClient._chat_completion()` in `llm_client.py`:
 | `test_obs_logger_campaign` | Unit | `log_campaign_start()` creates experiment dir + meta.yaml |
 | `test_obs_logger_round` | Unit | `log_round()` creates observation JSON + MLflow run dir |
 | `test_obs_logger_prompt_version` | Unit | `log_prompt_version()` writes prompt.txt + metadata.json |
+| `test_events_jsonl` | Unit | Every public method appends a line to `events.jsonl` with correct `event` type and navigation IDs |
+| `test_events_jsonl_navigation` | Unit | Parse events.jsonl, verify `trace_id`/`campaign_id` point to actual files on disk |
 | `test_obs_disabled` | Unit | All methods are no-ops when `OBS_ENABLED = False` |
 | `test_llm_retry_503` | Unit | Mock 503 response, verify retry with backoff, eventual success |
 | `test_llm_retry_429` | Unit | Mock 429 response, verify retry |
 | `test_llm_no_retry_400` | Unit | Mock 400 response, verify immediate raise |
-| `test_obs_integration` | Integration | Run feedback cycle with mocked backend, verify complete obs/ tree |
+| `test_llm_retry_exhausted` | Unit | Mock 503 every attempt, verify exception after max retries |
+| `test_obs_integration` | Integration | Run feedback cycle with mocked backend, verify complete obs/ tree including events.jsonl |

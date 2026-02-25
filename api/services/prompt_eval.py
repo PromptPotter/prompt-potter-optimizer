@@ -421,6 +421,23 @@ async def evaluate_prompt_cached(
         )
         store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 
+        # --- observability: log dataset run trace ---
+        try:
+            from api.services.observability_logger import ObsLogger
+            obs = ObsLogger(store.base_dir, backend_id)
+            obs.log_dataset_run(
+                run_id=run_id,
+                content_hash=content_hash,
+                accuracy=scores["accuracy"],
+                total=scores["total"],
+                hits=scores["hits"],
+                model=model,
+                temperature=temperature,
+                prompt_state_id=prompt_state.id,
+            )
+        except Exception:
+            logger.debug("ObsLogger.log_dataset_run failed", exc_info=True)
+
     return results, scores, False
 
 

@@ -127,9 +127,18 @@ async def run_feedback_cycle(
     )
     from api.services.backend_client import BackendClient
     from api.services.langfuse_client import LangfuseLogger
+    from api.services.observability_logger import ObsLogger
 
     langfuse = LangfuseLogger.get_instance()
     started_at = datetime.now(timezone.utc).isoformat()
+
+    # File-based observability (parallel to cloud Langfuse)
+    obs: ObsLogger | None = None
+    if config.project_root and config.backend_id:
+        try:
+            obs = ObsLogger(config.project_root, config.backend_id)
+        except Exception:
+            logger.debug("Failed to create ObsLogger", exc_info=True)
 
     # Initialize backend session (required before /matches calls)
     if config.session_terms:
@@ -151,6 +160,18 @@ async def run_feedback_cycle(
         session_id=langfuse_session_id,
         tags=["campaign", "feedback_cycle"],
     )
+
+    # File-based campaign trace
+    obs_campaign_id = campaign_trace_id or f"campaign_{started_at[:19].replace(':', '')}"
+    if obs:
+        try:
+            obs.log_campaign_start(
+                campaign_id=obs_campaign_id,
+                config=config.model_dump(),
+                baseline_accuracy=baseline_accuracy,
+            )
+        except Exception:
+            logger.debug("ObsLogger.log_campaign_start failed", exc_info=True)
 
     # -- Step 1: Initialize baseline --
     if baseline_prompt_state is not None:
@@ -275,6 +296,43 @@ async def run_feedback_cycle(
                 comment=f"Round {round_num}: "
                         f"{'improved' if eval_out.improved else 'no change'}",
             )
+
+        # File-based round + prompt logging
+        if obs:
+            try:
+                obs.log_round(
+                    campaign_id=obs_campaign_id,
+                    round_num=round_num,
+                    accuracy=eval_out.winner_accuracy,
+                    hits=eval_out.winner.get("hits", 0),
+                    total=eval_out.winner.get("total", 0),
+                    improved=eval_out.improved,
+                    next_action=eval_out.next_action,
+                    winner_prompt_state_id=eval_out.winner_prompt_state.get(
+                        "id", "",
+                    ),
+                    candidate_scores=eval_out.candidate_scores,
+                    model=config.model or "",
+                    temperature=config.temperature,
+                    n_variants=config.n_variants,
+                )
+                # Log prompt version for the winner
+                from api.models.prompt_state import PromptState
+                winner_ps = PromptState(**eval_out.winner_prompt_state)
+                obs.log_prompt_version(
+                    prompt_state_id=winner_ps.id,
+                    rendered_prompt=winner_ps.render(),
+                    layer1_fields={
+                        f: getattr(winner_ps, f)
+                        for f in [
+                            "persona", "task_intent", "problem_description",
+                            "instruction", "thinking_style", "answer_format",
+                        ]
+                    },
+                    parent_id=winner_ps.parent_id,
+                )
+            except Exception:
+                logger.debug("ObsLogger round/prompt logging failed", exc_info=True)
 
         # Update current state — pass results forward for failure analysis
         current_ps = eval_out.winner_prompt_state
