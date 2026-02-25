@@ -24,14 +24,12 @@ LLM_MODEL=meta-llama/llama-4-maverick-17b-128e-instruct
 
 ## Workflow Overview
 
-```
-┌──────────────┐     ┌──────────────────┐     ┌──────────────┐
-│  Exploration  │ ──► │  Grid Search      │ ──► │  Optimization │
-│  Notebook     │     │  (landscape)      │     │  Campaign     │
-└──────────────┘     └──────────────────┘     └──────────────┘
-termnorm_backend      optimization_campaign     optimization_campaign
-.ipynb                .ipynb (Section 6)        .ipynb (Sections 7-9)
-```
+PromptPotter uses two nested loops:
+
+- **Human Loop** — you explore the landscape (sensitivity scan, grid search), run an optimization, harvest the results, and start again from a better position.
+- **AI Loop** — the feedback cycle automatically generates candidate prompts, evaluates them against the backend, selects winners, and iterates until patience runs out.
+
+Every evaluation is saved. When one optimization thread stops improving, the next sensitivity scan automatically discovers all stored data and computes a better starting point.
 
 ### 1. Exploration Notebook
 
@@ -40,20 +38,17 @@ Open `notebooks/termnorm_backend.ipynb`:
 1. **Register** your backend connection
 2. **Sync** experiment data (queries, ground truth, pipeline traces)
 3. **Replay** queries through the pipeline to establish baseline
-4. **Analyze** candidate coverage and diagnostic metrics
-5. **Compare** pipeline variants statistically
+4. **Compare** pipeline variants statistically
 
 ### 2. Optimization Campaign
 
 Open `notebooks/optimization_campaign.ipynb`:
 
-1. **Load baseline** prompt from synced experiment data
-2. **Filter** evaluation data (queries with entity_profile)
-3. **Evaluate baseline** accuracy
-4. **Grid search** over prompt component axes (persona, thinking_style, etc.)
-5. **Iterative optimization** — generate candidates via LLM, evaluate, select winners
-6. **Get suggestions** — LLM-generated improvement advice
-7. **Save** the best prompt to the project store
+1. **Load baseline** and evaluate accuracy (Section 4)
+2. **Sensitivity scan** — classify which prompt axes matter most (Section 4.5)
+3. **Grid search** — explore combinations of high-impact axes (Section 4.6)
+4. **Feedback cycle** — automated candidate generation and evaluation (Section 5)
+5. **Review suggestions** and save the best prompt (Sections 6-7)
 
 ## 3-Layer PromptState
 
@@ -185,6 +180,26 @@ grid_config = {
 }
 ```
 
+## Sensitivity Scan
+
+Before grid search, a sensitivity scan identifies which prompt axes actually matter. It perturbs one axis at a time (OAT) and measures the accuracy delta against your baseline.
+
+**When to use:** Before grid search, to avoid wasting budget on axes that don't affect accuracy. Also useful after an optimization round — re-scanning with all accumulated data reveals which axes still have room for improvement.
+
+**How it works:**
+1. A **diagnostic set** is built from your eval data (~75% baseline hits for regression guard, ~25% misses for improvement signal)
+2. Each axis is perturbed independently, and the accuracy change is measured
+3. Axes are classified as high / medium / low sensitivity
+4. The **coverage advisor** checks what's already cached — if prior runs already evaluated a variant, those results are reused automatically
+
+**In the notebook:** Section 4.5. Key cells: build diagnostic set, run historical audit, check coverage, run scan, select winner.
+
+```python
+# Coverage advisor shows what's already measured
+coverage = assess_scan_coverage(plan, store, backend_id)
+# Scan only evaluates what's missing — cached results are reused
+```
+
 ## Progress Tracking
 
 After each round (grid search winner, optimization rounds), a training-style progress table is displayed:
@@ -200,22 +215,23 @@ Round  Accuracy  Rolling Avg (8)  Trend
 - **Rolling Avg**: Smoothed accuracy over the last 8 rounds
 - **Trend**: Per-round improvement indicator; plateau detection shows when accuracy stalls
 
-## Semi-Automatic Optimization
+## Feedback Cycle (Optimization)
 
-The `run_optimization_loop()` function automates the generate → evaluate → select cycle:
+The feedback cycle automates prompt optimization with 3-layer escalation:
 
 ```python
-campaign_rounds = await run_optimization_loop(
+campaign_rounds = await run_feedback_cycle_notebook(
     campaign_rounds, eval_data, campaign_config, GROQ_API_KEY,
     store=svc["store"], backend_id=svc["backend_id"],
 )
 ```
 
-Behavior:
-- Subsamples `eval_data` to `n_samples` queries per round
-- Auto-continues while improvement exceeds `improvement_threshold`
-- Stops after `patience` consecutive rounds without improvement
-- Displays progress after each round
+**How it works:**
+1. Each round generates N candidate prompts via LLM, evaluates each against the backend, and selects the winner
+2. If Layer 1 changes (persona, instruction, etc.) stop improving, the system escalates to Layer 2 (context refinement), then Layer 3 (strategy modification)
+3. Stops when: `patience` consecutive non-improving rounds, `max_rounds` reached, or perfect accuracy
+
+**In the notebook:** Section 5. Progress bars show per-query and per-candidate evaluation status.
 
 Configure via `optimization` section:
 ```python
@@ -224,8 +240,17 @@ Configure via `optimization` section:
     "improvement_threshold": 0.01,
     "n_variants": 5,
     "creativity": 0.7,
+    "max_rounds": 10,
 }
 ```
+
+## Caching & Crash Recovery
+
+**Safe to interrupt.** Long evaluations write results incrementally to `.partial.jsonl` files. If a run crashes or you restart the kernel, it resumes from where it stopped — no work is lost.
+
+**Automatic deduplication.** Every evaluation is cached by a content hash (prompt text + queries + model + temperature). Re-running the same prompt against the same data returns cached results instantly, regardless of which optimization path produced them originally.
+
+**Shared across all paths.** Grid search, sensitivity scan, and feedback cycle all write to the same `dataset_runs` store. The coverage advisor discovers all cached results and skips backend calls for variants that have already been evaluated. This means every optimization run enriches the next one.
 
 ## Configuration Reference
 
@@ -264,6 +289,12 @@ eval_llm = {
     "max_tokens": 4000,
 }
 ```
+
+## REST API
+
+Start the API server: `uvicorn api.main:app --port 8001 --reload`
+
+Response models and endpoints are auto-documented at `http://localhost:8001/docs` (Swagger UI).
 
 ## Troubleshooting
 
