@@ -32,17 +32,19 @@ cd docker && docker-compose up --build
 
 ### Two entry points, shared core
 
-1. **FastAPI API** (`api/main.py`) — REST endpoints at `/api/v1/`. Routers: `backends` (connect, sync, execute, compare), `workflows`, `health`.
-2. **Jupyter notebooks** — `notebooks/termnorm_backend.ipynb` (exploration) and `notebooks/optimization_campaign.ipynb` (optimization). Both use `notebooks/_campaign_lib.py`, a thin wrapper that delegates to `api/services/` and adds tqdm progress bars + IPython display.
+1. **FastAPI API** (`api/main.py`) — REST endpoints at `/api/v1/`. Routers: `backends` (connect, sync, execute, compare), `health`.
+2. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` is the **primary working interface** at this stage. Uses `notebooks/_campaign_lib.py`, a thin wrapper that delegates to `api/services/` and adds tqdm progress bars + IPython display.
 
 All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py`) never implements business logic — it only wraps service functions with UI output.
+
+`tests/test_e2e_optimization.py` is the testable E2E proxy for the notebook workflow — critical because Claude Code can't run Jupyter.
 
 ### Service layer (`api/services/`)
 
 | Service | Purpose |
 |---------|---------|
 | `prompt_eval.py` | Evaluate prompts against datasets via backend `/matches` endpoint. Content-addressed deduplication via `eval_content_hash()`. Incremental writes (`.partial.jsonl`) for crash recovery. |
-| `grid_search.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. Grid plan persistence (`grid_plan_identity()`, `serialize_grid_plan()`, `deserialize_grid_plan()`). |
+| `search/grid_core.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. Grid plan persistence (`grid_plan_identity()`, `serialize_grid_plan()`, `deserialize_grid_plan()`). |
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation, round winner selection, improvement suggestions. |
 | `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions). |
 | `project_store.py` | Facade over focused store modules in `stores/`. File I/O for `.promptpotter/projects/`. |
@@ -102,6 +104,45 @@ Grid search (`grid_search.run_grid_search()`) iterates over cartesian products o
 Smart search (`smart_search.sensitivity_scan()`) measures one-at-a-time axis perturbations against the baseline, classifying axes by sensitivity. The coverage advisor (`coverage.assess_scan_coverage()`) checks existing `dataset_runs` to determine which variants already have enough cached data to skip backend calls.
 
 Feedback cycle (`feedback_cycle.run_feedback_cycle()`) runs iterative optimization rounds: `GrowFilterNode` generates candidates via LLM, `AnalysisEvalNode` evaluates each candidate via `evaluate_prompt_cached()` — so every candidate evaluation is automatically persisted and deduplicated.
+
+### Scaffold (not yet wired)
+
+The following modules are a CWL-inspired workflow engine scaffold — **future architecture, not dead code**:
+
+- `api/core/workflow_runner.py` — YAML-driven workflow executor
+- `api/nodes/` — node base class + implementations (`llm_node`, `ranker_node`, `pipeline_config_node`, `optimizer_nodes`)
+- `api/evaluators/` — evaluator base + implementations (`exact_match`, `criteria`)
+- `api/routers/workflows.py` — REST endpoints for workflow execution
+- `api/models/workflow.py` — workflow data models
+- `workflows/*.yaml` — workflow definitions
+
+**Migration intent:** Service-layer functions (eval, grid search, scan, feedback cycle) will be wrapped into workflow nodes. The notebook will then drive optimization via `WorkflowRunner` instead of direct service calls. See `docs/specs/roadmap.md` M6.
+
+### How to start a milestone
+
+Each milestone has an executable spec in `docs/specs/`. One Claude Code session = one WBS work package.
+
+**Steps:**
+1. Read the milestone spec (`docs/specs/m{N}-*.md`) — scope decisions, deliverables, API sketches
+2. Read `docs/specs/wbs.md` to find your work package ID and dependencies
+3. Read the service files listed in the deliverables table
+4. Check the "Reading list per work package" table in the milestone spec for WP-specific files
+
+| Milestone | Spec file | Pre-reading hint |
+|-----------|-----------|-----------------|
+| M5: Observability | [`docs/specs/m5-observability.md`](docs/specs/m5-observability.md) | Read TermNorm utils first (`langfuse_logger.py`, `standards_logger.py`, `prompt_registry.py` at `/c/Users/dsacc/OfficeAddinApps/TermNorm-excel/backend-api/utils/`) |
+| M6: Workflow Migration | [`docs/specs/m6-workflow-migration.md`](docs/specs/m6-workflow-migration.md) | Read `api/core/workflow_runner.py` and `workflows/optimizer_single_pass.yaml` |
+| M7: Multi-Connector | [`docs/specs/m7-multi-connector.md`](docs/specs/m7-multi-connector.md) | Read `docs/connectors/termnorm.md` and `api/services/backend_client.py` |
+
+### TermNorm reference patterns
+
+The TermNorm-excel backend (`/c/Users/dsacc/OfficeAddinApps/TermNorm-excel/backend-api/utils/`) has proven zero-dependency implementations of:
+
+- **Langfuse logging** (`langfuse_logger.py`) — file-based traces/observations/scores
+- **MLflow experiment tracking** (`standards_logger.py`) — file-based experiments/runs
+- **Prompt registry** (`prompt_registry.py`) — versioned prompt templates with metadata
+
+These are the target patterns for PromptPotter's observability layer (see roadmap M5).
 
 ## Project Conventions
 

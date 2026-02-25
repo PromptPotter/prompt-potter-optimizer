@@ -34,13 +34,17 @@
           |  langfuse_client                |
           +---------------+----------------+
                           |
-          +------+--------+--------+-------+
-          |      |        |        |       |
-          v      v        v        v       v
-      TermNorm  LLM    Langfuse  File   Evaluator
-      Backend  Providers  SDK    System  Framework
-      API      (Groq,           (.pp/)  (api/evaluators/)
-               OpenAI)
+          +------+--------+--------+-------+-------+
+          |      |        |        |       |       |
+          v      v        v        v       v       v
+      Connector LLM    Langfuse  File   Evaluator  obs/
+      Protocol Providers  SDK    System  Framework  (Langfuse
+      (M7)     (Groq,           (.pp/)  (api/       traces,
+       |       OpenAI)                   evaluators/ MLflow
+       v                                )           experiments,
+   TermNorm                                         prompts)
+   Backend                                          (M5)
+   API
 ```
 
 - **Notebooks** are the primary optimization interface. `_campaign_lib.py` wraps services with progress bars; no business logic.
@@ -138,6 +142,8 @@ Dataset runs are indexed by content hash. Grid plans and smart search plans use 
 | **Optimizer nodes as thin wrappers** | Nodes wrap existing service functions. Service logic is independently testable. |
 | **Notebook-first HITL** | Campaign config as editable JSON, manual round control, LLM suggestions -- natural fit for HITL. Feedback cycle is also callable from any Python context. |
 
+> **Cross-reference:** Milestone specs [M5](m5-observability.md) (observability), [M6](m6-workflow-migration.md) (workflow migration), and [M7](m7-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
+
 ---
 
 ## Integration Points
@@ -149,6 +155,9 @@ Dataset runs are indexed by content hash. Grid plans and smart search plans use 
 | TermNorm backend | HTTP REST (`/matches`, `/pipeline`) | Implemented |
 | ProjectStore | JSON files in `.promptpotter/projects/` | Implemented |
 | Evaluator framework | Python API (ExactMatch active, CriteriaEvaluator available) | Implemented |
+| File-based observability | Langfuse trace JSON + MLflow FileStore YAML in `obs/` | Planned ([M5](m5-observability.md)) |
+| CWL workflow engine | `WorkflowRunner` with `runtime_config`, YAML workflow definitions | Planned ([M6](m6-workflow-migration.md)) |
+| ConnectorProtocol | `typing.Protocol` abstraction over backend connectors | Planned ([M7](m7-multi-connector.md)) |
 
 ---
 

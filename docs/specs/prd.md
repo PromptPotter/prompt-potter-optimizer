@@ -26,6 +26,10 @@
 | P1.7 | Pipeline Parameter Passthrough | P1 | Implemented (M1) |
 | P1.8 | Sensitivity Scan | P1 | Implemented (M3) |
 | P1.9 | Data Loop (Eval Reuse) | P1 | Implemented (M3) |
+| P1.10 | File-Based Observability | P1 | Planned (M5) |
+| P1.11 | LLM Retry Logic | P1 | Planned (M5) |
+| P1.12 | Workflow-Driven Optimization | P1 | Planned (M6) |
+| P1.13 | Multi-Connector Support | P1 | Planned (M7) |
 | P2.1 | Evolutionary Operators | P2 | Planned |
 | P2.2 | MCP Server Mode | P2 | Planned |
 | P2.3 | Streamlit Dashboard | P2 | Planned |
@@ -75,6 +79,19 @@ All P1 requirements are implemented.
 
 ---
 
+## P1 (continued) -- Should Have (M5–M7 Infrastructure)
+
+Requirements added for milestones M5–M7. See individual milestone specs for full details.
+
+| ID | What | Implementation | Milestone |
+|----|------|---------------|-----------|
+| P1.10 | File-based observability: Langfuse-compatible traces + MLflow-compatible experiments on disk. Prompt versioning. | [M5 spec](m5-observability.md) — `observability_logger.py` | M5 |
+| P1.11 | LLM retry logic: exponential backoff for transient 503/429 errors in `llm_client.py` | [M5 spec](m5-observability.md) — WP 5.3 | M5 |
+| P1.12 | Workflow-driven optimization: `WorkflowRunner` with `runtime_config`, `FeedbackCycleNode`, `DatasetLoadNode`, YAML campaigns | [M6 spec](m6-workflow-migration.md) | M6 |
+| P1.13 | Multi-connector support: `ConnectorProtocol`, `MockConnector`, `ConnectorRegistry`, backend-agnostic evaluation | [M7 spec](m7-multi-connector.md) | M7 |
+
+---
+
 ## P2 -- Nice to Have (Advanced Capabilities)
 
 | ID | What |
@@ -103,21 +120,28 @@ All P1 requirements are implemented.
 
 ## Traceability Matrix
 
-| Requirement | SC1: Improvement | SC2: Reproducibility | SC3: Langfuse | SC4: Time to First | SC5: TermNorm | SC6: Generalization |
-|-------------|:---:|:---:|:---:|:---:|:---:|:---:|
-| P0.1 Backend Evaluation | x | x | | x | x | |
-| P0.2 Failure Analysis | x | | | | x | |
-| P0.3 Candidate Generation | x | | | | x | |
-| P0.4 Optimization Loop | x | x | | x | x | |
-| P0.5 PROMPT_STATE | | x | | | | |
-| P0.6 Grid Search | x | x | | x | x | |
-| P1.1 Optimizer Nodes | | | | | | x |
-| P1.2 Feedback Cycling | x | x | x | | | |
-| P1.3 Campaign Registry | | x | x | | | |
-| P1.4 Langfuse | | | x | | | |
-| P1.5 Discovery Protocol | | | | | x | |
-| P1.6 Ablation Comparison | x | x | | | x | |
-| P1.7 Parameter Passthrough | | | | | x | |
-| P1.8 Sensitivity Scan | x | x | | x | x | |
-| P1.9 Data Loop | x | x | | x | | |
-| P2.4 Non-Prompt Targets | x | | | | | x |
+| Requirement | SC1: Improvement | SC2: Reproducibility | SC3: Langfuse | SC4: Time to First | SC5: TermNorm | SC6: Generalization | SC7: Observability | SC8: Workflow |
+|-------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| P0.1 Backend Evaluation | x | x | | x | x | | | |
+| P0.2 Failure Analysis | x | | | | x | | | |
+| P0.3 Candidate Generation | x | | | | x | | | |
+| P0.4 Optimization Loop | x | x | | x | x | | | |
+| P0.5 PROMPT_STATE | | x | | | | | | |
+| P0.6 Grid Search | x | x | | x | x | | | |
+| P1.1 Optimizer Nodes | | | | | | x | | |
+| P1.2 Feedback Cycling | x | x | x | | | | | |
+| P1.3 Campaign Registry | | x | x | | | | | |
+| P1.4 Langfuse | | | x | | | | | |
+| P1.5 Discovery Protocol | | | | | x | | | |
+| P1.6 Ablation Comparison | x | x | | | x | | | |
+| P1.7 Parameter Passthrough | | | | | x | | | |
+| P1.8 Sensitivity Scan | x | x | | x | x | | | |
+| P1.9 Data Loop | x | x | | x | | | | |
+| P1.10 File-Based Observability | | x | x | | | | x | |
+| P1.11 LLM Retry Logic | x | | | x | | | x | |
+| P1.12 Workflow-Driven Optimization | | x | | x | | x | | x |
+| P1.13 Multi-Connector | | | | | | x | | x |
+| P2.4 Non-Prompt Targets | x | | | | | x | | |
+
+**SC7: Observability** — File-based Langfuse traces, MLflow experiments, prompt versioning (M5).
+**SC8: Workflow** — YAML-defined campaigns, runtime_config DI, multi-connector support (M6, M7).

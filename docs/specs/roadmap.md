@@ -16,6 +16,9 @@
 | M2 | Core Optimizer (eval, grid search, prompt optimizer, notebook) | Complete |
 | M3 | Optimization Infrastructure | Nearly Complete |
 | M4 | Integration and Polish | Planned |
+| M5 | Observability Layer | Future |
+| M6 | CWL Workflow Migration | Future |
+| M7 | Multi-Connector Architecture | Future |
 
 ---
 
@@ -54,7 +57,51 @@
 
 ---
 
-## Future (Post-M4)
+## M5: Observability Layer -- Future
+
+Adopt TermNorm-excel's zero-dependency file-based patterns for production-grade logging.
+
+- **Langfuse file format** — replace custom eval logging in `evaluate_prompt_cached()` with Langfuse-compatible traces/observations/scores structure. Reference: `TermNorm-excel/backend-api/utils/langfuse_logger.py`
+- **MLflow experiment format** — feedback cycle campaigns as experiments, rounds as runs. Enables `mlflow ui --backend-store-uri file:./logs/experiments`. Reference: `TermNorm-excel/backend-api/utils/standards_logger.py`
+- **Prompt registry** — version PromptState Layer 1 fields with metadata. Reference: `TermNorm-excel/backend-api/utils/prompt_registry.py`
+- **LLM retry logic** — exponential backoff for Groq 503s in `llm_client.py`
+
+**Entry criteria:** M4 exit gate passed.
+
+**Exit gate:** Eval runs produce Langfuse-compatible trace files. Campaign runs produce MLflow-compatible experiment files. `mlflow ui` can visualize optimization history.
+
+---
+
+## M6: CWL Workflow Migration -- Future
+
+Wire existing service functions into the workflow engine scaffold (`api/core/`, `api/nodes/`).
+
+- **Wrap services as nodes** — `prompt_eval.evaluate_prompt_cached` → EvalNode, `search/smart_search.sensitivity_scan` → ScanNode, `search/grid_core.run_grid_search` → GridSearchNode, `feedback_cycle.run_feedback_cycle` → FeedbackCycleNode
+- **Pipeline parameter discovery** — auto-detect tunable parameters from workflow definition (Layer 1/2/3 fields, grid axes, scan axes)
+- **Workflow-driven optimization** — replace direct service calls in `_campaign_lib.py` with workflow execution via `WorkflowRunner`
+- **YAML-defined campaigns** — optimization campaigns as workflow YAML, not Python code
+
+**Entry criteria:** M5 exit gate passed (observability integrated).
+
+**Exit gate:** `optimization_campaign.ipynb` runs entirely through `WorkflowRunner`. Campaign YAML defines the full optimization pipeline.
+
+---
+
+## M7: Multi-Connector Architecture -- Future
+
+Generalize beyond TermNorm to support arbitrary LLM application backends.
+
+- **Connector interface** — abstract `BackendClient` into a connector protocol. Reference: `docs/connectors/termnorm.md` (already started)
+- **Connector registry** — discover and configure connectors at runtime
+- **Backend-agnostic evaluation** — `evaluate_prompt_cached()` works with any connector, not just TermNorm `/matches`
+
+**Entry criteria:** M6 exit gate passed (workflow engine active).
+
+**Exit gate:** A second backend connector exists and runs through the same optimization workflow.
+
+---
+
+## Backlog (unscheduled)
 
 | Feature | Notes |
 |---------|-------|
@@ -63,9 +110,8 @@
 | Non-prompt targets (P2.4, SC6) | Scoring functions, fuzzy matchers, retrieval queries, GA settings. |
 | Evolutionary operators (P2.1) | GA/DE population-based search |
 | MCP server mode (P2.2) | Expose tools to Claude Code |
-| LLM client retry logic | Groq 503 handling with exponential backoff |
 
-Prioritization decided at M4 exit gate.
+Prioritization decided at milestone exit gates.
 
 ---
 

@@ -1,3 +1,6 @@
+> **Status: Archived** — Last updated 2025-12-17 (pre-M3). Review for context
+> only; do not update unless actively surveying new frameworks.
+
 # Related Work: Prompt Optimization Frameworks
 
 *Last updated: 2025-12-17*
