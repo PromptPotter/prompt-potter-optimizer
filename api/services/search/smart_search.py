@@ -516,6 +516,83 @@ async def sensitivity_scan(
 
 
 # ---------------------------------------------------------------------------
+# Select best from scan (greedy composition, no backend calls)
+# ---------------------------------------------------------------------------
+
+
+def select_scan_winner(
+    scan_df: pd.DataFrame,
+    axis_profiles: list[dict],
+    baseline_ps: PromptState,
+    variant_library: dict,
+    pipeline_params: dict | None = None,
+) -> tuple[PromptState, dict]:
+    """Pick best variant per sensitive axis from OAT scan results.
+
+    Composes the best-performing value for each axis that showed positive
+    improvement (best_delta > 0) into a single PromptState. No backend
+    calls required — purely offline composition from existing scan data.
+
+    Returns:
+        (best_ps, best_params) — ready for evaluate_prompt() or feedback cycle.
+    """
+    base_params = dict(pipeline_params or {})
+    prompt_changes: dict[str, Any] = {}
+    param_changes: dict[str, Any] = {}
+
+    improving = [
+        p for p in axis_profiles
+        if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
+    ]
+
+    for profile in improving:
+        axis_name = profile["axis"]
+        axis_type = profile["axis_type"]
+
+        axis_rows = scan_df[scan_df["axis"] == axis_name]
+        if axis_rows.empty:
+            continue
+
+        best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
+        value_idx = int(best_row["value_idx"])
+
+        if axis_type == "prompt_field":
+            values = variant_library.get("prompt_fields", {}).get(axis_name, [])
+        else:
+            values = variant_library.get("pipeline_params", {}).get(axis_name, [])
+
+        if value_idx >= len(values):
+            logger.warning(
+                "select_scan_winner: value_idx %d out of range for %s (len=%d)",
+                value_idx, axis_name, len(values),
+            )
+            continue
+
+        value = values[value_idx]
+
+        if axis_type == "prompt_field":
+            prompt_changes[axis_name] = value
+        else:
+            param_changes[axis_name] = value
+
+    best_ps = baseline_ps
+    if prompt_changes:
+        best_ps = baseline_ps.derive(
+            **prompt_changes,
+            changes_description="scan_winner",
+        )
+
+    best_params = {**base_params, **param_changes}
+
+    logger.info(
+        "select_scan_winner: %d prompt changes, %d param changes from %d improving axes",
+        len(prompt_changes), len(param_changes), len(improving),
+    )
+
+    return best_ps, best_params
+
+
+# ---------------------------------------------------------------------------
 # Adaptive search (importance-weighted coordinate descent)
 # ---------------------------------------------------------------------------
 

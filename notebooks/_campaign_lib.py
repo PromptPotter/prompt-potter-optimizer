@@ -32,8 +32,6 @@ from api.services.campaign_init import init_services as _init_services
 from api.services.prompt_eval import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
     extract_baseline_prompt as load_baseline_prompt,
-    compute_accuracy,
-    evaluate_prompt_cached as _evaluate_prompt_cached,
     run_baseline_eval as _run_baseline_eval,
 )
 from api.services.prompt_optimizer import (
@@ -65,6 +63,7 @@ from api.services.search import (
     build_diagnostic_set,
     sensitivity_scan as _sensitivity_scan,
     adaptive_search as _adaptive_search,
+    select_scan_winner as _select_scan_winner,
     build_prompt_result_index as build_historical_index,
     synthesize_sensitivity_from_grid as synthesize_sensitivity,
     assess_scan_coverage as _assess_scan_coverage,
@@ -106,7 +105,7 @@ def show_pipeline_config(svc: dict, campaign_config: dict) -> dict:
     """Import pipeline config from backend, apply overrides, print summary.
 
     Returns:
-        pipeline_params dict ready for evaluate_prompt().
+        pipeline_params dict ready for evaluation.
     """
     pipeline_config = load_pipeline_config(svc["exp_data"])
 
@@ -249,65 +248,6 @@ def analyze_candidate_coverage(replay_results: list) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Baseline & Eval  (thin wrappers adding tqdm/print output)
 # ---------------------------------------------------------------------------
-
-
-async def evaluate_prompt(
-    prompt_state: PromptState,
-    eval_data: list,
-    eval_llm: dict,
-    api_key: str,
-    label: str = "Eval",
-    verbose: bool = True,
-    *,
-    store: "ProjectStore | None" = None,
-    backend_id: str = "",
-    force: bool = False,
-    backend_client=None,
-    pipeline_params: "dict | None" = None,
-) -> list:
-    """Evaluate a prompt on all eval_data via the backend with progress bar."""
-    if backend_client is None:
-        raise ValueError(
-            "backend_client is required. Start the TermNorm backend and pass "
-            "svc.get('backend_client') from init_services()."
-        )
-
-    model = eval_llm.get("model", "")
-    temperature = eval_llm.get("temperature", 0.1)
-
-    pbar = tqdm(total=len(eval_data), desc=f"{label} eval", unit="query")
-
-    def _on_result(result, index, total):
-        if verbose:
-            tag = "HIT " if result["hit"] else "MISS"
-            tqdm.write(
-                f"[{index + 1}/{total}] {tag}  {result['query'][:50]:<50s} "
-                f"| pred: {result['predicted'][:35]:<35s}"
-            )
-        pbar.update(1)
-
-    results, scores, cached = await _evaluate_prompt_cached(
-        prompt_state, eval_data, backend_client,
-        pipeline_params=pipeline_params,
-        store=store, backend_id=backend_id,
-        force=force, label=label,
-        model=model, temperature=temperature,
-        on_result=_on_result,
-    )
-    pbar.close()
-
-    if cached:
-        print(
-            f"[stored] {label}: {scores['hits']}/{scores['total']} "
-            f"({scores['accuracy']:.1%})  |  Errors: {scores.get('errors', 0)}"
-        )
-    else:
-        print(
-            f"\n{label}: {scores['hits']}/{scores['total']} ({scores['accuracy']:.1%})"
-            f"  |  Errors: {scores['errors']}"
-        )
-
-    return results
 
 
 async def run_baseline_eval(
@@ -1453,6 +1393,72 @@ def _make_search_progress_cb():
                 print(f"\n  Round {r}: no improvement, stopping.")
 
     return _cb
+
+
+def select_scan_winner_notebook(
+    scan_df,
+    axis_profiles: list[dict],
+    search_baseline,
+    variant_library: dict,
+    pipeline_params: dict | None = None,
+    store=None,
+    backend_id: str = "",
+    plan_id: str = "",
+) -> tuple:
+    """Pick best from scan and print summary. No backend needed.
+
+    If *scan_df* is ``None`` (resumed from cache), loads scan rows from the
+    plan store automatically.
+
+    Returns:
+        (best_ps, best_params).
+    """
+    # Load scan rows from plan if scan_df not in memory
+    if scan_df is None and store and backend_id and plan_id:
+        from api.services.search.plan_persistence import deserialize_smart_search_plan
+
+        plan_data = store.smart_search.load(backend_id, plan_id)
+        if plan_data:
+            plan = deserialize_smart_search_plan(plan_data)
+            rows = (plan.get("scan_results") or {}).get("rows", [])
+            if rows:
+                scan_df = pd.DataFrame(rows)
+
+    if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
+        print("No scan data available. Run sensitivity scan (4.5b) first.")
+        return search_baseline, dict(pipeline_params or {})
+
+    best_ps, best_params = _select_scan_winner(
+        scan_df, axis_profiles, search_baseline, variant_library,
+        pipeline_params=pipeline_params,
+    )
+
+    # Print summary
+    improving = [
+        p for p in axis_profiles
+        if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
+    ]
+    if improving:
+        print(f"Selected best from {len(improving)} improving axes:")
+        for p in improving:
+            axis_rows = scan_df[scan_df["axis"] == p["axis"]]
+            if not axis_rows.empty:
+                best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
+                print(
+                    f"  {p['axis']:<25s} best_delta=+{p['best_delta']:.1%}  "
+                    f"value_idx={int(best_row['value_idx'])}  "
+                    f"acc={best_row['accuracy']:.1%}"
+                )
+    else:
+        print("No axes improved over baseline — using baseline as-is.")
+
+    if best_ps.id != search_baseline.id:
+        print(f"\nComposed PromptState: {best_ps.id[:12]} "
+              f"(parent: {best_ps.parent_id[:12] if best_ps.parent_id else 'root'})")
+    if best_params != dict(pipeline_params or {}):
+        print(f"Pipeline params updated: {best_params}")
+
+    return best_ps, best_params
 
 
 def display_axis_profiles(profiles: list[dict]) -> None:

@@ -1,4 +1,4 @@
-"""Tests for feedback cycling (WP 3.4).
+"""Tests for feedback cycling (WP 3.4) and scan winner selection.
 
 Covers:
 - Multi-round optimization with improving candidates
@@ -6,11 +6,16 @@ Covers:
 - Perfect score early exit
 - next_action routing from analysis node
 - AnalysisEvalOutput.next_action field
+- select_scan_winner greedy composition from OAT scan results
 """
 
 import pytest
 
+import pandas as pd
+
+from api.models.prompt_state import PromptState
 from api.services.feedback_cycle import CycleConfig, run_feedback_cycle
+from api.services.search import select_scan_winner
 
 
 # ---------------------------------------------------------------------------
@@ -592,3 +597,138 @@ async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
     for i, (round_num, stall) in enumerate(callbacks):
         assert round_num == i
         assert stall == i + 1  # All rounds are non-improving
+
+
+# ---------------------------------------------------------------------------
+# select_scan_winner tests
+# ---------------------------------------------------------------------------
+
+
+class TestSelectScanWinner:
+    """Tests for select_scan_winner greedy composition."""
+
+    @pytest.fixture
+    def baseline_ps(self):
+        return PromptState(
+            instruction="Rank candidates",
+            thinking_style="baseline_style",
+            task_intent="baseline_intent",
+        )
+
+    @pytest.fixture
+    def variant_library(self):
+        return {
+            "prompt_fields": {
+                "thinking_style": [
+                    "baseline_style",
+                    "step by step",
+                    "analytical reasoning",
+                    "comparative analysis",
+                ],
+                "task_intent": [
+                    "baseline_intent",
+                    "match materials",
+                    "rank by relevance",
+                ],
+            },
+            "pipeline_params": {
+                "ranking_temperature": [0.0, 0.3, 0.7],
+            },
+        }
+
+    @pytest.fixture
+    def scan_df(self):
+        return pd.DataFrame([
+            # thinking_style: variant idx 2 is best (+10%)
+            {"axis": "thinking_style", "axis_type": "prompt_field",
+             "value_idx": 0, "accuracy": 0.50, "delta": 0.0},
+            {"axis": "thinking_style", "axis_type": "prompt_field",
+             "value_idx": 1, "accuracy": 0.55, "delta": 0.05},
+            {"axis": "thinking_style", "axis_type": "prompt_field",
+             "value_idx": 2, "accuracy": 0.60, "delta": 0.10},
+            {"axis": "thinking_style", "axis_type": "prompt_field",
+             "value_idx": 3, "accuracy": 0.45, "delta": -0.05},
+            # task_intent: no improvement
+            {"axis": "task_intent", "axis_type": "prompt_field",
+             "value_idx": 0, "accuracy": 0.50, "delta": 0.0},
+            {"axis": "task_intent", "axis_type": "prompt_field",
+             "value_idx": 1, "accuracy": 0.48, "delta": -0.02},
+            {"axis": "task_intent", "axis_type": "prompt_field",
+             "value_idx": 2, "accuracy": 0.50, "delta": 0.0},
+            # ranking_temperature: variant idx 1 is best (+5%)
+            {"axis": "ranking_temperature", "axis_type": "pipeline_param",
+             "value_idx": 0, "accuracy": 0.50, "delta": 0.0},
+            {"axis": "ranking_temperature", "axis_type": "pipeline_param",
+             "value_idx": 1, "accuracy": 0.55, "delta": 0.05},
+            {"axis": "ranking_temperature", "axis_type": "pipeline_param",
+             "value_idx": 2, "accuracy": 0.45, "delta": -0.05},
+        ])
+
+    @pytest.fixture
+    def axis_profiles(self):
+        return [
+            {"axis": "thinking_style", "axis_type": "prompt_field",
+             "cardinality": 4, "sensitivity_range": 0.15,
+             "best_delta": 0.10, "exploration_budget": "high"},
+            {"axis": "task_intent", "axis_type": "prompt_field",
+             "cardinality": 3, "sensitivity_range": 0.02,
+             "best_delta": 0.0, "exploration_budget": "medium"},
+            {"axis": "ranking_temperature", "axis_type": "pipeline_param",
+             "cardinality": 3, "sensitivity_range": 0.10,
+             "best_delta": 0.05, "exploration_budget": "medium"},
+        ]
+
+    def test_picks_best_per_improving_axis(
+        self, scan_df, axis_profiles, baseline_ps, variant_library,
+    ):
+        best_ps, best_params = select_scan_winner(
+            scan_df, axis_profiles, baseline_ps, variant_library,
+        )
+        # thinking_style should be "analytical reasoning" (idx 2)
+        assert best_ps.thinking_style == "analytical reasoning"
+        # task_intent unchanged (best_delta=0)
+        assert best_ps.task_intent == "baseline_intent"
+        # ranking_temperature should be 0.3 (idx 1)
+        assert best_params["ranking_temperature"] == 0.3
+
+    def test_no_improving_axes(self, baseline_ps, variant_library):
+        """When no axes improve, returns baseline unchanged."""
+        scan_df = pd.DataFrame([
+            {"axis": "thinking_style", "axis_type": "prompt_field",
+             "value_idx": 0, "accuracy": 0.50, "delta": 0.0},
+        ])
+        profiles = [
+            {"axis": "thinking_style", "axis_type": "prompt_field",
+             "cardinality": 1, "sensitivity_range": 0.0,
+             "best_delta": 0.0, "exploration_budget": "skip"},
+        ]
+        best_ps, best_params = select_scan_winner(
+            scan_df, profiles, baseline_ps, variant_library,
+        )
+        assert best_ps.id == baseline_ps.id
+        assert best_params == {}
+
+    def test_skipped_axes_excluded(
+        self, scan_df, baseline_ps, variant_library,
+    ):
+        """Axes with exploration_budget='skip' are excluded even if best_delta > 0."""
+        profiles = [
+            {"axis": "thinking_style", "axis_type": "prompt_field",
+             "cardinality": 4, "sensitivity_range": 0.15,
+             "best_delta": 0.10, "exploration_budget": "skip"},
+        ]
+        best_ps, best_params = select_scan_winner(
+            scan_df, profiles, baseline_ps, variant_library,
+        )
+        assert best_ps.id == baseline_ps.id
+
+    def test_pipeline_params_merged(
+        self, scan_df, axis_profiles, baseline_ps, variant_library,
+    ):
+        """Existing pipeline params are preserved and new ones merged in."""
+        best_ps, best_params = select_scan_winner(
+            scan_df, axis_profiles, baseline_ps, variant_library,
+            pipeline_params={"existing_key": "keep_me"},
+        )
+        assert best_params["existing_key"] == "keep_me"
+        assert best_params["ranking_temperature"] == 0.3

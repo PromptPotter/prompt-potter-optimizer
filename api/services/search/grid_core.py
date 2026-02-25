@@ -464,13 +464,21 @@ async def run_grid_search(
         DataFrame with columns: axis indices, prompt_state_id,
         hits, total, accuracy, errors. Sorted by accuracy desc.
     """
-    if session_terms:
-        await backend_client.init_session(session_terms)
-
     eval_plan = resolve_point_evals(
         grid_points, state_lookup, eval_data,
         eval_queries_per_point, shared_queries, seed,
     )
+
+    # Only init backend session if there are uncached points that need evaluation
+    if session_terms and store and backend_id:
+        needs_eval = any(
+            not store.dataset_runs.load_by_hash(backend_id, info.content_hash)
+            for info in eval_plan
+        )
+        if needs_eval:
+            await backend_client.init_session(session_terms)
+    elif session_terms:
+        await backend_client.init_session(session_terms)
 
     rows = []
     for info in eval_plan:

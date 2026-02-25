@@ -35,6 +35,7 @@ from api.services.search.smart_search import (
     build_diagnostic_set,
     classify_axis,
     resume_or_build_diagnostic,
+    select_scan_winner,
     sensitivity_scan,
 )
 
@@ -99,6 +100,7 @@ __all__ = [
     "build_diagnostic_set",
     "classify_axis",
     "resume_or_build_diagnostic",
+    "select_scan_winner",
     "sensitivity_scan",
     # plan_persistence
     "GRIDPLAN_PREFIX",
