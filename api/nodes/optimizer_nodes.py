@@ -303,14 +303,23 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
         candidates = [PromptState(**c) for c in input_data.candidates]
         all_candidate_results: dict[str, list[dict[str, Any]]] = {}
         candidate_scores: list[dict] = []
+        on_candidate_eval = self.config.get("on_candidate_eval")
+        on_query_eval = self.config.get("on_query_eval")
 
         for idx, c in enumerate(candidates):
+            # Build per-query callback scoped to this candidate
+            _on_result = None
+            if on_query_eval:
+                def _on_result(result, qi, qt, _ci=idx, _ct=len(candidates)):
+                    on_query_eval(_ci, _ct, qi, qt, result)
+
             results, scores, cached = await evaluate_prompt_cached(
                 c, input_data.eval_data, backend_client,
                 pipeline_params=pipeline_params,
                 store=store, backend_id=backend_id,
                 label=f"candidate_{idx}",
                 model=model or "", temperature=temperature,
+                on_result=_on_result,
             )
             all_candidate_results[c.id] = results
             candidate_scores.append({
@@ -320,6 +329,8 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
                 "total": scores["total"],
                 "cached": cached,
             })
+            if on_candidate_eval:
+                on_candidate_eval(idx, len(candidates), scores)
 
         # Assemble current_best — prefer pre-built dict, fall back to flat fields
         if input_data.current_best:

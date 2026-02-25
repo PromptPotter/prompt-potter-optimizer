@@ -1606,6 +1606,7 @@ async def run_feedback_cycle_notebook(
     backend_id: str = "",
     backend_url: str = "http://127.0.0.1:8000",
     pipeline_params: "dict | None" = None,
+    session_terms: "list[str] | None" = None,
     langfuse_session_id: str | None = None,
 ) -> list:
     """Run optimization via M3 feedback cycle (node-based architecture).
@@ -1637,28 +1638,60 @@ async def run_feedback_cycle_notebook(
         project_root=str(store.base_dir) if store else "",
         generate_suggestions=False,
         pipeline_params=pipeline_params,
+        session_terms=session_terms,
         temperature=eval_llm.get("temperature", 0.0),
         queries_per_eval=campaign_config.get("queries_per_eval", 0),
         seed=42,
     )
 
-    # Extract baseline from existing campaign_rounds (if any)
+    # Extract baseline from existing campaign_rounds.
+    # Use the last round that has real eval results; skip rounds seeded
+    # with carry-forward accuracy (e.g. "search" round from 4.5c).
     baseline_ps = None
     baseline_acc = 0.0
     baseline_results = None
+    instruction = ""
     if campaign_rounds:
+        # Prefer the last round that has actual eval results
         last = campaign_rounds[-1]
+        for rd in reversed(campaign_rounds):
+            if rd.get("results"):
+                last = rd
+                break
         ps = last["prompt_state"]
         baseline_ps = ps.model_dump() if hasattr(ps, "model_dump") else ps
         baseline_acc = last.get("accuracy", 0.0)
         baseline_results = last.get("results", [])
         instruction = ps.instruction if hasattr(ps, "instruction") else ""
-    else:
-        instruction = ""
+        # Use the prompt_state from the most recent round (may differ from
+        # the round with results — e.g. search winner with derived prompt)
+        tip_ps = campaign_rounds[-1]["prompt_state"]
+        baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
+        instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else instruction
 
     patience = config.patience
+    n_variants = config.n_variants
+
+    print(f"Feedback cycle: baseline acc={baseline_acc:.1%}, "
+          f"max_rounds={config.max_rounds}, patience={patience}")
+
+    _query_counter = [0]  # mutable counter for closure
+
+    def _on_query(cand_idx, n_cands, query_idx, n_queries, result):
+        _query_counter[0] += 1
+        tag = "HIT " if result.get("hit") else "MISS"
+        print(
+            f"  [{_query_counter[0]}] C{cand_idx + 1}/{n_cands} "
+            f"Q{query_idx + 1}/{n_queries} {tag} "
+            f"{result.get('query', '')[:50]}"
+        )
+
+    def _on_candidate(idx, total, scores):
+        tag = "cached" if scores.get("cached") else f"{scores['accuracy']:.1%}"
+        print(f"  >> Candidate {idx + 1}/{total} done: {tag}")
 
     def _on_round(round_result, stall_count):
+        _query_counter[0] = 0
         # Convert to campaign_rounds-compatible format and append
         ps = PromptState(**round_result.prompt_state)
         round_entry = {
@@ -1692,6 +1725,8 @@ async def run_feedback_cycle_notebook(
         baseline_accuracy=baseline_acc,
         baseline_results=baseline_results,
         on_round_complete=_on_round,
+        on_candidate_eval=_on_candidate,
+        on_query_eval=_on_query,
         langfuse_session_id=langfuse_session_id,
     )
 

@@ -37,8 +37,8 @@ BASE_DIR = Path(".promptpotter") / "projects"
 class ProjectStore:
     """Composite store — access domain stores as public attributes."""
 
-    def __init__(self, base_dir: Path | None = None):
-        self.base_dir = base_dir or BASE_DIR
+    def __init__(self, base_dir: Path | str | None = None):
+        self.base_dir = Path(base_dir) if base_dir else BASE_DIR
         self.backends = BackendStore(self.base_dir)
         self.campaigns = CampaignStore(self.base_dir)
         self.executions = ExecutionStore(self.base_dir)

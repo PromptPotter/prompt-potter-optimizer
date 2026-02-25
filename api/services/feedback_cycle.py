@@ -41,6 +41,7 @@ class CycleConfig(BaseModel):
     project_root: str = Field("", description="Project root for store")
     generate_suggestions: bool = Field(False, description="LLM suggestions each round")
     pipeline_params: dict | None = Field(None, description="Pipeline parameter overrides")
+    session_terms: list[str] | None = Field(None, description="Backend session terms")
     temperature: float = Field(0.0, description="Temperature for content hash")
     queries_per_eval: int = Field(0, description="Subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
@@ -87,6 +88,8 @@ async def run_feedback_cycle(
     baseline_accuracy: float = 0.0,
     baseline_results: list | None = None,
     on_round_complete: Callable | None = None,
+    on_candidate_eval: Callable | None = None,
+    on_query_eval: Callable | None = None,
     langfuse_session_id: str | None = None,
 ) -> CycleResult:
     """Run iterative optimization with feedback cycling.
@@ -108,6 +111,8 @@ async def run_feedback_cycle(
         baseline_results: Eval results for the baseline (for failure analysis).
         on_round_complete: Optional callback after each round:
             ``(round_result: CycleRoundResult, stall_count: int)``
+        on_candidate_eval: Optional callback after each candidate evaluation:
+            ``(candidate_idx: int, n_candidates: int, scores: dict)``
         langfuse_session_id: Optional session ID for grouping Langfuse traces.
 
     Returns:
@@ -120,10 +125,16 @@ async def run_feedback_cycle(
         GrowFilterNode,
         InitNode,
     )
+    from api.services.backend_client import BackendClient
     from api.services.langfuse_client import LangfuseLogger
 
     langfuse = LangfuseLogger.get_instance()
     started_at = datetime.now(timezone.utc).isoformat()
+
+    # Initialize backend session (required before /matches calls)
+    if config.session_terms:
+        bc = BackendClient(config.backend_url)
+        await bc.init_session(config.session_terms)
 
     # Subsample eval data if configured
     if config.queries_per_eval > 0 and len(eval_data) > config.queries_per_eval:
@@ -207,6 +218,8 @@ async def run_feedback_cycle(
                 "generate_suggestions": config.generate_suggestions,
                 "pipeline_params": config.pipeline_params,
                 "temperature": config.temperature,
+                "on_candidate_eval": on_candidate_eval,
+                "on_query_eval": on_query_eval,
             },
         )
         eval_out = await eval_node.process({
