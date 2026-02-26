@@ -20,6 +20,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -80,6 +81,20 @@ class CycleResult(BaseModel):
     langfuse_trace_id: str | None = None
     cycle_id: str | None = None
     resumed_from_round: int = 0
+
+
+@dataclass
+class _LoopState:
+    """Mutable state threaded through the feedback cycle round loop."""
+
+    rounds: list[CycleRoundResult] = field(default_factory=list)
+    current_ps: dict = field(default_factory=dict)
+    current_accuracy: float = 0.0
+    current_results: list = field(default_factory=list)
+    best_accuracy: float = 0.0
+    best_round: int = -1
+    best_ps: dict = field(default_factory=dict)
+    stall_count: int = 0
 
 
 def cycle_config_identity(
@@ -258,6 +273,347 @@ def _restore_round_state(
     )
 
 
+def _init_obs(
+    config: CycleConfig,
+    obs_campaign_id: str,
+    baseline_accuracy: float,
+    eval_data: list[dict],
+    langfuse_session_id: str | None,
+) -> tuple[Any | None, str | None, dict[str, str] | None]:
+    """Create ObsLogger, log campaign start, register dataset.
+
+    Returns:
+        (obs, dataset_name, dataset_item_map)
+    """
+    from api.services.obs.observability_logger import ObsLogger
+
+    obs: ObsLogger | None = None
+    if config.project_root and config.backend_id:
+        try:
+            obs = ObsLogger(config.project_root, config.backend_id)
+        except Exception:
+            logger.warning("Failed to create ObsLogger", exc_info=True)
+
+    dataset_name: str | None = None
+    dataset_item_map: dict[str, str] | None = None
+    if not obs:
+        return obs, dataset_name, dataset_item_map
+
+    try:
+        obs.log_campaign_start(
+            campaign_id=obs_campaign_id,
+            config=config.model_dump(),
+            baseline_accuracy=baseline_accuracy,
+            session_id=langfuse_session_id,
+        )
+    except Exception:
+        logger.warning("ObsLogger.log_campaign_start failed", exc_info=True)
+
+    try:
+        dataset_name = "termnorm_ground_truth"
+        dataset_item_map = obs.register_dataset(dataset_name, eval_data)
+        if dataset_item_map:
+            logger.info(
+                "Registered %d dataset items for '%s'",
+                len(dataset_item_map), dataset_name,
+            )
+    except Exception:
+        logger.warning("Dataset registration failed", exc_info=True)
+        dataset_item_map = None
+
+    return obs, dataset_name, dataset_item_map
+
+
+def _resume_or_create_campaign(
+    config: CycleConfig,
+    eval_data: list[dict],
+    current_ps: dict,
+    baseline_prompt_state: dict | None,
+    baseline_accuracy: float,
+) -> tuple[Any | None, str | None, int, _LoopState | None, CycleResult | None]:
+    """Handle campaign resume detection.
+
+    Returns:
+        (campaign_store, cycle_id, resumed_from_round, restored_state, completed_result)
+
+    - ``completed_result`` is set when a finished campaign was found on disk.
+    - ``restored_state`` is set when an in-progress campaign was found.
+    - Both are ``None`` for a fresh start.
+    """
+    if not (config.project_root and config.backend_id):
+        return None, None, 0, None, None
+
+    try:
+        from api.models.prompt_state import PromptState as _PS
+        from api.services.stores.campaign_store import CampaignStore
+
+        store_base = __import__("pathlib").Path(config.project_root)
+        campaign_store = CampaignStore(store_base)
+
+        if baseline_prompt_state is not None:
+            _bl_rendered = _PS(**baseline_prompt_state).render()
+        else:
+            _bl_rendered = _PS(**current_ps).render()
+
+        cycle_id = cycle_config_identity(config, _bl_rendered, eval_data)
+        logger.info("Cycle identity: %s", cycle_id)
+
+        existing = campaign_store.load(config.backend_id, cycle_id)
+        if existing is not None:
+            # Already completed — return cached result
+            if existing.get("status") == "completed":
+                logger.info(
+                    "Cycle %s already completed — returning cached result",
+                    cycle_id,
+                )
+                completed = _restore_completed_result(
+                    existing, campaign_store, config.backend_id, cycle_id,
+                )
+                return campaign_store, cycle_id, 0, None, completed
+
+            # In-progress — restore round state
+            if existing.get("trials"):
+                (
+                    rounds, cur_ps, cur_acc, cur_results,
+                    best_acc, best_rnd, best_ps, stall,
+                ) = _restore_round_state(
+                    existing, campaign_store, config.backend_id,
+                    cycle_id, config.improvement_threshold,
+                )
+                resumed_from = len(rounds)
+                logger.info(
+                    "Resuming cycle %s from round %d (best_acc=%.3f)",
+                    cycle_id, resumed_from, best_acc,
+                )
+                restored = _LoopState(
+                    rounds=rounds,
+                    current_ps=cur_ps,
+                    current_accuracy=cur_acc,
+                    current_results=cur_results,
+                    best_accuracy=best_acc,
+                    best_round=best_rnd,
+                    best_ps=best_ps,
+                    stall_count=stall,
+                )
+                return campaign_store, cycle_id, resumed_from, restored, None
+
+            logger.info(
+                "Cycle %s exists but has no completed rounds — starting fresh",
+                cycle_id,
+            )
+        else:
+            campaign_store.create(config.backend_id, cycle_id, {
+                "type": "feedback_cycle",
+                "config": config.model_dump(),
+                "baseline_accuracy": baseline_accuracy,
+            })
+
+        return campaign_store, cycle_id, 0, None, None
+    except Exception:
+        logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
+        return None, None, 0, None, None
+
+
+async def _execute_round(
+    round_num: int,
+    state: _LoopState,
+    round_eval_data: list[dict],
+    config: CycleConfig,
+    obs: Any | None,
+    obs_campaign_id: str,
+    dataset_name: str | None,
+    dataset_item_map: dict[str, str] | None,
+    campaign_store: Any | None,
+    cycle_id: str | None,
+    on_candidate_eval: Callable | None,
+    on_query_eval: Callable | None,
+) -> CycleRoundResult:
+    """Execute one optimization round: generate → evaluate → obs log.
+
+    Returns:
+        CycleRoundResult for this round.
+    """
+    from api.nodes.optimizer_nodes import AnalysisEvalNode, GrowFilterNode
+
+    # -- Generate or load candidates --
+    persisted = None
+    if campaign_store and cycle_id:
+        persisted = _load_round_candidates(
+            campaign_store, config.backend_id, cycle_id, round_num,
+        )
+
+    if persisted is not None:
+        logger.info(
+            "Loaded %d persisted candidates for round %d",
+            len(persisted), round_num,
+        )
+        candidates_for_eval = persisted
+    else:
+        logger.debug("No persisted candidates for round %d — generating fresh", round_num)
+        grow_node = GrowFilterNode(
+            node_id=f"cycle_grow_{round_num}",
+            config={
+                "model": config.model,
+                "provider": config.provider,
+                "n_variants": config.n_variants,
+                "creativity": config.creativity,
+            },
+        )
+        grow_out = await grow_node.process({
+            "prompt_state": state.current_ps,
+            "accuracy": state.current_accuracy,
+            "results": state.current_results,
+        })
+        candidates_for_eval = grow_out.candidates
+
+        if campaign_store and cycle_id:
+            _save_round_candidates(
+                campaign_store, config.backend_id, cycle_id,
+                round_num, candidates_for_eval,
+            )
+
+    # -- Evaluate candidates --
+    eval_config: dict[str, Any] = {
+        "model": config.model,
+        "provider": config.provider,
+        "backend_url": config.backend_url,
+        "backend_id": config.backend_id,
+        "project_root": config.project_root,
+        "improvement_threshold": config.improvement_threshold,
+        "generate_suggestions": config.generate_suggestions,
+        "pipeline_params": config.pipeline_params,
+        "temperature": config.temperature,
+        "on_candidate_eval": on_candidate_eval,
+        "on_query_eval": on_query_eval,
+        "obs": obs,
+    }
+    if dataset_name and dataset_item_map:
+        eval_config["dataset_name"] = dataset_name
+        eval_config["dataset_item_map"] = dataset_item_map
+
+    eval_node = AnalysisEvalNode(
+        node_id=f"cycle_eval_{round_num}",
+        config=eval_config,
+    )
+    eval_out = await eval_node.process({
+        "candidates": candidates_for_eval,
+        "eval_data": round_eval_data,
+        "baseline_prompt_state": state.current_ps,
+        "baseline_accuracy": state.current_accuracy,
+        "baseline_results": state.current_results,
+        "baseline_label": f"round_{round_num}" if round_num > 0 else "baseline",
+    })
+
+    round_result = CycleRoundResult(
+        round=round_num,
+        label=eval_out.winner.get("label", f"round_{round_num}"),
+        accuracy=eval_out.winner_accuracy,
+        hits=eval_out.winner.get("hits", 0),
+        total=eval_out.winner.get("total", 0),
+        improved=eval_out.improved,
+        next_action=eval_out.next_action,
+        prompt_state=eval_out.winner_prompt_state,
+        results=eval_out.winner_results,
+        candidates_evaluated=eval_out.winner.get("candidates_evaluated", 0),
+        candidate_scores=eval_out.candidate_scores,
+    )
+
+    # -- Observability: round + prompt version --
+    if obs:
+        try:
+            obs.log_round(
+                campaign_id=obs_campaign_id,
+                round_num=round_num,
+                accuracy=eval_out.winner_accuracy,
+                hits=eval_out.winner.get("hits", 0),
+                total=eval_out.winner.get("total", 0),
+                improved=eval_out.improved,
+                next_action=eval_out.next_action,
+                winner_prompt_state_id=eval_out.winner_prompt_state.get(
+                    "id", "",
+                ),
+                candidate_scores=eval_out.candidate_scores,
+                model=config.model or "",
+                temperature=config.temperature,
+                n_variants=config.n_variants,
+            )
+        except Exception:
+            logger.warning("ObsLogger.log_round failed", exc_info=True)
+
+        try:
+            from api.models.prompt_state import PromptState
+            winner_ps = PromptState(**eval_out.winner_prompt_state)
+            obs.log_prompt_version(
+                prompt_state_id=winner_ps.id,
+                rendered_prompt=winner_ps.render(),
+                layer1_fields={
+                    f: getattr(winner_ps, f)
+                    for f in [
+                        "persona", "task_intent", "problem_description",
+                        "instruction", "thinking_style", "answer_format",
+                    ]
+                },
+                parent_id=winner_ps.parent_id,
+            )
+        except Exception:
+            logger.warning(
+                "ObsLogger.log_prompt_version failed", exc_info=True,
+            )
+
+    return round_result
+
+
+def _finalize_campaign(
+    campaign_store: Any | None,
+    cycle_id: str | None,
+    config: CycleConfig,
+    state: _LoopState,
+    stop_reason: str,
+    finished_at: str,
+    obs: Any | None,
+    obs_campaign_id: str,
+) -> str | None:
+    """Mark campaign complete on disk and finalize observability.
+
+    Returns:
+        Cloud Langfuse trace ID (or None).
+    """
+    if campaign_store and cycle_id:
+        try:
+            campaign_store.update(config.backend_id, cycle_id, {
+                "status": "completed",
+                "stop_reason": stop_reason,
+                "best_accuracy": state.best_accuracy,
+                "best_round": state.best_round,
+                "n_rounds": len(state.rounds),
+                "finished_at": finished_at,
+            })
+        except Exception:
+            logger.warning("Campaign completion update failed", exc_info=True)
+
+    cloud_trace_id: str | None = None
+    if obs:
+        try:
+            obs.log_campaign_end(
+                campaign_id=obs_campaign_id,
+                best_accuracy=state.best_accuracy,
+                n_rounds=len(state.rounds),
+                stop_reason=stop_reason,
+                best_round=state.best_round,
+            )
+            obs.flush()
+            cloud_trace_id = obs.get_cloud_trace_id(obs_campaign_id)
+        except Exception:
+            logger.warning("ObsLogger campaign end failed", exc_info=True)
+
+    return cloud_trace_id
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
 async def run_feedback_cycle(
     instruction: str,
     eval_data: list[dict[str, Any]],
@@ -298,44 +654,26 @@ async def run_feedback_cycle(
     Returns:
         CycleResult with all rounds and final winner.
     """
-    from api.nodes.optimizer_nodes import (
-        AnalysisEvalNode,
-        GrowFilterNode,
-        InitNode,
-    )
+    from api.nodes.optimizer_nodes import InitNode
     from api.services.backend_client import BackendClient
     from api.services.eval_helpers import subsample_queries
-    from api.services.obs.observability_logger import ObsLogger
 
     started_at = datetime.now(timezone.utc).isoformat()
-
-    # Single observability gateway (file + cloud Langfuse)
-    obs: ObsLogger | None = None
-    if config.project_root and config.backend_id:
-        try:
-            obs = ObsLogger(config.project_root, config.backend_id)
-        except Exception:
-            logger.warning("Failed to create ObsLogger", exc_info=True)
 
     # Initialize backend session (required before /matches calls)
     if config.session_terms:
         bc = BackendClient(config.backend_url)
         await bc.init_session(config.session_terms)
 
-    # Subsample eval data if configured
     round_eval_data = subsample_queries(eval_data, config.queries_per_eval, config.seed)
 
     # -- Step 1: Initialize baseline --
     if baseline_prompt_state is not None:
-        # Use provided baseline — skip InitNode
         current_ps = baseline_prompt_state
         current_accuracy = baseline_accuracy
         current_results: list = baseline_results or []
-        logger.info(
-            "Using provided baseline (acc=%.3f)", current_accuracy,
-        )
+        logger.info("Using provided baseline (acc=%.3f)", current_accuracy)
     else:
-        # Run InitNode to create baseline from instruction
         init_node = InitNode(
             node_id="cycle_init",
             config={"model": config.model, "provider": config.provider},
@@ -348,265 +686,64 @@ async def run_feedback_cycle(
         current_accuracy = 0.0
         current_results = []
 
-    # -- Resume detection --
-    campaign_store = None
-    cycle_id: str | None = None
-    resumed_from_round = 0
+    # -- Step 2: Resume detection --
+    (
+        campaign_store, cycle_id, resumed_from_round,
+        restored_state, completed_result,
+    ) = _resume_or_create_campaign(
+        config, eval_data, current_ps, baseline_prompt_state, baseline_accuracy,
+    )
+    if completed_result is not None:
+        return completed_result
 
-    if config.project_root and config.backend_id:
-        try:
-            from api.models.prompt_state import PromptState as _PS
-            from api.services.stores.campaign_store import CampaignStore
-
-            store_base = __import__("pathlib").Path(config.project_root)
-            campaign_store = CampaignStore(store_base)
-
-            # Compute baseline rendered prompt for identity hash
-            if baseline_prompt_state is not None:
-                _bl_rendered = _PS(**baseline_prompt_state).render()
-            else:
-                _bl_rendered = _PS(**current_ps).render()
-
-            cycle_id = cycle_config_identity(config, _bl_rendered, eval_data)
-            logger.info("Cycle identity: %s", cycle_id)
-
-            existing = campaign_store.load(config.backend_id, cycle_id)
-            if existing is not None:
-                if existing.get("status") == "completed":
-                    logger.info(
-                        "Cycle %s already completed — returning cached result",
-                        cycle_id,
-                    )
-                    return _restore_completed_result(
-                        existing, campaign_store, config.backend_id, cycle_id,
-                    )
-
-                # In-progress: restore round state
-                if existing.get("trials"):
-                    (
-                        rounds, current_ps, current_accuracy, current_results,
-                        best_accuracy, best_round, best_ps, stall_count,
-                    ) = _restore_round_state(
-                        existing, campaign_store, config.backend_id,
-                        cycle_id, config.improvement_threshold,
-                    )
-                    resumed_from_round = len(rounds)
-                    logger.info(
-                        "Resuming cycle %s from round %d (best_acc=%.3f)",
-                        cycle_id, resumed_from_round, best_accuracy,
-                    )
-                else:
-                    logger.info(
-                        "Cycle %s exists but has no completed rounds "
-                        "— starting fresh",
-                        cycle_id,
-                    )
-            else:
-                # Create new campaign entry
-                campaign_store.create(config.backend_id, cycle_id, {
-                    "type": "feedback_cycle",
-                    "config": config.model_dump(),
-                    "baseline_accuracy": baseline_accuracy,
-                })
-        except Exception:
-            logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
-            campaign_store = None
-            cycle_id = None
-
-    # Campaign ID for observability
+    # -- Step 3: Observability setup --
     obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
-    dataset_name: str | None = None
-    dataset_item_map: dict[str, str] | None = None
-    if obs:
-        try:
-            obs.log_campaign_start(
-                campaign_id=obs_campaign_id,
-                config=config.model_dump(),
-                baseline_accuracy=baseline_accuracy,
-                session_id=langfuse_session_id,
-            )
-        except Exception:
-            logger.warning("ObsLogger.log_campaign_start failed", exc_info=True)
+    obs, dataset_name, dataset_item_map = _init_obs(
+        config, obs_campaign_id, baseline_accuracy, eval_data, langfuse_session_id,
+    )
 
-        # Register dataset items for linking evaluations
-        try:
-            dataset_name = "termnorm_ground_truth"
-            dataset_item_map = obs.register_dataset(dataset_name, eval_data)
-            if dataset_item_map:
-                logger.info(
-                    "Registered %d dataset items for '%s'",
-                    len(dataset_item_map), dataset_name,
-                )
-        except Exception:
-            logger.warning("Dataset registration failed", exc_info=True)
-            dataset_item_map = None
-
-    # Initialize round state for fresh start (skip if resumed)
-    if resumed_from_round == 0:
-        rounds = []
-        best_accuracy = current_accuracy
-        best_round = -1
-        best_ps = current_ps
-        stall_count = 0
+    # -- Step 4: Initialize loop state --
+    if restored_state is not None:
+        state = restored_state
+    else:
+        state = _LoopState(
+            current_ps=current_ps,
+            current_accuracy=current_accuracy,
+            current_results=current_results,
+            best_accuracy=current_accuracy,
+            best_ps=current_ps,
+        )
     stop_reason = "max_rounds"
 
-    # -- Step 2: Iterative loop --
+    # -- Step 5: Round loop --
     for round_num in range(resumed_from_round, config.max_rounds):
         logger.info(
             "Feedback cycle round %d (acc=%.3f, stall=%d/%d)",
-            round_num, current_accuracy, stall_count, config.patience,
+            round_num, state.current_accuracy, state.stall_count, config.patience,
         )
 
-        # Try loading persisted candidates (mid-round resume)
-        persisted = None
-        if campaign_store and cycle_id:
-            persisted = _load_round_candidates(
-                campaign_store, config.backend_id, cycle_id, round_num,
-            )
-
-        if persisted is not None:
-            logger.info(
-                "Loaded %d persisted candidates for round %d",
-                len(persisted), round_num,
-            )
-            candidates_for_eval = persisted
-        else:
-            logger.debug("No persisted candidates for round %d — generating fresh", round_num)
-            # Grow: generate fresh candidates via LLM
-            grow_node = GrowFilterNode(
-                node_id=f"cycle_grow_{round_num}",
-                config={
-                    "model": config.model,
-                    "provider": config.provider,
-                    "n_variants": config.n_variants,
-                    "creativity": config.creativity,
-                },
-            )
-            grow_out = await grow_node.process({
-                "prompt_state": current_ps,
-                "accuracy": current_accuracy,
-                "results": current_results,
-            })
-            candidates_for_eval = grow_out.candidates
-
-            # Persist before evaluation (crash-safe checkpoint)
-            if campaign_store and cycle_id:
-                _save_round_candidates(
-                    campaign_store, config.backend_id, cycle_id,
-                    round_num, candidates_for_eval,
-                )
-
-        # Evaluate: score candidates and select winner
-        eval_config: dict[str, Any] = {
-            "model": config.model,
-            "provider": config.provider,
-            "backend_url": config.backend_url,
-            "backend_id": config.backend_id,
-            "project_root": config.project_root,
-            "improvement_threshold": config.improvement_threshold,
-            "generate_suggestions": config.generate_suggestions,
-            "pipeline_params": config.pipeline_params,
-            "temperature": config.temperature,
-            "on_candidate_eval": on_candidate_eval,
-            "on_query_eval": on_query_eval,
-            "obs": obs,
-        }
-        if dataset_name and dataset_item_map:
-            eval_config["dataset_name"] = dataset_name
-            eval_config["dataset_item_map"] = dataset_item_map
-
-        eval_node = AnalysisEvalNode(
-            node_id=f"cycle_eval_{round_num}",
-            config=eval_config,
+        round_result = await _execute_round(
+            round_num, state, round_eval_data, config,
+            obs, obs_campaign_id, dataset_name, dataset_item_map,
+            campaign_store, cycle_id,
+            on_candidate_eval, on_query_eval,
         )
-        eval_out = await eval_node.process({
-            "candidates": candidates_for_eval,
-            "eval_data": round_eval_data,
-            "baseline_prompt_state": current_ps,
-            "baseline_accuracy": current_accuracy,
-            "baseline_results": current_results,
-            "baseline_label": f"round_{round_num}" if round_num > 0 else "baseline",
-        })
 
-        # Record round
-        round_result = CycleRoundResult(
-            round=round_num,
-            label=eval_out.winner.get("label", f"round_{round_num}"),
-            accuracy=eval_out.winner_accuracy,
-            hits=eval_out.winner.get("hits", 0),
-            total=eval_out.winner.get("total", 0),
-            improved=eval_out.improved,
-            next_action=eval_out.next_action,
-            prompt_state=eval_out.winner_prompt_state,
-            results=eval_out.winner_results,
-            candidates_evaluated=eval_out.winner.get("candidates_evaluated", 0),
-            candidate_scores=eval_out.candidate_scores,
-        )
-        rounds.append(round_result)
+        # Update loop state
+        state.rounds.append(round_result)
+        state.current_ps = round_result.prompt_state
+        state.current_accuracy = round_result.accuracy
+        state.current_results = round_result.results
 
-        # Observability: round logging (file + cloud Langfuse via ObsLogger)
-        if obs:
-            try:
-                obs.log_round(
-                    campaign_id=obs_campaign_id,
-                    round_num=round_num,
-                    accuracy=eval_out.winner_accuracy,
-                    hits=eval_out.winner.get("hits", 0),
-                    total=eval_out.winner.get("total", 0),
-                    improved=eval_out.improved,
-                    next_action=eval_out.next_action,
-                    winner_prompt_state_id=eval_out.winner_prompt_state.get(
-                        "id", "",
-                    ),
-                    candidate_scores=eval_out.candidate_scores,
-                    model=config.model or "",
-                    temperature=config.temperature,
-                    n_variants=config.n_variants,
-                )
-            except Exception:
-                logger.warning("ObsLogger.log_round failed", exc_info=True)
+        if state.current_accuracy > state.best_accuracy:
+            state.best_accuracy = state.current_accuracy
+            state.best_round = round_num
+            state.best_ps = state.current_ps
 
-        # Prompt version logging (separate so round logging isn't blocked)
-        if obs:
-            try:
-                from api.models.prompt_state import PromptState
-                winner_ps = PromptState(**eval_out.winner_prompt_state)
-                obs.log_prompt_version(
-                    prompt_state_id=winner_ps.id,
-                    rendered_prompt=winner_ps.render(),
-                    layer1_fields={
-                        f: getattr(winner_ps, f)
-                        for f in [
-                            "persona", "task_intent", "problem_description",
-                            "instruction", "thinking_style", "answer_format",
-                        ]
-                    },
-                    parent_id=winner_ps.parent_id,
-                )
-            except Exception:
-                logger.warning(
-                    "ObsLogger.log_prompt_version failed", exc_info=True,
-                )
+        state.stall_count = 0 if round_result.improved else state.stall_count + 1
 
-        # Update current state — pass results forward for failure analysis
-        current_ps = eval_out.winner_prompt_state
-        current_accuracy = eval_out.winner_accuracy
-        current_results = eval_out.winner_results
-
-        if current_accuracy > best_accuracy:
-            best_accuracy = current_accuracy
-            best_round = round_num
-            best_ps = current_ps
-
-        # Track stalls
-        if eval_out.improved:
-            stall_count = 0
-        else:
-            stall_count += 1
-
-        # Notify callback
         if on_round_complete:
-            on_round_complete(round_result, stall_count)
+            on_round_complete(round_result, state.stall_count)
 
         # Checkpoint round to disk
         if campaign_store and cycle_id:
@@ -627,69 +764,44 @@ async def run_feedback_cycle(
                         s if isinstance(s, dict) else s
                         for s in round_result.candidate_scores
                     ],
-                    "stall_count": stall_count,
+                    "stall_count": state.stall_count,
                 })
             except Exception:
                 logger.warning("Round checkpoint failed", exc_info=True)
 
         # Check stopping conditions
-        if current_accuracy >= 1.0:
+        if state.current_accuracy >= 1.0:
             stop_reason = "perfect_score"
             logger.info("Perfect score reached at round %d", round_num)
             break
-
-        if stall_count >= config.patience:
+        if state.stall_count >= config.patience:
             stop_reason = "patience_exhausted"
             logger.info(
                 "Patience exhausted after %d stalls at round %d",
-                stall_count, round_num,
+                state.stall_count, round_num,
             )
             break
-
-        if eval_out.next_action == "stop":
+        if round_result.next_action == "stop":
             stop_reason = "next_action_stop"
             logger.info("Analysis node signaled stop at round %d", round_num)
             break
 
+    # -- Step 6: Finalize --
     finished_at = datetime.now(timezone.utc).isoformat()
-
-    # Mark campaign as completed on disk
-    if campaign_store and cycle_id:
-        try:
-            campaign_store.update(config.backend_id, cycle_id, {
-                "status": "completed",
-                "stop_reason": stop_reason,
-                "best_accuracy": best_accuracy,
-                "best_round": best_round,
-                "n_rounds": len(rounds),
-                "finished_at": finished_at,
-            })
-        except Exception:
-            logger.warning("Campaign completion update failed", exc_info=True)
-
-    # Finalize campaign observability (file + cloud via ObsLogger)
-    cloud_trace_id: str | None = None
-    if obs:
-        try:
-            obs.log_campaign_end(
-                campaign_id=obs_campaign_id,
-                best_accuracy=best_accuracy,
-                n_rounds=len(rounds),
-                stop_reason=stop_reason,
-                best_round=best_round,
-            )
-            obs.flush()
-            cloud_trace_id = obs.get_cloud_trace_id(obs_campaign_id)
-        except Exception:
-            logger.warning("ObsLogger campaign end failed", exc_info=True)
+    cloud_trace_id = _finalize_campaign(
+        campaign_store, cycle_id, config, state, stop_reason, finished_at,
+        obs, obs_campaign_id,
+    )
 
     return CycleResult(
-        rounds=rounds,
-        n_rounds=len(rounds),
-        best_accuracy=best_accuracy,
-        best_round=best_round,
-        baseline_accuracy=rounds[0].accuracy if rounds else current_accuracy,
-        winner_prompt_state=best_ps,
+        rounds=state.rounds,
+        n_rounds=len(state.rounds),
+        best_accuracy=state.best_accuracy,
+        best_round=state.best_round,
+        baseline_accuracy=(
+            state.rounds[0].accuracy if state.rounds else state.current_accuracy
+        ),
+        winner_prompt_state=state.best_ps,
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,
