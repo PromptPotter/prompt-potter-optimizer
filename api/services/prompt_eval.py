@@ -376,6 +376,9 @@ async def evaluate_prompt_cached(
         if existing:
             results = existing["dataset_run_items"]
             scores = existing.get("scores", compute_accuracy(results))
+            if on_result is not None:
+                for i, r in enumerate(results):
+                    on_result({**r, "cached": True}, i, len(results))
             return results, scores, True
 
     # --- compute run_id for incremental writes ---
@@ -411,6 +414,11 @@ async def evaluate_prompt_cached(
                 remaining_data = eval_data[len(partial_results):]
         else:
             partial_results = []
+
+    # --- replay cached partial results to callback ---
+    if on_result is not None and partial_results:
+        for i, r in enumerate(partial_results):
+            on_result({**r, "cached": True}, i, len(eval_data))
 
     # --- evaluate via backend ---
     _incremental_writer = None

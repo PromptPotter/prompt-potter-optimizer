@@ -93,6 +93,7 @@ __all__ = [
     "build_historical_index",
     "synthesize_sensitivity",
     "run_feedback_cycle_notebook",
+    "backfill_langfuse",
 ]
 
 
@@ -1680,9 +1681,10 @@ async def run_feedback_cycle_notebook(
     def _on_query(cand_idx, n_cands, query_idx, n_queries, result):
         _query_counter[0] += 1
         tag = "HIT " if result.get("hit") else "MISS"
+        cached = " (cached)" if result.get("cached") else ""
         print(
             f"  [{_query_counter[0]}] C{cand_idx + 1}/{n_cands} "
-            f"Q{query_idx + 1}/{n_queries} {tag} "
+            f"Q{query_idx + 1}/{n_queries} {tag}{cached} "
             f"{result.get('query', '')[:50]}"
         )
 
@@ -1717,6 +1719,8 @@ async def run_feedback_cycle_notebook(
                     f"\nStopping: no improvement for {patience} consecutive rounds."
                 )
 
+    initial_len = len(campaign_rounds)
+
     result = await run_feedback_cycle(
         instruction=instruction,
         eval_data=eval_data,
@@ -1730,6 +1734,30 @@ async def run_feedback_cycle_notebook(
         langfuse_session_id=langfuse_session_id,
     )
 
+    # If fully cached (no new on_round_complete callbacks fired), populate
+    # campaign_rounds from the restored result so downstream cells work.
+    if len(campaign_rounds) == initial_len and result.rounds:
+        for rr in result.rounds:
+            ps = PromptState(**rr.prompt_state)
+            campaign_rounds.append({
+                "round": len(campaign_rounds),
+                "label": rr.label,
+                "prompt_state": ps,
+                "accuracy": rr.accuracy,
+                "hits": rr.hits,
+                "total": rr.total,
+                "results": rr.results,
+                "candidates_evaluated": rr.candidates_evaluated,
+                "improved": rr.improved,
+            })
+
+    # Print resume info
+    if result.resumed_from_round > 0:
+        print(
+            f"\nResumed from round {result.resumed_from_round} "
+            f"({result.resumed_from_round} rounds cached)"
+        )
+
     # Final summary
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
     print(f"\n{'=' * 70}")
@@ -1737,8 +1765,72 @@ async def run_feedback_cycle_notebook(
     print(f"  Rounds run: {result.n_rounds}")
     print(f"  Best accuracy: {best['accuracy']:.1%} (round {best['round']})")
     print(f"  Stop reason: {result.stop_reason}")
+    if result.cycle_id:
+        print(f"  Cycle ID: {result.cycle_id}")
     if result.langfuse_trace_id:
         print(f"  Langfuse trace: {result.langfuse_trace_id}")
     print(f"{'=' * 70}")
 
     return campaign_rounds
+
+
+# ---------------------------------------------------------------------------
+# Langfuse backfill
+# ---------------------------------------------------------------------------
+
+
+def backfill_langfuse(store: "ProjectStore", backend_id: str) -> dict:
+    """Push all historical dataset_runs to cloud Langfuse (one-shot, idempotent).
+
+    Reads every completed dataset_run on disk, groups by origin (baseline,
+    grid_search, sensitivity_scan, feedback_cycle, smart_search_winner),
+    and creates one Langfuse trace per group with per-run spans.
+
+    Re-running is safe — already-pushed runs are skipped.
+
+    Returns:
+        Stats dict from ``backfill_to_langfuse()``.
+    """
+    from api.services.langfuse_backfill import backfill_to_langfuse
+
+    summaries = store.dataset_runs.list_all(backend_id)
+
+    print("=" * 70)
+    print("  LANGFUSE BACKFILL")
+    print("=" * 70)
+    print(f"Found {len(summaries)} completed dataset runs for '{backend_id}'")
+
+    stats = backfill_to_langfuse(store, backend_id, on_progress=print)
+
+    if "error" in stats:
+        print(f"\nBackfill aborted: {stats['error']}")
+        return stats
+
+    new_runs = stats["new_runs"]
+    already = stats["already_done"]
+
+    if new_runs == 0:
+        print(f"\nAll {already} runs already backfilled. Nothing to do.")
+    else:
+        print(f"\nBackfill complete: {new_runs} runs pushed to Langfuse")
+        print(f"Session: {stats['session_id']}")
+
+    print("=" * 70)
+    print("  BACKFILL SUMMARY")
+    print("=" * 70)
+    print(f"  Total runs on disk: {stats['total_on_disk']}")
+    print(f"  Newly backfilled:   {new_runs}")
+    print(f"  Already done:       {already}")
+
+    for origin, info in stats.get("origins", {}).items():
+        n = info["n_runs"]
+        items = info["total_items"]
+        best = info["best_accuracy"]
+        avg = info["avg_accuracy"]
+        print(f"\n  {origin}:")
+        print(f"    Runs: {n}, Items: {items}")
+        print(f"    Best accuracy: {best:.1%}, Avg: {avg:.1%}")
+
+    print("=" * 70)
+
+    return stats

@@ -4,13 +4,15 @@ Langfuse SDK wrapper for workflow observability.
 Provides singleton access to Langfuse client with automatic project isolation
 via API keys. Logs traces, observations (generations/spans), and scores.
 
-Compatible with Langfuse SDK v2 (the v3 OTel-based SDK is not yet used).
+Uses the Langfuse SDK v3 ``start_span()`` / ``start_generation()`` API to build
+a proper trace hierarchy: one root span per trace, child spans nested underneath.
 
 Usage:
     langfuse = LangfuseLogger.get_instance()
     trace_id = langfuse.create_trace("workflow_name", inputs)
-    langfuse.create_generation(trace_id, "step_name", "gpt-4", input, output)
+    langfuse.create_span(trace_id, "step_name", input, output)
     langfuse.create_score(trace_id, "accuracy", 0.95)
+    langfuse.end_trace(trace_id)
     langfuse.flush()
 """
 import logging
@@ -43,6 +45,7 @@ class LangfuseLogger:
             and settings.LANGFUSE_PUBLIC_KEY
         )
         self.client = None
+        # Maps trace_id → root SDK span object (not a plain dict)
         self._trace_metadata: dict[str, Any] = {}
 
         if self.enabled:
@@ -81,7 +84,12 @@ class LangfuseLogger:
         session_id: str | None = None,
         tags: list[str] | None = None,
     ) -> str | None:
-        """Create a new trace for a workflow execution.
+        """Create a new trace with a root span and proper metadata.
+
+        Creates a trace_id, starts a root span linked to it, then calls
+        ``update_trace()`` on the root span to set trace-level metadata
+        (name, session_id, tags, input). This ensures the trace appears in
+        Langfuse with full metadata instead of as a bare auto-created stub.
 
         Returns trace_id or None if logging is disabled.
         """
@@ -90,14 +98,21 @@ class LangfuseLogger:
 
         try:
             trace_id = self.client.create_trace_id()
-            self._trace_metadata[trace_id] = {
-                "name": name,
-                "input": input,
-                "metadata": metadata or {},
-                "user_id": user_id,
-                "session_id": session_id,
-                "tags": tags or [],
-            }
+            root = self.client.start_span(
+                trace_context={"trace_id": trace_id},
+                name=name,
+                input=input,
+                metadata=metadata or {},
+            )
+            root.update_trace(
+                name=name,
+                user_id=user_id,
+                session_id=session_id,
+                input=input,
+                metadata=metadata,
+                tags=tags or [],
+            )
+            self._trace_metadata[trace_id] = root
             return trace_id
         except Exception:
             logger.warning("Failed to create Langfuse trace", exc_info=True)
@@ -113,7 +128,7 @@ class LangfuseLogger:
         usage: dict[str, int] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> str | None:
-        """Log an LLM generation.
+        """Log an LLM generation nested under the root span.
 
         Returns observation_id or None if logging is disabled.
         """
@@ -129,19 +144,19 @@ class LangfuseLogger:
                     "total": usage.get("total_tokens", 0),
                 }
 
-            trace_context = {"trace_id": trace_id}
-            generation = self.client.start_generation(
-                trace_context=trace_context,
-                name=name,
-                model=model,
-                input=input,
-                output=output,
-                usage_details=usage_details,
-                metadata=metadata or {},
-            )
-            if hasattr(generation, "end"):
-                generation.end()
-            return getattr(generation, "id", uuid.uuid4().hex[:12])
+            root = self._trace_metadata.get(trace_id)
+            if root:
+                gen = root.start_generation(
+                    name=name,
+                    model=model,
+                    input=input,
+                    output=output,
+                    usage_details=usage_details,
+                    metadata=metadata or {},
+                )
+                gen.end()
+                return getattr(gen, "id", uuid.uuid4().hex[:12])
+            return None
         except Exception:
             logger.warning("Failed to log Langfuse generation", exc_info=True)
             return None
@@ -154,7 +169,7 @@ class LangfuseLogger:
         output: Any,
         metadata: dict[str, Any] | None = None,
     ) -> str | None:
-        """Log a non-LLM node execution.
+        """Log a non-LLM span nested under the root span.
 
         Returns observation_id or None if logging is disabled.
         """
@@ -162,17 +177,17 @@ class LangfuseLogger:
             return None
 
         try:
-            trace_context = {"trace_id": trace_id}
-            span = self.client.start_span(
-                trace_context=trace_context,
-                name=name,
-                input=input,
-                output=output,
-                metadata=metadata or {},
-            )
-            if hasattr(span, "end"):
-                span.end()
-            return getattr(span, "id", uuid.uuid4().hex[:12])
+            root = self._trace_metadata.get(trace_id)
+            if root:
+                child = root.start_span(
+                    name=name,
+                    input=input,
+                    output=output,
+                    metadata=metadata or {},
+                )
+                child.end()
+                return getattr(child, "id", uuid.uuid4().hex[:12])
+            return None
         except Exception:
             logger.warning("Failed to log Langfuse span", exc_info=True)
             return None
@@ -190,7 +205,7 @@ class LangfuseLogger:
             return False
 
         try:
-            self.client.score(
+            self.client.create_score(
                 trace_id=trace_id,
                 name=name,
                 value=value,
@@ -208,24 +223,40 @@ class LangfuseLogger:
         output: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """Update a trace with final output or additional metadata."""
+        """Update a trace with final output or additional metadata.
+
+        Uses the root SDK span's ``update_trace()`` method to push changes
+        to the server (not just a local dict merge).
+        """
         if not self.enabled or not self.client or not trace_id:
             return False
 
         try:
-            trace = self._trace_metadata.get(trace_id)
-            if trace and hasattr(trace, "update"):
-                update_kwargs = {}
+            root = self._trace_metadata.get(trace_id)
+            if root:
+                kwargs: dict[str, Any] = {}
                 if output is not None:
-                    update_kwargs["output"] = output
+                    kwargs["output"] = output
                 if metadata is not None:
-                    update_kwargs["metadata"] = metadata
-                if update_kwargs:
-                    trace.update(**update_kwargs)
+                    kwargs["metadata"] = metadata
+                if kwargs:
+                    root.update_trace(**kwargs)
             return True
         except Exception:
             logger.warning("Failed to update Langfuse trace", exc_info=True)
             return False
+
+    def end_trace(self, trace_id: str) -> None:
+        """End the root span for a trace (marks the trace as complete)."""
+        if not self.enabled or not self.client or not trace_id:
+            return
+
+        try:
+            root = self._trace_metadata.get(trace_id)
+            if root:
+                root.end()
+        except Exception:
+            logger.warning("Failed to end Langfuse trace", exc_info=True)
 
     def flush(self) -> None:
         """Ensure all pending events are sent to Langfuse."""

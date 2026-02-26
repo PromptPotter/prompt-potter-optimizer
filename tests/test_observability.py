@@ -28,6 +28,11 @@ def _make_obs(tmp_path: Path, enabled: bool = True) -> ObsLogger:
     obs.obs_root = tmp_path / "obs"
     obs._enabled = enabled
     obs._campaign_traces = {}
+    obs._cloud_trace_ids = {}
+    obs._langfuse = None
+    # Reset class-level campaign state to avoid cross-test leakage
+    ObsLogger._active_cloud_trace_id = None
+    ObsLogger._active_session_id = None
     return obs
 
 
@@ -363,6 +368,188 @@ def test_events_jsonl_navigation(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# ObsLogger.log_campaign_end
+# ---------------------------------------------------------------------------
+
+
+def test_log_campaign_end(tmp_path):
+    """log_campaign_end updates trace output, writes best_accuracy score, and events."""
+    obs = _make_obs(tmp_path)
+
+    # Start campaign first
+    obs.log_campaign_start(
+        campaign_id="end_test_campaign",
+        config={"max_rounds": 5},
+        baseline_accuracy=0.50,
+    )
+
+    obs.log_campaign_end(
+        campaign_id="end_test_campaign",
+        best_accuracy=0.85,
+        n_rounds=3,
+        stop_reason="patience_exhausted",
+        best_round=1,
+    )
+
+    # Trace output updated
+    trace_id = obs._campaign_traces["end_test_campaign"]
+    trace_path = tmp_path / "obs" / "langfuse" / "traces" / f"{trace_id}.json"
+    trace_data = json.loads(trace_path.read_text())
+    assert trace_data["output"]["best_accuracy"] == 0.85
+    assert trace_data["output"]["n_rounds"] == 3
+    assert trace_data["output"]["stop_reason"] == "patience_exhausted"
+
+    # best_accuracy score written
+    scores = _find_scores(tmp_path / "obs", trace_id)
+    best_scores = [s for s in scores if s["name"] == "best_accuracy"]
+    assert len(best_scores) == 1
+    assert best_scores[0]["value"] == 0.85
+
+    # campaign_end event in events.jsonl
+    events = _read_events(tmp_path / "obs")
+    end_events = [e for e in events if e["event"] == "campaign_end"]
+    assert len(end_events) == 1
+    assert end_events[0]["best_accuracy"] == 0.85
+    assert end_events[0]["stop_reason"] == "patience_exhausted"
+    assert end_events[0]["best_round"] == 1
+
+
+# ---------------------------------------------------------------------------
+# ObsLogger.flush
+# ---------------------------------------------------------------------------
+
+
+def test_flush_without_langfuse(tmp_path):
+    """flush() is a no-op when _langfuse is None."""
+    obs = _make_obs(tmp_path)
+    # Should not raise
+    obs.flush()
+
+
+# ---------------------------------------------------------------------------
+# Dual-write with mock Langfuse
+# ---------------------------------------------------------------------------
+
+
+class _MockLangfuse:
+    """Minimal mock to verify cloud calls from ObsLogger."""
+
+    def __init__(self):
+        self.enabled = True
+        self.traces: list[dict] = []
+        self.spans: list[dict] = []
+        self.scores: list[dict] = []
+        self.trace_updates: list[dict] = []
+        self.end_trace_calls: list[str] = []
+        self.flush_count = 0
+        self._counter = 0
+
+    def create_trace(self, name, input, metadata=None, user_id=None,
+                     session_id=None, tags=None):
+        self._counter += 1
+        tid = f"cloud_trace_{self._counter}"
+        self.traces.append({"name": name, "input": input, "session_id": session_id,
+                            "tags": tags})
+        return tid
+
+    def create_span(self, trace_id, name, input, output, metadata=None):
+        self.spans.append({"trace_id": trace_id, "name": name,
+                           "input": input, "output": output})
+        return f"span_{name}"
+
+    def create_score(self, trace_id, name, value, data_type="NUMERIC",
+                     comment=None):
+        self.scores.append({"trace_id": trace_id, "name": name,
+                            "value": value, "comment": comment})
+        return True
+
+    def update_trace(self, trace_id, output=None, metadata=None):
+        self.trace_updates.append({"trace_id": trace_id, "output": output,
+                                   "metadata": metadata})
+        return True
+
+    def end_trace(self, trace_id):
+        self.end_trace_calls.append(trace_id)
+
+    def flush(self):
+        self.flush_count += 1
+
+
+def test_dual_write_with_mock_langfuse(tmp_path):
+    """Injecting a mock Langfuse causes cloud calls alongside file writes."""
+    mock_lf = _MockLangfuse()
+    obs = _make_obs(tmp_path)
+    obs._langfuse = mock_lf
+
+    # dataset_run outside campaign → standalone cloud trace + score
+    obs.log_dataset_run(
+        run_id="dr1", content_hash="hash1", accuracy=0.80,
+        total=10, hits=8, model="m", temperature=0.0,
+    )
+    assert len(mock_lf.traces) == 1
+    assert mock_lf.traces[0]["name"] == "dataset_run"
+    assert len(mock_lf.scores) == 1
+    assert mock_lf.scores[0]["name"] == "accuracy"
+
+    # campaign_start → cloud trace (campaign)
+    obs.log_campaign_start(
+        campaign_id="dual_test",
+        config={"max_rounds": 3},
+        baseline_accuracy=0.50,
+        session_id="sess_123",
+    )
+    assert len(mock_lf.traces) == 2
+    assert mock_lf.traces[1]["name"] == "feedback_cycle"
+    assert mock_lf.traces[1]["session_id"] == "sess_123"
+    assert "dual_test" in obs._cloud_trace_ids
+
+    # dataset_run during campaign → nested span (not new trace)
+    obs.log_dataset_run(
+        run_id="dr_during", content_hash="hash2", accuracy=0.60,
+        total=10, hits=6, model="m", temperature=0.0,
+    )
+    # No new trace created (still 2)
+    assert len(mock_lf.traces) == 2
+    # But a span was created under the campaign trace
+    eval_spans = [s for s in mock_lf.spans if s["name"].startswith("eval_")]
+    assert len(eval_spans) == 1
+    assert eval_spans[0]["trace_id"] == obs._cloud_trace_ids["dual_test"]
+
+    # round → cloud span + score
+    obs.log_round(
+        campaign_id="dual_test", round_num=0, accuracy=0.65,
+        hits=6, total=10, improved=True, next_action="generate",
+        winner_prompt_state_id="w1",
+        candidate_scores=[{"label": "c0", "accuracy": 0.65}],
+    )
+    round_spans = [s for s in mock_lf.spans if s["name"] == "round_0"]
+    assert len(round_spans) == 1
+    round_scores = [s for s in mock_lf.scores if s["name"] == "accuracy_round_0"]
+    assert len(round_scores) == 1
+
+    # campaign_end → cloud score + update_trace + end_trace
+    obs.log_campaign_end(
+        campaign_id="dual_test",
+        best_accuracy=0.65,
+        n_rounds=1,
+        stop_reason="max_rounds",
+        best_round=0,
+    )
+    best_scores = [s for s in mock_lf.scores if s["name"] == "best_accuracy"]
+    assert len(best_scores) == 1
+    assert len(mock_lf.trace_updates) == 1
+    assert len(mock_lf.end_trace_calls) == 1
+
+    # flush
+    obs.flush()
+    assert mock_lf.flush_count == 1
+
+    # get_cloud_trace_id
+    assert obs.get_cloud_trace_id("dual_test") is not None
+    assert obs.get_cloud_trace_id("nonexistent") is None
+
+
+# ---------------------------------------------------------------------------
 # OBS_ENABLED = False
 # ---------------------------------------------------------------------------
 
@@ -400,6 +587,65 @@ def test_obs_disabled(tmp_path):
     if obs_dir.exists():
         all_files = list(obs_dir.rglob("*"))
         assert len(all_files) == 0, f"Files created when disabled: {all_files}"
+
+
+# ---------------------------------------------------------------------------
+# Dataset run standalone vs campaign nesting
+# ---------------------------------------------------------------------------
+
+
+def test_dataset_run_standalone_creates_trace(tmp_path):
+    """Standalone dataset_run (no campaign) creates a cloud trace, not a span."""
+    mock_lf = _MockLangfuse()
+    obs = _make_obs(tmp_path)
+    obs._langfuse = mock_lf
+
+    obs.log_dataset_run(
+        run_id="standalone", content_hash="abc", accuracy=0.70,
+        total=10, hits=7, model="m", temperature=0.0,
+    )
+
+    assert len(mock_lf.traces) == 1
+    assert mock_lf.traces[0]["name"] == "dataset_run"
+    assert len(mock_lf.spans) == 0
+    assert len(mock_lf.scores) == 1
+    assert mock_lf.scores[0]["name"] == "accuracy"
+
+
+def test_class_level_cleared_after_campaign_end(tmp_path):
+    """Class-level _active_cloud_trace_id is cleared after campaign_end."""
+    mock_lf = _MockLangfuse()
+    obs = _make_obs(tmp_path)
+    obs._langfuse = mock_lf
+
+    # Start campaign → sets class-level state
+    obs.log_campaign_start(
+        campaign_id="cls_test",
+        config={},
+        baseline_accuracy=0.50,
+        session_id="sess",
+    )
+    assert ObsLogger._active_cloud_trace_id is not None
+    assert ObsLogger._active_session_id == "sess"
+
+    # End campaign → clears class-level state
+    obs.log_campaign_end(
+        campaign_id="cls_test",
+        best_accuracy=0.60,
+        n_rounds=1,
+        stop_reason="max_rounds",
+        best_round=0,
+    )
+    assert ObsLogger._active_cloud_trace_id is None
+    assert ObsLogger._active_session_id is None
+
+    # Dataset run after campaign end → standalone trace (not span)
+    obs.log_dataset_run(
+        run_id="after_end", content_hash="def", accuracy=0.80,
+        total=10, hits=8, model="m", temperature=0.0,
+    )
+    assert len(mock_lf.traces) == 2  # campaign trace + standalone trace
+    assert mock_lf.traces[1]["name"] == "dataset_run"
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
-"""Tests for Langfuse integration with feedback cycling (WP 3.6).
+"""Tests for cloud Langfuse integration via ObsLogger (WP 3.6).
 
-Verifies that:
+Verifies that cloud Langfuse calls flow through ObsLogger's dual-write:
 - Campaign-level trace is created for each feedback cycle
 - Per-round spans are logged with accuracy metadata
 - Per-round accuracy scores are emitted
@@ -29,16 +29,19 @@ class MockLangfuseLogger:
         self.scores: list[dict] = []
         self.generations: list[dict] = []
         self.trace_updates: list[dict] = []
+        self.end_trace_calls: list[str] = []
         self.flush_count = 0
-        self._next_trace_id = "mock_trace_001"
+        self._counter = 0
 
     def create_trace(self, name, input, metadata=None, user_id=None,
                      session_id=None, tags=None):
+        self._counter += 1
+        tid = f"mock_trace_{self._counter:03d}"
         self.traces.append({
             "name": name, "input": input, "metadata": metadata,
             "session_id": session_id, "tags": tags,
         })
-        return self._next_trace_id
+        return tid
 
     def create_span(self, trace_id, name, input, output, metadata=None):
         self.spans.append({
@@ -68,6 +71,9 @@ class MockLangfuseLogger:
         })
         return True
 
+    def end_trace(self, trace_id):
+        self.end_trace_calls.append(trace_id)
+
     def flush(self):
         self.flush_count += 1
 
@@ -87,19 +93,33 @@ def eval_data():
 
 
 @pytest.fixture
-def cycle_config():
+def cycle_config(tmp_path):
+    """Config with project_root + backend_id so ObsLogger is created."""
+    store_base = tmp_path / ".promptpotter" / "projects"
+    store_base.mkdir(parents=True)
     return CycleConfig(
         max_rounds=3,
         patience=2,
         n_variants=2,
         backend_url="http://mock:8000",
         generate_suggestions=False,
+        project_root=str(store_base),
+        backend_id="test-backend",
     )
 
 
 @pytest.fixture
 def mock_langfuse(monkeypatch):
-    """Install mock Langfuse and return it for assertions."""
+    """Install mock Langfuse so ObsLogger auto-detects it."""
+    from api.config import settings as _settings_mod
+    from api.services.observability_logger import ObsLogger
+
+    monkeypatch.setattr(_settings_mod.settings, "OBS_ENABLED", True)
+
+    # Reset class-level campaign state to avoid cross-test leakage
+    ObsLogger._active_cloud_trace_id = None
+    ObsLogger._active_session_id = None
+
     mock = MockLangfuseLogger()
     monkeypatch.setattr(
         LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
@@ -180,7 +200,7 @@ def _apply_service_mocks(monkeypatch):
 async def test_campaign_trace_created(
     monkeypatch, eval_data, cycle_config, mock_langfuse,
 ):
-    """Feedback cycle creates a campaign-level Langfuse trace."""
+    """Feedback cycle creates a campaign-level cloud Langfuse trace via ObsLogger."""
     _apply_service_mocks(monkeypatch)
 
     result = await run_feedback_cycle(
@@ -190,18 +210,22 @@ async def test_campaign_trace_created(
         langfuse_session_id="test_session_123",
     )
 
-    assert result.langfuse_trace_id == "mock_trace_001"
-    assert len(mock_langfuse.traces) == 1
-    assert mock_langfuse.traces[0]["name"] == "feedback_cycle"
-    assert mock_langfuse.traces[0]["session_id"] == "test_session_123"
-    assert "campaign" in mock_langfuse.traces[0]["tags"]
+    # Cloud trace ID is returned via ObsLogger.get_cloud_trace_id
+    assert result.langfuse_trace_id is not None
+    assert result.langfuse_trace_id.startswith("mock_trace_")
+
+    # Exactly one campaign trace created in cloud
+    campaign_traces = [t for t in mock_langfuse.traces if t["name"] == "feedback_cycle"]
+    assert len(campaign_traces) == 1
+    assert campaign_traces[0]["session_id"] == "test_session_123"
+    assert "campaign" in campaign_traces[0]["tags"]
 
 
 @pytest.mark.asyncio
 async def test_per_round_spans(
     monkeypatch, eval_data, cycle_config, mock_langfuse,
 ):
-    """Each round gets a Langfuse span with accuracy metadata."""
+    """Each round gets a cloud Langfuse span with accuracy metadata."""
     _apply_service_mocks(monkeypatch)
 
     result = await run_feedback_cycle(
@@ -212,10 +236,13 @@ async def test_per_round_spans(
 
     # Round 0 improves (0→0.33), then patience=2 stalls → 3 rounds total
     assert result.n_rounds == 3
-    assert len(mock_langfuse.spans) == 3
 
-    for i, span in enumerate(mock_langfuse.spans):
-        assert span["trace_id"] == "mock_trace_001"
+    # Per-round spans (prompt_version spans may also exist)
+    round_spans = [s for s in mock_langfuse.spans if s["name"].startswith("round_")]
+    assert len(round_spans) == 3
+
+    for i, span in enumerate(round_spans):
+        assert span["trace_id"] == result.langfuse_trace_id
         assert span["name"] == f"round_{i}"
         assert "winner_accuracy" in span["output"]
         assert "improved" in span["output"]
@@ -225,7 +252,7 @@ async def test_per_round_spans(
 async def test_per_round_accuracy_scores(
     monkeypatch, eval_data, cycle_config, mock_langfuse,
 ):
-    """Each round emits an accuracy score to Langfuse."""
+    """Each round emits an accuracy score to cloud Langfuse."""
     _apply_service_mocks(monkeypatch)
 
     result = await run_feedback_cycle(
@@ -234,14 +261,13 @@ async def test_per_round_accuracy_scores(
         config=cycle_config,
     )
 
-    # 2 rounds → 2 per-round scores + 1 final best_accuracy = 3 scores
     round_scores = [
         s for s in mock_langfuse.scores if s["name"].startswith("accuracy_round_")
     ]
     assert len(round_scores) == result.n_rounds
 
     for score in round_scores:
-        assert score["trace_id"] == "mock_trace_001"
+        assert score["trace_id"] == result.langfuse_trace_id
         assert isinstance(score["value"], float)
 
 
@@ -249,7 +275,7 @@ async def test_per_round_accuracy_scores(
 async def test_final_best_accuracy_score(
     monkeypatch, eval_data, cycle_config, mock_langfuse,
 ):
-    """Final best_accuracy score is emitted at cycle end."""
+    """Final best_accuracy score is emitted at cycle end via ObsLogger."""
     _apply_service_mocks(monkeypatch)
 
     result = await run_feedback_cycle(
@@ -267,7 +293,7 @@ async def test_final_best_accuracy_score(
 async def test_trace_updated_and_flushed(
     monkeypatch, eval_data, cycle_config, mock_langfuse,
 ):
-    """Campaign trace is updated with final output and flushed."""
+    """Campaign trace is updated with final output and flushed via ObsLogger."""
     _apply_service_mocks(monkeypatch)
 
     result = await run_feedback_cycle(
@@ -278,8 +304,43 @@ async def test_trace_updated_and_flushed(
 
     assert len(mock_langfuse.trace_updates) == 1
     update = mock_langfuse.trace_updates[0]
-    assert update["trace_id"] == "mock_trace_001"
+    assert update["trace_id"] == result.langfuse_trace_id
     assert update["output"]["stop_reason"] == result.stop_reason
     assert update["output"]["best_accuracy"] == result.best_accuracy
 
     assert mock_langfuse.flush_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_end_trace_called_at_campaign_end(
+    monkeypatch, eval_data, cycle_config, mock_langfuse,
+):
+    """end_trace is called when the feedback cycle finishes."""
+    _apply_service_mocks(monkeypatch)
+
+    result = await run_feedback_cycle(
+        instruction="Test.",
+        eval_data=eval_data,
+        config=cycle_config,
+    )
+
+    assert len(mock_langfuse.end_trace_calls) == 1
+    assert mock_langfuse.end_trace_calls[0] == result.langfuse_trace_id
+
+
+@pytest.mark.asyncio
+async def test_class_level_state_cleared(
+    monkeypatch, eval_data, cycle_config, mock_langfuse,
+):
+    """Class-level _active_cloud_trace_id is cleared after feedback cycle."""
+    from api.services.observability_logger import ObsLogger
+    _apply_service_mocks(monkeypatch)
+
+    await run_feedback_cycle(
+        instruction="Test.",
+        eval_data=eval_data,
+        config=cycle_config,
+    )
+
+    assert ObsLogger._active_cloud_trace_id is None
+    assert ObsLogger._active_session_id is None

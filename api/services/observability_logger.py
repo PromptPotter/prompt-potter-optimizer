@@ -98,19 +98,36 @@ def _append_jsonl(path: Path, data: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+_UNSET = object()
+
+
 class ObsLogger:
-    """File-based observability logger.
+    """Single observability gateway — file writes + optional cloud Langfuse.
 
     Writes Langfuse-compatible traces + MLflow FileStore experiments +
     ``events.jsonl`` flat navigation log. Every public method also appends
     to ``events.jsonl`` — the human starting point for data exploration.
 
-    All methods are synchronous (file I/O only). All methods are no-ops when
-    ``OBS_ENABLED = False``. All methods are wrapped in try/except to never
-    crash the main flow.
+    When cloud Langfuse credentials are available, each public method also
+    pushes the same data to cloud Langfuse (file-first, cloud-second).
+    Pass ``langfuse=None`` in tests to get file-only behaviour.
+
+    All methods are no-ops when ``OBS_ENABLED = False``. All methods are
+    wrapped in try/except to never crash the main flow.
     """
 
-    def __init__(self, store_base_dir: str | Path, backend_id: str):
+    # Class-level active campaign state (safe — single-threaded asyncio).
+    # When a campaign is active, dataset_run evals nest as spans under the
+    # campaign trace instead of creating separate top-level traces.
+    _active_cloud_trace_id: str | None = None
+    _active_session_id: str | None = None
+
+    def __init__(
+        self,
+        store_base_dir: str | Path,
+        backend_id: str,
+        langfuse: object = _UNSET,
+    ):
         """Initialize ObsLogger.
 
         Args:
@@ -118,13 +135,28 @@ class ObsLogger:
                 contains ``{backend_id}/`` subdirectories (e.g.
                 ``.promptpotter/projects``).  Do NOT pass the project root.
             backend_id: Backend identifier (subdirectory name).
+            langfuse: Cloud Langfuse logger instance.  Defaults to auto-detect
+                via ``LangfuseLogger.get_instance()``.  Pass ``None`` for
+                file-only mode (used in tests).
         """
         from api.config.settings import settings
 
         self.obs_root = Path(store_base_dir) / backend_id / "obs"
         self._enabled = settings.OBS_ENABLED
-        # Track campaign trace IDs for linking rounds to their campaign trace
+        # Track file-based campaign trace IDs for linking rounds
         self._campaign_traces: dict[str, str] = {}
+        # Track cloud Langfuse trace IDs per campaign
+        self._cloud_trace_ids: dict[str, str] = {}
+
+        if langfuse is _UNSET:
+            try:
+                from api.services.langfuse_client import LangfuseLogger
+                lf = LangfuseLogger.get_instance()
+                self._langfuse = lf if lf.enabled else None
+            except Exception:
+                self._langfuse = None
+        else:
+            self._langfuse = langfuse
 
     # --- Internal helpers ---
 
@@ -345,6 +377,50 @@ class ObsLogger:
                 "prompt_state_id": prompt_state_id,
             })
 
+            # Cloud Langfuse dual-write
+            if self._langfuse:
+                try:
+                    active_trace = ObsLogger._active_cloud_trace_id
+                    if active_trace:
+                        # Nested span under campaign trace
+                        self._langfuse.create_span(
+                            trace_id=active_trace,
+                            name=f"eval_{run_id}",
+                            input={
+                                "run_id": run_id,
+                                "content_hash": content_hash,
+                                "model": model,
+                                "temperature": temperature,
+                                "prompt_state_id": prompt_state_id,
+                            },
+                            output={
+                                "accuracy": accuracy,
+                                "hits": hits,
+                                "total": total,
+                            },
+                        )
+                    else:
+                        # Standalone trace (no campaign active)
+                        cloud_id = self._langfuse.create_trace(
+                            name="dataset_run",
+                            input={
+                                "run_id": run_id,
+                                "content_hash": content_hash,
+                                "model": model,
+                                "temperature": temperature,
+                                "prompt_state_id": prompt_state_id,
+                            },
+                            tags=["dataset_run"],
+                        )
+                        if cloud_id:
+                            self._langfuse.create_score(
+                                trace_id=cloud_id,
+                                name="accuracy",
+                                value=accuracy,
+                            )
+                except Exception:
+                    logger.debug("Cloud Langfuse dataset_run failed", exc_info=True)
+
             trace_path = (
                 self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"
             )
@@ -358,10 +434,14 @@ class ObsLogger:
         campaign_id: str,
         config: dict,
         baseline_accuracy: float,
+        session_id: str | None = None,
     ) -> Path | None:
         """Create MLflow experiment + Langfuse trace + events.jsonl for campaign start.
 
         Called from ``run_feedback_cycle()`` at campaign start.
+
+        Args:
+            session_id: Optional Langfuse session ID for grouping cloud traces.
         """
         if not self._enabled:
             return None
@@ -369,7 +449,7 @@ class ObsLogger:
             # MLflow experiment
             self._ensure_experiment(campaign_id)
 
-            # Langfuse trace
+            # Langfuse trace (file)
             trace_id = self._write_trace(
                 name="feedback_cycle",
                 input_data={
@@ -388,6 +468,28 @@ class ObsLogger:
                 "campaign_id": campaign_id,
                 "baseline_accuracy": baseline_accuracy,
             })
+
+            # Cloud Langfuse dual-write
+            if self._langfuse:
+                try:
+                    cloud_id = self._langfuse.create_trace(
+                        name="feedback_cycle",
+                        input={
+                            "campaign_id": campaign_id,
+                            "baseline_accuracy": baseline_accuracy,
+                            "config": config,
+                        },
+                        session_id=session_id,
+                        tags=["campaign", "feedback_cycle"],
+                    )
+                    if cloud_id:
+                        self._cloud_trace_ids[campaign_id] = cloud_id
+                        ObsLogger._active_cloud_trace_id = cloud_id
+                        ObsLogger._active_session_id = session_id
+                except Exception:
+                    logger.debug(
+                        "Cloud Langfuse campaign_start failed", exc_info=True,
+                    )
 
             trace_path = (
                 self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"
@@ -485,6 +587,37 @@ class ObsLogger:
                 "winner_prompt_state_id": winner_prompt_state_id,
             })
 
+            # Cloud Langfuse dual-write
+            cloud_trace_id = self._cloud_trace_ids.get(campaign_id)
+            if self._langfuse and cloud_trace_id:
+                try:
+                    self._langfuse.create_span(
+                        trace_id=cloud_trace_id,
+                        name=f"round_{round_num}",
+                        input={
+                            "n_candidates": len(candidate_scores),
+                            "baseline_accuracy": accuracy,
+                        },
+                        output={
+                            "winner_accuracy": accuracy,
+                            "improved": improved,
+                            "next_action": next_action,
+                        },
+                        metadata={
+                            "round": round_num,
+                            "candidates_evaluated": len(candidate_scores),
+                        },
+                    )
+                    self._langfuse.create_score(
+                        trace_id=cloud_trace_id,
+                        name=f"accuracy_round_{round_num}",
+                        value=accuracy,
+                        comment=f"Round {round_num}: "
+                                f"{'improved' if improved else 'no change'}",
+                    )
+                except Exception:
+                    logger.debug("Cloud Langfuse round failed", exc_info=True)
+
             # Return the observation dir for this trace
             obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
             return obs_dir if trace_id else None
@@ -536,9 +669,119 @@ class ObsLogger:
                 "parent_id": parent_id,
             })
 
+            # Cloud Langfuse dual-write — attach to active campaign trace if any
+            if self._langfuse and self._cloud_trace_ids:
+                try:
+                    # Use the most recently registered campaign trace
+                    cloud_trace_id = next(reversed(self._cloud_trace_ids.values()))
+                    self._langfuse.create_span(
+                        trace_id=cloud_trace_id,
+                        name="prompt_version",
+                        input={
+                            "prompt_state_id": prompt_state_id,
+                            "parent_id": parent_id,
+                        },
+                        output={"family": family, "version": version},
+                        metadata={"layer1_fields": layer1_fields},
+                    )
+                except Exception:
+                    logger.debug(
+                        "Cloud Langfuse prompt_version failed", exc_info=True,
+                    )
+
             return prompt_dir / "prompt.txt"
         except Exception:
             logger.warning(
                 "ObsLogger.log_prompt_version failed", exc_info=True,
             )
             return None
+
+    def log_campaign_end(
+        self,
+        campaign_id: str,
+        best_accuracy: float,
+        n_rounds: int,
+        stop_reason: str,
+        best_round: int,
+    ) -> None:
+        """Finalize campaign: update file trace, write best_accuracy score, log event.
+
+        Called from ``run_feedback_cycle()`` after the loop exits.
+        """
+        if not self._enabled:
+            return
+        try:
+            trace_id = self._campaign_traces.get(campaign_id, "")
+
+            # Update file trace output
+            if trace_id:
+                trace_path = (
+                    self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"
+                )
+                if trace_path.exists():
+                    import json as _json
+                    trace_data = _json.loads(trace_path.read_text(encoding="utf-8"))
+                    trace_data["output"] = {
+                        "best_accuracy": best_accuracy,
+                        "n_rounds": n_rounds,
+                        "stop_reason": stop_reason,
+                    }
+                    _write_json(trace_path, trace_data)
+
+                self._write_score(trace_id, "best_accuracy", best_accuracy)
+
+            self._log_event({
+                "event": "campaign_end",
+                "trace_id": trace_id,
+                "campaign_id": campaign_id,
+                "best_accuracy": best_accuracy,
+                "n_rounds": n_rounds,
+                "stop_reason": stop_reason,
+                "best_round": best_round,
+            })
+
+            # Cloud Langfuse dual-write
+            cloud_trace_id = self._cloud_trace_ids.get(campaign_id)
+            if self._langfuse and cloud_trace_id:
+                try:
+                    self._langfuse.create_score(
+                        trace_id=cloud_trace_id,
+                        name="best_accuracy",
+                        value=best_accuracy,
+                        comment=f"Best at round {best_round}, stop: {stop_reason}",
+                    )
+                    self._langfuse.update_trace(
+                        trace_id=cloud_trace_id,
+                        output={
+                            "best_accuracy": best_accuracy,
+                            "n_rounds": n_rounds,
+                            "stop_reason": stop_reason,
+                        },
+                        metadata={
+                            "stop_reason": stop_reason,
+                            "best_round": best_round,
+                        },
+                    )
+                    self._langfuse.end_trace(cloud_trace_id)
+                except Exception:
+                    logger.debug(
+                        "Cloud Langfuse campaign_end failed", exc_info=True,
+                    )
+
+            # Clear class-level campaign state
+            ObsLogger._active_cloud_trace_id = None
+            ObsLogger._active_session_id = None
+        except Exception:
+            logger.warning("ObsLogger.log_campaign_end failed", exc_info=True)
+
+    def flush(self) -> None:
+        """Flush cloud Langfuse (file I/O is already synchronous)."""
+        if self._langfuse:
+            try:
+                self._langfuse.flush()
+            except Exception:
+                logger.debug("Cloud Langfuse flush failed", exc_info=True)
+
+    def get_cloud_trace_id(self, campaign_id: str) -> str | None:
+        """Return cloud Langfuse trace ID for a campaign, or None."""
+        return self._cloud_trace_ids.get(campaign_id)
