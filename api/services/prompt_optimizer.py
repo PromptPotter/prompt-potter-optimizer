@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
 from api.services.project_store import ProjectStore
+from api.services.eval_helpers import subsample_queries
 from api.services.prompt_eval import compute_accuracy, evaluate_prompt_cached
 
 if TYPE_CHECKING:
@@ -443,16 +444,10 @@ async def run_manual_round(
     Returns:
         Round entry dict (also appended to campaign_rounds).
     """
-    import random as _random
-
     current_best = campaign_rounds[-1]
     round_num = len(campaign_rounds)
 
-    if queries_per_eval > 0 and len(eval_data) > queries_per_eval:
-        rng = _random.Random(seed)
-        round_eval_data = rng.sample(eval_data, queries_per_eval)
-    else:
-        round_eval_data = eval_data
+    round_eval_data = subsample_queries(eval_data, queries_per_eval, seed)
 
     candidates = await generate_candidates(
         current_best["prompt_state"],
@@ -534,13 +529,7 @@ async def run_optimization_loop(
     Returns:
         Updated campaign_rounds list.
     """
-    import random as _random
-
-    if queries_per_eval > 0 and len(eval_data) > queries_per_eval:
-        rng = _random.Random(seed)
-        round_eval_data = rng.sample(eval_data, queries_per_eval)
-    else:
-        round_eval_data = eval_data
+    round_eval_data = subsample_queries(eval_data, queries_per_eval, seed)
 
     rounds_without_improvement = 0
 

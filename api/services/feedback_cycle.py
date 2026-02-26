@@ -298,14 +298,13 @@ async def run_feedback_cycle(
     Returns:
         CycleResult with all rounds and final winner.
     """
-    import random as _random
-
     from api.nodes.optimizer_nodes import (
         AnalysisEvalNode,
         GrowFilterNode,
         InitNode,
     )
     from api.services.backend_client import BackendClient
+    from api.services.eval_helpers import subsample_queries
     from api.services.obs.observability_logger import ObsLogger
 
     started_at = datetime.now(timezone.utc).isoformat()
@@ -324,11 +323,7 @@ async def run_feedback_cycle(
         await bc.init_session(config.session_terms)
 
     # Subsample eval data if configured
-    if config.queries_per_eval > 0 and len(eval_data) > config.queries_per_eval:
-        rng = _random.Random(config.seed)
-        round_eval_data = rng.sample(eval_data, config.queries_per_eval)
-    else:
-        round_eval_data = eval_data
+    round_eval_data = subsample_queries(eval_data, config.queries_per_eval, config.seed)
 
     # -- Step 1: Initialize baseline --
     if baseline_prompt_state is not None:
