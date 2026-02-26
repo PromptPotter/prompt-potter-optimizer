@@ -3,7 +3,7 @@ import pytest
 
 import api.services.llm_client as llm_mod
 from api.services.llm_client import MockLLMClient
-from api.services.langfuse_client import LangfuseLogger
+from api.services.obs.langfuse_client import LangfuseLogger
 from api.services.project_store import ProjectStore
 
 

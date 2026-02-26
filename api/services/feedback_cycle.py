@@ -306,7 +306,7 @@ async def run_feedback_cycle(
         InitNode,
     )
     from api.services.backend_client import BackendClient
-    from api.services.observability_logger import ObsLogger
+    from api.services.obs.observability_logger import ObsLogger
 
     started_at = datetime.now(timezone.utc).isoformat()
 

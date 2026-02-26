@@ -22,7 +22,7 @@ _evaluator = ExactMatchEvaluator({"strip": True})
 
 if TYPE_CHECKING:
     from api.services.backend_client import BackendClient
-    from api.services.observability_logger import ObsLogger
+    from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -458,7 +458,7 @@ async def evaluate_prompt_cached(
         try:
             _obs = obs
             if _obs is None:
-                from api.services.observability_logger import ObsLogger
+                from api.services.obs.observability_logger import ObsLogger
                 _obs = ObsLogger(store.base_dir, backend_id)
             _obs.log_dataset_run(
                 run_id=run_id,

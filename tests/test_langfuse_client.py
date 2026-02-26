@@ -12,7 +12,7 @@ Verifies that LangfuseLogger methods delegate to the Langfuse SDK correctly:
 import unittest.mock
 from unittest.mock import MagicMock
 
-from api.services.langfuse_client import LangfuseLogger
+from api.services.obs.langfuse_client import LangfuseLogger
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +395,7 @@ def test_link_item_to_run():
     mock_resp = MagicMock()
     mock_resp.status_code = 200
 
-    with unittest.mock.patch("api.services.langfuse_client.requests") as mock_requests:
+    with unittest.mock.patch("api.services.obs.langfuse_client.requests") as mock_requests:
         mock_requests.post.return_value = mock_resp
 
         result = lf.link_item_to_run(

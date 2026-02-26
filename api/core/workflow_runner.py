@@ -209,7 +209,7 @@ class WorkflowRunner:
             WorkflowContext with all outputs and metrics
         """
         # Initialize Langfuse logger (singleton, no-op if disabled)
-        from api.services.langfuse_client import LangfuseLogger
+        from api.services.obs.langfuse_client import LangfuseLogger
         langfuse = LangfuseLogger.get_instance()
 
         context = WorkflowContext(

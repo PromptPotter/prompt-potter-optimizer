@@ -11,7 +11,7 @@ Verifies that cloud Langfuse calls flow through ObsLogger's dual-write:
 import pytest
 
 from api.services.feedback_cycle import CycleConfig, run_feedback_cycle
-from api.services.langfuse_client import LangfuseLogger
+from api.services.obs.langfuse_client import LangfuseLogger
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +328,7 @@ async def test_class_level_state_cleared(
     monkeypatch, eval_data, cycle_config, mock_langfuse,
 ):
     """After feedback cycle ends, a standalone dataset_run creates a new trace."""
-    from api.services.observability_logger import ObsLogger
+    from api.services.obs.observability_logger import ObsLogger
 
     _apply_service_mocks(monkeypatch)
 

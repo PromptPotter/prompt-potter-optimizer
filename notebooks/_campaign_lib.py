@@ -1789,7 +1789,7 @@ def backfill_langfuse(store: "ProjectStore", backend_id: str) -> dict:
     Returns:
         Stats dict from ``backfill_to_langfuse()``.
     """
-    from api.services.langfuse_backfill import backfill_to_langfuse
+    from api.services.obs.langfuse_backfill import backfill_to_langfuse
 
     summaries = store.dataset_runs.list_all(backend_id)
 

@@ -9,7 +9,7 @@ re-running only pushes new runs.
 
 Usage::
 
-    from api.services.langfuse_backfill import backfill_to_langfuse
+    from api.services.obs.langfuse_backfill import backfill_to_langfuse
     stats = backfill_to_langfuse(store, backend_id)
 """
 
@@ -211,7 +211,7 @@ def backfill_to_langfuse(
         Stats dict with keys: total_on_disk, new_runs, already_done,
         origins (per-origin breakdown), error (if Langfuse disabled).
     """
-    from api.services.langfuse_client import LangfuseLogger
+    from api.services.obs.langfuse_client import LangfuseLogger
 
     lf = LangfuseLogger.get_instance()
     if not lf.enabled:

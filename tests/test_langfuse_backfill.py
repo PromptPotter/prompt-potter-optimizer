@@ -15,12 +15,12 @@ import json
 
 import pytest
 
-from api.services.langfuse_backfill import (
+from api.services.obs.langfuse_backfill import (
     DATASET_NAME,
     backfill_to_langfuse,
     classify_run_origin,
 )
-from api.services.langfuse_client import LangfuseLogger
+from api.services.obs.langfuse_client import LangfuseLogger
 from api.services.project_store import ProjectStore
 
 

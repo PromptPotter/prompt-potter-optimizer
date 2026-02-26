@@ -10,7 +10,7 @@ Covers:
 import json
 from pathlib import Path
 
-from api.services.observability_logger import CloudObsBackend, ObsLogger
+from api.services.obs.observability_logger import CloudObsBackend, ObsLogger
 
 
 # ---------------------------------------------------------------------------

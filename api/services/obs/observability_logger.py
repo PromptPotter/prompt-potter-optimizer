@@ -401,7 +401,7 @@ class ObsLogger:
         self._cloud: CloudObsBackend | None = None
         if langfuse is _UNSET:
             try:
-                from api.services.langfuse_client import LangfuseLogger
+                from api.services.obs.langfuse_client import LangfuseLogger
                 lf = LangfuseLogger.get_instance()
                 if lf.enabled:
                     self._cloud = CloudObsBackend(lf)
