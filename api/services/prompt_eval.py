@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import statistics
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
@@ -143,7 +144,7 @@ def analyze_candidate_coverage(replay_results: list) -> dict:
             "rank_11_20": sum(1 for r in found_ranks if 11 <= r <= 20),
             "rank_gt_20": sum(1 for r in found_ranks if r > 20),
             "mean_rank": sum(found_ranks) / len(found_ranks),
-            "median_rank": sorted(found_ranks)[len(found_ranks) // 2],
+            "median_rank": statistics.median(found_ranks),
         }
 
     return {
@@ -386,10 +387,28 @@ async def evaluate_prompt_cached(
     remaining_data = eval_data
     if store and backend_id:
         partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
-        if partial_results and len(partial_results) < len(eval_data):
-            remaining_data = eval_data[len(partial_results):]
-        elif partial_results and len(partial_results) >= len(eval_data):
-            remaining_data = []
+        if partial_results:
+            # Validate partial results align with eval_data queries
+            valid = True
+            for i, (pr, ed) in enumerate(zip(partial_results, eval_data)):
+                if pr.get("query") != ed.get("query"):
+                    logger.warning(
+                        "Partial eval %s: query mismatch at index %d "
+                        "(%r != %r) — discarding stale partials",
+                        run_id, i, pr.get("query", "")[:40], ed.get("query", "")[:40],
+                    )
+                    valid = False
+                    break
+
+            if not valid:
+                partial_results = []
+                remaining_data = eval_data
+            elif len(partial_results) >= len(eval_data):
+                # Truncate to expected count (guards against crash-induced duplicates)
+                partial_results = partial_results[:len(eval_data)]
+                remaining_data = []
+            else:
+                remaining_data = eval_data[len(partial_results):]
         else:
             partial_results = []
 
