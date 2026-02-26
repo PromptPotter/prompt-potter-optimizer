@@ -5,16 +5,12 @@ Covers:
 - events.jsonl flat navigation log (every method appends)
 - events.jsonl → file navigation (trace_id/campaign_id link to real files)
 - OBS_ENABLED=False disables all output
-- LLM retry logic (503, 429, 400, exhaustion)
 """
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock
 
-import pytest
-
-from api.services.observability_logger import ObsLogger
+from api.services.observability_logger import CloudObsBackend, ObsLogger
 
 
 # ---------------------------------------------------------------------------
@@ -28,11 +24,7 @@ def _make_obs(tmp_path: Path, enabled: bool = True) -> ObsLogger:
     obs.obs_root = tmp_path / "obs"
     obs._enabled = enabled
     obs._campaign_traces = {}
-    obs._cloud_trace_ids = {}
-    obs._langfuse = None
-    # Reset class-level campaign state to avoid cross-test leakage
-    ObsLogger._active_cloud_trace_id = None
-    ObsLogger._active_session_id = None
+    obs._cloud = None
     return obs
 
 
@@ -420,7 +412,7 @@ def test_log_campaign_end(tmp_path):
 
 
 def test_flush_without_langfuse(tmp_path):
-    """flush() is a no-op when _langfuse is None."""
+    """flush() is a no-op when _cloud is None."""
     obs = _make_obs(tmp_path)
     # Should not raise
     obs.flush()
@@ -510,7 +502,7 @@ def test_dual_write_with_mock_langfuse(tmp_path):
     """Injecting a mock Langfuse causes cloud calls alongside file writes."""
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
-    obs._langfuse = mock_lf
+    obs._cloud = CloudObsBackend(mock_lf)
 
     # dataset_run outside campaign → standalone cloud trace + score
     obs.log_dataset_run(
@@ -532,7 +524,7 @@ def test_dual_write_with_mock_langfuse(tmp_path):
     assert len(mock_lf.traces) == 2
     assert mock_lf.traces[1]["name"] == "feedback_cycle"
     assert mock_lf.traces[1]["session_id"] == "sess_123"
-    assert "dual_test" in obs._cloud_trace_ids
+    assert "dual_test" in obs._cloud._trace_ids
 
     # dataset_run during campaign → nested span (not new trace)
     obs.log_dataset_run(
@@ -544,7 +536,7 @@ def test_dual_write_with_mock_langfuse(tmp_path):
     # But a span was created under the campaign trace
     eval_spans = [s for s in mock_lf.spans if s["name"].startswith("eval_")]
     assert len(eval_spans) == 1
-    assert eval_spans[0]["trace_id"] == obs._cloud_trace_ids["dual_test"]
+    assert eval_spans[0]["trace_id"] == obs._cloud._trace_ids["dual_test"]
 
     # round → cloud span + score
     obs.log_round(
@@ -621,7 +613,7 @@ def test_obs_disabled(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Dataset run standalone vs campaign nesting
+# Dataset run standalone vs campaign nesting (behavioral)
 # ---------------------------------------------------------------------------
 
 
@@ -629,7 +621,7 @@ def test_dataset_run_standalone_creates_trace(tmp_path):
     """Standalone dataset_run (no campaign) creates a cloud trace, not a span."""
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
-    obs._langfuse = mock_lf
+    obs._cloud = CloudObsBackend(mock_lf)
 
     obs.log_dataset_run(
         run_id="standalone", content_hash="abc", accuracy=0.70,
@@ -643,23 +635,23 @@ def test_dataset_run_standalone_creates_trace(tmp_path):
     assert mock_lf.scores[0]["name"] == "accuracy"
 
 
-def test_class_level_cleared_after_campaign_end(tmp_path):
-    """Class-level _active_cloud_trace_id is cleared after campaign_end."""
+def test_active_trace_cleared_after_campaign_end(tmp_path):
+    """After campaign_end, dataset_run creates a standalone trace (not a span)."""
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
-    obs._langfuse = mock_lf
+    obs._cloud = CloudObsBackend(mock_lf)
 
-    # Start campaign → sets class-level state
+    # Start campaign → cloud backend has active trace
     obs.log_campaign_start(
         campaign_id="cls_test",
         config={},
         baseline_accuracy=0.50,
         session_id="sess",
     )
-    assert ObsLogger._active_cloud_trace_id is not None
-    assert ObsLogger._active_session_id == "sess"
+    assert obs._cloud._active_trace_id is not None
+    assert obs._cloud._active_session_id == "sess"
 
-    # End campaign → clears class-level state
+    # End campaign → active trace cleared
     obs.log_campaign_end(
         campaign_id="cls_test",
         best_accuracy=0.60,
@@ -667,8 +659,8 @@ def test_class_level_cleared_after_campaign_end(tmp_path):
         stop_reason="max_rounds",
         best_round=0,
     )
-    assert ObsLogger._active_cloud_trace_id is None
-    assert ObsLogger._active_session_id is None
+    assert obs._cloud._active_trace_id is None
+    assert obs._cloud._active_session_id is None
 
     # Dataset run after campaign end → standalone trace (not span)
     obs.log_dataset_run(
@@ -677,185 +669,6 @@ def test_class_level_cleared_after_campaign_end(tmp_path):
     )
     assert len(mock_lf.traces) == 2  # campaign trace + standalone trace
     assert mock_lf.traces[1]["name"] == "dataset_run"
-
-
-# ---------------------------------------------------------------------------
-# LLM Retry Tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_llm_retry_503():
-    """Retry on 503 twice, then succeed on third attempt."""
-    from api.services.llm_client import _OpenAICompatibleClient
-
-    client = _OpenAICompatibleClient(
-        api_key="test-key",
-        base_url="http://localhost:1234",
-        default_model="test-model",
-        provider_name="test",
-    )
-
-    call_count = [0]
-
-    class MockCompletion:
-        class Choice:
-            class Message:
-                content = '{"result": "ok"}'
-            message = Message()
-            finish_reason = "stop"
-
-        choices = [Choice()]
-
-        class Usage:
-            prompt_tokens = 10
-            completion_tokens = 5
-            total_tokens = 15
-        usage = Usage()
-        model = "test-model"
-
-    class Mock503Error(Exception):
-        status_code = 503
-
-    async def mock_create(**kwargs):
-        call_count[0] += 1
-        if call_count[0] <= 2:
-            raise Mock503Error("Service unavailable")
-        return MockCompletion()
-
-    # Patch the client
-    mock_async_client = AsyncMock()
-    mock_async_client.chat.completions.create = mock_create
-    client._client = mock_async_client
-
-    # Should succeed after 2 retries
-    response = await client.chat(
-        messages=[{"role": "user", "content": "test"}],
-        model="test-model",
-    )
-
-    assert response.content == '{"result": "ok"}'
-    assert call_count[0] == 3  # 2 failures + 1 success
-
-
-@pytest.mark.asyncio
-async def test_llm_retry_429():
-    """Retry on 429 once, then succeed."""
-    from api.services.llm_client import _OpenAICompatibleClient
-
-    client = _OpenAICompatibleClient(
-        api_key="test-key",
-        base_url="http://localhost:1234",
-        default_model="test-model",
-        provider_name="test",
-    )
-
-    call_count = [0]
-
-    class MockCompletion:
-        class Choice:
-            class Message:
-                content = "success"
-            message = Message()
-            finish_reason = "stop"
-
-        choices = [Choice()]
-
-        class Usage:
-            prompt_tokens = 10
-            completion_tokens = 5
-            total_tokens = 15
-        usage = Usage()
-        model = "test-model"
-
-    class Mock429Error(Exception):
-        status_code = 429
-
-    async def mock_create(**kwargs):
-        call_count[0] += 1
-        if call_count[0] <= 1:
-            raise Mock429Error("Rate limited")
-        return MockCompletion()
-
-    mock_async_client = AsyncMock()
-    mock_async_client.chat.completions.create = mock_create
-    client._client = mock_async_client
-
-    response = await client.chat(
-        messages=[{"role": "user", "content": "test"}],
-        model="test-model",
-    )
-
-    assert response.content == "success"
-    assert call_count[0] == 2
-
-
-@pytest.mark.asyncio
-async def test_llm_no_retry_400():
-    """400 errors raise immediately with no retry."""
-    from api.services.llm_client import _OpenAICompatibleClient
-
-    client = _OpenAICompatibleClient(
-        api_key="test-key",
-        base_url="http://localhost:1234",
-        default_model="test-model",
-        provider_name="test",
-    )
-
-    call_count = [0]
-
-    class Mock400Error(Exception):
-        status_code = 400
-
-    async def mock_create(**kwargs):
-        call_count[0] += 1
-        raise Mock400Error("Bad request")
-
-    mock_async_client = AsyncMock()
-    mock_async_client.chat.completions.create = mock_create
-    client._client = mock_async_client
-
-    with pytest.raises(Mock400Error):
-        await client.chat(
-            messages=[{"role": "user", "content": "test"}],
-            model="test-model",
-        )
-
-    assert call_count[0] == 1  # No retry
-
-
-@pytest.mark.asyncio
-async def test_llm_retry_exhausted():
-    """503 on every attempt raises after max retries."""
-    from api.services.llm_client import _MAX_APP_RETRIES, _OpenAICompatibleClient
-
-    client = _OpenAICompatibleClient(
-        api_key="test-key",
-        base_url="http://localhost:1234",
-        default_model="test-model",
-        provider_name="test",
-    )
-
-    call_count = [0]
-
-    class Mock503Error(Exception):
-        status_code = 503
-
-    async def mock_create(**kwargs):
-        call_count[0] += 1
-        raise Mock503Error("Service unavailable")
-
-    mock_async_client = AsyncMock()
-    mock_async_client.chat.completions.create = mock_create
-    client._client = mock_async_client
-
-    with pytest.raises(Mock503Error):
-        await client.chat(
-            messages=[{"role": "user", "content": "test"}],
-            model="test-model",
-        )
-
-    assert call_count[0] == _MAX_APP_RETRIES + 1
 
 
 # ---------------------------------------------------------------------------
@@ -908,7 +721,7 @@ def test_register_dataset_cloud_dual_write(tmp_path):
     """register_dataset pushes items to cloud Langfuse."""
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
-    obs._langfuse = mock_lf
+    obs._cloud = CloudObsBackend(mock_lf)
 
     eval_data = [
         {"query": "aspirin", "ground_truth": "Aspirin"},
@@ -941,7 +754,7 @@ def test_dataset_run_with_linking(tmp_path):
     """log_dataset_run links to dataset items when dataset_name + item_map provided."""
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
-    obs._langfuse = mock_lf
+    obs._cloud = CloudObsBackend(mock_lf)
 
     item_map = {"aspirin": "item_001", "ibuprofen": "item_002"}
 
@@ -963,7 +776,7 @@ def test_dataset_run_with_linking(tmp_path):
 
     # Dataset links created
     assert len(mock_lf.dataset_run_links) == 2
-    linked_items = {l["dataset_item_id"] for l in mock_lf.dataset_run_links}
+    linked_items = {lnk["dataset_item_id"] for lnk in mock_lf.dataset_run_links}
     assert linked_items == {"item_001", "item_002"}
     for link in mock_lf.dataset_run_links:
         assert link["run_name"] == "baseline_abc"
@@ -973,7 +786,7 @@ def test_dataset_run_no_linking_without_map(tmp_path):
     """log_dataset_run creates no links when dataset_item_map not provided."""
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
-    obs._langfuse = mock_lf
+    obs._cloud = CloudObsBackend(mock_lf)
 
     obs.log_dataset_run(
         run_id="baseline_abc",

@@ -514,6 +514,7 @@ async def run_feedback_cycle(
             "temperature": config.temperature,
             "on_candidate_eval": on_candidate_eval,
             "on_query_eval": on_query_eval,
+            "obs": obs,
         }
         if dataset_name and dataset_item_map:
             eval_config["dataset_name"] = dataset_name

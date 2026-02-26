@@ -22,6 +22,7 @@ _evaluator = ExactMatchEvaluator({"strip": True})
 
 if TYPE_CHECKING:
     from api.services.backend_client import BackendClient
+    from api.services.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -343,6 +344,7 @@ async def evaluate_prompt_cached(
     on_result: Callable | None = None,
     dataset_name: str | None = None,
     dataset_item_map: dict[str, str] | None = None,
+    obs: "ObsLogger | None" = None,
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt with deduplication, partial resume, and finalization.
 
@@ -454,9 +456,11 @@ async def evaluate_prompt_cached(
 
         # --- observability: log dataset run trace ---
         try:
-            from api.services.observability_logger import ObsLogger
-            obs = ObsLogger(store.base_dir, backend_id)
-            obs.log_dataset_run(
+            _obs = obs
+            if _obs is None:
+                from api.services.observability_logger import ObsLogger
+                _obs = ObsLogger(store.base_dir, backend_id)
+            _obs.log_dataset_run(
                 run_id=run_id,
                 content_hash=content_hash,
                 accuracy=scores["accuracy"],

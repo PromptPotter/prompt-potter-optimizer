@@ -289,6 +289,7 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
         temperature = self.config.get("temperature", 0.0)
         dataset_name = self.config.get("dataset_name")
         dataset_item_map = self.config.get("dataset_item_map")
+        obs = self.config.get("obs")
 
         # Create backend client
         if not backend_url:
@@ -324,6 +325,7 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
                 on_result=_on_result,
                 dataset_name=dataset_name,
                 dataset_item_map=dataset_item_map,
+                obs=obs,
             )
             all_candidate_results[c.id] = results
             candidate_scores.append({
