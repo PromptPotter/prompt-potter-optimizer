@@ -1,9 +1,8 @@
 """
 Backfill historical dataset runs to cloud Langfuse.
 
-One-shot, idempotent push of all completed dataset_runs to Langfuse as
-properly structured traces. Grouped by run origin (baseline, grid_search,
-sensitivity_scan, feedback_cycle, smart_search_winner).
+Dataset-first structure: registers dataset items with ground truth, then
+creates one trace per dataset_run linked to the dataset via Dataset Runs.
 
 State is tracked in ``{backend_id}/obs/langfuse/backfill_state.json`` so
 re-running only pushes new runs.
@@ -42,6 +41,8 @@ _PREFIX_MAP = [
     ("smart_search_winner_", "smart_search_winner"),
 ]
 
+DATASET_NAME = "termnorm_ground_truth"
+
 
 def classify_run_origin(run_id: str) -> str:
     """Classify a dataset run by its ID prefix.
@@ -63,11 +64,22 @@ def _load_state(store: ProjectStore, backend_id: str) -> dict[str, Any]:
     path = _state_path(store, backend_id)
     if path.exists():
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            state = json.load(f)
+        # Detect old format (origin-grouped) and reset
+        if state.get("format_version") != 2:
+            logger.info("Resetting stale backfill state (old format)")
+            return _fresh_state()
+        return state
+    return _fresh_state()
+
+
+def _fresh_state() -> dict[str, Any]:
     return {
+        "format_version": 2,
         "backfilled_run_ids": [],
         "last_backfill_at": None,
         "langfuse_trace_ids": {},
+        "dataset_items": {},
     }
 
 
@@ -76,6 +88,99 @@ def _save_state(store: ProjectStore, backend_id: str, state: dict[str, Any]) -> 
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
+
+
+def _collect_ground_truth(
+    store: ProjectStore, backend_id: str, summaries: list[dict],
+) -> dict[str, str]:
+    """Extract unique (query → ground_truth) pairs from all dataset_runs."""
+    gt_map: dict[str, str] = {}
+    for s in summaries:
+        rid = s.get("run_id", "")
+        detail = store.dataset_runs.load_by_id(backend_id, rid)
+        if not detail:
+            continue
+        for item in detail.get("dataset_run_items", []):
+            query = item.get("query", "")
+            ground_truth = item.get("ground_truth", "")
+            if query and ground_truth:
+                gt_map[query] = ground_truth
+    return gt_map
+
+
+def _register_dataset_items(
+    lf: Any,
+    gt_map: dict[str, str],
+    state: dict[str, Any],
+    on_progress: Callable[[str], None] | None = None,
+) -> dict[str, str]:
+    """Register/update dataset items in Langfuse. Returns {query: item_id}.
+
+    Creates the dataset if needed, then creates or updates each item
+    with the ground truth as expected_output.
+    """
+    query_to_item_id: dict[str, str] = dict(state.get("dataset_items", {}))
+
+    # Create dataset (idempotent)
+    lf.create_dataset(
+        name=DATASET_NAME,
+        description="TermNorm production ground truth queries for prompt evaluation",
+        metadata={"n_queries": len(gt_map)},
+    )
+
+    # Fetch existing items to find those needing updates
+    existing_items: dict[str, Any] = {}  # query_str → SDK item
+    ds = lf.get_dataset(DATASET_NAME)
+    if ds and hasattr(ds, "items"):
+        for it in ds.items:
+            input_data = getattr(it, "input", None) or {}
+            q = input_data.get("query", "") if isinstance(input_data, dict) else ""
+            if q:
+                existing_items[q] = it
+
+    created = 0
+    updated = 0
+    for query, ground_truth in gt_map.items():
+        if query in query_to_item_id:
+            # Already registered — check if expected_output needs update
+            existing = existing_items.get(query)
+            if existing and getattr(existing, "expected_output", None) is None:
+                lf.update_dataset_item(
+                    item_id=getattr(existing, "id"),
+                    expected_output=ground_truth,
+                )
+                updated += 1
+            continue
+
+        # Check if item exists in Langfuse but not in our state
+        existing = existing_items.get(query)
+        if existing:
+            item_id = getattr(existing, "id")
+            if getattr(existing, "expected_output", None) is None:
+                lf.update_dataset_item(
+                    item_id=item_id,
+                    expected_output=ground_truth,
+                )
+                updated += 1
+        else:
+            item_id = lf.create_dataset_item(
+                dataset_name=DATASET_NAME,
+                input={"query": query},
+                expected_output=ground_truth,
+                metadata={"source": "eval_data"},
+            )
+            created += 1
+
+        if item_id:
+            query_to_item_id[query] = item_id
+
+    if on_progress:
+        on_progress(
+            f"  Dataset '{DATASET_NAME}': {len(query_to_item_id)} items "
+            f"({created} created, {updated} updated)",
+        )
+
+    return query_to_item_id
 
 
 def backfill_to_langfuse(
@@ -87,13 +192,19 @@ def backfill_to_langfuse(
 ) -> dict[str, Any]:
     """Push all historical dataset_runs to cloud Langfuse.
 
+    Dataset-first structure:
+    1. Collect ground truth from all runs
+    2. Register/update dataset items with expected_output
+    3. Create one trace per run, link to dataset items via Dataset Runs
+    4. Score each trace with accuracy
+
     Idempotent — tracks which run_ids have been pushed in a state file
     and skips them on subsequent calls.
 
     Args:
         store: ProjectStore instance.
         backend_id: Backend identifier.
-        flush_every: Flush Langfuse client every N spans.
+        flush_every: Flush Langfuse client every N traces.
         on_progress: Optional callback for progress messages.
 
     Returns:
@@ -114,7 +225,17 @@ def backfill_to_langfuse(
     summaries = store.dataset_runs.list_all(backend_id)
     total_on_disk = len(summaries)
 
-    # Group by origin, skip already-done
+    def _emit(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
+
+    # Step 1: Collect ground truth and register dataset items
+    _emit("Collecting ground truth from dataset runs...")
+    gt_map = _collect_ground_truth(store, backend_id, summaries)
+    query_to_item_id = _register_dataset_items(lf, gt_map, state, on_progress)
+    state["dataset_items"] = query_to_item_id
+
+    # Step 2: Group new runs by origin for stats
     groups: dict[str, list[dict]] = {origin: [] for origin in ORIGIN_ORDER}
     for s in summaries:
         rid = s.get("run_id", "")
@@ -126,10 +247,10 @@ def backfill_to_langfuse(
     new_runs = sum(len(v) for v in groups.values())
     span_counter = 0
     origin_stats: dict[str, dict[str, Any]] = {}
+    rate_limit_warned = False
 
-    def _emit(msg: str) -> None:
-        if on_progress:
-            on_progress(msg)
+    # Step 3: Create one trace per run, link to dataset
+    session_id = f"dataset_{backend_id}"
 
     for origin in ORIGIN_ORDER:
         runs = groups[origin]
@@ -137,17 +258,6 @@ def backfill_to_langfuse(
             continue
 
         _emit(f"  {origin}: {len(runs)} runs")
-
-        # Create one trace per origin group
-        trace_id = lf.create_trace(
-            name=f"backfill_{origin}",
-            input={"origin": origin, "n_runs": len(runs)},
-            session_id=f"backfill_{backend_id}",
-            tags=["backfill", origin],
-        )
-        if not trace_id:
-            logger.warning("Failed to create backfill trace for %s", origin)
-            continue
 
         accuracies: list[float] = []
         total_items = 0
@@ -165,81 +275,107 @@ def backfill_to_langfuse(
             accuracy = scores.get("accuracy", 0.0)
             hits = scores.get("hits", 0)
             total = scores.get("total", 0)
-            items = detail.get("items", [])
+            items = detail.get("dataset_run_items", [])
             item_count = len(items)
 
-            # Build span output with per-query items
-            span_output: dict[str, Any] = {
-                "accuracy": accuracy,
-                "hits": hits,
-                "total": total,
-                "items": [
-                    {
-                        "query": it.get("query", ""),
-                        "predicted": it.get("predicted", ""),
-                        "ground_truth": it.get("ground_truth", ""),
-                        "hit": it.get("hit", False),
-                    }
-                    for it in items
-                ],
-            }
-
-            lf.create_span(
-                trace_id=trace_id,
-                name=rid,
+            # Create one trace per run
+            trace_id = lf.create_trace(
+                name=f"eval_{rid}",
                 input={
                     "run_id": rid,
                     "content_hash": detail.get("content_hash", ""),
                     "model": detail.get("model", ""),
                     "prompt_state_id": detail.get("prompt_state_id", ""),
                 },
-                output=span_output,
+                session_id=session_id,
+                tags=["eval", origin],
             )
+            if not trace_id:
+                logger.warning("Failed to create trace for run %s", rid)
+                continue
+
+            # Create per-query spans under the trace
+            link_skipped = False
+            for it in items:
+                query = it.get("query", "")
+                span_id = lf.create_span(
+                    trace_id=trace_id,
+                    name=query[:60] if query else "query",
+                    input={
+                        "query": query,
+                        "ground_truth": it.get("ground_truth", ""),
+                    },
+                    output={
+                        "predicted": it.get("predicted", ""),
+                        "hit": it.get("hit", False),
+                    },
+                )
+
+                # Link span to dataset item (skip if rate-limited)
+                item_id = query_to_item_id.get(query)
+                if item_id and trace_id and not lf.rate_limited:
+                    lf.link_item_to_run(
+                        dataset_item_id=item_id,
+                        trace_id=trace_id,
+                        observation_id=span_id,
+                        run_name=rid,
+                        run_metadata={
+                            "origin": origin,
+                            "accuracy": accuracy,
+                        },
+                    )
+                elif lf.rate_limited and not link_skipped:
+                    link_skipped = True
+
+            if lf.rate_limited and not rate_limit_warned:
+                rate_limit_warned = True
+                _emit(
+                    "  ** Rate limit hit — traces/scores continue but "
+                    "dataset linking paused until quota resets. "
+                    "Re-run backfill later to complete linking."
+                )
+
+            # Score the trace
+            lf.create_score(trace_id, "accuracy", accuracy)
+            lf.update_trace(
+                trace_id,
+                output={
+                    "accuracy": accuracy,
+                    "hits": hits,
+                    "total": total,
+                },
+            )
+            lf.end_trace(trace_id)
 
             accuracies.append(accuracy)
             total_items += item_count
 
-            # Mark as done
+            # Mark as done (trace + scores created even if linking skipped)
             already_done.add(rid)
             state["backfilled_run_ids"].append(rid)
+            state["langfuse_trace_ids"][rid] = trace_id
 
             span_counter += 1
             if span_counter % flush_every == 0:
                 lf.flush()
                 _emit(f"    [{span_counter}/{new_runs}] flushed")
 
-        # Scores on the trace
+        # Save state after each origin group (crash recovery)
+        state["last_backfill_at"] = datetime.now(timezone.utc).isoformat()
+        _save_state(store, backend_id, state)
+
         if accuracies:
             best_acc = max(accuracies)
             avg_acc = sum(accuracies) / len(accuracies)
-            lf.create_score(trace_id, "best_accuracy", best_acc)
-            lf.create_score(trace_id, "avg_accuracy", avg_acc)
-            lf.update_trace(
-                trace_id,
-                output={
-                    "best_accuracy": best_acc,
-                    "avg_accuracy": avg_acc,
-                    "n_runs": len(runs),
-                    "total_items": total_items,
-                },
-            )
         else:
             best_acc = 0.0
             avg_acc = 0.0
-
-        lf.end_trace(trace_id)
-
-        # Save state after each origin group (crash recovery)
-        state["langfuse_trace_ids"][origin] = trace_id
-        state["last_backfill_at"] = datetime.now(timezone.utc).isoformat()
-        _save_state(store, backend_id, state)
 
         origin_stats[origin] = {
             "n_runs": len(runs),
             "total_items": total_items,
             "best_accuracy": best_acc,
             "avg_accuracy": avg_acc,
-            "trace_id": trace_id,
         }
 
     # Final flush
@@ -252,5 +388,8 @@ def backfill_to_langfuse(
         "new_runs": new_runs,
         "already_done": total_on_disk - new_runs,
         "origins": origin_stats,
-        "session_id": f"backfill_{backend_id}",
+        "session_id": session_id,
+        "dataset_name": DATASET_NAME,
+        "dataset_items": len(query_to_item_id),
+        "rate_limit_hit": rate_limit_warned,
     }

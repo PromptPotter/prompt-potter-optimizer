@@ -329,6 +329,91 @@ class ObsLogger:
 
     # --- Public API ---
 
+    def register_dataset(
+        self,
+        dataset_name: str,
+        eval_data: list[dict],
+    ) -> dict[str, str]:
+        """Register dataset items in file store and cloud Langfuse.
+
+        Creates one dataset item per unique query in eval_data, setting
+        ``expectedOutput`` to the ground truth label.
+
+        Args:
+            dataset_name: Langfuse dataset name (e.g. ``termnorm_ground_truth``).
+            eval_data: List of dicts with ``query`` and ``ground_truth`` keys.
+
+        Returns:
+            Mapping of ``{query: item_id}`` for linking evaluations to items.
+        """
+        if not self._enabled:
+            return {}
+
+        query_to_item_id: dict[str, str] = {}
+
+        try:
+            # File layer: write dataset items to obs/langfuse/datasets/{name}/
+            ds_dir = self.obs_root / "langfuse" / "datasets" / dataset_name
+            ds_dir.mkdir(parents=True, exist_ok=True)
+
+            for entry in eval_data:
+                query = entry.get("query", "")
+                ground_truth = entry.get("ground_truth", "")
+                if not query:
+                    continue
+
+                # Content-addressed item ID
+                import hashlib
+                item_id = hashlib.sha256(
+                    f"{dataset_name}:{query}".encode(),
+                ).hexdigest()[:16]
+
+                item_data = {
+                    "id": item_id,
+                    "dataset_name": dataset_name,
+                    "input": {"query": query},
+                    "expected_output": ground_truth,
+                }
+                _write_json(ds_dir / f"{item_id}.json", item_data)
+                query_to_item_id[query] = item_id
+
+            self._log_event({
+                "event": "dataset_registered",
+                "dataset_name": dataset_name,
+                "n_items": len(query_to_item_id),
+            })
+
+            # Cloud Langfuse dual-write
+            if self._langfuse:
+                try:
+                    self._langfuse.create_dataset(
+                        name=dataset_name,
+                        description="Ground truth queries for prompt evaluation",
+                        metadata={"n_items": len(eval_data)},
+                    )
+                    for entry in eval_data:
+                        query = entry.get("query", "")
+                        ground_truth = entry.get("ground_truth", "")
+                        if not query:
+                            continue
+                        cloud_id = self._langfuse.create_dataset_item(
+                            dataset_name=dataset_name,
+                            input={"query": query},
+                            expected_output=ground_truth,
+                            metadata={"source": "eval_data"},
+                        )
+                        if cloud_id:
+                            query_to_item_id[query] = cloud_id
+                except Exception:
+                    logger.debug(
+                        "Cloud Langfuse register_dataset failed", exc_info=True,
+                    )
+
+        except Exception:
+            logger.warning("ObsLogger.register_dataset failed", exc_info=True)
+
+        return query_to_item_id
+
     def log_dataset_run(
         self,
         run_id: str,
@@ -339,6 +424,8 @@ class ObsLogger:
         model: str,
         temperature: float,
         prompt_state_id: str = "",
+        dataset_name: str | None = None,
+        dataset_item_map: dict[str, str] | None = None,
     ) -> Path | None:
         """Write Langfuse trace + events.jsonl line for a completed eval run.
 
@@ -381,6 +468,7 @@ class ObsLogger:
             if self._langfuse:
                 try:
                     active_trace = ObsLogger._active_cloud_trace_id
+                    cloud_trace_id: str | None = None
                     if active_trace:
                         # Nested span under campaign trace
                         self._langfuse.create_span(
@@ -399,6 +487,7 @@ class ObsLogger:
                                 "total": total,
                             },
                         )
+                        cloud_trace_id = active_trace
                     else:
                         # Standalone trace (no campaign active)
                         cloud_id = self._langfuse.create_trace(
@@ -417,6 +506,20 @@ class ObsLogger:
                                 trace_id=cloud_id,
                                 name="accuracy",
                                 value=accuracy,
+                            )
+                            cloud_trace_id = cloud_id
+
+                    # Link to dataset items if available
+                    if cloud_trace_id and dataset_name and dataset_item_map:
+                        for query, item_id in dataset_item_map.items():
+                            self._langfuse.link_item_to_run(
+                                dataset_item_id=item_id,
+                                trace_id=cloud_trace_id,
+                                run_name=run_id,
+                                run_metadata={
+                                    "accuracy": accuracy,
+                                    "prompt_state_id": prompt_state_id,
+                                },
                             )
                 except Exception:
                     logger.debug("Cloud Langfuse dataset_run failed", exc_info=True)

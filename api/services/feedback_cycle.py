@@ -420,6 +420,8 @@ async def run_feedback_cycle(
 
     # Campaign ID for observability
     obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
+    dataset_name: str | None = None
+    dataset_item_map: dict[str, str] | None = None
     if obs:
         try:
             obs.log_campaign_start(
@@ -430,6 +432,19 @@ async def run_feedback_cycle(
             )
         except Exception:
             logger.warning("ObsLogger.log_campaign_start failed", exc_info=True)
+
+        # Register dataset items for linking evaluations
+        try:
+            dataset_name = "termnorm_ground_truth"
+            dataset_item_map = obs.register_dataset(dataset_name, eval_data)
+            if dataset_item_map:
+                logger.info(
+                    "Registered %d dataset items for '%s'",
+                    len(dataset_item_map), dataset_name,
+                )
+        except Exception:
+            logger.warning("Dataset registration failed", exc_info=True)
+            dataset_item_map = None
 
     # Initialize round state for fresh start (skip if resumed)
     if resumed_from_round == 0:
@@ -487,21 +502,26 @@ async def run_feedback_cycle(
                 )
 
         # Evaluate: score candidates and select winner
+        eval_config: dict[str, Any] = {
+            "model": config.model,
+            "provider": config.provider,
+            "backend_url": config.backend_url,
+            "backend_id": config.backend_id,
+            "project_root": config.project_root,
+            "improvement_threshold": config.improvement_threshold,
+            "generate_suggestions": config.generate_suggestions,
+            "pipeline_params": config.pipeline_params,
+            "temperature": config.temperature,
+            "on_candidate_eval": on_candidate_eval,
+            "on_query_eval": on_query_eval,
+        }
+        if dataset_name and dataset_item_map:
+            eval_config["dataset_name"] = dataset_name
+            eval_config["dataset_item_map"] = dataset_item_map
+
         eval_node = AnalysisEvalNode(
             node_id=f"cycle_eval_{round_num}",
-            config={
-                "model": config.model,
-                "provider": config.provider,
-                "backend_url": config.backend_url,
-                "backend_id": config.backend_id,
-                "project_root": config.project_root,
-                "improvement_threshold": config.improvement_threshold,
-                "generate_suggestions": config.generate_suggestions,
-                "pipeline_params": config.pipeline_params,
-                "temperature": config.temperature,
-                "on_candidate_eval": on_candidate_eval,
-                "on_query_eval": on_query_eval,
-            },
+            config=eval_config,
         )
         eval_out = await eval_node.process({
             "candidates": candidates_for_eval,

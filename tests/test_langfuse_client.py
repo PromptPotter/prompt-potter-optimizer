@@ -9,6 +9,7 @@ Verifies that LangfuseLogger methods delegate to the Langfuse SDK correctly:
 - create_score() → client.score()
 """
 
+import unittest.mock
 from unittest.mock import MagicMock
 
 from api.services.langfuse_client import LangfuseLogger
@@ -24,6 +25,7 @@ def _make_logger_with_mock_client() -> tuple[LangfuseLogger, MagicMock]:
     lf = LangfuseLogger.__new__(LangfuseLogger)
     lf.enabled = True
     lf._trace_metadata = {}
+    lf._rate_limit_until = 0.0
 
     mock_client = MagicMock()
     mock_client.create_trace_id.return_value = "trace_abc123"
@@ -277,3 +279,145 @@ def test_shutdown_calls_client():
     lf, mock_client = _make_logger_with_mock_client()
     lf.shutdown()
     mock_client.shutdown.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Dataset API
+# ---------------------------------------------------------------------------
+
+
+def test_create_dataset():
+    """create_dataset calls client.create_dataset()."""
+    lf, mock_client = _make_logger_with_mock_client()
+
+    result = lf.create_dataset(
+        name="termnorm_ground_truth",
+        description="Ground truth queries",
+        metadata={"source": "production"},
+    )
+
+    assert result is True
+    mock_client.create_dataset.assert_called_once_with(
+        name="termnorm_ground_truth",
+        description="Ground truth queries",
+        metadata={"source": "production"},
+    )
+
+
+def test_create_dataset_disabled():
+    """create_dataset returns False when disabled."""
+    lf, _ = _make_logger_with_mock_client()
+    lf.enabled = False
+    assert lf.create_dataset("x") is False
+
+
+def test_create_dataset_item():
+    """create_dataset_item calls client.create_dataset_item()."""
+    lf, mock_client = _make_logger_with_mock_client()
+
+    mock_item = MagicMock()
+    mock_item.id = "item_001"
+    mock_client.create_dataset_item.return_value = mock_item
+
+    item_id = lf.create_dataset_item(
+        dataset_name="termnorm_ground_truth",
+        input={"query": "aspirin"},
+        expected_output="Aspirin",
+        metadata={"source": "eval"},
+    )
+
+    assert item_id == "item_001"
+    mock_client.create_dataset_item.assert_called_once_with(
+        dataset_name="termnorm_ground_truth",
+        input={"query": "aspirin"},
+        expected_output="Aspirin",
+        metadata={"source": "eval"},
+    )
+
+
+def test_create_dataset_item_disabled():
+    """create_dataset_item returns None when disabled."""
+    lf, _ = _make_logger_with_mock_client()
+    lf.enabled = False
+    assert lf.create_dataset_item("ds", {}) is None
+
+
+def test_get_dataset():
+    """get_dataset calls client.get_dataset()."""
+    lf, mock_client = _make_logger_with_mock_client()
+
+    mock_ds = MagicMock()
+    mock_ds.name = "termnorm_ground_truth"
+    mock_client.get_dataset.return_value = mock_ds
+
+    ds = lf.get_dataset("termnorm_ground_truth")
+
+    assert ds is mock_ds
+    mock_client.get_dataset.assert_called_once_with(name="termnorm_ground_truth")
+
+
+def test_get_dataset_disabled():
+    """get_dataset returns None when disabled."""
+    lf, _ = _make_logger_with_mock_client()
+    lf.enabled = False
+    assert lf.get_dataset("x") is None
+
+
+def test_update_dataset_item():
+    """update_dataset_item calls client.create_dataset_item with id + expected_output."""
+    lf, mock_client = _make_logger_with_mock_client()
+
+    result = lf.update_dataset_item(
+        item_id="item_001",
+        expected_output="Aspirin",
+        metadata={"updated": True},
+    )
+
+    assert result is True
+    mock_client.create_dataset_item.assert_called_once_with(
+        id="item_001",
+        expected_output="Aspirin",
+        metadata={"updated": True},
+    )
+
+
+def test_update_dataset_item_disabled():
+    """update_dataset_item returns False when disabled."""
+    lf, _ = _make_logger_with_mock_client()
+    lf.enabled = False
+    assert lf.update_dataset_item("item_001") is False
+
+
+def test_link_item_to_run():
+    """link_item_to_run POSTs to the REST API."""
+    lf, mock_client = _make_logger_with_mock_client()
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+
+    with unittest.mock.patch("api.services.langfuse_client.requests") as mock_requests:
+        mock_requests.post.return_value = mock_resp
+
+        result = lf.link_item_to_run(
+            dataset_item_id="item_001",
+            trace_id="trace_abc",
+            observation_id="span_001",
+            run_name="baseline_abc",
+            run_metadata={"origin": "baseline"},
+        )
+
+    assert result is True
+    mock_requests.post.assert_called_once()
+    call_kwargs = mock_requests.post.call_args
+    body = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+    assert body["datasetItemId"] == "item_001"
+    assert body["traceId"] == "trace_abc"
+    assert body["observationId"] == "span_001"
+    assert body["runName"] == "baseline_abc"
+
+
+def test_link_item_to_run_disabled():
+    """link_item_to_run returns False when disabled."""
+    lf, _ = _make_logger_with_mock_client()
+    lf.enabled = False
+    assert lf.link_item_to_run("item_001", "trace_abc") is False

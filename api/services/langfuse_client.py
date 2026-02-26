@@ -17,8 +17,11 @@ Usage:
 """
 import logging
 import os
+import time
 import uuid
 from typing import Any
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,8 @@ class LangfuseLogger:
         self.client = None
         # Maps trace_id → root SDK span object (not a plain dict)
         self._trace_metadata: dict[str, Any] = {}
+        # Rate-limit tracking for REST API calls
+        self._rate_limit_until: float = 0.0  # unix timestamp when quota resets
 
         if self.enabled:
             try:
@@ -257,6 +262,166 @@ class LangfuseLogger:
                 root.end()
         except Exception:
             logger.warning("Failed to end Langfuse trace", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Dataset API
+    # ------------------------------------------------------------------
+
+    def create_dataset(
+        self,
+        name: str,
+        description: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Create a Langfuse dataset (idempotent — no error if it exists)."""
+        if not self.enabled or not self.client:
+            return False
+        try:
+            self.client.create_dataset(
+                name=name,
+                description=description or "",
+                metadata=metadata or {},
+            )
+            return True
+        except Exception:
+            logger.warning("Failed to create Langfuse dataset", exc_info=True)
+            return False
+
+    def create_dataset_item(
+        self,
+        dataset_name: str,
+        input: Any,
+        expected_output: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str | None:
+        """Create a dataset item. Returns item ID or None."""
+        if not self.enabled or not self.client:
+            return None
+        try:
+            item = self.client.create_dataset_item(
+                dataset_name=dataset_name,
+                input=input,
+                expected_output=expected_output,
+                metadata=metadata or {},
+            )
+            return getattr(item, "id", None)
+        except Exception:
+            logger.warning("Failed to create Langfuse dataset item", exc_info=True)
+            return None
+
+    def get_dataset(self, name: str) -> object | None:
+        """Fetch a dataset by name. Returns SDK dataset object or None."""
+        if not self.enabled or not self.client:
+            return None
+        try:
+            return self.client.get_dataset(name=name)
+        except Exception:
+            logger.warning("Failed to get Langfuse dataset", exc_info=True)
+            return None
+
+    def update_dataset_item(
+        self,
+        item_id: str,
+        expected_output: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Update an existing dataset item (e.g. to set expectedOutput)."""
+        if not self.enabled or not self.client:
+            return False
+        try:
+            kwargs: dict[str, Any] = {"id": item_id}
+            if expected_output is not None:
+                kwargs["expected_output"] = expected_output
+            if metadata is not None:
+                kwargs["metadata"] = metadata
+            self.client.create_dataset_item(**kwargs)
+            return True
+        except Exception:
+            logger.warning("Failed to update Langfuse dataset item", exc_info=True)
+            return False
+
+    @property
+    def rate_limited(self) -> bool:
+        """True if we're currently blocked by a Langfuse rate limit."""
+        return time.time() < self._rate_limit_until
+
+    def link_item_to_run(
+        self,
+        dataset_item_id: str,
+        trace_id: str,
+        observation_id: str | None = None,
+        run_name: str = "",
+        run_metadata: dict[str, Any] | None = None,
+        *,
+        max_retries: int = 3,
+    ) -> bool:
+        """Link a trace/observation to a dataset item via a Dataset Run.
+
+        Uses the REST API directly because the Python SDK does not expose
+        ``create_dataset_run_item`` (it only offers a context-manager approach
+        via ``item.run()`` which is unsuitable for backfill).
+
+        Respects 429 rate limits: retries with exponential backoff for short
+        waits, but if ``Retry-After`` exceeds 300s (daily quota exhausted),
+        sets ``rate_limited`` and returns False immediately so callers can
+        stop early.
+        """
+        if not self.enabled or not self.client:
+            return False
+        if self.rate_limited:
+            return False
+        try:
+            from api.config.settings import settings
+
+            body: dict[str, Any] = {
+                "datasetItemId": dataset_item_id,
+                "traceId": trace_id,
+                "runName": run_name,
+                "metadata": run_metadata or {},
+            }
+            if observation_id:
+                body["observationId"] = observation_id
+
+            url = f"{settings.LANGFUSE_HOST}/api/public/dataset-run-items"
+            auth = (settings.LANGFUSE_PUBLIC_KEY, settings.LANGFUSE_SECRET_KEY)
+
+            for attempt in range(max_retries):
+                resp = requests.post(url, auth=auth, json=body, timeout=30)
+
+                if resp.status_code in (200, 201):
+                    return True
+
+                if resp.status_code == 429:
+                    retry_after = int(resp.headers.get("Retry-After", "0"))
+                    remaining = int(resp.headers.get("X-RateLimit-Remaining", "-1"))
+
+                    # Daily quota exhausted (Retry-After > 5 min) — stop trying
+                    if retry_after > 300 or remaining == 0:
+                        self._rate_limit_until = time.time() + retry_after
+                        logger.warning(
+                            "Langfuse daily rate limit hit (resets in %ds). "
+                            "Skipping remaining link_item_to_run calls.",
+                            retry_after,
+                        )
+                        return False
+
+                    # Short-term rate limit — back off and retry
+                    wait = min(2 ** attempt, retry_after or 2 ** attempt)
+                    logger.debug("Rate limited, waiting %ds (attempt %d)", wait, attempt + 1)
+                    time.sleep(wait)
+                    continue
+
+                # Other HTTP error
+                logger.warning(
+                    "Link item to run HTTP %s: %s", resp.status_code, resp.text[:200],
+                )
+                return False
+
+            logger.warning("link_item_to_run exhausted %d retries", max_retries)
+            return False
+        except Exception:
+            logger.warning("Failed to link dataset item to run", exc_info=True)
+            return False
 
     def flush(self) -> None:
         """Ensure all pending events are sent to Langfuse."""

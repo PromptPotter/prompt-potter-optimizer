@@ -444,6 +444,12 @@ class _MockLangfuse:
         self.flush_count = 0
         self._counter = 0
 
+        # Dataset API tracking
+        self.datasets_created: list[dict] = []
+        self.dataset_items_created: list[dict] = []
+        self.dataset_run_links: list[dict] = []
+        self._item_counter = 0
+
     def create_trace(self, name, input, metadata=None, user_id=None,
                      session_id=None, tags=None):
         self._counter += 1
@@ -473,6 +479,31 @@ class _MockLangfuse:
 
     def flush(self):
         self.flush_count += 1
+
+    # Dataset API
+
+    def create_dataset(self, name, description=None, metadata=None):
+        self.datasets_created.append({"name": name, "description": description})
+        return True
+
+    def create_dataset_item(self, dataset_name, input, expected_output=None,
+                            metadata=None):
+        self._item_counter += 1
+        item_id = f"cloud_item_{self._item_counter}"
+        self.dataset_items_created.append({
+            "id": item_id, "dataset_name": dataset_name,
+            "input": input, "expected_output": expected_output,
+        })
+        return item_id
+
+    def link_item_to_run(self, dataset_item_id, trace_id,
+                         observation_id=None, run_name="", run_metadata=None):
+        self.dataset_run_links.append({
+            "dataset_item_id": dataset_item_id,
+            "trace_id": trace_id,
+            "run_name": run_name,
+        })
+        return True
 
 
 def test_dual_write_with_mock_langfuse(tmp_path):
@@ -825,3 +856,135 @@ async def test_llm_retry_exhausted():
         )
 
     assert call_count[0] == _MAX_APP_RETRIES + 1
+
+
+# ---------------------------------------------------------------------------
+# ObsLogger.register_dataset
+# ---------------------------------------------------------------------------
+
+
+def test_register_dataset_creates_files(tmp_path):
+    """register_dataset writes dataset item JSON files to disk."""
+    obs = _make_obs(tmp_path)
+
+    eval_data = [
+        {"query": "aspirin", "ground_truth": "Aspirin"},
+        {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
+    ]
+
+    item_map = obs.register_dataset("termnorm_gt", eval_data)
+
+    assert len(item_map) == 2
+    assert "aspirin" in item_map
+    assert "ibuprofen" in item_map
+
+    # Files exist on disk
+    ds_dir = tmp_path / "obs" / "langfuse" / "datasets" / "termnorm_gt"
+    assert ds_dir.exists()
+    items = list(ds_dir.glob("*.json"))
+    assert len(items) == 2
+
+    # Item content correct
+    item_data = json.loads(items[0].read_text())
+    assert "input" in item_data
+    assert "expected_output" in item_data
+    assert item_data["expected_output"] in ("Aspirin", "Ibuprofen")
+
+    # events.jsonl line
+    events = _read_events(tmp_path / "obs")
+    assert len(events) == 1
+    assert events[0]["event"] == "dataset_registered"
+    assert events[0]["n_items"] == 2
+
+
+def test_register_dataset_disabled(tmp_path):
+    """register_dataset returns empty dict when disabled."""
+    obs = _make_obs(tmp_path, enabled=False)
+    result = obs.register_dataset("ds", [{"query": "q", "ground_truth": "g"}])
+    assert result == {}
+
+
+def test_register_dataset_cloud_dual_write(tmp_path):
+    """register_dataset pushes items to cloud Langfuse."""
+    mock_lf = _MockLangfuse()
+    obs = _make_obs(tmp_path)
+    obs._langfuse = mock_lf
+
+    eval_data = [
+        {"query": "aspirin", "ground_truth": "Aspirin"},
+        {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
+    ]
+
+    item_map = obs.register_dataset("termnorm_gt", eval_data)
+
+    # Cloud dataset created
+    assert len(mock_lf.datasets_created) == 1
+    assert mock_lf.datasets_created[0]["name"] == "termnorm_gt"
+
+    # Cloud items created with ground truth
+    assert len(mock_lf.dataset_items_created) == 2
+    for it in mock_lf.dataset_items_created:
+        assert it["expected_output"] is not None
+
+    # item_map uses cloud IDs (overwritten from file IDs)
+    assert len(item_map) == 2
+    for query, item_id in item_map.items():
+        assert item_id.startswith("cloud_item_")
+
+
+# ---------------------------------------------------------------------------
+# ObsLogger.log_dataset_run with dataset linking
+# ---------------------------------------------------------------------------
+
+
+def test_dataset_run_with_linking(tmp_path):
+    """log_dataset_run links to dataset items when dataset_name + item_map provided."""
+    mock_lf = _MockLangfuse()
+    obs = _make_obs(tmp_path)
+    obs._langfuse = mock_lf
+
+    item_map = {"aspirin": "item_001", "ibuprofen": "item_002"}
+
+    obs.log_dataset_run(
+        run_id="baseline_abc",
+        content_hash="hash123",
+        accuracy=0.75,
+        total=2,
+        hits=1,
+        model="test-model",
+        temperature=0.0,
+        prompt_state_id="ps_abc",
+        dataset_name="termnorm_gt",
+        dataset_item_map=item_map,
+    )
+
+    # Standalone trace created (no active campaign)
+    assert len(mock_lf.traces) == 1
+
+    # Dataset links created
+    assert len(mock_lf.dataset_run_links) == 2
+    linked_items = {l["dataset_item_id"] for l in mock_lf.dataset_run_links}
+    assert linked_items == {"item_001", "item_002"}
+    for link in mock_lf.dataset_run_links:
+        assert link["run_name"] == "baseline_abc"
+
+
+def test_dataset_run_no_linking_without_map(tmp_path):
+    """log_dataset_run creates no links when dataset_item_map not provided."""
+    mock_lf = _MockLangfuse()
+    obs = _make_obs(tmp_path)
+    obs._langfuse = mock_lf
+
+    obs.log_dataset_run(
+        run_id="baseline_abc",
+        content_hash="hash123",
+        accuracy=0.75,
+        total=2,
+        hits=1,
+        model="test-model",
+        temperature=0.0,
+    )
+
+    # Trace created but no links
+    assert len(mock_lf.traces) == 1
+    assert len(mock_lf.dataset_run_links) == 0

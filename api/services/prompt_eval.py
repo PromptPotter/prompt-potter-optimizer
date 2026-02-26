@@ -341,6 +341,8 @@ async def evaluate_prompt_cached(
     model: str = "",
     temperature: float = 0.0,
     on_result: Callable | None = None,
+    dataset_name: str | None = None,
+    dataset_item_map: dict[str, str] | None = None,
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt with deduplication, partial resume, and finalization.
 
@@ -363,6 +365,8 @@ async def evaluate_prompt_cached(
         temperature: Temperature for content hash.
         on_result: Optional callback ``(result, index, total)`` called after
             each query evaluation (for progress reporting).
+        dataset_name: Optional Langfuse dataset name for linking evaluations.
+        dataset_item_map: Optional ``{query: item_id}`` mapping for dataset linking.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
@@ -461,6 +465,8 @@ async def evaluate_prompt_cached(
                 model=model,
                 temperature=temperature,
                 prompt_state_id=prompt_state.id,
+                dataset_name=dataset_name,
+                dataset_item_map=dataset_item_map,
             )
         except Exception:
             logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)

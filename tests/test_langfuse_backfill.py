@@ -2,11 +2,13 @@
 
 Verifies:
 - Run origin classification by prefix
-- Trace/span/score creation per origin group
+- Dataset-first structure: items registered with ground truth
+- Per-run traces with per-query spans linked to dataset items
 - Idempotency (second call skips all)
 - Incremental backfill (only new runs pushed)
 - Graceful handling when Langfuse is disabled
-- State file persistence
+- State file persistence (format_version=2)
+- Old state format reset
 """
 
 import json
@@ -14,6 +16,7 @@ import json
 import pytest
 
 from api.services.langfuse_backfill import (
+    DATASET_NAME,
     backfill_to_langfuse,
     classify_run_origin,
 )
@@ -38,6 +41,20 @@ class MockLangfuseLogger:
         self.end_trace_calls: list[str] = []
         self.flush_count = 0
         self._counter = 0
+        self._rate_limit_until = 0.0
+
+        # Dataset API tracking
+        self.datasets_created: list[dict] = []
+        self.dataset_items_created: list[dict] = []
+        self.dataset_items_updated: list[dict] = []
+        self.dataset_gets: list[str] = []
+        self.dataset_run_links: list[dict] = []
+        self._item_counter = 0
+
+    @property
+    def rate_limited(self) -> bool:
+        import time
+        return time.time() < self._rate_limit_until
 
     def create_trace(self, name, input, metadata=None, user_id=None,
                      session_id=None, tags=None):
@@ -77,6 +94,46 @@ class MockLangfuseLogger:
     def flush(self):
         self.flush_count += 1
 
+    # Dataset API
+
+    def create_dataset(self, name, description=None, metadata=None):
+        self.datasets_created.append({
+            "name": name, "description": description, "metadata": metadata,
+        })
+        return True
+
+    def create_dataset_item(self, dataset_name, input, expected_output=None,
+                            metadata=None):
+        self._item_counter += 1
+        item_id = f"item_{self._item_counter:03d}"
+        self.dataset_items_created.append({
+            "id": item_id, "dataset_name": dataset_name,
+            "input": input, "expected_output": expected_output,
+        })
+        return item_id
+
+    def get_dataset(self, name):
+        self.dataset_gets.append(name)
+        # Return empty dataset (no existing items)
+        return type("Dataset", (), {"name": name, "items": []})()
+
+    def update_dataset_item(self, item_id, expected_output=None, metadata=None):
+        self.dataset_items_updated.append({
+            "item_id": item_id, "expected_output": expected_output,
+        })
+        return True
+
+    def link_item_to_run(self, dataset_item_id, trace_id,
+                         observation_id=None, run_name="", run_metadata=None):
+        self.dataset_run_links.append({
+            "dataset_item_id": dataset_item_id,
+            "trace_id": trace_id,
+            "observation_id": observation_id,
+            "run_name": run_name,
+            "run_metadata": run_metadata,
+        })
+        return True
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,7 +156,7 @@ def _make_run(run_id: str, accuracy: float, items: list[dict] | None = None):
         "prompt_state_id": f"ps_{run_id}",
         "temperature": 0.0,
         "item_count": len(items),
-        "items": items,
+        "dataset_run_items": items,
         "scores": {
             "accuracy": accuracy,
             "hits": hits,
@@ -143,9 +200,44 @@ class TestClassifyRunOrigin:
         assert classify_run_origin("") == "other"
 
 
-class TestBackfillCreatesTracesPerOrigin:
-    def test_creates_traces_and_spans(self, tmp_path, monkeypatch):
-        """One trace per origin group, one span per run, scores on each trace."""
+class TestBackfillDatasetFirst:
+    def test_registers_dataset_items_with_ground_truth(self, tmp_path, monkeypatch):
+        """Backfill registers dataset items with expectedOutput set."""
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        items = [
+            {"query": "aspirin", "predicted": "Aspirin",
+             "ground_truth": "Aspirin", "hit": True},
+            {"query": "ibuprofen", "predicted": "wrong",
+             "ground_truth": "Ibuprofen", "hit": False},
+        ]
+        runs = [_make_run("baseline_001", 0.5, items=items)]
+        _seed_runs(store, backend_id, runs)
+
+        mock = MockLangfuseLogger()
+        monkeypatch.setattr(
+            LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
+        )
+
+        stats = backfill_to_langfuse(store, backend_id)
+
+        # Dataset created
+        assert len(mock.datasets_created) == 1
+        assert mock.datasets_created[0]["name"] == DATASET_NAME
+
+        # Dataset items created with ground truth
+        assert len(mock.dataset_items_created) == 2
+        queries = {it["input"]["query"] for it in mock.dataset_items_created}
+        assert queries == {"aspirin", "ibuprofen"}
+        for it in mock.dataset_items_created:
+            assert it["expected_output"] is not None
+
+        assert stats["dataset_items"] == 2
+        assert stats["dataset_name"] == DATASET_NAME
+
+    def test_creates_per_run_traces(self, tmp_path, monkeypatch):
+        """One trace per run (not per origin group)."""
         store = ProjectStore(tmp_path)
         backend_id = "test-backend"
 
@@ -168,43 +260,70 @@ class TestBackfillCreatesTracesPerOrigin:
         assert stats["new_runs"] == 4
         assert stats["already_done"] == 0
 
-        # 3 origin groups: baseline, grid_search, sensitivity_scan
-        assert len(mock.traces) == 3
+        # 4 traces (one per run), not 3 (one per origin)
+        assert len(mock.traces) == 4
         trace_names = [t["name"] for t in mock.traces]
-        assert "backfill_baseline" in trace_names
-        assert "backfill_grid_search" in trace_names
-        assert "backfill_sensitivity_scan" in trace_names
+        assert "eval_baseline_001" in trace_names
+        assert "eval_grid_001" in trace_names
+        assert "eval_grid_002" in trace_names
+        assert "eval_scan_001" in trace_names
 
-        # All traces tagged with "backfill"
+        # All traces have "eval" tag + origin tag
         for t in mock.traces:
-            assert "backfill" in t["tags"]
+            assert "eval" in t["tags"]
 
-        # Session IDs
+        # Session IDs are dataset-based
         for t in mock.traces:
-            assert t["session_id"] == f"backfill_{backend_id}"
+            assert t["session_id"] == f"dataset_{backend_id}"
 
-        # 4 spans total (one per run)
-        assert len(mock.spans) == 4
-        span_names = {s["name"] for s in mock.spans}
-        assert "baseline_001" in span_names
-        assert "grid_001" in span_names
-        assert "grid_002" in span_names
-        assert "scan_001" in span_names
-
-        # Each trace gets best_accuracy + avg_accuracy scores (3 groups * 2 = 6)
-        assert len(mock.scores) == 6
-
-        # Each trace gets updated with output
-        assert len(mock.trace_updates) == 3
+        # Each run gets an accuracy score
+        assert len(mock.scores) == 4
+        for s in mock.scores:
+            assert s["name"] == "accuracy"
 
         # Each trace gets ended
-        assert len(mock.end_trace_calls) == 3
+        assert len(mock.end_trace_calls) == 4
 
         # Grid search origin stats
         grid_stats = stats["origins"]["grid_search"]
         assert grid_stats["n_runs"] == 2
         assert grid_stats["best_accuracy"] == 0.8
         assert grid_stats["avg_accuracy"] == pytest.approx(0.7)
+
+    def test_per_query_spans_linked_to_dataset(self, tmp_path, monkeypatch):
+        """Each query in a run creates a span linked to a dataset item."""
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        items = [
+            {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True},
+            {"query": "q2", "predicted": "wrong", "ground_truth": "p2", "hit": False},
+        ]
+        runs = [_make_run("baseline_001", 0.5, items=items)]
+        _seed_runs(store, backend_id, runs)
+
+        mock = MockLangfuseLogger()
+        monkeypatch.setattr(
+            LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
+        )
+
+        backfill_to_langfuse(store, backend_id)
+
+        # 2 per-query spans under the trace
+        assert len(mock.spans) == 2
+
+        # Spans have query/predicted/hit structure
+        span_inputs = {s["input"]["query"] for s in mock.spans}
+        assert span_inputs == {"q1", "q2"}
+        for s in mock.spans:
+            assert "predicted" in s["output"]
+            assert "hit" in s["output"]
+
+        # 2 dataset run links (one per query)
+        assert len(mock.dataset_run_links) == 2
+        for link in mock.dataset_run_links:
+            assert link["run_name"] == "baseline_001"
+            assert link["dataset_item_id"] is not None
 
 
 class TestBackfillIdempotent:
@@ -235,7 +354,7 @@ class TestBackfillIdempotent:
         mock.trace_updates.clear()
         mock.end_trace_calls.clear()
 
-        # Second backfill — should be a no-op
+        # Second backfill — should be a no-op for runs
         stats2 = backfill_to_langfuse(store, backend_id)
         assert stats2["new_runs"] == 0
         assert stats2["already_done"] == 2
@@ -273,10 +392,11 @@ class TestBackfillIncremental:
         assert stats2["already_done"] == 1
         assert stats2["total_on_disk"] == 3
 
-        # Only grid_search trace created (baseline already done)
-        assert len(mock.traces) == 1
-        assert mock.traces[0]["name"] == "backfill_grid_search"
-        assert len(mock.spans) == 2
+        # Only new run traces created (baseline already done)
+        assert len(mock.traces) == 2
+        trace_names = {t["name"] for t in mock.traces}
+        assert "eval_grid_001" in trace_names
+        assert "eval_grid_002" in trace_names
 
 
 class TestBackfillDisabledLangfuse:
@@ -296,8 +416,8 @@ class TestBackfillDisabledLangfuse:
 
 
 class TestStateFileWritten:
-    def test_state_persisted(self, tmp_path, monkeypatch):
-        """backfill_state.json is written with run IDs and trace IDs."""
+    def test_state_persisted_v2(self, tmp_path, monkeypatch):
+        """backfill_state.json is written with format_version=2 and per-run trace IDs."""
         store = ProjectStore(tmp_path)
         backend_id = "test-backend"
 
@@ -320,23 +440,33 @@ class TestStateFileWritten:
         assert state_path.exists()
 
         state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["format_version"] == 2
         assert set(state["backfilled_run_ids"]) == {"baseline_001", "scan_001"}
         assert state["last_backfill_at"] is not None
-        assert "baseline" in state["langfuse_trace_ids"]
-        assert "sensitivity_scan" in state["langfuse_trace_ids"]
+        # Per-run trace IDs (not per-origin)
+        assert "baseline_001" in state["langfuse_trace_ids"]
+        assert "scan_001" in state["langfuse_trace_ids"]
+        # Dataset items tracked
+        assert len(state["dataset_items"]) > 0
 
-
-class TestSpanOutputContainsItems:
-    def test_items_in_span_output(self, tmp_path, monkeypatch):
-        """Each span's output includes per-query items."""
+    def test_old_state_format_reset(self, tmp_path, monkeypatch):
+        """Old state format (without format_version) gets reset."""
         store = ProjectStore(tmp_path)
         backend_id = "test-backend"
 
-        items = [
-            {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True},
-            {"query": "q2", "predicted": "wrong", "ground_truth": "p2", "hit": False},
-        ]
-        runs = [_make_run("baseline_001", 0.5, items=items)]
+        # Write old-format state
+        state_path = (
+            tmp_path / backend_id / "obs" / "langfuse" / "backfill_state.json"
+        )
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        old_state = {
+            "backfilled_run_ids": ["baseline_001"],
+            "last_backfill_at": "2026-01-01T00:00:00Z",
+            "langfuse_trace_ids": {"baseline": "old_trace_id"},
+        }
+        state_path.write_text(json.dumps(old_state), encoding="utf-8")
+
+        runs = [_make_run("baseline_001", 0.5)]
         _seed_runs(store, backend_id, runs)
 
         mock = MockLangfuseLogger()
@@ -344,12 +474,8 @@ class TestSpanOutputContainsItems:
             LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
         )
 
-        backfill_to_langfuse(store, backend_id)
+        stats = backfill_to_langfuse(store, backend_id)
 
-        assert len(mock.spans) == 1
-        output = mock.spans[0]["output"]
-        assert output["accuracy"] == 0.5
-        assert len(output["items"]) == 2
-        assert output["items"][0]["query"] == "q1"
-        assert output["items"][0]["hit"] is True
-        assert output["items"][1]["hit"] is False
+        # Old state was reset, so baseline_001 gets re-backfilled
+        assert stats["new_runs"] == 1
+        assert len(mock.traces) == 1

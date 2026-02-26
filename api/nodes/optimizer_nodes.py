@@ -287,6 +287,8 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
         threshold = self.config.get("improvement_threshold", 0.01)
         pipeline_params = self.config.get("pipeline_params")
         temperature = self.config.get("temperature", 0.0)
+        dataset_name = self.config.get("dataset_name")
+        dataset_item_map = self.config.get("dataset_item_map")
 
         # Create backend client
         if not backend_url:
@@ -320,6 +322,8 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
                 label=f"candidate_{idx}",
                 model=model or "", temperature=temperature,
                 on_result=_on_result,
+                dataset_name=dataset_name,
+                dataset_item_map=dataset_item_map,
             )
             all_candidate_results[c.id] = results
             candidate_scores.append({

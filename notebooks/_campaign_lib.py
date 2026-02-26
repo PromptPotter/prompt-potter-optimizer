@@ -1780,13 +1780,11 @@ async def run_feedback_cycle_notebook(
 
 
 def backfill_langfuse(store: "ProjectStore", backend_id: str) -> dict:
-    """Push all historical dataset_runs to cloud Langfuse (one-shot, idempotent).
+    """Push all historical dataset_runs to cloud Langfuse (dataset-first).
 
-    Reads every completed dataset_run on disk, groups by origin (baseline,
-    grid_search, sensitivity_scan, feedback_cycle, smart_search_winner),
-    and creates one Langfuse trace per group with per-run spans.
-
-    Re-running is safe — already-pushed runs are skipped.
+    Creates dataset items with ground truth, then one trace per run linked
+    to dataset items. Re-running is safe — already-pushed runs are skipped.
+    Old-format backfill state is automatically reset.
 
     Returns:
         Stats dict from ``backfill_to_langfuse()``.
@@ -1796,7 +1794,7 @@ def backfill_langfuse(store: "ProjectStore", backend_id: str) -> dict:
     summaries = store.dataset_runs.list_all(backend_id)
 
     print("=" * 70)
-    print("  LANGFUSE BACKFILL")
+    print("  LANGFUSE BACKFILL (dataset-first)")
     print("=" * 70)
     print(f"Found {len(summaries)} completed dataset runs for '{backend_id}'")
 
@@ -1818,9 +1816,11 @@ def backfill_langfuse(store: "ProjectStore", backend_id: str) -> dict:
     print("=" * 70)
     print("  BACKFILL SUMMARY")
     print("=" * 70)
-    print(f"  Total runs on disk: {stats['total_on_disk']}")
-    print(f"  Newly backfilled:   {new_runs}")
-    print(f"  Already done:       {already}")
+    print(f"  Total runs on disk:  {stats['total_on_disk']}")
+    print(f"  Newly backfilled:    {new_runs}")
+    print(f"  Already done:        {already}")
+    print(f"  Dataset:             {stats.get('dataset_name', 'N/A')}")
+    print(f"  Dataset items:       {stats.get('dataset_items', 0)}")
 
     for origin, info in stats.get("origins", {}).items():
         n = info["n_runs"]
