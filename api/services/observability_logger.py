@@ -83,14 +83,14 @@ def _write_json(path: Path, data: dict) -> None:
     """Write pretty-printed JSON, creating parent dirs as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(data, f, indent=2, ensure_ascii=False, default=str)
 
 
 def _append_jsonl(path: Path, data: dict) -> None:
     """Append one JSON line to a JSONL file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        f.write(json.dumps(data, ensure_ascii=False, default=str) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +110,18 @@ class ObsLogger:
     crash the main flow.
     """
 
-    def __init__(self, project_root: str | Path, backend_id: str):
+    def __init__(self, store_base_dir: str | Path, backend_id: str):
+        """Initialize ObsLogger.
+
+        Args:
+            store_base_dir: ProjectStore base directory — the path that already
+                contains ``{backend_id}/`` subdirectories (e.g.
+                ``.promptpotter/projects``).  Do NOT pass the project root.
+            backend_id: Backend identifier (subdirectory name).
+        """
         from api.config.settings import settings
 
-        self.obs_root = (
-            Path(project_root) / ".promptpotter" / "projects" / backend_id / "obs"
-        )
+        self.obs_root = Path(store_base_dir) / backend_id / "obs"
         self._enabled = settings.OBS_ENABLED
         # Track campaign trace IDs for linking rounds to their campaign trace
         self._campaign_traces: dict[str, str] = {}
@@ -344,7 +350,7 @@ class ObsLogger:
             )
             return trace_path
         except Exception:
-            logger.debug("ObsLogger.log_dataset_run failed", exc_info=True)
+            logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
             return None
 
     def log_campaign_start(
@@ -483,7 +489,7 @@ class ObsLogger:
             obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
             return obs_dir if trace_id else None
         except Exception:
-            logger.debug("ObsLogger.log_round failed", exc_info=True)
+            logger.warning("ObsLogger.log_round failed", exc_info=True)
             return None
 
     def log_prompt_version(
@@ -532,7 +538,7 @@ class ObsLogger:
 
             return prompt_dir / "prompt.txt"
         except Exception:
-            logger.debug(
+            logger.warning(
                 "ObsLogger.log_prompt_version failed", exc_info=True,
             )
             return None

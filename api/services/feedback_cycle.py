@@ -138,7 +138,7 @@ async def run_feedback_cycle(
         try:
             obs = ObsLogger(config.project_root, config.backend_id)
         except Exception:
-            logger.debug("Failed to create ObsLogger", exc_info=True)
+            logger.warning("Failed to create ObsLogger", exc_info=True)
 
     # Initialize backend session (required before /matches calls)
     if config.session_terms:
@@ -171,7 +171,7 @@ async def run_feedback_cycle(
                 baseline_accuracy=baseline_accuracy,
             )
         except Exception:
-            logger.debug("ObsLogger.log_campaign_start failed", exc_info=True)
+            logger.warning("ObsLogger.log_campaign_start failed", exc_info=True)
 
     # -- Step 1: Initialize baseline --
     if baseline_prompt_state is not None:
@@ -297,7 +297,7 @@ async def run_feedback_cycle(
                         f"{'improved' if eval_out.improved else 'no change'}",
             )
 
-        # File-based round + prompt logging
+        # File-based round logging
         if obs:
             try:
                 obs.log_round(
@@ -316,7 +316,12 @@ async def run_feedback_cycle(
                     temperature=config.temperature,
                     n_variants=config.n_variants,
                 )
-                # Log prompt version for the winner
+            except Exception:
+                logger.warning("ObsLogger.log_round failed", exc_info=True)
+
+        # File-based prompt version logging (separate so round logging isn't blocked)
+        if obs:
+            try:
                 from api.models.prompt_state import PromptState
                 winner_ps = PromptState(**eval_out.winner_prompt_state)
                 obs.log_prompt_version(
@@ -332,7 +337,9 @@ async def run_feedback_cycle(
                     parent_id=winner_ps.parent_id,
                 )
             except Exception:
-                logger.debug("ObsLogger round/prompt logging failed", exc_info=True)
+                logger.warning(
+                    "ObsLogger.log_prompt_version failed", exc_info=True,
+                )
 
         # Update current state — pass results forward for failure analysis
         current_ps = eval_out.winner_prompt_state

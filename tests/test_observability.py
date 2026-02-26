@@ -66,6 +66,29 @@ def _find_scores(obs_root: Path, trace_id: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# ObsLogger path construction
+# ---------------------------------------------------------------------------
+
+
+def test_obs_path_construction(tmp_path, monkeypatch):
+    """Verify obs_root doesn't double the .promptpotter/projects/ prefix.
+
+    Callers pass store.base_dir (already .promptpotter/projects).
+    ObsLogger must NOT re-add that prefix.
+    """
+    from api.config import settings as _settings_mod
+
+    monkeypatch.setattr(_settings_mod.settings, "OBS_ENABLED", True)
+
+    store_base = tmp_path / ".promptpotter" / "projects"
+    store_base.mkdir(parents=True)
+    obs = ObsLogger(store_base, "my-backend")
+
+    assert ".promptpotter/projects/.promptpotter" not in str(obs.obs_root)
+    assert obs.obs_root == store_base / "my-backend" / "obs"
+
+
+# ---------------------------------------------------------------------------
 # ObsLogger.log_dataset_run
 # ---------------------------------------------------------------------------
 

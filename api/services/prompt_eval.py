@@ -436,7 +436,7 @@ async def evaluate_prompt_cached(
                 prompt_state_id=prompt_state.id,
             )
         except Exception:
-            logger.debug("ObsLogger.log_dataset_run failed", exc_info=True)
+            logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
 
     return results, scores, False
 
