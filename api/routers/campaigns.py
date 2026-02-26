@@ -153,7 +153,7 @@ async def get_campaign_lineage(
     backend_id: str = Query(..., description="Backend identifier"),
 ):
     """Reconstruct the PromptState lineage chain for a campaign."""
-    from api.services.campaign_registry import get_campaign_lineage
+    from api.services.campaign.campaign_registry import get_campaign_lineage
 
     store = _get_store()
     campaign = store.campaigns.load(backend_id, campaign_id)

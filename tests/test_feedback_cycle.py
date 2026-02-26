@@ -14,7 +14,7 @@ import pytest
 import pandas as pd
 
 from api.models.prompt_state import PromptState
-from api.services.feedback_cycle import CycleConfig, run_feedback_cycle
+from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
 from api.services.search import select_scan_winner
 
 

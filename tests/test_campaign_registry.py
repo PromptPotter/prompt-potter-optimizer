@@ -11,7 +11,7 @@ import pytest
 
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
-from api.services.campaign_registry import (
+from api.services.campaign.campaign_registry import (
     complete_campaign,
     create_campaign,
     generate_campaign_id,

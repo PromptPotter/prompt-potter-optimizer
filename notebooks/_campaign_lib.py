@@ -28,7 +28,7 @@ from api.services.llm_client import LLMClientBase, setup_llm
 from api.services.project_store import ProjectStore
 
 # --- Service imports (core logic) ---
-from api.services.campaign_init import init_services as _init_services
+from api.services.campaign.campaign_init import init_services as _init_services
 from api.services.prompt_eval import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
     extract_baseline_prompt as load_baseline_prompt,
@@ -1621,7 +1621,7 @@ async def run_feedback_cycle_notebook(
     Returns:
         Updated campaign_rounds list.
     """
-    from api.services.feedback_cycle import CycleConfig, run_feedback_cycle
+    from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
 
     opt = campaign_config.get("optimization", {})
     eval_llm = campaign_config.get("eval_llm", {})

@@ -10,7 +10,7 @@ Verifies that cloud Langfuse calls flow through ObsLogger's dual-write:
 
 import pytest
 
-from api.services.feedback_cycle import CycleConfig, run_feedback_cycle
+from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
 from api.services.obs.langfuse_client import LangfuseLogger
 
 

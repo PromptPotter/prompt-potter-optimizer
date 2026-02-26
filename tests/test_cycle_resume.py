@@ -11,7 +11,7 @@ Covers:
 
 import pytest
 
-from api.services.feedback_cycle import (
+from api.services.campaign.feedback_cycle import (
     CycleConfig,
     cycle_config_identity,
     run_feedback_cycle,

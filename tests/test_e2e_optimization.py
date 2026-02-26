@@ -12,7 +12,7 @@ from pathlib import Path
 
 from api.core.workflow_runner import WorkflowRunner
 from api.models.prompt_state import PromptState
-from api.services.campaign_registry import (
+from api.services.campaign.campaign_registry import (
     complete_campaign,
     create_campaign,
     get_campaign_lineage,
@@ -256,8 +256,8 @@ async def test_e2e_feedback_cycle_with_registry(
     """Feedback cycle results persist to campaign registry."""
     _apply_all_mocks(monkeypatch)
 
-    from api.services.feedback_cycle import CycleConfig, run_feedback_cycle
-    from api.services.campaign_registry import record_campaign_rounds
+    from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
+    from api.services.campaign.campaign_registry import record_campaign_rounds
 
     config = CycleConfig(
         max_rounds=3,
