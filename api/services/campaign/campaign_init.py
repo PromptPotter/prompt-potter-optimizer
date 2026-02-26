@@ -74,36 +74,35 @@ async def init_services(
         except Exception as exc:
             logger.warning("Auto-sync failed: %s", exc)
 
+    base = {
+        "store": store,
+        "client": client,
+        "backend_id": backend_id,
+        "experiment_id": experiment_id,
+        "backend_client": client,
+        "synced": synced,
+    }
+
     if not exp_data:
         logger.warning(
             "No experiment data available. "
             "Downstream calls will fail until data is synced."
         )
         return {
-            "store": store,
-            "client": client,
+            **base,
             "queries": [],
             "terms": [],
             "exp_data": {},
-            "backend_id": backend_id,
-            "experiment_id": experiment_id,
-            "backend_client": client,
             "session_terms": [],
-            "synced": synced,
         }
 
     queries = client.extract_replay_queries(exp_data)
     terms = client.extract_session_terms(exp_data)
 
     return {
-        "store": store,
-        "client": client,
+        **base,
         "queries": queries,
         "terms": terms,
         "exp_data": exp_data,
-        "backend_id": backend_id,
-        "experiment_id": experiment_id,
-        "backend_client": client,
         "session_terms": BackendClient.extract_session_terms(exp_data),
-        "synced": synced,
     }

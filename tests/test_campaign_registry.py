@@ -14,11 +14,13 @@ from api.services.project_store import ProjectStore
 from api.services.campaign.campaign_registry import (
     complete_campaign,
     create_campaign,
-    generate_campaign_id,
-    generate_trial_id,
     get_campaign_lineage,
     record_campaign_rounds,
     record_trial,
+)
+from api.services.stores.campaign_store import (
+    generate_campaign_id,
+    generate_trial_id,
 )
 
 

@@ -37,10 +37,7 @@ from api.services.prompt_eval import (
 from api.services.prompt_optimizer import (
     generate_candidates,
     generate_suggestions,
-    save_campaign_winner,
     select_round_winner as _select_round_winner,
-    run_manual_round as _run_manual_round,
-    run_optimization_loop as _run_optimization_loop,
 )
 from api.config.settings import load_variant_library
 from api.services.search import (
@@ -86,7 +83,6 @@ __all__ = [
     "load_baseline_prompt",
     "generate_candidates",
     "generate_suggestions",
-    "save_campaign_winner",
     "validate_grid_config",
     "select_grid_winner",
     "build_diagnostic_set",
@@ -1491,45 +1487,28 @@ async def run_manual_round(
     api_key: str,
     svc: dict,
 ) -> dict:
-    """Run a single manual optimization round.
+    """Run a single manual optimization round via feedback cycle.
 
     Returns:
         The round entry dict (also appended to campaign_rounds).
     """
-    opt = campaign_config["optimization"]
-    llm_client, llm_model = setup_llm(campaign_config, api_key)
-    eval_llm = campaign_config["eval_llm"]
-    current_best = campaign_rounds[-1]
-    round_num = len(campaign_rounds)
+    # Override max_rounds=1 for single-round behaviour
+    override = dict(campaign_config)
+    override.setdefault("optimization", {})
+    override["optimization"] = {**override["optimization"], "max_rounds": 1, "patience": 1}
 
-    print(
-        f"=== ROUND {round_num} === Current best: "
-        f"{current_best['label']} ({current_best['accuracy']:.1%})\n"
-    )
-
-    def _on_candidate(candidate, idx, results, scores, cached):
-        acc = scores["accuracy"]
-        tag = "[cached]" if cached else ""
-        print(f"  Candidate {idx + 1}: {acc:.1%} "
-              f"({scores['hits']}/{scores['total']}) {tag}")
-
-    round_entry = await _run_manual_round(
-        campaign_rounds, eval_data, svc.get("backend_client"), llm_client,
-        model=llm_model,
-        temperature=eval_llm.get("temperature", 0.1),
-        n_variants=opt["n_variants"],
-        creativity=opt["creativity"],
-        improvement_threshold=opt["improvement_threshold"],
-        pipeline_params=campaign_config.get("pipeline_params"),
+    await run_feedback_cycle_notebook(
+        campaign_rounds, eval_data, override,
         store=svc.get("store"),
         backend_id=svc.get("backend_id", ""),
-        queries_per_eval=campaign_config.get("queries_per_eval", 0),
-        on_candidate_evaluated=_on_candidate,
+        backend_url=svc.get("client", svc.get("backend_client")).base_url
+        if svc.get("client") or svc.get("backend_client") else "http://127.0.0.1:8000",
+        pipeline_params=campaign_config.get("pipeline_params"),
+        session_terms=svc.get("session_terms"),
     )
 
     display_progress(campaign_rounds)
-
-    return round_entry
+    return campaign_rounds[-1]
 
 
 async def run_optimization_loop(
@@ -1545,41 +1524,32 @@ async def run_optimization_loop(
     backend_client=None,
     pipeline_params: "dict | None" = None,
 ) -> list:
-    """Run optimization rounds until patience exhausted or max_rounds reached.
+    """Run optimization loop via feedback cycle.
 
     Returns:
         Updated campaign_rounds list.
     """
     opt = campaign_config.get("optimization", {})
-    eval_llm = campaign_config["eval_llm"]
-    llm_client, llm_model = setup_llm(campaign_config, api_key)
     patience = opt.get("patience", patience)
 
-    def _on_round(round_entry, round_num, improved, stale_count):
-        display_progress(campaign_rounds)
-        if improved:
-            print("\nImprovement detected, auto-continuing...")
-        else:
-            print(f"\nNo improvement ({stale_count}/{patience} patience)")
-            if stale_count >= patience:
-                print(
-                    f"\nStopping: no improvement for {patience} consecutive rounds."
-                )
+    override = dict(campaign_config)
+    override.setdefault("optimization", {})
+    override["optimization"] = {
+        **override["optimization"],
+        "max_rounds": max_rounds,
+        "patience": patience,
+    }
 
-    result = await _run_optimization_loop(
-        campaign_rounds, eval_data, backend_client, llm_client,
-        model=llm_model,
-        temperature=eval_llm.get("temperature", 0.1),
-        n_variants=opt.get("n_variants", 5),
-        creativity=opt.get("creativity", 0.7),
-        improvement_threshold=opt.get("improvement_threshold", 0.01),
-        pipeline_params=pipeline_params,
+    backend_url = "http://127.0.0.1:8000"
+    if backend_client and hasattr(backend_client, "base_url"):
+        backend_url = backend_client.base_url
+
+    await run_feedback_cycle_notebook(
+        campaign_rounds, eval_data, override,
         store=store,
         backend_id=backend_id,
-        max_rounds=max_rounds,
-        patience=patience,
-        queries_per_eval=campaign_config.get("queries_per_eval", 0),
-        on_round_complete=_on_round,
+        backend_url=backend_url,
+        pipeline_params=pipeline_params,
     )
 
     # Final summary
@@ -1590,7 +1560,7 @@ async def run_optimization_loop(
     print(f"  Best accuracy: {best['accuracy']:.1%} (round {best['round']})")
     print(f"{'=' * 70}")
 
-    return result
+    return campaign_rounds
 
 
 # ---------------------------------------------------------------------------

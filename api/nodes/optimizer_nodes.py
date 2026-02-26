@@ -7,7 +7,7 @@ Three nodes wrapping existing service logic:
 """
 
 import logging
-from typing import Any, Type
+from typing import Type
 
 from pydantic import BaseModel, Field
 
@@ -270,73 +270,11 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
         return AnalysisEvalOutput
 
     async def _execute(self, input_data: AnalysisEvalInput) -> AnalysisEvalOutput:
-        from api.models.prompt_state import PromptState
-        from api.services.backend_client import BackendClient
-        from api.services.llm_client import get_llm_client
-        from api.services.prompt_eval import evaluate_prompt_cached
-        from api.services.prompt_optimizer import (
-            generate_suggestions,
-            select_round_winner,
-        )
+        from api.services.prompt_optimizer import evaluate_and_select_winner
 
-        model = self.config.get("model")
-        provider = self.config.get("provider")
         backend_url = self.config.get("backend_url", "")
-        backend_id = self.config.get("backend_id", "")
-        project_root = self.config.get("project_root", "")
-        threshold = self.config.get("improvement_threshold", 0.01)
-        pipeline_params = self.config.get("pipeline_params")
-        temperature = self.config.get("temperature", 0.0)
-        dataset_name = self.config.get("dataset_name")
-        dataset_item_map = self.config.get("dataset_item_map")
-        obs = self.config.get("obs")
-
-        # Create backend client
         if not backend_url:
             raise ValueError("AnalysisEvalNode requires 'backend_url' in config")
-        backend_client = BackendClient(backend_url)
-
-        # Create store if project_root provided
-        store = None
-        if project_root:
-            from api.services.project_store import ProjectStore
-            store = ProjectStore(project_root)
-
-        # Reconstruct PromptStates and evaluate each candidate
-        candidates = [PromptState(**c) for c in input_data.candidates]
-        all_candidate_results: dict[str, list[dict[str, Any]]] = {}
-        candidate_scores: list[dict] = []
-        on_candidate_eval = self.config.get("on_candidate_eval")
-        on_query_eval = self.config.get("on_query_eval")
-
-        for idx, c in enumerate(candidates):
-            # Build per-query callback scoped to this candidate
-            _on_result = None
-            if on_query_eval:
-                def _on_result(result, qi, qt, _ci=idx, _ct=len(candidates)):
-                    on_query_eval(_ci, _ct, qi, qt, result)
-
-            results, scores, cached = await evaluate_prompt_cached(
-                c, input_data.eval_data, backend_client,
-                pipeline_params=pipeline_params,
-                store=store, backend_id=backend_id,
-                label=f"candidate_{idx}",
-                model=model or "", temperature=temperature,
-                on_result=_on_result,
-                dataset_name=dataset_name,
-                dataset_item_map=dataset_item_map,
-                obs=obs,
-            )
-            all_candidate_results[c.id] = results
-            candidate_scores.append({
-                "candidate_id": c.id,
-                "accuracy": scores["accuracy"],
-                "hits": scores["hits"],
-                "total": scores["total"],
-                "cached": cached,
-            })
-            if on_candidate_eval:
-                on_candidate_eval(idx, len(candidates), scores)
 
         # Assemble current_best — prefer pre-built dict, fall back to flat fields
         if input_data.current_best:
@@ -354,50 +292,29 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
                 "'baseline_prompt_state' flat field"
             )
 
-        # Reconstruct PromptState object for select_round_winner
-        if isinstance(current_best.get("prompt_state"), dict):
-            current_best["prompt_state"] = PromptState(
-                **current_best["prompt_state"],
-            )
-
-        # Select winner using evaluator-backed scores
-        winner_entry = select_round_winner(
-            candidates, all_candidate_results,
-            current_best, threshold,
+        result = await evaluate_and_select_winner(
+            input_data.candidates,
+            input_data.eval_data,
+            current_best,
+            backend_url=backend_url,
+            backend_id=self.config.get("backend_id", ""),
+            project_root=self.config.get("project_root", ""),
+            improvement_threshold=self.config.get("improvement_threshold", 0.01),
+            pipeline_params=self.config.get("pipeline_params"),
+            model=self.config.get("model"),
+            temperature=self.config.get("temperature", 0.0),
+            do_suggestions=(
+                self.config.get("generate_suggestions", True)
+                and bool(input_data.campaign_rounds)
+            ),
+            campaign_rounds=input_data.campaign_rounds,
+            campaign_config=input_data.campaign_config,
+            on_candidate_eval=self.config.get("on_candidate_eval"),
+            on_query_eval=self.config.get("on_query_eval"),
+            obs=self.config.get("obs"),
+            dataset_name=self.config.get("dataset_name"),
+            dataset_item_map=self.config.get("dataset_item_map"),
+            provider=self.config.get("provider"),
         )
 
-        # Generate suggestions if requested and rounds are available
-        suggestions: dict = {}
-        if (self.config.get("generate_suggestions", True)
-                and input_data.campaign_rounds):
-            llm_client = get_llm_client(provider)
-            suggestions = await generate_suggestions(
-                input_data.campaign_rounds,
-                input_data.eval_data,
-                input_data.campaign_config,
-                llm_client, model=model,
-            )
-
-        # Determine next_action routing hint
-        next_action = suggestions.get("next_action", "generate")
-        if next_action not in ("generate", "refine_context", "modify_plan", "stop"):
-            next_action = "generate"
-
-        winner_ps = winner_entry["prompt_state"]
-        return AnalysisEvalOutput(
-            winner={
-                "label": winner_entry["label"],
-                "accuracy": winner_entry["accuracy"],
-                "hits": winner_entry["hits"],
-                "total": winner_entry["total"],
-                "improved": winner_entry["improved"],
-                "candidates_evaluated": winner_entry["candidates_evaluated"],
-            },
-            winner_prompt_state=winner_ps.model_dump(),
-            winner_accuracy=winner_entry["accuracy"],
-            improved=winner_entry["improved"],
-            next_action=next_action,
-            suggestions=suggestions,
-            candidate_scores=candidate_scores,
-            winner_results=winner_entry.get("results", []),
-        )
+        return AnalysisEvalOutput(**result)

@@ -312,41 +312,20 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
         mock_eval,
     )
 
-    # Mock generate_suggestions to return next_action=stop
-    async def mock_suggestions(rounds, data, config, client, **kwargs):
-        return {"next_action": "stop", "reason": "Manual stop signal"}
+    # Wrap evaluate_and_select_winner to force next_action="stop"
+    from api.services.prompt_optimizer import evaluate_and_select_winner
+
+    original_eval = evaluate_and_select_winner
+
+    async def patched_eval(*args, **kwargs):
+        result = await original_eval(*args, **kwargs)
+        result["next_action"] = "stop"
+        return result
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_suggestions",
-        mock_suggestions,
+        "api.services.prompt_optimizer.evaluate_and_select_winner",
+        patched_eval,
     )
-
-    # Enable suggestions so next_action is populated
-    cycle_config.generate_suggestions = True
-    # Need campaign_rounds for suggestions to trigger — we pass them
-    # via the node's input. The cycle runner doesn't pass campaign_rounds
-    # yet, but the suggestions mock will still be called because
-    # generate_suggestions=True and campaign_rounds is empty → skipped.
-    # So let's force it by setting a non-empty campaign_rounds.
-    # Actually, the node checks `if config.generate_suggestions and
-    # input_data.campaign_rounds`. Since campaign_rounds is empty in
-    # the cycle runner, suggestions won't be called. Let me adjust
-    # the cycle_config instead.
-    cycle_config.generate_suggestions = False
-
-    # Instead, test next_action via the output field directly.
-    # The analysis node defaults to "generate". We need to verify
-    # the stop mechanism works.
-    from api.nodes.optimizer_nodes import AnalysisEvalNode
-
-    original_execute = AnalysisEvalNode._execute
-
-    async def patched_execute(self, input_data):
-        result = await original_execute(self, input_data)
-        # Force next_action to "stop"
-        return result.model_copy(update={"next_action": "stop"})
-
-    monkeypatch.setattr(AnalysisEvalNode, "_execute", patched_execute)
 
     result = await run_feedback_cycle(
         instruction="Rank candidates.",

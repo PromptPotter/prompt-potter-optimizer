@@ -433,7 +433,12 @@ async def _execute_round(
     Returns:
         CycleRoundResult for this round.
     """
-    from api.nodes.optimizer_nodes import AnalysisEvalNode, GrowFilterNode
+    from api.models.prompt_state import PromptState
+    from api.services.llm_client import get_llm_client
+    from api.services.prompt_optimizer import (
+        evaluate_and_select_winner,
+        generate_candidates,
+    )
 
     # -- Generate or load candidates --
     persisted = None
@@ -450,21 +455,14 @@ async def _execute_round(
         candidates_for_eval = persisted
     else:
         logger.debug("No persisted candidates for round %d — generating fresh", round_num)
-        grow_node = GrowFilterNode(
-            node_id=f"cycle_grow_{round_num}",
-            config={
-                "model": config.model,
-                "provider": config.provider,
-                "n_variants": config.n_variants,
-                "creativity": config.creativity,
-            },
+        llm_client = get_llm_client(config.provider)
+        current_ps = PromptState(**state.current_ps)
+        raw_candidates = await generate_candidates(
+            current_ps, state.current_accuracy, state.current_results,
+            config.n_variants, config.creativity, llm_client,
+            model=config.model,
         )
-        grow_out = await grow_node.process({
-            "prompt_state": state.current_ps,
-            "accuracy": state.current_accuracy,
-            "results": state.current_results,
-        })
-        candidates_for_eval = grow_out.candidates
+        candidates_for_eval = [c.model_dump() for c in raw_candidates]
 
         if campaign_store and cycle_id:
             _save_round_candidates(
@@ -472,50 +470,45 @@ async def _execute_round(
                 round_num, candidates_for_eval,
             )
 
-    # -- Evaluate candidates --
-    eval_config: dict[str, Any] = {
-        "model": config.model,
-        "provider": config.provider,
-        "backend_url": config.backend_url,
-        "backend_id": config.backend_id,
-        "project_root": config.project_root,
-        "improvement_threshold": config.improvement_threshold,
-        "generate_suggestions": config.generate_suggestions,
-        "pipeline_params": config.pipeline_params,
-        "temperature": config.temperature,
-        "on_candidate_eval": on_candidate_eval,
-        "on_query_eval": on_query_eval,
-        "obs": obs,
+    # -- Evaluate candidates and select winner --
+    baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
+    current_best = {
+        "accuracy": state.current_accuracy,
+        "prompt_state": state.current_ps,
+        "results": state.current_results,
+        "label": baseline_label,
     }
-    if dataset_name and dataset_item_map:
-        eval_config["dataset_name"] = dataset_name
-        eval_config["dataset_item_map"] = dataset_item_map
 
-    eval_node = AnalysisEvalNode(
-        node_id=f"cycle_eval_{round_num}",
-        config=eval_config,
+    eval_out = await evaluate_and_select_winner(
+        candidates_for_eval, round_eval_data, current_best,
+        backend_url=config.backend_url,
+        backend_id=config.backend_id,
+        project_root=config.project_root,
+        improvement_threshold=config.improvement_threshold,
+        pipeline_params=config.pipeline_params,
+        model=config.model,
+        temperature=config.temperature,
+        do_suggestions=config.generate_suggestions,
+        on_candidate_eval=on_candidate_eval,
+        on_query_eval=on_query_eval,
+        obs=obs,
+        dataset_name=dataset_name if dataset_name and dataset_item_map else None,
+        dataset_item_map=dataset_item_map if dataset_name and dataset_item_map else None,
+        provider=config.provider,
     )
-    eval_out = await eval_node.process({
-        "candidates": candidates_for_eval,
-        "eval_data": round_eval_data,
-        "baseline_prompt_state": state.current_ps,
-        "baseline_accuracy": state.current_accuracy,
-        "baseline_results": state.current_results,
-        "baseline_label": f"round_{round_num}" if round_num > 0 else "baseline",
-    })
 
     round_result = CycleRoundResult(
         round=round_num,
-        label=eval_out.winner.get("label", f"round_{round_num}"),
-        accuracy=eval_out.winner_accuracy,
-        hits=eval_out.winner.get("hits", 0),
-        total=eval_out.winner.get("total", 0),
-        improved=eval_out.improved,
-        next_action=eval_out.next_action,
-        prompt_state=eval_out.winner_prompt_state,
-        results=eval_out.winner_results,
-        candidates_evaluated=eval_out.winner.get("candidates_evaluated", 0),
-        candidate_scores=eval_out.candidate_scores,
+        label=eval_out["winner"].get("label", f"round_{round_num}"),
+        accuracy=eval_out["winner_accuracy"],
+        hits=eval_out["winner"].get("hits", 0),
+        total=eval_out["winner"].get("total", 0),
+        improved=eval_out["improved"],
+        next_action=eval_out["next_action"],
+        prompt_state=eval_out["winner_prompt_state"],
+        results=eval_out["winner_results"],
+        candidates_evaluated=eval_out["winner"].get("candidates_evaluated", 0),
+        candidate_scores=eval_out["candidate_scores"],
     )
 
     # -- Observability: round + prompt version --
@@ -524,15 +517,15 @@ async def _execute_round(
             obs.log_round(
                 campaign_id=obs_campaign_id,
                 round_num=round_num,
-                accuracy=eval_out.winner_accuracy,
-                hits=eval_out.winner.get("hits", 0),
-                total=eval_out.winner.get("total", 0),
-                improved=eval_out.improved,
-                next_action=eval_out.next_action,
-                winner_prompt_state_id=eval_out.winner_prompt_state.get(
+                accuracy=eval_out["winner_accuracy"],
+                hits=eval_out["winner"].get("hits", 0),
+                total=eval_out["winner"].get("total", 0),
+                improved=eval_out["improved"],
+                next_action=eval_out["next_action"],
+                winner_prompt_state_id=eval_out["winner_prompt_state"].get(
                     "id", "",
                 ),
-                candidate_scores=eval_out.candidate_scores,
+                candidate_scores=eval_out["candidate_scores"],
                 model=config.model or "",
                 temperature=config.temperature,
                 n_variants=config.n_variants,
@@ -541,8 +534,7 @@ async def _execute_round(
             logger.warning("ObsLogger.log_round failed", exc_info=True)
 
         try:
-            from api.models.prompt_state import PromptState
-            winner_ps = PromptState(**eval_out.winner_prompt_state)
+            winner_ps = PromptState(**eval_out["winner_prompt_state"])
             obs.log_prompt_version(
                 prompt_state_id=winner_ps.id,
                 rendered_prompt=winner_ps.render(),
