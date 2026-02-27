@@ -1,9 +1,9 @@
 # Architecture Design Document: PromptPotter Optimizer
 
-**Version:** 0.7.0
-**Date:** 2026-02-25
+**Version:** 0.9.0
+**Date:** 2026-02-27
 **Status:** Active
-**Depends on:** [Project Charter v0.7.0](project-charter.md), [PRD v0.7.0](prd.md)
+**Depends on:** [Project Charter v0.7.0](project-charter.md), [PRD v0.9.0](prd.md)
 
 ---
 
@@ -96,6 +96,10 @@ Key services:
 
 ## Data Model
 
+### Core Data Models
+
+**PromptState** defines the prompt being optimized. **PipelineSchema** defines the backend pipeline being targeted. Together they parameterize every optimization service: `f(PromptState, PipelineSchema, eval_data) → scores`.
+
 ### PromptState
 
 Immutable, versioned prompt configuration in three optimization layers. See [PRD P0.5](prd.md).
@@ -106,6 +110,17 @@ Immutable, versioned prompt configuration in three optimization layers. See [PRD
 - **Metadata:** id (uuid.hex), parent_id, created_at, changes_description
 
 `render()` assembles Layer 1 into prompt text. `derive(**changes)` creates children. `diff(a, b)` produces structured comparison.
+
+### PipelineSchema
+
+Backend-agnostic pipeline description — single source of truth for what the backend pipeline looks like. See [PRD P1.14](prd.md), [M6 spec](m6-workflow-migration.md).
+
+- **`PipelineStep`:** name, type (generation/span/event), param_keys, observation_name
+- **`ObservationMapping`:** obs_name → target_field extraction rules
+- **Derivation methods:** `step_param_keys()`, `obs_extraction_map()`, `template_variables`, `langfuse_type_map()`
+- **Factory:** `pipeline_discovery.py` parses `GET /pipeline` → `PipelineSchema`. Static `TERMNORM_DEFAULT_SCHEMA` for offline use.
+
+Provides derivation methods for 6 pipeline-specific constants (M6 Wave 1). Remaining 7 are covered by `ConnectorProtocol` (M7).
 
 ### ProjectStore File Layout
 
@@ -121,6 +136,12 @@ Immutable, versioned prompt configuration in three optimization layers. See [PRD
   smart_search_plans/{plan_id}.json
   campaigns/{campaign_id}.json     # Metadata + trial index
   campaigns/{campaign_id}/trial_NNNN.json
+  obs/
+    langfuse/events.jsonl          # flat navigation log (START HERE for data exploration)
+    langfuse/traces/{trace_id}.json
+    langfuse/scores/{trace_id}.jsonl
+    experiments/{campaign_id}/     # MLflow FileStore format (mlflow ui compatible)
+    prompts/{family}/{version}/    # prompt versioning (prompt.txt + metadata.json)
 ```
 
 Dataset runs are indexed by content hash. Grid plans and smart search plans use separate identity hashes. Campaign data uses a two-level structure (metadata + trial details).
@@ -142,7 +163,7 @@ Dataset runs are indexed by content hash. Grid plans and smart search plans use 
 | **Optimizer nodes as thin wrappers** | Nodes wrap existing service functions. Service logic is independently testable. |
 | **Notebook-first HITL** | Campaign config as editable JSON, manual round control, LLM suggestions -- natural fit for HITL. Feedback cycle is also callable from any Python context. |
 
-> **Cross-reference:** Milestone specs [M5](m5-observability.md) (observability), [M6](m6-workflow-migration.md) (workflow migration), and [M7](m7-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
+> **Cross-reference:** [Observability guide](../obs-guide.md) covers M5 data exploration. Milestone specs [M6](m6-workflow-migration.md) (workflow migration) and [M7](m7-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
 
 ---
 
@@ -155,7 +176,8 @@ Dataset runs are indexed by content hash. Grid plans and smart search plans use 
 | TermNorm backend | HTTP REST (`/matches`, `/pipeline`) | Implemented |
 | ProjectStore | JSON files in `.promptpotter/projects/` | Implemented |
 | Evaluator framework | Python API (ExactMatch active, CriteriaEvaluator available) | Implemented |
-| File-based observability | Langfuse trace JSON + MLflow FileStore YAML in `obs/` | Planned ([M5](m5-observability.md)) |
+| File-based observability | Langfuse trace JSON + MLflow FileStore YAML in `obs/` | Implemented |
+| PipelineSchema | Backend-agnostic pipeline description, derivation methods | Planned ([M6](m6-workflow-migration.md)) |
 | CWL workflow engine | `WorkflowRunner` with `runtime_config`, YAML workflow definitions | Planned ([M6](m6-workflow-migration.md)) |
 | ConnectorProtocol | `typing.Protocol` abstraction over backend connectors | Planned ([M7](m7-multi-connector.md)) |
 

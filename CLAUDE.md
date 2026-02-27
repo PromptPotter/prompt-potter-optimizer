@@ -44,14 +44,13 @@ All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py
 | Service | Purpose |
 |---------|---------|
 | `prompt_eval.py` | Evaluate prompts against datasets via backend `/matches` endpoint. Content-addressed deduplication via `eval_content_hash()`. Incremental writes (`.partial.jsonl`) for crash recovery. |
-| `search/grid_core.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. Grid plan persistence (`grid_plan_identity()`, `serialize_grid_plan()`, `deserialize_grid_plan()`). |
+| `search/grid_core.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. Grid plan persistence. Skips `init_session` when all points are cached. |
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation, round winner selection, improvement suggestions. |
 | `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions). |
 | `project_store.py` | Facade over focused store modules in `stores/`. File I/O for `.promptpotter/projects/`. |
 | `campaign/feedback_cycle.py` | Iterative optimization orchestrator: `CycleConfig` → `GrowFilterNode` → `AnalysisEvalNode` loop with patience-based stopping, 3-path routing (`generate`/`refine_context`/`modify_plan`/`stop`). |
 | `campaign/campaign_init.py` | Campaign initialization: project store setup, backend sync, baseline evaluation. |
 | `search/smart_search.py` | Sensitivity scan (OAT perturbation), adaptive search (coordinate descent), axis classification. |
-| `search/grid_core.py` | Grid search evaluation engine. Skips `init_session` when all points are cached. |
 | `search/coverage.py` | Historical index (`build_prompt_result_index`) and coverage advisor. Discovers all stored `dataset_runs` for reuse across optimization threads. |
 | `obs/observability_logger.py` | File-based observability: Langfuse-compatible traces, MLflow experiments, prompt versioning. `events.jsonl` flat nav log. |
 | `obs/langfuse_client.py` | Langfuse v2 cloud integration (singleton). |
@@ -63,12 +62,16 @@ All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py
 
 ### Data model
 
+**PromptState** defines the prompt being optimized. **PipelineSchema** defines the backend pipeline being targeted. Together they parameterize every optimization service: `f(PromptState, PipelineSchema, eval_data) → scores`.
+
 **PromptState** (`api/models/prompt_state.py`) — Immutable, versioned prompt configuration organized into 3 optimization layers:
 - **Layer 1 (Generate)**: `persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`, `few_shot_examples` — change every optimization pass
 - **Layer 2 (Refine Context)**: `context`, `parameters` — adjust when Layer 1 stalls
 - **Layer 3 (Modify Plan)**: `plan` — rarely changed (strategy defaults)
 
 PromptState is frozen (`model_config = {"frozen": True}`). Use `derive(**changes)` to create children (sets `parent_id` automatically). Use `render()` to assemble Layer 1 fields into a prompt string. Use `diff(a, b)` for structured diffs.
+
+**PipelineSchema** (`api/models/pipeline_schema.py`, M6) — Backend-agnostic pipeline description with derivation methods: `step_param_keys()`, `obs_extraction_map()`, `template_variables`, `langfuse_type_map()`. Factory in `api/services/pipeline_discovery.py` parses `GET /pipeline` response; static `TERMNORM_DEFAULT_SCHEMA` for offline use.
 
 **ProjectStore** layout on disk:
 ```
@@ -81,7 +84,8 @@ PromptState is frozen (`model_config = {"frozen": True}`). Use `derive(**changes
   dataset_runs.json                # index of all runs (content_hash → run_id)
   grid_plans/{plan_id}.json        # persisted grid search plans (resume on restart)
   smart_search_plans/{plan_id}.json # sensitivity scan plans (axis profiles, scan results)
-  campaigns/{campaign_id}.json     # campaign metadata + trial results
+  campaigns/{campaign_id}.json     # campaign metadata + trial index
+  campaigns/{campaign_id}/trial_NNNN.json
   obs/
     langfuse/events.jsonl          # flat navigation log (START HERE for data exploration)
     langfuse/traces/{trace_id}.json
@@ -125,7 +129,7 @@ The following modules are a CWL-inspired workflow engine scaffold — **future a
 - `api/models/workflow.py` — workflow data models
 - `workflows/*.yaml` — workflow definitions
 
-**Migration intent:** Service-layer functions (eval, grid search, scan, feedback cycle) will be wrapped into workflow nodes. The notebook will then drive optimization via `WorkflowRunner` instead of direct service calls. See `docs/specs/roadmap.md` M6.
+**Migration intent:** M6 adds `PipelineSchema` (replacing hardcoded TermNorm constants) then wraps service-layer functions into workflow nodes. The notebook will drive optimization via `WorkflowRunner` instead of direct service calls. See `docs/specs/m6-workflow-migration.md`.
 
 ### How to start a milestone
 
@@ -139,8 +143,8 @@ Each milestone has an executable spec in `docs/specs/`. One Claude Code session 
 
 | Milestone | Spec file | Pre-reading hint |
 |-----------|-----------|-----------------|
-| M5: Observability | [`docs/specs/m5-observability.md`](docs/specs/m5-observability.md) | Read TermNorm utils first (`langfuse_logger.py`, `standards_logger.py`, `prompt_registry.py` at `/c/Users/dsacc/OfficeAddinApps/TermNorm-excel/backend-api/utils/`) |
-| M6: Workflow Migration | [`docs/specs/m6-workflow-migration.md`](docs/specs/m6-workflow-migration.md) | Read `api/core/workflow_runner.py` and `workflows/optimizer_single_pass.yaml` |
+| M5: Observability | Complete | See [`docs/obs-guide.md`](docs/obs-guide.md) for data exploration. |
+| M6: Workflow Migration + PipelineSchema | [`docs/specs/m6-workflow-migration.md`](docs/specs/m6-workflow-migration.md) | Wave 1: read hardcoded constants in `backend_client.py`, `eval_dataset.py`, `grid_core.py`. Wave 2: read `api/core/workflow_runner.py` and `workflows/optimizer_single_pass.yaml` |
 | M7: Multi-Connector | [`docs/specs/m7-multi-connector.md`](docs/specs/m7-multi-connector.md) | Read `docs/connectors/termnorm.md` and `api/services/backend_client.py` |
 
 ### TermNorm reference patterns
@@ -151,7 +155,7 @@ The TermNorm-excel backend (`/c/Users/dsacc/OfficeAddinApps/TermNorm-excel/backe
 - **MLflow experiment tracking** (`standards_logger.py`) — file-based experiments/runs
 - **Prompt registry** (`prompt_registry.py`) — versioned prompt templates with metadata
 
-These are the target patterns for PromptPotter's observability layer (see roadmap M5).
+These patterns were adopted for PromptPotter's observability layer (M5, complete). See `api/services/obs/` and [`docs/obs-guide.md`](docs/obs-guide.md).
 
 ## Project Conventions
 

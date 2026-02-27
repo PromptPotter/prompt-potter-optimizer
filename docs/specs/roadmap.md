@@ -1,9 +1,9 @@
 # Roadmap: PromptPotter Optimizer
 
-**Version:** 0.7.0
-**Date:** 2026-02-25
+**Version:** 0.9.0
+**Date:** 2026-02-27
 **Status:** Active
-**Depends on:** [WBS v0.7.0](wbs.md)
+**Depends on:** [WBS v0.9.0](wbs.md)
 
 ---
 
@@ -15,9 +15,9 @@
 | M1 | Foundation (PromptState, ProjectStore, comparison, CI) | Complete |
 | M2 | Core Optimizer (eval, grid search, prompt optimizer, notebook) | Complete |
 | M3 | Optimization Infrastructure | Complete |
-| M4 | Integration and Polish | Planned |
-| M5 | Observability Layer | Nearly Complete |
-| M6 | CWL Workflow Migration | Future |
+| M4 | Integration and Polish (reclassified — absorbed into M3–M5) | Complete |
+| M5 | Observability Layer | Complete |
+| M6 | CWL Workflow Migration + PipelineSchema Foundation | Planned |
 | M7 | Multi-Connector Architecture | Future |
 
 ---
@@ -40,61 +40,77 @@
 
 ---
 
-## M4: Integration and Polish -- Planned
+## M4: Integration and Polish -- Complete (Reclassified)
 
-- **TermNorm Variant Comparison** (SC5): Variant A vs B on BC5CDR 500-term subset using the full two-loop workflow
-- **Streamlit Dashboard**: campaign browser, trial comparison, dataset explorer
-- **Docker Compose**: optimizer + Langfuse with health checks
-- **Documentation**: README, notebooks, cleanup
+Originally planned for variant comparison, Streamlit, Docker, and docs. Cleanup and polish work was absorbed into M3–M5 sessions. Remaining items redistributed:
 
-**Entry criteria:** M3 exit gate passed.
-
-**Exit gate:** Variant A vs B comparison completes with clear recommendation. Docker deployment works. Decision: does optimized LLM2 justify its cost?
-
----
-
-## M5: Observability Layer -- Nearly Complete
-
-Adopt TermNorm-excel's zero-dependency file-based patterns for production-grade logging. Three layers of human-accessible data: `events.jsonl` (flat nav log), Langfuse traces (structured detail), MLflow experiments (metrics viewer).
-
-- **`events.jsonl`** — flat human-readable event log as starting point for data exploration. Custom extension (not Langfuse/MLflow spec), each line has `trace_id`/`campaign_id` links to detailed files. Adapted from TermNorm `langfuse_logger._log_event()`.
-- **Langfuse file format** — Langfuse-compatible traces/observations/scores on disk. Reference: `TermNorm-excel/backend-api/utils/langfuse_logger.py`
-- **MLflow experiment format** — feedback cycle campaigns as experiments, rounds as runs. PromptPotter has zero MLflow dependency; viewer runs in a separate throwaway venv (`mlflow ui --backend-store-uri file:...`). Reference: `TermNorm-excel/backend-api/utils/standards_logger.py` and `FILE_ORGANIZATION_STRATEGY.md`.
-- **Prompt registry** — version PromptState Layer 1 fields with metadata. Write-only audit trail. Reference: `TermNorm-excel/backend-api/utils/prompt_registry.py`
-- **LLM retry logic** — exponential backoff for Groq 503s in `llm_client.py`
-
-**Entry criteria:** M4 exit gate passed (or waived).
-
-**Exit gate:** Eval runs produce Langfuse-compatible trace files. Campaign runs produce MLflow-compatible experiment files. `events.jsonl` written for every significant action. `mlflow ui` can visualize optimization history. Full spec: [`docs/specs/m5-observability.md`](m5-observability.md).
+| Original Item | New Home |
+|--------------|----------|
+| 4.1 TermNorm Variant Comparison (SC5) | Backlog (needs ConnectorProtocol + real pipeline comparison infrastructure) |
+| 4.2 Streamlit Dashboard | P2.3 Backlog |
+| 4.3 Docker Compose update | M6 WP 6.7 |
+| 4.4 Documentation update | M6 exit criteria |
 
 ---
 
-## M6: CWL Workflow Migration -- Future
+## M5: Observability Layer -- Complete
 
-Wire existing service functions into the workflow engine scaffold (`api/core/`, `api/nodes/`).
+Adopted TermNorm-excel's zero-dependency file-based patterns for production-grade logging. Three layers of human-accessible data: `events.jsonl` (flat nav log), Langfuse traces (structured detail), MLflow experiments (metrics viewer). See [`docs/obs-guide.md`](../obs-guide.md) for data exploration.
 
-- **Wrap services as nodes** — `prompt_eval.evaluate_prompt_cached` → EvalNode, `search/smart_search.sensitivity_scan` → ScanNode, `search/grid_core.run_grid_search` → GridSearchNode, `feedback_cycle.run_feedback_cycle` → FeedbackCycleNode
-- **Pipeline parameter discovery** — auto-detect tunable parameters from workflow definition (Layer 1/2/3 fields, grid axes, scan axes)
-- **Workflow-driven optimization** — replace direct service calls in `_campaign_lib.py` with workflow execution via `WorkflowRunner`
-- **YAML-defined campaigns** — optimization campaigns as workflow YAML, not Python code
+**Complete:**
+- `ObsLogger` with Langfuse-compatible traces, MLflow experiments, prompt versioning
+- `events.jsonl` flat navigation log for human data exploration
+- LLM retry logic (exponential backoff for Groq 503s)
+- Wired into `evaluate_prompt_cached()` and `run_feedback_cycle()`
+- Generic pipeline observation extraction via `OBS_EXTRACTION_MAP`
+- Langfuse cloud push (`push_run()`, `push_all_runs()`)
+
+**Exit gate:** All eval runs produce obs files. `mlflow ui` visualizes optimization history. `OBS_EXTRACTION_MAP` is the single config point for observation mapping.
+
+---
+
+## M6: CWL Workflow Migration + PipelineSchema Foundation -- Planned
+
+Wire existing service functions into the workflow engine scaffold (`api/core/`, `api/nodes/`). PipelineSchema as a prerequisite foundation — backend-agnostic pipeline description that provides derivation methods for all pipeline-specific constants.
+
+**Wave 1: Schema Foundation** (prerequisite)
+- **PipelineSchema model** — `api/models/pipeline_schema.py` with derivation methods replacing hardcoded constants
+- **TermNorm factory** — `api/services/pipeline_discovery.py` parses `GET /pipeline` into `PipelineSchema`
+- **Replace hardcoded dicts** — `PIPELINE_STEP_PARAMS`, `_STEP_PARAM_KEYS`, `OBS_EXTRACTION_MAP`, `REQUIRED_PIPELINE_KEY`, `REQUIRED_TEMPLATE_VARS`, `DATASET_NAME` all derived from schema
+
+**Wave 2: Workflow Nodes** (existing M6 scope)
+- **runtime_config injection** — `WorkflowRunner.execute()` accepts and merges `runtime_config` including `PipelineSchema`
+- **DatasetLoadNode** — load experiment, build eval dataset
+- **FeedbackCycleNode** — wrap `run_feedback_cycle()` with `CycleConfig`
+- **ScanNode + YAML workflows** — `sensitivity_scan.yaml`, `optimization_campaign.yaml`
+
+**Wave 3: Notebook Migration**
+- **Notebook migration** — `_campaign_lib.run_workflow()` drives optimization through `WorkflowRunner`
+- **Docker Compose update** (from M4.3)
 
 **Entry criteria:** M5 exit gate passed (observability integrated).
 
-**Exit gate:** `optimization_campaign.ipynb` runs entirely through `WorkflowRunner`. Campaign YAML defines the full optimization pipeline.
+**Exit gate:** `optimization_campaign.yaml` executes end-to-end via `WorkflowRunner`. No hardcoded pipeline step names in service layer (all derived from PipelineSchema). Docker Compose updated.
+
+Full spec: [`docs/specs/m6-workflow-migration.md`](m6-workflow-migration.md)
 
 ---
 
 ## M7: Multi-Connector Architecture -- Future
 
-Generalize beyond TermNorm to support arbitrary LLM application backends.
+Generalize beyond TermNorm to support arbitrary LLM application backends. Resolves remaining chokepoints (4,5,7,10,11,12,13) that require ConnectorProtocol.
 
-- **Connector interface** — abstract `BackendClient` into a connector protocol. Reference: `docs/connectors/termnorm.md` (already started)
+- **Connector interface** — abstract `BackendClient` into a connector protocol
 - **Connector registry** — discover and configure connectors at runtime
-- **Backend-agnostic evaluation** — `evaluate_prompt_cached()` works with any connector, not just TermNorm `/matches`
+- **Backend-agnostic evaluation** — `evaluate_prompt_cached()` works with any connector
+- **Query parser registry** — replace `parse_bom_material()` with connector-specific parsers
+- **Generic eval config** — replace hardcoded hit@1 exact match with `schema.eval_config`
 
-**Entry criteria:** M6 exit gate passed (workflow engine active).
+**Entry criteria:** M6 exit gate passed (PipelineSchema + workflow engine active).
 
 **Exit gate:** A second backend connector exists and runs through the same optimization workflow.
+
+Full spec: [`docs/specs/m7-multi-connector.md`](m7-multi-connector.md)
 
 ---
 
@@ -102,7 +118,9 @@ Generalize beyond TermNorm to support arbitrary LLM application backends.
 
 | Feature | Notes |
 |---------|-------|
+| TermNorm Variant Comparison (SC5) | Needs ConnectorProtocol + pipeline comparison infrastructure (post-M7) |
 | Web scrape ablation | How many websites to scrape? Quality vs cost/latency tradeoff. |
+| Streamlit Dashboard (P2.3) | Campaign browser, trial comparison, dataset explorer. |
 | Public service deployment | Auth, rate limiting, multi-tenancy. API already stateless. |
 | Non-prompt targets (P2.4, SC6) | Scoring functions, fuzzy matchers, retrieval queries, GA settings. |
 | Evolutionary operators (P2.1) | GA/DE population-based search |
