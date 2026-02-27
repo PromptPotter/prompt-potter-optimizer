@@ -154,6 +154,7 @@ class MockLangfuseLogger:
             "trace_id": trace_id, "name": name,
             "input": input, "output": None, "metadata": metadata,
             "obs_id": obs_id, "open": True,
+            "as_type": as_type, "parent_observation_id": parent_observation_id,
         })
         return obs_id
 
@@ -171,6 +172,7 @@ class MockLangfuseLogger:
         self.spans.append({
             "trace_id": trace_id, "name": name,
             "input": input, "output": output, "metadata": metadata,
+            "as_type": as_type, "parent_observation_id": parent_observation_id,
         })
         return f"span_{name}"
 

@@ -257,6 +257,15 @@ async def backend_reranker_eval(
             "hit": eval_output.result == EvalResult.PASS,
             "score": eval_output.score,
             "error": None,
+            "pipeline_data": {
+                "entity_profile": data.get("entity_profile"),
+                "token_matched_candidates": data.get("token_matched_candidates"),
+                "ranked_candidates": ranked,
+                "step_timings": data.get("step_timings"),
+                "llm_provider": data.get("llm_provider"),
+                "total_time": data.get("total_time"),
+                "web_search_status": data.get("web_search_status"),
+            },
         }
     except Exception as exc:
         logger.warning("backend_reranker_eval failed for %s: %s", query[:60], exc)
@@ -267,6 +276,7 @@ async def backend_reranker_eval(
             "hit": False,
             "score": 0.0,
             "error": str(exc),
+            "pipeline_data": None,
         }
 
 

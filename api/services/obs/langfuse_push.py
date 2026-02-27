@@ -257,21 +257,80 @@ def push_run(
         logger.warning("push_run: failed to create trace for run %s", run_id)
         return None
 
-    # Per-query spans
+    # Per-query chains with pipeline step observations
     for it in items:
         query = it.get("query", "")
-        span_id = lf.create_span(
-            trace_id=trace_id,
-            name=query[:60] if query else "query",
-            input={
-                "query": query,
-                "ground_truth": it.get("ground_truth", ""),
-            },
-            output={
+        pipeline = it.get("pipeline_data") or {}
+
+        if pipeline:
+            # Rich pipeline data available — create chain with step observations
+            q_obs_id = lf.start_span(
+                trace_id, query[:60] or "query",
+                input={"query": query, "ground_truth": it.get("ground_truth", "")},
+                as_type="chain",
+            )
+
+            if pipeline.get("entity_profile"):
+                profile = pipeline["entity_profile"]
+                lf.create_span(
+                    trace_id, "entity_profiling",
+                    input={"query": query},
+                    output={
+                        "core_concept": profile.get("core_concept", ""),
+                        "entity_name": profile.get("entity_name", ""),
+                    },
+                    parent_observation_id=q_obs_id, as_type="tool",
+                )
+
+            if pipeline.get("token_matched_candidates"):
+                candidates = pipeline["token_matched_candidates"]
+                lf.create_span(
+                    trace_id, "token_matching",
+                    input={"query": query},
+                    output={
+                        "n_candidates": len(candidates),
+                        "top_3": candidates[:3],
+                    },
+                    parent_observation_id=q_obs_id, as_type="tool",
+                )
+
+            if pipeline.get("ranked_candidates"):
+                ranked_cands = pipeline["ranked_candidates"]
+                lf.create_span(
+                    trace_id, "llm_ranking",
+                    input={"n_candidates": len(ranked_cands)},
+                    output={
+                        "top_candidate": (
+                            ranked_cands[0].get("candidate", "") if ranked_cands else ""
+                        ),
+                        "top_score": (
+                            ranked_cands[0].get("relevance_score", 0)
+                            if ranked_cands else 0
+                        ),
+                    },
+                    parent_observation_id=q_obs_id, as_type="generation",
+                )
+
+            lf.end_observation(q_obs_id, output={
                 "predicted": it.get("predicted", ""),
                 "hit": it.get("hit", False),
-            },
-        )
+            })
+            span_id = q_obs_id
+        else:
+            # Fallback for old runs without pipeline_data
+            span_id = lf.create_span(
+                trace_id=trace_id,
+                name=query[:60] if query else "query",
+                input={
+                    "query": query,
+                    "ground_truth": it.get("ground_truth", ""),
+                },
+                output={
+                    "predicted": it.get("predicted", ""),
+                    "hit": it.get("hit", False),
+                },
+                as_type="tool",
+            )
 
         # Link span to dataset item (skip if rate-limited)
         if query_to_item_id:
@@ -287,6 +346,14 @@ def push_run(
                         "accuracy": accuracy,
                     },
                 )
+
+    # Aggregate accuracy observation
+    lf.create_span(
+        trace_id, "score_accuracy",
+        input={"hits": hits, "total": total},
+        output={"accuracy": accuracy},
+        as_type="tool",
+    )
 
     # Score + output + end
     lf.create_score(trace_id, "accuracy", accuracy)

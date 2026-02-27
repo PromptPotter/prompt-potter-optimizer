@@ -147,13 +147,23 @@ class TestPushRun:
         assert "grid_search" in trace["tags"]
         assert trace["session_id"] == f"dataset_{backend_id}"
 
-        # Per-query spans
-        assert len(mock.spans) == 2
-        span_queries = {s["input"]["query"] for s in mock.spans}
+        # Per-query spans (filter out score_accuracy observation)
+        query_spans = [s for s in mock.spans if s["name"] != "score_accuracy"]
+        assert len(query_spans) == 2
+        span_queries = {s["input"]["query"] for s in query_spans}
         assert span_queries == {"q1", "q2"}
-        for s in mock.spans:
+        for s in query_spans:
             assert "predicted" in s["output"]
             assert "hit" in s["output"]
+
+        # score_accuracy observation present
+        score_obs = [s for s in mock.spans if s["name"] == "score_accuracy"]
+        assert len(score_obs) == 1
+        assert score_obs[0]["output"]["accuracy"] == 0.5
+
+        # Fallback: no pipeline_data → as_type="tool"
+        for s in query_spans:
+            assert s.get("as_type") == "tool"
 
         # Score + trace output + end_trace
         assert len(mock.scores) == 1
@@ -317,13 +327,14 @@ class TestPushAllRunsDatasetFirst:
 
         push_all_runs(store, backend_id)
 
-        # 2 per-query spans under the trace
-        assert len(mock.spans) == 2
+        # Filter to per-query spans (exclude score_accuracy)
+        query_spans = [s for s in mock.spans if s["name"] != "score_accuracy"]
+        assert len(query_spans) == 2
 
         # Spans have query/predicted/hit structure
-        span_inputs = {s["input"]["query"] for s in mock.spans}
+        span_inputs = {s["input"]["query"] for s in query_spans}
         assert span_inputs == {"q1", "q2"}
-        for s in mock.spans:
+        for s in query_spans:
             assert "predicted" in s["output"]
             assert "hit" in s["output"]
 
@@ -487,3 +498,189 @@ class TestStateFileWritten:
         # Old state was reset, so baseline_001 gets re-pushed
         assert stats["new_runs"] == 1
         assert len(mock.traces) == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests — pipeline step observations
+# ---------------------------------------------------------------------------
+
+
+def _make_pipeline_items():
+    """Build items with pipeline_data for testing pipeline observations."""
+    return [
+        {
+            "query": "aspirin",
+            "predicted": "Aspirin",
+            "ground_truth": "Aspirin",
+            "hit": True,
+            "pipeline_data": {
+                "entity_profile": {
+                    "core_concept": "pain reliever",
+                    "entity_name": "Aspirin",
+                },
+                "token_matched_candidates": [
+                    ("Aspirin", 5), ("Aspirin Tablet", 3),
+                ],
+                "ranked_candidates": [
+                    {"candidate": "Aspirin", "relevance_score": 0.95},
+                    {"candidate": "Aspirin Tablet", "relevance_score": 0.70},
+                ],
+                "step_timings": {
+                    "entity_profiling": 1.2,
+                    "token_matching": 0.05,
+                    "llm_ranking": 0.8,
+                },
+                "llm_provider": "groq/llama-4",
+                "total_time": 2.1,
+                "web_search_status": "success",
+            },
+        },
+        {
+            "query": "ibuprofen",
+            "predicted": "Ibuprofen",
+            "ground_truth": "Ibuprofen",
+            "hit": True,
+            "pipeline_data": {
+                "entity_profile": {
+                    "core_concept": "NSAID",
+                    "entity_name": "Ibuprofen",
+                },
+                "token_matched_candidates": [
+                    ("Ibuprofen", 4),
+                ],
+                "ranked_candidates": [
+                    {"candidate": "Ibuprofen", "relevance_score": 0.9},
+                ],
+                "step_timings": {
+                    "entity_profiling": 1.0,
+                    "token_matching": 0.04,
+                    "llm_ranking": 0.6,
+                },
+                "llm_provider": "groq/llama-4",
+                "total_time": 1.7,
+                "web_search_status": "success",
+            },
+        },
+    ]
+
+
+class TestPushRunPipelineSteps:
+    def test_push_run_pipeline_steps(self, tmp_path):
+        """push_run creates pipeline step observations when pipeline_data present."""
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        items = _make_pipeline_items()
+        runs = [_make_run("baseline_001", 1.0, items=items)]
+        _seed_runs(store, backend_id, runs)
+
+        mock = MockLangfuseLogger()
+        trace_id = push_run(mock, store, backend_id, "baseline_001")
+        assert trace_id is not None
+
+        # Per-query chain observations (opened via start_span)
+        chains = [s for s in mock.spans if s.get("as_type") == "chain"]
+        assert len(chains) == 2
+        for c in chains:
+            assert c.get("open") is False  # closed via end_observation
+            assert "predicted" in c["output"]
+
+        # Pipeline step observations per query (3 steps × 2 queries = 6)
+        entity_obs = [s for s in mock.spans if s["name"] == "entity_profiling"]
+        token_obs = [s for s in mock.spans if s["name"] == "token_matching"]
+        ranking_obs = [s for s in mock.spans if s["name"] == "llm_ranking"]
+
+        assert len(entity_obs) == 2
+        assert len(token_obs) == 2
+        assert len(ranking_obs) == 2
+
+        # Correct as_type for each step
+        for s in entity_obs:
+            assert s["as_type"] == "tool"
+        for s in token_obs:
+            assert s["as_type"] == "tool"
+        for s in ranking_obs:
+            assert s["as_type"] == "generation"
+
+        # Entity profiling output contains profile data
+        for s in entity_obs:
+            assert "core_concept" in s["output"]
+
+        # Token matching output contains candidate count
+        for s in token_obs:
+            assert "n_candidates" in s["output"]
+            assert s["output"]["n_candidates"] > 0
+
+        # LLM ranking output has top candidate
+        for s in ranking_obs:
+            assert "top_candidate" in s["output"]
+            assert s["output"]["top_candidate"] != ""
+
+        # Pipeline steps are parented to the chain
+        chain_ids = {c["obs_id"] for c in chains}
+        for s in entity_obs + token_obs + ranking_obs:
+            assert s.get("parent_observation_id") in chain_ids
+
+        # score_accuracy observation present
+        score_obs = [s for s in mock.spans if s["name"] == "score_accuracy"]
+        assert len(score_obs) == 1
+        assert score_obs[0]["as_type"] == "tool"
+
+    def test_push_run_fallback_no_pipeline_data(self, tmp_path):
+        """push_run falls back to single tool per query when no pipeline_data."""
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        items = [
+            {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True},
+            {"query": "q2", "predicted": "wrong", "ground_truth": "p2", "hit": False},
+        ]
+        runs = [_make_run("baseline_002", 0.5, items=items)]
+        _seed_runs(store, backend_id, runs)
+
+        mock = MockLangfuseLogger()
+        trace_id = push_run(mock, store, backend_id, "baseline_002")
+        assert trace_id is not None
+
+        # Per-query spans use as_type="tool" (fallback)
+        query_spans = [s for s in mock.spans if s["name"] != "score_accuracy"]
+        assert len(query_spans) == 2
+        for s in query_spans:
+            assert s["as_type"] == "tool"
+            assert "predicted" in s["output"]
+
+        # No pipeline step observations
+        pipeline_steps = [
+            s for s in mock.spans
+            if s["name"] in ("entity_profiling", "token_matching", "llm_ranking")
+        ]
+        assert len(pipeline_steps) == 0
+
+        # score_accuracy still present
+        score_obs = [s for s in mock.spans if s["name"] == "score_accuracy"]
+        assert len(score_obs) == 1
+
+    def test_push_run_mixed_items(self, tmp_path):
+        """push_run handles mix of items with and without pipeline_data."""
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        items = [
+            _make_pipeline_items()[0],  # has pipeline_data
+            {"query": "q_old", "predicted": "p_old", "ground_truth": "p_old",
+             "hit": True},  # no pipeline_data
+        ]
+        runs = [_make_run("grid_001", 1.0, items=items)]
+        _seed_runs(store, backend_id, runs)
+
+        mock = MockLangfuseLogger()
+        push_run(mock, store, backend_id, "grid_001")
+
+        # 1 chain (pipeline) + 3 pipeline steps + 1 tool (fallback) + 1 score
+        chains = [s for s in mock.spans if s.get("as_type") == "chain"]
+        tools = [
+            s for s in mock.spans
+            if s.get("as_type") == "tool" and s["name"] == "q_old"
+        ]
+        assert len(chains) == 1  # aspirin query
+        assert len(tools) == 1   # old query fallback
