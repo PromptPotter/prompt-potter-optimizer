@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from _helpers import MockCompletion
+
 
 @pytest.mark.asyncio
 async def test_llm_retry_503():
@@ -22,22 +24,6 @@ async def test_llm_retry_503():
     )
 
     call_count = [0]
-
-    class MockCompletion:
-        class Choice:
-            class Message:
-                content = '{"result": "ok"}'
-            message = Message()
-            finish_reason = "stop"
-
-        choices = [Choice()]
-
-        class Usage:
-            prompt_tokens = 10
-            completion_tokens = 5
-            total_tokens = 15
-        usage = Usage()
-        model = "test-model"
 
     class Mock503Error(Exception):
         status_code = 503
@@ -77,22 +63,6 @@ async def test_llm_retry_429():
 
     call_count = [0]
 
-    class MockCompletion:
-        class Choice:
-            class Message:
-                content = "success"
-            message = Message()
-            finish_reason = "stop"
-
-        choices = [Choice()]
-
-        class Usage:
-            prompt_tokens = 10
-            completion_tokens = 5
-            total_tokens = 15
-        usage = Usage()
-        model = "test-model"
-
     class Mock429Error(Exception):
         status_code = 429
 
@@ -111,7 +81,7 @@ async def test_llm_retry_429():
         model="test-model",
     )
 
-    assert response.content == "success"
+    assert response.content == '{"result": "ok"}'
     assert call_count[0] == 2
 
 

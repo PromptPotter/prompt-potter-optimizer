@@ -17,19 +17,12 @@ from api.models.prompt_state import PromptState
 from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
 from api.services.search import select_scan_winner
 
+from _helpers import apply_grow_mock, apply_init_mock, apply_llm_mock
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def eval_data():
-    return [
-        {"query": "aspirin", "ground_truth": "Aspirin"},
-        {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
-        {"query": "acetaminophen", "ground_truth": "Acetaminophen"},
-    ]
 
 
 @pytest.fixture
@@ -46,53 +39,6 @@ def cycle_config():
 
 
 # ---------------------------------------------------------------------------
-# Shared mock setup
-# ---------------------------------------------------------------------------
-
-
-def _apply_init_mock(monkeypatch):
-    """Mock InitNode's restructure_context."""
-    async def mock_restructure(context_input, llm_client, **kwargs):
-        return {
-            "persona": "Expert",
-            "instruction": "Rank by relevance",
-            "thinking_style": "Step by step",
-        }
-
-    monkeypatch.setattr(
-        "api.services.search.context.restructure_context",
-        mock_restructure,
-    )
-
-
-def _apply_llm_mock(monkeypatch):
-    """Mock get_llm_client."""
-    from api.services.llm_client import MockLLMClient
-    monkeypatch.setattr(
-        "api.services.llm_client.get_llm_client",
-        lambda provider=None: MockLLMClient(),
-    )
-
-
-def _apply_grow_mock(monkeypatch):
-    """Mock generate_candidates."""
-    async def mock_generate(current_ps, accuracy, results, n, creativity,
-                            llm_client, **kwargs):
-        return [
-            current_ps.derive(
-                instruction=f"variant_{i}_acc{accuracy:.0%}",
-                changes_description=f"gen_{i}",
-            )
-            for i in range(n)
-        ]
-
-    monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
-        mock_generate,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Multi-round improving test
 # ---------------------------------------------------------------------------
 
@@ -100,9 +46,9 @@ def _apply_grow_mock(monkeypatch):
 @pytest.mark.asyncio
 async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
     """Feedback cycle improves accuracy over multiple rounds."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
 
     # Hits improve each round: 1/3 → 2/3 → 3/3 (perfect, stops early)
     round_hits = [1, 2, 3]
@@ -167,9 +113,9 @@ async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
     """Loop stops after patience consecutive non-improvements."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
 
     # All candidates return 0% — never beats baseline (which is also 0%)
     async def mock_eval(ps, data, backend_client, **kwargs):
@@ -207,9 +153,9 @@ async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_max_rounds(monkeypatch, eval_data):
     """Loop stops at max_rounds even with continuous improvement."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
 
     # Slow steady improvement — never reaches perfect or stalls
     call_idx = [0]
@@ -275,9 +221,9 @@ async def test_max_rounds(monkeypatch, eval_data):
 @pytest.mark.asyncio
 async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
     """Loop stops when AnalysisEvalNode outputs next_action='stop'."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
 
     # First candidate gets 33%, analysis suggestions say stop
     async def mock_eval(ps, data, backend_client, **kwargs):
@@ -364,9 +310,9 @@ def test_next_action_in_output():
 @pytest.mark.asyncio
 async def test_result_structure(monkeypatch, eval_data, cycle_config):
     """CycleResult has all expected fields with correct types."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
 
     async def mock_eval(ps, data, backend_client, **kwargs):
         results = [
@@ -409,8 +355,8 @@ async def test_result_structure(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
     """Feedback cycle skips InitNode when baseline_prompt_state is provided."""
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
 
     from api.models.prompt_state import PromptState
 
@@ -460,8 +406,8 @@ async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_config):
     """Winner results are passed forward to next round's GrowFilterNode."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
 
     # Track what results GrowFilterNode receives each round
     grow_results_received = []
@@ -542,9 +488,9 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
 @pytest.mark.asyncio
 async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
     """on_round_complete is called after each round with correct args."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
 
     async def mock_eval(ps, data, backend_client, **kwargs):
         results = [

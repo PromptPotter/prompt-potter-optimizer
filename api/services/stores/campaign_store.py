@@ -315,3 +315,62 @@ class CampaignStore:
         """Mark a campaign as completed."""
         self.update(backend_id, campaign_id, {"status": "completed"})
         logger.info("Campaign %s completed", campaign_id)
+
+    def save_round_candidates(
+        self,
+        backend_id: str,
+        campaign_id: str,
+        round_num: int,
+        candidates: list[dict[str, Any]],
+    ) -> None:
+        """Persist generated candidates before evaluation (mid-round checkpoint)."""
+        path = (
+            self._trial_dir(backend_id, campaign_id)
+            / f"round_{round_num:04d}_candidates.json"
+        )
+        write_json(path, candidates)
+        logger.info(
+            "Saved %d candidates for round %d → %s",
+            len(candidates), round_num, path.name,
+        )
+
+    def load_round_candidates(
+        self,
+        backend_id: str,
+        campaign_id: str,
+        round_num: int,
+    ) -> list[dict[str, Any]] | None:
+        """Load persisted candidates for a round.  Returns None if not on disk."""
+        path = (
+            self._trial_dir(backend_id, campaign_id)
+            / f"round_{round_num:04d}_candidates.json"
+        )
+        if not path.exists():
+            return None
+        return read_json(path)
+
+    def get_lineage(
+        self, backend_id: str, campaign_id: str,
+    ) -> list[dict[str, Any]]:
+        """Reconstruct the full PromptState lineage chain for a campaign.
+
+        Returns a list of ``{trial_id, round, prompt_state_id, parent_id,
+        accuracy, label}`` ordered by round.
+        """
+        campaign = self.load(backend_id, campaign_id)
+        if not campaign:
+            return []
+
+        lineage = []
+        for entry in campaign.get("trials", []):
+            trial = self.load_trial(backend_id, campaign_id, entry["round"])
+            parent_id = trial.get("parent_prompt_state_id") if trial else None
+            lineage.append({
+                "trial_id": entry["trial_id"],
+                "round": entry["round"],
+                "prompt_state_id": entry.get("prompt_state_id", ""),
+                "parent_prompt_state_id": parent_id,
+                "accuracy": entry.get("accuracy", 0.0),
+                "label": entry.get("label", ""),
+            })
+        return lineage

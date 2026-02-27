@@ -1,7 +1,7 @@
 """
 Feedback cycling orchestrator for iterative prompt optimization.
 
-Wraps optimizer nodes (InitNode → GrowFilterNode → AnalysisEvalNode) in a
+Runs ``generate_candidates()`` → ``evaluate_and_select_winner()`` in a
 counter-based loop with 3-path routing based on ``next_action``:
 
 - **generate** (Layer 1): vary persona, instruction, thinking_style, etc.
@@ -12,7 +12,7 @@ counter-based loop with 3-path routing based on ``next_action``:
 Stopping conditions:
 - ``max_rounds`` reached
 - ``patience`` consecutive non-improving rounds exhausted
-- ``next_action == "stop"`` from analysis node
+- ``next_action == "stop"`` from evaluate_and_select_winner
 - ``winner_accuracy >= 1.0`` (perfect score)
 """
 
@@ -22,6 +22,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -132,6 +133,23 @@ def cycle_config_identity(
     return f"cycle_{digest}"
 
 
+def _round_result_from_detail(detail: dict) -> CycleRoundResult:
+    """Build a CycleRoundResult from a persisted trial detail dict."""
+    return CycleRoundResult(
+        round=detail["round"],
+        label=detail.get("label", ""),
+        accuracy=detail.get("accuracy", 0.0),
+        hits=detail.get("hits", 0),
+        total=detail.get("total", 0),
+        improved=detail.get("improved", False),
+        next_action=detail.get("next_action", "generate"),
+        prompt_state=detail.get("prompt_state", {}),
+        results=detail.get("results", []),
+        candidates_evaluated=detail.get("candidates_evaluated", 0),
+        candidate_scores=detail.get("candidate_scores", []),
+    )
+
+
 def _restore_completed_result(
     campaign_data: dict,
     store: Any,
@@ -144,19 +162,7 @@ def _restore_completed_result(
         detail = store.load_trial(backend_id, cycle_id, trial_summary["round"])
         if detail is None:
             continue
-        rounds.append(CycleRoundResult(
-            round=detail["round"],
-            label=detail.get("label", ""),
-            accuracy=detail.get("accuracy", 0.0),
-            hits=detail.get("hits", 0),
-            total=detail.get("total", 0),
-            improved=detail.get("improved", False),
-            next_action=detail.get("next_action", "generate"),
-            prompt_state=detail.get("prompt_state", {}),
-            results=detail.get("results", []),
-            candidates_evaluated=detail.get("candidates_evaluated", 0),
-            candidate_scores=detail.get("candidate_scores", []),
-        ))
+        rounds.append(_round_result_from_detail(detail))
 
     return CycleResult(
         rounds=rounds,
@@ -171,42 +177,6 @@ def _restore_completed_result(
         cycle_id=cycle_id,
         resumed_from_round=0,
     )
-
-
-def _save_round_candidates(
-    campaign_store: Any,
-    backend_id: str,
-    cycle_id: str,
-    round_num: int,
-    candidates: list[dict],
-) -> None:
-    """Persist generated candidates before evaluation (mid-round checkpoint)."""
-    from api.services.stores.base import write_json
-
-    path = (
-        campaign_store._trial_dir(backend_id, cycle_id)
-        / f"round_{round_num:04d}_candidates.json"
-    )
-    write_json(path, candidates)
-    logger.info("Saved %d candidates for round %d → %s", len(candidates), round_num, path.name)
-
-
-def _load_round_candidates(
-    campaign_store: Any,
-    backend_id: str,
-    cycle_id: str,
-    round_num: int,
-) -> list[dict] | None:
-    """Load persisted candidates for a round.  Returns None if not on disk."""
-    from api.services.stores.base import read_json
-
-    path = (
-        campaign_store._trial_dir(backend_id, cycle_id)
-        / f"round_{round_num:04d}_candidates.json"
-    )
-    if not path.exists():
-        return None
-    return read_json(path)
 
 
 def _restore_round_state(
@@ -235,19 +205,7 @@ def _restore_round_state(
         detail = store.load_trial(backend_id, cycle_id, trial_summary["round"])
         if detail is None:
             continue
-        rr = CycleRoundResult(
-            round=detail["round"],
-            label=detail.get("label", ""),
-            accuracy=detail.get("accuracy", 0.0),
-            hits=detail.get("hits", 0),
-            total=detail.get("total", 0),
-            improved=detail.get("improved", False),
-            next_action=detail.get("next_action", "generate"),
-            prompt_state=detail.get("prompt_state", {}),
-            results=detail.get("results", []),
-            candidates_evaluated=detail.get("candidates_evaluated", 0),
-            candidate_scores=detail.get("candidate_scores", []),
-        )
+        rr = _round_result_from_detail(detail)
         rounds.append(rr)
 
         current_ps = rr.prompt_state
@@ -347,7 +305,7 @@ def _resume_or_create_campaign(
         from api.models.prompt_state import PromptState as _PS
         from api.services.stores.campaign_store import CampaignStore
 
-        store_base = __import__("pathlib").Path(config.project_root)
+        store_base = Path(config.project_root)
         campaign_store = CampaignStore(store_base)
 
         if baseline_prompt_state is not None:
@@ -428,11 +386,7 @@ async def _execute_round(
     on_candidate_eval: Callable | None,
     on_query_eval: Callable | None,
 ) -> CycleRoundResult:
-    """Execute one optimization round: generate → evaluate → obs log.
-
-    Returns:
-        CycleRoundResult for this round.
-    """
+    """Execute one optimization round: generate → evaluate → select winner → obs log."""
     from api.models.prompt_state import PromptState
     from api.services.llm_client import get_llm_client
     from api.services.prompt_optimizer import (
@@ -443,8 +397,8 @@ async def _execute_round(
     # -- Generate or load candidates --
     persisted = None
     if campaign_store and cycle_id:
-        persisted = _load_round_candidates(
-            campaign_store, config.backend_id, cycle_id, round_num,
+        persisted = campaign_store.load_round_candidates(
+            config.backend_id, cycle_id, round_num,
         )
 
     if persisted is not None:
@@ -465,8 +419,8 @@ async def _execute_round(
         candidates_for_eval = [c.model_dump() for c in raw_candidates]
 
         if campaign_store and cycle_id:
-            _save_round_candidates(
-                campaign_store, config.backend_id, cycle_id,
+            campaign_store.save_round_candidates(
+                config.backend_id, cycle_id,
                 round_num, candidates_for_eval,
             )
 
@@ -624,7 +578,7 @@ async def run_feedback_cycle(
 
     Executes:
     1. InitNode — create baseline PromptState (skipped if baseline_prompt_state provided)
-    2. Loop: GrowFilterNode → AnalysisEvalNode → route by next_action
+    2. Loop: generate_candidates → evaluate_and_select_winner → route by next_action
     3. Stop when patience exhausted, max_rounds reached, or perfect score
 
     Args:

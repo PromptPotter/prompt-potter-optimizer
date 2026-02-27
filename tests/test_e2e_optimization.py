@@ -2,9 +2,9 @@
 
 Integration test that:
 1. Runs the single-pass optimizer workflow via WorkflowRunner
-2. Records results to the campaign registry
+2. Records results to the campaign store
 3. Verifies workflow output structure, PromptState lineage, and
-   campaign registry persistence
+   campaign persistence
 """
 
 import pytest
@@ -12,13 +12,6 @@ from pathlib import Path
 
 from api.core.workflow_runner import WorkflowRunner
 from api.models.prompt_state import PromptState
-from api.services.campaign.campaign_registry import (
-    complete_campaign,
-    create_campaign,
-    get_campaign_lineage,
-    record_trial,
-)
-from api.services.project_store import ProjectStore
 
 
 WORKFLOW_PATH = Path(__file__).parent.parent / "workflows" / "optimizer_single_pass.yaml"
@@ -28,11 +21,6 @@ BACKEND_ID = "e2e-test-backend"
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def store(tmp_path):
-    return ProjectStore(base_dir=tmp_path)
 
 
 @pytest.fixture
@@ -162,8 +150,8 @@ async def test_e2e_workflow_and_campaign_registry(
     assert final["n_candidates"] == 5
 
     # -- 2. Record results to campaign registry --
-    campaign = create_campaign(
-        store, BACKEND_ID,
+    campaign = store.campaigns.create_campaign(
+        BACKEND_ID,
         name="E2E Drug Name Optimization",
         config={"instruction": "Normalize drug names"},
     )
@@ -171,8 +159,8 @@ async def test_e2e_workflow_and_campaign_registry(
 
     # Record baseline trial from init step
     init_out = context.step_outputs["init"]
-    record_trial(
-        store, BACKEND_ID, campaign_id,
+    store.campaigns.record_trial(
+        BACKEND_ID, campaign_id,
         round_num=0,
         prompt_state=init_out["prompt_state"],
         accuracy=0.0,
@@ -183,8 +171,8 @@ async def test_e2e_workflow_and_campaign_registry(
 
     # Record optimization trial from evaluate step
     eval_out = context.step_outputs["evaluate"]
-    record_trial(
-        store, BACKEND_ID, campaign_id,
+    store.campaigns.record_trial(
+        BACKEND_ID, campaign_id,
         round_num=1,
         prompt_state=eval_out["winner_prompt_state"],
         accuracy=eval_out["winner_accuracy"],
@@ -195,9 +183,9 @@ async def test_e2e_workflow_and_campaign_registry(
         candidates_evaluated=eval_out["winner"]["candidates_evaluated"],
     )
 
-    complete_campaign(store, BACKEND_ID, campaign_id)
+    store.campaigns.complete(BACKEND_ID, campaign_id)
 
-    # -- 3. Verify campaign registry persistence --
+    # -- 3. Verify campaign persistence --
     loaded = store.campaigns.load(BACKEND_ID, campaign_id)
     assert loaded is not None
     assert loaded["status"] == "completed"
@@ -216,7 +204,7 @@ async def test_e2e_workflow_and_campaign_registry(
     assert winner_trial["improved"] is True
 
     # -- 4. Verify PromptState lineage --
-    lineage = get_campaign_lineage(store, BACKEND_ID, campaign_id)
+    lineage = store.campaigns.get_lineage(BACKEND_ID, campaign_id)
     assert len(lineage) == 2
 
     # Baseline has no parent
@@ -245,7 +233,7 @@ async def test_e2e_workflow_and_campaign_registry(
 
 
 # ---------------------------------------------------------------------------
-# E2E test: feedback cycle + campaign registry
+# E2E test: feedback cycle + campaign store
 # ---------------------------------------------------------------------------
 
 
@@ -253,11 +241,10 @@ async def test_e2e_workflow_and_campaign_registry(
 async def test_e2e_feedback_cycle_with_registry(
     monkeypatch, store, eval_data,
 ):
-    """Feedback cycle results persist to campaign registry."""
+    """Feedback cycle results persist to campaign store."""
     _apply_all_mocks(monkeypatch)
 
     from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
-    from api.services.campaign.campaign_registry import record_campaign_rounds
 
     config = CycleConfig(
         max_rounds=3,
@@ -275,9 +262,9 @@ async def test_e2e_feedback_cycle_with_registry(
 
     assert result.n_rounds > 0
 
-    # Record to campaign registry
-    campaign = create_campaign(
-        store, BACKEND_ID,
+    # Record to campaign store
+    campaign = store.campaigns.create_campaign(
+        BACKEND_ID,
         name="E2E Feedback Cycle",
         config={"max_rounds": 3},
     )
@@ -298,10 +285,10 @@ async def test_e2e_feedback_cycle_with_registry(
             "candidates_evaluated": rd.candidates_evaluated,
         })
 
-    trial_ids = record_campaign_rounds(
-        store, BACKEND_ID, campaign_id, rounds_for_registry,
+    trial_ids = store.campaigns.record_campaign_rounds(
+        BACKEND_ID, campaign_id, rounds_for_registry,
     )
-    complete_campaign(store, BACKEND_ID, campaign_id)
+    store.campaigns.complete(BACKEND_ID, campaign_id)
 
     assert len(trial_ids) == result.n_rounds
 

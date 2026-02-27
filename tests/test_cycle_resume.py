@@ -17,19 +17,17 @@ from api.services.campaign.feedback_cycle import (
     run_feedback_cycle,
 )
 
+from _helpers import (
+    apply_eval_mock,
+    apply_grow_mock,
+    apply_init_mock,
+    apply_llm_mock,
+)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def eval_data():
-    return [
-        {"query": "aspirin", "ground_truth": "Aspirin"},
-        {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
-        {"query": "acetaminophen", "ground_truth": "Acetaminophen"},
-    ]
 
 
 @pytest.fixture
@@ -43,91 +41,6 @@ def base_config():
         backend_url="http://mock:8000",
         generate_suggestions=False,
     )
-
-
-# ---------------------------------------------------------------------------
-# Shared mock setup (copied from test_feedback_cycle.py)
-# ---------------------------------------------------------------------------
-
-
-def _apply_init_mock(monkeypatch):
-    async def mock_restructure(context_input, llm_client, **kwargs):
-        return {
-            "persona": "Expert",
-            "instruction": "Rank by relevance",
-            "thinking_style": "Step by step",
-        }
-
-    monkeypatch.setattr(
-        "api.services.search.context.restructure_context",
-        mock_restructure,
-    )
-
-
-def _apply_llm_mock(monkeypatch):
-    from api.services.llm_client import MockLLMClient
-    monkeypatch.setattr(
-        "api.services.llm_client.get_llm_client",
-        lambda provider=None: MockLLMClient(),
-    )
-
-
-def _apply_grow_mock(monkeypatch):
-    async def mock_generate(current_ps, accuracy, results, n, creativity,
-                            llm_client, **kwargs):
-        return [
-            current_ps.derive(
-                instruction=f"variant_{i}_acc{accuracy:.0%}",
-                changes_description=f"gen_{i}",
-            )
-            for i in range(n)
-        ]
-
-    monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
-        mock_generate,
-    )
-
-
-def _apply_eval_mock(monkeypatch, round_hits=None):
-    """Mock evaluate_prompt_cached with configurable per-round hit counts."""
-    if round_hits is None:
-        round_hits = [1, 2, 3]
-    call_count = [0]
-
-    async def mock_eval(ps, data, backend_client, **kwargs):
-        idx = min(call_count[0], len(round_hits) - 1)
-        target_hits = round_hits[idx]
-        label = kwargs.get("label", "")
-        if label == "candidate_0":
-            results = []
-            for i, d in enumerate(data):
-                hit = i < target_hits
-                results.append({
-                    "query": d["query"],
-                    "predicted": d["ground_truth"] if hit else "WRONG",
-                    "ground_truth": d["ground_truth"],
-                    "hit": hit, "score": 1.0 if hit else 0.0, "error": None,
-                })
-            scores = {"hits": target_hits, "total": len(data),
-                      "accuracy": target_hits / len(data), "errors": 0}
-            call_count[0] += 1
-        else:
-            results = [
-                {"query": d["query"], "predicted": "WRONG",
-                 "ground_truth": d["ground_truth"], "hit": False,
-                 "score": 0.0, "error": None}
-                for d in data
-            ]
-            scores = {"hits": 0, "total": len(data),
-                      "accuracy": 0.0, "errors": 0}
-        return results, scores, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
-    return call_count
 
 
 # ---------------------------------------------------------------------------
@@ -208,10 +121,10 @@ async def test_completed_cycle_returns_cached(
     monkeypatch, eval_data, base_config, tmp_path,
 ):
     """Re-running a completed cycle returns the cached result with 0 new evals."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
-    call_count = _apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
+    call_count = apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
 
     # First run — writes to disk, runs 3 rounds (perfect score at round 2)
     config = base_config.model_copy(update={
@@ -253,12 +166,12 @@ async def test_resume_from_interrupted_cycle(
     monkeypatch, eval_data, tmp_path,
 ):
     """Aborted cycle resumes from last completed round."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
 
     # Round 0: 1/3 hit, round 1: 2/3 hits, round 2: 3/3 hits
-    call_count = _apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
+    call_count = apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
 
     config = CycleConfig(
         max_rounds=5,
@@ -329,8 +242,8 @@ async def test_mid_round_resume_uses_persisted_candidates(
     monkeypatch, eval_data, tmp_path,
 ):
     """Abort mid-round, re-run → GrowFilterNode skipped, same candidates used."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
 
     # Track whether generate_candidates was called
     grow_calls = [0]
@@ -350,7 +263,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
         "api.services.prompt_optimizer.generate_candidates",
         mock_generate,
     )
-    call_count = _apply_eval_mock(monkeypatch, round_hits=[2, 2])
+    apply_eval_mock(monkeypatch, round_hits=[2, 2])
 
     config = CycleConfig(
         max_rounds=1,
@@ -418,10 +331,10 @@ async def test_mid_round_resume_uses_persisted_candidates(
 @pytest.mark.asyncio
 async def test_no_store_no_persistence(monkeypatch, eval_data, base_config):
     """Without project_root, cycle runs fresh every time with no cycle_id."""
-    _apply_init_mock(monkeypatch)
-    _apply_llm_mock(monkeypatch)
-    _apply_grow_mock(monkeypatch)
-    _apply_eval_mock(monkeypatch, round_hits=[0])
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
+    apply_eval_mock(monkeypatch, round_hits=[0])
 
     # No project_root or backend_id set
     result = await run_feedback_cycle(

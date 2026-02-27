@@ -76,7 +76,6 @@ async def init_services(
 
     base = {
         "store": store,
-        "client": client,
         "backend_id": backend_id,
         "experiment_id": experiment_id,
         "backend_client": client,
@@ -91,18 +90,15 @@ async def init_services(
         return {
             **base,
             "queries": [],
-            "terms": [],
             "exp_data": {},
             "session_terms": [],
         }
 
     queries = client.extract_replay_queries(exp_data)
-    terms = client.extract_session_terms(exp_data)
 
     return {
         **base,
         "queries": queries,
-        "terms": terms,
         "exp_data": exp_data,
-        "session_terms": BackendClient.extract_session_terms(exp_data),
+        "session_terms": client.extract_session_terms(exp_data),
     }

@@ -24,7 +24,7 @@ from api.services.backend_client import (
     build_pipeline_params,
     load_pipeline_config,
 )
-from api.services.llm_client import LLMClientBase, setup_llm
+from api.services.llm_client import GroqClient, LLMClientBase, OpenAIClient
 from api.services.project_store import ProjectStore
 
 # --- Service imports (core logic) ---
@@ -37,7 +37,6 @@ from api.services.prompt_eval import (
 from api.services.prompt_optimizer import (
     generate_candidates,
     generate_suggestions,
-    select_round_winner as _select_round_winner,
 )
 from api.config.settings import load_variant_library
 from api.services.search import (
@@ -143,7 +142,63 @@ def show_pipeline_config(svc: dict, campaign_config: dict) -> dict:
     return pipeline_params
 
 
-# setup_llm and make_llm_client imported from api.services.llm_client above
+def make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase:
+    """Create an LLM client from a provider URL or key."""
+    if "groq.com" in provider_url:
+        return GroqClient(api_key=api_key)
+    elif "openai.com" in provider_url:
+        return OpenAIClient(api_key=api_key)
+    return GroqClient(api_key=api_key)
+
+
+def setup_llm(campaign_config: dict, api_key: str) -> tuple[LLMClientBase, str]:
+    """Create LLM client + model from campaign_config['eval_llm'].
+
+    Returns:
+        (llm_client, model) tuple for passing to service functions.
+    """
+    eval_llm = campaign_config["eval_llm"]
+    client = make_llm_client(eval_llm.get("provider_url", ""), api_key)
+    return client, eval_llm.get("model", "")
+
+
+def save_campaign_winner(
+    campaign_rounds: list,
+    campaign_config: dict,
+    store: "ProjectStore",
+    backend_id: str,
+) -> dict:
+    """Find best round, save to store. Returns save_data dict."""
+    from datetime import datetime, timezone
+
+    winner = campaign_rounds[-1]["prompt_state"]
+    winner_acc = campaign_rounds[-1]["accuracy"]
+
+    for rd in campaign_rounds:
+        if rd["accuracy"] > winner_acc:
+            winner = rd["prompt_state"]
+            winner_acc = rd["accuracy"]
+
+    save_data = {
+        "winner": winner.model_dump(),
+        "accuracy": winner_acc,
+        "campaign_rounds": len(campaign_rounds),
+        "baseline_accuracy": campaign_rounds[0]["accuracy"],
+        "improvement": winner_acc - campaign_rounds[0]["accuracy"],
+        "config": campaign_config,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
+    store.backends.save_sync(backend_id, filename, save_data)
+
+    print(f"Winner saved: {filename} (acc={winner_acc:.1%})")
+    return {
+        **save_data,
+        "winner_id": winner.id,
+        "filename": filename,
+        "backend_id": backend_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +237,7 @@ async def init_services(
     print(f"Experiment : {exp_data.get('experiment', {}).get('name', experiment_id)}")
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
     print(f"Queries    : {len(svc.get('queries', []))}  |  "
-          f"Session terms: {len(svc.get('terms', []))}")
+          f"Session terms: {len(svc.get('session_terms', []))}")
 
     return svc
 
@@ -251,7 +306,6 @@ async def run_baseline_eval(
     baseline: PromptState,
     eval_data: list,
     campaign_config: dict,
-    api_key: str,
     svc: dict,
 ) -> tuple:
     """Evaluate baseline prompt and initialize campaign_rounds.
@@ -294,51 +348,6 @@ async def run_baseline_eval(
         )
 
     return campaign_rounds, baseline_results
-
-
-def select_round_winner(
-    candidates: list,
-    all_candidate_results: dict,
-    current_best: dict,
-    improvement_threshold: float,
-) -> dict:
-    """Compare candidates, print comparison table, return round entry dict."""
-    from IPython.display import display as ipy_display
-    result = _select_round_winner(
-        candidates, all_candidate_results, current_best, improvement_threshold,
-    )
-
-    # Display comparison table
-    print(f"\n{'=' * 70}")
-    print("ROUND SUMMARY")
-    print(f"{'=' * 70}")
-    ipy_display(pd.DataFrame(result["comparison_rows"]))
-
-    if result["improved"]:
-        print(
-            f"\nWINNER: {result['label']} ({result['accuracy']:.1%}, "
-            f"+{result['accuracy'] - current_best['accuracy']:.1%} over previous)"
-        )
-        ps = result["prompt_state"]
-        print(
-            f"  PromptState: {ps.id[:12]}  "
-            f"(parent: {ps.parent_id[:12] if ps.parent_id else 'none'})"
-        )
-    else:
-        print(
-            f"\nNo improvement beyond threshold ({improvement_threshold:.1%}). "
-            "Keeping current best."
-        )
-
-    return {
-        "label": result["label"],
-        "prompt_state": result["prompt_state"],
-        "accuracy": result["accuracy"],
-        "hits": result["hits"],
-        "total": result["total"],
-        "results": result["results"],
-        "candidates_evaluated": result["candidates_evaluated"],
-    }
 
 
 def display_suggestions(suggestions: dict, round_num: int) -> None:
@@ -560,7 +569,6 @@ async def run_grid_search(
     state_lookup: dict,
     eval_data: list,
     eval_llm: dict,
-    api_key: str,
     *,
     plan_id: str = "",
     store: "ProjectStore | None" = None,
@@ -1484,7 +1492,6 @@ async def run_manual_round(
     campaign_rounds: list,
     eval_data: list,
     campaign_config: dict,
-    api_key: str,
     svc: dict,
 ) -> dict:
     """Run a single manual optimization round via feedback cycle.
@@ -1501,8 +1508,8 @@ async def run_manual_round(
         campaign_rounds, eval_data, override,
         store=svc.get("store"),
         backend_id=svc.get("backend_id", ""),
-        backend_url=svc.get("client", svc.get("backend_client")).base_url
-        if svc.get("client") or svc.get("backend_client") else "http://127.0.0.1:8000",
+        backend_url=svc["backend_client"].base_url
+        if svc.get("backend_client") else "http://127.0.0.1:8000",
         pipeline_params=campaign_config.get("pipeline_params"),
         session_terms=svc.get("session_terms"),
     )
@@ -1515,7 +1522,6 @@ async def run_optimization_loop(
     campaign_rounds: list,
     eval_data: list,
     campaign_config: dict,
-    api_key: str,
     *,
     store: "ProjectStore | None" = None,
     backend_id: str = "",

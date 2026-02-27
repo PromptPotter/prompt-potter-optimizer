@@ -320,13 +320,13 @@ async def generate_suggestions(
         "normalization pipeline.\n"
         "Analyze the current campaign state and provide actionable "
         "suggestions for the next round.\n\n"
-        f"CAMPAIGN HISTORY:\n{chr(10).join(history_lines)}\n\n"
+        f"CAMPAIGN HISTORY:\n{"\n".join(history_lines)}\n\n"
         f"CURRENT BEST PROMPT ({current_acc:.1%} accuracy):\n"
         f"---\n{current_ps.render()}\n---\n\n"
         f"CURRENT CONFIG:\n{json.dumps(campaign_config, indent=2)}\n\n"
         f"FAILURE DETAILS ({len(failures)} failures out of "
         f"{len(current_results)} queries):\n"
-        f"{chr(10).join(failure_detail)}\n\n"
+        f"{"\n".join(failure_detail)}\n\n"
         "Provide your analysis as a JSON object with these keys:\n\n"
         '1. "failure_patterns": array of objects, each with:\n'
         '   - "category": failure type (e.g., "bad_profile", '

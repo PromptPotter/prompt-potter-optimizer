@@ -29,15 +29,6 @@ def baseline_ps():
 
 
 @pytest.fixture
-def eval_data():
-    return [
-        {"query": "aspirin", "ground_truth": "Aspirin"},
-        {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
-        {"query": "acetaminophen", "ground_truth": "Acetaminophen"},
-    ]
-
-
-@pytest.fixture
 def baseline_results():
     return [
         {"query": "aspirin", "predicted": "Aspirin", "ground_truth": "Aspirin",

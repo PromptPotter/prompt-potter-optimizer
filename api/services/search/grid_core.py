@@ -24,7 +24,6 @@ from api.services.prompt_eval import (
     eval_content_hash,
     make_incremental_writer,
 )
-from api.config.settings import load_variant_library
 from api.services.search.smart_search import MIN_DIAGNOSTIC_QUERIES
 
 logger = logging.getLogger(__name__)
@@ -46,13 +45,7 @@ REQUIRED_TEMPLATE_VARS = {
 }
 
 
-def _load_default_grid_axes() -> dict[str, list[str]]:
-    """Load default grid axes from the variant library."""
-    return load_variant_library()["prompt_fields"]
-
-
 # Lazy-loaded default for backward compat with notebooks importing the name.
-# Use _load_default_grid_axes() when you need fresh data.
 DEFAULT_GRID_AXES: dict[str, list[str]] = {
     "persona": [
         "",

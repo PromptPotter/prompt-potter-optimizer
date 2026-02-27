@@ -1,8 +1,8 @@
-"""Tests for campaign registry (WP 3.3).
+"""Tests for campaign store and registry (WP 3.3).
 
 Covers:
 - CampaignStore CRUD (create, add_trial, load, list, export, delete)
-- campaign_registry service functions
+- High-level CampaignStore methods (create_campaign, record_trial, etc.)
 - Campaign lineage reconstruction
 - API endpoints via FastAPI test client
 """
@@ -10,14 +10,6 @@ Covers:
 import pytest
 
 from api.models.prompt_state import PromptState
-from api.services.project_store import ProjectStore
-from api.services.campaign.campaign_registry import (
-    complete_campaign,
-    create_campaign,
-    get_campaign_lineage,
-    record_campaign_rounds,
-    record_trial,
-)
 from api.services.stores.campaign_store import (
     generate_campaign_id,
     generate_trial_id,
@@ -32,12 +24,6 @@ BACKEND_ID = "test-backend"
 
 
 @pytest.fixture
-def store(tmp_path):
-    """ProjectStore pointing at a temp directory."""
-    return ProjectStore(base_dir=tmp_path)
-
-
-@pytest.fixture
 def baseline_ps():
     return PromptState(
         instruction="Rank candidates by relevance.",
@@ -49,8 +35,8 @@ def baseline_ps():
 @pytest.fixture
 def campaign(store):
     """A freshly created campaign."""
-    return create_campaign(
-        store, BACKEND_ID,
+    return store.campaigns.create_campaign(
+        BACKEND_ID,
         name="Test Optimization",
         config={"n_variants": 5, "model": "test-model"},
     )
@@ -80,7 +66,7 @@ def test_trial_id_format():
 
 def test_create_and_load(store):
     """Create a campaign and load it back."""
-    data = create_campaign(store, BACKEND_ID, name="My Campaign")
+    data = store.campaigns.create_campaign(BACKEND_ID, name="My Campaign")
     assert data["campaign_id"].startswith("campaign_")
     assert data["name"] == "My Campaign"
     assert data["status"] == "active"
@@ -107,8 +93,8 @@ def test_load_nonexistent(store):
 def test_add_trial_updates_index(store, campaign, baseline_ps):
     """add_trial writes detail file and updates campaign index."""
     cid = campaign["campaign_id"]
-    trial = record_trial(
-        store, BACKEND_ID, cid,
+    trial = store.campaigns.record_trial(
+        BACKEND_ID, cid,
         round_num=0,
         prompt_state=baseline_ps.model_dump(),
         accuracy=0.67,
@@ -136,8 +122,8 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
     cid = campaign["campaign_id"]
 
     # Round 0: baseline 0.67
-    record_trial(
-        store, BACKEND_ID, cid, round_num=0,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=0,
         prompt_state=baseline_ps.model_dump(),
         accuracy=0.67, hits=2, total=3, label="baseline",
     )
@@ -146,8 +132,8 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
     improved_ps = baseline_ps.derive(
         instruction="better", changes_description="round1",
     )
-    record_trial(
-        store, BACKEND_ID, cid, round_num=1,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=1,
         prompt_state=improved_ps.model_dump(),
         accuracy=0.80, hits=4, total=5, label="round1", improved=True,
     )
@@ -156,8 +142,8 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
     worse_ps = improved_ps.derive(
         instruction="worse", changes_description="round2",
     )
-    record_trial(
-        store, BACKEND_ID, cid, round_num=2,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=2,
         prompt_state=worse_ps.model_dump(),
         accuracy=0.60, hits=3, total=5, label="round2", improved=False,
     )
@@ -170,8 +156,8 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
 
 def test_list_all(store):
     """list_all returns summaries for all campaigns."""
-    create_campaign(store, BACKEND_ID, name="Campaign A")
-    create_campaign(store, BACKEND_ID, name="Campaign B")
+    store.campaigns.create_campaign(BACKEND_ID, name="Campaign A")
+    store.campaigns.create_campaign(BACKEND_ID, name="Campaign B")
 
     campaigns = store.campaigns.list_all(BACKEND_ID)
     assert len(campaigns) == 2
@@ -188,8 +174,8 @@ def test_export_includes_trial_details(store, campaign, baseline_ps):
     """export() includes full trial detail files."""
     cid = campaign["campaign_id"]
 
-    record_trial(
-        store, BACKEND_ID, cid, round_num=0,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=0,
         prompt_state=baseline_ps.model_dump(),
         accuracy=0.67, hits=2, total=3, label="baseline",
         results=[{"query": "q1", "hit": True}],
@@ -217,7 +203,7 @@ def test_delete(store, campaign):
 def test_complete_campaign(store, campaign):
     """complete_campaign sets status to completed."""
     cid = campaign["campaign_id"]
-    complete_campaign(store, BACKEND_ID, cid)
+    store.campaigns.complete(BACKEND_ID, cid)
     loaded = store.campaigns.load(BACKEND_ID, cid)
     assert loaded["status"] == "completed"
 
@@ -246,7 +232,7 @@ def test_record_campaign_rounds(store, campaign, baseline_ps):
         },
     ]
 
-    trial_ids = record_campaign_rounds(store, BACKEND_ID, cid, rounds)
+    trial_ids = store.campaigns.record_campaign_rounds(BACKEND_ID, cid, rounds)
     assert len(trial_ids) == 2
 
     loaded = store.campaigns.load(BACKEND_ID, cid)
@@ -261,7 +247,7 @@ def test_record_campaign_rounds(store, campaign, baseline_ps):
 
 
 def test_lineage_chain(store, campaign, baseline_ps):
-    """get_campaign_lineage returns full parent chain."""
+    """get_lineage returns full parent chain."""
     cid = campaign["campaign_id"]
 
     # Build lineage: baseline → r1 → r2
@@ -272,23 +258,23 @@ def test_lineage_chain(store, campaign, baseline_ps):
         instruction="r2", changes_description="round2",
     )
 
-    record_trial(
-        store, BACKEND_ID, cid, round_num=0,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=0,
         prompt_state=baseline_ps.model_dump(),
         accuracy=0.50, hits=1, total=2, label="baseline",
     )
-    record_trial(
-        store, BACKEND_ID, cid, round_num=1,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=1,
         prompt_state=r1_ps.model_dump(),
         accuracy=0.75, hits=3, total=4, label="round1",
     )
-    record_trial(
-        store, BACKEND_ID, cid, round_num=2,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=2,
         prompt_state=r2_ps.model_dump(),
         accuracy=1.0, hits=4, total=4, label="round2",
     )
 
-    lineage = get_campaign_lineage(store, BACKEND_ID, cid)
+    lineage = store.campaigns.get_lineage(BACKEND_ID, cid)
     assert len(lineage) == 3
 
     # Round 0 has no parent
@@ -333,7 +319,7 @@ def test_api_list_empty(api_client):
 
 def test_api_create_and_list(api_client, store, baseline_ps):
     """Create campaigns via service, list via API."""
-    create_campaign(store, BACKEND_ID, name="API Test")
+    store.campaigns.create_campaign(BACKEND_ID, name="API Test")
 
     resp = api_client.get(
         "/api/v1/campaigns", params={"backend_id": BACKEND_ID},
@@ -346,10 +332,10 @@ def test_api_create_and_list(api_client, store, baseline_ps):
 
 def test_api_get_detail(api_client, store, baseline_ps):
     """Get campaign detail via API."""
-    c = create_campaign(store, BACKEND_ID, name="Detail Test")
+    c = store.campaigns.create_campaign(BACKEND_ID, name="Detail Test")
     cid = c["campaign_id"]
-    record_trial(
-        store, BACKEND_ID, cid, round_num=0,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=0,
         prompt_state=baseline_ps.model_dump(),
         accuracy=0.67, hits=2, total=3, label="baseline",
     )
@@ -365,10 +351,10 @@ def test_api_get_detail(api_client, store, baseline_ps):
 
 def test_api_get_trial(api_client, store, baseline_ps):
     """Get trial detail via API."""
-    c = create_campaign(store, BACKEND_ID, name="Trial Test")
+    c = store.campaigns.create_campaign(BACKEND_ID, name="Trial Test")
     cid = c["campaign_id"]
-    record_trial(
-        store, BACKEND_ID, cid, round_num=0,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=0,
         prompt_state=baseline_ps.model_dump(),
         accuracy=0.67, hits=2, total=3, label="baseline",
         results=[{"query": "q1", "hit": True}],
@@ -386,10 +372,10 @@ def test_api_get_trial(api_client, store, baseline_ps):
 
 def test_api_export(api_client, store, baseline_ps):
     """Export campaign via API."""
-    c = create_campaign(store, BACKEND_ID, name="Export Test")
+    c = store.campaigns.create_campaign(BACKEND_ID, name="Export Test")
     cid = c["campaign_id"]
-    record_trial(
-        store, BACKEND_ID, cid, round_num=0,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=0,
         prompt_state=baseline_ps.model_dump(),
         accuracy=0.67, hits=2, total=3, label="baseline",
     )
@@ -406,17 +392,17 @@ def test_api_export(api_client, store, baseline_ps):
 
 def test_api_lineage(api_client, store, baseline_ps):
     """Get lineage via API."""
-    c = create_campaign(store, BACKEND_ID, name="Lineage Test")
+    c = store.campaigns.create_campaign(BACKEND_ID, name="Lineage Test")
     cid = c["campaign_id"]
     r1 = baseline_ps.derive(instruction="r1", changes_description="r1")
 
-    record_trial(
-        store, BACKEND_ID, cid, round_num=0,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=0,
         prompt_state=baseline_ps.model_dump(),
         accuracy=0.50, hits=1, total=2, label="baseline",
     )
-    record_trial(
-        store, BACKEND_ID, cid, round_num=1,
+    store.campaigns.record_trial(
+        BACKEND_ID, cid, round_num=1,
         prompt_state=r1.model_dump(),
         accuracy=0.80, hits=4, total=5, label="r1",
     )
@@ -433,7 +419,7 @@ def test_api_lineage(api_client, store, baseline_ps):
 
 def test_api_delete(api_client, store):
     """Delete campaign via API."""
-    c = create_campaign(store, BACKEND_ID, name="Delete Test")
+    c = store.campaigns.create_campaign(BACKEND_ID, name="Delete Test")
     cid = c["campaign_id"]
 
     resp = api_client.delete(
