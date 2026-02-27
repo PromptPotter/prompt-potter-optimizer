@@ -396,6 +396,13 @@ async def _execute_round(
         generate_suggestions,
     )
 
+    # -- Open round observation (timed span) --
+    if obs:
+        try:
+            obs.log_round_start(obs_campaign_id, round_num)
+        except Exception:
+            logger.warning("ObsLogger.log_round_start failed", exc_info=True)
+
     # -- Generate or load candidates --
     persisted = None
     if campaign_store and cycle_id:
@@ -500,10 +507,10 @@ async def _execute_round(
         candidate_scores=eval_out["candidate_scores"],
     )
 
-    # -- Observability: round + prompt version --
+    # -- Observability: close round + prompt version --
     if obs:
         try:
-            obs.log_round(
+            obs.log_round_end(
                 campaign_id=obs_campaign_id,
                 round_num=round_num,
                 accuracy=eval_out["winner_accuracy"],
@@ -520,7 +527,7 @@ async def _execute_round(
                 n_variants=config.n_variants,
             )
         except Exception:
-            logger.warning("ObsLogger.log_round failed", exc_info=True)
+            logger.warning("ObsLogger.log_round_end failed", exc_info=True)
 
         try:
             winner_ps = PromptState(**eval_out["winner_prompt_state"])

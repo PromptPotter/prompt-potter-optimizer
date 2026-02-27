@@ -48,8 +48,10 @@ class LangfuseLogger:
             and settings.LANGFUSE_PUBLIC_KEY
         )
         self.client = None
-        # Maps trace_id → root SDK span object (not a plain dict)
+        # Maps trace_id → root SDK observation object (not a plain dict)
         self._trace_metadata: dict[str, Any] = {}
+        # Maps obs_id → open SDK observation (for long-running spans)
+        self._open_observations: dict[str, Any] = {}
         # Rate-limit tracking for REST API calls
         self._rate_limit_until: float = 0.0  # unix timestamp when quota resets
 
@@ -103,8 +105,9 @@ class LangfuseLogger:
 
         try:
             trace_id = self.client.create_trace_id()
-            root = self.client.start_span(
+            root = self.client.start_observation(
                 trace_context={"trace_id": trace_id},
+                as_type="chain",
                 name=name,
                 input=input,
                 metadata=metadata or {},
@@ -122,6 +125,71 @@ class LangfuseLogger:
         except Exception:
             logger.warning("Failed to create Langfuse trace", exc_info=True)
             return None
+
+    def start_span(
+        self,
+        trace_id: str,
+        name: str,
+        input: Any = None,
+        metadata: dict[str, Any] | None = None,
+        *,
+        parent_observation_id: str | None = None,
+        as_type: str = "span",
+    ) -> str | None:
+        """Start a long-running observation. Call end_observation() when done.
+
+        Returns observation_id or None if logging is disabled.
+        """
+        if not self.enabled or not self.client or not trace_id:
+            return None
+
+        try:
+            # Find parent: explicit parent obs, or root trace span
+            parent = None
+            if parent_observation_id:
+                parent = self._open_observations.get(parent_observation_id)
+            if parent is None:
+                parent = self._trace_metadata.get(trace_id)
+            if parent is None:
+                return None
+
+            child = parent.start_observation(
+                as_type=as_type,
+                name=name,
+                input=input,
+                metadata=metadata or {},
+            )
+            obs_id = getattr(child, "id", uuid.uuid4().hex[:12])
+            self._open_observations[obs_id] = child
+            return obs_id
+        except Exception:
+            logger.warning("Failed to start Langfuse span", exc_info=True)
+            return None
+
+    def end_observation(
+        self,
+        obs_id: str,
+        output: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Close a previously started observation (span/chain/tool)."""
+        if not self.enabled or not obs_id:
+            return
+
+        try:
+            child = self._open_observations.pop(obs_id, None)
+            if child is None:
+                return
+            kwargs: dict[str, Any] = {}
+            if output is not None:
+                kwargs["output"] = output
+            if metadata is not None:
+                kwargs["metadata"] = metadata
+            if kwargs:
+                child.update(**kwargs)
+            child.end()
+        except Exception:
+            logger.warning("Failed to end Langfuse observation", exc_info=True)
 
     def create_generation(
         self,
@@ -173,8 +241,15 @@ class LangfuseLogger:
         input: Any,
         output: Any,
         metadata: dict[str, Any] | None = None,
+        *,
+        parent_observation_id: str | None = None,
+        as_type: str = "span",
     ) -> str | None:
-        """Log a non-LLM span nested under the root span.
+        """Log a non-LLM observation nested under root or a parent observation.
+
+        Args:
+            parent_observation_id: Nest under this open observation instead of root.
+            as_type: Observation type (``span``, ``tool``, ``chain``, etc.).
 
         Returns observation_id or None if logging is disabled.
         """
@@ -182,17 +257,23 @@ class LangfuseLogger:
             return None
 
         try:
-            root = self._trace_metadata.get(trace_id)
-            if root:
-                child = root.start_span(
-                    name=name,
-                    input=input,
-                    output=output,
-                    metadata=metadata or {},
-                )
-                child.end()
-                return getattr(child, "id", uuid.uuid4().hex[:12])
-            return None
+            parent = None
+            if parent_observation_id:
+                parent = self._open_observations.get(parent_observation_id)
+            if parent is None:
+                parent = self._trace_metadata.get(trace_id)
+            if parent is None:
+                return None
+
+            child = parent.start_observation(
+                as_type=as_type,
+                name=name,
+                input=input,
+                output=output,
+                metadata=metadata or {},
+            )
+            child.end()
+            return getattr(child, "id", uuid.uuid4().hex[:12])
         except Exception:
             logger.warning("Failed to log Langfuse span", exc_info=True)
             return None

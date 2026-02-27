@@ -111,6 +111,7 @@ class CloudObsBackend:
         self._trace_ids: dict[str, str] = {}
         self._active_trace_id: str | None = None
         self._active_session_id: str | None = None
+        self._active_round_obs_id: str | None = None
 
     def on_dataset_registered(
         self,
@@ -168,6 +169,64 @@ class CloudObsBackend:
         except Exception:
             logger.debug("Cloud Langfuse campaign_start failed", exc_info=True)
 
+    def on_round_start(self, campaign_id: str, round_num: int) -> None:
+        """Open a long-running round span in cloud Langfuse."""
+        cloud_trace_id = self._trace_ids.get(campaign_id)
+        if not cloud_trace_id:
+            return
+        try:
+            obs_id = self._lf.start_span(
+                trace_id=cloud_trace_id,
+                name=f"round_{round_num}",
+                input={"round": round_num},
+                metadata={"round": round_num},
+                as_type="span",
+            )
+            self._active_round_obs_id = obs_id
+        except Exception:
+            logger.debug("Cloud Langfuse round_start failed", exc_info=True)
+
+    def on_round_end(
+        self,
+        campaign_id: str,
+        round_num: int,
+        accuracy: float,
+        improved: bool,
+        next_action: str,
+        candidate_scores: list[dict],
+    ) -> None:
+        """Close the round span, attach score."""
+        cloud_trace_id = self._trace_ids.get(campaign_id)
+        if not cloud_trace_id:
+            self._active_round_obs_id = None
+            return
+        try:
+            if self._active_round_obs_id:
+                self._lf.end_observation(
+                    self._active_round_obs_id,
+                    output={
+                        "winner_accuracy": accuracy,
+                        "improved": improved,
+                        "next_action": next_action,
+                        "candidates_evaluated": len(candidate_scores),
+                    },
+                    metadata={
+                        "round": round_num,
+                        "candidates_evaluated": len(candidate_scores),
+                    },
+                )
+            self._lf.create_score(
+                trace_id=cloud_trace_id,
+                name=f"accuracy_round_{round_num}",
+                value=accuracy,
+                comment=f"Round {round_num}: "
+                        f"{'improved' if improved else 'no change'}",
+            )
+        except Exception:
+            logger.debug("Cloud Langfuse round_end failed", exc_info=True)
+        finally:
+            self._active_round_obs_id = None
+
     def on_round(
         self,
         campaign_id: str,
@@ -177,37 +236,44 @@ class CloudObsBackend:
         next_action: str,
         candidate_scores: list[dict],
     ) -> None:
-        """Push round span + score to cloud."""
-        cloud_trace_id = self._trace_ids.get(campaign_id)
-        if not cloud_trace_id:
+        """Fire-and-forget round: open + close immediately (legacy path)."""
+        self.on_round_start(campaign_id, round_num)
+        self.on_round_end(
+            campaign_id, round_num, accuracy,
+            improved, next_action, candidate_scores,
+        )
+
+    def on_dataset_run(
+        self,
+        run_id: str,
+        content_hash: str,
+        accuracy: float,
+        hits: int,
+        total: int,
+        prompt_state_id: str,
+    ) -> None:
+        """Push eval-run span to cloud, nesting under active round if present."""
+        if not self._active_trace_id:
             return
         try:
             self._lf.create_span(
-                trace_id=cloud_trace_id,
-                name=f"round_{round_num}",
+                trace_id=self._active_trace_id,
+                name=f"eval_{run_id[:8]}",
                 input={
-                    "n_candidates": len(candidate_scores),
-                    "baseline_accuracy": accuracy,
+                    "run_id": run_id,
+                    "content_hash": content_hash,
+                    "prompt_state_id": prompt_state_id,
                 },
                 output={
-                    "winner_accuracy": accuracy,
-                    "improved": improved,
-                    "next_action": next_action,
+                    "accuracy": accuracy,
+                    "hits": hits,
+                    "total": total,
                 },
-                metadata={
-                    "round": round_num,
-                    "candidates_evaluated": len(candidate_scores),
-                },
-            )
-            self._lf.create_score(
-                trace_id=cloud_trace_id,
-                name=f"accuracy_round_{round_num}",
-                value=accuracy,
-                comment=f"Round {round_num}: "
-                        f"{'improved' if improved else 'no change'}",
+                parent_observation_id=self._active_round_obs_id,
+                as_type="tool",
             )
         except Exception:
-            logger.debug("Cloud Langfuse round failed", exc_info=True)
+            logger.debug("Cloud Langfuse dataset_run failed", exc_info=True)
 
     def on_prompt_version(
         self,
@@ -231,6 +297,8 @@ class CloudObsBackend:
                 },
                 output={"family": family, "version": version},
                 metadata={"layer1_fields": layer1_fields},
+                parent_observation_id=self._active_round_obs_id,
+                as_type="tool",
             )
         except Exception:
             logger.debug("Cloud Langfuse prompt_version failed", exc_info=True)
@@ -624,6 +692,11 @@ class ObsLogger:
                 "prompt_state_id": prompt_state_id,
             })
 
+            if self._cloud:
+                self._cloud.on_dataset_run(
+                    run_id, content_hash, accuracy, hits, total, prompt_state_id,
+                )
+
             trace_path = (
                 self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"
             )
@@ -685,7 +758,33 @@ class ObsLogger:
             )
             return None
 
-    def log_round(
+    def log_round_start(
+        self,
+        campaign_id: str,
+        round_num: int,
+    ) -> None:
+        """Open a round observation (file + cloud). Call log_round_end() when done.
+
+        Called from ``_execute_round()`` before candidate generation.
+        """
+        if not self._enabled:
+            return
+        try:
+            trace_id = self._campaign_traces.get(campaign_id, "")
+            if trace_id:
+                self._write_observation(
+                    trace_id=trace_id,
+                    obs_type="span",
+                    name=f"round_{round_num}_start",
+                    input_data={"round": round_num},
+                )
+
+            if self._cloud:
+                self._cloud.on_round_start(campaign_id, round_num)
+        except Exception:
+            logger.warning("ObsLogger.log_round_start failed", exc_info=True)
+
+    def log_round_end(
         self,
         campaign_id: str,
         round_num: int,
@@ -700,9 +799,9 @@ class ObsLogger:
         temperature: float = 0.0,
         n_variants: int = 0,
     ) -> Path | None:
-        """Write observation + score + MLflow run + events.jsonl for one round.
+        """Close a round: file observation + score + MLflow run + events.jsonl + cloud.
 
-        Called from ``run_feedback_cycle()`` after each optimization round.
+        Called from ``_execute_round()`` after evaluation completes.
         """
         if not self._enabled:
             return None
@@ -770,7 +869,7 @@ class ObsLogger:
             })
 
             if self._cloud:
-                self._cloud.on_round(
+                self._cloud.on_round_end(
                     campaign_id, round_num, accuracy,
                     improved, next_action, candidate_scores,
                 )
@@ -778,8 +877,35 @@ class ObsLogger:
             obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
             return obs_dir if trace_id else None
         except Exception:
-            logger.warning("ObsLogger.log_round failed", exc_info=True)
+            logger.warning("ObsLogger.log_round_end failed", exc_info=True)
             return None
+
+    def log_round(
+        self,
+        campaign_id: str,
+        round_num: int,
+        accuracy: float,
+        hits: int,
+        total: int,
+        improved: bool,
+        next_action: str,
+        winner_prompt_state_id: str,
+        candidate_scores: list[dict],
+        model: str = "",
+        temperature: float = 0.0,
+        n_variants: int = 0,
+    ) -> Path | None:
+        """Fire-and-forget round log (start + end in one call).
+
+        Preserves the original API for non-campaign callers. Internally
+        delegates to ``log_round_start()`` + ``log_round_end()``.
+        """
+        self.log_round_start(campaign_id, round_num)
+        return self.log_round_end(
+            campaign_id, round_num, accuracy, hits, total,
+            improved, next_action, winner_prompt_state_id,
+            candidate_scores, model, temperature, n_variants,
+        )
 
     def log_prompt_version(
         self,

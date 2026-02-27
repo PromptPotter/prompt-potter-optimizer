@@ -213,13 +213,18 @@ def test_obs_logger_round(tmp_path):
     assert result is not None
     assert result.exists()
 
-    # Langfuse observation files
+    # Langfuse observation files (round_start + round_end = 2 observations)
     trace_id = obs._campaign_traces["campaign_round_test"]
     obs_files = _find_observations(tmp_path / "obs", trace_id)
-    assert len(obs_files) == 1
-    obs_data = json.loads(obs_files[0].read_text())
+    assert len(obs_files) == 2
+    # The round_end observation has the full output
+    round_obs = [
+        json.loads(f.read_text()) for f in obs_files
+        if json.loads(f.read_text())["name"] == "round_0"
+    ]
+    assert len(round_obs) == 1
+    obs_data = round_obs[0]
     assert obs_data["type"] == "span"
-    assert obs_data["name"] == "round_0"
     assert obs_data["output"]["accuracy"] == 0.65
     assert obs_data["output"]["improved"] is True
 
@@ -450,7 +455,24 @@ class _MockLangfuse:
                             "tags": tags})
         return tid
 
-    def create_span(self, trace_id, name, input, output, metadata=None):
+    def start_span(self, trace_id, name, input=None, metadata=None,
+                   *, parent_observation_id=None, as_type="span"):
+        self._counter += 1
+        obs_id = f"open_obs_{self._counter}"
+        self.spans.append({"trace_id": trace_id, "name": name,
+                           "input": input, "output": None,
+                           "obs_id": obs_id, "open": True})
+        return obs_id
+
+    def end_observation(self, obs_id, output=None, metadata=None):
+        for span in self.spans:
+            if span.get("obs_id") == obs_id and span.get("open"):
+                span["output"] = output
+                span["open"] = False
+                break
+
+    def create_span(self, trace_id, name, input, output, metadata=None,
+                    *, parent_observation_id=None, as_type="span"):
         self.spans.append({"trace_id": trace_id, "name": name,
                            "input": input, "output": output})
         return f"span_{name}"

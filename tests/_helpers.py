@@ -146,7 +146,28 @@ class MockLangfuseLogger:
         })
         return tid
 
-    def create_span(self, trace_id, name, input, output, metadata=None):
+    def start_span(self, trace_id, name, input=None, metadata=None,
+                   *, parent_observation_id=None, as_type="span"):
+        self._counter += 1
+        obs_id = f"open_obs_{self._counter:03d}"
+        self.spans.append({
+            "trace_id": trace_id, "name": name,
+            "input": input, "output": None, "metadata": metadata,
+            "obs_id": obs_id, "open": True,
+        })
+        return obs_id
+
+    def end_observation(self, obs_id, output=None, metadata=None):
+        for span in self.spans:
+            if span.get("obs_id") == obs_id and span.get("open"):
+                span["output"] = output
+                if metadata:
+                    span["metadata"] = metadata
+                span["open"] = False
+                break
+
+    def create_span(self, trace_id, name, input, output, metadata=None,
+                    *, parent_observation_id=None, as_type="span"):
         self.spans.append({
             "trace_id": trace_id, "name": name,
             "input": input, "output": output, "metadata": metadata,

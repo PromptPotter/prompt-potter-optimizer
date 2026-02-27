@@ -1,8 +1,9 @@
 """Unit tests for LangfuseLogger SDK wrapper.
 
 Verifies that LangfuseLogger methods delegate to the Langfuse SDK correctly:
-- create_trace() → client.start_span() + root.update_trace()
-- create_span() → root.start_span() (nested under root)
+- create_trace() → client.start_observation(as_type="chain") + root.update_trace()
+- create_span() → root.start_observation() (nested under root, supports parent + type)
+- start_span() / end_observation() → long-running observation lifecycle
 - create_generation() → root.start_generation() (nested under root)
 - update_trace() → root.update_trace() (not dict.update)
 - end_trace() → root.end()
@@ -25,16 +26,17 @@ def _make_logger_with_mock_client() -> tuple[LangfuseLogger, MagicMock]:
     lf = LangfuseLogger.__new__(LangfuseLogger)
     lf.enabled = True
     lf._trace_metadata = {}
+    lf._open_observations = {}
     lf._rate_limit_until = 0.0
 
     mock_client = MagicMock()
     mock_client.create_trace_id.return_value = "trace_abc123"
     lf.client = mock_client
 
-    # Mock root span returned by client.start_span()
+    # Mock root observation returned by client.start_observation()
     mock_root = MagicMock()
     mock_root.id = "root_span_001"
-    mock_client.start_span.return_value = mock_root
+    mock_client.start_observation.return_value = mock_root
 
     return lf, mock_client
 
@@ -45,7 +47,7 @@ def _make_logger_with_mock_client() -> tuple[LangfuseLogger, MagicMock]:
 
 
 def test_create_trace_sends_to_server():
-    """create_trace calls client.start_span + root.update_trace (not just local dict)."""
+    """create_trace calls client.start_observation(as_type='chain') + root.update_trace."""
     lf, mock_client = _make_logger_with_mock_client()
 
     trace_id = lf.create_trace(
@@ -59,15 +61,16 @@ def test_create_trace_sends_to_server():
 
     assert trace_id == "trace_abc123"
 
-    # client.start_span called with trace context
-    mock_client.start_span.assert_called_once()
-    call_kwargs = mock_client.start_span.call_args[1]
+    # client.start_observation called with as_type="chain"
+    mock_client.start_observation.assert_called_once()
+    call_kwargs = mock_client.start_observation.call_args[1]
     assert call_kwargs["trace_context"] == {"trace_id": "trace_abc123"}
+    assert call_kwargs["as_type"] == "chain"
     assert call_kwargs["name"] == "feedback_cycle"
     assert call_kwargs["input"] == {"campaign_id": "c1"}
 
     # root.update_trace called to push trace metadata to server
-    mock_root = mock_client.start_span.return_value
+    mock_root = mock_client.start_observation.return_value
     mock_root.update_trace.assert_called_once_with(
         name="feedback_cycle",
         user_id="user1",
@@ -77,7 +80,7 @@ def test_create_trace_sends_to_server():
         tags=["campaign"],
     )
 
-    # Root span stored (not a plain dict)
+    # Root observation stored (not a plain dict)
     assert lf._trace_metadata[trace_id] is mock_root
 
 
@@ -94,16 +97,16 @@ def test_create_trace_disabled():
 
 
 def test_create_span_nests_under_root():
-    """create_span calls root.start_span (child nesting, not client.start_span)."""
+    """create_span calls root.start_observation (child nesting)."""
     lf, mock_client = _make_logger_with_mock_client()
 
     # Create trace first to populate root
     lf.create_trace(name="cycle", input={})
-    mock_root = mock_client.start_span.return_value
+    mock_root = mock_client.start_observation.return_value
 
     mock_child = MagicMock()
     mock_child.id = "child_001"
-    mock_root.start_span.return_value = mock_child
+    mock_root.start_observation.return_value = mock_child
 
     span_id = lf.create_span(
         trace_id="trace_abc123",
@@ -114,7 +117,8 @@ def test_create_span_nests_under_root():
     )
 
     assert span_id == "child_001"
-    mock_root.start_span.assert_called_once_with(
+    mock_root.start_observation.assert_called_once_with(
+        as_type="span",
         name="round_0",
         input={"n": 5},
         output={"accuracy": 0.7},
@@ -139,7 +143,7 @@ def test_create_generation_nests_under_root():
     lf, mock_client = _make_logger_with_mock_client()
 
     lf.create_trace(name="cycle", input={})
-    mock_root = mock_client.start_span.return_value
+    mock_root = mock_client.start_observation.return_value
 
     mock_gen = MagicMock()
     mock_gen.id = "gen_001"
@@ -183,7 +187,7 @@ def test_update_trace_uses_sdk_object():
     lf, mock_client = _make_logger_with_mock_client()
 
     lf.create_trace(name="cycle", input={})
-    mock_root = mock_client.start_span.return_value
+    mock_root = mock_client.start_observation.return_value
     mock_root.update_trace.reset_mock()  # clear the call from create_trace
 
     result = lf.update_trace(
@@ -204,7 +208,7 @@ def test_update_trace_partial_kwargs():
     lf, mock_client = _make_logger_with_mock_client()
 
     lf.create_trace(name="cycle", input={})
-    mock_root = mock_client.start_span.return_value
+    mock_root = mock_client.start_observation.return_value
     mock_root.update_trace.reset_mock()
 
     lf.update_trace(trace_id="trace_abc123", output={"done": True})
@@ -222,7 +226,7 @@ def test_end_trace_ends_root_span():
     lf, mock_client = _make_logger_with_mock_client()
 
     lf.create_trace(name="cycle", input={})
-    mock_root = mock_client.start_span.return_value
+    mock_root = mock_client.start_observation.return_value
 
     lf.end_trace("trace_abc123")
 
@@ -421,3 +425,143 @@ def test_link_item_to_run_disabled():
     lf, _ = _make_logger_with_mock_client()
     lf.enabled = False
     assert lf.link_item_to_run("item_001", "trace_abc") is False
+
+
+# ---------------------------------------------------------------------------
+# start_span / end_observation (long-running observation lifecycle)
+# ---------------------------------------------------------------------------
+
+
+def test_start_span_stores_open_observation():
+    """start_span opens a long-running observation and stores it."""
+    lf, mock_client = _make_logger_with_mock_client()
+
+    lf.create_trace(name="cycle", input={})
+    mock_root = mock_client.start_observation.return_value
+
+    mock_child = MagicMock()
+    mock_child.id = "round_obs_001"
+    mock_root.start_observation.return_value = mock_child
+
+    obs_id = lf.start_span(
+        trace_id="trace_abc123",
+        name="round_0",
+        input={"round": 0},
+        metadata={"round": 0},
+    )
+
+    assert obs_id == "round_obs_001"
+    # Observation is stored in _open_observations (not immediately ended)
+    assert lf._open_observations["round_obs_001"] is mock_child
+    mock_child.end.assert_not_called()
+
+    mock_root.start_observation.assert_called_once_with(
+        as_type="span",
+        name="round_0",
+        input={"round": 0},
+        metadata={"round": 0},
+    )
+
+
+def test_end_observation_closes_span():
+    """end_observation closes a previously started span with output."""
+    lf, mock_client = _make_logger_with_mock_client()
+
+    lf.create_trace(name="cycle", input={})
+    mock_root = mock_client.start_observation.return_value
+
+    mock_child = MagicMock()
+    mock_child.id = "round_obs_001"
+    mock_root.start_observation.return_value = mock_child
+
+    obs_id = lf.start_span(trace_id="trace_abc123", name="round_0")
+    assert obs_id == "round_obs_001"
+
+    lf.end_observation(
+        obs_id="round_obs_001",
+        output={"accuracy": 0.85, "improved": True},
+        metadata={"candidates": 5},
+    )
+
+    mock_child.update.assert_called_once_with(
+        output={"accuracy": 0.85, "improved": True},
+        metadata={"candidates": 5},
+    )
+    mock_child.end.assert_called_once()
+    # Removed from open observations
+    assert "round_obs_001" not in lf._open_observations
+
+
+def test_end_observation_noop_for_unknown():
+    """end_observation is a no-op for unknown obs_id."""
+    lf, _ = _make_logger_with_mock_client()
+    # Should not raise
+    lf.end_observation("nonexistent", output={"x": 1})
+
+
+# ---------------------------------------------------------------------------
+# create_span — parent + type overrides
+# ---------------------------------------------------------------------------
+
+
+def test_create_span_with_parent():
+    """create_span nests under parent observation when parent_observation_id is set."""
+    lf, mock_client = _make_logger_with_mock_client()
+
+    lf.create_trace(name="cycle", input={})
+    mock_root = mock_client.start_observation.return_value
+
+    # Open a round span
+    mock_round = MagicMock()
+    mock_round.id = "round_obs_001"
+    mock_root.start_observation.return_value = mock_round
+
+    round_id = lf.start_span(trace_id="trace_abc123", name="round_0")
+
+    # Now create a child span under the round
+    mock_eval = MagicMock()
+    mock_eval.id = "eval_001"
+    mock_round.start_observation.return_value = mock_eval
+
+    span_id = lf.create_span(
+        trace_id="trace_abc123",
+        name="eval_candidate_1",
+        input={"run_id": "abc"},
+        output={"accuracy": 0.9},
+        parent_observation_id=round_id,
+        as_type="tool",
+    )
+
+    assert span_id == "eval_001"
+    mock_round.start_observation.assert_called_with(
+        as_type="tool",
+        name="eval_candidate_1",
+        input={"run_id": "abc"},
+        output={"accuracy": 0.9},
+        metadata={},
+    )
+    mock_eval.end.assert_called_once()
+
+
+def test_create_span_with_type():
+    """create_span respects as_type parameter."""
+    lf, mock_client = _make_logger_with_mock_client()
+
+    lf.create_trace(name="cycle", input={})
+    mock_root = mock_client.start_observation.return_value
+
+    mock_child = MagicMock()
+    mock_child.id = "tool_001"
+    mock_root.start_observation.return_value = mock_child
+
+    span_id = lf.create_span(
+        trace_id="trace_abc123",
+        name="prompt_version",
+        input={},
+        output={},
+        as_type="tool",
+    )
+
+    assert span_id == "tool_001"
+    call_kwargs = mock_root.start_observation.call_args[1]
+    assert call_kwargs["as_type"] == "tool"
