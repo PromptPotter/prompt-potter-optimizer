@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from api.models.backend import BackendConnection
 from api.services.backend_client import BackendClient
@@ -121,6 +121,7 @@ async def run_baseline_eval(
     model: str = "",
     temperature: float = 0.0,
     on_result: Callable | None = None,
+    obs: Any | None = None,
 ) -> tuple[list, list]:
     """Evaluate baseline prompt and build initial campaign_rounds list.
 
@@ -136,6 +137,7 @@ async def run_baseline_eval(
         model: Model identifier for content hash.
         temperature: Temperature for content hash.
         on_result: Optional callback for progress reporting.
+        obs: Optional ObsLogger for dataset registration.
 
     Returns:
         Tuple of (campaign_rounds, baseline_results).
@@ -154,6 +156,13 @@ async def run_baseline_eval(
             "No evaluation data available. "
             "Generate data first (e.g. run termnorm_backend.ipynb)."
         )
+
+    # Register dataset items in obs if available
+    if obs and eval_data:
+        try:
+            obs.register_dataset("termnorm_ground_truth", eval_data)
+        except Exception:
+            logger.warning("Dataset registration in run_baseline_eval failed", exc_info=True)
 
     baseline_results, scores, _cached = await evaluate_prompt_cached(
         baseline, eval_data, backend_client,

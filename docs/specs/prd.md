@@ -26,8 +26,8 @@
 | P1.7 | Pipeline Parameter Passthrough | P1 | Implemented (M1) |
 | P1.8 | Sensitivity Scan | P1 | Implemented (M3) |
 | P1.9 | Data Loop (Eval Reuse) | P1 | Implemented (M3) |
-| P1.10 | File-Based Observability | P1 | Planned (M5) |
-| P1.11 | LLM Retry Logic | P1 | Planned (M5) |
+| P1.10 | File-Based Observability | P1 | Complete (M5) |
+| P1.11 | LLM Retry Logic | P1 | Complete (M5) |
 | P1.12 | Workflow-Driven Optimization | P1 | Planned (M6) |
 | P1.13 | Multi-Connector Support | P1 | Planned (M7) |
 | P2.1 | Evolutionary Operators | P2 | Planned |

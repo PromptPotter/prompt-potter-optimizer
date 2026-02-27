@@ -48,15 +48,18 @@ All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation, round winner selection, improvement suggestions. |
 | `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions). |
 | `project_store.py` | Facade over focused store modules in `stores/`. File I/O for `.promptpotter/projects/`. |
-| `feedback_cycle.py` | Iterative optimization orchestrator: `CycleConfig` → `GrowFilterNode` → `AnalysisEvalNode` loop with patience-based stopping, 3-path routing (`generate`/`refine_context`/`modify_plan`/`stop`). |
+| `campaign/feedback_cycle.py` | Iterative optimization orchestrator: `CycleConfig` → `GrowFilterNode` → `AnalysisEvalNode` loop with patience-based stopping, 3-path routing (`generate`/`refine_context`/`modify_plan`/`stop`). |
+| `campaign/campaign_init.py` | Campaign initialization: project store setup, backend sync, baseline evaluation. |
 | `search/smart_search.py` | Sensitivity scan (OAT perturbation), adaptive search (coordinate descent), axis classification. |
 | `search/grid_core.py` | Grid search evaluation engine. Skips `init_session` when all points are cached. |
 | `search/coverage.py` | Historical index (`build_prompt_result_index`) and coverage advisor. Discovers all stored `dataset_runs` for reuse across optimization threads. |
+| `obs/observability_logger.py` | File-based observability: Langfuse-compatible traces, MLflow experiments, prompt versioning. `events.jsonl` flat nav log. |
+| `obs/langfuse_client.py` | Langfuse v2 cloud integration (singleton). |
+| `obs/langfuse_backfill.py` | Backfill local obs data to Langfuse cloud. |
 | `stores/` | Focused store modules: `BackendStore`, `ExecutionStore`, `DatasetRunStore`, `GridPlanStore`, `SmartSearchStore`, `CampaignStore`. Shared I/O in `stores/base.py`. |
-| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with `_OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. |
+| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with `_OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. Exponential backoff for transient 503/429 errors. |
 | `query_utils.py` | Shared query-parsing utilities (e.g. `parse_bom_material()`). |
 | `comparison.py` | Statistical comparison (hit@k, McNemar, Wilcoxon). |
-| `langfuse_client.py` | Langfuse v2 observability integration. |
 
 ### Data model
 
@@ -79,6 +82,12 @@ PromptState is frozen (`model_config = {"frozen": True}`). Use `derive(**changes
   grid_plans/{plan_id}.json        # persisted grid search plans (resume on restart)
   smart_search_plans/{plan_id}.json # sensitivity scan plans (axis profiles, scan results)
   campaigns/{campaign_id}.json     # campaign metadata + trial results
+  obs/
+    langfuse/events.jsonl          # flat navigation log (START HERE for data exploration)
+    langfuse/traces/{trace_id}.json
+    langfuse/scores/{trace_id}.jsonl
+    experiments/{campaign_id}/     # MLflow FileStore format (mlflow ui compatible)
+    prompts/{family}/{version}/    # prompt versioning (prompt.txt + metadata.json)
 ```
 
 ### North star workflow (HITL optimization cycle)

@@ -14,15 +14,15 @@
 | M0 | Specifications | Complete |
 | M1 | Foundation (PromptState, ProjectStore, comparison, CI) | Complete |
 | M2 | Core Optimizer (eval, grid search, prompt optimizer, notebook) | Complete |
-| M3 | Optimization Infrastructure | Nearly Complete |
+| M3 | Optimization Infrastructure | Complete |
 | M4 | Integration and Polish | Planned |
-| M5 | Observability Layer | Future |
+| M5 | Observability Layer | Nearly Complete |
 | M6 | CWL Workflow Migration | Future |
 | M7 | Multi-Connector Architecture | Future |
 
 ---
 
-## M3: Optimization Infrastructure -- Nearly Complete
+## M3: Optimization Infrastructure -- Complete
 
 **Complete:**
 - Optimizer nodes (InitNode, GrowFilterNode, AnalysisEvalNode)
@@ -34,13 +34,9 @@
 - Campaign init service
 - Notebook integration with progress display
 - Data loop (all eval paths -> shared dataset_runs)
-
-**Remaining:**
-- Service layer cleanup: reduce duplication between `_campaign_lib.py` and service-layer functions
+- Service layer cleanup (campaign_lib dedup, ~1,300 LOC removed across 4 passes)
 
 **Exit gate:** End-to-end optimization with progress output, eval data feeds back into scans, Langfuse traces with scores.
-
-**Risk:** Groq rate limits / 503 errors on long runs (needs retry with backoff).
 
 ---
 
@@ -57,7 +53,7 @@
 
 ---
 
-## M5: Observability Layer -- In Progress
+## M5: Observability Layer -- Nearly Complete
 
 Adopt TermNorm-excel's zero-dependency file-based patterns for production-grade logging. Three layers of human-accessible data: `events.jsonl` (flat nav log), Langfuse traces (structured detail), MLflow experiments (metrics viewer).
 

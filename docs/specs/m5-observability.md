@@ -2,7 +2,7 @@
 
 **Version:** 0.8.0
 **Date:** 2026-02-25
-**Status:** Planned
+**Status:** Complete
 **Depends on:** [Roadmap M5](roadmap.md), [ADD v0.7.0](add.md), [PRD P1.10–P1.11](prd.md)
 
 ---

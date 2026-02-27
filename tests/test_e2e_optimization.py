@@ -12,6 +12,7 @@ from pathlib import Path
 
 from api.core.workflow_runner import WorkflowRunner
 from api.models.prompt_state import PromptState
+from api.services.project_store import ProjectStore
 
 
 WORKFLOW_PATH = Path(__file__).parent.parent / "workflows" / "optimizer_single_pass.yaml"
@@ -295,3 +296,72 @@ async def test_e2e_feedback_cycle_with_registry(
     loaded = store.campaigns.load(BACKEND_ID, campaign_id)
     assert loaded["status"] == "completed"
     assert loaded["n_trials"] == result.n_rounds
+
+
+# ---------------------------------------------------------------------------
+# E2E test: feedback cycle produces obs files
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e2e_feedback_cycle_obs_output(
+    monkeypatch, tmp_path, eval_data,
+):
+    """Feedback cycle with project_root writes obs files."""
+    _apply_all_mocks(monkeypatch)
+
+    from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
+
+    project_root = tmp_path
+    backend_id = "obs-test-backend"
+
+    # Create minimal backend registration so ProjectStore works
+    store = ProjectStore(base_dir=project_root)
+    from api.models.backend import BackendConnection
+    store.backends.register(BackendConnection(
+        id=backend_id, name="Obs Test",
+        backend_type="termnorm", base_url="http://mock:8000",
+    ))
+
+    config = CycleConfig(
+        max_rounds=2,
+        patience=2,
+        n_variants=2,
+        backend_url="http://mock:8000",
+        backend_id=backend_id,
+        project_root=str(project_root),
+        generate_suggestions=False,
+    )
+
+    result = await run_feedback_cycle(
+        instruction="Normalize drug names.",
+        eval_data=eval_data,
+        config=config,
+    )
+    assert result.n_rounds > 0
+
+    obs_root = project_root / backend_id / "obs"
+
+    # events.jsonl exists and has entries
+    events_file = obs_root / "langfuse" / "events.jsonl"
+    assert events_file.exists(), "events.jsonl not created"
+    lines = events_file.read_text().strip().splitlines()
+    assert len(lines) > 0, "events.jsonl is empty"
+
+    # traces/ has at least one trace file
+    traces_dir = obs_root / "langfuse" / "traces"
+    assert traces_dir.exists(), "traces/ directory not created"
+    trace_files = list(traces_dir.glob("*.json"))
+    assert len(trace_files) >= 1, "No trace files written"
+
+    # experiments/ has at least one experiment directory
+    experiments_dir = obs_root / "experiments"
+    assert experiments_dir.exists(), "experiments/ directory not created"
+    exp_dirs = [d for d in experiments_dir.iterdir() if d.is_dir()]
+    assert len(exp_dirs) >= 1, "No experiment directories written"
+
+    # prompts/ has at least one prompt version
+    prompts_dir = obs_root / "prompts"
+    assert prompts_dir.exists(), "prompts/ directory not created"
+    prompt_files = list(prompts_dir.rglob("prompt.txt"))
+    assert len(prompt_files) >= 1, "No prompt versions written"

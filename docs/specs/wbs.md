@@ -60,7 +60,7 @@
 
 ---
 
-## Phase 3: Optimization Infrastructure (M3) -- Nearly Complete
+## Phase 3: Optimization Infrastructure (M3) -- Complete
 
 | ID | Work Package | Sessions | PRD Ref | Status |
 |----|-------------|:--------:|---------|--------|
@@ -73,8 +73,8 @@
 | 3.7 | Campaign init service | 1 | -- | Complete |
 | 3.8 | Notebook integration (feedback cycle + progress) | 1 | P1.2 | Complete |
 | 3.9 | Data loop verification | 1 | P1.9 | Complete |
-| 3.10 | Service layer cleanup (campaign_lib dedup) | 1 | -- | Remaining |
-| 3.11 | Spec rewrite v0.7.0 | 1 | -- | In Progress |
+| 3.10 | Service layer cleanup (campaign_lib dedup) | 1 | -- | Complete |
+| 3.11 | Spec rewrite v0.7.0 | 1 | -- | Complete |
 
 ---
 
@@ -89,18 +89,18 @@
 
 ---
 
-## Phase 5: Observability Layer (M5) -- Planned
+## Phase 5: Observability Layer (M5) -- Nearly Complete
 
 See [M5 spec](m5-observability.md) for full details.
 
 | ID | Work Package | Sessions | PRD Ref | Status |
 |----|-------------|:--------:|---------|--------|
 | 5.0 | Write M5 spec | 1 | -- | Complete |
-| 5.1 | ObsLogger core (traces, experiments, rounds) | 1 | P1.10 | Planned |
-| 5.2 | Prompt registry (prompt versioning on disk) | 1 | P1.10 | Planned |
-| 5.3 | LLM retry logic (exponential backoff) | 1 | P1.11 | Planned |
-| 5.4 | Wire into services (prompt_eval, feedback_cycle) | 1 | P1.10 | Planned |
-| 5.5 | Integration test (obs file output E2E) | 1 | P1.10 | Planned |
+| 5.1 | ObsLogger core (traces, experiments, rounds) | 1 | P1.10 | Complete |
+| 5.2 | Prompt registry (prompt versioning on disk) | 1 | P1.10 | Complete |
+| 5.3 | LLM retry logic (exponential backoff) | 1 | P1.11 | Complete |
+| 5.4 | Wire into services (prompt_eval, feedback_cycle) | 1 | P1.10 | Complete |
+| 5.5 | Integration test (obs file output E2E) | 1 | P1.10 | Complete |
 
 ---
 
@@ -140,9 +140,9 @@ See [M7 spec](m7-multi-connector.md) for full details.
 | M0: Specifications | 7 | 7 | Complete |
 | M1: Foundation | 8 | 8 | Complete |
 | M2: Core Optimizer | 9 | 10 | Complete |
-| M3: Optimization Infrastructure | 11 | 14 | Nearly Complete (1 remaining + spec rewrite) |
+| M3: Optimization Infrastructure | 11 | 14 | Complete |
 | M4: Integration and Polish | 4 | 6 | Planned |
-| M5: Observability Layer | 6 | 6 | Planned |
+| M5: Observability Layer | 6 | 6 | Nearly Complete |
 | M6: CWL Workflow Migration | 6 | 6 | Planned |
 | M7: Multi-Connector | 5 | 5 | Planned |
 | **Total** | **56** | **~62** | |
@@ -168,8 +168,8 @@ See [M7 spec](m7-multi-connector.md) for full details.
 | P1.7 Parameter Passthrough | 1.8 | M1 | Complete |
 | P1.8 Sensitivity Scan | 3.5 | M3 | Complete |
 | P1.9 Data Loop | 3.9 | M3 | Complete |
-| P1.10 File-Based Observability | 5.1, 5.2, 5.4, 5.5 | M5 | Planned |
-| P1.11 LLM Retry Logic | 5.3 | M5 | Planned |
+| P1.10 File-Based Observability | 5.1, 5.2, 5.4, 5.5 | M5 | Complete |
+| P1.11 LLM Retry Logic | 5.3 | M5 | Complete |
 | P1.12 Workflow-Driven Optimization | 6.1–6.5 | M6 | Planned |
 | P1.13 Multi-Connector Support | 7.1–7.4 | M7 | Planned |
 | P2.3 Streamlit Dashboard | 4.2 | M4 | Planned |

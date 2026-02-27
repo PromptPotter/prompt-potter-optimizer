@@ -6,20 +6,13 @@ interactive notebook use.
 """
 
 import logging
-import sys
 from pathlib import Path
 
 import pandas as pd
 from tqdm.auto import tqdm
 
-# Ensure project root is importable
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
 from api.models.prompt_state import PromptState
 from api.services.backend_client import (
-    BackendClient,
     PIPELINE_STEP_PARAMS,
     build_pipeline_params,
     load_pipeline_config,
@@ -41,11 +34,6 @@ from api.services.prompt_optimizer import (
 from api.config.settings import load_variant_library
 from api.services.search import (
     DEFAULT_GRID_AXES,
-    SAMPLING_ALPHA,
-    GRID_SEARCHABLE_FIELDS,
-    REQUIRED_TEMPLATE_VARS,
-    MIN_DIAGNOSTIC_QUERIES,
-    DEFAULT_DIAGNOSTIC_QUERIES,
     validate_grid_config,
     build_grid_points as _build_grid_points,
     build_combined_state_lookup as _build_combined_state_lookup,
@@ -69,25 +57,37 @@ from api.services.search import (
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
 )
 
-# Re-export constants and service functions for notebooks
+# Public API — every name the notebook imports, plus backfill_langfuse.
 __all__ = [
-    "DEFAULT_GRID_AXES",
-    "SAMPLING_ALPHA",
-    "GRID_SEARCHABLE_FIELDS",
-    "REQUIRED_TEMPLATE_VARS",
-    "MIN_DIAGNOSTIC_QUERIES",
-    "DEFAULT_DIAGNOSTIC_QUERIES",
-    "load_variant_library",
-    # Direct re-exports (no local wrapper)
-    "load_baseline_prompt",
-    "generate_candidates",
-    "generate_suggestions",
-    "validate_grid_config",
-    "select_grid_winner",
-    "build_diagnostic_set",
-    "build_historical_index",
-    "synthesize_sensitivity",
-    "run_feedback_cycle_notebook",
+    # Constants
+    "DEFAULT_GRID_AXES", "PIPELINE_STEP_PARAMS",
+    # Service init
+    "init_services", "setup_llm", "load_variant_library",
+    # Baseline & eval
+    "load_baseline_prompt", "run_baseline_eval",
+    "analyze_candidate_coverage", "load_eval_dataset",
+    # Candidates & suggestions
+    "generate_candidates", "generate_suggestions", "display_suggestions",
+    # Grid search
+    "validate_grid_config", "build_grid_points", "run_grid_search",
+    "display_grid_results", "select_grid_winner", "analyze_grid_results",
+    "resume_or_build_grid", "merge_grid_results",
+    # Grid plan discovery
+    "list_grid_plans", "load_grid_plan_results",
+    # Pipeline config
+    "load_pipeline_config", "build_pipeline_params",
+    # Smart search
+    "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
+    "display_axis_profiles", "resume_or_build_diagnostic",
+    "select_scan_winner_notebook", "build_historical_index",
+    "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
+    # Campaign
+    "run_feedback_cycle_notebook", "save_campaign_winner",
+    "display_progress", "run_manual_round",
+    "select_and_seed_grid_winner",
+    # Notebook-facing wrappers
+    "show_pipeline_config", "show_grid_overview",
+    # Utilities
     "backfill_langfuse",
 ]
 
@@ -142,7 +142,7 @@ def show_pipeline_config(svc: dict, campaign_config: dict) -> dict:
     return pipeline_params
 
 
-def make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase:
+def _make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase:
     """Create an LLM client from a provider URL or key."""
     if "groq.com" in provider_url:
         return GroqClient(api_key=api_key)
@@ -158,7 +158,7 @@ def setup_llm(campaign_config: dict, api_key: str) -> tuple[LLMClientBase, str]:
         (llm_client, model) tuple for passing to service functions.
     """
     eval_llm = campaign_config["eval_llm"]
-    client = make_llm_client(eval_llm.get("provider_url", ""), api_key)
+    client = _make_llm_client(eval_llm.get("provider_url", ""), api_key)
     return client, eval_llm.get("model", "")
 
 
@@ -551,7 +551,8 @@ async def resume_or_build_grid(
         store, backend_id, improvement_areas=improvement_areas,
     )
     # Service returns 7-tuple (plan_id, points, lookup, axes, fields, baseline, resumed)
-    plan_id, grid_points, grid_state_lookup, grid_axes, layer1_fields, grid_baseline, resumed = result
+    (plan_id, grid_points, grid_state_lookup,
+     grid_axes, layer1_fields, grid_baseline, resumed) = result
 
     if resumed:
         print(f"[RESUME] Found existing grid plan: {plan_id}")
@@ -789,7 +790,7 @@ async def analyze_grid_results(
     return analysis
 
 
-def print_eval_summary(store: ProjectStore, backend_id: str) -> None:
+def _print_eval_summary(store: ProjectStore, backend_id: str) -> None:
     """Print a summary table of completed and in-progress eval runs."""
     completed = store.dataset_runs.list_all(backend_id)
     partials = store.dataset_runs.list_partial_evals(backend_id)
@@ -881,7 +882,7 @@ def load_eval_dataset(
             "replay first."
         )
 
-    print_eval_summary(store, backend_id)
+    _print_eval_summary(store, backend_id)
 
     return eval_data
 
@@ -1592,11 +1593,8 @@ async def run_feedback_cycle_notebook(
         baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
         instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else instruction
 
-    patience = config.patience
-    n_variants = config.n_variants
-
     print(f"Feedback cycle: baseline acc={baseline_acc:.1%}, "
-          f"max_rounds={config.max_rounds}, patience={patience}")
+          f"max_rounds={config.max_rounds}, patience={config.patience}")
 
     _query_counter = [0]  # mutable counter for closure
 
@@ -1635,10 +1633,11 @@ async def run_feedback_cycle_notebook(
         if round_result.improved:
             print("\nImprovement detected, auto-continuing...")
         else:
-            print(f"\nNo improvement ({stall_count}/{patience} patience)")
-            if stall_count >= patience:
+            print(f"\nNo improvement ({stall_count}/{config.patience} patience)")
+            if stall_count >= config.patience:
                 print(
-                    f"\nStopping: no improvement for {patience} consecutive rounds."
+                    f"\nStopping: no improvement for {config.patience}"
+                    " consecutive rounds."
                 )
 
     initial_len = len(campaign_rounds)
