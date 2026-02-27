@@ -1,24 +1,26 @@
-"""Tests for Langfuse backfill of historical dataset runs.
+"""Tests for Langfuse cloud push of dataset runs.
 
 Verifies:
 - Run origin classification by prefix
 - Dataset-first structure: items registered with ground truth
 - Per-run traces with per-query spans linked to dataset items
 - Idempotency (second call skips all)
-- Incremental backfill (only new runs pushed)
+- Incremental push (only new runs pushed)
 - Graceful handling when Langfuse is disabled
 - State file persistence (format_version=2)
 - Old state format reset
+- push_run() single-run idempotency and trace format
 """
 
 import json
 
 import pytest
 
-from api.services.obs.langfuse_backfill import (
+from api.services.obs.langfuse_push import (
     DATASET_NAME,
-    backfill_to_langfuse,
     classify_run_origin,
+    push_all_runs,
+    push_run,
 )
 from api.services.obs.langfuse_client import LangfuseLogger
 from api.services.project_store import ProjectStore
@@ -64,7 +66,7 @@ def _seed_runs(store: ProjectStore, backend_id: str, runs: list[dict]):
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Tests — classify_run_origin
 # ---------------------------------------------------------------------------
 
 
@@ -91,9 +93,124 @@ class TestClassifyRunOrigin:
         assert classify_run_origin("") == "other"
 
 
-class TestBackfillDatasetFirst:
+# ---------------------------------------------------------------------------
+# Tests — push_run (single-run)
+# ---------------------------------------------------------------------------
+
+
+class TestPushRun:
+    def test_push_run_idempotent(self, tmp_path):
+        """push_run creates trace first time, returns None on second call."""
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        items = [
+            {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True},
+            {"query": "q2", "predicted": "wrong", "ground_truth": "p2", "hit": False},
+        ]
+        runs = [_make_run("baseline_001", 0.5, items=items)]
+        _seed_runs(store, backend_id, runs)
+
+        mock = MockLangfuseLogger()
+
+        # First push — creates trace
+        trace_id = push_run(mock, store, backend_id, "baseline_001")
+        assert trace_id is not None
+        assert trace_id.startswith("mock_trace_")
+        assert len(mock.traces) == 1
+
+        # Second push — idempotent, returns None
+        trace_id_2 = push_run(mock, store, backend_id, "baseline_001")
+        assert trace_id_2 is None
+        assert len(mock.traces) == 1  # no new trace
+
+    def test_push_run_format(self, tmp_path):
+        """push_run creates trace named eval_{run_id} with per-query spans."""
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        items = [
+            {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True},
+            {"query": "q2", "predicted": "wrong", "ground_truth": "p2", "hit": False},
+        ]
+        runs = [_make_run("grid_001", 0.5, items=items)]
+        _seed_runs(store, backend_id, runs)
+
+        mock = MockLangfuseLogger()
+        assert push_run(mock, store, backend_id, "grid_001") is not None
+
+        # Trace format
+        assert len(mock.traces) == 1
+        trace = mock.traces[0]
+        assert trace["name"] == "eval_grid_001"
+        assert "eval" in trace["tags"]
+        assert "grid_search" in trace["tags"]
+        assert trace["session_id"] == f"dataset_{backend_id}"
+
+        # Per-query spans
+        assert len(mock.spans) == 2
+        span_queries = {s["input"]["query"] for s in mock.spans}
+        assert span_queries == {"q1", "q2"}
+        for s in mock.spans:
+            assert "predicted" in s["output"]
+            assert "hit" in s["output"]
+
+        # Score + trace output + end_trace
+        assert len(mock.scores) == 1
+        assert mock.scores[0]["name"] == "accuracy"
+        assert len(mock.trace_updates) == 1
+        assert mock.trace_updates[0]["output"]["accuracy"] == 0.5
+        assert len(mock.end_trace_calls) == 1
+
+    def test_push_run_with_dataset_linking(self, tmp_path):
+        """push_run links spans to dataset items when query_to_item_id given."""
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        items = [
+            {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True},
+        ]
+        runs = [_make_run("baseline_001", 1.0, items=items)]
+        _seed_runs(store, backend_id, runs)
+
+        mock = MockLangfuseLogger()
+        push_run(
+            mock, store, backend_id, "baseline_001",
+            query_to_item_id={"q1": "item_abc"},
+        )
+
+        assert len(mock.dataset_run_links) == 1
+        assert mock.dataset_run_links[0]["dataset_item_id"] == "item_abc"
+        assert mock.dataset_run_links[0]["run_name"] == "baseline_001"
+
+    def test_push_run_saves_state(self, tmp_path):
+        """push_run persists state to backfill_state.json."""
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        runs = [_make_run("baseline_001", 0.5)]
+        _seed_runs(store, backend_id, runs)
+
+        mock = MockLangfuseLogger()
+        push_run(mock, store, backend_id, "baseline_001")
+
+        state_path = (
+            tmp_path / backend_id / "obs" / "langfuse" / "backfill_state.json"
+        )
+        assert state_path.exists()
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert "baseline_001" in state["backfilled_run_ids"]
+        assert "baseline_001" in state["langfuse_trace_ids"]
+
+
+# ---------------------------------------------------------------------------
+# Tests — push_all_runs (batch)
+# ---------------------------------------------------------------------------
+
+
+class TestPushAllRunsDatasetFirst:
     def test_registers_dataset_items_with_ground_truth(self, tmp_path, monkeypatch):
-        """Backfill registers dataset items with expectedOutput set."""
+        """push_all_runs registers dataset items with expectedOutput set."""
         store = ProjectStore(tmp_path)
         backend_id = "test-backend"
 
@@ -111,7 +228,7 @@ class TestBackfillDatasetFirst:
             LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
         )
 
-        stats = backfill_to_langfuse(store, backend_id)
+        stats = push_all_runs(store, backend_id)
 
         # Dataset created
         assert len(mock.datasets_created) == 1
@@ -145,7 +262,7 @@ class TestBackfillDatasetFirst:
             LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
         )
 
-        stats = backfill_to_langfuse(store, backend_id)
+        stats = push_all_runs(store, backend_id)
 
         assert stats["total_on_disk"] == 4
         assert stats["new_runs"] == 4
@@ -198,7 +315,7 @@ class TestBackfillDatasetFirst:
             LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
         )
 
-        backfill_to_langfuse(store, backend_id)
+        push_all_runs(store, backend_id)
 
         # 2 per-query spans under the trace
         assert len(mock.spans) == 2
@@ -217,9 +334,9 @@ class TestBackfillDatasetFirst:
             assert link["dataset_item_id"] is not None
 
 
-class TestBackfillIdempotent:
+class TestPushAllRunsIdempotent:
     def test_second_call_skips_all(self, tmp_path, monkeypatch):
-        """After a successful backfill, running again pushes nothing new."""
+        """After a successful push, running again pushes nothing new."""
         store = ProjectStore(tmp_path)
         backend_id = "test-backend"
 
@@ -234,8 +351,8 @@ class TestBackfillIdempotent:
             LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
         )
 
-        # First backfill
-        stats1 = backfill_to_langfuse(store, backend_id)
+        # First push
+        stats1 = push_all_runs(store, backend_id)
         assert stats1["new_runs"] == 2
 
         # Reset mock counters
@@ -245,17 +362,17 @@ class TestBackfillIdempotent:
         mock.trace_updates.clear()
         mock.end_trace_calls.clear()
 
-        # Second backfill — should be a no-op for runs
-        stats2 = backfill_to_langfuse(store, backend_id)
+        # Second push — should be a no-op for runs
+        stats2 = push_all_runs(store, backend_id)
         assert stats2["new_runs"] == 0
         assert stats2["already_done"] == 2
         assert len(mock.traces) == 0
         assert len(mock.spans) == 0
 
 
-class TestBackfillIncremental:
+class TestPushAllRunsIncremental:
     def test_only_new_runs_pushed(self, tmp_path, monkeypatch):
-        """Adding runs after first backfill: only new ones get pushed."""
+        """Adding runs after first push: only new ones get pushed."""
         store = ProjectStore(tmp_path)
         backend_id = "test-backend"
 
@@ -267,7 +384,7 @@ class TestBackfillIncremental:
             LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
         )
 
-        stats1 = backfill_to_langfuse(store, backend_id)
+        stats1 = push_all_runs(store, backend_id)
         assert stats1["new_runs"] == 1
 
         # Add more runs
@@ -278,7 +395,7 @@ class TestBackfillIncremental:
         mock.spans.clear()
         mock.scores.clear()
 
-        stats2 = backfill_to_langfuse(store, backend_id)
+        stats2 = push_all_runs(store, backend_id)
         assert stats2["new_runs"] == 2
         assert stats2["already_done"] == 1
         assert stats2["total_on_disk"] == 3
@@ -290,7 +407,7 @@ class TestBackfillIncremental:
         assert "eval_grid_002" in trace_names
 
 
-class TestBackfillDisabledLangfuse:
+class TestPushAllRunsDisabledLangfuse:
     def test_returns_error(self, tmp_path, monkeypatch):
         """When Langfuse is disabled, returns error dict."""
         store = ProjectStore(tmp_path)
@@ -301,7 +418,7 @@ class TestBackfillDisabledLangfuse:
             LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
         )
 
-        stats = backfill_to_langfuse(store, backend_id)
+        stats = push_all_runs(store, backend_id)
         assert "error" in stats
         assert "disabled" in stats["error"].lower()
 
@@ -323,7 +440,7 @@ class TestStateFileWritten:
             LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
         )
 
-        backfill_to_langfuse(store, backend_id)
+        push_all_runs(store, backend_id)
 
         state_path = (
             tmp_path / backend_id / "obs" / "langfuse" / "backfill_state.json"
@@ -365,8 +482,8 @@ class TestStateFileWritten:
             LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
         )
 
-        stats = backfill_to_langfuse(store, backend_id)
+        stats = push_all_runs(store, backend_id)
 
-        # Old state was reset, so baseline_001 gets re-backfilled
+        # Old state was reset, so baseline_001 gets re-pushed
         assert stats["new_runs"] == 1
         assert len(mock.traces) == 1

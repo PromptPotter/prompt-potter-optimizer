@@ -142,74 +142,6 @@ class CloudObsBackend:
             logger.debug("Cloud Langfuse register_dataset failed", exc_info=True)
         return query_to_item_id
 
-    def on_dataset_run(
-        self,
-        run_id: str,
-        content_hash: str,
-        accuracy: float,
-        total: int,
-        hits: int,
-        model: str,
-        temperature: float,
-        prompt_state_id: str,
-        dataset_name: str | None,
-        dataset_item_map: dict[str, str] | None,
-    ) -> None:
-        """Push dataset_run as span (during campaign) or trace (standalone)."""
-        try:
-            cloud_trace_id: str | None = None
-            if self._active_trace_id:
-                self._lf.create_span(
-                    trace_id=self._active_trace_id,
-                    name=f"eval_{run_id}",
-                    input={
-                        "run_id": run_id,
-                        "content_hash": content_hash,
-                        "model": model,
-                        "temperature": temperature,
-                        "prompt_state_id": prompt_state_id,
-                    },
-                    output={
-                        "accuracy": accuracy,
-                        "hits": hits,
-                        "total": total,
-                    },
-                )
-                cloud_trace_id = self._active_trace_id
-            else:
-                cloud_id = self._lf.create_trace(
-                    name="dataset_run",
-                    input={
-                        "run_id": run_id,
-                        "content_hash": content_hash,
-                        "model": model,
-                        "temperature": temperature,
-                        "prompt_state_id": prompt_state_id,
-                    },
-                    tags=["dataset_run"],
-                )
-                if cloud_id:
-                    self._lf.create_score(
-                        trace_id=cloud_id,
-                        name="accuracy",
-                        value=accuracy,
-                    )
-                    cloud_trace_id = cloud_id
-
-            if cloud_trace_id and dataset_name and dataset_item_map:
-                for query, item_id in dataset_item_map.items():
-                    self._lf.link_item_to_run(
-                        dataset_item_id=item_id,
-                        trace_id=cloud_trace_id,
-                        run_name=run_id,
-                        run_metadata={
-                            "accuracy": accuracy,
-                            "prompt_state_id": prompt_state_id,
-                        },
-                    )
-        except Exception:
-            logger.debug("Cloud Langfuse dataset_run failed", exc_info=True)
-
     def on_campaign_start(
         self,
         campaign_id: str,
@@ -691,13 +623,6 @@ class ObsLogger:
                 "model": model,
                 "prompt_state_id": prompt_state_id,
             })
-
-            if self._cloud:
-                self._cloud.on_dataset_run(
-                    run_id, content_hash, accuracy, total, hits,
-                    model, temperature, prompt_state_id,
-                    dataset_name, dataset_item_map,
-                )
 
             trace_path = (
                 self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"

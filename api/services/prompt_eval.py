@@ -516,4 +516,17 @@ async def evaluate_prompt_cached(
         except Exception:
             logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
 
+        # --- auto-push to Langfuse cloud (idempotent via registry) ---
+        try:
+            from api.services.obs.langfuse_client import LangfuseLogger
+            _lf = LangfuseLogger.get_instance()
+            if _lf.enabled:
+                from api.services.obs.langfuse_push import push_run
+                push_run(
+                    _lf, store, backend_id, run_id,
+                    query_to_item_id=dataset_item_map,
+                )
+        except Exception:
+            logger.debug("Cloud push failed", exc_info=True)
+
     return results, scores, False

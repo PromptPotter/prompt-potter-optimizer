@@ -57,7 +57,7 @@ from api.services.search import (
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
 )
 
-# Public API — every name the notebook imports, plus backfill_langfuse.
+# Public API — every name the notebook imports.
 __all__ = [
     # Constants
     "DEFAULT_GRID_AXES", "PIPELINE_STEP_PARAMS",
@@ -87,8 +87,8 @@ __all__ = [
     "select_and_seed_grid_winner",
     # Notebook-facing wrappers
     "show_pipeline_config", "show_grid_overview",
-    # Utilities
-    "backfill_langfuse",
+    # Langfuse
+    "push_langfuse", "backfill_langfuse", "configure_langfuse",
 ]
 
 
@@ -1696,49 +1696,91 @@ async def run_feedback_cycle_notebook(
 
 
 # ---------------------------------------------------------------------------
-# Langfuse backfill
+# Langfuse push / configure
 # ---------------------------------------------------------------------------
 
 
-def backfill_langfuse(store: "ProjectStore", backend_id: str) -> dict:
+def configure_langfuse(
+    *,
+    enabled: bool | None = None,
+    host: str | None = None,
+    public_key: str | None = None,
+    secret_key: str | None = None,
+) -> None:
+    """Configure Langfuse settings at runtime from a notebook cell.
+
+    Mutates the global settings singleton and resets the LangfuseLogger
+    singleton so the next call picks up new credentials.
+
+    Args:
+        enabled: Override ``LANGFUSE_ENABLED``.
+        host: Override ``LANGFUSE_HOST``.
+        public_key: Override ``LANGFUSE_PUBLIC_KEY``.
+        secret_key: Override ``LANGFUSE_SECRET_KEY``.
+    """
+    from api.config.settings import settings
+    from api.services.obs.langfuse_client import LangfuseLogger
+
+    changed = False
+    if enabled is not None:
+        settings.LANGFUSE_ENABLED = enabled
+        changed = True
+    if host is not None:
+        settings.LANGFUSE_HOST = host
+        changed = True
+    if public_key is not None:
+        settings.LANGFUSE_PUBLIC_KEY = public_key
+        changed = True
+    if secret_key is not None:
+        settings.LANGFUSE_SECRET_KEY = secret_key
+        changed = True
+
+    if changed:
+        LangfuseLogger.reset_instance()
+        lf = LangfuseLogger.get_instance()
+        status = "enabled" if lf.enabled else "disabled"
+        print(f"Langfuse reconfigured: {status}")
+
+
+def push_langfuse(store: "ProjectStore", backend_id: str) -> dict:
     """Push all historical dataset_runs to cloud Langfuse (dataset-first).
 
     Creates dataset items with ground truth, then one trace per run linked
     to dataset items. Re-running is safe — already-pushed runs are skipped.
-    Old-format backfill state is automatically reset.
+    Old-format state is automatically reset.
 
     Returns:
-        Stats dict from ``backfill_to_langfuse()``.
+        Stats dict from ``push_all_runs()``.
     """
-    from api.services.obs.langfuse_backfill import backfill_to_langfuse
+    from api.services.obs.langfuse_push import push_all_runs
 
     summaries = store.dataset_runs.list_all(backend_id)
 
     print("=" * 70)
-    print("  LANGFUSE BACKFILL (dataset-first)")
+    print("  LANGFUSE PUSH (dataset-first)")
     print("=" * 70)
     print(f"Found {len(summaries)} completed dataset runs for '{backend_id}'")
 
-    stats = backfill_to_langfuse(store, backend_id, on_progress=print)
+    stats = push_all_runs(store, backend_id, on_progress=print)
 
     if "error" in stats:
-        print(f"\nBackfill aborted: {stats['error']}")
+        print(f"\nPush aborted: {stats['error']}")
         return stats
 
     new_runs = stats["new_runs"]
     already = stats["already_done"]
 
     if new_runs == 0:
-        print(f"\nAll {already} runs already backfilled. Nothing to do.")
+        print(f"\nAll {already} runs already pushed. Nothing to do.")
     else:
-        print(f"\nBackfill complete: {new_runs} runs pushed to Langfuse")
+        print(f"\nPush complete: {new_runs} runs pushed to Langfuse")
         print(f"Session: {stats['session_id']}")
 
     print("=" * 70)
-    print("  BACKFILL SUMMARY")
+    print("  PUSH SUMMARY")
     print("=" * 70)
     print(f"  Total runs on disk:  {stats['total_on_disk']}")
-    print(f"  Newly backfilled:    {new_runs}")
+    print(f"  Newly pushed:        {new_runs}")
     print(f"  Already done:        {already}")
     print(f"  Dataset:             {stats.get('dataset_name', 'N/A')}")
     print(f"  Dataset items:       {stats.get('dataset_items', 0)}")
@@ -1755,3 +1797,7 @@ def backfill_langfuse(store: "ProjectStore", backend_id: str) -> dict:
     print("=" * 70)
 
     return stats
+
+
+# Backward-compatible alias
+backfill_langfuse = push_langfuse

@@ -499,20 +499,22 @@ class _MockLangfuse:
 
 
 def test_dual_write_with_mock_langfuse(tmp_path):
-    """Injecting a mock Langfuse causes cloud calls alongside file writes."""
+    """Injecting a mock Langfuse causes cloud calls alongside file writes.
+
+    Note: dataset_run cloud push is now handled by push_run() in
+    langfuse_push.py, not by CloudObsBackend. ObsLogger.log_dataset_run()
+    is file-only. This test covers campaign-related cloud delegation.
+    """
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
     obs._cloud = CloudObsBackend(mock_lf)
 
-    # dataset_run outside campaign → standalone cloud trace + score
+    # dataset_run is now file-only (no cloud trace)
     obs.log_dataset_run(
         run_id="dr1", content_hash="hash1", accuracy=0.80,
         total=10, hits=8, model="m", temperature=0.0,
     )
-    assert len(mock_lf.traces) == 1
-    assert mock_lf.traces[0]["name"] == "dataset_run"
-    assert len(mock_lf.scores) == 1
-    assert mock_lf.scores[0]["name"] == "accuracy"
+    assert len(mock_lf.traces) == 0  # no cloud push from ObsLogger
 
     # campaign_start → cloud trace (campaign)
     obs.log_campaign_start(
@@ -521,22 +523,10 @@ def test_dual_write_with_mock_langfuse(tmp_path):
         baseline_accuracy=0.50,
         session_id="sess_123",
     )
-    assert len(mock_lf.traces) == 2
-    assert mock_lf.traces[1]["name"] == "feedback_cycle"
-    assert mock_lf.traces[1]["session_id"] == "sess_123"
+    assert len(mock_lf.traces) == 1
+    assert mock_lf.traces[0]["name"] == "feedback_cycle"
+    assert mock_lf.traces[0]["session_id"] == "sess_123"
     assert "dual_test" in obs._cloud._trace_ids
-
-    # dataset_run during campaign → nested span (not new trace)
-    obs.log_dataset_run(
-        run_id="dr_during", content_hash="hash2", accuracy=0.60,
-        total=10, hits=6, model="m", temperature=0.0,
-    )
-    # No new trace created (still 2)
-    assert len(mock_lf.traces) == 2
-    # But a span was created under the campaign trace
-    eval_spans = [s for s in mock_lf.spans if s["name"].startswith("eval_")]
-    assert len(eval_spans) == 1
-    assert eval_spans[0]["trace_id"] == obs._cloud._trace_ids["dual_test"]
 
     # round → cloud span + score
     obs.log_round(
@@ -617,8 +607,12 @@ def test_obs_disabled(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_dataset_run_standalone_creates_trace(tmp_path):
-    """Standalone dataset_run (no campaign) creates a cloud trace, not a span."""
+def test_dataset_run_no_cloud_push(tmp_path):
+    """log_dataset_run is file-only — no cloud traces or spans created.
+
+    Cloud push for dataset runs is now handled by push_run() in
+    langfuse_push.py, called from prompt_eval.py after finalization.
+    """
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
     obs._cloud = CloudObsBackend(mock_lf)
@@ -628,15 +622,13 @@ def test_dataset_run_standalone_creates_trace(tmp_path):
         total=10, hits=7, model="m", temperature=0.0,
     )
 
-    assert len(mock_lf.traces) == 1
-    assert mock_lf.traces[0]["name"] == "dataset_run"
+    assert len(mock_lf.traces) == 0
     assert len(mock_lf.spans) == 0
-    assert len(mock_lf.scores) == 1
-    assert mock_lf.scores[0]["name"] == "accuracy"
+    assert len(mock_lf.scores) == 0
 
 
 def test_active_trace_cleared_after_campaign_end(tmp_path):
-    """After campaign_end, dataset_run creates a standalone trace (not a span)."""
+    """After campaign_end, active trace state is cleared."""
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
     obs._cloud = CloudObsBackend(mock_lf)
@@ -661,14 +653,6 @@ def test_active_trace_cleared_after_campaign_end(tmp_path):
     )
     assert obs._cloud._active_trace_id is None
     assert obs._cloud._active_session_id is None
-
-    # Dataset run after campaign end → standalone trace (not span)
-    obs.log_dataset_run(
-        run_id="after_end", content_hash="def", accuracy=0.80,
-        total=10, hits=8, model="m", temperature=0.0,
-    )
-    assert len(mock_lf.traces) == 2  # campaign trace + standalone trace
-    assert mock_lf.traces[1]["name"] == "dataset_run"
 
 
 # ---------------------------------------------------------------------------
@@ -750,8 +734,8 @@ def test_register_dataset_cloud_dual_write(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_dataset_run_with_linking(tmp_path):
-    """log_dataset_run links to dataset items when dataset_name + item_map provided."""
+def test_dataset_run_file_only_with_item_map(tmp_path):
+    """log_dataset_run with dataset_item_map still only writes files (no cloud)."""
     mock_lf = _MockLangfuse()
     obs = _make_obs(tmp_path)
     obs._cloud = CloudObsBackend(mock_lf)
@@ -771,33 +755,12 @@ def test_dataset_run_with_linking(tmp_path):
         dataset_item_map=item_map,
     )
 
-    # Standalone trace created (no active campaign)
-    assert len(mock_lf.traces) == 1
-
-    # Dataset links created
-    assert len(mock_lf.dataset_run_links) == 2
-    linked_items = {lnk["dataset_item_id"] for lnk in mock_lf.dataset_run_links}
-    assert linked_items == {"item_001", "item_002"}
-    for link in mock_lf.dataset_run_links:
-        assert link["run_name"] == "baseline_abc"
-
-
-def test_dataset_run_no_linking_without_map(tmp_path):
-    """log_dataset_run creates no links when dataset_item_map not provided."""
-    mock_lf = _MockLangfuse()
-    obs = _make_obs(tmp_path)
-    obs._cloud = CloudObsBackend(mock_lf)
-
-    obs.log_dataset_run(
-        run_id="baseline_abc",
-        content_hash="hash123",
-        accuracy=0.75,
-        total=2,
-        hits=1,
-        model="test-model",
-        temperature=0.0,
-    )
-
-    # Trace created but no links
-    assert len(mock_lf.traces) == 1
+    # No cloud traces or links (cloud push handled by push_run)
+    assert len(mock_lf.traces) == 0
     assert len(mock_lf.dataset_run_links) == 0
+
+    # File trace + score still written
+    traces_dir = tmp_path / "obs" / "langfuse" / "traces"
+    assert traces_dir.exists()
+    trace_files = list(traces_dir.glob("*.json"))
+    assert len(trace_files) == 1

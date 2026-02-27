@@ -202,39 +202,3 @@ async def test_end_trace_called_at_campaign_end(
     assert mock_langfuse.end_trace_calls[0] == result.langfuse_trace_id
 
 
-@pytest.mark.asyncio
-async def test_class_level_state_cleared(
-    monkeypatch, eval_data, cycle_config, mock_langfuse,
-):
-    """After feedback cycle ends, a standalone dataset_run creates a new trace."""
-    from api.services.obs.observability_logger import ObsLogger
-
-    _apply_service_mocks(monkeypatch)
-
-    await run_feedback_cycle(
-        instruction="Test.",
-        eval_data=eval_data,
-        config=cycle_config,
-    )
-
-    # Behavioral assertion: create an ObsLogger with the same mock Langfuse
-    # and verify that a dataset_run after the campaign creates a standalone
-    # trace rather than nesting under the (now-ended) campaign trace.
-    traces_before = len(mock_langfuse.traces)
-    spans_before = len(mock_langfuse.spans)
-
-    obs = ObsLogger(cycle_config.project_root, cycle_config.backend_id)
-    obs.log_dataset_run(
-        run_id="after_cycle", content_hash="postcycle",
-        accuracy=0.90, total=10, hits=9, model="m", temperature=0.0,
-    )
-
-    # A new standalone trace was created (not a span under the campaign)
-    assert len(mock_langfuse.traces) == traces_before + 1
-    assert mock_langfuse.traces[-1]["name"] == "dataset_run"
-    # No new eval spans created
-    new_eval_spans = [
-        s for s in mock_langfuse.spans[spans_before:]
-        if s["name"].startswith("eval_")
-    ]
-    assert len(new_eval_spans) == 0
