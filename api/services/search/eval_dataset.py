@@ -1,10 +1,50 @@
 """Eval dataset loading from synced experiments or stored replays."""
 
 import random
+from dataclasses import dataclass
 
 from api.services.project_store import ProjectStore
 from api.services.query_utils import parse_bom_material
 
+
+# ---------------------------------------------------------------------------
+# Declarative observation → pipeline_data mapping
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class _ObsField:
+    """Maps one trace observation field to a pipeline_data key."""
+
+    pipeline_key: str
+    output_field: str | None = None  # None → use full output dict
+    is_llm: bool = False             # True → also extract model from metadata
+
+
+# Declarative mapping: observation name → extraction rules.
+# When M6 lands, this will be derived from CWL workflow step definitions.
+OBS_EXTRACTION_MAP: dict[str, list[_ObsField]] = {
+    "entity_profiling": [
+        _ObsField("entity_profile", output_field=None, is_llm=True),
+    ],
+    "token_matching": [
+        _ObsField("token_matched_candidates", output_field="candidates"),
+    ],
+    "llm_ranking": [
+        _ObsField("ranked_candidates", output_field="ranked_candidates", is_llm=True),
+    ],
+    "web_search": [
+        _ObsField("web_sources", output_field="sources"),
+        _ObsField("web_search_status", output_field="status"),
+    ],
+}
+
+# The pipeline_data key that must be present for a trace to be valid.
+REQUIRED_PIPELINE_KEY = "entity_profile"
+
+
+# ---------------------------------------------------------------------------
+# Extraction
+# ---------------------------------------------------------------------------
 
 def _extract_eval_from_traces(exp_data: dict) -> list:
     """Build eval data from Langfuse-style traces in synced experiment data.
@@ -12,6 +52,9 @@ def _extract_eval_from_traces(exp_data: dict) -> list:
     Each trace in ``runs[0].traces[]`` carries named observations with
     pipeline step outputs.  Ground truth is joined from ``mappings[]``
     via the ``bom_material`` extracted from the query string.
+
+    Observation extraction is driven by :data:`OBS_EXTRACTION_MAP` — no
+    hardcoded step names appear in the loop body.
 
     Returns:
         List of eval-data dicts (may be empty).
@@ -42,25 +85,39 @@ def _extract_eval_from_traces(exp_data: dict) -> list:
         if not ground_truth:
             continue
 
-        # Extract pipeline step outputs from observations
-        entity_profile = None
-        token_matched_candidates = None
+        # Build pipeline_data from observations using declarative mapping
+        pipeline_data: dict = {}
+        llm_provider: str | None = None
+
         for obs in trace.get("observations", []):
             name = obs.get("name", "")
             output = obs.get("output")
-            if not output:
+            if not name or not output:
                 continue
-            if name == "entity_profiling":
-                entity_profile = output
-            elif name == "token_matching":
-                token_matched_candidates = output.get("candidates")
 
-        if not entity_profile:
+            for field in OBS_EXTRACTION_MAP.get(name, []):
+                if field.output_field is None:
+                    pipeline_data[field.pipeline_key] = output
+                else:
+                    val = output.get(field.output_field)
+                    if val is not None:
+                        pipeline_data[field.pipeline_key] = val
+
+                if field.is_llm and not llm_provider:
+                    llm_provider = (obs.get("metadata") or {}).get("model")
+
+        # Gate: required pipeline key must be present
+        if not pipeline_data.get(REQUIRED_PIPELINE_KEY):
             continue
 
-        pipeline_data: dict = {"entity_profile": entity_profile}
-        if token_matched_candidates is not None:
-            pipeline_data["token_matched_candidates"] = token_matched_candidates
+        if llm_provider:
+            pipeline_data["llm_provider"] = llm_provider
+
+        # Total time from trace scores (latency_ms → seconds)
+        for score in trace.get("scores", []):
+            if score.get("name") == "latency_ms" and score.get("value"):
+                pipeline_data["total_time"] = score["value"] / 1000.0
+                break
 
         eval_data.append({
             "query": query,

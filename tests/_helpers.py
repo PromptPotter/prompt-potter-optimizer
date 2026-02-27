@@ -112,6 +112,7 @@ class MockLangfuseLogger:
     def __init__(self, *, enabled=True):
         self.enabled = enabled
         self.traces: list[dict] = []
+        self.trace_ids: list[str] = []  # bare trace IDs (from create_trace_id)
         self.spans: list[dict] = []
         self.scores: list[dict] = []
         self.generations: list[dict] = []
@@ -120,6 +121,9 @@ class MockLangfuseLogger:
         self.flush_count = 0
         self._counter = 0
         self._rate_limit_until = 0.0
+
+        # Top-level observations (pipeline graph nodes)
+        self.top_level_observations: list[dict] = []
 
         # Dataset API tracking
         self.datasets_created: list[dict] = []
@@ -133,6 +137,14 @@ class MockLangfuseLogger:
     def rate_limited(self) -> bool:
         import time
         return time.time() < self._rate_limit_until
+
+    def create_trace_id(self):
+        if not self.enabled:
+            return None
+        self._counter += 1
+        tid = f"mock_trace_{self._counter:03d}"
+        self.trace_ids.append(tid)
+        return tid
 
     def create_trace(self, name, input, metadata=None, user_id=None,
                      session_id=None, tags=None):
@@ -168,13 +180,36 @@ class MockLangfuseLogger:
                 break
 
     def create_span(self, trace_id, name, input, output, metadata=None,
-                    *, parent_observation_id=None, as_type="span"):
+                    *, parent_observation_id=None, as_type="span",
+                    model=None, usage_details=None):
         self.spans.append({
             "trace_id": trace_id, "name": name,
             "input": input, "output": output, "metadata": metadata,
             "as_type": as_type, "parent_observation_id": parent_observation_id,
+            "model": model, "usage_details": usage_details,
         })
         return f"span_{name}"
+
+    def create_top_level_observation(
+        self, trace_id, name, as_type, input, output,
+        metadata=None, model=None, usage_details=None,
+        *, trace_params=None,
+    ):
+        record = {
+            "trace_id": trace_id, "name": name, "as_type": as_type,
+            "input": input, "output": output, "metadata": metadata,
+            "model": model, "usage_details": usage_details,
+            "top_level": True, "trace_params": trace_params,
+        }
+        self.top_level_observations.append(record)
+        # Also record in spans for backward compat with existing count assertions
+        self.spans.append({
+            "trace_id": trace_id, "name": name,
+            "input": input, "output": output, "metadata": metadata,
+            "as_type": as_type, "parent_observation_id": None,
+            "top_level": True,
+        })
+        return f"tl_{name}"
 
     def create_generation(self, trace_id, name, model, input, output,
                           usage=None, metadata=None):

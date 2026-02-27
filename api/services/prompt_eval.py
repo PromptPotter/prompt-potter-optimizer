@@ -265,6 +265,9 @@ async def backend_reranker_eval(
                 "llm_provider": data.get("llm_provider"),
                 "total_time": data.get("total_time"),
                 "web_search_status": data.get("web_search_status"),
+                "pipeline_params": data.get("pipeline_params"),
+                "web_search_error": data.get("web_search_error"),
+                "web_sources": data.get("web_sources"),
             },
         }
     except Exception as exc:

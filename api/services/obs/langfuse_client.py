@@ -82,6 +82,21 @@ class LangfuseLogger:
         """Reset singleton (useful for testing)."""
         cls._instance = None
 
+    def create_trace_id(self) -> str | None:
+        """Create a bare trace ID without a root observation.
+
+        Use this for pipeline traces where step observations carry trace metadata
+        via ``trace_params`` on ``create_top_level_observation()``. This avoids
+        creating a root chain that collapses steps in the Langfuse graph view.
+        """
+        if not self.enabled or not self.client:
+            return None
+        try:
+            return self.client.create_trace_id()
+        except Exception:
+            logger.warning("Failed to create Langfuse trace ID", exc_info=True)
+            return None
+
     def create_trace(
         self,
         name: str,
@@ -191,6 +206,59 @@ class LangfuseLogger:
         except Exception:
             logger.warning("Failed to end Langfuse observation", exc_info=True)
 
+    def create_top_level_observation(
+        self,
+        trace_id: str,
+        name: str,
+        as_type: str,
+        input: Any,
+        output: Any,
+        metadata: dict[str, Any] | None = None,
+        model: str | None = None,
+        usage_details: dict[str, int] | None = None,
+        *,
+        trace_params: dict[str, Any] | None = None,
+    ) -> str | None:
+        """Create an observation directly on a trace (visible as a graph node).
+
+        Uses ``client.start_observation(trace_context={"trace_id": ...})``
+        instead of ``root.start_observation()`` — this makes the observation
+        appear as a top-level node in the Langfuse trace graph rather than
+        being collapsed inside the root chain.
+
+        Args:
+            trace_params: When set, calls ``obs.update_trace(**trace_params)``
+                to populate trace-level fields (name, session_id, tags, input,
+                output, metadata). Must be called before ``obs.end()`` because
+                the SDK gates on ``is_recording()``. Pass on the *first*
+                observation of a headless trace (created via ``create_trace_id``).
+        """
+        if not self.enabled or not self.client or not trace_id:
+            return None
+
+        try:
+            kwargs: dict[str, Any] = {
+                "trace_context": {"trace_id": trace_id},
+                "as_type": as_type,
+                "name": name,
+                "input": input,
+                "output": output,
+                "metadata": metadata or {},
+            }
+            if model:
+                kwargs["model"] = model
+            if usage_details:
+                kwargs["usage_details"] = usage_details
+
+            obs = self.client.start_observation(**kwargs)
+            if trace_params:
+                obs.update_trace(**trace_params)
+            obs.end()
+            return getattr(obs, "id", uuid.uuid4().hex[:12])
+        except Exception:
+            logger.warning("Failed to create top-level Langfuse observation", exc_info=True)
+            return None
+
     def create_generation(
         self,
         trace_id: str,
@@ -244,12 +312,16 @@ class LangfuseLogger:
         *,
         parent_observation_id: str | None = None,
         as_type: str = "span",
+        model: str | None = None,
+        usage_details: dict[str, int] | None = None,
     ) -> str | None:
         """Log a non-LLM observation nested under root or a parent observation.
 
         Args:
             parent_observation_id: Nest under this open observation instead of root.
             as_type: Observation type (``span``, ``tool``, ``chain``, etc.).
+            model: Model name (for generation-type steps).
+            usage_details: Token usage dict (for generation-type steps).
 
         Returns observation_id or None if logging is disabled.
         """
@@ -265,13 +337,19 @@ class LangfuseLogger:
             if parent is None:
                 return None
 
-            child = parent.start_observation(
-                as_type=as_type,
-                name=name,
-                input=input,
-                output=output,
-                metadata=metadata or {},
-            )
+            kwargs: dict[str, Any] = {
+                "as_type": as_type,
+                "name": name,
+                "input": input,
+                "output": output,
+                "metadata": metadata or {},
+            }
+            if model:
+                kwargs["model"] = model
+            if usage_details:
+                kwargs["usage_details"] = usage_details
+
+            child = parent.start_observation(**kwargs)
             child.end()
             return getattr(child, "id", uuid.uuid4().hex[:12])
         except Exception:

@@ -41,6 +41,8 @@
 | 4 | `api/services/prompt_eval.py` | MODIFY | Wire `log_dataset_run()` into `evaluate_prompt_cached()` after final result write |
 | 5 | `api/config/settings.py` | MODIFY | Add `OBS_ENABLED: bool = True` to `Settings` |
 | 6 | `tests/test_observability.py` | CREATE | Unit tests for ObsLogger file output and LLM retry logic |
+| 7 | `api/services/search/eval_dataset.py` | MODIFY | Generic observation extraction via `OBS_EXTRACTION_MAP` |
+| 8 | `tests/test_eval_dataset.py` | CREATE | Tests for mapping-driven extraction |
 
 ---
 
@@ -237,6 +239,7 @@ This pattern is proven in production by TermNorm-excel (reference: `backend-api/
 | 5.3 | LLM retry logic | 1 | 5.0 | Exponential backoff in `llm_client.py`. Unit tests with mock HTTP responses. |
 | 5.4 | Wire into services | 1 | 5.1, 5.3 | Wire `log_dataset_run()` into `evaluate_prompt_cached()`, wire campaign logging into `feedback_cycle.py`. Config flag gating. |
 | 5.5 | Integration test | 1 | 5.4 | E2E test: run feedback cycle with mocked backend, verify obs files are written in correct layout. |
+| 5.6 | Generic pipeline observation extraction | 1 | 5.0 | Replace hardcoded `if/elif` in `eval_dataset.py` with mapping-driven extraction. `OBS_EXTRACTION_MAP` defines obs→pipeline_data field rules. Extract all 4 observations + model metadata + timing. Tests. |
 
 ### Reading list per work package
 
@@ -247,6 +250,7 @@ This pattern is proven in production by TermNorm-excel (reference: `backend-api/
 | 5.3 | `api/services/llm_client.py` (_chat_completion method), search for existing error handling |
 | 5.4 | `api/services/prompt_eval.py` (evaluate_prompt_cached final write), `api/services/feedback_cycle.py` (run_feedback_cycle loop body) |
 | 5.5 | `tests/test_e2e_optimization.py` (existing E2E pattern), `api/config/settings.py` (OBS_ENABLED flag) |
+| 5.6 | `api/services/search/eval_dataset.py` (current extraction), `api/services/backend_client.py` (PIPELINE_STEP_PARAMS pattern, load_pipeline_config), `api/models/workflow.py` (StepDefinition for M6 reference) |
 
 ---
 
@@ -266,6 +270,8 @@ This pattern is proven in production by TermNorm-excel (reference: `backend-api/
 - LLM client retries transient 503/429 errors with exponential backoff
 - All existing tests still pass
 - New tests in `tests/test_observability.py` cover file output format, events.jsonl, and retry logic
+- `_extract_eval_from_traces()` extracts all pipeline observations via declarative mapping (no hardcoded step names)
+- `OBS_EXTRACTION_MAP` is the single config point for observation-to-field mapping
 
 ## Test Strategy
 
@@ -283,3 +289,4 @@ This pattern is proven in production by TermNorm-excel (reference: `backend-api/
 | `test_llm_no_retry_400` | Unit | Mock 400 response, verify immediate raise |
 | `test_llm_retry_exhausted` | Unit | Mock 503 every attempt, verify exception after max retries |
 | `test_obs_integration` | Integration | Run feedback cycle with mocked backend, verify complete obs/ tree including events.jsonl |
+| `test_eval_dataset_*` | Unit | Mapping-driven extraction produces correct pipeline_data from trace observations |

@@ -2,7 +2,10 @@
 Push dataset runs to cloud Langfuse.
 
 Dataset-first structure: registers dataset items with ground truth, then
-creates one trace per dataset_run linked to the dataset via Dataset Runs.
+creates one trace per *query* linked to the dataset via Dataset Runs.
+Each trace shows the backend pipeline graph (web_search → entity_profiling
+→ token_matching → llm_ranking) — standard Langfuse pattern: 1 trace =
+1 pipeline invocation.
 
 Two entry points:
 
@@ -25,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from api.services.obs.pipeline_nodes import extract_pipeline_nodes
 from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -49,6 +53,8 @@ _PREFIX_MAP = [
 
 DATASET_NAME = "termnorm_ground_truth"
 
+_STATE_FORMAT_VERSION = 3
+
 
 def classify_run_origin(run_id: str) -> str:
     """Classify a dataset run by its ID prefix.
@@ -71,8 +77,7 @@ def _load_state(store: ProjectStore, backend_id: str) -> dict[str, Any]:
     if path.exists():
         with open(path, encoding="utf-8") as f:
             state = json.load(f)
-        # Detect old format (origin-grouped) and reset
-        if state.get("format_version") != 2:
+        if state.get("format_version") != _STATE_FORMAT_VERSION:
             logger.info("Resetting stale backfill state (old format)")
             return _fresh_state()
         return state
@@ -81,10 +86,10 @@ def _load_state(store: ProjectStore, backend_id: str) -> dict[str, Any]:
 
 def _fresh_state() -> dict[str, Any]:
     return {
-        "format_version": 2,
+        "format_version": _STATE_FORMAT_VERSION,
         "backfilled_run_ids": [],
         "last_backfill_at": None,
-        "langfuse_trace_ids": {},
+        "langfuse_trace_ids": {},   # {run_id: [trace_id, ...]}
         "dataset_items": {},
     }
 
@@ -99,7 +104,7 @@ def _save_state(store: ProjectStore, backend_id: str, state: dict[str, Any]) -> 
 def _collect_ground_truth(
     store: ProjectStore, backend_id: str, summaries: list[dict],
 ) -> dict[str, str]:
-    """Extract unique (query → ground_truth) pairs from all dataset_runs."""
+    """Extract unique (query -> ground_truth) pairs from all dataset_runs."""
     gt_map: dict[str, str] = {}
     for s in summaries:
         rid = s.get("run_id", "")
@@ -135,7 +140,7 @@ def _register_dataset_items(
     )
 
     # Fetch existing items to find those needing updates
-    existing_items: dict[str, Any] = {}  # query_str → SDK item
+    existing_items: dict[str, Any] = {}  # query_str -> SDK item
     ds = lf.get_dataset(DATASET_NAME)
     if ds and hasattr(ds, "items"):
         for it in ds.items:
@@ -190,7 +195,7 @@ def _register_dataset_items(
 
 
 # ---------------------------------------------------------------------------
-# push_run — single-run cloud push (idempotent via shared registry)
+# push_run — single-run cloud push (one trace per query)
 # ---------------------------------------------------------------------------
 
 
@@ -204,8 +209,12 @@ def push_run(
     session_id: str | None = None,
     _state: dict[str, Any] | None = None,
     _save: bool = True,
-) -> str | None:
-    """Push one dataset_run to Langfuse cloud. Idempotent via shared registry.
+) -> list[str] | None:
+    """Push one dataset_run to Langfuse cloud as per-query pipeline traces.
+
+    Creates one rooted trace per query item (via ``create_trace()``), then
+    adds pipeline steps as child spans (via ``create_span()``). This produces
+    a proper Langfuse graph: ``__start__ → termnorm_pipeline → {steps} → __end__``.
 
     Args:
         lf: LangfuseLogger instance.
@@ -220,7 +229,8 @@ def push_run(
             batch contexts where the caller manages saves.
 
     Returns:
-        Langfuse trace ID, or None if already pushed or push failed.
+        List of per-query Langfuse trace IDs, or None if already pushed
+        or push failed.
     """
     state = _state if _state is not None else _load_state(store, backend_id)
     already_done = set(state["backfilled_run_ids"])
@@ -234,148 +244,85 @@ def push_run(
         logger.warning("push_run: could not load detail for run %s", run_id)
         return None
 
-    scores = detail.get("scores", {})
-    accuracy = scores.get("accuracy", 0.0)
-    hits = scores.get("hits", 0)
-    total = scores.get("total", 0)
     items = detail.get("dataset_run_items", [])
     origin = classify_run_origin(run_id)
+    sid = session_id or f"dataset_{backend_id}"
+    trace_ids: list[str] = []
 
-    # Create trace
-    trace_id = lf.create_trace(
-        name=f"eval_{run_id}",
-        input={
-            "run_id": run_id,
-            "content_hash": detail.get("content_hash", ""),
-            "model": detail.get("model", ""),
-            "prompt_state_id": detail.get("prompt_state_id", ""),
-        },
-        session_id=session_id or f"dataset_{backend_id}",
-        tags=["eval", origin],
-    )
-    if not trace_id:
-        logger.warning("push_run: failed to create trace for run %s", run_id)
-        return None
-
-    # Per-query chains with pipeline step observations
     for it in items:
         query = it.get("query", "")
         pipeline = it.get("pipeline_data") or {}
+        hit = it.get("hit", False)
+
+        # Root chain anchor — visible in Langfuse graph as the trace root.
+        # Child spans nest underneath, producing a proper pipeline graph.
+        trace_metadata: dict[str, Any] = {
+            "run_id": run_id,
+            "llm_provider": pipeline.get("llm_provider", detail.get("model", "")),
+            "prompt_state_id": detail.get("prompt_state_id", ""),
+        }
+        pp = pipeline.get("pipeline_params")
+        if pp:
+            trace_metadata["pipeline_params"] = pp
+
+        trace_id = lf.create_trace(
+            name="termnorm_pipeline",
+            input={"query": query, "ground_truth": it.get("ground_truth", "")},
+            session_id=sid,
+            tags=["eval", origin, "pipeline"],
+            metadata=trace_metadata,
+        )
+        if not trace_id:
+            continue
 
         if pipeline:
-            # Rich pipeline data available — create chain with step observations
-            q_obs_id = lf.start_span(
-                trace_id, query[:60] or "query",
-                input={"query": query, "ground_truth": it.get("ground_truth", "")},
-                as_type="chain",
-            )
-
-            if pipeline.get("entity_profile"):
-                profile = pipeline["entity_profile"]
+            nodes = extract_pipeline_nodes(pipeline, query)
+            for node in nodes:
                 lf.create_span(
-                    trace_id, "entity_profiling",
-                    input={"query": query},
-                    output={
-                        "core_concept": profile.get("core_concept", ""),
-                        "entity_name": profile.get("entity_name", ""),
-                    },
-                    parent_observation_id=q_obs_id, as_type="tool",
+                    trace_id, node.name, node.input, node.output, node.metadata,
+                    as_type=node.as_type, model=node.model,
+                    usage_details=node.usage_details,
                 )
 
-            if pipeline.get("token_matched_candidates"):
-                candidates = pipeline["token_matched_candidates"]
-                lf.create_span(
-                    trace_id, "token_matching",
-                    input={"query": query},
-                    output={
-                        "n_candidates": len(candidates),
-                        "top_3": candidates[:3],
-                    },
-                    parent_observation_id=q_obs_id, as_type="tool",
-                )
+        lf.create_score(trace_id, "hit", 1.0 if hit else 0.0)
+        lf.update_trace(trace_id, output={
+            "predicted": it.get("predicted", ""),
+            "ground_truth": it.get("ground_truth", ""),
+            "hit": hit,
+            "entity_profile": pipeline.get("entity_profile"),
+            "n_token_candidates": len(pipeline.get("token_matched_candidates") or []),
+            "n_ranked_candidates": len(pipeline.get("ranked_candidates") or []),
+            "web_search_status": pipeline.get("web_search_status"),
+            "web_sources": pipeline.get("web_sources"),
+            "total_time": pipeline.get("total_time"),
+        })
+        lf.end_trace(trace_id)
 
-            if pipeline.get("ranked_candidates"):
-                ranked_cands = pipeline["ranked_candidates"]
-                lf.create_span(
-                    trace_id, "llm_ranking",
-                    input={"n_candidates": len(ranked_cands)},
-                    output={
-                        "top_candidate": (
-                            ranked_cands[0].get("candidate", "") if ranked_cands else ""
-                        ),
-                        "top_score": (
-                            ranked_cands[0].get("relevance_score", 0)
-                            if ranked_cands else 0
-                        ),
-                    },
-                    parent_observation_id=q_obs_id, as_type="generation",
-                )
-
-            lf.end_observation(q_obs_id, output={
-                "predicted": it.get("predicted", ""),
-                "hit": it.get("hit", False),
-            })
-            span_id = q_obs_id
-        else:
-            # Fallback for old runs without pipeline_data
-            span_id = lf.create_span(
-                trace_id=trace_id,
-                name=query[:60] if query else "query",
-                input={
-                    "query": query,
-                    "ground_truth": it.get("ground_truth", ""),
-                },
-                output={
-                    "predicted": it.get("predicted", ""),
-                    "hit": it.get("hit", False),
-                },
-                as_type="tool",
-            )
-
-        # Link span to dataset item (skip if rate-limited)
+        # Link trace to dataset item
         if query_to_item_id:
             item_id = query_to_item_id.get(query)
             if item_id and not lf.rate_limited:
                 lf.link_item_to_run(
                     dataset_item_id=item_id,
                     trace_id=trace_id,
-                    observation_id=span_id,
                     run_name=run_id,
-                    run_metadata={
-                        "origin": origin,
-                        "accuracy": accuracy,
-                    },
+                    run_metadata={"origin": origin},
                 )
 
-    # Aggregate accuracy observation
-    lf.create_span(
-        trace_id, "score_accuracy",
-        input={"hits": hits, "total": total},
-        output={"accuracy": accuracy},
-        as_type="tool",
-    )
+        trace_ids.append(trace_id)
 
-    # Score + output + end
-    lf.create_score(trace_id, "accuracy", accuracy)
-    lf.update_trace(
-        trace_id,
-        output={
-            "accuracy": accuracy,
-            "hits": hits,
-            "total": total,
-        },
-    )
-    lf.end_trace(trace_id)
+    if not trace_ids:
+        return None
 
     # Update registry
     state["backfilled_run_ids"].append(run_id)
-    state["langfuse_trace_ids"][run_id] = trace_id
+    state["langfuse_trace_ids"][run_id] = trace_ids
 
     if _save:
         state["last_backfill_at"] = datetime.now(timezone.utc).isoformat()
         _save_state(store, backend_id, state)
 
-    return trace_id
+    return trace_ids
 
 
 # ---------------------------------------------------------------------------
@@ -395,8 +342,8 @@ def push_all_runs(
     Dataset-first structure:
     1. Collect ground truth from all runs
     2. Register/update dataset items with expected_output
-    3. Create one trace per run, link to dataset items via Dataset Runs
-    4. Score each trace with accuracy
+    3. Create one trace per query per run, link to dataset items
+    4. Score each trace with hit (1/0)
 
     Idempotent — tracks which run_ids have been pushed in a state file
     and skips them on subsequent calls.
@@ -404,7 +351,7 @@ def push_all_runs(
     Args:
         store: ProjectStore instance.
         backend_id: Backend identifier.
-        flush_every: Flush Langfuse client every N traces.
+        flush_every: Flush Langfuse client every N runs.
         on_progress: Optional callback for progress messages.
 
     Returns:
@@ -465,7 +412,7 @@ def push_all_runs(
         for run_summary in runs:
             rid = run_summary["run_id"]
 
-            trace_id = push_run(
+            trace_ids = push_run(
                 lf, store, backend_id, rid,
                 query_to_item_id=query_to_item_id,
                 session_id=session_id,
@@ -473,9 +420,8 @@ def push_all_runs(
                 _save=False,
             )
 
-            if trace_id:
-                # Collect stats from detail (already loaded inside push_run,
-                # but lightweight to re-read for stats)
+            if trace_ids:
+                # Collect stats from detail
                 detail = store.dataset_runs.load_by_id(backend_id, rid)
                 if detail:
                     scores = detail.get("scores", {})

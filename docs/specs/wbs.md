@@ -89,7 +89,7 @@
 
 ---
 
-## Phase 5: Observability Layer (M5) -- Nearly Complete
+## Phase 5: Observability Layer (M5) -- In Progress
 
 See [M5 spec](m5-observability.md) for full details.
 
@@ -101,6 +101,7 @@ See [M5 spec](m5-observability.md) for full details.
 | 5.3 | LLM retry logic (exponential backoff) | 1 | P1.11 | Complete |
 | 5.4 | Wire into services (prompt_eval, feedback_cycle) | 1 | P1.10 | Complete |
 | 5.5 | Integration test (obs file output E2E) | 1 | P1.10 | Complete |
+| 5.6 | Generic pipeline observation extraction | 1 | P1.10 | In Progress |
 
 ---
 
@@ -142,10 +143,10 @@ See [M7 spec](m7-multi-connector.md) for full details.
 | M2: Core Optimizer | 9 | 10 | Complete |
 | M3: Optimization Infrastructure | 11 | 14 | Complete |
 | M4: Integration and Polish | 4 | 6 | Planned |
-| M5: Observability Layer | 6 | 6 | Nearly Complete |
+| M5: Observability Layer | 7 | 7 | In Progress |
 | M6: CWL Workflow Migration | 6 | 6 | Planned |
 | M7: Multi-Connector | 5 | 5 | Planned |
-| **Total** | **56** | **~62** | |
+| **Total** | **57** | **~63** | |
 
 ---
 
