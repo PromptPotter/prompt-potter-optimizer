@@ -388,10 +388,12 @@ async def _execute_round(
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     from api.models.prompt_state import PromptState
+    from api.services.backend_client import BackendClient
     from api.services.llm_client import get_llm_client
     from api.services.prompt_optimizer import (
         evaluate_and_select_winner,
         generate_candidates,
+        generate_suggestions,
     )
 
     # -- Generate or load candidates --
@@ -424,6 +426,13 @@ async def _execute_round(
                 round_num, candidates_for_eval,
             )
 
+    # -- Build dependencies once --
+    backend_client = BackendClient(config.backend_url)
+    store = None
+    if config.project_root:
+        from api.services.project_store import ProjectStore
+        store = ProjectStore(config.project_root)
+
     # -- Evaluate candidates and select winner --
     baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
@@ -435,21 +444,47 @@ async def _execute_round(
 
     eval_out = await evaluate_and_select_winner(
         candidates_for_eval, round_eval_data, current_best,
-        backend_url=config.backend_url,
+        backend_client=backend_client,
         backend_id=config.backend_id,
-        project_root=config.project_root,
+        store=store,
         improvement_threshold=config.improvement_threshold,
         pipeline_params=config.pipeline_params,
         model=config.model,
         temperature=config.temperature,
-        do_suggestions=config.generate_suggestions,
         on_candidate_eval=on_candidate_eval,
         on_query_eval=on_query_eval,
         obs=obs,
         dataset_name=dataset_name if dataset_name and dataset_item_map else None,
         dataset_item_map=dataset_item_map if dataset_name and dataset_item_map else None,
-        provider=config.provider,
     )
+
+    # -- Generate suggestions separately if requested --
+    if config.generate_suggestions:
+        try:
+            llm_client = get_llm_client(config.provider)
+            # Build campaign_rounds-like list from state for suggestion context
+            rounds_for_suggestions = [
+                {"round": r.round, "label": r.label, "accuracy": r.accuracy,
+                 "prompt_state": PromptState(**r.prompt_state),
+                 "results": r.results}
+                for r in state.rounds
+            ]
+            rounds_for_suggestions.append({
+                "round": round_num, "label": eval_out["winner"]["label"],
+                "accuracy": eval_out["winner_accuracy"],
+                "prompt_state": PromptState(**eval_out["winner_prompt_state"]),
+                "results": eval_out["winner_results"],
+            })
+            suggestions = await generate_suggestions(
+                rounds_for_suggestions, round_eval_data, {},
+                llm_client, model=config.model,
+            )
+            next_action = suggestions.get("next_action", "generate")
+            if next_action in ("generate", "refine_context", "modify_plan", "stop"):
+                eval_out["next_action"] = next_action
+            eval_out["suggestions"] = suggestions
+        except Exception:
+            logger.warning("Suggestion generation failed", exc_info=True)
 
     round_result = CycleRoundResult(
         round=round_num,

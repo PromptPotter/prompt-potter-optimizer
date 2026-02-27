@@ -29,10 +29,10 @@ from api.services.project_store import ProjectStore
 
 # --- Service imports (core logic) ---
 from api.services.campaign.campaign_init import init_services as _init_services
+from api.services.campaign.campaign_init import run_baseline_eval as _run_baseline_eval
 from api.services.prompt_eval import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
     extract_baseline_prompt as load_baseline_prompt,
-    run_baseline_eval as _run_baseline_eval,
 )
 from api.services.prompt_optimizer import (
     generate_candidates,
@@ -1118,7 +1118,6 @@ async def sensitivity_scan(
     store=None,
     backend_id: str = "",
     pipeline_params: dict | None = None,
-    request_delay: float = 1.0,
     session_terms: list | None = None,
     plan_id: str = "",
     prompt_result_index: dict | None = None,
@@ -1167,7 +1166,6 @@ async def sensitivity_scan(
             user_focus=user_focus,
             store=store, backend_id=backend_id,
             pipeline_params=pipeline_params,
-            request_delay=request_delay,
             session_terms=session_terms,
             progress_cb=cb,
             prompt_result_index=prompt_result_index,
@@ -1268,7 +1266,6 @@ async def adaptive_search(
     store=None,
     backend_id: str = "",
     pipeline_params: dict | None = None,
-    request_delay: float = 1.0,
     session_terms: list | None = None,
     plan_id: str = "",
     prompt_result_index: dict | None = None,
@@ -1301,7 +1298,6 @@ async def adaptive_search(
             stop_threshold=stop_threshold,
             store=store, backend_id=backend_id,
             pipeline_params=pipeline_params,
-            request_delay=request_delay,
             session_terms=session_terms,
             progress_cb=cb,
             prompt_result_index=prompt_result_index,
@@ -1517,56 +1513,6 @@ async def run_manual_round(
     display_progress(campaign_rounds)
     return campaign_rounds[-1]
 
-
-async def run_optimization_loop(
-    campaign_rounds: list,
-    eval_data: list,
-    campaign_config: dict,
-    *,
-    store: "ProjectStore | None" = None,
-    backend_id: str = "",
-    max_rounds: int = 10,
-    patience: int = 3,
-    backend_client=None,
-    pipeline_params: "dict | None" = None,
-) -> list:
-    """Run optimization loop via feedback cycle.
-
-    Returns:
-        Updated campaign_rounds list.
-    """
-    opt = campaign_config.get("optimization", {})
-    patience = opt.get("patience", patience)
-
-    override = dict(campaign_config)
-    override.setdefault("optimization", {})
-    override["optimization"] = {
-        **override["optimization"],
-        "max_rounds": max_rounds,
-        "patience": patience,
-    }
-
-    backend_url = "http://127.0.0.1:8000"
-    if backend_client and hasattr(backend_client, "base_url"):
-        backend_url = backend_client.base_url
-
-    await run_feedback_cycle_notebook(
-        campaign_rounds, eval_data, override,
-        store=store,
-        backend_id=backend_id,
-        backend_url=backend_url,
-        pipeline_params=pipeline_params,
-    )
-
-    # Final summary
-    best = max(campaign_rounds, key=lambda r: r["accuracy"])
-    print(f"\n{'=' * 70}")
-    print("OPTIMIZATION COMPLETE")
-    print(f"  Rounds run: {len(campaign_rounds) - 1}")
-    print(f"  Best accuracy: {best['accuracy']:.1%} (round {best['round']})")
-    print(f"{'=' * 70}")
-
-    return campaign_rounds
 
 
 # ---------------------------------------------------------------------------

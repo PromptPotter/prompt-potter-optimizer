@@ -1,15 +1,21 @@
 """Campaign initialization service.
 
 Sets up project store, backend client, auto-syncs experiment data,
-and returns a services dict ready for use.
+evaluates baselines, and returns a services dict ready for use.
 """
+from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from api.models.backend import BackendConnection
 from api.services.backend_client import BackendClient
 from api.services.project_store import ProjectStore
+
+if TYPE_CHECKING:
+    from api.models.prompt_state import PromptState
 
 logger = logging.getLogger(__name__)
 
@@ -102,3 +108,66 @@ async def init_services(
         "exp_data": exp_data,
         "session_terms": client.extract_session_terms(exp_data),
     }
+
+
+async def run_baseline_eval(
+    baseline: "PromptState",
+    eval_data: list,
+    backend_client: BackendClient,
+    pipeline_params: dict | None = None,
+    store: ProjectStore | None = None,
+    backend_id: str = "",
+    experiment_id: str = "",
+    model: str = "",
+    temperature: float = 0.0,
+    on_result: Callable | None = None,
+) -> tuple[list, list]:
+    """Evaluate baseline prompt and build initial campaign_rounds list.
+
+    Args:
+        baseline: Baseline PromptState.
+        eval_data: Evaluation data. If empty and store+experiment_id are
+            provided, attempts to load from store.
+        backend_client: BackendClient for evaluation.
+        pipeline_params: Optional pipeline parameter overrides.
+        store: Optional ProjectStore.
+        backend_id: Backend identifier.
+        experiment_id: Experiment to load eval data from if eval_data is empty.
+        model: Model identifier for content hash.
+        temperature: Temperature for content hash.
+        on_result: Optional callback for progress reporting.
+
+    Returns:
+        Tuple of (campaign_rounds, baseline_results).
+
+    Raises:
+        RuntimeError: If no evaluation data is available.
+    """
+    from api.services.prompt_eval import evaluate_prompt_cached
+
+    if not eval_data and store and experiment_id:
+        from api.services.search.eval_dataset import load_eval_dataset
+        eval_data = load_eval_dataset(store, backend_id, experiment_id)
+
+    if not eval_data:
+        raise RuntimeError(
+            "No evaluation data available. "
+            "Generate data first (e.g. run termnorm_backend.ipynb)."
+        )
+
+    baseline_results, scores, _cached = await evaluate_prompt_cached(
+        baseline, eval_data, backend_client,
+        pipeline_params=pipeline_params,
+        store=store, backend_id=backend_id,
+        label="Baseline",
+        model=model, temperature=temperature,
+        on_result=on_result,
+    )
+
+    campaign_rounds = [{
+        "round": 0, "label": "baseline", "prompt_state": baseline,
+        "accuracy": scores["accuracy"], "hits": scores["hits"],
+        "total": scores["total"], "results": baseline_results,
+    }]
+
+    return campaign_rounds, baseline_results

@@ -8,11 +8,15 @@ winners, generates improvement suggestions, and saves campaign results.
 import json
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
 from api.services.prompt_eval import compute_accuracy
+
+if TYPE_CHECKING:
+    from api.services.backend_client import BackendClient
+    from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -365,24 +369,20 @@ async def evaluate_and_select_winner(
     eval_data: list,
     current_best: dict[str, Any],
     *,
-    backend_url: str,
+    backend_client: "BackendClient",
     backend_id: str = "",
-    project_root: str = "",
+    store: "ProjectStore | None" = None,
     improvement_threshold: float = 0.01,
     pipeline_params: dict | None = None,
     model: str | None = None,
     temperature: float = 0.0,
-    do_suggestions: bool = False,
-    campaign_rounds: list[dict] | None = None,
-    campaign_config: dict | None = None,
     on_candidate_eval: Callable | None = None,
     on_query_eval: Callable | None = None,
     obs: Any = None,
     dataset_name: str | None = None,
     dataset_item_map: dict[str, str] | None = None,
-    provider: str | None = None,
 ) -> dict[str, Any]:
-    """Evaluate candidates, select winner, optionally generate suggestions.
+    """Evaluate candidates and select the round winner.
 
     This is the core eval+select logic extracted from AnalysisEvalNode so it
     can be called directly by the feedback cycle without node overhead.
@@ -391,16 +391,7 @@ async def evaluate_and_select_winner(
         Dict with keys: winner, winner_prompt_state, winner_accuracy,
         improved, next_action, suggestions, candidate_scores, winner_results.
     """
-    from api.services.backend_client import BackendClient
-    from api.services.llm_client import get_llm_client
     from api.services.prompt_eval import evaluate_prompt_cached
-
-    backend_client = BackendClient(backend_url)
-
-    store = None
-    if project_root:
-        from api.services.project_store import ProjectStore
-        store = ProjectStore(project_root)
 
     ps_candidates = [PromptState(**c) for c in candidates]
     all_candidate_results: dict[str, list[dict]] = {}
@@ -443,19 +434,6 @@ async def evaluate_and_select_winner(
         ps_candidates, all_candidate_results, cb, improvement_threshold,
     )
 
-    # Generate suggestions if requested
-    suggestions: dict = {}
-    if do_suggestions and campaign_rounds:
-        llm_client = get_llm_client(provider)
-        suggestions = await generate_suggestions(
-            campaign_rounds, eval_data, campaign_config or {},
-            llm_client, model=model,
-        )
-
-    next_action = suggestions.get("next_action", "generate")
-    if next_action not in ("generate", "refine_context", "modify_plan", "stop"):
-        next_action = "generate"
-
     winner_ps = winner_entry["prompt_state"]
     return {
         "winner": {
@@ -469,8 +447,8 @@ async def evaluate_and_select_winner(
         "winner_prompt_state": winner_ps.model_dump(),
         "winner_accuracy": winner_entry["accuracy"],
         "improved": winner_entry["improved"],
-        "next_action": next_action,
-        "suggestions": suggestions,
+        "next_action": "generate",
+        "suggestions": {},
         "candidate_scores": candidate_scores,
         "winner_results": winner_entry.get("results", []),
     }

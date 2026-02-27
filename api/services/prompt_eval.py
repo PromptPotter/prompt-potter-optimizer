@@ -6,7 +6,6 @@ and evaluates reranker prompts via the TermNorm backend's /matches endpoint.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -218,7 +217,6 @@ async def backend_reranker_eval(
     backend_client: BackendClient,
     rendered_prompt: str,
     pipeline_params: dict | None = None,
-    request_delay: float = 0,
 ) -> dict:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint.
 
@@ -228,7 +226,6 @@ async def backend_reranker_eval(
         rendered_prompt: Fully rendered ranking prompt to pass as ``ranking_prompt``.
         pipeline_params: Optional pipeline parameter overrides forwarded to
             the backend's ``/matches`` endpoint.
-        request_delay: Seconds to sleep before the call (0 = no delay).
 
     Returns:
         Dict with keys: query, predicted, ground_truth, hit, score, error.
@@ -279,7 +276,6 @@ async def evaluate_prompt_batch(
     backend_client: BackendClient,
     pipeline_params: dict | None = None,
     on_result: Callable | None = None,
-    request_delay: float = 0,
 ) -> list:
     """Evaluate a prompt on all eval_data queries via the backend.
 
@@ -290,7 +286,6 @@ async def evaluate_prompt_batch(
         pipeline_params: Optional pipeline parameter overrides.
         on_result: Optional callback ``(result, index, total)`` called after
             each query evaluation.
-        request_delay: Seconds to sleep between backend calls (0 = no delay).
 
     Returns:
         List of result dicts from backend_reranker_eval.
@@ -299,9 +294,6 @@ async def evaluate_prompt_batch(
     rendered = prompt_state.render()
 
     for i, qd in enumerate(eval_data):
-        if request_delay > 0 and i > 0:
-            await asyncio.sleep(request_delay)
-
         result = await backend_reranker_eval(
             qd, backend_client, rendered,
             pipeline_params=pipeline_params,
@@ -345,11 +337,13 @@ async def evaluate_prompt_cached(
     dataset_name: str | None = None,
     dataset_item_map: dict[str, str] | None = None,
     obs: "ObsLogger | None" = None,
+    prompt_result_index: dict | None = None,
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt with deduplication, partial resume, and finalization.
 
     Core evaluation logic without UI output. Handles:
     - Content-hash deduplication via ProjectStore
+    - Cross-run historical query lookups via prompt_result_index
     - Partial result resume after crash
     - Incremental writes for crash protection
     - Final run storage
@@ -369,6 +363,10 @@ async def evaluate_prompt_cached(
             each query evaluation (for progress reporting).
         dataset_name: Optional Langfuse dataset name for linking evaluations.
         dataset_item_map: Optional ``{query: item_id}`` mapping for dataset linking.
+        prompt_result_index: Optional cross-run historical index mapping
+            ``{rendered_prompt_hash: {query: result_dict}}``.  When provided,
+            queries already answered in prior runs are reused instead of
+            calling the backend again.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
@@ -387,19 +385,57 @@ async def evaluate_prompt_cached(
                     on_result({**r, "cached": True}, i, len(results))
             return results, scores, True
 
+    # --- cross-run historical index lookup ---
+    historical_results: list[dict] = []
+    remaining_after_history = eval_data
+    if prompt_result_index and eval_data and not force:
+        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
+        cached_by_query = prompt_result_index.get(rp_hash, {})
+        if cached_by_query:
+            n_matched = sum(
+                1 for qd in eval_data if qd.get("query", "") in cached_by_query
+            )
+            coverage = n_matched / len(eval_data)
+            if coverage >= 1.0:
+                # Full historical coverage — skip backend entirely
+                matched = [cached_by_query[qd["query"]] for qd in eval_data]
+                acc = compute_accuracy(matched)
+                logger.info(
+                    "evaluate_prompt_cached [historical] full coverage "
+                    "(%d/%d queries)", n_matched, len(eval_data),
+                )
+                if on_result is not None:
+                    for i, r in enumerate(matched):
+                        on_result({**r, "cached": True}, i, len(matched))
+                return matched, acc, True
+            if coverage > 0:
+                logger.info(
+                    "evaluate_prompt_cached [historical] partial coverage: "
+                    "%.0f%% (%d/%d queries)",
+                    coverage * 100, n_matched, len(eval_data),
+                )
+                # Split into covered + uncovered queries
+                remaining_after_history = []
+                for qd in eval_data:
+                    q = qd.get("query", "")
+                    if q in cached_by_query:
+                        historical_results.append(cached_by_query[q])
+                    else:
+                        remaining_after_history.append(qd)
+
     # --- compute run_id for incremental writes ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
     # --- check for partial results (resume after crash) ---
     partial_results: list = []
-    remaining_data = eval_data
+    remaining_data = remaining_after_history
     if store and backend_id:
         partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
         if partial_results:
-            # Validate partial results align with eval_data queries
+            # Validate partial results align with remaining queries
             valid = True
-            for i, (pr, ed) in enumerate(zip(partial_results, eval_data)):
+            for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
                 if pr.get("query") != ed.get("query"):
                     logger.warning(
                         "Partial eval %s: query mismatch at index %d "
@@ -411,31 +447,36 @@ async def evaluate_prompt_cached(
 
             if not valid:
                 partial_results = []
-                remaining_data = eval_data
-            elif len(partial_results) >= len(eval_data):
-                # Truncate to expected count (guards against crash-induced duplicates)
-                partial_results = partial_results[:len(eval_data)]
+            elif len(partial_results) >= len(remaining_data):
+                partial_results = partial_results[:len(remaining_data)]
                 remaining_data = []
             else:
-                remaining_data = eval_data[len(partial_results):]
+                remaining_data = remaining_data[len(partial_results):]
         else:
             partial_results = []
 
-    # --- replay cached partial results to callback ---
+    # --- replay cached partial/historical results to callback ---
+    callback_offset = 0
+    if on_result is not None and historical_results:
+        for i, r in enumerate(historical_results):
+            on_result({**r, "cached": True}, i, len(eval_data))
+        callback_offset = len(historical_results)
     if on_result is not None and partial_results:
         for i, r in enumerate(partial_results):
-            on_result({**r, "cached": True}, i, len(eval_data))
+            on_result({**r, "cached": True}, callback_offset + i, len(eval_data))
 
     # --- evaluate via backend ---
     _incremental_writer = None
     if store and backend_id:
         _incremental_writer = make_incremental_writer(store, backend_id, run_id)
 
+    _cb_offset = callback_offset + len(partial_results)
+
     def _on_result(result: dict, index: int, total: int) -> None:
         if _incremental_writer is not None:
             _incremental_writer(result, index, total)
         if on_result is not None:
-            on_result(result, len(partial_results) + index, len(eval_data))
+            on_result(result, _cb_offset + index, len(eval_data))
 
     new_results = await evaluate_prompt_batch(
         prompt_state, remaining_data, backend_client,
@@ -443,7 +484,7 @@ async def evaluate_prompt_cached(
         on_result=_on_result,
     )
 
-    results = partial_results + new_results
+    results = historical_results + partial_results + new_results
     scores = compute_accuracy(results)
 
     # --- finalize: save complete run, delete .partial.jsonl ---
@@ -476,64 +517,3 @@ async def evaluate_prompt_cached(
             logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
 
     return results, scores, False
-
-
-async def run_baseline_eval(
-    baseline: PromptState,
-    eval_data: list,
-    backend_client: "BackendClient",
-    pipeline_params: dict | None = None,
-    store: "ProjectStore | None" = None,
-    backend_id: str = "",
-    experiment_id: str = "",
-    model: str = "",
-    temperature: float = 0.0,
-    on_result: Callable | None = None,
-) -> tuple[list, list]:
-    """Evaluate baseline prompt and build initial campaign_rounds list.
-
-    Args:
-        baseline: Baseline PromptState.
-        eval_data: Evaluation data. If empty and store+experiment_id are
-            provided, attempts to load from store.
-        backend_client: BackendClient for evaluation.
-        pipeline_params: Optional pipeline parameter overrides.
-        store: Optional ProjectStore.
-        backend_id: Backend identifier.
-        experiment_id: Experiment to load eval data from if eval_data is empty.
-        model: Model identifier for content hash.
-        temperature: Temperature for content hash.
-        on_result: Optional callback for progress reporting.
-
-    Returns:
-        Tuple of (campaign_rounds, baseline_results).
-
-    Raises:
-        RuntimeError: If no evaluation data is available.
-    """
-    if not eval_data and store and experiment_id:
-        from api.services.search.eval_dataset import load_eval_dataset
-        eval_data = load_eval_dataset(store, backend_id, experiment_id)
-
-    if not eval_data:
-        raise RuntimeError(
-            "No evaluation data available. "
-            "Generate data first (e.g. run termnorm_backend.ipynb)."
-        )
-
-    baseline_results, scores, _cached = await evaluate_prompt_cached(
-        baseline, eval_data, backend_client,
-        pipeline_params=pipeline_params,
-        store=store, backend_id=backend_id,
-        label="Baseline",
-        model=model, temperature=temperature,
-        on_result=on_result,
-    )
-
-    campaign_rounds = [{
-        "round": 0, "label": "baseline", "prompt_state": baseline,
-        "accuracy": scores["accuracy"], "hits": scores["hits"],
-        "total": scores["total"], "results": baseline_results,
-    }]
-
-    return campaign_rounds, baseline_results

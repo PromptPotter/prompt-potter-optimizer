@@ -270,11 +270,23 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
         return AnalysisEvalOutput
 
     async def _execute(self, input_data: AnalysisEvalInput) -> AnalysisEvalOutput:
-        from api.services.prompt_optimizer import evaluate_and_select_winner
+        from api.services.backend_client import BackendClient
+        from api.services.prompt_optimizer import (
+            evaluate_and_select_winner,
+            generate_suggestions,
+        )
 
         backend_url = self.config.get("backend_url", "")
         if not backend_url:
             raise ValueError("AnalysisEvalNode requires 'backend_url' in config")
+
+        # Build dependencies
+        backend_client = BackendClient(backend_url)
+        store = None
+        project_root = self.config.get("project_root", "")
+        if project_root:
+            from api.services.project_store import ProjectStore
+            store = ProjectStore(project_root)
 
         # Assemble current_best — prefer pre-built dict, fall back to flat fields
         if input_data.current_best:
@@ -296,25 +308,42 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
             input_data.candidates,
             input_data.eval_data,
             current_best,
-            backend_url=backend_url,
+            backend_client=backend_client,
             backend_id=self.config.get("backend_id", ""),
-            project_root=self.config.get("project_root", ""),
+            store=store,
             improvement_threshold=self.config.get("improvement_threshold", 0.01),
             pipeline_params=self.config.get("pipeline_params"),
             model=self.config.get("model"),
             temperature=self.config.get("temperature", 0.0),
-            do_suggestions=(
-                self.config.get("generate_suggestions", True)
-                and bool(input_data.campaign_rounds)
-            ),
-            campaign_rounds=input_data.campaign_rounds,
-            campaign_config=input_data.campaign_config,
             on_candidate_eval=self.config.get("on_candidate_eval"),
             on_query_eval=self.config.get("on_query_eval"),
             obs=self.config.get("obs"),
             dataset_name=self.config.get("dataset_name"),
             dataset_item_map=self.config.get("dataset_item_map"),
-            provider=self.config.get("provider"),
         )
+
+        # Generate suggestions separately if requested
+        if (
+            self.config.get("generate_suggestions", True)
+            and input_data.campaign_rounds
+        ):
+            try:
+                from api.services.llm_client import get_llm_client
+                llm_client = get_llm_client(self.config.get("provider"))
+                suggestions = await generate_suggestions(
+                    input_data.campaign_rounds,
+                    input_data.eval_data,
+                    input_data.campaign_config,
+                    llm_client,
+                    model=self.config.get("model"),
+                )
+                result["suggestions"] = suggestions
+                next_action = suggestions.get("next_action", "generate")
+                if next_action in (
+                    "generate", "refine_context", "modify_plan", "stop",
+                ):
+                    result["next_action"] = next_action
+            except Exception:
+                logger.warning("Suggestion generation failed", exc_info=True)
 
         return AnalysisEvalOutput(**result)
