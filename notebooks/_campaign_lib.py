@@ -6,50 +6,34 @@ interactive notebook use.
 """
 
 import logging
-import sys
 from pathlib import Path
 
 import pandas as pd
 from tqdm.auto import tqdm
 
-# Ensure project root is importable
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
 from api.models.prompt_state import PromptState
 from api.services.backend_client import (
-    BackendClient,
     PIPELINE_STEP_PARAMS,
     build_pipeline_params,
     load_pipeline_config,
 )
-from api.services.llm_client import LLMClientBase, setup_llm
+from api.services.llm_client import GroqClient, LLMClientBase, OpenAIClient
 from api.services.project_store import ProjectStore
 
 # --- Service imports (core logic) ---
-from api.services.campaign_init import init_services as _init_services
+from api.services.campaign.campaign_init import init_services as _init_services
+from api.services.campaign.campaign_init import run_baseline_eval as _run_baseline_eval
 from api.services.prompt_eval import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
     extract_baseline_prompt as load_baseline_prompt,
-    run_baseline_eval as _run_baseline_eval,
 )
 from api.services.prompt_optimizer import (
     generate_candidates,
     generate_suggestions,
-    save_campaign_winner,
-    select_round_winner as _select_round_winner,
-    run_manual_round as _run_manual_round,
-    run_optimization_loop as _run_optimization_loop,
 )
 from api.config.settings import load_variant_library
 from api.services.search import (
     DEFAULT_GRID_AXES,
-    SAMPLING_ALPHA,
-    GRID_SEARCHABLE_FIELDS,
-    REQUIRED_TEMPLATE_VARS,
-    MIN_DIAGNOSTIC_QUERIES,
-    DEFAULT_DIAGNOSTIC_QUERIES,
     validate_grid_config,
     build_grid_points as _build_grid_points,
     build_combined_state_lookup as _build_combined_state_lookup,
@@ -73,26 +57,38 @@ from api.services.search import (
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
 )
 
-# Re-export constants and service functions for notebooks
+# Public API — every name the notebook imports.
 __all__ = [
-    "DEFAULT_GRID_AXES",
-    "SAMPLING_ALPHA",
-    "GRID_SEARCHABLE_FIELDS",
-    "REQUIRED_TEMPLATE_VARS",
-    "MIN_DIAGNOSTIC_QUERIES",
-    "DEFAULT_DIAGNOSTIC_QUERIES",
-    "load_variant_library",
-    # Direct re-exports (no local wrapper)
-    "load_baseline_prompt",
-    "generate_candidates",
-    "generate_suggestions",
-    "save_campaign_winner",
-    "validate_grid_config",
-    "select_grid_winner",
-    "build_diagnostic_set",
-    "build_historical_index",
-    "synthesize_sensitivity",
-    "run_feedback_cycle_notebook",
+    # Constants
+    "DEFAULT_GRID_AXES", "PIPELINE_STEP_PARAMS",
+    # Service init
+    "init_services", "setup_llm", "load_variant_library",
+    # Baseline & eval
+    "load_baseline_prompt", "run_baseline_eval",
+    "analyze_candidate_coverage", "load_eval_dataset",
+    # Candidates & suggestions
+    "generate_candidates", "generate_suggestions", "display_suggestions",
+    # Grid search
+    "validate_grid_config", "build_grid_points", "run_grid_search",
+    "display_grid_results", "select_grid_winner", "analyze_grid_results",
+    "resume_or_build_grid", "merge_grid_results",
+    # Grid plan discovery
+    "list_grid_plans", "load_grid_plan_results",
+    # Pipeline config
+    "load_pipeline_config", "build_pipeline_params",
+    # Smart search
+    "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
+    "display_axis_profiles", "resume_or_build_diagnostic",
+    "select_scan_winner_notebook", "build_historical_index",
+    "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
+    # Campaign
+    "run_feedback_cycle_notebook", "save_campaign_winner",
+    "display_progress", "run_manual_round",
+    "select_and_seed_grid_winner",
+    # Notebook-facing wrappers
+    "show_pipeline_config", "show_grid_overview",
+    # Langfuse
+    "push_langfuse", "backfill_langfuse", "configure_langfuse",
 ]
 
 
@@ -146,7 +142,63 @@ def show_pipeline_config(svc: dict, campaign_config: dict) -> dict:
     return pipeline_params
 
 
-# setup_llm and make_llm_client imported from api.services.llm_client above
+def _make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase:
+    """Create an LLM client from a provider URL or key."""
+    if "groq.com" in provider_url:
+        return GroqClient(api_key=api_key)
+    elif "openai.com" in provider_url:
+        return OpenAIClient(api_key=api_key)
+    return GroqClient(api_key=api_key)
+
+
+def setup_llm(campaign_config: dict, api_key: str) -> tuple[LLMClientBase, str]:
+    """Create LLM client + model from campaign_config['eval_llm'].
+
+    Returns:
+        (llm_client, model) tuple for passing to service functions.
+    """
+    eval_llm = campaign_config["eval_llm"]
+    client = _make_llm_client(eval_llm.get("provider_url", ""), api_key)
+    return client, eval_llm.get("model", "")
+
+
+def save_campaign_winner(
+    campaign_rounds: list,
+    campaign_config: dict,
+    store: "ProjectStore",
+    backend_id: str,
+) -> dict:
+    """Find best round, save to store. Returns save_data dict."""
+    from datetime import datetime, timezone
+
+    winner = campaign_rounds[-1]["prompt_state"]
+    winner_acc = campaign_rounds[-1]["accuracy"]
+
+    for rd in campaign_rounds:
+        if rd["accuracy"] > winner_acc:
+            winner = rd["prompt_state"]
+            winner_acc = rd["accuracy"]
+
+    save_data = {
+        "winner": winner.model_dump(),
+        "accuracy": winner_acc,
+        "campaign_rounds": len(campaign_rounds),
+        "baseline_accuracy": campaign_rounds[0]["accuracy"],
+        "improvement": winner_acc - campaign_rounds[0]["accuracy"],
+        "config": campaign_config,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
+    store.backends.save_sync(backend_id, filename, save_data)
+
+    print(f"Winner saved: {filename} (acc={winner_acc:.1%})")
+    return {
+        **save_data,
+        "winner_id": winner.id,
+        "filename": filename,
+        "backend_id": backend_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +237,7 @@ async def init_services(
     print(f"Experiment : {exp_data.get('experiment', {}).get('name', experiment_id)}")
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
     print(f"Queries    : {len(svc.get('queries', []))}  |  "
-          f"Session terms: {len(svc.get('terms', []))}")
+          f"Session terms: {len(svc.get('session_terms', []))}")
 
     return svc
 
@@ -254,7 +306,6 @@ async def run_baseline_eval(
     baseline: PromptState,
     eval_data: list,
     campaign_config: dict,
-    api_key: str,
     svc: dict,
 ) -> tuple:
     """Evaluate baseline prompt and initialize campaign_rounds.
@@ -297,51 +348,6 @@ async def run_baseline_eval(
         )
 
     return campaign_rounds, baseline_results
-
-
-def select_round_winner(
-    candidates: list,
-    all_candidate_results: dict,
-    current_best: dict,
-    improvement_threshold: float,
-) -> dict:
-    """Compare candidates, print comparison table, return round entry dict."""
-    from IPython.display import display as ipy_display
-    result = _select_round_winner(
-        candidates, all_candidate_results, current_best, improvement_threshold,
-    )
-
-    # Display comparison table
-    print(f"\n{'=' * 70}")
-    print("ROUND SUMMARY")
-    print(f"{'=' * 70}")
-    ipy_display(pd.DataFrame(result["comparison_rows"]))
-
-    if result["improved"]:
-        print(
-            f"\nWINNER: {result['label']} ({result['accuracy']:.1%}, "
-            f"+{result['accuracy'] - current_best['accuracy']:.1%} over previous)"
-        )
-        ps = result["prompt_state"]
-        print(
-            f"  PromptState: {ps.id[:12]}  "
-            f"(parent: {ps.parent_id[:12] if ps.parent_id else 'none'})"
-        )
-    else:
-        print(
-            f"\nNo improvement beyond threshold ({improvement_threshold:.1%}). "
-            "Keeping current best."
-        )
-
-    return {
-        "label": result["label"],
-        "prompt_state": result["prompt_state"],
-        "accuracy": result["accuracy"],
-        "hits": result["hits"],
-        "total": result["total"],
-        "results": result["results"],
-        "candidates_evaluated": result["candidates_evaluated"],
-    }
 
 
 def display_suggestions(suggestions: dict, round_num: int) -> None:
@@ -545,7 +551,8 @@ async def resume_or_build_grid(
         store, backend_id, improvement_areas=improvement_areas,
     )
     # Service returns 7-tuple (plan_id, points, lookup, axes, fields, baseline, resumed)
-    plan_id, grid_points, grid_state_lookup, grid_axes, layer1_fields, grid_baseline, resumed = result
+    (plan_id, grid_points, grid_state_lookup,
+     grid_axes, layer1_fields, grid_baseline, resumed) = result
 
     if resumed:
         print(f"[RESUME] Found existing grid plan: {plan_id}")
@@ -563,7 +570,6 @@ async def run_grid_search(
     state_lookup: dict,
     eval_data: list,
     eval_llm: dict,
-    api_key: str,
     *,
     plan_id: str = "",
     store: "ProjectStore | None" = None,
@@ -784,7 +790,7 @@ async def analyze_grid_results(
     return analysis
 
 
-def print_eval_summary(store: ProjectStore, backend_id: str) -> None:
+def _print_eval_summary(store: ProjectStore, backend_id: str) -> None:
     """Print a summary table of completed and in-progress eval runs."""
     completed = store.dataset_runs.list_all(backend_id)
     partials = store.dataset_runs.list_partial_evals(backend_id)
@@ -876,7 +882,7 @@ def load_eval_dataset(
             "replay first."
         )
 
-    print_eval_summary(store, backend_id)
+    _print_eval_summary(store, backend_id)
 
     return eval_data
 
@@ -1113,7 +1119,6 @@ async def sensitivity_scan(
     store=None,
     backend_id: str = "",
     pipeline_params: dict | None = None,
-    request_delay: float = 1.0,
     session_terms: list | None = None,
     plan_id: str = "",
     prompt_result_index: dict | None = None,
@@ -1162,7 +1167,6 @@ async def sensitivity_scan(
             user_focus=user_focus,
             store=store, backend_id=backend_id,
             pipeline_params=pipeline_params,
-            request_delay=request_delay,
             session_terms=session_terms,
             progress_cb=cb,
             prompt_result_index=prompt_result_index,
@@ -1263,7 +1267,6 @@ async def adaptive_search(
     store=None,
     backend_id: str = "",
     pipeline_params: dict | None = None,
-    request_delay: float = 1.0,
     session_terms: list | None = None,
     plan_id: str = "",
     prompt_result_index: dict | None = None,
@@ -1296,7 +1299,6 @@ async def adaptive_search(
             stop_threshold=stop_threshold,
             store=store, backend_id=backend_id,
             pipeline_params=pipeline_params,
-            request_delay=request_delay,
             session_terms=session_terms,
             progress_cb=cb,
             prompt_result_index=prompt_result_index,
@@ -1487,109 +1489,31 @@ async def run_manual_round(
     campaign_rounds: list,
     eval_data: list,
     campaign_config: dict,
-    api_key: str,
     svc: dict,
 ) -> dict:
-    """Run a single manual optimization round.
+    """Run a single manual optimization round via feedback cycle.
 
     Returns:
         The round entry dict (also appended to campaign_rounds).
     """
-    opt = campaign_config["optimization"]
-    llm_client, llm_model = setup_llm(campaign_config, api_key)
-    eval_llm = campaign_config["eval_llm"]
-    current_best = campaign_rounds[-1]
-    round_num = len(campaign_rounds)
+    # Override max_rounds=1 for single-round behaviour
+    override = dict(campaign_config)
+    override.setdefault("optimization", {})
+    override["optimization"] = {**override["optimization"], "max_rounds": 1, "patience": 1}
 
-    print(
-        f"=== ROUND {round_num} === Current best: "
-        f"{current_best['label']} ({current_best['accuracy']:.1%})\n"
-    )
-
-    def _on_candidate(candidate, idx, results, scores, cached):
-        acc = scores["accuracy"]
-        tag = "[cached]" if cached else ""
-        print(f"  Candidate {idx + 1}: {acc:.1%} "
-              f"({scores['hits']}/{scores['total']}) {tag}")
-
-    round_entry = await _run_manual_round(
-        campaign_rounds, eval_data, svc.get("backend_client"), llm_client,
-        model=llm_model,
-        temperature=eval_llm.get("temperature", 0.1),
-        n_variants=opt["n_variants"],
-        creativity=opt["creativity"],
-        improvement_threshold=opt["improvement_threshold"],
-        pipeline_params=campaign_config.get("pipeline_params"),
+    await run_feedback_cycle_notebook(
+        campaign_rounds, eval_data, override,
         store=svc.get("store"),
         backend_id=svc.get("backend_id", ""),
-        queries_per_eval=campaign_config.get("queries_per_eval", 0),
-        on_candidate_evaluated=_on_candidate,
+        backend_url=svc["backend_client"].base_url
+        if svc.get("backend_client") else "http://127.0.0.1:8000",
+        pipeline_params=campaign_config.get("pipeline_params"),
+        session_terms=svc.get("session_terms"),
     )
 
     display_progress(campaign_rounds)
+    return campaign_rounds[-1]
 
-    return round_entry
-
-
-async def run_optimization_loop(
-    campaign_rounds: list,
-    eval_data: list,
-    campaign_config: dict,
-    api_key: str,
-    *,
-    store: "ProjectStore | None" = None,
-    backend_id: str = "",
-    max_rounds: int = 10,
-    patience: int = 3,
-    backend_client=None,
-    pipeline_params: "dict | None" = None,
-) -> list:
-    """Run optimization rounds until patience exhausted or max_rounds reached.
-
-    Returns:
-        Updated campaign_rounds list.
-    """
-    opt = campaign_config.get("optimization", {})
-    eval_llm = campaign_config["eval_llm"]
-    llm_client, llm_model = setup_llm(campaign_config, api_key)
-    patience = opt.get("patience", patience)
-
-    def _on_round(round_entry, round_num, improved, stale_count):
-        display_progress(campaign_rounds)
-        if improved:
-            print("\nImprovement detected, auto-continuing...")
-        else:
-            print(f"\nNo improvement ({stale_count}/{patience} patience)")
-            if stale_count >= patience:
-                print(
-                    f"\nStopping: no improvement for {patience} consecutive rounds."
-                )
-
-    result = await _run_optimization_loop(
-        campaign_rounds, eval_data, backend_client, llm_client,
-        model=llm_model,
-        temperature=eval_llm.get("temperature", 0.1),
-        n_variants=opt.get("n_variants", 5),
-        creativity=opt.get("creativity", 0.7),
-        improvement_threshold=opt.get("improvement_threshold", 0.01),
-        pipeline_params=pipeline_params,
-        store=store,
-        backend_id=backend_id,
-        max_rounds=max_rounds,
-        patience=patience,
-        queries_per_eval=campaign_config.get("queries_per_eval", 0),
-        on_round_complete=_on_round,
-    )
-
-    # Final summary
-    best = max(campaign_rounds, key=lambda r: r["accuracy"])
-    print(f"\n{'=' * 70}")
-    print("OPTIMIZATION COMPLETE")
-    print(f"  Rounds run: {len(campaign_rounds) - 1}")
-    print(f"  Best accuracy: {best['accuracy']:.1%} (round {best['round']})")
-    print(f"{'=' * 70}")
-
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1620,7 +1544,7 @@ async def run_feedback_cycle_notebook(
     Returns:
         Updated campaign_rounds list.
     """
-    from api.services.feedback_cycle import CycleConfig, run_feedback_cycle
+    from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
 
     opt = campaign_config.get("optimization", {})
     eval_llm = campaign_config.get("eval_llm", {})
@@ -1669,20 +1593,18 @@ async def run_feedback_cycle_notebook(
         baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
         instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else instruction
 
-    patience = config.patience
-    n_variants = config.n_variants
-
     print(f"Feedback cycle: baseline acc={baseline_acc:.1%}, "
-          f"max_rounds={config.max_rounds}, patience={patience}")
+          f"max_rounds={config.max_rounds}, patience={config.patience}")
 
     _query_counter = [0]  # mutable counter for closure
 
     def _on_query(cand_idx, n_cands, query_idx, n_queries, result):
         _query_counter[0] += 1
         tag = "HIT " if result.get("hit") else "MISS"
+        cached = " (cached)" if result.get("cached") else ""
         print(
             f"  [{_query_counter[0]}] C{cand_idx + 1}/{n_cands} "
-            f"Q{query_idx + 1}/{n_queries} {tag} "
+            f"Q{query_idx + 1}/{n_queries} {tag}{cached} "
             f"{result.get('query', '')[:50]}"
         )
 
@@ -1711,11 +1633,14 @@ async def run_feedback_cycle_notebook(
         if round_result.improved:
             print("\nImprovement detected, auto-continuing...")
         else:
-            print(f"\nNo improvement ({stall_count}/{patience} patience)")
-            if stall_count >= patience:
+            print(f"\nNo improvement ({stall_count}/{config.patience} patience)")
+            if stall_count >= config.patience:
                 print(
-                    f"\nStopping: no improvement for {patience} consecutive rounds."
+                    f"\nStopping: no improvement for {config.patience}"
+                    " consecutive rounds."
                 )
+
+    initial_len = len(campaign_rounds)
 
     result = await run_feedback_cycle(
         instruction=instruction,
@@ -1730,6 +1655,30 @@ async def run_feedback_cycle_notebook(
         langfuse_session_id=langfuse_session_id,
     )
 
+    # If fully cached (no new on_round_complete callbacks fired), populate
+    # campaign_rounds from the restored result so downstream cells work.
+    if len(campaign_rounds) == initial_len and result.rounds:
+        for rr in result.rounds:
+            ps = PromptState(**rr.prompt_state)
+            campaign_rounds.append({
+                "round": len(campaign_rounds),
+                "label": rr.label,
+                "prompt_state": ps,
+                "accuracy": rr.accuracy,
+                "hits": rr.hits,
+                "total": rr.total,
+                "results": rr.results,
+                "candidates_evaluated": rr.candidates_evaluated,
+                "improved": rr.improved,
+            })
+
+    # Print resume info
+    if result.resumed_from_round > 0:
+        print(
+            f"\nResumed from round {result.resumed_from_round} "
+            f"({result.resumed_from_round} rounds cached)"
+        )
+
     # Final summary
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
     print(f"\n{'=' * 70}")
@@ -1737,8 +1686,118 @@ async def run_feedback_cycle_notebook(
     print(f"  Rounds run: {result.n_rounds}")
     print(f"  Best accuracy: {best['accuracy']:.1%} (round {best['round']})")
     print(f"  Stop reason: {result.stop_reason}")
+    if result.cycle_id:
+        print(f"  Cycle ID: {result.cycle_id}")
     if result.langfuse_trace_id:
         print(f"  Langfuse trace: {result.langfuse_trace_id}")
     print(f"{'=' * 70}")
 
     return campaign_rounds
+
+
+# ---------------------------------------------------------------------------
+# Langfuse push / configure
+# ---------------------------------------------------------------------------
+
+
+def configure_langfuse(
+    *,
+    enabled: bool | None = None,
+    host: str | None = None,
+    public_key: str | None = None,
+    secret_key: str | None = None,
+) -> None:
+    """Configure Langfuse settings at runtime from a notebook cell.
+
+    Mutates the global settings singleton and resets the LangfuseLogger
+    singleton so the next call picks up new credentials.
+
+    Args:
+        enabled: Override ``LANGFUSE_ENABLED``.
+        host: Override ``LANGFUSE_HOST``.
+        public_key: Override ``LANGFUSE_PUBLIC_KEY``.
+        secret_key: Override ``LANGFUSE_SECRET_KEY``.
+    """
+    from api.config.settings import settings
+    from api.services.obs.langfuse_client import LangfuseLogger
+
+    changed = False
+    if enabled is not None:
+        settings.LANGFUSE_ENABLED = enabled
+        changed = True
+    if host is not None:
+        settings.LANGFUSE_HOST = host
+        changed = True
+    if public_key is not None:
+        settings.LANGFUSE_PUBLIC_KEY = public_key
+        changed = True
+    if secret_key is not None:
+        settings.LANGFUSE_SECRET_KEY = secret_key
+        changed = True
+
+    if changed:
+        LangfuseLogger.reset_instance()
+        lf = LangfuseLogger.get_instance()
+        status = "enabled" if lf.enabled else "disabled"
+        print(f"Langfuse reconfigured: {status}")
+
+
+def push_langfuse(store: "ProjectStore", backend_id: str) -> dict:
+    """Push all historical dataset_runs to cloud Langfuse (dataset-first).
+
+    Creates dataset items with ground truth, then one trace per run linked
+    to dataset items. Re-running is safe — already-pushed runs are skipped.
+    Old-format state is automatically reset.
+
+    Returns:
+        Stats dict from ``push_all_runs()``.
+    """
+    from api.services.obs.langfuse_push import push_all_runs
+
+    summaries = store.dataset_runs.list_all(backend_id)
+
+    print("=" * 70)
+    print("  LANGFUSE PUSH (dataset-first)")
+    print("=" * 70)
+    print(f"Found {len(summaries)} completed dataset runs for '{backend_id}'")
+
+    stats = push_all_runs(store, backend_id, on_progress=print)
+
+    if "error" in stats:
+        print(f"\nPush aborted: {stats['error']}")
+        return stats
+
+    new_runs = stats["new_runs"]
+    already = stats["already_done"]
+
+    if new_runs == 0:
+        print(f"\nAll {already} runs already pushed. Nothing to do.")
+    else:
+        print(f"\nPush complete: {new_runs} runs pushed to Langfuse")
+        print(f"Session: {stats['session_id']}")
+
+    print("=" * 70)
+    print("  PUSH SUMMARY")
+    print("=" * 70)
+    print(f"  Total runs on disk:  {stats['total_on_disk']}")
+    print(f"  Newly pushed:        {new_runs}")
+    print(f"  Already done:        {already}")
+    print(f"  Dataset:             {stats.get('dataset_name', 'N/A')}")
+    print(f"  Dataset items:       {stats.get('dataset_items', 0)}")
+
+    for origin, info in stats.get("origins", {}).items():
+        n = info["n_runs"]
+        items = info["total_items"]
+        best = info["best_accuracy"]
+        avg = info["avg_accuracy"]
+        print(f"\n  {origin}:")
+        print(f"    Runs: {n}, Items: {items}")
+        print(f"    Best accuracy: {best:.1%}, Avg: {avg:.1%}")
+
+    print("=" * 70)
+
+    return stats
+
+
+# Backward-compatible alias
+backfill_langfuse = push_langfuse

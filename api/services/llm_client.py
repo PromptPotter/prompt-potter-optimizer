@@ -4,6 +4,7 @@ LLM client abstraction layer.
 Provides a unified interface for Groq (default), OpenAI, and Anthropic APIs,
 with support for chat completions, JSON mode, and token tracking.
 """
+import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -23,6 +24,11 @@ OPENAI_MAX_RETRIES = 5
 GROQ_MAX_RETRIES = 3
 GROQ_TIMEOUT = 60.0
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+# App-level retry for transient errors (beyond SDK's own retry)
+_RETRY_STATUSES = {429, 502, 503}
+_MAX_APP_RETRIES = 3
+_BASE_DELAY = 1.0  # seconds
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +157,31 @@ class _OpenAICompatibleClient(LLMClientBase):
             request_params["response_format"] = {"type": "json_object"}
 
         request_params.update(kwargs)
-        response = await client.chat.completions.create(**request_params)
+
+        # App-level retry for transient server errors
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_APP_RETRIES + 1):
+            try:
+                response = await client.chat.completions.create(**request_params)
+                break
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                is_connection = "Connection" in type(exc).__name__
+                if status in _RETRY_STATUSES or is_connection:
+                    last_exc = exc
+                    if attempt < _MAX_APP_RETRIES:
+                        delay = _BASE_DELAY * (2 ** attempt)
+                        logger.warning(
+                            "%s request failed (attempt %d/%d, status=%s), "
+                            "retrying in %.1fs: %s",
+                            self._provider_name, attempt + 1,
+                            _MAX_APP_RETRIES + 1, status, delay, exc,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                raise
+        else:
+            raise last_exc  # type: ignore[misc]
 
         content = response.choices[0].message.content or ""
         parsed = (
@@ -399,28 +429,3 @@ def set_llm_client(client: LLMClientBase) -> None:
     """Set a custom LLM client (useful for testing)."""
     global _llm_client
     _llm_client = client
-
-
-# ---------------------------------------------------------------------------
-# Factory helpers (used by notebooks + future M3 nodes)
-# ---------------------------------------------------------------------------
-
-
-def make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase:
-    """Create an LLM client from a provider URL or key."""
-    if "groq.com" in provider_url:
-        return GroqClient(api_key=api_key)
-    elif "openai.com" in provider_url:
-        return OpenAIClient(api_key=api_key)
-    return GroqClient(api_key=api_key)
-
-
-def setup_llm(campaign_config: dict, api_key: str) -> tuple[LLMClientBase, str]:
-    """Create LLM client + model from campaign_config['eval_llm'].
-
-    Returns:
-        (llm_client, model) tuple for passing to service functions.
-    """
-    eval_llm = campaign_config["eval_llm"]
-    client = make_llm_client(eval_llm.get("provider_url", ""), api_key)
-    return client, eval_llm.get("model", "")

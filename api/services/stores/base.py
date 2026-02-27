@@ -2,7 +2,9 @@
 Shared I/O helpers for file-based stores.
 """
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -23,10 +25,25 @@ def validate_path_component(name: str) -> str:
 
 
 def write_json(path: Path, data: Any) -> None:
-    """Write *data* as pretty-printed JSON, creating parent dirs as needed."""
+    """Write *data* as pretty-printed JSON atomically.
+
+    Writes to a temp file in the same directory, then uses ``os.replace()``
+    to atomically swap it into place.  This prevents partial/corrupt files
+    if the process crashes mid-write.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, path)
+    except BaseException:
+        # Clean up temp file on failure (fd already closed by os.fdopen)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def read_json(path: Path) -> Any:

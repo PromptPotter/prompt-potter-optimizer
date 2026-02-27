@@ -2,10 +2,19 @@
 Dataset run (eval result caching) storage.
 """
 import json
+import logging
+import os
+import time
 from pathlib import Path
 from typing import Any
 
 from api.services.stores.base import read_json, validate_path_component, write_json
+
+logger = logging.getLogger(__name__)
+
+# Lock acquisition parameters
+_LOCK_RETRY_INTERVAL = 0.05  # seconds between retries
+_LOCK_TIMEOUT = 5.0  # seconds before treating lock as stale
 
 
 class DatasetRunStore:
@@ -23,6 +32,45 @@ class DatasetRunStore:
 
     # -- complete runs --------------------------------------------------------
 
+    @staticmethod
+    def _acquire_lock(lock_path: Path) -> None:
+        """Acquire an exclusive lock file, retrying on contention."""
+        deadline = time.monotonic() + _LOCK_TIMEOUT
+        while True:
+            try:
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                return
+            except FileExistsError:
+                # Check for stale lock (older than timeout)
+                try:
+                    age = time.monotonic() - os.path.getmtime(lock_path)
+                    if age > _LOCK_TIMEOUT:
+                        logger.warning("Removing stale lock file: %s (age=%.1fs)", lock_path, age)
+                        try:
+                            os.unlink(lock_path)
+                        except OSError:
+                            pass
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    logger.warning("Lock timeout on %s — breaking stale lock", lock_path)
+                    try:
+                        os.unlink(lock_path)
+                    except OSError:
+                        pass
+                    continue
+                time.sleep(_LOCK_RETRY_INTERVAL)
+
+    @staticmethod
+    def _release_lock(lock_path: Path) -> None:
+        """Release the lock file."""
+        try:
+            os.unlink(lock_path)
+        except OSError:
+            pass
+
     def save(
         self, backend_id: str, run_id: str, data: dict[str, Any],
     ) -> Path:
@@ -30,6 +78,10 @@ class DatasetRunStore:
 
         ``data`` must include at least ``run_id``, ``content_hash``, and
         ``scores``.
+
+        The detail file is written atomically (via ``write_json``).  The
+        index update is protected by an exclusive lock file to prevent
+        concurrent writers from losing entries.
         """
         detail_path = self._runs_dir(backend_id) / f"{run_id}.json"
         write_json(detail_path, data)
@@ -48,24 +100,31 @@ class DatasetRunStore:
         }
 
         index_path = self._index_path(backend_id)
-        if index_path.exists():
-            index = read_json(index_path)
-        else:
-            index = {"dataset_runs": [], "total": 0}
+        lock_path = index_path.with_suffix(".json.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        content_hash = data.get("content_hash", "")
-        entries = index["dataset_runs"]
-        replaced = False
-        for i, entry in enumerate(entries):
-            if entry.get("content_hash") == content_hash:
-                entries[i] = summary
-                replaced = True
-                break
-        if not replaced:
-            entries.append(summary)
+        self._acquire_lock(lock_path)
+        try:
+            if index_path.exists():
+                index = read_json(index_path)
+            else:
+                index = {"dataset_runs": [], "total": 0}
 
-        index["total"] = len(entries)
-        write_json(index_path, index)
+            content_hash = data.get("content_hash", "")
+            entries = index["dataset_runs"]
+            replaced = False
+            for i, entry in enumerate(entries):
+                if entry.get("content_hash") == content_hash:
+                    entries[i] = summary
+                    replaced = True
+                    break
+            if not replaced:
+                entries.append(summary)
+
+            index["total"] = len(entries)
+            write_json(index_path, index)
+        finally:
+            self._release_lock(lock_path)
 
         return detail_path
 

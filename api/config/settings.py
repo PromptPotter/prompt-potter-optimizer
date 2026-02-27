@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     LANGFUSE_ENABLED: bool = True
 
+    # File-based observability (traces, experiments, events.jsonl)
+    OBS_ENABLED: bool = True
+
     model_config = {"env_file": ".env", "case_sensitive": True, "extra": "ignore"}
 
 

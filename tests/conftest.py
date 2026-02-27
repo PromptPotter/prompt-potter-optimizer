@@ -3,7 +3,7 @@ import pytest
 
 import api.services.llm_client as llm_mod
 from api.services.llm_client import MockLLMClient
-from api.services.langfuse_client import LangfuseLogger
+from api.services.obs.langfuse_client import LangfuseLogger
 from api.services.project_store import ProjectStore
 
 
@@ -23,8 +23,24 @@ def tmp_store(tmp_path):
     return ProjectStore(base_dir=tmp_path)
 
 
+@pytest.fixture
+def store(tmp_store):
+    """Alias for tmp_store — used by campaign and e2e tests."""
+    return tmp_store
+
+
 @pytest.fixture(autouse=True)
 def _reset_langfuse():
     """Reset the LangfuseLogger singleton after every test."""
     yield
     LangfuseLogger.reset_instance()
+
+
+@pytest.fixture
+def eval_data():
+    """Standard 3-query eval dataset used by feedback cycle tests."""
+    return [
+        {"query": "aspirin", "ground_truth": "Aspirin"},
+        {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
+        {"query": "acetaminophen", "ground_truth": "Acetaminophen"},
+    ]

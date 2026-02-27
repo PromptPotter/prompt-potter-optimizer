@@ -9,7 +9,7 @@ Executes CWL-inspired workflow definitions by:
 """
 from typing import Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import uuid
 import yaml
@@ -45,7 +45,7 @@ class WorkflowContext(BaseModel):
 
 def generate_trace_id() -> str:
     """Generate a unique trace ID with timestamp prefix."""
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     short_uuid = str(uuid.uuid4())[:8]
     return f"trace_{timestamp}_{short_uuid}"
 
@@ -209,14 +209,14 @@ class WorkflowRunner:
             WorkflowContext with all outputs and metrics
         """
         # Initialize Langfuse logger (singleton, no-op if disabled)
-        from api.services.langfuse_client import LangfuseLogger
+        from api.services.obs.langfuse_client import LangfuseLogger
         langfuse = LangfuseLogger.get_instance()
 
         context = WorkflowContext(
             workflow_id=self.workflow.id,
             trace_id=trace_id or generate_trace_id(),
             inputs=inputs,
-            start_time=datetime.utcnow().isoformat() + "Z",
+            start_time=datetime.now(timezone.utc).isoformat() + "Z",
             status="running"
         )
 
@@ -323,12 +323,12 @@ class WorkflowRunner:
             context.metrics.append({
                 "error": str(e),
                 "step_id": step_id if "step_id" in locals() else None,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
             })
             raise
 
         finally:
-            context.end_time = datetime.utcnow().isoformat() + "Z"
+            context.end_time = datetime.now(timezone.utc).isoformat() + "Z"
 
             # Update Langfuse trace with final output and flush
             if context.langfuse_trace_id:

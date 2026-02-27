@@ -1,7 +1,7 @@
 # Product Requirements Document: PromptPotter Optimizer
 
-**Version:** 0.7.0
-**Date:** 2026-02-25
+**Version:** 0.9.0
+**Date:** 2026-02-27
 **Status:** Active
 **Depends on:** [Project Charter v0.7.0](project-charter.md)
 
@@ -26,10 +26,11 @@
 | P1.7 | Pipeline Parameter Passthrough | P1 | Implemented (M1) |
 | P1.8 | Sensitivity Scan | P1 | Implemented (M3) |
 | P1.9 | Data Loop (Eval Reuse) | P1 | Implemented (M3) |
-| P1.10 | File-Based Observability | P1 | Planned (M5) |
-| P1.11 | LLM Retry Logic | P1 | Planned (M5) |
+| P1.10 | File-Based Observability | P1 | Complete (M5) |
+| P1.11 | LLM Retry Logic | P1 | Complete (M5) |
 | P1.12 | Workflow-Driven Optimization | P1 | Planned (M6) |
 | P1.13 | Multi-Connector Support | P1 | Planned (M7) |
+| P1.14 | PipelineSchema | P1 | Planned (M6) |
 | P2.1 | Evolutionary Operators | P2 | Planned |
 | P2.2 | MCP Server Mode | P2 | Planned |
 | P2.3 | Streamlit Dashboard | P2 | Planned |
@@ -48,47 +49,25 @@
 
 ## P0 -- Must Have (Core Optimizer)
 
-All P0 requirements are implemented. Implementation references point to source files.
-
-| ID | What | Implementation |
-|----|------|---------------|
-| P0.1 | Backend eval via `/matches` with content-addressed dedup and crash recovery | `prompt_eval.py` |
-| P0.2 | Failure analysis with categorized patterns and suggestions | `prompt_optimizer.py` -- `generate_suggestions()` |
-| P0.3 | LLM meta-prompt candidate generation with lineage | `prompt_optimizer.py` -- `generate_candidates()` |
-| P0.4 | Optimization loop with patience-based stopping | `feedback_cycle.py`, `_campaign_lib.py` |
-| P0.5 | Immutable 3-layer PromptState with `render()`, `derive()`, `diff()` | `api/models/prompt_state.py` |
-| P0.6 | Grid search with sampling, plan persistence, LLM analysis | `search/grid_core.py`, `search/context.py`, `search/plan_persistence.py` |
+P0.1–P0.6: All implemented (M1–M2). Backend evaluation with content-addressed dedup and crash recovery, failure analysis, LLM candidate generation, optimization loop with patience-based stopping, immutable 3-layer PromptState, grid search with sampling and plan persistence. See `api/services/` for implementations.
 
 ---
 
 ## P1 -- Should Have (M3 Optimization Infrastructure)
 
-All P1 requirements are implemented.
-
-| ID | What | Implementation |
-|----|------|---------------|
-| P1.1 | InitNode, GrowFilterNode, AnalysisEvalNode wrapping service logic | `api/nodes/optimizer_nodes.py` |
-| P1.2 | `run_feedback_cycle()` with 3-path routing, patience, progress callbacks | `feedback_cycle.py` |
-| P1.3 | CampaignStore + campaign_registry for campaign/trial persistence | `campaign_registry.py`, `stores/campaign_store.py` |
-| P1.4 | Per-trial Langfuse tracing with scores and campaign grouping | `langfuse_client.py`, integrated in `feedback_cycle.py` |
-| P1.5 | Backend pipeline discovery via `GET /pipeline` | `backend_client.py` |
-| P1.6 | Statistical comparison (McNemar, Wilcoxon, hit@k) | `comparison.py` |
-| P1.7 | Pipeline parameter passthrough to backend | `backend_client.py` |
-| P1.8 | OAT sensitivity scan with axis classification and diagnostic set | `search/smart_search.py` |
-| P1.9 | Shared dataset_runs store + coverage advisor for eval reuse | `search/coverage.py` |
+P1.1–P1.9: All implemented (M1–M3). Optimizer nodes, feedback cycling with 3-path routing, campaign registry, Langfuse per-trial tracing, discovery protocol, ablation comparison, parameter passthrough, sensitivity scan, shared data loop. See `api/services/` and `api/nodes/` for implementations.
 
 ---
 
 ## P1 (continued) -- Should Have (M5–M7 Infrastructure)
 
-Requirements added for milestones M5–M7. See individual milestone specs for full details.
-
 | ID | What | Implementation | Milestone |
 |----|------|---------------|-----------|
-| P1.10 | File-based observability: Langfuse-compatible traces + MLflow-compatible experiments on disk. Prompt versioning. | [M5 spec](m5-observability.md) — `observability_logger.py` | M5 |
-| P1.11 | LLM retry logic: exponential backoff for transient 503/429 errors in `llm_client.py` | [M5 spec](m5-observability.md) — WP 5.3 | M5 |
+| P1.10 | File-based observability: Langfuse-compatible traces + MLflow-compatible experiments on disk. Prompt versioning. | `api/services/obs/observability_logger.py` | M5 (Complete) |
+| P1.11 | LLM retry logic: exponential backoff for transient 503/429 errors in `llm_client.py` | `api/services/llm_client.py` | M5 (Complete) |
 | P1.12 | Workflow-driven optimization: `WorkflowRunner` with `runtime_config`, `FeedbackCycleNode`, `DatasetLoadNode`, YAML campaigns | [M6 spec](m6-workflow-migration.md) | M6 |
 | P1.13 | Multi-connector support: `ConnectorProtocol`, `MockConnector`, `ConnectorRegistry`, backend-agnostic evaluation | [M7 spec](m7-multi-connector.md) | M7 |
+| P1.14 | PipelineSchema: backend-agnostic pipeline description as single source of truth. Eliminates 13 backend-specific assumptions. Derived from backend discovery, consumed by all services. | [M6 spec](m6-workflow-migration.md) — WP 6.1–6.2 | M6 |
 
 ---
 
@@ -141,7 +120,8 @@ Requirements added for milestones M5–M7. See individual milestone specs for fu
 | P1.11 LLM Retry Logic | x | | | x | | | x | |
 | P1.12 Workflow-Driven Optimization | | x | | x | | x | | x |
 | P1.13 Multi-Connector | | | | | | x | | x |
+| P1.14 PipelineSchema | | | | | | x | | x |
 | P2.4 Non-Prompt Targets | x | | | | | x | | |
 
 **SC7: Observability** — File-based Langfuse traces, MLflow experiments, prompt versioning (M5).
-**SC8: Workflow** — YAML-defined campaigns, runtime_config DI, multi-connector support (M6, M7).
+**SC8: Workflow** — YAML-defined campaigns, runtime_config DI, PipelineSchema, multi-connector support (M6, M7).

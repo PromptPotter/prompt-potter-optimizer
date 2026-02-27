@@ -7,7 +7,7 @@ Each node has strongly-typed input/output models and a consistent execution inte
 from abc import ABC, abstractmethod
 from typing import Any, TypeVar, Generic, Type
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 
 
@@ -123,7 +123,7 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
             Exception: Any exception from _execute is re-raised with metrics captured
         """
         start = time.time()
-        start_time = datetime.utcnow().isoformat() + "Z"
+        start_time = datetime.now(timezone.utc).isoformat() + "Z"
         error_msg = None
 
         try:
@@ -151,7 +151,7 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
             raise
 
         finally:
-            end_time = datetime.utcnow().isoformat() + "Z"
+            end_time = datetime.now(timezone.utc).isoformat() + "Z"
             duration_ms = (time.time() - start) * 1000
 
             self._last_metrics = NodeMetrics(

@@ -25,15 +25,6 @@ WORKFLOW_PATH = Path(__file__).parent.parent / "workflows" / "optimizer_single_p
 
 
 @pytest.fixture
-def eval_data():
-    return [
-        {"query": "aspirin", "ground_truth": "Aspirin"},
-        {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
-        {"query": "acetaminophen", "ground_truth": "Acetaminophen"},
-    ]
-
-
-@pytest.fixture
 def workflow_def():
     """Load the optimizer single-pass workflow definition."""
     return WorkflowRunner.from_yaml(WORKFLOW_PATH)

@@ -4,7 +4,6 @@ One-at-a-time (OAT) perturbation scanning and importance-weighted
 coordinate descent over prompt-field and pipeline-param axes.
 """
 
-import hashlib
 import logging
 import random
 from collections import defaultdict
@@ -14,13 +13,8 @@ import pandas as pd
 
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
-from api.services.prompt_eval import (
-    HASH_TRUNCATE,
-    backend_reranker_eval,
-    build_dataset_run_data,
-    compute_accuracy,
-    eval_content_hash,
-)
+from api.services.prompt_eval import evaluate_prompt_cached
+from api.services.search.utils import preview as _preview
 
 logger = logging.getLogger(__name__)
 
@@ -141,148 +135,6 @@ def classify_axis(
     return "high"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-# Re-export for backward compatibility (synthesis.py imports from here)
-from api.services.search.utils import preview as _preview  # noqa: E402
-
-
-async def _eval_config(
-    rendered_prompt: str,
-    eval_data: list,
-    backend_client: Any,
-    pipeline_params: dict | None = None,
-    request_delay: float = 1.0,
-    store: ProjectStore | None = None,
-    backend_id: str = "",
-    prompt_result_index: dict | None = None,
-) -> dict:
-    """Evaluate a single config against the diagnostic set.
-
-    Returns dict with keys: hits, total, accuracy, errors, results, cached.
-    ``results`` contains per-query dicts; ``cached`` indicates cache hit.
-    Uses content-hash caching when store is available, then falls back to
-    the cross-run ``prompt_result_index`` for query-level historical lookups.
-    """
-    import asyncio
-
-    content_hash = eval_content_hash(rendered_prompt, eval_data, "", 0.0)
-
-    # Check exact content-hash cache (prompt + exact query set)
-    if store and backend_id:
-        existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
-        if existing:
-            return {
-                **existing["scores"],
-                "results": existing.get("dataset_run_items", []),
-                "cached": True,
-            }
-
-    # Check cross-run historical index (query-level lookups)
-    if prompt_result_index and eval_data:
-        rp_hash = hashlib.sha256(
-            rendered_prompt.encode(),
-        ).hexdigest()[:HASH_TRUNCATE]
-        cached_by_query = prompt_result_index.get(rp_hash, {})
-        if cached_by_query:
-            n_matched = sum(
-                1 for qd in eval_data if qd.get("query", "") in cached_by_query
-            )
-            coverage = n_matched / len(eval_data)
-            if coverage >= 1.0:
-                # Full historical coverage — skip backend entirely
-                matched = [
-                    cached_by_query[qd["query"]] for qd in eval_data
-                ]
-                acc = compute_accuracy(matched)
-                logger.info(
-                    "_eval_config [historical] full coverage (%d/%d queries)",
-                    n_matched, len(eval_data),
-                )
-                return {**acc, "results": matched, "cached": True}
-            if coverage > 0:
-                logger.info(
-                    "_eval_config [historical] partial coverage: "
-                    "%.0f%% (%d/%d queries)",
-                    coverage * 100, n_matched, len(eval_data),
-                )
-                # Continue below — evaluate only missing queries
-
-    run_id = f"scan_{content_hash[:8]}"
-
-    # Resume from partial results if available
-    results: list[dict] = []
-    start_idx = 0
-    if store and backend_id:
-        partial = store.dataset_runs.load_partial_eval(backend_id, run_id)
-        if partial:
-            results = partial
-            start_idx = len(partial)
-            logger.info(
-                "_eval_config [%s] resuming from query %d/%d (partial)",
-                run_id, start_idx + 1, len(eval_data),
-            )
-
-    # Determine which queries still need backend evaluation
-    # If we got partial historical coverage, only evaluate missing queries
-    queries_to_eval = eval_data
-    historical_results: list[dict] = []
-    if prompt_result_index and eval_data and not results:
-        rp_hash = hashlib.sha256(
-            rendered_prompt.encode(),
-        ).hexdigest()[:HASH_TRUNCATE]
-        cached_by_query = prompt_result_index.get(rp_hash, {})
-        if cached_by_query:
-            queries_to_eval = []
-            for qd in eval_data:
-                q = qd.get("query", "")
-                if q in cached_by_query:
-                    historical_results.append(cached_by_query[q])
-                else:
-                    queries_to_eval.append(qd)
-
-    n_to_eval = len(queries_to_eval)
-    for qi in range(start_idx, n_to_eval):
-        qd = queries_to_eval[qi]
-        logger.info(
-            "_eval_config [%s] query %d/%d: %s",
-            run_id, qi + 1, n_to_eval, qd["query"][:60],
-        )
-        result = await backend_reranker_eval(
-            qd, backend_client, rendered_prompt,
-            pipeline_params=pipeline_params,
-        )
-        hit_str = "HIT" if result.get("hit") else "MISS"
-        logger.info(
-            "_eval_config [%s] query %d/%d -> %s  pred=%s",
-            run_id, qi + 1, n_to_eval, hit_str,
-            (result.get("predicted") or "")[:50],
-        )
-        results.append(result)
-        if store and backend_id:
-            store.dataset_runs.append_eval_item(backend_id, run_id, result)
-        if request_delay > 0:
-            await asyncio.sleep(request_delay)
-
-    # Merge historical results with freshly evaluated results
-    all_results = historical_results + results
-    acc = compute_accuracy(all_results)
-
-    if store and backend_id:
-        run_data = build_dataset_run_data(
-            run_id, "scan", content_hash, "",
-            rendered_prompt, "", 0.0, acc, all_results,
-        )
-        store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
-
-    return {
-        **acc,
-        "results": all_results,
-        "cached": len(results) == 0 and len(historical_results) > 0,
-    }
-
 
 # ---------------------------------------------------------------------------
 # Sensitivity scan
@@ -298,7 +150,6 @@ async def sensitivity_scan(
     store: ProjectStore | None = None,
     backend_id: str = "",
     pipeline_params: dict | None = None,
-    request_delay: float = 1.0,
     session_terms: list | None = None,
     progress_cb: Callable | None = None,
     prompt_result_index: dict | None = None,
@@ -320,7 +171,6 @@ async def sensitivity_scan(
         store: Optional ProjectStore for caching.
         backend_id: Backend identifier.
         pipeline_params: Base pipeline parameters.
-        request_delay: Delay between backend calls.
         session_terms: Optional session terms for backend init.
         progress_cb: Optional callback ``(event: dict) -> None`` for
             progress reporting. Event types: ``baseline_done``,
@@ -335,16 +185,20 @@ async def sensitivity_scan(
         await backend_client.init_session(session_terms)
 
     base_params = dict(pipeline_params or {})
-    baseline_rendered = baseline_ps.render()
+
+    async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
+        """Evaluate a PromptState and return {**scores, results, cached}."""
+        results, scores, cached = await evaluate_prompt_cached(
+            ps, eval_data, backend_client,
+            pipeline_params=pp or base_params,
+            store=store, backend_id=backend_id,
+            label="scan",
+            prompt_result_index=prompt_result_index,
+        )
+        return {**scores, "results": results, "cached": cached}
 
     # Evaluate baseline
-    baseline_scores = await _eval_config(
-        baseline_rendered, eval_data, backend_client,
-        pipeline_params=base_params,
-        request_delay=request_delay,
-        store=store, backend_id=backend_id,
-        prompt_result_index=prompt_result_index,
-    )
+    baseline_scores = await _eval_ps(baseline_ps)
     baseline_acc = baseline_scores["accuracy"]
     _cb({
         "type": "baseline_done",
@@ -386,74 +240,37 @@ async def sensitivity_scan(
             # Skip the baseline value for each axis
             if axis_type == "prompt_field":
                 current_val = getattr(baseline_ps, axis_name, "")
-                if value == current_val:
-                    delta = 0.0
-                    acc = baseline_acc
-                    rows.append({
-                        "axis": axis_name, "axis_type": axis_type,
-                        "value_idx": vi,
-                        "value_preview": _preview(value),
-                        "hits": baseline_scores["hits"],
-                        "total": baseline_scores["total"],
-                        "accuracy": acc, "delta": delta,
-                    })
-                    axis_stats[axis_name].append(delta)
-                    _cb({
-                        "type": "variant_done",
-                        "axis": axis_name, "value_idx": vi,
-                        "value_preview": _preview(value),
-                        "is_baseline_value": True,
-                        "accuracy": acc, "delta": delta,
-                        "hits": baseline_scores["hits"],
-                        "total": baseline_scores["total"],
-                        "results": [], "cached": False,
-                    })
-                    continue
-
-                perturbed = baseline_ps.derive(**{axis_name: value})
-                rendered = perturbed.render()
-                scores = await _eval_config(
-                    rendered, eval_data, backend_client,
-                    pipeline_params=base_params,
-                    request_delay=request_delay,
-                    store=store, backend_id=backend_id,
-                    prompt_result_index=prompt_result_index,
-                )
             else:
-                # Pipeline param
                 current_val = base_params.get(axis_name)
-                if value == current_val:
-                    delta = 0.0
-                    acc = baseline_acc
-                    rows.append({
-                        "axis": axis_name, "axis_type": axis_type,
-                        "value_idx": vi,
-                        "value_preview": _preview(value),
-                        "hits": baseline_scores["hits"],
-                        "total": baseline_scores["total"],
-                        "accuracy": acc, "delta": delta,
-                    })
-                    axis_stats[axis_name].append(delta)
-                    _cb({
-                        "type": "variant_done",
-                        "axis": axis_name, "value_idx": vi,
-                        "value_preview": _preview(value),
-                        "is_baseline_value": True,
-                        "accuracy": acc, "delta": delta,
-                        "hits": baseline_scores["hits"],
-                        "total": baseline_scores["total"],
-                        "results": [], "cached": False,
-                    })
-                    continue
 
+            if value == current_val:
+                rows.append({
+                    "axis": axis_name, "axis_type": axis_type,
+                    "value_idx": vi,
+                    "value_preview": _preview(value),
+                    "hits": baseline_scores["hits"],
+                    "total": baseline_scores["total"],
+                    "accuracy": baseline_acc, "delta": 0.0,
+                })
+                axis_stats[axis_name].append(0.0)
+                _cb({
+                    "type": "variant_done",
+                    "axis": axis_name, "value_idx": vi,
+                    "value_preview": _preview(value),
+                    "is_baseline_value": True,
+                    "accuracy": baseline_acc, "delta": 0.0,
+                    "hits": baseline_scores["hits"],
+                    "total": baseline_scores["total"],
+                    "results": [], "cached": False,
+                })
+                continue
+
+            if axis_type == "prompt_field":
+                perturbed = baseline_ps.derive(**{axis_name: value})
+                scores = await _eval_ps(perturbed)
+            else:
                 perturbed_params = {**base_params, axis_name: value}
-                scores = await _eval_config(
-                    baseline_rendered, eval_data, backend_client,
-                    pipeline_params=perturbed_params,
-                    request_delay=request_delay,
-                    store=store, backend_id=backend_id,
-                    prompt_result_index=prompt_result_index,
-                )
+                scores = await _eval_ps(baseline_ps, perturbed_params)
 
             acc = scores["accuracy"]
             delta = acc - baseline_acc
@@ -608,7 +425,6 @@ async def adaptive_search(
     store: ProjectStore | None = None,
     backend_id: str = "",
     pipeline_params: dict | None = None,
-    request_delay: float = 1.0,
     session_terms: list | None = None,
     progress_cb: Callable | None = None,
     prompt_result_index: dict | None = None,
@@ -632,7 +448,6 @@ async def adaptive_search(
         store: Optional ProjectStore for caching.
         backend_id: Backend identifier.
         pipeline_params: Base pipeline parameters.
-        request_delay: Delay between backend calls.
         session_terms: Optional session terms.
         progress_cb: Optional callback ``(event: dict) -> None`` for
             progress reporting. Event types: ``round_start``,
@@ -657,15 +472,19 @@ async def adaptive_search(
     resolved_axes: set[str] = set()
     log_rows: list[dict] = []
 
+    async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
+        """Evaluate a PromptState and return {**scores, results, cached}."""
+        results, scores, cached = await evaluate_prompt_cached(
+            ps, eval_data, backend_client,
+            pipeline_params=pp or current_params,
+            store=store, backend_id=backend_id,
+            label="scan",
+            prompt_result_index=prompt_result_index,
+        )
+        return {**scores, "results": results, "cached": cached}
+
     # Get baseline accuracy
-    baseline_rendered = current_ps.render()
-    baseline_scores = await _eval_config(
-        baseline_rendered, eval_data, backend_client,
-        pipeline_params=current_params,
-        request_delay=request_delay,
-        store=store, backend_id=backend_id,
-        prompt_result_index=prompt_result_index,
-    )
+    baseline_scores = await _eval_ps(current_ps)
     current_acc = baseline_scores["accuracy"]
 
     for round_num in range(1, max_rounds + 1):
@@ -720,19 +539,12 @@ async def adaptive_search(
             for value in values:
                 if axis_type == "prompt_field":
                     test_ps = current_ps.derive(**{axis_name: value})
-                    rendered = test_ps.render()
                     test_params = current_params
                 else:
-                    rendered = current_ps.render()
+                    test_ps = current_ps
                     test_params = {**current_params, axis_name: value}
 
-                scores = await _eval_config(
-                    rendered, eval_data, backend_client,
-                    pipeline_params=test_params,
-                    request_delay=request_delay,
-                    store=store, backend_id=backend_id,
-                    prompt_result_index=prompt_result_index,
-                )
+                scores = await _eval_ps(test_ps, test_params)
 
                 delta = scores["accuracy"] - current_acc
                 log_rows.append({

@@ -153,14 +153,12 @@ async def get_campaign_lineage(
     backend_id: str = Query(..., description="Backend identifier"),
 ):
     """Reconstruct the PromptState lineage chain for a campaign."""
-    from api.services.campaign_registry import get_campaign_lineage
-
     store = _get_store()
-    campaign = store.campaigns.load(backend_id, campaign_id)
-    if campaign is None:
-        raise HTTPException(404, f"Campaign not found: {campaign_id}")
-
-    lineage = get_campaign_lineage(store, backend_id, campaign_id)
+    lineage = store.campaigns.get_lineage(backend_id, campaign_id)
+    if not lineage:
+        # Check if campaign exists at all vs just having no trials
+        if store.campaigns.load(backend_id, campaign_id) is None:
+            raise HTTPException(404, f"Campaign not found: {campaign_id}")
     return CampaignLineageResponse(
         campaign_id=campaign_id,
         lineage=[LineageEntry(**e) for e in lineage],
