@@ -2,8 +2,8 @@
 import hashlib
 
 from api.models.prompt_state import PromptState
-from api.services.search import (
-    build_data_inventory,
+from api.services.search import build_data_inventory
+from api.services.search.plan_persistence import (
     serialize_grid_plan,
     serialize_smart_search_plan,
 )

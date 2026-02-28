@@ -66,7 +66,7 @@ The AI Loop is implemented by `feedback_cycle.py` orchestrating three optimizer 
 |------|-------|
 | **InitNode** | `search.context.restructure_context()` -> initial PromptState |
 | **GrowFilterNode** | `prompt_optimizer.generate_candidates()` -> N variant PromptStates |
-| **AnalysisEvalNode** | `prompt_eval.evaluate_prompt_cached()` + `select_round_winner()` + `generate_suggestions()` -> scores + `next_action` routing |
+| **AnalysisEvalNode** | `prompt_eval.evaluate_prompt_cached()` + `_select_round_winner()` + `generate_suggestions()` -> scores + `next_action` routing |
 
 Three feedback paths with escalation: **Layer 1 (Generate)** every pass, **Layer 2 (Refine Context)** when Layer 1 stalls, **Layer 3 (Modify Plan)** rarely. Stopping: `max_rounds`, `patience`, `next_action == "stop"`, or perfect accuracy.
 

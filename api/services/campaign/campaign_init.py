@@ -12,6 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 from api.models.backend import BackendConnection
 from api.services.backend_client import BackendClient
+from api.services.constants import DATASET_NAME
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
@@ -160,7 +161,6 @@ async def run_baseline_eval(
     # Register dataset items in obs if available
     if obs and eval_data:
         try:
-            from api.services.constants import DATASET_NAME
             obs.register_dataset(DATASET_NAME, eval_data)
         except Exception:
             logger.warning("Dataset registration in run_baseline_eval failed", exc_info=True)

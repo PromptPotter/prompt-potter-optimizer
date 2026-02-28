@@ -87,7 +87,6 @@ class EvaluatorBase(ABC):
         self,
         expected: dict[str, Any],
         actual: dict[str, Any],
-        field_rules: dict[str, str] | None = None
     ) -> EvaluationOutput:
         """
         Evaluate workflow output with optional field-level rules.
@@ -95,8 +94,6 @@ class EvaluatorBase(ABC):
         Args:
             expected: Expected output dict
             actual: Actual output dict
-            field_rules: Optional per-field evaluator types
-                         e.g., {"name": "exact", "description": "substring"}
 
         Returns:
             EvaluationOutput with field-level details
@@ -135,7 +132,3 @@ class EvaluatorBase(ABC):
             reason=None if all_passed else "One or more fields did not match"
         )
 
-    @classmethod
-    def get_evaluator_type(cls) -> str:
-        """Return the evaluator type identifier."""
-        return cls.__name__

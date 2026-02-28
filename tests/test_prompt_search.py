@@ -5,11 +5,8 @@ import pandas as pd
 import pytest
 
 from api.config.settings import load_variant_library
-from api.services.search import (
-    build_diagnostic_set,
-    classify_axis,
-    select_grid_winner,
-)
+from api.services.search import build_diagnostic_set, select_grid_winner
+from api.services.search.smart_search import classify_axis
 
 
 # ---------------------------------------------------------------------------

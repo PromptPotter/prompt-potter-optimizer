@@ -23,9 +23,16 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+from api.services.constants import DATASET_NAME
+
+if TYPE_CHECKING:
+    from api.services.obs.observability_logger import ObsLogger
+    from api.services.project_store import ProjectStore
+    from api.services.stores.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +104,7 @@ class _LoopState:
     best_ps: dict = field(default_factory=dict)
     stall_count: int = 0
     backend_client: Any = None   # BackendClient (future: ConnectorProtocol)
-    store: Any = None            # ProjectStore | None
+    store: "ProjectStore | None" = None
 
 
 def cycle_config_identity(
@@ -154,7 +161,7 @@ def _round_result_from_detail(detail: dict) -> CycleRoundResult:
 
 def _restore_completed_result(
     campaign_data: dict,
-    store: Any,
+    store: "CampaignStore",
     backend_id: str,
     cycle_id: str,
 ) -> CycleResult:
@@ -183,7 +190,7 @@ def _restore_completed_result(
 
 def _restore_round_state(
     campaign_data: dict,
-    store: Any,
+    store: "CampaignStore",
     backend_id: str,
     cycle_id: str,
     threshold: float,
@@ -270,7 +277,6 @@ def _init_obs(
         logger.warning("ObsLogger.log_campaign_start failed", exc_info=True)
 
     try:
-        from api.services.constants import DATASET_NAME
         dataset_name = DATASET_NAME
         dataset_item_map = obs.register_dataset(dataset_name, eval_data)
         if dataset_item_map:
@@ -380,11 +386,11 @@ async def _execute_round(
     state: _LoopState,
     round_eval_data: list[dict],
     config: CycleConfig,
-    obs: Any | None,
+    obs: "ObsLogger | None",
     obs_campaign_id: str,
     dataset_name: str | None,
     dataset_item_map: dict[str, str] | None,
-    campaign_store: Any | None,
+    campaign_store: "CampaignStore | None",
     cycle_id: str | None,
     on_candidate_eval: Callable | None,
     on_query_eval: Callable | None,
@@ -481,9 +487,8 @@ async def _execute_round(
                 rounds_for_suggestions, round_eval_data, {},
                 llm_client, model=config.model,
             )
-            from api.services.constants import NEXT_ACTIONS
             next_action = suggestions.get("next_action", "generate")
-            if next_action in NEXT_ACTIONS:
+            if next_action in ("generate", "refine_context", "modify_plan", "stop"):
                 eval_out["next_action"] = next_action
             eval_out["suggestions"] = suggestions
         except Exception:
@@ -548,13 +553,13 @@ async def _execute_round(
 
 
 def _finalize_campaign(
-    campaign_store: Any | None,
+    campaign_store: "CampaignStore | None",
     cycle_id: str | None,
     config: CycleConfig,
     state: _LoopState,
     stop_reason: str,
     finished_at: str,
-    obs: Any | None,
+    obs: "ObsLogger | None",
     obs_campaign_id: str,
 ) -> str | None:
     """Mark campaign complete on disk and finalize observability.

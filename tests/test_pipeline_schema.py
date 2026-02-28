@@ -187,7 +187,7 @@ class TestTermNormConsistency:
 
     def test_dataset_name_matches_dataset_name(self):
         """Must match DATASET_NAME in langfuse_push.py:54."""
-        from api.services.obs.langfuse_push import DATASET_NAME
+        from api.services.constants import DATASET_NAME
 
         assert TERMNORM_DEFAULT_SCHEMA.dataset_name == DATASET_NAME
 

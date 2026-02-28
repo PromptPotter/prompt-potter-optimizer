@@ -244,7 +244,7 @@ class AnalysisEvalOutput(BaseModel):
 class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
     """Evaluate candidates via backend, select winner, generate suggestions.
 
-    Wraps ``evaluate_prompt_cached()``, ``select_round_winner()``, and
+    Wraps ``evaluate_prompt_cached()``, ``_select_round_winner()``, and
     ``generate_suggestions()`` from ``api.services``.  Evaluation uses the
     evaluator framework (``api.evaluators.exact_match.ExactMatchEvaluator``)
     via the ``prompt_eval`` service.

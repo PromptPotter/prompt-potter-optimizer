@@ -16,6 +16,7 @@ from api.services.prompt_eval import compute_accuracy
 
 if TYPE_CHECKING:
     from api.services.backend_client import BackendClient
+    from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -190,7 +191,7 @@ async def generate_candidates(
     return candidates
 
 
-def select_round_winner(
+def _select_round_winner(
     candidates: list[PromptState],
     all_candidate_results: dict[str, list[dict]],
     current_best: dict[str, Any],
@@ -378,7 +379,7 @@ async def evaluate_and_select_winner(
     temperature: float = 0.0,
     on_candidate_eval: Callable | None = None,
     on_query_eval: Callable | None = None,
-    obs: Any = None,
+    obs: "ObsLogger | None" = None,
     dataset_name: str | None = None,
     dataset_item_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -430,7 +431,7 @@ async def evaluate_and_select_winner(
     if isinstance(cb.get("prompt_state"), dict):
         cb["prompt_state"] = PromptState(**cb["prompt_state"])
 
-    winner_entry = select_round_winner(
+    winner_entry = _select_round_winner(
         ps_candidates, all_candidate_results, cb, improvement_threshold,
     )
 

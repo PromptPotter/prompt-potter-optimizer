@@ -1,9 +1,9 @@
 """
-Evaluator registry for workflow evaluation.
+Evaluator module for workflow evaluation.
 
-Provides registration and discovery of evaluator types.
+Provides ExactMatchEvaluator and a simple lookup function.
 """
-from typing import Any, Type
+from typing import Any
 
 from .base import (
     EvaluatorBase,
@@ -11,41 +11,16 @@ from .base import (
     EvalResult,
 )
 from .exact_match import ExactMatchEvaluator
-from .criteria import CriteriaEvaluator
-
-
-# Global evaluator registry
-_EVALUATOR_REGISTRY: dict[str, Type[EvaluatorBase]] = {}
-
-
-def register_evaluator(evaluator_class: Type[EvaluatorBase]) -> Type[EvaluatorBase]:
-    """
-    Register an evaluator class in the registry.
-
-    Args:
-        evaluator_class: Evaluator class to register
-
-    Returns:
-        The evaluator class (for decorator usage)
-    """
-    evaluator_type = evaluator_class.get_evaluator_type()
-    _EVALUATOR_REGISTRY[evaluator_type] = evaluator_class
-
-    # Also register lowercase version for convenience
-    _EVALUATOR_REGISTRY[evaluator_type.lower()] = evaluator_class
-
-    return evaluator_class
 
 
 def get_evaluator(
     evaluator_type: str,
-    config: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None,
 ) -> EvaluatorBase:
-    """
-    Get an evaluator instance by type name.
+    """Get an evaluator instance by type name.
 
     Args:
-        evaluator_type: Evaluator type name (e.g., "exact_match", "criteria")
+        evaluator_type: Evaluator type name (e.g., "exact_match", "exact")
         config: Optional evaluator configuration
 
     Returns:
@@ -54,44 +29,12 @@ def get_evaluator(
     Raises:
         ValueError: If evaluator type not found
     """
-    evaluator_class = _EVALUATOR_REGISTRY.get(evaluator_type)
-
-    if not evaluator_class:
-        # Try common aliases
-        aliases = {
-            "exact": ExactMatchEvaluator,
-            "exact_match": ExactMatchEvaluator,
-            "exactmatch": ExactMatchEvaluator,
-            "criteria": CriteriaEvaluator,
-            "llm": CriteriaEvaluator,
-            "llm_judge": CriteriaEvaluator,
-            "semantic": CriteriaEvaluator,
-        }
-        evaluator_class = aliases.get(evaluator_type.lower())
-
-    if not evaluator_class:
-        available = list_evaluator_types()
-        raise ValueError(
-            f"Unknown evaluator type: '{evaluator_type}'. "
-            f"Available: {available}"
-        )
-
-    return evaluator_class(config)
-
-
-def list_evaluator_types() -> list[str]:
-    """
-    List all registered evaluator types.
-
-    Returns:
-        List of evaluator type names
-    """
-    return [k for k in _EVALUATOR_REGISTRY if not k.islower()]
-
-
-# Register built-in evaluators
-register_evaluator(ExactMatchEvaluator)
-register_evaluator(CriteriaEvaluator)
+    if evaluator_type.lower() in ("exact_match", "exact", "exactmatch"):
+        return ExactMatchEvaluator(config)
+    raise ValueError(
+        f"Unknown evaluator type: '{evaluator_type}'. "
+        f"Available: ['ExactMatchEvaluator']"
+    )
 
 
 __all__ = [
@@ -99,8 +42,5 @@ __all__ = [
     "EvaluationOutput",
     "EvalResult",
     "ExactMatchEvaluator",
-    "CriteriaEvaluator",
-    "register_evaluator",
     "get_evaluator",
-    "list_evaluator_types",
 ]

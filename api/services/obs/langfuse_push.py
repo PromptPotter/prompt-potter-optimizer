@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from api.services.constants import DATASET_NAME  # re-export for backward compat
+from api.services.constants import DATASET_NAME
 from api.services.obs.pipeline_nodes import extract_pipeline_nodes
 from api.services.project_store import ProjectStore
 
@@ -473,7 +473,3 @@ def push_all_runs(
         "dataset_items": len(query_to_item_id),
         "rate_limit_hit": rate_limit_warned,
     }
-
-
-# Backward-compatible alias
-backfill_to_langfuse = push_all_runs

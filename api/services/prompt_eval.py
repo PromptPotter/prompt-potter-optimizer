@@ -210,23 +210,6 @@ def extract_baseline_prompt(exp_data: dict) -> PromptState:
     )
 
 
-def filter_eval_data(replay_results: list) -> list:
-    """Filter replay results to those with entity_profile in pipeline_data.
-
-    Args:
-        replay_results: List of replay result dicts.
-
-    Returns:
-        Filtered list containing only successful results with entity_profile.
-    """
-    return [
-        r
-        for r in replay_results
-        if r.get("status") == "success"
-        and r.get("pipeline_data", {}).get("entity_profile")
-    ]
-
-
 def _extract_pipeline_data(
     backend_data: dict, ranked_candidates: list,
 ) -> dict:
