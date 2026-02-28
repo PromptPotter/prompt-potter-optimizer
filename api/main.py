@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from scalar_fastapi import get_scalar_api_reference
 
 from api.config.settings import APP_VERSION, settings
 from api.routers import backends, campaigns, health, workflows
@@ -27,10 +28,18 @@ app = FastAPI(
     title="PromptPotter Optimizer",
     description="API-first prompt optimization service",
     version=APP_VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None,
+    redoc_url=None,
     lifespan=lifespan,
 )
+
+
+@app.get("/docs", include_in_schema=False)
+async def scalar_docs():
+    return get_scalar_api_reference(
+        openapi_url=app.openapi_url,
+        title=app.title,
+    )
 
 # CORS middleware
 app.add_middleware(
