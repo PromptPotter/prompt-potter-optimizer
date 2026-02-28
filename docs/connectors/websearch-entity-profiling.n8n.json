@@ -1,0 +1,660 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "path": "termnorm/workflow",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -112,
+        -64
+      ],
+      "id": "fdfaae93-6cd0-4ae9-a93e-bc1574935931",
+      "name": "GET /termnorm/workflow",
+      "webhookId": "workflow-export-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $input.first().json.query;\nconst staticData = $getWorkflowStaticData('global');\nreturn [{\n  json: {\n    n8n_base_url: staticData.n8n_base_url || 'http://localhost:5678',\n    workflow_id: query.id || staticData.workflow_id || 'SET_YOUR_WORKFLOW_ID',\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        -64
+      ],
+      "id": "d174dadc-dd51-4a46-85be-a0cc02bf0d00",
+      "name": "Resolve Config"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.n8n_base_url }}/api/v1/workflows/{{ $json.workflow_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        336,
+        -64
+      ],
+      "id": "244ac6d1-bab8-4ecd-ae5b-71baeed5fd25",
+      "name": "n8n API"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        -64
+      ],
+      "id": "2690c524-87b8-46df-bea9-310a60349288",
+      "name": "Respond Workflow"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "termnorm/sessions",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -112,
+        160
+      ],
+      "id": "dbdb9bf8-0ca8-4308-be8e-680930065521",
+      "name": "POST /sessions",
+      "webhookId": "sessions-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst staticData = $getWorkflowStaticData('global');\nstaticData.terms = body.terms || [];\nreturn [{\n  json: {\n    status: 'ok',\n    term_count: staticData.terms.length\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        160
+      ],
+      "id": "c13a9d4f-c3be-43c6-8dcc-3811e732aec3",
+      "name": "Store Terms"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        336,
+        160
+      ],
+      "id": "704c2f7b-2373-462c-88f4-4edaf00645d6",
+      "name": "Respond Sessions"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "termnorm/matches",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -112,
+        512
+      ],
+      "id": "887082d6-40d1-485f-86ec-9444e65f9130",
+      "name": "POST /matches",
+      "webhookId": "matches-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst query = body.query || '';\n\n// Split on last '/' to get bom_material and process\nconst lastSlash = query.lastIndexOf('/');\nlet bom_material, process;\nif (lastSlash > 0) {\n  bom_material = query.substring(0, lastSlash).trim();\n  process = query.substring(lastSlash + 1).trim();\n} else {\n  bom_material = query.trim();\n  process = '';\n}\n\nreturn [{\n  json: {\n    query,\n    bom_material,\n    process,\n    max_sites: body.max_sites ?? 7,\n    num_results: body.num_results ?? 20,\n    content_char_limit: body.content_char_limit ?? 800,\n    raw_content_limit: body.raw_content_limit ?? 5000,\n    profiling_temperature: body.profiling_temperature ?? 0.3,\n    profiling_max_tokens: body.profiling_max_tokens ?? 1800,\n    ranking_prompt: body.ranking_prompt ?? null,\n    ranking_temperature: body.ranking_temperature ?? 0,\n    ranking_max_tokens: body.ranking_max_tokens ?? 4000,\n    ranking_sample_size: body.ranking_sample_size ?? 20,\n    max_token_candidates: body.max_token_candidates ?? 20,\n    relevance_weight_core: body.relevance_weight_core ?? 0.7,\n    model: body.model ?? 'meta-llama/llama-4-maverick-17b-128e-instruct',\n    start_time: Date.now()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        512
+      ],
+      "id": "aa0ce30b-b76a-4700-9946-3b6256aafab8",
+      "name": "Parse Query & Extract Params"
+    },
+    {
+      "parameters": {
+        "jsCode": "// TODO: implement cache with workflow static data\n// Stub: always returns cache miss\nconst prev = $input.first().json;\nreturn [{\n  json: {\n    ...prev,\n    cache_hit: false\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        512
+      ],
+      "id": "0f1f8cea-ded5-48f1-92f1-1e7a32017585",
+      "name": "Cache Lookup (STUB)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// TODO: implement SequenceMatcher-like fuzzy matching against stored terms\n// Stub: always returns no fuzzy match\nconst prev = $input.first().json;\nreturn [{\n  json: {\n    ...prev,\n    fuzzy_hit: false,\n    fuzzy_score: 0\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        512
+      ],
+      "id": "07b5ba32-65ec-4817-a01b-43d3b605560d",
+      "name": "Fuzzy Matching (STUB)"
+    },
+    {
+      "parameters": {
+        "url": "https://api.search.brave.com/res/v1/web/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.bom_material }}"
+            },
+            {
+              "name": "count",
+              "value": "={{ $json.num_results }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        928,
+        512
+      ],
+      "id": "ed0c2a47-93fa-496b-8767-62ec2b37fb25",
+      "name": "Brave Search"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=RESEARCH DATA:\n={{ (() => { const r = ($json.web?.results || []); const p = $('Parse Query & Extract Params').first().json; const cl = p.content_char_limit || 800; const rl = p.raw_content_limit || 5000; let t = r.map((x,i) => '[' + (i+1) + '] ' + (x.title||'') + '\\\\n' + (x.description||'').substring(0,cl)).join('\\\\n\\\\n'); return t.length > rl ? t.substring(0,rl) : t; })() }}\n---\nREMEMBER: Every term must be followed by its US/GB variant if different. Return the JSON object with ALL fields maximally populated.",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a comprehensive technical database API specialized in exhaustive entity profiling. Extract ALL possible information about '{{ $('Parse Query & Extract Params').first().json.bom_material }}' from the research data.\n\nCRITICAL SPELLING REQUIREMENT: In ALL arrays, after each term, immediately add its US/GB spelling variant if different. Example: [\"colour\", \"color\", \"analyse\", \"analyze\"]. This is MANDATORY for every array field.\n\nCORE CONCEPT IDENTIFICATION: Within '{{ $('Parse Query & Extract Params').first().json.bom_material }}', certain words carry more semantic weight than others. Material names, product codes, and specifications describe WHAT is involved, but other terms describe the fundamental NATURE of what is being expressed. Identify the single word that defines the conceptual essence - typically the term that indicates an activity, action, method, or process rather than an object or material. Output only this one defining word.\n\nPROFESSIONAL CLASSIFICATION ALIASES: Generate the full spectrum of expert-level references for this entity, spanning precise technical descriptors to broader categorical terms. These terms stem from domain-specific terminology and industry-standard nomenclature that professionals recognize. Include approximations and near-equivalent terms that experts use when exact terminology doesn't exist, accepting that some terms may not be perfect equivalents but represent the best available expert terminology for referencing similar concepts.\n\nGENERIC TECHNICAL INFERENCE INSTRUCTION: Given the product or technical description '{{ $('Parse Query & Extract Params').first().json.bom_material }}', perform comprehensive analysis to extract and infer:\n1. Explicit Information: Directly stated specifications, dimensions, materials, codes, and properties\n2. Implicit Information: Commonly associated materials, manufacturing processes, applications, and technical characteristics\n3. Manufacturing Processes: Both stated and inferred processes based on product type, materials, and specifications\n4. Material Composition: Complete material breakdown including standard/typical materials\n5. Applications & Use Cases: Direct and derived applications based on product characteristics\n\nInclude domain knowledge from technical standards, industry practices, and material science.\n\nCRITICAL INSTRUCTIONS FOR RICH ATTRIBUTE COLLECTION:\n- MAXIMIZE diversity: Include ALL synonyms, trade names, scientific names, abbreviations, acronyms, regional terms, industry terminology\n- COMPREHENSIVE extraction: Capture every property, specification, feature, attribute, including numerical values and compositional data\n- PRIORITIZE completeness over brevity: Aim for 5-10+ items per array field"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1200,
+        512
+      ],
+      "id": "30d5d562-43da-4817-b331-30f162d518b9",
+      "name": "Entity Profiling LLM",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        672
+      ],
+      "id": "255ec266-94cd-4794-9dd8-bd688cd03cf7",
+      "name": "Groq Model"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n\t\"type\": \"object\",\n\t\"properties\": {\n\t\t\"entity_name\": {\n\t\t\t\"type\": \"string\",\n\t\t\t\"description\": \"Primary name or description of the entity\"\n\t\t},\n\t\t\"core_concept\": {\n\t\t\t\"type\": \"string\",\n\t\t\t\"description\": \"Single word defining the conceptual essence (activity/action/method/process)\"\n\t\t},\n\t\t\"entity_category\": {\n\t\t\t\"type\": \"string\",\n\t\t\t\"description\": \"Broad technical category\"\n\t\t},\n\t\t\"aliases\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"string\"\n\t\t\t},\n\t\t\t\"description\": \"Alternative names, abbreviations, trade names (include US/GB spelling variants)\"\n\t\t},\n\t\t\"professional_classification_aliases\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"string\"\n\t\t\t},\n\t\t\t\"description\": \"Expert-level reference terms and nomenclature\"\n\t\t},\n\t\t\"technical_specifications\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"string\"\n\t\t\t},\n\t\t\t\"description\": \"Dimensions, grades, tolerances, codes\"\n\t\t},\n\t\t\"materials\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"string\"\n\t\t\t},\n\t\t\t\"description\": \"Material compositions, alloys, base materials\"\n\t\t},\n\t\t\"manufacturing_processes\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"string\"\n\t\t\t},\n\t\t\t\"description\": \"Fabrication methods, treatments\"\n\t\t},\n\t\t\"applications\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"string\"\n\t\t\t},\n\t\t\t\"description\": \"Use cases, industries, products\"\n\t\t},\n\t\t\"properties_and_characteristics\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"string\"\n\t\t\t},\n\t\t\t\"description\": \"Physical, chemical, mechanical properties\"\n\t\t},\n\t\t\"standards_and_codes\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"string\"\n\t\t\t},\n\t\t\t\"description\": \"ISO, DIN, ASTM, EN standards\"\n\t\t},\n\t\t\"related_terms\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"string\"\n\t\t\t},\n\t\t\t\"description\": \"Associated terminology\"\n\t\t}\n\t},\n\t\"required\": [\n\t\t\"entity_name\",\n\t\t\"core_concept\",\n\t\t\"entity_category\",\n\t\t\"aliases\",\n\t\t\"professional_classification_aliases\",\n\t\t\"technical_specifications\",\n\t\t\"materials\",\n\t\t\"manufacturing_processes\",\n\t\t\"applications\",\n\t\t\"properties_and_characteristics\",\n\t\t\"standards_and_codes\",\n\t\t\"related_terms\"\n\t]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1344,
+        672
+      ],
+      "id": "82eb6133-1a55-4854-a058-63ef3d960178",
+      "name": "Entity Profile Schema"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Candidate Matching\n// Extracts entity profile, looks up candidate terms from session DB (STUB),\n// and formats candidate list for LLM Ranking.\n\nconst llmOutput = $input.first().json;\nconst params = $('Parse Query & Extract Params').first().json;\nconst braveResults = $('Brave Search').first().json;\nconst webResults = braveResults.web?.results || [];\nconst staticData = $getWorkflowStaticData('global');\n\n// Extract entity profile from chainLlm output\nconst entity_profile = llmOutput.output || llmOutput;\n\n// Match candidates from session term DB (STUB)\n// TODO: implement inverted token index + overlap scoring\nconst terms = staticData.terms || [];\nlet token_matched_candidates;\nif (terms.length > 0) {\n  token_matched_candidates = terms\n    .slice(0, Math.min(params.max_token_candidates, terms.length))\n    .map((term, i) => [term, Math.round((0.85 - i * 0.05) * 100) / 100]);\n} else {\n  token_matched_candidates = [\n    ['Placeholder Term 1', 0.85],\n    ['Placeholder Term 2', 0.72],\n    ['Placeholder Term 3', 0.65],\n    ['Placeholder Term 4', 0.58],\n    ['Placeholder Term 5', 0.50]\n  ];\n}\n\n// Format candidates for LLM Ranking prompt\nconst candidate_lines = token_matched_candidates\n  .slice(0, params.ranking_sample_size)\n  .map(([term, score], i) => `${i + 1}. ${term}`)\n  .join('\\n');\n\nreturn [{\n  json: {\n    ...params,\n    entity_profile,\n    core_concept: entity_profile.core_concept || '',\n    entity_profile_json: JSON.stringify(entity_profile, null, 2),\n    profiling_model: params.model,\n    web_results_count: webResults.length,\n    web_search_status: webResults.length > 0 ? 'success' : 'no_results',\n    token_matched_candidates,\n    candidate_lines\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1664,
+        512
+      ],
+      "id": "e51a5c58-1c91-4d4f-a699-8fd7d56359d6",
+      "name": "Candidate Matching"
+    },
+    {
+      "parameters": {
+        "jsCode": "const llmOutput = $input.first().json;\nconst prev = $('Candidate Matching').first().json;\n\n// chainLlm with outputParser wraps in .output\nconst rankingResult = llmOutput.output || llmOutput;\nconst ranked_candidates = rankingResult.ranked_candidates || [];\n\nconst elapsed = ((Date.now() - prev.start_time) / 1000).toFixed(1);\n\nreturn [{\n  json: {\n    status: 'success',\n    message: `Research completed - Found ${ranked_candidates.length} matches in ${elapsed}s`,\n    data: {\n      ranked_candidates,\n      entity_profile: prev.entity_profile,\n      token_matched_candidates: prev.token_matched_candidates,\n      llm_provider: `groq/${prev.model}`,\n      total_time: parseFloat(elapsed),\n      web_search_status: prev.web_search_status,\n      web_search_error: null,\n      pipeline_steps: {\n        cache_lookup: { hit: prev.cache_hit },\n        fuzzy_matching: { hit: prev.fuzzy_hit, score: prev.fuzzy_score },\n        web_search: { results_count: prev.web_results_count },\n        entity_profiling: { model: prev.profiling_model },\n        token_matching: { candidates_count: prev.token_matched_candidates.length },\n        llm_ranking: { model: prev.model, candidates_count: ranked_candidates.length }\n      }\n    }\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2304,
+        512
+      ],
+      "id": "0c08fe8c-7df7-48fd-a058-e58ed9944eea",
+      "name": "Format Response"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2528,
+        512
+      ],
+      "id": "bbeeef2a-0d76-46a6-9ab5-73499fac4dd7",
+      "name": "Respond Matches"
+    },
+    {
+      "parameters": {
+        "content": "# Web Search + Entity Profiling Pipeline\n\n6-step terminology normalization chain.\nBrave web search → Groq LLM entity profiling → Groq LLM ranking (implemented).\nCache, fuzzy, token matching (stubs).\n\n**Endpoints:**\n- `GET  /termnorm/workflow` → Full workflow JSON via n8n API (self-export)\n- `POST /termnorm/sessions` → Store reference terms\n- `POST /termnorm/matches`  → Run pipeline\n\n**Credentials:** Brave Search API + Groq API + n8n API Key\n",
+        "height": 292,
+        "width": 764
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        688,
+        0
+      ],
+      "id": "27a5b39b-0b39-4600-bff2-d65fe05ff924",
+      "name": "Pipeline Overview"
+    },
+    {
+      "parameters": {
+        "content": "# Pipeline Parameters (all optional)\n\n- num_results: 20\n- content_char_limit: 800\n- raw_content_limit: 5000\n- profiling_temperature: 0.3\n- profiling_max_tokens: 1800\n- ranking_temperature: 0\n- ranking_max_tokens: 4000\n- ranking_sample_size: 20\n- max_token_candidates: 20\n- relevance_weight_core: 0.7\n- model: meta-llama/llama-4-maverick-17b-128e-instruct\n\nOverride via POST body on /termnorm/matches\n",
+        "height": 280,
+        "width": 376
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1472,
+        0
+      ],
+      "id": "0174c99d-3710-4baf-afed-d4271136710e",
+      "name": "Parameter Reference"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.ranking_prompt || 'Evaluate the candidates listed in the system message. Return valid JSON.' }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a candidate evaluation expert.\n\nTASK 1: Analyze profile and core concept (PRIMARY FACTOR - 70% WEIGHT)\n- Summarize the profile in 1-2 sentences capturing key details\n- Identify the entity_category from the profile\n- Think step-by-step: What are the most important distinguishing features of this entity?\n- CRITICAL: Prioritize candidates that match the core_concept: '{{ $json.core_concept }}'\n- Higher match = more of the distinguishing features present in the candidate name\n\nTASK 2: Evaluate candidate matches\n- Each candidate will receive a relevance_score from 0.0 to 1.0\n- 0.95+ : Exact or near-perfect semantic match\n- 0.80-0.94 : Strong match\n- 0.50-0.79 : Moderate match\n- 0.00-0.49 : Weak/poor match\n\nENTITY PROFILE (JSON):\n{{ $json.entity_profile_json }}\n\nCANDIDATE MATCHES TO EVALUATE:\n{{ $json.candidate_lines }}\n\nReturn a valid JSON with \"reasoning\" and \"ranked_candidates\" array (rank, candidate, relevance_score, rationale).\nInclude ALL candidates. Rank 1 = highest score. Return ONLY valid JSON."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1952,
+        512
+      ],
+      "id": "73b28542-680c-43be-9bd2-047f1f203ce4",
+      "name": "LLM Ranking",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        736
+      ],
+      "id": "3459ebac-00e7-4824-9f75-bfd6507adf59",
+      "name": "Ranking Groq Model"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n\t\"type\": \"object\",\n\t\"properties\": {\n\t\t\"reasoning\": {\n\t\t\t\"type\": \"string\"\n\t\t},\n\t\t\"ranked_candidates\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"rank\": {\n\t\t\t\t\t\t\"type\": \"integer\"\n\t\t\t\t\t},\n\t\t\t\t\t\"candidate\": {\n\t\t\t\t\t\t\"type\": \"string\"\n\t\t\t\t\t},\n\t\t\t\t\t\"relevance_score\": {\n\t\t\t\t\t\t\"type\": \"number\"\n\t\t\t\t\t},\n\t\t\t\t\t\"rationale\": {\n\t\t\t\t\t\t\"type\": \"string\"\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t\"required\": [\n\t\t\t\t\t\"rank\",\n\t\t\t\t\t\"candidate\",\n\t\t\t\t\t\"relevance_score\",\n\t\t\t\t\t\"rationale\"\n\t\t\t\t]\n\t\t\t}\n\t\t}\n\t},\n\t\"required\": [\n\t\t\"reasoning\",\n\t\t\"ranked_candidates\"\n\t]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2096,
+        736
+      ],
+      "id": "008d07dd-f03e-4879-a527-f22b3826fd92",
+      "name": "Ranking Output Schema"
+    },
+    {
+      "parameters": {
+        "content": "# Step 1: Cache Lookup\nSTUB — check workflow static data for cached results",
+        "height": 368,
+        "width": 278
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        272,
+        336
+      ],
+      "id": "f8a2085e-45f9-4b28-917f-8bc3b79326af",
+      "name": "Step 1: Cache"
+    },
+    {
+      "parameters": {
+        "content": "# Step 2: Fuzzy Matching\nSTUB — SequenceMatcher against stored session terms",
+        "height": 368,
+        "width": 246
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        576,
+        336
+      ],
+      "id": "c5b7eda4-98da-4994-8655-53caf08705cf",
+      "name": "Step 2: Fuzzy"
+    },
+    {
+      "parameters": {
+        "content": "# Step 3: Web Search\nBrave Search API — results fed directly into Entity Profiling LLM",
+        "height": 368,
+        "width": 262
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        848,
+        336
+      ],
+      "id": "9404e675-9cd1-4689-b3d6-748285431248",
+      "name": "Step 3: Web Search"
+    },
+    {
+      "parameters": {
+        "content": "# Step 4: Entity Profiling\nGroq LLM with structured output parser.\nExtracts entity profile JSON from web research data.\nSub-nodes: Groq Model + Entity Profile Schema",
+        "height": 364,
+        "width": 396
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        336
+      ],
+      "id": "add8c6af-ce3e-4dbe-990a-fc0099ff2942",
+      "name": "Step 4: Entity Profiling"
+    },
+    {
+      "parameters": {
+        "content": "# Step 5: Candidate Matching\nDB lookup + candidate formatting for LLM Ranking.\nSTUB — TODO: inverted token index.",
+        "height": 368,
+        "width": 380
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        336
+      ],
+      "id": "0db38495-34ec-4f65-9793-c842c4d2198e",
+      "name": "Step 5: Candidate Matching"
+    },
+    {
+      "parameters": {
+        "content": "# Step 6: LLM Ranking\nGroq LLM re-rank → Format response.\nranking_prompt override from POST body = what PromptPotter optimizes.\nSub-nodes: Ranking Groq Model + Ranking Output Schema",
+        "height": 380,
+        "width": 364
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1936,
+        336
+      ],
+      "id": "7ae25cd7-7076-4893-a0a1-9e501b75f09b",
+      "name": "Step 6: LLM Ranking"
+    }
+  ],
+  "connections": {
+    "GET /termnorm/workflow": {
+      "main": [
+        [
+          {
+            "node": "Resolve Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Config": {
+      "main": [
+        [
+          {
+            "node": "n8n API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "n8n API": {
+      "main": [
+        [
+          {
+            "node": "Respond Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /sessions": {
+      "main": [
+        [
+          {
+            "node": "Store Terms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Terms": {
+      "main": [
+        [
+          {
+            "node": "Respond Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /matches": {
+      "main": [
+        [
+          {
+            "node": "Parse Query & Extract Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Query & Extract Params": {
+      "main": [
+        [
+          {
+            "node": "Cache Lookup (STUB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cache Lookup (STUB)": {
+      "main": [
+        [
+          {
+            "node": "Fuzzy Matching (STUB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fuzzy Matching (STUB)": {
+      "main": [
+        [
+          {
+            "node": "Brave Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brave Search": {
+      "main": [
+        [
+          {
+            "node": "Entity Profiling LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entity Profiling LLM": {
+      "main": [
+        [
+          {
+            "node": "Candidate Matching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Entity Profiling LLM",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entity Profile Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Entity Profiling LLM",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Candidate Matching": {
+      "main": [
+        [
+          {
+            "node": "LLM Ranking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Ranking": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ranking Groq Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM Ranking",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ranking Output Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "LLM Ranking",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "09a80676641fdc883fcaa67648f06322bebbd00adb281b1cf481107091bcc026"
+  }
+}
