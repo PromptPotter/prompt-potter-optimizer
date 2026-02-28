@@ -30,6 +30,11 @@ class ExecutionResultItem(BaseModel):
     query: str
     bom_material: str | None = None
     process: str | None = None
+    query_fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Generic query metadata. Mirrors bom_material/process for "
+        "TermNorm; other connectors populate with their own keys.",
+    )
     ground_truth: str
     predicted: str
     confidence: float = 0.0

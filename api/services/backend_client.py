@@ -98,6 +98,10 @@ def _build_result_dict(
         "query": query_data["query"],
         "bom_material": query_data["bom_material"],
         "process": query_data["process"],
+        "query_fields": {
+            "bom_material": query_data["bom_material"],
+            "process": query_data["process"],
+        },
         "ground_truth": query_data["ground_truth"],
         "predicted": predicted,
         "confidence": confidence,
@@ -271,6 +275,10 @@ class BackendClient:
                 "query": query,
                 "bom_material": bom_material,
                 "process": process,
+                "query_fields": {
+                    "bom_material": bom_material,
+                    "process": process,
+                },
                 "ground_truth": bom_to_gt[bom_material],
                 "original_predicted": er.get("predicted", ""),
                 "original_latency_ms": er.get("latency_ms", 0),
