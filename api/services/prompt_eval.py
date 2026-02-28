@@ -19,6 +19,20 @@ from api.models.prompt_state import PromptState
 
 _evaluator = ExactMatchEvaluator({"strip": True})
 
+# TermNorm pipeline data keys extracted from /matches response.
+# M6: will be derived from PipelineSchema.obs_extraction_map().
+_PIPELINE_DATA_KEYS = [
+    "entity_profile",
+    "token_matched_candidates",
+    "step_timings",
+    "llm_provider",
+    "total_time",
+    "web_search_status",
+    "pipeline_params",
+    "web_search_error",
+    "web_sources",
+]
+
 if TYPE_CHECKING:
     from api.services.backend_client import BackendClient
     from api.services.obs.observability_logger import ObsLogger
@@ -212,6 +226,22 @@ def filter_eval_data(replay_results: list) -> list:
     ]
 
 
+def _extract_pipeline_data(
+    backend_data: dict, ranked_candidates: list,
+) -> dict:
+    """Extract pipeline data fields from a backend /matches response.
+
+    Collects ``ranked_candidates`` plus all keys in ``_PIPELINE_DATA_KEYS``
+    from ``backend_data``.
+    """
+    pd: dict = {"ranked_candidates": ranked_candidates}
+    for key in _PIPELINE_DATA_KEYS:
+        val = backend_data.get(key)
+        if val is not None:
+            pd[key] = val
+    return pd
+
+
 async def backend_reranker_eval(
     query_data: dict,
     backend_client: BackendClient,
@@ -257,18 +287,7 @@ async def backend_reranker_eval(
             "hit": eval_output.result == EvalResult.PASS,
             "score": eval_output.score,
             "error": None,
-            "pipeline_data": {
-                "entity_profile": data.get("entity_profile"),
-                "token_matched_candidates": data.get("token_matched_candidates"),
-                "ranked_candidates": ranked,
-                "step_timings": data.get("step_timings"),
-                "llm_provider": data.get("llm_provider"),
-                "total_time": data.get("total_time"),
-                "web_search_status": data.get("web_search_status"),
-                "pipeline_params": data.get("pipeline_params"),
-                "web_search_error": data.get("web_search_error"),
-                "web_sources": data.get("web_sources"),
-            },
+            "pipeline_data": _extract_pipeline_data(data, ranked),
         }
     except Exception as exc:
         logger.warning("backend_reranker_eval failed for %s: %s", query[:60], exc)
