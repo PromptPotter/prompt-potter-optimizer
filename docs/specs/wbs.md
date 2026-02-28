@@ -68,19 +68,37 @@ M5 is complete. See [`docs/obs-guide.md`](../obs-guide.md) for data exploration.
 
 ---
 
-## Phase 6: CWL Workflow Migration + PipelineSchema Foundation (M6) -- Planned
+## Phase 6: PipelineSchema + Cross-Repo Pipeline Composability (M6) -- Planned
 
-See [M6 spec](m6-workflow-migration.md) for full details.
+See [M6 spec](m6-workflow-migration.md) for full details. Cross-repo: TermNorm task doc at [`TermNorm: docs/pipeline-composability.md`](../../../OfficeAddinApps/TermNorm-excel/docs/pipeline-composability.md).
 
-**Wave 1: Schema Foundation** (prerequisite for all other M6 work)
+**Wave 0: TermNorm Cleanup** (TermNorm repo)
+
+| ID | Work Package | Sessions | PRD Ref | Depends | Status |
+|----|-------------|:--------:|---------|---------|--------|
+| 6.0a | Simplify fuzzy matcher + confidence constants | 1 | -- | -- | Planned |
+
+**Wave 1: Pipeline Contract** (TermNorm repo)
+
+| ID | Work Package | Sessions | PRD Ref | Depends | Status |
+|----|-------------|:--------:|---------|---------|--------|
+| 6.0b | GET /pipeline endpoint + pipeline config JSON | 1 | P1.14 | 6.0a | Planned |
+
+**Wave 2: Schema Foundation** (PromptPotter repo — prerequisite for Wave 4)
 
 | ID | Work Package | Sessions | PRD Ref | Depends | Status |
 |----|-------------|:--------:|---------|---------|--------|
 | 6.0 | Write M6 spec | 1 | -- | -- | Complete |
-| 6.1 | PipelineSchema model + TermNorm factory | 1 | P1.14 | 6.0 | Planned |
+| 6.1 | PipelineSchema model + TermNorm factory | 1 | P1.14 | 6.0b | Planned |
 | 6.2 | Replace hardcoded dicts with schema derivation | 1 | P1.14 | 6.1 | Planned |
 
-**Wave 2: Workflow Nodes** (current M6 scope)
+**Wave 3: Unified Tracing** (TermNorm repo — parallel with Wave 2)
+
+| ID | Work Package | Sessions | PRD Ref | Depends | Status |
+|----|-------------|:--------:|---------|---------|--------|
+| 6.0c | Unified tracing (trace lifecycle + frontend integration) | 1 | P1.10 | 6.0b | Planned |
+
+**Wave 4: Workflow Nodes** (PromptPotter repo)
 
 | ID | Work Package | Sessions | PRD Ref | Depends | Status |
 |----|-------------|:--------:|---------|---------|--------|
@@ -89,7 +107,7 @@ See [M6 spec](m6-workflow-migration.md) for full details.
 | 6.5 | FeedbackCycleNode | 1 | P1.12 | 6.3 | Planned |
 | 6.6 | ScanNode + YAML workflows | 1 | P1.12 | 6.4, 6.5 | Planned |
 
-**Wave 3: Notebook Migration**
+**Wave 5: Notebook Migration** (PromptPotter repo)
 
 | ID | Work Package | Sessions | PRD Ref | Depends | Status |
 |----|-------------|:--------:|---------|---------|--------|
@@ -121,9 +139,9 @@ See [M7 spec](m7-multi-connector.md) for full details.
 | M3: Optimization Infrastructure | 11 | 14 | Complete |
 | M4: Integration and Polish | -- | -- | Complete (reclassified) |
 | M5: Observability Layer | 7 | 7 | Complete |
-| M6: Workflow Migration + PipelineSchema | 8 | 8 | Planned |
+| M6: PipelineSchema + Pipeline Composability | 11 | 11 | Planned |
 | M7: Multi-Connector | 5 | 5 | Planned |
-| **Total** | **55** | **~59** | |
+| **Total** | **58** | **~62** | |
 
 ---
 
