@@ -45,10 +45,13 @@ def load_pipeline_config(exp_data: dict) -> dict:
     pipeline = runs[0].get("pipeline", {})
     config = pipeline.get("config", {})
     return {
-        "steps": config.get("steps", []),
-        "notation": pipeline.get("notation", ""),
         "name": config.get("name", ""),
         "version": config.get("version", ""),
+        "description": config.get("description", ""),
+        "notation": pipeline.get("notation", ""),
+        "config_id": pipeline.get("config_id", ""),
+        "steps": config.get("steps", []),
+        "metadata": config.get("metadata", {}),
     }
 
 
