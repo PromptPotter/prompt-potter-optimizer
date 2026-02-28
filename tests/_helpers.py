@@ -62,7 +62,7 @@ def apply_eval_mock(monkeypatch, round_hits=None):
         round_hits = [1, 2, 3]
     call_count = [0]
 
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         idx = min(call_count[0], len(round_hits) - 1)
         target_hits = round_hits[idx]
         label = kwargs.get("label", "")

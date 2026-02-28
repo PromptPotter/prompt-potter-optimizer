@@ -22,6 +22,7 @@ from api.services.search.grid_core import (
 
 # smart_search
 from api.services.search.smart_search import (
+    ScanEvent,
     adaptive_search,
     build_diagnostic_set,
     resume_or_build_diagnostic,
@@ -59,6 +60,7 @@ __all__ = [
     "select_grid_winner",
     "validate_grid_config",
     # smart_search
+    "ScanEvent",
     "adaptive_search",
     "build_diagnostic_set",
     "resume_or_build_diagnostic",

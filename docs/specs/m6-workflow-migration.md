@@ -465,7 +465,7 @@ Waves 4-5 are existing M6 PromptPotter work.
 |----|-------------|:--------:|------------|-------------|
 | 6.0 | Write M6 spec | 1 | — | This document |
 | 6.1 | PipelineSchema model + TermNorm factory | 1 | 6.0b | Create `pipeline_schema.py` (PipelineSchema, PipelineStep with `runtime`/`short_circuit`, ObservationMapping). Create `pipeline_discovery.py` (parse `GET /pipeline` → schema, static TermNorm default with all 6 steps). Tests for model, factory, derivation methods. |
-| 6.2 | Replace hardcoded dicts with schema derivation | 1 | 6.1 | Replace chokepoints 1,2,3,6,8,9 with schema method calls. Thread `PipelineSchema` through `backend_client`, `eval_dataset`, `grid_core`, `langfuse_push`. Tests verifying no hardcoded pipeline step names remain. |
+| 6.2 | Replace hardcoded dicts with schema derivation | 1 | 6.1 | Replace chokepoints 1,2,3,6,8,9 with schema method calls. Thread `PipelineSchema` through `backend_client`, `eval_dataset`, `grid_core`, `langfuse_push`. Tests verifying no hardcoded pipeline step names remain. **Note:** chokepoint #2 (`_STEP_PARAM_KEYS` in `pipeline_nodes.py`) intentionally excludes `ranking_prompt` from the `llm_ranking` step's param keys — a straight `schema.step_param_keys()` replacement would break this filtering. The node must subtract `ranking_prompt` after calling the schema method. |
 
 **Wave 3: Unified Tracing** (TermNorm repo — see [task doc](../../../OfficeAddinApps/TermNorm-excel/docs/pipeline-composability.md))
 

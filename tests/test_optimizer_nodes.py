@@ -182,7 +182,7 @@ async def test_analysis_eval_node(
     # Mock evaluate_prompt_cached to return deterministic results
     call_count = [0]
 
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         call_count[0] += 1
         if ps.id == candidate_a.id:
             # candidate_a: 100% accuracy
@@ -255,7 +255,7 @@ async def test_analysis_eval_no_improvement(
         instruction="worse", changes_description="worse_variant",
     )
 
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         # candidate: 0% accuracy
         results = [
             {"query": d["query"], "predicted": "WRONG",

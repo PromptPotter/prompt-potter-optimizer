@@ -119,7 +119,7 @@ async def test_workflow_end_to_end(monkeypatch, eval_data):
 
     # -- Mock evaluate_prompt_cached (AnalysisEvalNode) --
     # First candidate gets 100% accuracy, others get 0%
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
             results = [
@@ -239,7 +239,7 @@ async def test_flat_baseline_fields(monkeypatch):
     ]
 
     # Mock: candidate beats baseline
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         results = [
             {"query": d["query"], "predicted": d["ground_truth"],
              "ground_truth": d["ground_truth"], "hit": True,

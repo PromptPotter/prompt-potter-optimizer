@@ -19,7 +19,7 @@
 +-----------+-----------+  +------------+-------------------+
 | _campaign_lib.py      |  |  FastAPI (api/main.py)         |
 | (tqdm, IPython,       |  |  backends / workflows / health |
-|  progress display)    |  |  routers                       |
+|  progress display)    |  |  / campaigns routers           |
 +-----------+-----------+  +--------------------------------+
             |                           |
             +-------------+-------------+
@@ -28,10 +28,12 @@
           |         Service Layer           |
           |  feedback_cycle, search/*,      |
           |  prompt_optimizer, prompt_eval, |
-          |  campaign_registry/init,        |
+          |  campaign/campaign_init,        |
           |  backend_client, project_store, |
           |  llm_client, comparison,        |
-          |  langfuse_client                |
+          |  search/context, constants,     |
+          |  obs/langfuse_client,           |
+          |  obs/langfuse_push              |
           +---------------+----------------+
                           |
           +------+--------+--------+-------+-------+
@@ -66,9 +68,9 @@ The AI Loop is implemented by `feedback_cycle.py` orchestrating three optimizer 
 |------|-------|
 | **InitNode** | `search.context.restructure_context()` -> initial PromptState |
 | **GrowFilterNode** | `prompt_optimizer.generate_candidates()` -> N variant PromptStates |
-| **AnalysisEvalNode** | `prompt_eval.evaluate_prompt_cached()` + `_select_round_winner()` + `generate_suggestions()` -> scores + `next_action` routing |
+| **AnalysisEvalNode** | `prompt_eval.evaluate_prompt_cached()` + `_select_round_winner()` + `generate_suggestions()` -> scores + generate/stop routing |
 
-Three feedback paths with escalation: **Layer 1 (Generate)** every pass, **Layer 2 (Refine Context)** when Layer 1 stalls, **Layer 3 (Modify Plan)** rarely. Stopping: `max_rounds`, `patience`, `next_action == "stop"`, or perfect accuracy.
+Each round generates Layer 1 variants. Stopping: `max_rounds`, `patience`, `next_action == "stop"` (from suggestion analysis), or perfect accuracy.
 
 ---
 
@@ -80,13 +82,13 @@ Key services:
 
 | Service | Responsibility |
 |---------|---------------|
-| `feedback_cycle.py` | Iterative optimization orchestrator with patience-based stopping, 3-path routing, progress callbacks, Langfuse logging |
+| `feedback_cycle.py` | Iterative optimization orchestrator with patience-based stopping, progress callbacks, Langfuse logging |
 | `search/smart_search.py` | Sensitivity scan (OAT perturbation), adaptive search (coordinate descent), axis classification |
 | `search/grid_core.py` | Grid search evaluation engine with content-addressed caching |
 | `search/coverage.py` | Historical index and coverage advisor -- discovers all stored `dataset_runs` for reuse |
 | `prompt_eval.py` | Backend evaluation via `/matches`, content-addressed dedup, incremental `.partial.jsonl` crash recovery, `evaluate_prompt_cached()` as single eval gateway |
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation, winner selection, suggestions |
-| `campaign_registry.py` | Campaign/trial lifecycle and persistence |
+| `stores/campaign_store.py` | Campaign/trial lifecycle and persistence |
 | `backend_client.py` | HTTP client for TermNorm backend |
 | `project_store.py` | Facade over focused store modules in `stores/` |
 | `llm_client.py` | `_OpenAICompatibleClient` base. Groq (default), OpenAI. Global singleton. |
@@ -175,9 +177,9 @@ Dataset runs are indexed by content hash. Grid plans and smart search plans use 
 | Langfuse | Python SDK v2 | Implemented |
 | TermNorm backend | HTTP REST (`/matches`, `/pipeline`) | Implemented |
 | ProjectStore | JSON files in `.promptpotter/projects/` | Implemented |
-| Evaluator framework | Python API (ExactMatch active, CriteriaEvaluator available) | Implemented |
+| Evaluator framework | Python API (ExactMatchEvaluator) | Implemented |
 | File-based observability | Langfuse trace JSON + MLflow FileStore YAML in `obs/` | Implemented |
-| PipelineSchema | Backend-agnostic pipeline description, derivation methods | Planned ([M6](m6-workflow-migration.md)) |
+| PipelineSchema | Backend-agnostic pipeline description, derivation methods | Implemented ([M6](m6-workflow-migration.md) WP 6.1) |
 | CWL workflow engine | `WorkflowRunner` with `runtime_config`, YAML workflow definitions | Planned ([M6](m6-workflow-migration.md)) |
 | ConnectorProtocol | `typing.Protocol` abstraction over backend connectors | Planned ([M7](m7-multi-connector.md)) |
 

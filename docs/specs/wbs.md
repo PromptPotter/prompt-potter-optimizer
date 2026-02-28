@@ -1,7 +1,7 @@
 # Work Breakdown Structure: PromptPotter Optimizer
 
-**Version:** 0.9.0
-**Date:** 2026-02-27
+**Version:** 0.10.0
+**Date:** 2026-02-28
 **Status:** Active
 **Depends on:** [PRD v0.9.0](prd.md), [ADD v0.9.0](add.md)
 
@@ -70,7 +70,7 @@ M5 is complete. See [`docs/obs-guide.md`](../obs-guide.md) for data exploration.
 
 ## Phase 6: PipelineSchema + Cross-Repo Pipeline Composability (M6) -- Planned
 
-See [M6 spec](m6-workflow-migration.md) for full details. Cross-repo: TermNorm task doc at [`TermNorm: docs/pipeline-composability.md`](../../../OfficeAddinApps/TermNorm-excel/docs/pipeline-composability.md).
+See [M6 spec](m6-workflow-migration.md) for full details. Cross-repo: TermNorm task doc at [`TermNorm: docs/pipeline-composability.md`](../../../OfficeAddinApps/TermNorm-excel/docs/pipeline-composability.md). n8n research: [n8n mapper spec](m6-n8n-mapper.md) (implementation deferred to M8).
 
 **Wave 0: TermNorm Cleanup** (TermNorm repo)
 
@@ -89,7 +89,8 @@ See [M6 spec](m6-workflow-migration.md) for full details. Cross-repo: TermNorm t
 | ID | Work Package | Sessions | PRD Ref | Depends | Status |
 |----|-------------|:--------:|---------|---------|--------|
 | 6.0 | Write M6 spec | 1 | -- | -- | Complete |
-| 6.1 | PipelineSchema model + TermNorm factory | 1 | P1.14 | 6.0b | Planned |
+| 6.0d | n8n → PipelineSchema mapper spec (research, architecture) | 1 | P1.14 | 6.1 | Complete |
+| 6.1 | PipelineSchema model + TermNorm factory | 1 | P1.14 | 6.0b | Complete |
 | 6.2 | Replace hardcoded dicts with schema derivation | 1 | P1.14 | 6.1 | Planned |
 
 **Wave 3: Unified Tracing** (TermNorm repo — parallel with Wave 2)
@@ -129,6 +130,19 @@ See [M7 spec](m7-multi-connector.md) for full details.
 
 ---
 
+## Phase 8: n8n Connector Implementation (M8) -- Planned
+
+See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depends on M7 ConnectorProtocol.
+
+| ID | Work Package | Sessions | PRD Ref | Depends | Status |
+|----|-------------|:--------:|---------|---------|--------|
+| 8.1 | Node.js bridge (`external/n8n-bridge/`) + bridge output Pydantic models | 1 | P1.13 | 7.1 | Planned |
+| 8.2 | n8n mapper (Phases A-E) + MappingReport + gap detection | 1 | P1.13 | 8.1 | Planned |
+| 8.3 | n8n ConnectorProtocol adapter + pipeline_discovery integration | 1 | P1.13 | 8.2, 7.3 | Planned |
+| 8.4 | Tests against real fixture + raw fallback path | 1 | P1.13 | 8.2 | Planned |
+
+---
+
 ## Session Summary
 
 | Phase | Packages | Sessions | Status |
@@ -139,9 +153,10 @@ See [M7 spec](m7-multi-connector.md) for full details.
 | M3: Optimization Infrastructure | 11 | 14 | Complete |
 | M4: Integration and Polish | -- | -- | Complete (reclassified) |
 | M5: Observability Layer | 7 | 7 | Complete |
-| M6: PipelineSchema + Pipeline Composability | 11 | 11 | Planned |
+| M6: PipelineSchema + Pipeline Composability | 12 | 12 | Planned |
 | M7: Multi-Connector | 5 | 5 | Planned |
-| **Total** | **58** | **~62** | |
+| M8: n8n Connector | 4 | 4 | Planned |
+| **Total** | **63** | **~67** | |
 
 ---
 
@@ -167,7 +182,7 @@ See [M7 spec](m7-multi-connector.md) for full details.
 | P1.10 File-Based Observability | 5.1–5.6 | M5 | Complete |
 | P1.11 LLM Retry Logic | 5.3 | M5 | Complete |
 | P1.12 Workflow-Driven Optimization | 6.3–6.7 | M6 | Planned |
-| P1.13 Multi-Connector Support | 7.1–7.4 | M7 | Planned |
+| P1.13 Multi-Connector Support | 7.1–7.4, 8.1–8.4 | M7, M8 | Planned |
 | P1.14 PipelineSchema | 6.1–6.2 | M6 | Planned |
 | P2.3 Streamlit Dashboard | -- | Backlog | Planned |
 | SC5 TermNorm Validation | -- | Backlog | Planned |

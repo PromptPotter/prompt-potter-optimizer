@@ -69,7 +69,7 @@ def _apply_all_mocks(monkeypatch):
     )
 
     # Mock evaluate_prompt_cached — first candidate: 75%, others: 25%
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
             hits = 3  # 3 out of 4

@@ -54,7 +54,7 @@ async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
     round_hits = [1, 2, 3]
     call_count = [0]
 
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         idx = min(call_count[0], len(round_hits) - 1)
         target_hits = round_hits[idx]
 
@@ -118,7 +118,7 @@ async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
     apply_grow_mock(monkeypatch)
 
     # All candidates return 0% — never beats baseline (which is also 0%)
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         results = [
             {"query": d["query"], "predicted": "WRONG",
              "ground_truth": d["ground_truth"], "hit": False,
@@ -160,7 +160,7 @@ async def test_max_rounds(monkeypatch, eval_data):
     # Slow steady improvement — never reaches perfect or stalls
     call_idx = [0]
 
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
             # Improve by small amount each round
@@ -226,7 +226,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
     apply_grow_mock(monkeypatch)
 
     # First candidate gets 33%, analysis suggestions say stop
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
             results = [
@@ -314,7 +314,7 @@ async def test_result_structure(monkeypatch, eval_data, cycle_config):
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
 
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         results = [
             {"query": d["query"], "predicted": "WRONG",
              "ground_truth": d["ground_truth"], "hit": False,
@@ -368,7 +368,7 @@ async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
     )
 
     # All candidates score 0% → patience stops after 2 rounds
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         results = [
             {"query": d["query"], "predicted": "WRONG",
              "ground_truth": d["ground_truth"], "hit": False,
@@ -429,7 +429,7 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
     )
 
     # First candidate always gets 1/3 accuracy with real results
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
             results = [
@@ -492,7 +492,7 @@ async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
 
-    async def mock_eval(ps, data, backend_client, **kwargs):
+    async def mock_eval(ps, data, **kwargs):
         results = [
             {"query": d["query"], "predicted": "WRONG",
              "ground_truth": d["ground_truth"], "hit": False,

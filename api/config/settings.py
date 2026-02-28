@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
-APP_VERSION: str = "0.6.0"
+APP_VERSION: str = "0.6.1"
 
 
 class Settings(BaseSettings):

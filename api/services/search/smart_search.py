@@ -7,7 +7,7 @@ coordinate descent over prompt-field and pipeline-param axes.
 import logging
 import random
 from collections import defaultdict
-from typing import Any, Callable
+from typing import Any, Callable, Literal, TypedDict
 
 import pandas as pd
 
@@ -17,6 +17,76 @@ from api.services.prompt_eval import evaluate_prompt_cached
 from api.services.search.utils import preview as _preview
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Progress event types
+# ---------------------------------------------------------------------------
+
+
+class ScanEvent(TypedDict, total=False):
+    """Progress event emitted by ``sensitivity_scan()`` and ``adaptive_search()``.
+
+    All events carry ``type``.  Other fields depend on the event type:
+
+    - ``baseline_done``: accuracy, hits, total, results, cached
+    - ``axis_start``: axis, axis_type, cardinality, axis_index, total_axes,
+      round (adaptive only), budget (adaptive only)
+    - ``variant_done``: axis, value_idx, value_preview, is_baseline_value,
+      accuracy, delta, hits, total, results, cached, round (adaptive only)
+    - ``axis_done``: axis, axis_type, cardinality, sensitivity_range,
+      best_delta, worst_delta, exploration_budget, estimated_eval_cost
+    - ``axis_resolved``: round, axis, action, best_value, improvement,
+      new_accuracy (adaptive only)
+    - ``round_start``: round, max_rounds, current_accuracy, active_axes
+      (adaptive only)
+    - ``round_done``: round, improved, accuracy (adaptive only)
+    """
+
+    type: Literal[
+        "baseline_done",
+        "axis_start",
+        "variant_done",
+        "axis_done",
+        "axis_resolved",
+        "round_start",
+        "round_done",
+    ]
+    # common
+    axis: str
+    axis_type: str
+    accuracy: float
+    delta: float
+    hits: int
+    total: int
+    cached: bool
+    results: list
+    # axis_start
+    cardinality: int
+    axis_index: int
+    total_axes: int
+    budget: str
+    # variant_done
+    value_idx: int
+    value_preview: str
+    is_baseline_value: bool
+    # axis_resolved
+    action: str
+    best_value: str
+    improvement: float
+    new_accuracy: float
+    # round events
+    round: int
+    max_rounds: int
+    current_accuracy: float
+    active_axes: list[str]
+    improved: bool
+    # axis_done profile fields
+    sensitivity_range: float
+    best_delta: float
+    worst_delta: float
+    exploration_budget: str
+    estimated_eval_cost: int
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -172,7 +242,7 @@ async def sensitivity_scan(
     backend_id: str = "",
     pipeline_params: dict | None = None,
     session_terms: list | None = None,
-    progress_cb: Callable | None = None,
+    progress_cb: Callable[[ScanEvent], None] | None = None,
     prompt_result_index: dict | None = None,
     plan_id: str = "",
 ) -> tuple[pd.DataFrame, list[dict]]:
@@ -442,7 +512,7 @@ async def adaptive_search(
     backend_id: str = "",
     pipeline_params: dict | None = None,
     session_terms: list | None = None,
-    progress_cb: Callable | None = None,
+    progress_cb: Callable[[ScanEvent], None] | None = None,
     prompt_result_index: dict | None = None,
     plan_id: str = "",
 ) -> tuple[PromptState, dict, pd.DataFrame]:

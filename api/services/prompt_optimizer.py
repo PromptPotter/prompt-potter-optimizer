@@ -17,6 +17,7 @@ from api.services.prompt_eval import compute_accuracy
 if TYPE_CHECKING:
     from api.services.backend_client import BackendClient
     from api.services.obs.observability_logger import ObsLogger
+    from api.services.prompt_eval import EvalContext
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,99 @@ logger = logging.getLogger(__name__)
 MAX_FAILURES_GENERATE = 15
 MAX_FAILURES_SUGGEST = 20
 DISPLAY_TRUNCATE = 60
+
+
+def _build_constrained_meta_prompt(
+    n_variants: int,
+    rendered_prompt: str,
+    current_accuracy: float,
+    current_results: list,
+    failure_examples: str,
+    variant_library: dict,
+) -> str:
+    """Build meta-prompt that constrains non-instruction fields to library values."""
+    prompt_fields = variant_library.get("prompt_fields", {})
+    constrained_fields = {
+        k: v for k, v in prompt_fields.items()
+        if k != "instruction" and len(v) > 1
+    }
+
+    library_desc = "VARIANT LIBRARY (select by index):\n"
+    for field_name, options in constrained_fields.items():
+        library_desc += f"  {field_name}:\n"
+        for i, opt in enumerate(options):
+            label = opt[:60] if opt else "(empty)"
+            library_desc += f"    [{i}] {label}\n"
+
+    response_schema = (
+        "Return a JSON object with key \"variants\" containing an array "
+        f"of {n_variants} objects, each with:\n"
+        "  - \"variant_name\": short identifier\n"
+        "  - \"changes_description\": 1-2 sentence description\n"
+        "  - \"instruction\": full prompt template text "
+        "(modify freely, keep template variables)\n"
+    )
+    for field_name in constrained_fields:
+        response_schema += (
+            f"  - \"{field_name}_idx\": integer index into the {field_name} options\n"
+        )
+
+    return (
+        f"You are a prompt engineering expert. Generate {n_variants} "
+        "improved variants\nof a candidate-ranking prompt used in a "
+        "terminology normalization pipeline.\n\n"
+        f"CURRENT PROMPT ({current_accuracy:.1%} accuracy on "
+        f"{len(current_results)} queries):\n"
+        f"---\n{rendered_prompt}\n---\n\n"
+        f"FAILURE EXAMPLES (predicted != ground_truth):\n"
+        f"{failure_examples}\n\n"
+        f"{library_desc}\n"
+        "The prompt uses template variables (double-brace syntax):\n"
+        "  {{core_concept}} -- core concept from entity profile\n"
+        "  {{entity_profile_json}} -- full JSON entity profile\n"
+        "  {{matches}} -- newline-separated candidate list\n\n"
+        "RULES:\n"
+        "- Modify 'instruction' freely (keep template variables)\n"
+        "- For other fields, SELECT from the provided options by index\n\n"
+        f"{response_schema}"
+    )
+
+
+def _build_freeform_meta_prompt(
+    n_variants: int,
+    rendered_prompt: str,
+    current_accuracy: float,
+    current_results: list,
+    failure_examples: str,
+) -> str:
+    """Build meta-prompt for open-form prompt generation."""
+    return (
+        f"You are a prompt engineering expert. Generate {n_variants} "
+        "improved variants\nof a candidate-ranking prompt used in a "
+        "terminology normalization pipeline.\n\n"
+        f"CURRENT PROMPT ({current_accuracy:.1%} accuracy on "
+        f"{len(current_results)} queries):\n"
+        f"---\n{rendered_prompt}\n---\n\n"
+        f"FAILURE EXAMPLES (predicted != ground_truth):\n"
+        f"{failure_examples}\n\n"
+        "The prompt uses template variables (double-brace syntax):\n"
+        "  {{core_concept}} -- core concept from entity profile\n"
+        "  {{entity_profile_json}} -- full JSON entity profile from web "
+        "research\n"
+        "  {{matches}} -- newline-separated list of \"- candidate_term\" "
+        "from token matching\n\n"
+        "For each variant:\n"
+        "1. Analyze WHY the current prompt fails on the examples above\n"
+        "2. Make targeted changes to improve ranking accuracy "
+        "(get correct candidate to rank #1)\n"
+        "3. Keep the same template variables and JSON output format\n\n"
+        "Return a JSON object with key \"variants\" containing an array "
+        "of objects:\n"
+        "  - \"variant_name\": short identifier\n"
+        "  - \"changes_description\": 1-2 sentence description of what "
+        "changed and why\n"
+        "  - \"prompt_text\": full prompt template text"
+    )
 
 
 async def generate_candidates(
@@ -66,80 +160,15 @@ async def generate_candidates(
 
     rendered_prompt = current_ps.render()
 
-    # Build constrained or free-form meta-prompt
     if variant_library:
-        prompt_fields = variant_library.get("prompt_fields", {})
-        constrained_fields = {
-            k: v for k, v in prompt_fields.items()
-            if k != "instruction" and len(v) > 1
-        }
-
-        library_desc = "VARIANT LIBRARY (select by index):\n"
-        for field, options in constrained_fields.items():
-            library_desc += f"  {field}:\n"
-            for i, opt in enumerate(options):
-                label = opt[:60] if opt else "(empty)"
-                library_desc += f"    [{i}] {label}\n"
-
-        response_schema = (
-            "Return a JSON object with key \"variants\" containing an array "
-            f"of {n_variants} objects, each with:\n"
-            "  - \"variant_name\": short identifier\n"
-            "  - \"changes_description\": 1-2 sentence description\n"
-            "  - \"instruction\": full prompt template text "
-            "(modify freely, keep template variables)\n"
-        )
-        for field in constrained_fields:
-            response_schema += (
-                f"  - \"{field}_idx\": integer index into the {field} options\n"
-            )
-
-        meta_prompt = (
-            f"You are a prompt engineering expert. Generate {n_variants} "
-            "improved variants\nof a candidate-ranking prompt used in a "
-            "terminology normalization pipeline.\n\n"
-            f"CURRENT PROMPT ({current_accuracy:.1%} accuracy on "
-            f"{len(current_results)} queries):\n"
-            f"---\n{rendered_prompt}\n---\n\n"
-            f"FAILURE EXAMPLES (predicted != ground_truth):\n"
-            f"{failure_examples}\n\n"
-            f"{library_desc}\n"
-            "The prompt uses template variables (double-brace syntax):\n"
-            "  {{core_concept}} -- core concept from entity profile\n"
-            "  {{entity_profile_json}} -- full JSON entity profile\n"
-            "  {{matches}} -- newline-separated candidate list\n\n"
-            "RULES:\n"
-            "- Modify 'instruction' freely (keep template variables)\n"
-            "- For other fields, SELECT from the provided options by index\n\n"
-            f"{response_schema}"
+        meta_prompt = _build_constrained_meta_prompt(
+            n_variants, rendered_prompt, current_accuracy,
+            current_results, failure_examples, variant_library,
         )
     else:
-        meta_prompt = (
-            f"You are a prompt engineering expert. Generate {n_variants} "
-            "improved variants\nof a candidate-ranking prompt used in a "
-            "terminology normalization pipeline.\n\n"
-            f"CURRENT PROMPT ({current_accuracy:.1%} accuracy on "
-            f"{len(current_results)} queries):\n"
-            f"---\n{rendered_prompt}\n---\n\n"
-            f"FAILURE EXAMPLES (predicted != ground_truth):\n"
-            f"{failure_examples}\n\n"
-            "The prompt uses template variables (double-brace syntax):\n"
-            "  {{core_concept}} -- core concept from entity profile\n"
-            "  {{entity_profile_json}} -- full JSON entity profile from web "
-            "research\n"
-            "  {{matches}} -- newline-separated list of \"- candidate_term\" "
-            "from token matching\n\n"
-            "For each variant:\n"
-            "1. Analyze WHY the current prompt fails on the examples above\n"
-            "2. Make targeted changes to improve ranking accuracy "
-            "(get correct candidate to rank #1)\n"
-            "3. Keep the same template variables and JSON output format\n\n"
-            "Return a JSON object with key \"variants\" containing an array "
-            "of objects:\n"
-            "  - \"variant_name\": short identifier\n"
-            "  - \"changes_description\": 1-2 sentence description of what "
-            "changed and why\n"
-            "  - \"prompt_text\": full prompt template text"
+        meta_prompt = _build_freeform_meta_prompt(
+            n_variants, rendered_prompt, current_accuracy,
+            current_results, failure_examples,
         )
 
     response = await llm_client.chat(
@@ -159,19 +188,18 @@ async def generate_candidates(
     candidates = []
     for v in variants_list[:n_variants]:
         if variant_library:
-            # Map indices back to library values
             changes: dict[str, Any] = {
                 "instruction": v.get("instruction", v.get("prompt_text", "")),
             }
             prompt_fields = variant_library.get("prompt_fields", {})
-            for field, options in prompt_fields.items():
-                if field == "instruction" or len(options) <= 1:
+            for field_name, options in prompt_fields.items():
+                if field_name == "instruction" or len(options) <= 1:
                     continue
-                idx_key = f"{field}_idx"
+                idx_key = f"{field_name}_idx"
                 if idx_key in v:
                     idx = int(v[idx_key])
                     if 0 <= idx < len(options):
-                        changes[field] = options[idx]
+                        changes[field_name] = options[idx]
 
             ps = current_ps.derive(
                 **changes,
@@ -370,7 +398,7 @@ async def evaluate_and_select_winner(
     eval_data: list,
     current_best: dict[str, Any],
     *,
-    backend_client: "BackendClient",
+    backend_client: "BackendClient | None" = None,
     backend_id: str = "",
     store: "ProjectStore | None" = None,
     improvement_threshold: float = 0.01,
@@ -382,17 +410,37 @@ async def evaluate_and_select_winner(
     obs: "ObsLogger | None" = None,
     dataset_name: str | None = None,
     dataset_item_map: dict[str, str] | None = None,
+    ctx: "EvalContext | None" = None,
 ) -> dict[str, Any]:
     """Evaluate candidates and select the round winner.
 
     This is the core eval+select logic extracted from AnalysisEvalNode so it
     can be called directly by the feedback cycle without node overhead.
 
+    Infrastructure params can be passed individually **or** grouped in an
+    ``EvalContext`` via the ``ctx`` keyword.
+
     Returns:
         Dict with keys: winner, winner_prompt_state, winner_accuracy,
         improved, next_action, suggestions, candidate_scores, winner_results.
     """
-    from api.services.prompt_eval import evaluate_prompt_cached
+    from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
+
+    # Build or merge EvalContext
+    if ctx is None and backend_client is not None:
+        ctx = EvalContext(
+            backend_client=backend_client,
+            store=store,
+            backend_id=backend_id,
+            pipeline_params=pipeline_params,
+            model=model or "",
+            temperature=temperature,
+            obs=obs,
+            dataset_name=dataset_name,
+            dataset_item_map=dataset_item_map,
+        )
+    elif ctx is None:
+        raise ValueError("backend_client or ctx is required")
 
     ps_candidates = [PromptState(**c) for c in candidates]
     all_candidate_results: dict[str, list[dict]] = {}
@@ -405,15 +453,10 @@ async def evaluate_and_select_winner(
                 on_query_eval(_ci, _ct, qi, qt, result)
 
         results, scores, cached = await evaluate_prompt_cached(
-            c, eval_data, backend_client,
-            pipeline_params=pipeline_params,
-            store=store, backend_id=backend_id,
+            c, eval_data,
             label=f"candidate_{idx}",
-            model=model or "", temperature=temperature,
             on_result=_on_result,
-            dataset_name=dataset_name,
-            dataset_item_map=dataset_item_map,
-            obs=obs,
+            ctx=ctx,
         )
         all_candidate_results[c.id] = results
         candidate_scores.append({

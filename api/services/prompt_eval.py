@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import statistics
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
@@ -45,6 +46,25 @@ logger = logging.getLogger(__name__)
 # deduplication within a single project.  Collision probability stays negligible
 # for the expected dataset sizes (<100k eval runs).
 HASH_TRUNCATE = 16
+
+
+@dataclass
+class EvalContext:
+    """Groups infrastructure parameters shared across evaluation calls.
+
+    Reduces the 13-parameter signatures of ``evaluate_prompt_cached()``
+    and ``evaluate_and_select_winner()`` to a manageable set.
+    """
+
+    backend_client: BackendClient
+    store: ProjectStore | None = None
+    backend_id: str = ""
+    pipeline_params: dict | None = None
+    model: str = ""
+    temperature: float = 0.0
+    obs: ObsLogger | None = None
+    dataset_name: str | None = None
+    dataset_item_map: dict[str, str] | None = field(default=None)
 
 
 def eval_content_hash(
@@ -470,7 +490,7 @@ def _finalize_observability(
 async def evaluate_prompt_cached(
     prompt_state: PromptState,
     eval_data: list,
-    backend_client: "BackendClient",
+    backend_client: "BackendClient | None" = None,
     pipeline_params: dict | None = None,
     store: "ProjectStore | None" = None,
     backend_id: str = "",
@@ -483,6 +503,8 @@ async def evaluate_prompt_cached(
     dataset_item_map: dict[str, str] | None = None,
     obs: "ObsLogger | None" = None,
     prompt_result_index: dict | None = None,
+    *,
+    ctx: EvalContext | None = None,
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt with deduplication, partial resume, and finalization.
 
@@ -493,29 +515,28 @@ async def evaluate_prompt_cached(
     - Incremental writes for crash protection
     - Final run storage
 
-    Args:
-        prompt_state: PromptState to evaluate.
-        eval_data: List of query dicts with ``query`` and ``ground_truth``.
-        backend_client: BackendClient with ``run_match()`` method.
-        pipeline_params: Optional pipeline parameter overrides.
-        store: Optional ProjectStore for caching/persistence.
-        backend_id: Backend identifier (required when store is provided).
-        force: Skip dedup lookup and re-evaluate.
-        label: Human-readable label for the run.
-        model: Model identifier for content hash.
-        temperature: Temperature for content hash.
-        on_result: Optional callback ``(result, index, total)`` called after
-            each query evaluation (for progress reporting).
-        dataset_name: Optional Langfuse dataset name for linking evaluations.
-        dataset_item_map: Optional ``{query: item_id}`` mapping for dataset linking.
-        prompt_result_index: Optional cross-run historical index mapping
-            ``{rendered_prompt_hash: {query: result_dict}}``.  When provided,
-            queries already answered in prior runs are reused instead of
-            calling the backend again.
+    Infrastructure params can be passed individually **or** grouped in an
+    ``EvalContext`` via the ``ctx`` keyword.  When ``ctx`` is provided its
+    fields fill in any values not explicitly supplied by the caller.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
     """
+    # Resolve from EvalContext when provided
+    if ctx is not None:
+        backend_client = backend_client or ctx.backend_client
+        store = store or ctx.store
+        backend_id = backend_id or ctx.backend_id
+        pipeline_params = pipeline_params if pipeline_params is not None else ctx.pipeline_params
+        model = model or ctx.model
+        temperature = temperature or ctx.temperature
+        obs = obs or ctx.obs
+        dataset_name = dataset_name or ctx.dataset_name
+        dataset_item_map = dataset_item_map or ctx.dataset_item_map
+
+    if backend_client is None:
+        raise ValueError("backend_client is required (pass directly or via ctx)")
+
     rendered = prompt_state.render()
     content_hash = eval_content_hash(rendered, eval_data, model, temperature)
 

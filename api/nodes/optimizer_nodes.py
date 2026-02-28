@@ -221,11 +221,7 @@ class AnalysisEvalOutput(BaseModel):
     improved: bool = Field(..., description="Whether improvement exceeded threshold")
     next_action: str = Field(
         "generate",
-        description=(
-            "Routing hint for feedback cycling: "
-            "'generate' (Layer 1), 'refine_context' (Layer 2), "
-            "'modify_plan' (Layer 3), or 'stop'"
-        ),
+        description="Routing hint for feedback cycling: 'generate' or 'stop'",
     )
     suggestions: dict = Field(
         default_factory=dict,
@@ -304,22 +300,28 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
                 "'baseline_prompt_state' flat field"
             )
 
+        from api.services.prompt_eval import EvalContext
+
+        ctx = EvalContext(
+            backend_client=backend_client,
+            store=store,
+            backend_id=self.config.get("backend_id", ""),
+            pipeline_params=self.config.get("pipeline_params"),
+            model=self.config.get("model") or "",
+            temperature=self.config.get("temperature", 0.0),
+            obs=self.config.get("obs"),
+            dataset_name=self.config.get("dataset_name"),
+            dataset_item_map=self.config.get("dataset_item_map"),
+        )
+
         result = await evaluate_and_select_winner(
             input_data.candidates,
             input_data.eval_data,
             current_best,
-            backend_client=backend_client,
-            backend_id=self.config.get("backend_id", ""),
-            store=store,
             improvement_threshold=self.config.get("improvement_threshold", 0.01),
-            pipeline_params=self.config.get("pipeline_params"),
-            model=self.config.get("model"),
-            temperature=self.config.get("temperature", 0.0),
             on_candidate_eval=self.config.get("on_candidate_eval"),
             on_query_eval=self.config.get("on_query_eval"),
-            obs=self.config.get("obs"),
-            dataset_name=self.config.get("dataset_name"),
-            dataset_item_map=self.config.get("dataset_item_map"),
+            ctx=ctx,
         )
 
         # Generate suggestions separately if requested
@@ -339,9 +341,7 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
                 )
                 result["suggestions"] = suggestions
                 next_action = suggestions.get("next_action", "generate")
-                if next_action in (
-                    "generate", "refine_context", "modify_plan", "stop",
-                ):
+                if next_action in ("generate", "stop"):
                     result["next_action"] = next_action
             except Exception:
                 logger.warning("Suggestion generation failed", exc_info=True)
