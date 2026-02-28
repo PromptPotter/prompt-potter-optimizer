@@ -1,12 +1,18 @@
 """
 Execution (pipeline replay) storage.
 """
-import json
 from pathlib import Path
 from typing import Any
 
 from api.models.backend import Execution, ExecutionResultItem
-from api.services.stores.base import read_json, validate_path_component, write_json
+from api.services.stores.base import (
+    append_jsonl,
+    read_json,
+    read_json_optional,
+    read_jsonl,
+    validate_path_component,
+    write_json,
+)
 
 
 class ExecutionStore:
@@ -31,36 +37,26 @@ class ExecutionStore:
 
     def load(self, backend_id: str, execution_id: str) -> Execution | None:
         """Load an execution by ID. Returns None if not found."""
-        path = self._executions_dir(backend_id) / f"{execution_id}.json"
-        if not path.exists():
-            return None
-        return Execution(**read_json(path))
+        data = read_json_optional(
+            self._executions_dir(backend_id) / f"{execution_id}.json",
+        )
+        return Execution(**data) if data is not None else None
 
     def append_result(
         self, backend_id: str, execution_id: str, result: dict[str, Any],
     ) -> Path:
         """Append a single result as one JSON line to an in-progress .jsonl file."""
-        path = self._executions_dir(backend_id) / f"{execution_id}.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(result, ensure_ascii=False) + "\n")
-            f.flush()
-        return path
+        return append_jsonl(
+            self._executions_dir(backend_id) / f"{execution_id}.jsonl", result,
+        )
 
     def load_partial_results(
         self, backend_id: str, execution_id: str,
     ) -> list[dict[str, Any]]:
         """Read all result lines from an in-progress .jsonl file."""
-        path = self._executions_dir(backend_id) / f"{execution_id}.jsonl"
-        if not path.exists():
-            return []
-        results = []
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    results.append(json.loads(line))
-        return results
+        return read_jsonl(
+            self._executions_dir(backend_id) / f"{execution_id}.jsonl",
+        )
 
     def finalize(self, execution: Execution) -> Path:
         """Merge .jsonl partial results into Execution, save .json, delete .jsonl."""

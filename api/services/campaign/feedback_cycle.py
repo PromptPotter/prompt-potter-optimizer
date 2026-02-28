@@ -96,6 +96,8 @@ class _LoopState:
     best_round: int = -1
     best_ps: dict = field(default_factory=dict)
     stall_count: int = 0
+    backend_client: Any = None   # BackendClient (future: ConnectorProtocol)
+    store: Any = None            # ProjectStore | None
 
 
 def cycle_config_identity(
@@ -268,7 +270,8 @@ def _init_obs(
         logger.warning("ObsLogger.log_campaign_start failed", exc_info=True)
 
     try:
-        dataset_name = "termnorm_ground_truth"
+        from api.services.constants import DATASET_NAME
+        dataset_name = DATASET_NAME
         dataset_item_map = obs.register_dataset(dataset_name, eval_data)
         if dataset_item_map:
             logger.info(
@@ -388,7 +391,6 @@ async def _execute_round(
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     from api.models.prompt_state import PromptState
-    from api.services.backend_client import BackendClient
     from api.services.llm_client import get_llm_client
     from api.services.prompt_optimizer import (
         evaluate_and_select_winner,
@@ -433,13 +435,6 @@ async def _execute_round(
                 round_num, candidates_for_eval,
             )
 
-    # -- Build dependencies once --
-    backend_client = BackendClient(config.backend_url)
-    store = None
-    if config.project_root:
-        from api.services.project_store import ProjectStore
-        store = ProjectStore(config.project_root)
-
     # -- Evaluate candidates and select winner --
     baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
@@ -451,9 +446,9 @@ async def _execute_round(
 
     eval_out = await evaluate_and_select_winner(
         candidates_for_eval, round_eval_data, current_best,
-        backend_client=backend_client,
+        backend_client=state.backend_client,
         backend_id=config.backend_id,
-        store=store,
+        store=state.store,
         improvement_threshold=config.improvement_threshold,
         pipeline_params=config.pipeline_params,
         model=config.model,
@@ -486,8 +481,9 @@ async def _execute_round(
                 rounds_for_suggestions, round_eval_data, {},
                 llm_client, model=config.model,
             )
+            from api.services.constants import NEXT_ACTIONS
             next_action = suggestions.get("next_action", "generate")
-            if next_action in ("generate", "refine_context", "modify_plan", "stop"):
+            if next_action in NEXT_ACTIONS:
                 eval_out["next_action"] = next_action
             eval_out["suggestions"] = suggestions
         except Exception:
@@ -644,7 +640,7 @@ async def run_feedback_cycle(
     """
     from api.nodes.optimizer_nodes import InitNode
     from api.services.backend_client import BackendClient
-    from api.services.eval_helpers import subsample_queries
+    from api.services.query_utils import subsample_queries
 
     started_at = datetime.now(timezone.utc).isoformat()
 
@@ -701,6 +697,13 @@ async def run_feedback_cycle(
             best_accuracy=current_accuracy,
             best_ps=current_ps,
         )
+
+    # Build shared clients once (reused across all rounds)
+    state.backend_client = BackendClient(config.backend_url)
+    if config.project_root:
+        from api.services.project_store import ProjectStore
+        state.store = ProjectStore(config.project_root)
+
     stop_reason = "max_rounds"
 
     # -- Step 5: Round loop --

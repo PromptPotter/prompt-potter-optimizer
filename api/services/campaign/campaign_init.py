@@ -160,7 +160,8 @@ async def run_baseline_eval(
     # Register dataset items in obs if available
     if obs and eval_data:
         try:
-            obs.register_dataset("termnorm_ground_truth", eval_data)
+            from api.services.constants import DATASET_NAME
+            obs.register_dataset(DATASET_NAME, eval_data)
         except Exception:
             logger.warning("Dataset registration in run_baseline_eval failed", exc_info=True)
 

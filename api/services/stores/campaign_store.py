@@ -12,7 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from api.services.stores.base import read_json, validate_path_component, write_json
+from api.services.stores.base import (
+    read_json,
+    read_json_optional,
+    validate_path_component,
+    write_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,10 +82,7 @@ class CampaignStore:
         self, backend_id: str, campaign_id: str,
     ) -> dict[str, Any] | None:
         """Load campaign metadata + trial index.  Returns None if not found."""
-        path = self._campaign_path(backend_id, campaign_id)
-        if not path.exists():
-            return None
-        return read_json(path)
+        return read_json_optional(self._campaign_path(backend_id, campaign_id))
 
     def update(
         self, backend_id: str, campaign_id: str, updates: dict[str, Any],
@@ -174,13 +176,9 @@ class CampaignStore:
         round_num: int,
     ) -> dict[str, Any] | None:
         """Load a trial detail by round number.  Returns None if not found."""
-        path = (
-            self._trial_dir(backend_id, campaign_id)
-            / f"trial_{round_num:04d}.json"
+        return read_json_optional(
+            self._trial_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json",
         )
-        if not path.exists():
-            return None
-        return read_json(path)
 
     def export(
         self, backend_id: str, campaign_id: str,
@@ -341,13 +339,10 @@ class CampaignStore:
         round_num: int,
     ) -> list[dict[str, Any]] | None:
         """Load persisted candidates for a round.  Returns None if not on disk."""
-        path = (
+        return read_json_optional(
             self._trial_dir(backend_id, campaign_id)
-            / f"round_{round_num:04d}_candidates.json"
+            / f"round_{round_num:04d}_candidates.json",
         )
-        if not path.exists():
-            return None
-        return read_json(path)
 
     def get_lineage(
         self, backend_id: str, campaign_id: str,

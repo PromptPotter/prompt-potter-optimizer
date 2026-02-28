@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from api.models.pipeline_schema import ObservationMapping, PipelineSchema, PipelineStep
+from api.services.constants import DATASET_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
     description="TermNorm AI terminology normalization pipeline",
     required_step="entity_profile",
     template_variables={"{{core_concept}}", "{{entity_profile_json}}", "{{matches}}"},
-    dataset_name="termnorm_ground_truth",
+    dataset_name=DATASET_NAME,
     steps=[
         PipelineStep(
             name="cache_lookup",

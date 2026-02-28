@@ -35,6 +35,10 @@ LAYER_FIELDS: dict[str, list[str]] = {
     "modify_plan": ["plan"],
 }
 
+# Layer 1 string fields (all generate fields except few_shot_examples).
+# render() and diff() iterate this instead of hardcoded tuples.
+_LAYER1_STRING_FIELDS = [f for f in LAYER_FIELDS["generate"] if f != "few_shot_examples"]
+
 
 # ---------------------------------------------------------------------------
 # Supporting models
@@ -88,14 +92,7 @@ class PromptState(BaseModel):
         Few-shot examples are formatted as Input/Output pairs.
         """
         parts: list[str] = []
-        for field_name in (
-            "persona",
-            "task_intent",
-            "problem_description",
-            "instruction",
-            "thinking_style",
-            "answer_format",
-        ):
+        for field_name in _LAYER1_STRING_FIELDS:
             value = getattr(self, field_name)
             if value:
                 parts.append(value)
@@ -163,8 +160,7 @@ def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
     field_changes: list[FieldChange] = []
 
     # Compare Layer 1 string fields
-    for field_name in ("persona", "task_intent", "problem_description",
-                       "instruction", "thinking_style", "answer_format"):
+    for field_name in _LAYER1_STRING_FIELDS:
         old_val = getattr(a, field_name)
         new_val = getattr(b, field_name)
         if old_val != new_val:

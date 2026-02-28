@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 
+from api.services.constants import NO_RESULT
 from api.services.query_utils import parse_bom_material
 
 if TYPE_CHECKING:
@@ -323,7 +324,7 @@ class BackendClient:
 
                 results.append(_build_result_dict(
                     q,
-                    predicted=top.get("candidate", "NO_RESULT"),
+                    predicted=top.get("candidate", NO_RESULT),
                     confidence=top.get("relevance_score", 0),
                     ranked_candidates=ranked[:20],
                     latency_ms=round(elapsed * 1000, 1),

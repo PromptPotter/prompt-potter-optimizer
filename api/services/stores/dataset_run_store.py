@@ -1,14 +1,20 @@
 """
 Dataset run (eval result caching) storage.
 """
-import json
 import logging
 import os
 import time
 from pathlib import Path
 from typing import Any
 
-from api.services.stores.base import read_json, validate_path_component, write_json
+from api.services.stores.base import (
+    append_jsonl,
+    read_json,
+    read_json_optional,
+    read_jsonl,
+    validate_path_component,
+    write_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,33 +138,28 @@ class DatasetRunStore:
         self, backend_id: str, run_id: str,
     ) -> dict[str, Any] | None:
         """Load a dataset run detail file directly by run_id (no index scan)."""
-        detail_path = self._runs_dir(backend_id) / f"{run_id}.json"
-        if not detail_path.exists():
-            return None
-        return read_json(detail_path)
+        return read_json_optional(self._runs_dir(backend_id) / f"{run_id}.json")
 
     def load_by_hash(
         self, backend_id: str, content_hash: str,
     ) -> dict[str, Any] | None:
         """Scan the index for a matching content_hash, load and return detail."""
-        index_path = self._index_path(backend_id)
-        if not index_path.exists():
+        index = read_json_optional(self._index_path(backend_id))
+        if index is None:
             return None
 
-        index = read_json(index_path)
         for entry in index.get("dataset_runs", []):
             if entry.get("content_hash") == content_hash:
-                detail_path = self._runs_dir(backend_id) / f"{entry['run_id']}.json"
-                if detail_path.exists():
-                    return read_json(detail_path)
+                return read_json_optional(
+                    self._runs_dir(backend_id) / f"{entry['run_id']}.json",
+                )
         return None
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return the index entries (summaries without full items)."""
-        index_path = self._index_path(backend_id)
-        if not index_path.exists():
+        index = read_json_optional(self._index_path(backend_id))
+        if index is None:
             return []
-        index = read_json(index_path)
         return index.get("dataset_runs", [])
 
     # -- incremental eval writes ----------------------------------------------
@@ -167,27 +168,17 @@ class DatasetRunStore:
         self, backend_id: str, run_id: str, item: dict,
     ) -> Path:
         """Append one eval result to an in-progress .partial.jsonl file."""
-        path = self._runs_dir(backend_id) / f"{run_id}.partial.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
-            f.flush()
-        return path
+        return append_jsonl(
+            self._runs_dir(backend_id) / f"{run_id}.partial.jsonl", item,
+        )
 
     def load_partial_eval(
         self, backend_id: str, run_id: str,
     ) -> list[dict[str, Any]]:
         """Read all items from an in-progress .partial.jsonl file."""
-        path = self._runs_dir(backend_id) / f"{run_id}.partial.jsonl"
-        if not path.exists():
-            return []
-        items: list[dict[str, Any]] = []
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    items.append(json.loads(line))
-        return items
+        return read_jsonl(
+            self._runs_dir(backend_id) / f"{run_id}.partial.jsonl",
+        )
 
     def list_partial_evals(self, backend_id: str) -> list[dict]:
         """List in-progress .partial.jsonl files with line counts."""

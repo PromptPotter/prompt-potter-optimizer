@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Callable
 from api.evaluators.base import EvalResult
 from api.evaluators.exact_match import ExactMatchEvaluator
 from api.models.prompt_state import PromptState
+from api.services.constants import NO_RESULT
 
 _evaluator = ExactMatchEvaluator({"strip": True})
 
@@ -277,7 +278,7 @@ async def backend_reranker_eval(
         data = resp.get("data", {})
         ranked = data.get("ranked_candidates", [])
         predicted = (
-            ranked[0].get("candidate", "NO_RESULT") if ranked else "NO_RESULT"
+            ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
         )
         eval_output = _evaluator.evaluate(ground_truth, predicted)
         return {

@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from api.services.constants import DATASET_NAME  # re-export for backward compat
 from api.services.obs.pipeline_nodes import extract_pipeline_nodes
 from api.services.project_store import ProjectStore
 
@@ -50,8 +51,6 @@ _PREFIX_MAP = [
     ("candidate_", "feedback_cycle"),
     ("smart_search_winner_", "smart_search_winner"),
 ]
-
-DATASET_NAME = "termnorm_ground_truth"
 
 _STATE_FORMAT_VERSION = 3
 

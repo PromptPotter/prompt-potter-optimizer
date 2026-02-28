@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from api.models.backend import BackendConnection
-from api.services.stores.base import read_json, validate_path_component, write_json
+from api.services.stores.base import (
+    read_json,
+    read_json_optional,
+    validate_path_component,
+    write_json,
+)
 
 
 class BackendStore:
@@ -32,10 +37,8 @@ class BackendStore:
 
     def get(self, backend_id: str) -> BackendConnection | None:
         """Read backend.json, return None if not found."""
-        path = self._backend_dir(backend_id) / "backend.json"
-        if not path.exists():
-            return None
-        return BackendConnection(**read_json(path))
+        data = read_json_optional(self._backend_dir(backend_id) / "backend.json")
+        return BackendConnection(**data) if data is not None else None
 
     def list_all(self) -> list[BackendConnection]:
         """List all registered backends."""
@@ -75,10 +78,7 @@ class BackendStore:
 
     def load_sync(self, backend_id: str, key: str) -> Any | None:
         """Read a synced API response. Returns None if not found."""
-        path = self._sync_dir(backend_id) / key
-        if not path.exists():
-            return None
-        return read_json(path)
+        return read_json_optional(self._sync_dir(backend_id) / key)
 
     def list_synced_experiments(self, backend_id: str) -> list[dict[str, Any]]:
         """List individual synced experiment files."""

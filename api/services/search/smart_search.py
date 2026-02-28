@@ -27,6 +27,27 @@ DEFAULT_DIAGNOSTIC_QUERIES = 6
 DIAGNOSTIC_HIT_RATIO = 0.75
 
 
+def _make_eval_fn(
+    eval_data: list,
+    backend_client: Any,
+    store: ProjectStore | None,
+    backend_id: str,
+    get_params: Callable[[], dict],
+    prompt_result_index: dict | None = None,
+) -> Callable:
+    """Factory for the ``_eval_ps`` closure used by scan and adaptive search."""
+    async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
+        results, scores, cached = await evaluate_prompt_cached(
+            ps, eval_data, backend_client,
+            pipeline_params=pp or get_params(),
+            store=store, backend_id=backend_id,
+            label="scan",
+            prompt_result_index=prompt_result_index,
+        )
+        return {**scores, "results": results, "cached": cached}
+    return _eval_ps
+
+
 # ---------------------------------------------------------------------------
 # Diagnostic set builder
 # ---------------------------------------------------------------------------
@@ -186,16 +207,11 @@ async def sensitivity_scan(
 
     base_params = dict(pipeline_params or {})
 
-    async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
-        """Evaluate a PromptState and return {**scores, results, cached}."""
-        results, scores, cached = await evaluate_prompt_cached(
-            ps, eval_data, backend_client,
-            pipeline_params=pp or base_params,
-            store=store, backend_id=backend_id,
-            label="scan",
-            prompt_result_index=prompt_result_index,
-        )
-        return {**scores, "results": results, "cached": cached}
+    _eval_ps = _make_eval_fn(
+        eval_data, backend_client, store, backend_id,
+        get_params=lambda: base_params,
+        prompt_result_index=prompt_result_index,
+    )
 
     # Evaluate baseline
     baseline_scores = await _eval_ps(baseline_ps)
@@ -472,16 +488,11 @@ async def adaptive_search(
     resolved_axes: set[str] = set()
     log_rows: list[dict] = []
 
-    async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
-        """Evaluate a PromptState and return {**scores, results, cached}."""
-        results, scores, cached = await evaluate_prompt_cached(
-            ps, eval_data, backend_client,
-            pipeline_params=pp or current_params,
-            store=store, backend_id=backend_id,
-            label="scan",
-            prompt_result_index=prompt_result_index,
-        )
-        return {**scores, "results": results, "cached": cached}
+    _eval_ps = _make_eval_fn(
+        eval_data, backend_client, store, backend_id,
+        get_params=lambda: current_params,
+        prompt_result_index=prompt_result_index,
+    )
 
     # Get baseline accuracy
     baseline_scores = await _eval_ps(current_ps)

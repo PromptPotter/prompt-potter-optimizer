@@ -29,6 +29,8 @@ class ObservationMapping(BaseModel):
     - ``is_llm``: whether to also extract model info from observation metadata
     """
 
+    model_config = {"frozen": True}
+
     pipeline_key: str
     output_field: str | None = None
     is_llm: bool = False
@@ -40,6 +42,8 @@ class ObservationMapping(BaseModel):
 
 class PipelineStep(BaseModel):
     """One step in a backend pipeline."""
+
+    model_config = {"frozen": True}
 
     name: str
     type: str = "tool"
@@ -61,6 +65,8 @@ class PipelineSchema(BaseModel):
     Carries enough information for all PromptPotter services to operate
     generically: evaluation, grid search, observability, and Langfuse push.
     """
+
+    model_config = {"frozen": True}
 
     name: str = ""
     version: str = ""
