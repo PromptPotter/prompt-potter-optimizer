@@ -73,26 +73,7 @@ PromptState is frozen (`model_config = {"frozen": True}`). Use `derive(**changes
 
 **PipelineSchema** (`api/models/pipeline_schema.py`, M6) — Backend-agnostic pipeline description with derivation methods: `step_param_keys()`, `obs_extraction_map()`, `template_variables`, `langfuse_type_map()`. Factory in `api/services/pipeline_discovery.py` parses `GET /pipeline` response; static `TERMNORM_DEFAULT_SCHEMA` for offline use.
 
-**ProjectStore** layout on disk:
-```
-.promptpotter/projects/{backend_id}/
-  backend.json
-  sync/experiments/{id}.json
-  executions/{id}.json
-  dataset_runs/{run_id}.json       # completed eval runs (shared across all eval paths)
-  dataset_runs/{run_id}.partial.jsonl  # in-progress (crash recovery)
-  dataset_runs.json                # index of all runs (content_hash → run_id)
-  grid_plans/{plan_id}.json        # persisted grid search plans (resume on restart)
-  smart_search_plans/{plan_id}.json # sensitivity scan plans (axis profiles, scan results)
-  campaigns/{campaign_id}.json     # campaign metadata + trial index
-  campaigns/{campaign_id}/trial_NNNN.json
-  obs/
-    langfuse/events.jsonl          # flat navigation log (START HERE for data exploration)
-    langfuse/traces/{trace_id}.json
-    langfuse/scores/{trace_id}.jsonl
-    experiments/{campaign_id}/     # MLflow FileStore format (mlflow ui compatible)
-    prompts/{family}/{version}/    # prompt versioning (prompt.txt + metadata.json)
-```
+**ProjectStore** disk layout, store conventions, and evaluation flow details: see [`api/services/CLAUDE.md`](api/services/CLAUDE.md).
 
 ### North star workflow (HITL optimization cycle)
 
@@ -108,28 +89,11 @@ The human workflow is a repeatable loop:
 
 ### Evaluation flow
 
-Backend evaluation is the primary path: `prompt_eval.backend_reranker_eval()` calls the backend's `POST /matches` with a rendered ranking prompt override, then checks if the top-ranked candidate matches ground truth (exact string match = hit@1).
-
-All evaluation paths converge on `evaluate_prompt_cached()` which handles content-addressed deduplication, incremental `.partial.jsonl` crash recovery, and final result storage. This is the single gateway for persisting eval results.
-
-Grid search (`grid_search.run_grid_search()`) iterates over cartesian products of Layer 1 field variants, evaluating each grid point against the eval dataset via backend calls. Per-point query sampling is supported: `eval_queries_per_point` controls how many queries each point gets, and `shared_queries` controls whether all points share the same query set. Results are deduplicated by content hash.
-
-Smart search (`smart_search.sensitivity_scan()`) measures one-at-a-time axis perturbations against the baseline, classifying axes by sensitivity. The coverage advisor (`coverage.assess_scan_coverage()`) checks existing `dataset_runs` to determine which variants already have enough cached data to skip backend calls.
-
-Feedback cycle (`feedback_cycle.run_feedback_cycle()`) runs iterative optimization rounds: `GrowFilterNode` generates candidates via LLM, `AnalysisEvalNode` evaluates each candidate via `evaluate_prompt_cached()` — so every candidate evaluation is automatically persisted and deduplicated.
+All evaluation paths (grid search, smart search, feedback cycle) converge on `evaluate_prompt_cached()` — the single gateway for eval persistence with content-addressed deduplication. See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for details.
 
 ### Scaffold (not yet wired)
 
-The following modules are a CWL-inspired workflow engine scaffold — **future architecture, not dead code**:
-
-- `api/core/workflow_runner.py` — YAML-driven workflow executor
-- `api/nodes/` — node base class + implementations (`llm_node`, `ranker_node`, `pipeline_config_node`, `optimizer_nodes`)
-- `api/evaluators/` — evaluator base + implementations (`exact_match`, `criteria`)
-- `api/routers/workflows.py` — REST endpoints for workflow execution
-- `api/models/workflow.py` — workflow data models
-- `workflows/*.yaml` — workflow definitions
-
-**Migration intent:** M6 adds `PipelineSchema` (replacing hardcoded TermNorm constants) then wraps service-layer functions into workflow nodes. The notebook will drive optimization via `WorkflowRunner` instead of direct service calls. See `docs/specs/m6-workflow-migration.md`.
+CWL-inspired workflow engine scaffold — **future architecture, not dead code**. See [`api/core/CLAUDE.md`](api/core/CLAUDE.md) for workflow engine details, node types, and M6 migration intent.
 
 ### How to start a milestone
 
@@ -149,13 +113,7 @@ Each milestone has an executable spec in `docs/specs/`. One Claude Code session 
 
 ### TermNorm reference patterns
 
-The TermNorm-excel backend (`/c/Users/dsacc/OfficeAddinApps/TermNorm-excel/backend-api/utils/`) has proven zero-dependency implementations of:
-
-- **Langfuse logging** (`langfuse_logger.py`) — file-based traces/observations/scores
-- **MLflow experiment tracking** (`standards_logger.py`) — file-based experiments/runs
-- **Prompt registry** (`prompt_registry.py`) — versioned prompt templates with metadata
-
-These patterns were adopted for PromptPotter's observability layer (M5, complete). See `api/services/obs/` and [`docs/obs-guide.md`](docs/obs-guide.md).
+See [`external/CLAUDE.md`](external/CLAUDE.md) for TermNorm reference implementations (Langfuse, MLflow, prompt registry).
 
 ## Project Conventions
 

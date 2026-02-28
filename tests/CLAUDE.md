@@ -1,0 +1,48 @@
+# tests — Testing Conventions
+
+## Running tests
+
+```bash
+pytest -v --tb=short              # all tests
+pytest tests/test_prompt_state.py -v   # single file
+pytest tests/test_prompt_state.py::test_create_and_derive -v  # single function
+```
+
+## pytest config (pyproject.toml)
+
+- `asyncio_mode = "auto"` — async tests run automatically, no manual event loop setup
+- `pythonpath = ["tests"]` — allows direct imports from `tests/` (e.g. `from _helpers import ...`)
+- `testpaths = ["tests"]`
+
+## Fixtures (`conftest.py`)
+
+| Fixture | Description |
+|---------|-------------|
+| `mock_llm_client` | Swaps global `_llm_client` singleton with `MockLLMClient`; restores after test |
+| `tmp_store` / `store` | `ProjectStore` backed by `tmp_path`; use for all file I/O tests |
+| `eval_data` | Standard 3-query dataset: aspirin, ibuprofen, acetaminophen |
+| `_reset_langfuse` | **Autouse** — resets `LangfuseLogger` singleton after every test |
+
+## Helpers (`_helpers.py`)
+
+| Helper | Purpose |
+|--------|---------|
+| `apply_init_mock(monkeypatch)` | Mocks `restructure_context` for InitNode |
+| `apply_llm_mock(monkeypatch)` | Mocks `get_llm_client` to return `MockLLMClient` |
+| `apply_grow_mock(monkeypatch)` | Mocks `generate_candidates` with deterministic variants |
+| `apply_eval_mock(monkeypatch, round_hits)` | Mocks `evaluate_prompt_cached`; returns `call_count` list for tracking |
+| `MockLangfuseLogger` | Records all Langfuse calls (traces, spans, scores, generations, dataset API) |
+| `MockCompletion` | Fake OpenAI-compatible completion response |
+
+## Mock strategy
+
+- **`monkeypatch`** for async service mocking (preferred) — patches module-level functions
+- **`MagicMock`** for dependency injection into functions
+- No pytest-mock plugin; use stdlib `unittest.mock` when needed
+
+## Patterns
+
+- **Async tests**: `@pytest.mark.asyncio` + inline `async def` mock functions
+- **File I/O**: Always use `tmp_store` fixture, never raw temp dirs
+- **Class-based grouping**: Related assertions in test classes (e.g. `TestFullTraceExtraction`)
+- **Naming**: `test_{module}.py` mirrors `api/services/{module}.py`
