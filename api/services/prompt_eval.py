@@ -354,6 +354,135 @@ def compute_accuracy(results: list) -> dict:
     return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
 
 
+def _resolve_historical_and_partial(
+    rendered: str,
+    eval_data: list,
+    run_id: str,
+    *,
+    force: bool,
+    prompt_result_index: dict | None,
+    store: "ProjectStore | None",
+    backend_id: str,
+) -> tuple[list[dict], list, list, str | None]:
+    """Resolve cached layers: cross-run historical index + partial resume.
+
+    Returns:
+        ``(historical_results, partial_results, remaining_data, full_cache_signal)``
+        When ``full_cache_signal`` is ``"full"``, all queries are satisfied
+        from the historical index (caller should short-circuit).
+    """
+    historical_results: list[dict] = []
+    remaining_after_history = eval_data
+
+    if prompt_result_index and eval_data and not force:
+        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
+        cached_by_query = prompt_result_index.get(rp_hash, {})
+        if cached_by_query:
+            n_matched = sum(
+                1 for qd in eval_data if qd.get("query", "") in cached_by_query
+            )
+            coverage = n_matched / len(eval_data)
+            if coverage >= 1.0:
+                logger.info(
+                    "evaluate_prompt_cached [historical] full coverage "
+                    "(%d/%d queries)", n_matched, len(eval_data),
+                )
+                matched = [cached_by_query[qd["query"]] for qd in eval_data]
+                return matched, [], [], "full"
+            if coverage > 0:
+                logger.info(
+                    "evaluate_prompt_cached [historical] partial coverage: "
+                    "%.0f%% (%d/%d queries)",
+                    coverage * 100, n_matched, len(eval_data),
+                )
+                remaining_after_history = []
+                for qd in eval_data:
+                    q = qd.get("query", "")
+                    if q in cached_by_query:
+                        historical_results.append(cached_by_query[q])
+                    else:
+                        remaining_after_history.append(qd)
+
+    # --- check for partial results (resume after crash) ---
+    partial_results: list = []
+    remaining_data = remaining_after_history
+    if store and backend_id:
+        partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
+        if partial_results:
+            valid = True
+            for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
+                if pr.get("query") != ed.get("query"):
+                    logger.warning(
+                        "Partial eval %s: query mismatch at index %d "
+                        "(%r != %r) — discarding stale partials",
+                        run_id, i, pr.get("query", "")[:40], ed.get("query", "")[:40],
+                    )
+                    valid = False
+                    break
+
+            if not valid:
+                partial_results = []
+            elif len(partial_results) >= len(remaining_data):
+                partial_results = partial_results[:len(remaining_data)]
+                remaining_data = []
+            else:
+                remaining_data = remaining_data[len(partial_results):]
+        else:
+            partial_results = []
+
+    return historical_results, partial_results, remaining_data, None
+
+
+def _finalize_observability(
+    store: "ProjectStore",
+    backend_id: str,
+    run_id: str,
+    content_hash: str,
+    scores: dict,
+    model: str,
+    temperature: float,
+    prompt_state_id: str,
+    dataset_name: str | None,
+    dataset_item_map: dict[str, str] | None,
+    obs: "ObsLogger | None",
+) -> None:
+    """Log eval run to local obs and push to Langfuse cloud.
+
+    Both paths are wrapped in their own try/except — failure never crashes eval.
+    """
+    try:
+        _obs = obs
+        if _obs is None:
+            from api.services.obs.observability_logger import ObsLogger
+            _obs = ObsLogger(store.base_dir, backend_id)
+        _obs.log_dataset_run(
+            run_id=run_id,
+            content_hash=content_hash,
+            accuracy=scores["accuracy"],
+            total=scores["total"],
+            hits=scores["hits"],
+            model=model,
+            temperature=temperature,
+            prompt_state_id=prompt_state_id,
+            dataset_name=dataset_name,
+            dataset_item_map=dataset_item_map,
+        )
+    except Exception:
+        logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
+
+    try:
+        from api.services.obs.langfuse_client import LangfuseLogger
+        _lf = LangfuseLogger.get_instance()
+        if _lf.enabled:
+            from api.services.obs.langfuse_push import push_run
+            push_run(
+                _lf, store, backend_id, run_id,
+                query_to_item_id=dataset_item_map,
+            )
+    except Exception:
+        logger.debug("Cloud push failed", exc_info=True)
+
+
 async def evaluate_prompt_cached(
     prompt_state: PromptState,
     eval_data: list,
@@ -417,75 +546,25 @@ async def evaluate_prompt_cached(
                     on_result({**r, "cached": True}, i, len(results))
             return results, scores, True
 
-    # --- cross-run historical index lookup ---
-    historical_results: list[dict] = []
-    remaining_after_history = eval_data
-    if prompt_result_index and eval_data and not force:
-        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
-        cached_by_query = prompt_result_index.get(rp_hash, {})
-        if cached_by_query:
-            n_matched = sum(
-                1 for qd in eval_data if qd.get("query", "") in cached_by_query
-            )
-            coverage = n_matched / len(eval_data)
-            if coverage >= 1.0:
-                # Full historical coverage — skip backend entirely
-                matched = [cached_by_query[qd["query"]] for qd in eval_data]
-                acc = compute_accuracy(matched)
-                logger.info(
-                    "evaluate_prompt_cached [historical] full coverage "
-                    "(%d/%d queries)", n_matched, len(eval_data),
-                )
-                if on_result is not None:
-                    for i, r in enumerate(matched):
-                        on_result({**r, "cached": True}, i, len(matched))
-                return matched, acc, True
-            if coverage > 0:
-                logger.info(
-                    "evaluate_prompt_cached [historical] partial coverage: "
-                    "%.0f%% (%d/%d queries)",
-                    coverage * 100, n_matched, len(eval_data),
-                )
-                # Split into covered + uncovered queries
-                remaining_after_history = []
-                for qd in eval_data:
-                    q = qd.get("query", "")
-                    if q in cached_by_query:
-                        historical_results.append(cached_by_query[q])
-                    else:
-                        remaining_after_history.append(qd)
-
-    # --- compute run_id for incremental writes ---
+    # --- resolve cached layers (historical index + partial resume) ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    # --- check for partial results (resume after crash) ---
-    partial_results: list = []
-    remaining_data = remaining_after_history
-    if store and backend_id:
-        partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
-        if partial_results:
-            # Validate partial results align with remaining queries
-            valid = True
-            for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
-                if pr.get("query") != ed.get("query"):
-                    logger.warning(
-                        "Partial eval %s: query mismatch at index %d "
-                        "(%r != %r) — discarding stale partials",
-                        run_id, i, pr.get("query", "")[:40], ed.get("query", "")[:40],
-                    )
-                    valid = False
-                    break
-
-            if not valid:
-                partial_results = []
-            elif len(partial_results) >= len(remaining_data):
-                partial_results = partial_results[:len(remaining_data)]
-                remaining_data = []
-            else:
-                remaining_data = remaining_data[len(partial_results):]
-        else:
-            partial_results = []
+    historical_results, partial_results, remaining_data, full_signal = (
+        _resolve_historical_and_partial(
+            rendered, eval_data, run_id,
+            force=force,
+            prompt_result_index=prompt_result_index,
+            store=store,
+            backend_id=backend_id,
+        )
+    )
+    if full_signal == "full":
+        acc = compute_accuracy(historical_results)
+        if on_result is not None:
+            for i, r in enumerate(historical_results):
+                on_result({**r, "cached": True}, i, len(historical_results))
+        return historical_results, acc, True
 
     # --- replay cached partial/historical results to callback ---
     callback_offset = 0
@@ -497,7 +576,7 @@ async def evaluate_prompt_cached(
         for i, r in enumerate(partial_results):
             on_result({**r, "cached": True}, callback_offset + i, len(eval_data))
 
-    # --- evaluate via backend ---
+    # --- evaluate remaining via backend ---
     _incremental_writer = None
     if store and backend_id:
         _incremental_writer = make_incremental_writer(store, backend_id, run_id)
@@ -519,7 +598,7 @@ async def evaluate_prompt_cached(
     results = historical_results + partial_results + new_results
     scores = compute_accuracy(results)
 
-    # --- finalize: save complete run, delete .partial.jsonl ---
+    # --- finalize: save complete run + observability ---
     if store and backend_id:
         run_data = build_dataset_run_data(
             run_id, label, content_hash, prompt_state.id,
@@ -527,38 +606,10 @@ async def evaluate_prompt_cached(
         )
         store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 
-        # --- observability: log dataset run trace ---
-        try:
-            _obs = obs
-            if _obs is None:
-                from api.services.obs.observability_logger import ObsLogger
-                _obs = ObsLogger(store.base_dir, backend_id)
-            _obs.log_dataset_run(
-                run_id=run_id,
-                content_hash=content_hash,
-                accuracy=scores["accuracy"],
-                total=scores["total"],
-                hits=scores["hits"],
-                model=model,
-                temperature=temperature,
-                prompt_state_id=prompt_state.id,
-                dataset_name=dataset_name,
-                dataset_item_map=dataset_item_map,
-            )
-        except Exception:
-            logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
-
-        # --- auto-push to Langfuse cloud (idempotent via registry) ---
-        try:
-            from api.services.obs.langfuse_client import LangfuseLogger
-            _lf = LangfuseLogger.get_instance()
-            if _lf.enabled:
-                from api.services.obs.langfuse_push import push_run
-                push_run(
-                    _lf, store, backend_id, run_id,
-                    query_to_item_id=dataset_item_map,
-                )
-        except Exception:
-            logger.debug("Cloud push failed", exc_info=True)
+        _finalize_observability(
+            store, backend_id, run_id, content_hash, scores,
+            model, temperature, prompt_state.id,
+            dataset_name, dataset_item_map, obs,
+        )
 
     return results, scores, False
