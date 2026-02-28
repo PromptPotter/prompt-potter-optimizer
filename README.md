@@ -1,8 +1,19 @@
 # PromptPotter Optimizer
 
-**Systematic prompt optimization for LLM pipelines. Two nested loops — human-guided landscape analysis and AI-driven candidate search — that build on each other.**
+**Automatic prompt optimization for any LLM pipeline.**
 
-## How It Works
+## The 4-Step Workflow
+
+1. **Provide a dataset** — input/output pairs (and any extra context)
+2. **Describe your pipeline** — a schema of your LLM application's steps
+3. **Set your budget** — how many rounds, how many evaluations
+4. **Get optimized parameters** — the best prompt configuration for your pipeline
+
+PromptPotter treats your LLM pipeline as a black box, systematically explores
+the prompt space, and returns the configuration that maximizes accuracy on
+your dataset.
+
+## How It Works Under the Hood
 
 PromptPotter has two loops that work together:
 
