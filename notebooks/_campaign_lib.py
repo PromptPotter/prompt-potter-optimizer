@@ -86,7 +86,6 @@ __all__ = [
     "display_progress", "run_manual_round",
     "select_and_seed_grid_winner",
     # Notebook-facing wrappers
-    "show_pipeline_config", "show_campaign_config",
     "show_entity_profiles", "show_grid_overview",
     # Langfuse
     "push_langfuse", "backfill_langfuse", "configure_langfuse",
@@ -94,117 +93,8 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
-# Pipeline config (display wrapper over backend_client functions)
+# Entity profiles display
 # ---------------------------------------------------------------------------
-
-
-def show_pipeline_config(svc: dict, campaign_config: dict) -> dict:
-    """Import pipeline config from backend, display workflow config, print summary.
-
-    Returns:
-        pipeline_params dict ready for evaluation.
-    """
-    pipeline_config = load_pipeline_config(svc["exp_data"])
-
-    ruler = "=" * 70
-    print(ruler)
-    print(f"  PIPELINE: {pipeline_config['name']}  v{pipeline_config['version']}")
-    if pipeline_config.get("description"):
-        print(f"  {pipeline_config['description']}")
-    print(f"  Notation: {pipeline_config['notation']}")
-    if pipeline_config.get("config_id"):
-        print(f"  Config ID: {pipeline_config['config_id']}")
-    print(ruler)
-
-    for i, step in enumerate(pipeline_config["steps"]):
-        print(f"\n  Step {i + 1}: {step['name']}  ({step.get('type', '?')})")
-
-        sig = step.get("signature", {})
-        if sig:
-            inputs = sig.get("input", sig.get("inputs", []))
-            outputs = sig.get("output", sig.get("outputs", []))
-            if inputs:
-                fmt = ", ".join(inputs) if isinstance(inputs, list) else inputs
-                print(f"    Input:  {fmt}")
-            if outputs:
-                fmt = ", ".join(outputs) if isinstance(outputs, list) else outputs
-                print(f"    Output: {fmt}")
-
-        cfg = step.get("config", {})
-        if cfg:
-            model = cfg.get("model") or cfg.get("model_name")
-            if model:
-                print(f"    Model:  {model}")
-            for k, v in cfg.items():
-                if k in ("model", "model_name"):
-                    continue
-                print(f"    {k}: {v}")
-
-        if step.get("description"):
-            print(f"    Desc:   {step['description']}")
-
-    print(f"\n  Flow: {' -> '.join(s['name'] for s in pipeline_config['steps'])}")
-    print(ruler)
-
-    pipeline_params = build_pipeline_params(
-        pipeline_config,
-        overrides=campaign_config.get("pipeline_overrides"),
-    )
-    campaign_config["pipeline_params"] = pipeline_params
-
-    # Show tunable parameters per active step with variant library search ranges
-    variant_lib = load_variant_library()
-    pp_search = variant_lib.get("pipeline_params", {})
-    step_names = [s["name"] for s in pipeline_config["steps"]]
-    print("\n  Tunable parameters:")
-    for step_name in step_names:
-        params = sorted(PIPELINE_STEP_PARAMS.get(step_name, set()))
-        if not params:
-            continue
-        print(f"    {step_name}:")
-        for param in params:
-            search_vals = pp_search.get(param)
-            if search_vals:
-                print(f"      {param:<34s} search: {search_vals}")
-            elif param == "ranking_prompt":
-                print(f"      {param:<34s} (overridden by optimizer)")
-            else:
-                print(f"      {param:<34s} (no search values defined)")
-    print(ruler)
-
-    return pipeline_params
-
-
-def show_campaign_config(campaign_config: dict) -> None:
-    """Print a scannable summary of campaign_config."""
-    ruler = "=" * 70
-    print(ruler)
-    print("  CAMPAIGN CONFIG")
-    print(ruler)
-
-    # Top-level scalars
-    for key in ("queries_per_eval", "exploration_rate", "improvement_areas"):
-        if key in campaign_config:
-            print(f"  {key:<24s} {campaign_config[key]}")
-
-    # Nested sections
-    for section in ("optimization", "eval_llm", "grid_search", "smart_search"):
-        block = campaign_config.get(section)
-        if not block:
-            continue
-        print(f"\n  [{section}]")
-        for k, v in block.items():
-            val = v if not isinstance(v, str) or len(v) <= 60 else v[:57] + "..."
-            print(f"    {k:<26s} {val}")
-
-    # Pipeline overrides
-    overrides = campaign_config.get("pipeline_overrides", {})
-    if overrides:
-        print("\n  [pipeline_overrides]")
-        for k, v in overrides.items():
-            print(f"    {k:<26s} {v}")
-
-    print(ruler)
 
 
 def show_entity_profiles(eval_data: list, n_samples: int = 3) -> None:
