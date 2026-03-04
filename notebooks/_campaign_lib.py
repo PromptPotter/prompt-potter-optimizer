@@ -170,12 +170,13 @@ def save_campaign_winner(
             winner = rd["prompt_state"]
             winner_acc = rd["accuracy"]
 
+    baseline_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else None
     save_data = {
         "winner": winner.model_dump(),
         "accuracy": winner_acc,
         "campaign_rounds": len(campaign_rounds),
-        "baseline_accuracy": campaign_rounds[0]["accuracy"],
-        "improvement": winner_acc - campaign_rounds[0]["accuracy"],
+        "baseline_accuracy": baseline_acc,
+        "improvement": (winner_acc - baseline_acc) if baseline_acc is not None else None,
         "config": campaign_config,
         "saved_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -510,9 +511,12 @@ async def run_baseline_eval(
     def _on_result(result, index, total):
         pbar.total = total
         tag = "HIT " if result["hit"] else "MISS"
+        pred = result["predicted"][:35]
+        if result.get("error"):
+            pred = f"ERROR: {result['error'][:50]}"
         tqdm.write(
             f"[{index + 1}/{total}] {tag}  {result['query'][:50]:<50s} "
-            f"| pred: {result['predicted'][:35]:<35s}"
+            f"| {pred:<55s}"
         )
         pbar.update(1)
 
@@ -523,6 +527,7 @@ async def run_baseline_eval(
         experiment_id=svc.get("experiment_id", ""),
         model=model, temperature=temperature,
         on_result=_on_result,
+        session_terms=svc.get("session_terms"),
     )
     pbar.close()
 
@@ -1310,12 +1315,17 @@ async def sensitivity_scan(
     session_terms: list | None = None,
     plan_id: str = "",
     prompt_result_index: dict | None = None,
+    partial_scan: dict | None = None,
 ) -> tuple:
     """Run a sensitivity scan over all axes with progress output.
 
     Returns (per_variant_df, axis_profiles).
     """
-    print("Running sensitivity scan...")
+    if partial_scan:
+        n_done = len(partial_scan.get("completed_axes", []))
+        print(f"Resuming sensitivity scan ({n_done} axes already done)...")
+    else:
+        print("Running sensitivity scan...")
     if user_focus:
         print(f"  User focus: {user_focus}")
 
@@ -1359,6 +1369,7 @@ async def sensitivity_scan(
             progress_cb=cb,
             prompt_result_index=prompt_result_index,
             plan_id=plan_id,
+            partial_scan=partial_scan,
         )
     finally:
         _httpx_log.setLevel(_prev_httpx)

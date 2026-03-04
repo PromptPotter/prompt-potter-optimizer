@@ -97,6 +97,46 @@ DEFAULT_DIAGNOSTIC_QUERIES = 6
 DIAGNOSTIC_HIT_RATIO = 0.75
 
 
+def _profiles_from_rows(
+    rows: list[dict],
+    axes: list[tuple[str, str, list]],
+    n_eval: int,
+) -> list[dict]:
+    """Build axis profiles from scan rows.
+
+    Args:
+        rows: Per-variant result dicts with ``axis``, ``delta`` keys.
+        axes: List of ``(axis_name, axis_type, values)`` tuples.
+        n_eval: Number of diagnostic queries (for noise threshold).
+
+    Returns:
+        Axis profiles sorted by sensitivity_range (descending).
+    """
+    axis_deltas: dict[str, list[float]] = defaultdict(list)
+    for row in rows:
+        axis_deltas[row["axis"]].append(row["delta"])
+
+    profiles: list[dict] = []
+    for axis_name, axis_type, values in axes:
+        deltas = axis_deltas.get(axis_name, [0.0])
+        sens_range = max(deltas) - min(deltas) if deltas else 0.0
+        card = len(values)
+        budget = classify_axis(card, sens_range, n_eval)
+        profiles.append({
+            "axis": axis_name,
+            "axis_type": axis_type,
+            "cardinality": card,
+            "sensitivity_range": round(sens_range, 4),
+            "best_delta": round(max(deltas), 4) if deltas else 0.0,
+            "worst_delta": round(min(deltas), 4) if deltas else 0.0,
+            "exploration_budget": budget,
+            "estimated_eval_cost": card * n_eval,
+        })
+
+    profiles.sort(key=lambda p: -p["sensitivity_range"])
+    return profiles
+
+
 def _make_eval_fn(
     eval_data: list,
     backend_client: Any,
@@ -165,6 +205,20 @@ def build_diagnostic_set(
             misses.append(query_to_eval[q])
 
     rng = random.Random(seed)
+
+    # Fallback: no baseline results — sample randomly from eval_data
+    if not hits and not misses:
+        n = min(n_queries, len(eval_data))
+        diagnostic = rng.sample(eval_data, n)
+        summary = {
+            "n_queries": len(diagnostic),
+            "n_hits": 0,
+            "n_misses": 0,
+            "total_pool_hits": 0,
+            "total_pool_misses": 0,
+            "stratified": False,
+        }
+        return diagnostic, summary
     n_queries = min(n_queries, len(hits) + len(misses))
 
     n_hits = max(1, round(n_queries * DIAGNOSTIC_HIT_RATIO))
@@ -245,6 +299,7 @@ async def sensitivity_scan(
     progress_cb: Callable[[ScanEvent], None] | None = None,
     prompt_result_index: dict | None = None,
     plan_id: str = "",
+    partial_scan: dict | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -266,6 +321,9 @@ async def sensitivity_scan(
         progress_cb: Optional callback ``(event: dict) -> None`` for
             progress reporting. Event types: ``baseline_done``,
             ``axis_start``, ``variant_done``, ``axis_done``.
+        partial_scan: Optional dict with ``rows`` and ``completed_axes``
+            from a previously interrupted scan. Completed axes are
+            skipped and their rows are included in the output.
 
     Returns:
         Tuple of (per_variant_df, axis_profiles).
@@ -313,8 +371,24 @@ async def sensitivity_scan(
 
     rows: list[dict] = []
     axis_stats: dict[str, list[float]] = defaultdict(list)
+    completed_axes: set[str] = set()
+
+    # Restore partial state from a previously interrupted scan
+    if partial_scan:
+        for row in partial_scan.get("rows", []):
+            rows.append(row)
+            axis_stats[row["axis"]].append(row["delta"])
+        completed_axes = set(partial_scan.get("completed_axes", []))
+        logger.info(
+            "Resuming scan: %d rows, %d/%d axes completed",
+            len(rows), len(completed_axes), len(axes),
+        )
 
     for ai, (axis_name, axis_type, values) in enumerate(axes):
+        if axis_name in completed_axes:
+            logger.info("Skipping completed axis: %s", axis_name)
+            continue
+
         _cb({
             "type": "axis_start",
             "axis": axis_name, "axis_type": axis_type,
@@ -380,27 +454,23 @@ async def sensitivity_scan(
                 "cached": scores.get("cached", False),
             })
 
-    # Build axis profiles
-    profiles: list[dict] = []
-    for axis_name, axis_type, values in axes:
-        deltas = axis_stats.get(axis_name, [0.0])
-        sens_range = max(deltas) - min(deltas) if deltas else 0.0
-        card = len(values)
-        budget = classify_axis(card, sens_range, len(eval_data))
-        profile = {
-            "axis": axis_name,
-            "axis_type": axis_type,
-            "cardinality": card,
-            "sensitivity_range": round(sens_range, 4),
-            "best_delta": round(max(deltas), 4) if deltas else 0.0,
-            "worst_delta": round(min(deltas), 4) if deltas else 0.0,
-            "exploration_budget": budget,
-            "estimated_eval_cost": card * len(eval_data),
-        }
-        profiles.append(profile)
-        _cb({"type": "axis_done", **profile})
+        # Checkpoint: mark axis as completed and persist partial state
+        completed_axes.add(axis_name)
+        if store and backend_id and plan_id:
+            store.smart_search.update(backend_id, plan_id, {
+                "status": "scan_partial",
+                "scan_results": {
+                    "rows": rows,
+                    "completed_axes": list(completed_axes),
+                },
+            })
+            logger.info("Checkpoint: axis '%s' complete (%d/%d)", axis_name,
+                        len(completed_axes), len(axes))
 
-    profiles.sort(key=lambda p: -p["sensitivity_range"])
+    # Build axis profiles
+    profiles = _profiles_from_rows(rows, axes, len(eval_data))
+    for profile in profiles:
+        _cb({"type": "axis_done", **profile})
 
     # Persist scan results to plan
     if store and backend_id and plan_id:
@@ -778,6 +848,33 @@ async def resume_or_build_diagnostic(
                 plan["diag_summary"],
                 cached_profiles,
             )
+        if plan["scan_results"] and status == "scan_partial":
+            partial_rows = plan["scan_results"].get("rows", [])
+            partial_completed = plan["scan_results"].get("completed_axes", [])
+            # Rebuild axes list to compute partial profiles
+            _vl = load_variant_library()
+            _axes: list[tuple[str, str, list]] = []
+            for name, vals in _vl.get("prompt_fields", {}).items():
+                if len(vals) > 1:
+                    _axes.append((name, "prompt_field", vals))
+            for name, vals in _vl.get("pipeline_params", {}).items():
+                if len(vals) > 1:
+                    _axes.append((name, "pipeline_param", vals))
+            partial_profiles = _profiles_from_rows(
+                partial_rows, _axes, len(plan["diagnostic"]),
+            )
+            logger.info(
+                "Scan partial in plan %s: %d axes done, %d profiles",
+                plan_id, len(partial_completed), len(partial_profiles),
+            )
+            return (
+                plan_id,
+                plan["search_baseline_ps"],
+                plan["diagnostic"],
+                plan["diag_summary"],
+                partial_profiles,
+            )
+
         # diagnostic_built -> reuse saved baseline; prefer sibling with scan data
         siblings = [
             s for s in store.smart_search.list_all(backend_id)

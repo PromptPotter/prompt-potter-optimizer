@@ -328,12 +328,25 @@ async def evaluate_prompt_batch(
     """
     results = []
     rendered = prompt_state.render()
+    consecutive_errors = 0
+    max_consecutive_errors = 10
 
     for i, qd in enumerate(eval_data):
         result = await backend_reranker_eval(
             qd, backend_client, rendered,
             pipeline_params=pipeline_params,
         )
+
+        if result.get("error"):
+            consecutive_errors += 1
+            if consecutive_errors >= max_consecutive_errors:
+                raise RuntimeError(
+                    f"Aborting: {consecutive_errors} consecutive backend errors. "
+                    f"Last error: {result['error'][:200]}"
+                )
+        else:
+            consecutive_errors = 0
+
         results.append(result)
 
         if on_result is not None:

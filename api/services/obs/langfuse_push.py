@@ -131,12 +131,17 @@ def _register_dataset_items(
     """
     query_to_item_id: dict[str, str] = dict(state.get("dataset_items", {}))
 
-    # Create dataset (idempotent)
-    lf.create_dataset(
+    # Create dataset (idempotent) — fail fast on auth errors
+    ok = lf.create_dataset(
         name=DATASET_NAME,
         description="TermNorm production ground truth queries for prompt evaluation",
         metadata={"n_queries": len(gt_map)},
     )
+    if not ok:
+        raise RuntimeError(
+            f"Langfuse: failed to create/access dataset '{DATASET_NAME}'. "
+            "Check LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY in .env."
+        )
 
     # Fetch existing items to find those needing updates
     existing_items: dict[str, Any] = {}  # query_str -> SDK item
@@ -378,7 +383,11 @@ def push_all_runs(
     # Step 1: Collect ground truth and register dataset items
     _emit("Collecting ground truth from dataset runs...")
     gt_map = _collect_ground_truth(store, backend_id, summaries)
-    query_to_item_id = _register_dataset_items(lf, gt_map, state, on_progress)
+    try:
+        query_to_item_id = _register_dataset_items(lf, gt_map, state, on_progress)
+    except RuntimeError as exc:
+        _emit(f"  SKIP: {exc}")
+        return {"skipped": True, "reason": str(exc)}
     state["dataset_items"] = query_to_item_id
 
     # Step 2: Group new runs by origin for stats

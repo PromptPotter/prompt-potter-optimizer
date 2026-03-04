@@ -5,6 +5,7 @@ evaluates baselines, and returns a services dict ready for use.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -158,6 +159,38 @@ def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
     return queries
 
 
+async def _wait_session_ready(
+    backend_client: BackendClient,
+    max_attempts: int = 5,
+    delay: float = 1.0,
+) -> None:
+    """Poll check_status until session is active with terms loaded.
+
+    Retries up to ``max_attempts`` times with ``delay`` seconds between.
+    Logs a warning if the session never becomes ready.
+    """
+    for attempt in range(1, max_attempts + 1):
+        status = await backend_client.check_status()
+        if status.get("session_active") and status.get("terms_loaded", 0) > 0:
+            logger.info(
+                "Session ready (attempt %d/%d): %d terms loaded",
+                attempt, max_attempts, status["terms_loaded"],
+            )
+            return
+        logger.debug(
+            "Session not ready (attempt %d/%d): session_active=%s, terms_loaded=%s",
+            attempt, max_attempts,
+            status.get("session_active"), status.get("terms_loaded"),
+        )
+        if attempt < max_attempts:
+            await asyncio.sleep(delay)
+
+    logger.warning(
+        "Session not ready after %d attempts — evaluation may produce errors. "
+        "Last status: %s", max_attempts, status,
+    )
+
+
 async def run_baseline_eval(
     baseline: "PromptState",
     eval_data: list,
@@ -170,6 +203,7 @@ async def run_baseline_eval(
     temperature: float = 0.0,
     on_result: Callable | None = None,
     obs: Any | None = None,
+    session_terms: list[str] | None = None,
 ) -> tuple[list, list]:
     """Evaluate baseline prompt and build initial campaign_rounds list.
 
@@ -204,6 +238,11 @@ async def run_baseline_eval(
             "No evaluation data available. "
             "Generate data first (e.g. run termnorm_backend.ipynb)."
         )
+
+    # Initialize backend session so /matches doesn't 400
+    if session_terms:
+        await backend_client.init_session(session_terms)
+        await _wait_session_ready(backend_client)
 
     # Register dataset items in obs if available
     if obs and eval_data:

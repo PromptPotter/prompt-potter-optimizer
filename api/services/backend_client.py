@@ -57,14 +57,24 @@ def load_pipeline_config(exp_data: dict) -> dict:
 
 
 def build_pipeline_params(
-    pipeline_config: dict, overrides: dict | None = None,
+    pipeline_config: dict,
+    overrides: dict | None = None,
+    exclude_steps: list[str] | None = None,
 ) -> dict:
     """Build pipeline_params from a (possibly shortened) pipeline config.
 
     Returns dict ready for evaluate_prompt(..., pipeline_params=params).
     Includes 'steps' list (sent to TermNorm) and any user overrides.
+
+    Args:
+        pipeline_config: Pipeline config with ``steps`` list.
+        overrides: Optional parameter overrides (e.g. ``ranking_temperature``).
+        exclude_steps: Step names to remove from the active pipeline
+            (e.g. ``["llm_ranking"]`` for token-matching-only evaluation).
     """
     step_names = [s["name"] for s in pipeline_config["steps"]]
+    if exclude_steps:
+        step_names = [s for s in step_names if s not in exclude_steps]
     params: dict = {"steps": step_names}
 
     active_param_names: set = set()
