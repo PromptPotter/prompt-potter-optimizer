@@ -633,9 +633,16 @@ class ObsLogger:
             })
 
             if self._cloud:
-                query_to_item_id = self._cloud.on_dataset_registered(
-                    dataset_name, eval_data, query_to_item_id,
-                )
+                if len(eval_data) > 100:
+                    logger.warning(
+                        "Skipping Langfuse cloud dataset registration for %d items "
+                        "(rate-limit risk). Use the dedicated Langfuse sync cell instead.",
+                        len(eval_data),
+                    )
+                else:
+                    query_to_item_id = self._cloud.on_dataset_registered(
+                        dataset_name, eval_data, query_to_item_id,
+                    )
 
         except Exception:
             logger.warning("ObsLogger.register_dataset failed", exc_info=True)

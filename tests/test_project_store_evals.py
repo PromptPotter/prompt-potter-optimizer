@@ -201,3 +201,48 @@ def test_list_partial_evals_ignores_finalized(tmp_store):
     tmp_store.dataset_runs.finalize_eval_run("b1", "run_fin", run_data)
 
     assert tmp_store.dataset_runs.list_partial_evals("b1") == []
+
+
+# ---------------------------------------------------------------------------
+# Provenance — source field in dataset_runs
+# ---------------------------------------------------------------------------
+
+
+def test_build_dataset_run_data_includes_source():
+    from api.services.prompt_eval import build_dataset_run_data
+    data = build_dataset_run_data(
+        "baseline_aabb", "Baseline", "aabb1122", "ps-1",
+        "test prompt", "model", 0.0,
+        {"hits": 1, "total": 1, "accuracy": 1.0, "errors": 0}, [],
+        source="baseline",
+    )
+    assert data["source"] == "baseline"
+
+
+def test_build_dataset_run_data_source_defaults_empty():
+    from api.services.prompt_eval import build_dataset_run_data
+    data = build_dataset_run_data(
+        "run_x", "Run", "hash_x", "ps-1",
+        "test prompt", "model", 0.0,
+        {"hits": 0, "total": 0, "accuracy": 0.0, "errors": 0}, [],
+    )
+    assert data["source"] == ""
+
+
+def test_source_persisted_in_index(tmp_store):
+    data = _make_run_data()
+    data["source"] = "grid_search"
+    tmp_store.dataset_runs.save("b1", data["run_id"], data)
+
+    entries = tmp_store.dataset_runs.list_all("b1")
+    assert entries[0]["source"] == "grid_search"
+
+
+def test_source_missing_defaults_empty_in_index(tmp_store):
+    """Legacy runs without source field get empty string in index."""
+    data = _make_run_data()
+    # No "source" key at all
+    tmp_store.dataset_runs.save("b1", data["run_id"], data)
+
+    entries = tmp_store.dataset_runs.list_all("b1")
+    assert entries[0]["source"] == ""

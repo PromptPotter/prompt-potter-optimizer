@@ -102,6 +102,7 @@ class DatasetRunStore:
             "item_count": data.get("item_count", 0),
             "scores": data.get("scores", {}),
             "content_hash": data.get("content_hash", ""),
+            "source": data.get("source", ""),
             "created_at": data.get("created_at", ""),
         }
 

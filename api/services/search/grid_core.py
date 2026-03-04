@@ -427,6 +427,7 @@ async def _load_or_compute_point(
         run_data = build_dataset_run_data(
             run_id, f"grid_point_{info.point_idx}", info.content_hash,
             info.ps_id, rendered, "", 0.0, acc, results,
+            source="grid_search",
         )
         store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 

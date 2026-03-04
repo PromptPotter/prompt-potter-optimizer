@@ -55,12 +55,17 @@ _PREFIX_MAP = [
 _STATE_FORMAT_VERSION = 3
 
 
-def classify_run_origin(run_id: str) -> str:
-    """Classify a dataset run by its ID prefix.
+def classify_run_origin(run_id: str, source: str = "") -> str:
+    """Classify a dataset run's origin protocol.
+
+    Uses the explicit ``source`` field when available, falls back to
+    run_id prefix matching for legacy runs without a source field.
 
     Returns one of: baseline, grid_search, sensitivity_scan,
     feedback_cycle, smart_search_winner, other.
     """
+    if source:
+        return source
     for prefix, origin in _PREFIX_MAP:
         if run_id.startswith(prefix):
             return origin
@@ -249,7 +254,7 @@ def push_run(
         return None
 
     items = detail.get("dataset_run_items", [])
-    origin = classify_run_origin(run_id)
+    origin = classify_run_origin(run_id, detail.get("source", ""))
     sid = session_id or f"dataset_{backend_id}"
     trace_ids: list[str] = []
 
@@ -396,7 +401,7 @@ def push_all_runs(
         rid = s.get("run_id", "")
         if rid in already_done:
             continue
-        origin = classify_run_origin(rid)
+        origin = classify_run_origin(rid, s.get("source", ""))
         groups[origin].append(s)
 
     new_runs = sum(len(v) for v in groups.values())

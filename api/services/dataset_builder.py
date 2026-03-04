@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 SHEET_COLUMN_MAP: dict[str, dict[str, str]] = {
     "Sheet1":    {"query": "Material name in BOM", "gt": "Dataset in SP"},
     "Material":  {"query": "Material name in BOM", "gt": "Dataset in SP"},
-    "Processes": {"query": "Ausgangsliste",        "gt": "Eintrag aus Zielliste"},
+    "Processes":  {"query": "Ausgangsliste",        "gt": "Eintrag aus Zielliste"},
+    "Processing": {"query": "Ausgangsliste",        "gt": "Eintrag aus Zielliste"},
 }
 
 
@@ -99,8 +100,9 @@ def train_test_split(
     """
     rng = random.Random(seed)
 
-    processes = [r for r in data if r["source_sheet"] == "Processes"]
-    material = [r for r in data if r["source_sheet"] != "Processes"]
+    _proc_sheets = {"Processes", "Processing"}
+    processes = [r for r in data if r["source_sheet"] in _proc_sheets]
+    material = [r for r in data if r["source_sheet"] not in _proc_sheets]
 
     def _split(items: list[dict]) -> tuple[list[dict], list[dict]]:
         shuffled = items[:]

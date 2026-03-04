@@ -92,6 +92,14 @@ class TestClassifyRunOrigin:
     def test_empty(self):
         assert classify_run_origin("") == "other"
 
+    def test_explicit_source_preferred(self):
+        # Explicit source should be used even when run_id has a different prefix
+        assert classify_run_origin("grid_00230b37", source="baseline") == "baseline"
+
+    def test_explicit_source_empty_falls_back(self):
+        # Empty source falls back to prefix matching
+        assert classify_run_origin("grid_00230b37", source="") == "grid_search"
+
 
 # ---------------------------------------------------------------------------
 # Tests — push_run (single-run, per-query traces)
@@ -886,3 +894,70 @@ class TestPushRunPipelineSteps:
             if s["trace_id"] == trace_no_steps_id
         ]
         assert len(fallback_spans) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests — _finalize_observability cloud push gating
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeObsCloudGating:
+    """When obs is explicitly provided, the singleton push_run must NOT fire."""
+
+    def test_explicit_obs_skips_singleton_push(self, tmp_path, monkeypatch):
+        from api.services.prompt_eval import _finalize_observability
+        from api.services.obs.observability_logger import ObsLogger
+
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        # Create a file-only obs (langfuse=None)
+        obs = ObsLogger.__new__(ObsLogger)
+        obs.obs_root = store.base_dir / backend_id / "obs"
+        obs._enabled = True
+        obs._campaign_traces = {}
+        obs._cloud = None
+
+        push_called = []
+        monkeypatch.setattr(
+            "api.services.obs.langfuse_push.push_run",
+            lambda *a, **kw: push_called.append(1),
+        )
+
+        _finalize_observability(
+            store, backend_id, "baseline_aabb", "aabb1122",
+            {"accuracy": 1.0, "total": 1, "hits": 1},
+            "model", 0.0, "ps-1", None, None,
+            obs=obs,
+        )
+        assert push_called == [], "push_run should NOT be called when obs is explicit"
+
+    def test_no_obs_enters_cloud_push_branch(self, tmp_path, monkeypatch):
+        """When obs=None, the cloud push branch is entered (LangfuseLogger.get_instance called)."""
+        from api.services.prompt_eval import _finalize_observability
+
+        store = ProjectStore(tmp_path)
+        backend_id = "test-backend"
+
+        singleton_called = []
+
+        def _mock_get_instance():
+            singleton_called.append(1)
+            mock = MockLangfuseLogger()
+            mock.enabled = False  # disable actual push
+            return mock
+
+        monkeypatch.setattr(
+            "api.services.obs.langfuse_client.LangfuseLogger.get_instance",
+            _mock_get_instance,
+        )
+
+        _finalize_observability(
+            store, backend_id, "baseline_aabb", "aabb1122",
+            {"accuracy": 1.0, "total": 1, "hits": 1},
+            "model", 0.0, "ps-1", None, None,
+            obs=None,
+        )
+        assert len(singleton_called) >= 1, (
+            "LangfuseLogger.get_instance SHOULD be called when obs is None"
+        )

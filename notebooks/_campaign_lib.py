@@ -60,6 +60,7 @@ from api.services.search import (
     resume_or_build_grid as _resume_or_build_grid,
     load_grid_plan_results as _load_grid_plan_results,
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
+    advise_scan_config as _advise_scan_config,
 )
 
 # Public API — every name the notebook imports.
@@ -87,7 +88,7 @@ __all__ = [
     "load_pipeline_config", "build_pipeline_params",
     # Smart search
     "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
-    "display_axis_profiles", "resume_or_build_diagnostic",
+    "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
     "select_scan_winner_notebook", "build_historical_index",
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
     # Campaign
@@ -383,7 +384,12 @@ def load_or_create_datasets(
             result = {"train": existing["items"]}
             for name in ("test_processes", "test_material"):
                 ds = store.datasets.load(backend_id, name)
-                result[name] = ds["items"] if ds else []
+                if ds:
+                    result[name] = ds["items"]
+                else:
+                    result[name] = []
+                    print(f"  WARNING: {name} not found on disk"
+                          " — run with force=True to recreate")
             total = sum(len(v) for v in result.values())
             print(f"Loaded stored datasets: {total} total rows")
             for name, items in result.items():
@@ -446,6 +452,13 @@ def analyze_candidate_coverage(replay_results: list) -> pd.DataFrame:
     rank_dist = result["rank_distribution"]
 
     cov_df = pd.DataFrame(rows)
+
+    if total_cov == 0 and replay_results:
+        print("CANDIDATE COVERAGE")
+        print("=" * 50)
+        print(f"  No pipeline data in {len(replay_results)} items.")
+        print("  Run baseline eval first to get coverage analysis.")
+        return cov_df
 
     print("CANDIDATE COVERAGE")
     print("=" * 50)
@@ -510,7 +523,10 @@ async def run_baseline_eval(
 
     def _on_result(result, index, total):
         pbar.total = total
-        tag = "HIT " if result["hit"] else "MISS"
+        if result.get("cached"):
+            tag = "HIT+" if result["hit"] else "MISS+"
+        else:
+            tag = "HIT " if result["hit"] else "MISS"
         pred = result["predicted"][:35]
         if result.get("error"):
             pred = f"ERROR: {result['error'][:50]}"
@@ -520,6 +536,9 @@ async def run_baseline_eval(
         )
         pbar.update(1)
 
+    from api.services.obs.observability_logger import ObsLogger
+    _obs = ObsLogger(svc["store"].base_dir, svc.get("backend_id", ""), langfuse=None)
+
     campaign_rounds, baseline_results = await _run_baseline_eval(
         baseline, eval_data, svc.get("backend_client"),
         pipeline_params=campaign_config.get("pipeline_params"),
@@ -528,6 +547,7 @@ async def run_baseline_eval(
         model=model, temperature=temperature,
         on_result=_on_result,
         session_terms=svc.get("session_terms"),
+        obs=_obs,
     )
     pbar.close()
 
@@ -1301,6 +1321,100 @@ def show_data_inventory(
     print("=" * 70)
 
     return inv
+
+
+async def scan_advisor(
+    pipeline_schema,
+    variant_library: dict,
+    baseline_results: list,
+    eval_data_size: int,
+    llm_client: "LLMClientBase",
+    model: str = "",
+    query_budget: int = 120,
+    coverage_stats: dict | None = None,
+) -> dict:
+    """LLM-powered scan configuration advice.
+
+    Analyzes the pipeline and recommends which axes to focus the sensitivity
+    scan on. Run BEFORE the scan to guide axis selection and budget allocation.
+
+    Returns:
+        Advisory dict with priority_axes, suggested_n_diagnostic,
+        axes_to_skip, budget_breakdown, and reasoning.
+    """
+    print("=" * 70)
+    print("SCAN ADVISOR — pipeline-aware sensitivity setup")
+    print("=" * 70)
+    print(f"  Pipeline: {pipeline_schema.name} ({pipeline_schema.version})")
+    print(f"  Steps: {[s.name for s in pipeline_schema.steps]}")
+    print(f"  Eval data size: {eval_data_size} queries")
+    print(f"  Query budget: {query_budget}")
+    print(f"  Calling {model or '?'} ...")
+    print()
+
+    advisory = await _advise_scan_config(
+        pipeline_schema=pipeline_schema,
+        variant_library=variant_library,
+        baseline_results=baseline_results,
+        eval_data_size=eval_data_size,
+        llm_client=llm_client,
+        model=model,
+        query_budget=query_budget,
+        coverage_stats=coverage_stats,
+    )
+
+    # Display results
+    print(f"{'─' * 70}")
+    print("PRIORITY AXES (ranked by importance)")
+    print(f"{'─' * 70}")
+    for i, ax in enumerate(advisory.get("priority_axes", []), 1):
+        imp = ax.get("importance", "?").upper()
+        src = ax.get("source", "?")
+        label = f"[{imp}] {ax.get('axis', '?')} ({src})"
+        if ax.get("step"):
+            label += f" — step: {ax['step']}"
+        print(f"  {i}. {label}")
+        print(f"     {ax.get('rationale', '')}")
+        if ax.get("suggested_values"):
+            print(f"     Values: {ax['suggested_values']}")
+
+    skipped = advisory.get("axes_to_skip", [])
+    if skipped:
+        print(f"\n{'─' * 70}")
+        print("AXES TO SKIP")
+        print(f"{'─' * 70}")
+        for ax in skipped:
+            print(f"  - {ax.get('axis', '?')}: {ax.get('reason', '?')}")
+
+    budget = advisory.get("budget_breakdown", {})
+    if budget:
+        print(f"\n{'─' * 70}")
+        print("BUDGET BREAKDOWN")
+        print(f"{'─' * 70}")
+        for k, v in budget.items():
+            print(f"  {k}: {v}")
+
+    n_diag = advisory.get("suggested_n_diagnostic", 6)
+    print(f"\n  Suggested n_diagnostic: {n_diag}")
+
+    reasoning = advisory.get("reasoning", "")
+    if reasoning:
+        print(f"\n{'─' * 70}")
+        print("REASONING")
+        print(f"{'─' * 70}")
+        print(f"  {reasoning}")
+
+    warnings = advisory.get("validation_warnings", [])
+    if warnings:
+        print(f"\n{'─' * 70}")
+        print("VALIDATION WARNINGS")
+        print(f"{'─' * 70}")
+        for w in warnings:
+            print(f"  ⚠ {w}")
+
+    print("=" * 70)
+
+    return advisory
 
 
 async def sensitivity_scan(

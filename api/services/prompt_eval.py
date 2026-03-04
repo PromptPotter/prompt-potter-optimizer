@@ -65,6 +65,7 @@ class EvalContext:
     obs: ObsLogger | None = None
     dataset_name: str | None = None
     dataset_item_map: dict[str, str] | None = field(default=None)
+    source: str = ""
 
 
 def eval_content_hash(
@@ -99,6 +100,8 @@ def build_dataset_run_data(
     temperature: float,
     scores: dict,
     results: list,
+    *,
+    source: str = "",
 ) -> dict:
     """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
     return {
@@ -113,6 +116,7 @@ def build_dataset_run_data(
         "temperature": temperature,
         "item_count": scores["total"],
         "scores": scores,
+        "source": source,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "dataset_run_items": results,
     }
@@ -137,7 +141,7 @@ def analyze_candidate_coverage(replay_results: list) -> dict:
     """
     rows = []
     for r in replay_results:
-        if r.get("status") != "success":
+        if r.get("error"):
             continue
         pd_data = r.get("pipeline_data", {})
         candidates = pd_data.get("token_matched_candidates", [])
@@ -426,6 +430,29 @@ def _resolve_historical_and_partial(
     if store and backend_id:
         partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
         if partial_results:
+            # Detect stale partials: if the first N results are all errors,
+            # the partial was written during a broken session and is unreliable.
+            leading_errors = 0
+            for pr in partial_results:
+                if pr.get("error"):
+                    leading_errors += 1
+                else:
+                    break
+            if leading_errors >= 5:
+                logger.warning(
+                    "Partial eval %s: %d leading consecutive errors "
+                    "— discarding stale partial file",
+                    run_id, leading_errors,
+                )
+                partial_path = (
+                    store.dataset_runs._runs_dir(backend_id)
+                    / f"{run_id}.partial.jsonl"
+                )
+                if partial_path.exists():
+                    partial_path.unlink()
+                partial_results = []
+
+        if partial_results:
             valid = True
             for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
                 if pr.get("query") != ed.get("query"):
@@ -444,8 +471,6 @@ def _resolve_historical_and_partial(
                 remaining_data = []
             else:
                 remaining_data = remaining_data[len(partial_results):]
-        else:
-            partial_results = []
 
     return historical_results, partial_results, remaining_data, None
 
@@ -487,17 +512,21 @@ def _finalize_observability(
     except Exception:
         logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
 
-    try:
-        from api.services.obs.langfuse_client import LangfuseLogger
-        _lf = LangfuseLogger.get_instance()
-        if _lf.enabled:
-            from api.services.obs.langfuse_push import push_run
-            push_run(
-                _lf, store, backend_id, run_id,
-                query_to_item_id=dataset_item_map,
-            )
-    except Exception:
-        logger.debug("Cloud push failed", exc_info=True)
+    # Per-query cloud push — only when no explicit obs was provided.
+    # When obs IS provided, the caller controls cloud behavior through
+    # their ObsLogger's CloudObsBackend configuration.
+    if obs is None:
+        try:
+            from api.services.obs.langfuse_client import LangfuseLogger
+            _lf = LangfuseLogger.get_instance()
+            if _lf.enabled:
+                from api.services.obs.langfuse_push import push_run
+                push_run(
+                    _lf, store, backend_id, run_id,
+                    query_to_item_id=dataset_item_map,
+                )
+        except Exception:
+            logger.debug("Cloud push failed", exc_info=True)
 
 
 async def evaluate_prompt_cached(
@@ -516,6 +545,7 @@ async def evaluate_prompt_cached(
     dataset_item_map: dict[str, str] | None = None,
     obs: "ObsLogger | None" = None,
     prompt_result_index: dict | None = None,
+    source: str = "",
     *,
     ctx: EvalContext | None = None,
 ) -> tuple[list, dict, bool]:
@@ -546,6 +576,7 @@ async def evaluate_prompt_cached(
         obs = obs or ctx.obs
         dataset_name = dataset_name or ctx.dataset_name
         dataset_item_map = dataset_item_map or ctx.dataset_item_map
+        source = source or ctx.source
 
     if backend_client is None:
         raise ValueError("backend_client is required (pass directly or via ctx)")
@@ -584,6 +615,12 @@ async def evaluate_prompt_cached(
                 on_result({**r, "cached": True}, i, len(historical_results))
         return historical_results, acc, True
 
+    if partial_results:
+        logger.info(
+            "Resuming %s: %d cached results, %d remaining",
+            run_id, len(partial_results), len(remaining_data),
+        )
+
     # --- replay cached partial/historical results to callback ---
     callback_offset = 0
     if on_result is not None and historical_results:
@@ -621,6 +658,7 @@ async def evaluate_prompt_cached(
         run_data = build_dataset_run_data(
             run_id, label, content_hash, prompt_state.id,
             rendered, model, temperature, scores, results,
+            source=source,
         )
         store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 

@@ -153,6 +153,7 @@ def _make_eval_fn(
             store=store, backend_id=backend_id,
             label="scan",
             prompt_result_index=prompt_result_index,
+            source="sensitivity_scan",
         )
         return {**scores, "results": results, "cached": cached}
     return _eval_ps

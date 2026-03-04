@@ -11,6 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+import httpx
+
 from api.models.backend import BackendConnection
 from api.services.backend_client import BackendClient
 from api.services.constants import DATASET_NAME
@@ -171,16 +173,17 @@ async def _wait_session_ready(
     """
     for attempt in range(1, max_attempts + 1):
         status = await backend_client.check_status()
-        if status.get("session_active") and status.get("terms_loaded", 0) > 0:
+        data = status.get("data", {})
+        if data.get("session_active") and data.get("terms_loaded", 0) > 0:
             logger.info(
                 "Session ready (attempt %d/%d): %d terms loaded",
-                attempt, max_attempts, status["terms_loaded"],
+                attempt, max_attempts, data["terms_loaded"],
             )
             return
         logger.debug(
             "Session not ready (attempt %d/%d): session_active=%s, terms_loaded=%s",
             attempt, max_attempts,
-            status.get("session_active"), status.get("terms_loaded"),
+            data.get("session_active"), data.get("terms_loaded"),
         )
         if attempt < max_attempts:
             await asyncio.sleep(delay)
@@ -189,6 +192,52 @@ async def _wait_session_ready(
         "Session not ready after %d attempts — evaluation may produce errors. "
         "Last status: %s", max_attempts, status,
     )
+
+
+async def _verify_matches_liveness(
+    backend_client: BackendClient,
+    probe_query: str,
+    max_attempts: int = 3,
+    delay: float = 2.0,
+) -> None:
+    """Send a lightweight /matches probe to verify the endpoint is live.
+
+    Uses ``skip_llm_ranking=True`` for speed. Retries on 400 (the exact
+    symptom of an unready session). Non-fatal: logs a warning if all
+    probes fail.
+    """
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{backend_client.base_url}/matches",
+                    json={"query": probe_query, "skip_llm_ranking": True},
+                )
+                resp.raise_for_status()
+            logger.info(
+                "Matches liveness probe succeeded (attempt %d/%d)",
+                attempt, max_attempts,
+            )
+            return
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 400 and attempt < max_attempts:
+                logger.debug(
+                    "Matches probe got 400 (attempt %d/%d), retrying in %.0fs",
+                    attempt, max_attempts, delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.warning(
+                    "Matches liveness probe failed (attempt %d/%d): %s",
+                    attempt, max_attempts, exc,
+                )
+                return
+        except Exception as exc:
+            logger.warning(
+                "Matches liveness probe failed (attempt %d/%d): %s",
+                attempt, max_attempts, exc,
+            )
+            return
 
 
 async def run_baseline_eval(
@@ -243,6 +292,7 @@ async def run_baseline_eval(
     if session_terms:
         await backend_client.init_session(session_terms)
         await _wait_session_ready(backend_client)
+        await _verify_matches_liveness(backend_client, probe_query=session_terms[0])
 
     # Register dataset items in obs if available
     if obs and eval_data:
@@ -258,6 +308,8 @@ async def run_baseline_eval(
         label="Baseline",
         model=model, temperature=temperature,
         on_result=on_result,
+        obs=obs,
+        source="baseline",
     )
 
     campaign_rounds = [{

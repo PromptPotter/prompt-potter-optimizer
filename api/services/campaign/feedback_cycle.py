@@ -472,6 +472,7 @@ async def _evaluate_candidates(
         obs=obs,
         dataset_name=dataset_name if dataset_name and dataset_item_map else None,
         dataset_item_map=dataset_item_map if dataset_name and dataset_item_map else None,
+        source="feedback_cycle",
     )
 
     eval_out = await evaluate_and_select_winner(

@@ -452,21 +452,32 @@ class LangfuseLogger:
         input: Any,
         expected_output: Any = None,
         metadata: dict[str, Any] | None = None,
+        _max_retries: int = 3,
     ) -> str | None:
-        """Create a dataset item. Returns item ID or None."""
+        """Create a dataset item. Returns item ID or None.
+
+        Retries with exponential backoff on 429 rate-limit errors.
+        """
         if not self.enabled or not self.client:
             return None
-        try:
-            item = self.client.create_dataset_item(
-                dataset_name=dataset_name,
-                input=input,
-                expected_output=expected_output,
-                metadata=metadata or {},
-            )
-            return getattr(item, "id", None)
-        except Exception:
-            logger.warning("Failed to create Langfuse dataset item", exc_info=True)
-            return None
+        for attempt in range(_max_retries):
+            try:
+                item = self.client.create_dataset_item(
+                    dataset_name=dataset_name,
+                    input=input,
+                    expected_output=expected_output,
+                    metadata=metadata or {},
+                )
+                return getattr(item, "id", None)
+            except Exception as exc:
+                if "429" in str(exc) and attempt < _max_retries - 1:
+                    delay = 2 ** attempt
+                    logger.debug("Langfuse 429 rate limit, retry in %ds", delay)
+                    time.sleep(delay)
+                    continue
+                logger.warning("Failed to create Langfuse dataset item", exc_info=True)
+                return None
+        return None
 
     def get_dataset(self, name: str) -> object | None:
         """Fetch a dataset by name. Returns SDK dataset object or None."""

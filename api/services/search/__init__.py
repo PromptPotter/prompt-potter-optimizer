@@ -44,6 +44,9 @@ from api.services.search.eval_dataset import load_eval_dataset
 # context
 from api.services.search.context import restructure_context
 
+# scan_advisor
+from api.services.search.scan_advisor import advise_scan_config
+
 # synthesis
 from api.services.search.synthesis import synthesize_sensitivity_from_grid
 
@@ -76,6 +79,8 @@ __all__ = [
     "load_eval_dataset",
     # context
     "restructure_context",
+    # scan_advisor
+    "advise_scan_config",
     # synthesis
     "synthesize_sensitivity_from_grid",
 ]
