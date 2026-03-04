@@ -441,7 +441,7 @@ async def run_grid_search(
     on_point_done: Callable | None = None,
     on_query_done: Callable | None = None,
     on_point_reused: Callable | None = None,
-    request_delay: float = 1.0,
+    request_delay: float = 0.0,
     store: ProjectStore | None = None,
     backend_id: str = "",
     session_terms: list | None = None,

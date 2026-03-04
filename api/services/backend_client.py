@@ -140,10 +140,8 @@ class BackendClient:
         - ``"status": "unreachable"`` for connection errors
         """
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    f"{self.base_url}/status", timeout=self.timeout,
-                )
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.get(f"{self.base_url}/status")
                 resp.raise_for_status()
                 return resp.json()
         except httpx.HTTPStatusError as exc:
@@ -166,10 +164,8 @@ class BackendClient:
 
     async def fetch_experiments(self) -> dict[str, Any]:
         """GET /experiments — returns full response verbatim."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{self.base_url}/experiments", timeout=self.timeout,
-            )
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(f"{self.base_url}/experiments")
             resp.raise_for_status()
             return resp.json()
 
@@ -184,11 +180,10 @@ class BackendClient:
         params: dict[str, str] = {}
         if include_traces:
             params["include_traces"] = "true"
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.get(
                 f"{self.base_url}/experiments/{experiment_id}/mappings",
                 params=params,
-                timeout=self.timeout,
             )
             resp.raise_for_status()
             return resp.json()
@@ -197,11 +192,10 @@ class BackendClient:
 
     async def init_session(self, terms: list[str]) -> dict[str, Any]:
         """POST /sessions with terms array."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(
                 f"{self.base_url}/sessions",
                 json={"terms": terms},
-                timeout=self.timeout,
             )
             resp.raise_for_status()
             return resp.json()
@@ -222,11 +216,10 @@ class BackendClient:
             payload.update(pipeline_params)
         if ranking_prompt:
             payload["ranking_prompt"] = ranking_prompt
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=MATCH_TIMEOUT) as client:
             resp = await client.post(
                 f"{self.base_url}/matches",
                 json=payload,
-                timeout=MATCH_TIMEOUT,
             )
             resp.raise_for_status()
             return resp.json()
@@ -326,7 +319,7 @@ class BackendClient:
         queries: list[dict[str, Any]],
         terms: list[str],
         skip_llm_ranking: bool = True,
-        delay_between: float = 2.0,
+        delay_between: float = 0.0,
         on_result: Callable[[dict[str, Any], int, int], Any] | None = None,
         pipeline_params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
