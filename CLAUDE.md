@@ -33,7 +33,14 @@ cd docker && docker-compose up --build
 ### Two entry points, shared core
 
 1. **FastAPI API** (`api/main.py`) — REST endpoints at `/api/v1/`. Routers: `backends` (connect, sync, execute, compare), `health`.
-2. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` is the **primary working interface** at this stage. Uses `notebooks/_campaign_lib.py`, a thin wrapper that delegates to `api/services/` and adds tqdm progress bars + IPython display.
+2. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` is the **primary working interface** at this stage. Uses `notebooks/_campaign_lib.py`, a thin wrapper that delegates to `api/services/` and adds tqdm progress bars + IPython display. The notebook flow:
+   - **Setup** — `init_services()` connects to TermNorm, syncs experiments, loads session terms
+   - **Configuration** — `campaign_config` dict: query budget, exploration rate, pipeline overrides, grid/smart search knobs, LLM settings
+   - **Data** — pipeline snapshot (`fetch_pipeline()`), backend status check, dataset summary, Excel ground-truth loading, Langfuse sync config
+   - **Smart Search** — scan advisor (LLM-driven axis recommendations) → build diagnostic set → historical data audit + coverage advisor → sensitivity scan → select scan winner
+   - **Grid Search** (optional) — build/resume grid plan → run grid → display results + LLM analysis → select grid winner
+   - **Optimization** — feedback cycle (automatic with patience-based stopping) or manual round-by-round
+   - **Results** — campaign comparison table, per-query flip tracking, PromptState lineage chain, save winner, Langfuse backfill
 
 All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py`) never implements business logic — it only wraps service functions with UI output.
 
@@ -46,11 +53,13 @@ All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py
 | `prompt_eval.py` | Evaluate prompts against datasets via backend `/matches` endpoint. Content-addressed deduplication via `eval_content_hash()`. Incremental writes (`.partial.jsonl`) for crash recovery. |
 | `search/grid_core.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. Grid plan persistence. Skips `init_session` when all points are cached. |
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation, round winner selection, improvement suggestions. |
-| `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions). |
+| `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions, `fetch_pipeline()`). |
+| `pipeline_discovery.py` | Pipeline schema factory. `TERMNORM_DEFAULT_SCHEMA` (structural only) + `parse_pipeline_response()` merges live `GET /pipeline` metadata. |
 | `project_store.py` | Facade over focused store modules in `stores/`. File I/O for `.promptpotter/projects/`. |
 | `campaign/feedback_cycle.py` | Iterative optimization orchestrator: `CycleConfig` → `GrowFilterNode` → `AnalysisEvalNode` loop with patience-based stopping, 3-path routing (`generate`/`refine_context`/`modify_plan`/`stop`). |
 | `campaign/campaign_init.py` | Campaign initialization: project store setup, backend sync, baseline evaluation. |
-| `search/smart_search.py` | Sensitivity scan (OAT perturbation), adaptive search (coordinate descent), axis classification. |
+| `search/smart_search.py` | Sensitivity scan (OAT perturbation), adaptive search (coordinate descent), axis classification. `filter_variant_library()` drops axes not in active pipeline. |
+| `search/scan_advisor.py` | LLM-driven scan recommendations. Enriched with output schema fields + prompt metadata from `PipelineSchema`. |
 | `search/coverage.py` | Historical index (`build_prompt_result_index`) and coverage advisor. Discovers all stored `dataset_runs` for reuse across optimization threads. |
 | `obs/observability_logger.py` | File-based observability: Langfuse-compatible traces, MLflow experiments, prompt versioning. `events.jsonl` flat nav log. |
 | `obs/langfuse_client.py` | Langfuse v2 cloud integration (singleton). |

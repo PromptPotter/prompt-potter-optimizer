@@ -150,56 +150,85 @@ TermNorm's `GET /pipeline` endpoint returns the complete pipeline config. This i
 
 ```json
 {
-  "name": "TermNormPipeline",
-  "version": "v2.0",
-  "steps": [
-    {
-      "name": "cache_lookup",
+  "name": "TermNorm",
+  "version": "v1.1",
+  "nodes": {
+    "cache_lookup": {
       "type": "DeterministicFunction",
-      "runtime": "frontend",
       "short_circuit": true,
       "config": {}
     },
-    {
-      "name": "fuzzy_matching",
+    "fuzzy_matching": {
       "type": "DeterministicFunction",
-      "runtime": "frontend",
       "short_circuit": true,
-      "config": { "threshold": 0.7 }
+      "config": { "threshold": 70, "scorer": "WRatio", "limit": 5 }
     },
-    {
-      "name": "web_search",
+    "web_search": {
       "type": "ExternalService",
-      "runtime": "backend",
       "config": { "max_sites": 7, "num_results": 20, "content_char_limit": 800, "raw_content_limit": 5000 }
     },
-    {
-      "name": "entity_profiling",
+    "entity_profiling": {
       "type": "LLMGeneration",
-      "runtime": "backend",
-      "config": { "model": "meta-llama/llama-4-maverick-17b-128e-instruct", "temperature": 0.3, "max_tokens": 1800 }
+      "config": {
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "temperature": 0.3, "max_tokens": 1800, "output_format": "json",
+        "prompt_family": "entity_profiling", "prompt_version": 1,
+        "schema_family": "entity_profile", "schema_version": 1
+      }
     },
-    {
-      "name": "token_matching",
+    "token_matching": {
       "type": "DeterministicFunction",
-      "runtime": "backend",
       "config": { "max_token_candidates": 20, "relevance_weight_core": 0.7 }
     },
-    {
-      "name": "llm_ranking",
+    "llm_ranking": {
       "type": "LLMGeneration",
-      "runtime": "backend",
-      "config": { "model": "meta-llama/llama-4-maverick-17b-128e-instruct", "temperature": 0.0, "max_tokens": 4000, "ranking_sample_size": 20 }
+      "config": {
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "temperature": 0.0, "max_tokens": 4000, "ranking_sample_size": 20,
+        "prompt_family": "llm_ranking", "prompt_version": 1,
+        "schema_family": "llm_ranking_output", "schema_version": 1
+      }
     }
-  ]
+  },
+  "pipelines": {
+    "default": ["web_search", "entity_profiling", "token_matching", "llm_ranking"],
+    "with_fuzzy": ["fuzzy_matching", "web_search", "entity_profiling", "token_matching", "llm_ranking"]
+  },
+  "resolved_schemas": {
+    "entity_profile/1": {
+      "family": "entity_profile", "version": 1,
+      "description": "Entity profile extraction schema",
+      "fields": ["entity_name", "core_concept", "distinguishing_features", "..."]
+    },
+    "llm_ranking_output/1": {
+      "family": "llm_ranking_output", "version": 1,
+      "description": "LLM ranking step output schema",
+      "fields": ["profile_summary", "core_concept_description", "ranked_candidates"]
+    }
+  },
+  "resolved_prompts": {
+    "entity_profiling/1": {
+      "family": "entity_profiling", "version": 1,
+      "template_variables": ["query", "format_string", "combined_text"],
+      "template": "You are a comprehensive technical database API..."
+    },
+    "llm_ranking/1": {
+      "family": "llm_ranking", "version": 1,
+      "template_variables": ["core_concept", "entity_profile_json", "matches"],
+      "template": "You are a candidate evaluation expert..."
+    }
+  }
 }
 ```
 
 Key fields:
-- `runtime`: `"frontend"` or `"backend"` — who executes this step
-- `short_circuit`: if `true`, pipeline stops when this step produces a result
-- `config`: tunable parameters (defaults, overridable)
+- `nodes`: node definitions with type, config, and optional `short_circuit` flag
+- `pipelines`: named pipeline variants — ordered lists of node names to execute
 - `type`: step category — `"LLMGeneration"`, `"DeterministicFunction"`, `"ExternalService"`
+- `short_circuit`: if `true`, pipeline stops when this step produces a result
+- `schema_family`/`prompt_family`: references into TermNorm's on-disk registries (LLMGeneration nodes only)
+- `resolved_schemas`: output schemas resolved from the schema registry, keyed by `{family}/{version}`
+- `resolved_prompts`: prompt templates resolved from the prompt registry, keyed by `{family}/{version}`
 
 ---
 
@@ -227,7 +256,7 @@ Key fields:
 | # | File | Action | What | Wave |
 |---|------|--------|------|:----:|
 | 1 | `api/models/pipeline_schema.py` | CREATE | `PipelineSchema`, `PipelineStep`, `ObservationMapping` models (with `runtime`, `short_circuit`) | 2 |
-| 2 | `api/services/pipeline_discovery.py` | CREATE | Factory: parse `GET /pipeline` → PipelineSchema, static TermNorm default (full 6-step) | 2 |
+| 2 | `api/services/pipeline_discovery.py` | CREATE | Factory: `parse_pipeline_response()` parses `GET /pipeline` → PipelineSchema, merging `resolved_schemas`/`resolved_prompts` onto `PipelineStep` objects as `StepOutputSchema`/`StepPromptMeta` (live always wins). Static `TERMNORM_DEFAULT_SCHEMA` carries structural metadata only — no hardcoded `output_schema` or `prompt_meta`. | 2 |
 | 3 | `tests/test_pipeline_schema.py` | CREATE | Schema model tests, factory tests, derivation method tests | 2 |
 | 4 | `api/services/backend_client.py` | MODIFY | Replace `PIPELINE_STEP_PARAMS` with `schema.step_param_keys()` | 2 |
 | 5 | `api/services/search/eval_dataset.py` | MODIFY | Replace `OBS_EXTRACTION_MAP` with `schema.obs_extraction_map()` | 2 |

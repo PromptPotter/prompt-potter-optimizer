@@ -16,8 +16,36 @@ All evaluation paths converge here — grid search, smart search, and feedback c
 
 - **Backend eval**: `backend_reranker_eval()` calls `POST /matches` with rendered ranking prompt override, checks top-ranked candidate against ground truth (exact string match = hit@1)
 - **Grid search**: Cartesian product of Layer 1 field variants. `eval_queries_per_point` + `shared_queries` control sampling. Results deduplicated by content hash.
-- **Smart search**: One-at-a-time axis perturbations against baseline. Coverage advisor checks historical index before backend calls.
+- **Smart search**: One-at-a-time axis perturbations against baseline. Coverage advisor checks historical index before backend calls. `filter_variant_library()` in `smart_search.py` drops axes not owned by active pipeline steps before evaluation (e.g. drops `prompt_fields` when `llm_ranking` is inactive).
 - **Feedback cycle**: `GrowFilterNode` generates candidates via LLM, `AnalysisEvalNode` evaluates each via `evaluate_prompt_cached()`.
+
+## Pipeline discovery and registry metadata
+
+`pipeline_discovery.py` is the bridge between TermNorm's live `GET /pipeline` response and PromptPotter's `PipelineSchema` model.
+
+### Ownership principle
+
+**TermNorm owns all registry artifacts** (schemas, prompts). PromptPotter never hardcodes them:
+
+- `TERMNORM_DEFAULT_SCHEMA` carries **structural metadata only**: observation_mappings, langfuse_type, param_keys, runtime. No `output_schema` or `prompt_meta`.
+- Registry-owned metadata (`StepOutputSchema`, `StepPromptMeta`) comes exclusively from the live response's `resolved_schemas`/`resolved_prompts` dicts.
+- `parse_pipeline_response()` merges live metadata onto known pipeline steps — **live always wins** (no `is None` guard).
+
+### Response formats
+
+`parse_pipeline_response()` handles three response formats:
+
+1. **New** (current): top-level `resolved_schemas`/`resolved_prompts` dicts. Nodes reference by `schema_family`/`prompt_family`; resolved objects live in separate top-level sections.
+2. **Legacy enriched**: inline `_resolved_schema`/`_resolved_prompt` in each node's config.
+3. **Legacy steps list**: minimal `steps` array with name + config keys.
+
+### Scan advisor enrichment
+
+`scan_advisor.py` builds a pipeline anatomy dict from `PipelineSchema` that now includes:
+- `output_schema` — field names and descriptions (what each step produces)
+- `prompt_meta` — template variables and description (what prompts look like)
+
+This gives the LLM advisor visibility into the full pipeline structure for better axis recommendations.
 
 ## ProjectStore disk layout
 

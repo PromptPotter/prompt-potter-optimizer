@@ -117,12 +117,16 @@ Immutable, versioned prompt configuration in three optimization layers. See [PRD
 
 Backend-agnostic pipeline description — single source of truth for what the backend pipeline looks like. See [PRD P1.14](prd.md), [M6 spec](m6-workflow-migration.md).
 
-- **`PipelineStep`:** name, type (generation/span/event), param_keys, observation_name
+- **`PipelineStep`:** name, type (generation/span/event), runtime, short_circuit, param_keys, observation_name, `output_schema` (`StepOutputSchema`), `prompt_meta` (`StepPromptMeta`)
+- **`StepOutputSchema`:** frozen model carrying resolved field names, descriptions, and JSON schema from the backend's schema registry
+- **`StepPromptMeta`:** frozen model carrying resolved template variables, prompt template, and description from the backend's prompt registry
 - **`ObservationMapping`:** obs_name → target_field extraction rules
 - **Derivation methods:** `step_param_keys()`, `obs_extraction_map()`, `template_variables`, `langfuse_type_map()`
-- **Factory:** `pipeline_discovery.py` parses `GET /pipeline` → `PipelineSchema`. Static `TERMNORM_DEFAULT_SCHEMA` for offline use.
+- **Factory:** `pipeline_discovery.py` — `parse_pipeline_response()` parses `GET /pipeline` and merges `resolved_schemas`/`resolved_prompts` from the live response onto `PipelineStep` objects as `StepOutputSchema`/`StepPromptMeta`. Live always wins. Static `TERMNORM_DEFAULT_SCHEMA` carries structural metadata only (observation_mappings, langfuse_type, param_keys, runtime) — no hardcoded `output_schema` or `prompt_meta`.
 
-Provides derivation methods for 6 pipeline-specific constants (M6 Wave 1). Remaining 7 are covered by `ConnectorProtocol` (M7).
+**Registry metadata resolution:** LLMGeneration nodes in the pipeline config reference schemas and prompts by family + version (e.g. `schema_family: "entity_profile"`, `schema_version: 1`). The backend's `GET /pipeline` handler resolves these references from on-disk registries and returns them as `resolved_schemas` and `resolved_prompts` top-level dicts. `parse_pipeline_response()` matches these resolved artifacts to their owning steps and attaches them as first-class `StepOutputSchema`/`StepPromptMeta` objects. The scan advisor uses this enriched schema (output fields + prompt metadata) to make informed recommendations.
+
+Provides derivation methods for 6 pipeline-specific constants (M6 Wave 2). Remaining 7 are covered by `ConnectorProtocol` (M7).
 
 ### ProjectStore File Layout
 
