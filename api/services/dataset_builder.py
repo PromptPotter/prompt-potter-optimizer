@@ -1,0 +1,130 @@
+"""Excel ground-truth loader and train/test splitter.
+
+Loads BOM-example.xlsx sheets, extracts query/ground_truth pairs,
+and splits into train + per-domain test sets.
+"""
+
+import logging
+import random
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Column mapping per Excel sheet type.
+# Keys = sheet names, values = {"query": <col>, "gt": <col>}.
+SHEET_COLUMN_MAP: dict[str, dict[str, str]] = {
+    "Sheet1":    {"query": "Material name in BOM", "gt": "Dataset in SP"},
+    "Material":  {"query": "Material name in BOM", "gt": "Dataset in SP"},
+    "Processes": {"query": "Ausgangsliste",        "gt": "Eintrag aus Zielliste"},
+}
+
+
+def load_excel_ground_truth(
+    path: str | Path,
+    sheet_column_map: dict[str, dict[str, str]] = SHEET_COLUMN_MAP,
+) -> list[dict]:
+    """Read sheets from an Excel file, normalize columns, return unified list.
+
+    Returns:
+        List of ``{"query": str, "ground_truth": str, "source_sheet": str}``.
+        Rows where query or ground_truth is empty/NaN are dropped.
+    """
+    try:
+        import openpyxl  # noqa: E402 — lazy import to avoid hard dep at module level
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(
+            "openpyxl is required to load Excel files. Install it: pip install openpyxl"
+        ) from None
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    rows: list[dict] = []
+
+    for sheet_name, col_map in sheet_column_map.items():
+        if sheet_name not in wb.sheetnames:
+            logger.debug("Sheet %r not found in %s, skipping", sheet_name, path)
+            continue
+
+        ws = wb[sheet_name]
+        # Build header index from first row
+        header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+        headers = [str(h).strip() if h else "" for h in header_row]
+
+        query_col = col_map["query"]
+        gt_col = col_map["gt"]
+
+        if query_col not in headers or gt_col not in headers:
+            logger.warning(
+                "Sheet %r: expected columns %r and %r but found %s",
+                sheet_name, query_col, gt_col, headers,
+            )
+            continue
+
+        qi = headers.index(query_col)
+        gi = headers.index(gt_col)
+
+        for row_vals in ws.iter_rows(min_row=2, values_only=True):
+            query = str(row_vals[qi]).strip() if row_vals[qi] is not None else ""
+            gt = str(row_vals[gi]).strip() if row_vals[gi] is not None else ""
+            if query and gt:
+                rows.append({
+                    "query": query,
+                    "ground_truth": gt,
+                    "source_sheet": sheet_name,
+                })
+
+    wb.close()
+    logger.info(
+        "Loaded %d ground-truth pairs from %s (%s)",
+        len(rows), path,
+        ", ".join(f"{s}: {sum(1 for r in rows if r['source_sheet'] == s)}"
+                  for s in dict.fromkeys(r["source_sheet"] for r in rows)),
+    )
+    return rows
+
+
+def train_test_split(
+    data: list[dict],
+    test_fraction: float = 0.2,
+    seed: int = 42,
+) -> tuple[list[dict], dict[str, list[dict]]]:
+    """Split ground-truth data into train + per-domain test sets.
+
+    Logic:
+    - Separate rows by source_sheet: "Processes" vs ("Material" + "Sheet1")
+    - From each group, draw ``test_fraction`` into the test set
+    - Remaining rows from both groups -> combined train set
+
+    Returns:
+        ``(train_data, {"test_processes": [...], "test_material": [...]})``.
+    """
+    rng = random.Random(seed)
+
+    processes = [r for r in data if r["source_sheet"] == "Processes"]
+    material = [r for r in data if r["source_sheet"] != "Processes"]
+
+    def _split(items: list[dict]) -> tuple[list[dict], list[dict]]:
+        shuffled = items[:]
+        rng.shuffle(shuffled)
+        n_test = max(1, round(len(shuffled) * test_fraction))
+        return shuffled[n_test:], shuffled[:n_test]
+
+    train_proc, test_proc = _split(processes) if processes else ([], [])
+    train_mat, test_mat = _split(material) if material else ([], [])
+
+    train = train_proc + train_mat
+
+    # Warn on duplicate queries across test sets
+    test_queries_proc = {r["query"] for r in test_proc}
+    test_queries_mat = {r["query"] for r in test_mat}
+    overlap = test_queries_proc & test_queries_mat
+    if overlap:
+        logger.warning(
+            "Duplicate queries across test sets (%d): %s",
+            len(overlap), list(overlap)[:5],
+        )
+
+    logger.info(
+        "Split: %d train, %d test_processes, %d test_material",
+        len(train), len(test_proc), len(test_mat),
+    )
+    return train, {"test_processes": test_proc, "test_material": test_mat}

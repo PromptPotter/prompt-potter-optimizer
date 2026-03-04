@@ -129,6 +129,39 @@ class BackendClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
+    # -- status check -------------------------------------------------------
+
+    async def check_status(self) -> dict[str, Any]:
+        """GET /status — returns backend health/state info.
+
+        Returns parsed JSON on success, or a dict with:
+        - ``"error"`` + ``"status"`` on failure
+        - ``"status": "not_implemented"`` for 404 (endpoint missing)
+        - ``"status": "unreachable"`` for connection errors
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{self.base_url}/status", timeout=self.timeout,
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.info("Backend /status endpoint not found (404)")
+                return {
+                    "status": "not_implemented",
+                    "error": "GET /status not available on this backend",
+                }
+            logger.warning("Backend status check failed: %s", exc)
+            return {"status": "error", "error": str(exc)}
+        except httpx.ConnectError as exc:
+            logger.warning("Backend unreachable: %s", exc)
+            return {"status": "unreachable", "error": str(exc)}
+        except Exception as exc:
+            logger.warning("Backend status check failed: %s", exc)
+            return {"status": "error", "error": str(exc)}
+
     # -- sync operations (fetch verbatim API responses) -------------------
 
     async def fetch_experiments(self) -> dict[str, Any]:

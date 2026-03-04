@@ -26,6 +26,7 @@ async def init_services(
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
     project_root: Path | None = None,
+    dataset_name: str | None = None,
 ) -> dict:
     """Initialize store, client, and load experiment data.
 
@@ -34,12 +35,19 @@ async def init_services(
     callers can still proceed (the user gets a clear message instead of
     a crash).
 
+    When ``dataset_name`` is provided, loads ground-truth data from the
+    ``DatasetStore`` instead of requiring experiment traces.  This allows
+    the optimization workflow to run with Excel-sourced datasets.
+
     Args:
         backend_url: Backend base URL.
         backend_id: Backend identifier.
         experiment_id: Experiment to load.
         project_root: Project root directory.  Defaults to two levels up
             from the notebooks directory.
+        dataset_name: If set, load this named dataset from the DatasetStore
+            (e.g. "train") instead of extracting queries from experiment
+            traces.
 
     Returns:
         Dict with keys: store, client, queries, terms, exp_data,
@@ -59,6 +67,33 @@ async def init_services(
             backend_type="termnorm", base_url=backend_url,
         ))
 
+    base = {
+        "store": store,
+        "backend_id": backend_id,
+        "experiment_id": experiment_id,
+        "backend_client": client,
+        "synced": False,
+    }
+
+    # --- Dataset store path (preferred when available) ---
+    if dataset_name:
+        ds = store.datasets.load(backend_id, dataset_name)
+        if ds and ds.get("items"):
+            items = ds["items"]
+            session_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
+            logger.info(
+                "Loaded dataset %r from store: %d items, %d session terms",
+                dataset_name, len(items), len(session_terms),
+            )
+            return {
+                **base,
+                "queries": _dataset_items_to_queries(items),
+                "exp_data": {},
+                "session_terms": session_terms,
+            }
+        logger.info("Dataset %r not found in store, falling back to experiment sync", dataset_name)
+
+    # --- Experiment sync path (original) ---
     exp_data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
 
     # Detect stale sync data: data exists but has no traces
@@ -81,18 +116,12 @@ async def init_services(
         except Exception as exc:
             logger.warning("Auto-sync failed: %s", exc)
 
-    base = {
-        "store": store,
-        "backend_id": backend_id,
-        "experiment_id": experiment_id,
-        "backend_client": client,
-        "synced": synced,
-    }
+    base["synced"] = synced
 
     if not exp_data:
         logger.warning(
             "No experiment data available. "
-            "Downstream calls will fail until data is synced."
+            "Downstream calls will fail until data is synced or datasets are loaded."
         )
         return {
             **base,
@@ -109,6 +138,24 @@ async def init_services(
         "exp_data": exp_data,
         "session_terms": client.extract_session_terms(exp_data),
     }
+
+
+def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
+    """Convert DatasetStore items to the query format used by replay/eval."""
+    queries = []
+    for item in items:
+        query = item.get("query", "")
+        gt = item.get("ground_truth", "")
+        if not query or not gt:
+            continue
+        queries.append({
+            "query": query,
+            "bom_material": query,
+            "process": "",
+            "query_fields": {"bom_material": query, "process": ""},
+            "ground_truth": gt,
+        })
+    return queries
 
 
 async def run_baseline_eval(

@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # File-based observability (traces, experiments, events.jsonl)
     OBS_ENABLED: bool = True
 
+    # Dataset — path to Excel ground-truth file (optional)
+    EXCEL_PATH: str = ""
+
     model_config = {"env_file": ".env", "case_sensitive": True, "extra": "ignore"}
 
 

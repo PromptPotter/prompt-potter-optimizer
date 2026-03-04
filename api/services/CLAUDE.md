@@ -26,6 +26,9 @@ All evaluation paths converge here — grid search, smart search, and feedback c
   backend.json
   sync/experiments/{id}.json
   executions/{id}.json
+  datasets/train.json                 # Excel ground-truth train split
+  datasets/test_processes.json        # Excel ground-truth test split (Processes sheet)
+  datasets/test_material.json         # Excel ground-truth test split (Material+Sheet1)
   dataset_runs/{run_id}.json          # completed eval runs (shared across all eval paths)
   dataset_runs/{run_id}.partial.jsonl  # in-progress (crash recovery)
   dataset_runs.json                   # index of all runs (content_hash -> run_id)

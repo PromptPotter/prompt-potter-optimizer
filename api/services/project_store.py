@@ -13,6 +13,9 @@ Layout on disk::
           experiments.json
           experiments/{experiment_id}.json
         executions/{execution_id}.json
+        datasets/train.json
+        datasets/test_processes.json
+        datasets/test_material.json
         dataset_runs/{run_id}.json
         dataset_runs/{run_id}.partial.jsonl
         dataset_runs.json
@@ -27,6 +30,7 @@ from pathlib import Path
 from api.services.stores.backend_store import BackendStore
 from api.services.stores.campaign_store import CampaignStore
 from api.services.stores.dataset_run_store import DatasetRunStore
+from api.services.stores.dataset_store import DatasetStore
 from api.services.stores.execution_store import ExecutionStore
 from api.services.stores.grid_plan_store import GridPlanStore
 from api.services.stores.smart_search_store import SmartSearchStore
@@ -41,6 +45,7 @@ class ProjectStore:
         self.base_dir = Path(base_dir) if base_dir else BASE_DIR
         self.backends = BackendStore(self.base_dir)
         self.campaigns = CampaignStore(self.base_dir)
+        self.datasets = DatasetStore(self.base_dir)
         self.executions = ExecutionStore(self.base_dir)
         self.dataset_runs = DatasetRunStore(self.base_dir)
         self.grid_plans = GridPlanStore(self.base_dir)
