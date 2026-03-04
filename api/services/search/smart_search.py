@@ -12,6 +12,7 @@ from typing import Any, Callable, Literal, TypedDict
 import pandas as pd
 
 from api.models.prompt_state import PromptState
+from api.services.backend_client import PIPELINE_STEP_PARAMS
 from api.services.project_store import ProjectStore
 from api.services.prompt_eval import evaluate_prompt_cached
 from api.services.search.utils import preview as _preview
@@ -283,6 +284,68 @@ def classify_axis(
 
 
 # ---------------------------------------------------------------------------
+# Variant library filtering
+# ---------------------------------------------------------------------------
+
+
+def filter_variant_library(
+    variant_library: dict,
+    pipeline_params: dict | None,
+) -> dict:
+    """Filter variant library to axes relevant for the active pipeline.
+
+    - Keeps only ``pipeline_params`` axes whose owning step is active.
+    - Drops all ``prompt_fields`` when ``llm_ranking`` is not active
+      (``PromptState.render()`` produces ``ranking_prompt`` consumed only
+      by that step).
+
+    Args:
+        variant_library: Full variant library dict with ``prompt_fields``
+            and optional ``pipeline_params`` sections.
+        pipeline_params: Current pipeline parameters (must contain ``steps``
+            key listing active step names).
+
+    Returns:
+        Filtered copy of the variant library.
+    """
+    active_steps = set((pipeline_params or {}).get("steps", []))
+
+    # Build set of param keys owned by active steps
+    active_param_keys: set[str] = set()
+    for step_name, param_keys in PIPELINE_STEP_PARAMS.items():
+        if step_name in active_steps:
+            active_param_keys |= param_keys
+
+    # Filter pipeline_params to only active-step keys
+    filtered_pp: dict[str, list] = {}
+    for axis, values in variant_library.get("pipeline_params", {}).items():
+        if axis in active_param_keys:
+            filtered_pp[axis] = values
+
+    # Drop prompt_fields when llm_ranking is not active
+    filtered_pf = variant_library.get("prompt_fields", {})
+    if "llm_ranking" not in active_steps:
+        filtered_pf = {}
+
+    result: dict = {}
+    if filtered_pf:
+        result["prompt_fields"] = filtered_pf
+    if filtered_pp:
+        result["pipeline_params"] = filtered_pp
+
+    removed_pp = set(variant_library.get("pipeline_params", {})) - set(filtered_pp)
+    if removed_pp:
+        logger.info("filter_variant_library: dropped pipeline_params %s", removed_pp)
+    if not filtered_pf and variant_library.get("prompt_fields"):
+        logger.info(
+            "filter_variant_library: dropped all prompt_fields "
+            "(llm_ranking not active)"
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Sensitivity scan
 # ---------------------------------------------------------------------------
 
@@ -335,6 +398,9 @@ async def sensitivity_scan(
         await backend_client.init_session(session_terms)
 
     base_params = dict(pipeline_params or {})
+
+    # Filter axes to only those relevant for the active pipeline
+    variant_library = filter_variant_library(variant_library, pipeline_params)
 
     _eval_ps = _make_eval_fn(
         eval_data, backend_client, store, backend_id,

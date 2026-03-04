@@ -161,11 +161,10 @@ def test_load_variant_library():
     """Config file loads and has expected top-level keys."""
     lib = load_variant_library()
     assert "prompt_fields" in lib
-    assert "pipeline_params" in lib
     assert "persona" in lib["prompt_fields"]
-    assert "ranking_temperature" in lib["pipeline_params"]
     assert isinstance(lib["prompt_fields"]["persona"], list)
     assert len(lib["prompt_fields"]["persona"]) > 1
+    # pipeline_params removed — now supplied dynamically by scan advisor
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +258,7 @@ async def test_sensitivity_scan_partial_resume():
         df, profiles = await sensitivity_scan(
             baseline, variant_library, eval_data,
             backend_client=None,  # not used since eval is mocked
+            pipeline_params={"steps": ["llm_ranking"]},
             partial_scan=partial_scan,
         )
 

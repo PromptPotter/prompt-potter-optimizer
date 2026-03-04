@@ -170,6 +170,19 @@ class BackendClient:
             logger.warning("Backend status check failed: %s", exc)
             return {"status": "error", "error": str(exc)}
 
+    # -- pipeline config ---------------------------------------------------
+
+    async def fetch_pipeline(self) -> dict[str, Any]:
+        """GET /pipeline — returns full pipeline configuration.
+
+        Includes node configs, models, temperatures, and resolved schema/prompt
+        registry data (if the backend supports enrichment).
+        """
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(f"{self.base_url}/pipeline")
+            resp.raise_for_status()
+            return resp.json()
+
     # -- sync operations (fetch verbatim API responses) -------------------
 
     async def fetch_experiments(self) -> dict[str, Any]:

@@ -37,6 +37,42 @@ class ObservationMapping(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Step metadata (output schema + prompt info)
+# ---------------------------------------------------------------------------
+
+class StepOutputSchema(BaseModel):
+    """Resolved output schema for a pipeline step.
+
+    Carries the field names and descriptions from the backend's schema registry
+    so that downstream consumers (scan advisor, notebooks) can reason about
+    what a step produces without calling the registry directly.
+    """
+
+    model_config = {"frozen": True}
+
+    family: str = ""
+    version: int | None = None
+    fields: list[str] = Field(default_factory=list)
+    field_descriptions: dict[str, str] = Field(default_factory=dict)
+
+
+class StepPromptMeta(BaseModel):
+    """Resolved prompt metadata for a pipeline step.
+
+    Carries template variable names, a human description, and the full
+    prompt template text from the backend's prompt registry.
+    """
+
+    model_config = {"frozen": True}
+
+    family: str = ""
+    version: int | None = None
+    template_variables: list[str] = Field(default_factory=list)
+    description: str = ""
+    template: str = ""
+
+
+# ---------------------------------------------------------------------------
 # Pipeline step
 # ---------------------------------------------------------------------------
 
@@ -53,6 +89,8 @@ class PipelineStep(BaseModel):
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"
+    output_schema: StepOutputSchema | None = None
+    prompt_meta: StepPromptMeta | None = None
 
 
 # ---------------------------------------------------------------------------

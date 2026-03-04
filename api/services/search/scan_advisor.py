@@ -19,7 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 def _build_pipeline_anatomy(schema: PipelineSchema) -> list[dict[str, Any]]:
-    """Extract structured pipeline anatomy from PipelineSchema.steps."""
+    """Extract structured pipeline anatomy from PipelineSchema.steps.
+
+    Includes output schema fields and prompt metadata when available,
+    giving the advisor LLM visibility into what each step produces.
+    """
     anatomy = []
     for step in schema.steps:
         entry: dict[str, Any] = {
@@ -31,6 +35,19 @@ def _build_pipeline_anatomy(schema: PipelineSchema) -> list[dict[str, Any]]:
             entry["param_keys"] = sorted(step.param_keys)
         if step.short_circuit:
             entry["short_circuit"] = True
+        if step.output_schema:
+            schema_entry: dict[str, Any] = {
+                "fields": step.output_schema.fields,
+            }
+            if step.output_schema.field_descriptions:
+                schema_entry["field_descriptions"] = step.output_schema.field_descriptions
+            entry["output_schema"] = schema_entry
+        if step.prompt_meta:
+            entry["prompt_meta"] = {
+                "family": step.prompt_meta.family,
+                "template_variables": step.prompt_meta.template_variables,
+                "description": step.prompt_meta.description,
+            }
         anatomy.append(entry)
     return anatomy
 
@@ -68,6 +85,13 @@ and recommend which axes (parameters and prompt fields) to focus a sensitivity s
 
 ## Pipeline Anatomy (steps, types, tunable parameters)
 {json.dumps(pipeline_anatomy, indent=2)}
+
+## Step Output Schemas
+Some steps produce structured JSON outputs that feed downstream steps.
+The ``output_schema`` in the Pipeline Anatomy shows what each step produces.
+Consider which output fields are most impactful for downstream accuracy —
+e.g. if entity profiling produces fields that token matching uses for scoring,
+changes to profiling quality directly affect candidate retrieval.
 
 ## Available Prompt Field Axes
 These are the prompt template fields that can be varied during optimization:

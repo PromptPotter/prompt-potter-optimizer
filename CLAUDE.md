@@ -71,7 +71,7 @@ All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py
 
 PromptState is frozen (`model_config = {"frozen": True}`). Use `derive(**changes)` to create children (sets `parent_id` automatically). Use `render()` to assemble Layer 1 fields into a prompt string. Use `diff(a, b)` for structured diffs.
 
-**PipelineSchema** (`api/models/pipeline_schema.py`, M6) — Backend-agnostic pipeline description with derivation methods: `step_param_keys()`, `obs_extraction_map()`, `template_variables`, `langfuse_type_map()`. Factory in `api/services/pipeline_discovery.py` parses `GET /pipeline` response; static `TERMNORM_DEFAULT_SCHEMA` for offline use.
+**PipelineSchema** (`api/models/pipeline_schema.py`, M6) — Backend-agnostic pipeline description with derivation methods: `step_param_keys()`, `obs_extraction_map()`, `template_variables`, `langfuse_type_map()`. Each `PipelineStep` can carry `output_schema` (field names/descriptions) and `prompt_meta` (template variables, prompt template). Factory in `api/services/pipeline_discovery.py`: `parse_pipeline_response()` parses `GET /pipeline` and merges live metadata (live always wins). `TERMNORM_DEFAULT_SCHEMA` carries structural metadata only (observation_mappings, langfuse_type, param_keys, runtime) — registry-owned `output_schema`/`prompt_meta` come exclusively from the live response's `resolved_schemas`/`resolved_prompts`.
 
 **ProjectStore** disk layout, store conventions, and evaluation flow details: see [`api/services/CLAUDE.md`](api/services/CLAUDE.md).
 
@@ -79,6 +79,7 @@ PromptState is frozen (`model_config = {"frozen": True}`). Use `derive(**changes
 
 The human workflow is a repeatable loop:
 
+0. **Pipeline snapshot** — call `backend_client.fetch_pipeline()` and display the full JSON. This ensures every experiment run has its pipeline parameters recorded inline in the notebook output.
 1. **Generate data** — sync from backend, build eval dataset, run baseline eval
 2. **Explore** — sensitivity scan and/or grid search map the accuracy landscape; results are persisted as `dataset_runs` keyed by content hash
 3. **Optimize** — feedback cycle (LLM candidate generation → backend evaluation → winner selection) runs iteratively until the human stops it
@@ -125,3 +126,4 @@ See [`external/CLAUDE.md`](external/CLAUDE.md) for TermNorm reference implementa
 - **Config**: Pydantic `BaseSettings` loading from `.env` (see `api/config/settings.py`)
 - **Version**: Centralized in `api/config/settings.py` as `APP_VERSION`
 - **API versioning**: all endpoints under `/api/v1/`
+- **Pipeline reproducibility**: The notebook MUST display the full pipeline configuration (all node configs, models, temperatures, schemas) via `GET /pipeline` before any evaluation. This is the experiment's parameter manifest — never strip it to just step names. The scan advisor also reads this config to make informed recommendations.

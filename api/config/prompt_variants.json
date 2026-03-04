@@ -22,10 +22,5 @@
       "Rank all candidates from most to least relevant."
     ],
     "problem_description": [""]
-  },
-  "pipeline_params": {
-    "ranking_temperature": [0.0, 0.3, 0.7, 1.0],
-    "max_token_candidates": [5, 10, 20],
-    "ranking_sample_size": [3, 5, 10]
   }
 }

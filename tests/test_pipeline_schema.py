@@ -2,7 +2,13 @@
 
 import pytest
 
-from api.models.pipeline_schema import ObservationMapping, PipelineSchema, PipelineStep
+from api.models.pipeline_schema import (
+    ObservationMapping,
+    PipelineSchema,
+    PipelineStep,
+    StepOutputSchema,
+    StepPromptMeta,
+)
 from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA, parse_pipeline_response
 
 
@@ -20,6 +26,8 @@ class TestPipelineStep:
         assert step.observation_name is None
         assert step.observation_mappings == []
         assert step.langfuse_type == "span"
+        assert step.output_schema is None
+        assert step.prompt_meta is None
 
     def test_with_all_fields(self):
         step = PipelineStep(
@@ -285,3 +293,343 @@ class TestParsePipelineResponse:
         data = {"name": "FlatPipeline", "version": "1.0", "steps": []}
         schema = parse_pipeline_response(data)
         assert schema.name == "flatpipeline"
+
+    def test_top_level_resolved_unknown(self):
+        """New format: top-level resolved_schemas/resolved_prompts dicts."""
+        data = {
+            "name": "CustomNodes",
+            "version": "1.0",
+            "nodes": {
+                "step_a": {
+                    "type": "LLMGeneration",
+                    "config": {
+                        "model": "gpt-4",
+                        "temperature": 0.5,
+                        "schema_family": "my_schema",
+                        "schema_version": 1,
+                        "prompt_family": "my_prompt",
+                        "prompt_version": 2,
+                    },
+                },
+                "step_b": {
+                    "type": "DeterministicFunction",
+                    "config": {"threshold": 0.8},
+                },
+            },
+            "resolved_schemas": {
+                "my_schema/1": {
+                    "family": "my_schema",
+                    "version": 1,
+                    "description": "Test schema",
+                    "fields": ["field1", "field2"],
+                    "json_schema": {
+                        "properties": {
+                            "field1": {"type": "string", "description": "First field"},
+                            "field2": {"type": "number"},
+                        },
+                    },
+                },
+            },
+            "resolved_prompts": {
+                "my_prompt/2": {
+                    "family": "my_prompt",
+                    "version": 2,
+                    "description": "A test prompt",
+                    "template_variables": ["input", "context"],
+                    "template": "You are a {{input}} with {{context}}",
+                },
+            },
+        }
+        schema = parse_pipeline_response(data)
+        assert schema.name == "customnodes"
+        assert len(schema.steps) == 2
+
+        # step_a should have resolved metadata from top-level dicts
+        step_a = schema.steps[0]
+        assert step_a.name == "step_a"
+        assert step_a.output_schema is not None
+        assert step_a.output_schema.family == "my_schema"
+        assert step_a.output_schema.fields == ["field1", "field2"]
+        assert step_a.output_schema.field_descriptions == {"field1": "First field"}
+        assert step_a.prompt_meta is not None
+        assert step_a.prompt_meta.family == "my_prompt"
+        assert step_a.prompt_meta.version == 2
+        assert step_a.prompt_meta.template_variables == ["input", "context"]
+        assert step_a.prompt_meta.template == "You are a {{input}} with {{context}}"
+
+        # step_b should have no metadata
+        step_b = schema.steps[1]
+        assert step_b.output_schema is None
+        assert step_b.prompt_meta is None
+
+    def test_inline_resolved_fallback(self):
+        """Legacy format: inline _resolved_schema/_resolved_prompt in node config."""
+        data = {
+            "name": "CustomNodes",
+            "version": "1.0",
+            "nodes": {
+                "step_a": {
+                    "type": "LLMGeneration",
+                    "config": {
+                        "model": "gpt-4",
+                        "schema_family": "my_schema",
+                        "_resolved_schema": {
+                            "family": "my_schema",
+                            "version": 1,
+                            "json_schema": {
+                                "properties": {
+                                    "field1": {"type": "string", "description": "First"},
+                                },
+                            },
+                            "fields": ["field1"],
+                        },
+                        "prompt_family": "my_prompt",
+                        "_resolved_prompt": {
+                            "family": "my_prompt",
+                            "version": 2,
+                            "template_variables": ["input"],
+                            "description": "Legacy prompt",
+                        },
+                    },
+                },
+            },
+        }
+        schema = parse_pipeline_response(data)
+        step_a = schema.steps[0]
+        assert step_a.output_schema is not None
+        assert step_a.output_schema.family == "my_schema"
+        assert step_a.prompt_meta is not None
+        assert step_a.prompt_meta.family == "my_prompt"
+
+    def test_top_level_resolved_known_pipeline(self):
+        """Known pipeline with top-level resolved dicts merges metadata."""
+        data = {
+            "name": "TermNorm",
+            "version": "v2.0",
+            "nodes": {
+                "web_search": {
+                    "type": "ExternalService",
+                    "config": {
+                        "max_sites": 7,
+                        "schema_family": "search_results",
+                        "schema_version": 1,
+                        "prompt_family": "search_prompt",
+                        "prompt_version": 1,
+                    },
+                },
+            },
+            "resolved_schemas": {
+                "search_results/1": {
+                    "family": "search_results",
+                    "version": 1,
+                    "fields": ["sources"],
+                    "json_schema": {
+                        "properties": {
+                            "sources": {"type": "array", "description": "URLs found"},
+                        },
+                    },
+                },
+            },
+            "resolved_prompts": {
+                "search_prompt/1": {
+                    "family": "search_prompt",
+                    "version": 1,
+                    "template_variables": ["query"],
+                    "description": "Search prompt",
+                },
+            },
+        }
+        schema = parse_pipeline_response(data)
+        # Known pipeline should still have 6 steps
+        assert len(schema.steps) == 6
+        # web_search step should now have the resolved schema + prompt_meta merged
+        ws = next(s for s in schema.steps if s.name == "web_search")
+        assert ws.output_schema is not None
+        assert ws.output_schema.family == "search_results"
+        assert ws.output_schema.fields == ["sources"]
+        assert ws.prompt_meta is not None
+        assert ws.prompt_meta.family == "search_prompt"
+        assert ws.prompt_meta.template_variables == ["query"]
+
+
+# ---------------------------------------------------------------------------
+# New models: StepOutputSchema, StepPromptMeta
+# ---------------------------------------------------------------------------
+
+class TestStepOutputSchema:
+    def test_defaults(self):
+        s = StepOutputSchema()
+        assert s.family == ""
+        assert s.version is None
+        assert s.fields == []
+        assert s.field_descriptions == {}
+
+    def test_frozen(self):
+        s = StepOutputSchema(family="entity_profile", fields=["a", "b"])
+        with pytest.raises(Exception):
+            s.family = "changed"
+
+    def test_full_construction(self):
+        s = StepOutputSchema(
+            family="entity_profile",
+            version=1,
+            fields=["entity_name", "core_concept"],
+            field_descriptions={"entity_name": "Canonical name"},
+        )
+        assert s.family == "entity_profile"
+        assert s.version == 1
+        assert len(s.fields) == 2
+        assert s.field_descriptions["entity_name"] == "Canonical name"
+
+
+class TestStepPromptMeta:
+    def test_defaults(self):
+        m = StepPromptMeta()
+        assert m.family == ""
+        assert m.version is None
+        assert m.template_variables == []
+        assert m.description == ""
+        assert m.template == ""
+
+    def test_frozen(self):
+        m = StepPromptMeta(family="entity_profiling")
+        with pytest.raises(Exception):
+            m.family = "changed"
+
+    def test_full_construction(self):
+        m = StepPromptMeta(
+            family="llm_ranking",
+            version=1,
+            template_variables=["core_concept", "entity_profile_json", "matches"],
+            description="Rank candidates",
+            template="You are a candidate evaluation expert.",
+        )
+        assert m.family == "llm_ranking"
+        assert len(m.template_variables) == 3
+        assert m.template == "You are a candidate evaluation expert."
+
+
+# ---------------------------------------------------------------------------
+# Default schema metadata
+# ---------------------------------------------------------------------------
+
+class TestTermNormDefaultNoHardcodedMetadata:
+    """Verify TERMNORM_DEFAULT_SCHEMA does NOT carry registry-owned metadata."""
+
+    def test_entity_profiling_no_hardcoded_metadata(self):
+        ep = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "entity_profiling")
+        assert ep.output_schema is None
+        assert ep.prompt_meta is None
+
+    def test_llm_ranking_no_hardcoded_metadata(self):
+        lr = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "llm_ranking")
+        assert lr.prompt_meta is None
+
+    def test_entity_profiling_keeps_structural_fields(self):
+        ep = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "entity_profiling")
+        assert ep.langfuse_type == "generation"
+        assert ep.observation_name == "entity_profiling"
+        assert len(ep.observation_mappings) == 1
+        assert ep.param_keys == {
+            "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
+        }
+
+    def test_llm_ranking_keeps_structural_fields(self):
+        lr = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "llm_ranking")
+        assert lr.langfuse_type == "generation"
+        assert lr.observation_name == "llm_ranking"
+        assert len(lr.observation_mappings) == 1
+
+
+class TestKnownPipelineMetadataFromLiveResponse:
+    """Verify that live response metadata lands on correct known-pipeline steps."""
+
+    @pytest.fixture()
+    def termnorm_live_response(self):
+        return {
+            "name": "TermNorm",
+            "version": "2.0",
+            "nodes": {
+                "entity_profiling": {
+                    "type": "LLMGeneration",
+                    "config": {
+                        "schema_family": "entity_profile",
+                        "schema_version": 1,
+                        "prompt_family": "entity_profiling",
+                        "prompt_version": 1,
+                    },
+                },
+                "llm_ranking": {
+                    "type": "LLMGeneration",
+                    "config": {
+                        "prompt_family": "llm_ranking",
+                        "prompt_version": 1,
+                    },
+                },
+            },
+            "resolved_schemas": {
+                "entity_profile/1": {
+                    "family": "entity_profile",
+                    "version": 1,
+                    "fields": ["entity_name", "core_concept"],
+                    "json_schema": {
+                        "properties": {
+                            "entity_name": {
+                                "type": "string",
+                                "description": "Canonical name",
+                            },
+                            "core_concept": {
+                                "type": "string",
+                                "description": "Conceptual essence",
+                            },
+                        },
+                    },
+                },
+            },
+            "resolved_prompts": {
+                "entity_profiling/1": {
+                    "family": "entity_profiling",
+                    "version": 1,
+                    "template_variables": ["query", "format_string", "combined_text"],
+                    "description": "Extract entity profile",
+                },
+                "llm_ranking/1": {
+                    "family": "llm_ranking",
+                    "version": 1,
+                    "template_variables": [
+                        "core_concept", "entity_profile_json", "matches",
+                    ],
+                    "description": "Rank candidates",
+                },
+            },
+        }
+
+    def test_entity_profiling_gets_both(self, termnorm_live_response):
+        schema = parse_pipeline_response(termnorm_live_response)
+        ep = next(s for s in schema.steps if s.name == "entity_profiling")
+        assert ep.output_schema is not None
+        assert ep.output_schema.family == "entity_profile"
+        assert ep.output_schema.fields == ["entity_name", "core_concept"]
+        assert ep.output_schema.field_descriptions == {
+            "entity_name": "Canonical name",
+            "core_concept": "Conceptual essence",
+        }
+        assert ep.prompt_meta is not None
+        assert ep.prompt_meta.family == "entity_profiling"
+        assert ep.prompt_meta.template_variables == [
+            "query", "format_string", "combined_text",
+        ]
+
+    def test_llm_ranking_gets_prompt_meta(self, termnorm_live_response):
+        schema = parse_pipeline_response(termnorm_live_response)
+        lr = next(s for s in schema.steps if s.name == "llm_ranking")
+        assert lr.prompt_meta is not None
+        assert lr.prompt_meta.family == "llm_ranking"
+        assert "core_concept" in lr.prompt_meta.template_variables
+
+    def test_other_steps_unaffected(self, termnorm_live_response):
+        schema = parse_pipeline_response(termnorm_live_response)
+        ws = next(s for s in schema.steps if s.name == "web_search")
+        assert ws.output_schema is None
+        assert ws.prompt_meta is None
+        assert len(schema.steps) == 6

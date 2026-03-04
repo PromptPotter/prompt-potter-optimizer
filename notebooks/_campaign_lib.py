@@ -89,6 +89,7 @@ __all__ = [
     # Smart search
     "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
     "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
+    "advisory_to_scan_variants",
     "select_scan_winner_notebook", "build_historical_index",
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
     # Campaign
@@ -1415,6 +1416,20 @@ async def scan_advisor(
     print("=" * 70)
 
     return advisory
+
+
+def advisory_to_scan_variants(advisory: dict) -> dict:
+    """Convert scan advisory into editable pipeline_params dict.
+
+    Extracts ``priority_axes`` entries whose ``source`` is ``"pipeline_param"``
+    and that carry ``suggested_values``.  Returns a dict the user can edit
+    before passing to the sensitivity scan as ``variant_library["pipeline_params"]``.
+    """
+    params: dict[str, list] = {}
+    for ax in advisory.get("priority_axes", []):
+        if ax.get("source") == "pipeline_param" and ax.get("suggested_values"):
+            params[ax["axis"]] = ax["suggested_values"]
+    return params
 
 
 async def sensitivity_scan(
