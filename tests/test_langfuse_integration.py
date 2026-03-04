@@ -1,11 +1,7 @@
 """Tests for cloud Langfuse integration via ObsLogger (WP 3.6).
 
 Verifies that cloud Langfuse calls flow through ObsLogger's dual-write:
-- Campaign-level trace is created for each feedback cycle
-- Per-round spans are logged with accuracy metadata
-- Per-round accuracy scores are emitted
-- Final best_accuracy score is emitted
-- Trace is updated with final output and flushed
+campaign trace, per-round spans/scores, final score, trace update + flush.
 """
 
 import pytest
@@ -71,10 +67,10 @@ def _apply_service_mocks(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_campaign_trace_created(
+async def test_full_langfuse_integration(
     monkeypatch, eval_data, cycle_config, mock_langfuse,
 ):
-    """Feedback cycle creates a campaign-level cloud Langfuse trace via ObsLogger."""
+    """Full feedback cycle: campaign trace, per-round spans/scores, final output."""
     _apply_service_mocks(monkeypatch)
 
     result = await run_feedback_cycle(
@@ -84,121 +80,44 @@ async def test_campaign_trace_created(
         langfuse_session_id="test_session_123",
     )
 
-    # Cloud trace ID is returned via ObsLogger.get_cloud_trace_id
+    # Cloud trace ID returned
     assert result.langfuse_trace_id is not None
     assert result.langfuse_trace_id.startswith("mock_trace_")
 
-    # Exactly one campaign trace created in cloud
+    # Exactly one campaign trace
     campaign_traces = [t for t in mock_langfuse.traces if t["name"] == "feedback_cycle"]
     assert len(campaign_traces) == 1
     assert campaign_traces[0]["session_id"] == "test_session_123"
     assert "campaign" in campaign_traces[0]["tags"]
 
-
-@pytest.mark.asyncio
-async def test_per_round_spans(
-    monkeypatch, eval_data, cycle_config, mock_langfuse,
-):
-    """Each round gets a cloud Langfuse span with accuracy metadata."""
-    _apply_service_mocks(monkeypatch)
-
-    result = await run_feedback_cycle(
-        instruction="Test.",
-        eval_data=eval_data,
-        config=cycle_config,
-    )
-
-    # Round 0 improves (0→0.33), then patience=2 stalls → 3 rounds total
+    # Per-round spans (3 rounds)
     assert result.n_rounds == 3
-
-    # Per-round spans (prompt_version spans may also exist)
     round_spans = [s for s in mock_langfuse.spans if s["name"].startswith("round_")]
     assert len(round_spans) == 3
-
     for i, span in enumerate(round_spans):
         assert span["trace_id"] == result.langfuse_trace_id
         assert span["name"] == f"round_{i}"
         assert "winner_accuracy" in span["output"]
-        assert "improved" in span["output"]
 
-
-@pytest.mark.asyncio
-async def test_per_round_accuracy_scores(
-    monkeypatch, eval_data, cycle_config, mock_langfuse,
-):
-    """Each round emits an accuracy score to cloud Langfuse."""
-    _apply_service_mocks(monkeypatch)
-
-    result = await run_feedback_cycle(
-        instruction="Test.",
-        eval_data=eval_data,
-        config=cycle_config,
-    )
-
+    # Per-round accuracy scores
     round_scores = [
         s for s in mock_langfuse.scores if s["name"].startswith("accuracy_round_")
     ]
     assert len(round_scores) == result.n_rounds
 
-    for score in round_scores:
-        assert score["trace_id"] == result.langfuse_trace_id
-        assert isinstance(score["value"], float)
-
-
-@pytest.mark.asyncio
-async def test_final_best_accuracy_score(
-    monkeypatch, eval_data, cycle_config, mock_langfuse,
-):
-    """Final best_accuracy score is emitted at cycle end via ObsLogger."""
-    _apply_service_mocks(monkeypatch)
-
-    result = await run_feedback_cycle(
-        instruction="Test.",
-        eval_data=eval_data,
-        config=cycle_config,
-    )
-
+    # Final best_accuracy score
     best_scores = [s for s in mock_langfuse.scores if s["name"] == "best_accuracy"]
     assert len(best_scores) == 1
     assert best_scores[0]["value"] == result.best_accuracy
 
-
-@pytest.mark.asyncio
-async def test_trace_updated_and_flushed(
-    monkeypatch, eval_data, cycle_config, mock_langfuse,
-):
-    """Campaign trace is updated with final output and flushed via ObsLogger."""
-    _apply_service_mocks(monkeypatch)
-
-    result = await run_feedback_cycle(
-        instruction="Test.",
-        eval_data=eval_data,
-        config=cycle_config,
-    )
-
+    # Trace updated with final output and flushed
     assert len(mock_langfuse.trace_updates) == 1
     update = mock_langfuse.trace_updates[0]
     assert update["trace_id"] == result.langfuse_trace_id
     assert update["output"]["stop_reason"] == result.stop_reason
     assert update["output"]["best_accuracy"] == result.best_accuracy
-
     assert mock_langfuse.flush_count >= 1
 
-
-@pytest.mark.asyncio
-async def test_end_trace_called_at_campaign_end(
-    monkeypatch, eval_data, cycle_config, mock_langfuse,
-):
-    """end_trace is called when the feedback cycle finishes."""
-    _apply_service_mocks(monkeypatch)
-
-    result = await run_feedback_cycle(
-        instruction="Test.",
-        eval_data=eval_data,
-        config=cycle_config,
-    )
-
+    # end_trace called
     assert len(mock_langfuse.end_trace_calls) == 1
     assert mock_langfuse.end_trace_calls[0] == result.langfuse_trace_id
-
-

@@ -8,38 +8,38 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from _helpers import MockCompletion
+from api.services.llm_client import _MAX_APP_RETRIES, _OpenAICompatibleClient
+from _helpers import MockCompletion, make_http_error
 
 
-@pytest.mark.asyncio
-async def test_llm_retry_503():
-    """Retry on 503 twice, then succeed on third attempt."""
-    from api.services.llm_client import _OpenAICompatibleClient
-
+@pytest.fixture
+def llm_client():
+    """Create a fresh _OpenAICompatibleClient with a mocked async client."""
     client = _OpenAICompatibleClient(
         api_key="test-key",
         base_url="http://localhost:1234",
         default_model="test-model",
         provider_name="test",
     )
+    mock_async_client = AsyncMock()
+    client._client = mock_async_client
+    return client, mock_async_client
 
+
+@pytest.mark.asyncio
+async def test_llm_retry_503(llm_client):
+    """Retry on 503 twice, then succeed on third attempt."""
+    client, mock_async = llm_client
     call_count = [0]
-
-    class Mock503Error(Exception):
-        status_code = 503
 
     async def mock_create(**kwargs):
         call_count[0] += 1
         if call_count[0] <= 2:
-            raise Mock503Error("Service unavailable")
+            raise make_http_error(503, "Service unavailable")
         return MockCompletion()
 
-    # Patch the client
-    mock_async_client = AsyncMock()
-    mock_async_client.chat.completions.create = mock_create
-    client._client = mock_async_client
+    mock_async.chat.completions.create = mock_create
 
-    # Should succeed after 2 retries
     response = await client.chat(
         messages=[{"role": "user", "content": "test"}],
         model="test-model",
@@ -50,31 +50,18 @@ async def test_llm_retry_503():
 
 
 @pytest.mark.asyncio
-async def test_llm_retry_429():
+async def test_llm_retry_429(llm_client):
     """Retry on 429 once, then succeed."""
-    from api.services.llm_client import _OpenAICompatibleClient
-
-    client = _OpenAICompatibleClient(
-        api_key="test-key",
-        base_url="http://localhost:1234",
-        default_model="test-model",
-        provider_name="test",
-    )
-
+    client, mock_async = llm_client
     call_count = [0]
-
-    class Mock429Error(Exception):
-        status_code = 429
 
     async def mock_create(**kwargs):
         call_count[0] += 1
         if call_count[0] <= 1:
-            raise Mock429Error("Rate limited")
+            raise make_http_error(429, "Rate limited")
         return MockCompletion()
 
-    mock_async_client = AsyncMock()
-    mock_async_client.chat.completions.create = mock_create
-    client._client = mock_async_client
+    mock_async.chat.completions.create = mock_create
 
     response = await client.chat(
         messages=[{"role": "user", "content": "test"}],
@@ -86,31 +73,18 @@ async def test_llm_retry_429():
 
 
 @pytest.mark.asyncio
-async def test_llm_no_retry_400():
+async def test_llm_no_retry_400(llm_client):
     """400 errors raise immediately with no retry."""
-    from api.services.llm_client import _OpenAICompatibleClient
-
-    client = _OpenAICompatibleClient(
-        api_key="test-key",
-        base_url="http://localhost:1234",
-        default_model="test-model",
-        provider_name="test",
-    )
-
+    client, mock_async = llm_client
     call_count = [0]
-
-    class Mock400Error(Exception):
-        status_code = 400
 
     async def mock_create(**kwargs):
         call_count[0] += 1
-        raise Mock400Error("Bad request")
+        raise make_http_error(400, "Bad request")
 
-    mock_async_client = AsyncMock()
-    mock_async_client.chat.completions.create = mock_create
-    client._client = mock_async_client
+    mock_async.chat.completions.create = mock_create
 
-    with pytest.raises(Mock400Error):
+    with pytest.raises(Exception, match="Bad request"):
         await client.chat(
             messages=[{"role": "user", "content": "test"}],
             model="test-model",
@@ -120,31 +94,18 @@ async def test_llm_no_retry_400():
 
 
 @pytest.mark.asyncio
-async def test_llm_retry_exhausted():
+async def test_llm_retry_exhausted(llm_client):
     """503 on every attempt raises after max retries."""
-    from api.services.llm_client import _MAX_APP_RETRIES, _OpenAICompatibleClient
-
-    client = _OpenAICompatibleClient(
-        api_key="test-key",
-        base_url="http://localhost:1234",
-        default_model="test-model",
-        provider_name="test",
-    )
-
+    client, mock_async = llm_client
     call_count = [0]
-
-    class Mock503Error(Exception):
-        status_code = 503
 
     async def mock_create(**kwargs):
         call_count[0] += 1
-        raise Mock503Error("Service unavailable")
+        raise make_http_error(503, "Service unavailable")
 
-    mock_async_client = AsyncMock()
-    mock_async_client.chat.completions.create = mock_create
-    client._client = mock_async_client
+    mock_async.chat.completions.create = mock_create
 
-    with pytest.raises(Mock503Error):
+    with pytest.raises(Exception, match="Service unavailable"):
         await client.chat(
             messages=[{"role": "user", "content": "test"}],
             model="test-model",

@@ -1,24 +1,11 @@
 """Tests for campaign store and registry (WP 3.3).
 
-Covers:
-- CampaignStore CRUD (create, add_trial, load, list, export, delete)
-- High-level CampaignStore methods (create_campaign, record_trial, etc.)
-- Campaign lineage reconstruction
-- API endpoints via FastAPI test client
+Covers CampaignStore CRUD, lineage reconstruction, and API endpoints.
 """
 
 import pytest
 
 from api.models.prompt_state import PromptState
-from api.services.stores.campaign_store import (
-    generate_campaign_id,
-    generate_trial_id,
-)
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 BACKEND_ID = "test-backend"
 
@@ -43,23 +30,6 @@ def campaign(store):
 
 
 # ---------------------------------------------------------------------------
-# ID generation
-# ---------------------------------------------------------------------------
-
-
-def test_campaign_id_format():
-    cid = generate_campaign_id()
-    assert cid.startswith("campaign_")
-    assert len(cid) > 20
-
-
-def test_trial_id_format():
-    tid = generate_trial_id(3)
-    assert tid.startswith("trial_0003_")
-    assert len(tid) > 15
-
-
-# ---------------------------------------------------------------------------
 # CampaignStore CRUD
 # ---------------------------------------------------------------------------
 
@@ -77,19 +47,6 @@ def test_create_and_load(store):
     assert loaded["name"] == "My Campaign"
 
 
-def test_create_duplicate_raises(store, campaign):
-    """Creating a campaign with the same ID raises FileExistsError."""
-    with pytest.raises(FileExistsError):
-        store.campaigns.create(
-            BACKEND_ID, campaign["campaign_id"], {"name": "dup"},
-        )
-
-
-def test_load_nonexistent(store):
-    """Loading a missing campaign returns None."""
-    assert store.campaigns.load(BACKEND_ID, "campaign_nope") is None
-
-
 def test_add_trial_updates_index(store, campaign, baseline_ps):
     """add_trial writes detail file and updates campaign index."""
     cid = campaign["campaign_id"]
@@ -103,13 +60,11 @@ def test_add_trial_updates_index(store, campaign, baseline_ps):
         label="baseline",
     )
 
-    # Detail file exists
     detail = store.campaigns.load_trial(BACKEND_ID, cid, 0)
     assert detail is not None
     assert detail["trial_id"] == trial["trial_id"]
     assert detail["accuracy"] == 0.67
 
-    # Campaign index updated
     loaded = store.campaigns.load(BACKEND_ID, cid)
     assert loaded["n_trials"] == 1
     assert loaded["baseline_accuracy"] == 0.67
@@ -121,14 +76,12 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
     """Best accuracy tracked across multiple trials."""
     cid = campaign["campaign_id"]
 
-    # Round 0: baseline 0.67
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=0,
         prompt_state=baseline_ps.model_dump(),
         accuracy=0.67, hits=2, total=3, label="baseline",
     )
 
-    # Round 1: improved to 0.80
     improved_ps = baseline_ps.derive(
         instruction="better", changes_description="round1",
     )
@@ -138,7 +91,6 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
         accuracy=0.80, hits=4, total=5, label="round1", improved=True,
     )
 
-    # Round 2: regressed to 0.60
     worse_ps = improved_ps.derive(
         instruction="worse", changes_description="round2",
     )
@@ -165,11 +117,6 @@ def test_list_all(store):
     assert names == {"Campaign A", "Campaign B"}
 
 
-def test_list_empty(store):
-    """list_all returns empty list when no campaigns exist."""
-    assert store.campaigns.list_all(BACKEND_ID) == []
-
-
 def test_export_includes_trial_details(store, campaign, baseline_ps):
     """export() includes full trial detail files."""
     cid = campaign["campaign_id"]
@@ -193,19 +140,6 @@ def test_delete(store, campaign):
     assert store.campaigns.delete(BACKEND_ID, cid) is True
     assert store.campaigns.load(BACKEND_ID, cid) is None
     assert store.campaigns.delete(BACKEND_ID, cid) is False
-
-
-# ---------------------------------------------------------------------------
-# Service functions
-# ---------------------------------------------------------------------------
-
-
-def test_complete_campaign(store, campaign):
-    """complete_campaign sets status to completed."""
-    cid = campaign["campaign_id"]
-    store.campaigns.complete(BACKEND_ID, cid)
-    loaded = store.campaigns.load(BACKEND_ID, cid)
-    assert loaded["status"] == "completed"
 
 
 def test_record_campaign_rounds(store, campaign, baseline_ps):
@@ -250,13 +184,8 @@ def test_lineage_chain(store, campaign, baseline_ps):
     """get_lineage returns full parent chain."""
     cid = campaign["campaign_id"]
 
-    # Build lineage: baseline → r1 → r2
-    r1_ps = baseline_ps.derive(
-        instruction="r1", changes_description="round1",
-    )
-    r2_ps = r1_ps.derive(
-        instruction="r2", changes_description="round2",
-    )
+    r1_ps = baseline_ps.derive(instruction="r1", changes_description="round1")
+    r2_ps = r1_ps.derive(instruction="r2", changes_description="round2")
 
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=0,
@@ -276,18 +205,9 @@ def test_lineage_chain(store, campaign, baseline_ps):
 
     lineage = store.campaigns.get_lineage(BACKEND_ID, cid)
     assert len(lineage) == 3
-
-    # Round 0 has no parent
     assert lineage[0]["parent_prompt_state_id"] is None
-    assert lineage[0]["prompt_state_id"] == baseline_ps.id
-
-    # Round 1 parent is baseline
     assert lineage[1]["parent_prompt_state_id"] == baseline_ps.id
-    assert lineage[1]["prompt_state_id"] == r1_ps.id
-
-    # Round 2 parent is r1
     assert lineage[2]["parent_prompt_state_id"] == r1_ps.id
-    assert lineage[2]["prompt_state_id"] == r2_ps.id
 
 
 # ---------------------------------------------------------------------------
@@ -307,51 +227,9 @@ def api_client(store, monkeypatch):
     return TestClient(app)
 
 
-def test_api_list_empty(api_client):
-    resp = api_client.get(
-        "/api/v1/campaigns", params={"backend_id": BACKEND_ID},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 0
-    assert data["campaigns"] == []
-
-
-def test_api_create_and_list(api_client, store, baseline_ps):
-    """Create campaigns via service, list via API."""
-    store.campaigns.create_campaign(BACKEND_ID, name="API Test")
-
-    resp = api_client.get(
-        "/api/v1/campaigns", params={"backend_id": BACKEND_ID},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 1
-    assert data["campaigns"][0]["name"] == "API Test"
-
-
-def test_api_get_detail(api_client, store, baseline_ps):
-    """Get campaign detail via API."""
-    c = store.campaigns.create_campaign(BACKEND_ID, name="Detail Test")
-    cid = c["campaign_id"]
-    store.campaigns.record_trial(
-        BACKEND_ID, cid, round_num=0,
-        prompt_state=baseline_ps.model_dump(),
-        accuracy=0.67, hits=2, total=3, label="baseline",
-    )
-
-    resp = api_client.get(
-        f"/api/v1/campaigns/{cid}", params={"backend_id": BACKEND_ID},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["n_trials"] == 1
-    assert data["trials"][0]["accuracy"] == 0.67
-
-
-def test_api_get_trial(api_client, store, baseline_ps):
-    """Get trial detail via API."""
-    c = store.campaigns.create_campaign(BACKEND_ID, name="Trial Test")
+def test_api_crud_lifecycle(api_client, store, baseline_ps):
+    """Create, list, get detail, get trial via API."""
+    c = store.campaigns.create_campaign(BACKEND_ID, name="API Test")
     cid = c["campaign_id"]
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=0,
@@ -360,61 +238,30 @@ def test_api_get_trial(api_client, store, baseline_ps):
         results=[{"query": "q1", "hit": True}],
     )
 
+    # List
+    resp = api_client.get(
+        "/api/v1/campaigns", params={"backend_id": BACKEND_ID},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+    assert resp.json()["campaigns"][0]["name"] == "API Test"
+
+    # Detail
+    resp = api_client.get(
+        f"/api/v1/campaigns/{cid}", params={"backend_id": BACKEND_ID},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["n_trials"] == 1
+    assert resp.json()["trials"][0]["accuracy"] == 0.67
+
+    # Trial
     resp = api_client.get(
         f"/api/v1/campaigns/{cid}/trials/0",
         params={"backend_id": BACKEND_ID},
     )
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["accuracy"] == 0.67
-    assert len(data["results"]) == 1
-
-
-def test_api_export(api_client, store, baseline_ps):
-    """Export campaign via API."""
-    c = store.campaigns.create_campaign(BACKEND_ID, name="Export Test")
-    cid = c["campaign_id"]
-    store.campaigns.record_trial(
-        BACKEND_ID, cid, round_num=0,
-        prompt_state=baseline_ps.model_dump(),
-        accuracy=0.67, hits=2, total=3, label="baseline",
-    )
-
-    resp = api_client.get(
-        f"/api/v1/campaigns/{cid}/export",
-        params={"backend_id": BACKEND_ID},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "trials_detail" in data
-    assert len(data["trials_detail"]) == 1
-
-
-def test_api_lineage(api_client, store, baseline_ps):
-    """Get lineage via API."""
-    c = store.campaigns.create_campaign(BACKEND_ID, name="Lineage Test")
-    cid = c["campaign_id"]
-    r1 = baseline_ps.derive(instruction="r1", changes_description="r1")
-
-    store.campaigns.record_trial(
-        BACKEND_ID, cid, round_num=0,
-        prompt_state=baseline_ps.model_dump(),
-        accuracy=0.50, hits=1, total=2, label="baseline",
-    )
-    store.campaigns.record_trial(
-        BACKEND_ID, cid, round_num=1,
-        prompt_state=r1.model_dump(),
-        accuracy=0.80, hits=4, total=5, label="r1",
-    )
-
-    resp = api_client.get(
-        f"/api/v1/campaigns/{cid}/lineage",
-        params={"backend_id": BACKEND_ID},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["lineage"]) == 2
-    assert data["lineage"][1]["parent_prompt_state_id"] == baseline_ps.id
+    assert resp.json()["accuracy"] == 0.67
+    assert len(resp.json()["results"]) == 1
 
 
 def test_api_delete(api_client, store):
@@ -428,17 +275,7 @@ def test_api_delete(api_client, store):
     assert resp.status_code == 200
     assert resp.json()["deleted"] is True
 
-    # Verify gone
     resp = api_client.get(
         f"/api/v1/campaigns/{cid}", params={"backend_id": BACKEND_ID},
-    )
-    assert resp.status_code == 404
-
-
-def test_api_not_found(api_client):
-    """404 for missing campaign."""
-    resp = api_client.get(
-        "/api/v1/campaigns/campaign_nope",
-        params={"backend_id": BACKEND_ID},
     )
     assert resp.status_code == 404

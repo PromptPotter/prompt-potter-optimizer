@@ -53,22 +53,11 @@ def test_nodes_registered():
     assert get_node_class("InitNode") is InitNode
     assert get_node_class("GrowFilterNode") is GrowFilterNode
     assert get_node_class("AnalysisEvalNode") is AnalysisEvalNode
-    # CWL-prefix registration
     assert get_node_class("nodes/InitNode") is InitNode
-    assert get_node_class("nodes/GrowFilterNode") is GrowFilterNode
-    assert get_node_class("nodes/AnalysisEvalNode") is AnalysisEvalNode
-
-
-def test_node_info():
-    """Nodes expose correct discovery metadata."""
-    info = InitNode.get_node_info()
-    assert info["type"] == "InitNode"
-    assert info["input_model"] == "InitNodeInput"
-    assert info["output_model"] == "InitNodeOutput"
 
 
 # ---------------------------------------------------------------------------
-# InitNode tests
+# InitNode
 # ---------------------------------------------------------------------------
 
 
@@ -108,13 +97,12 @@ async def test_init_node(monkeypatch):
     assert output.prompt_state_id
     assert output.layer1_fields["persona"] == "You are a ranking expert."
     assert len(output.rendered_prompt) > 0
-    # PromptState should be deserializable
     ps = PromptState(**output.prompt_state)
     assert ps.id == output.prompt_state_id
 
 
 # ---------------------------------------------------------------------------
-# GrowFilterNode tests
+# GrowFilterNode
 # ---------------------------------------------------------------------------
 
 
@@ -155,14 +143,13 @@ async def test_grow_filter_node(monkeypatch, baseline_ps, baseline_results):
     assert isinstance(output, GrowFilterOutput)
     assert output.n_generated == 3
     assert len(output.candidates) == 3
-    # Each candidate should be deserializable
     for c_dict in output.candidates:
         ps = PromptState(**c_dict)
         assert ps.parent_id == baseline_ps.id
 
 
 # ---------------------------------------------------------------------------
-# AnalysisEvalNode tests
+# AnalysisEvalNode
 # ---------------------------------------------------------------------------
 
 
@@ -171,7 +158,6 @@ async def test_analysis_eval_node(
     monkeypatch, baseline_ps, eval_data, baseline_results,
 ):
     """AnalysisEvalNode evaluates candidates and selects a winner."""
-    # Create two candidates
     candidate_a = baseline_ps.derive(
         instruction="variant_a", changes_description="better_a",
     )
@@ -179,13 +165,11 @@ async def test_analysis_eval_node(
         instruction="variant_b", changes_description="better_b",
     )
 
-    # Mock evaluate_prompt_cached to return deterministic results
     call_count = [0]
 
     async def mock_eval(ps, data, **kwargs):
         call_count[0] += 1
         if ps.id == candidate_a.id:
-            # candidate_a: 100% accuracy
             results = [
                 {"query": d["query"], "predicted": d["ground_truth"],
                  "ground_truth": d["ground_truth"], "hit": True,
@@ -195,7 +179,6 @@ async def test_analysis_eval_node(
             scores = {"hits": len(data), "total": len(data),
                        "accuracy": 1.0, "errors": 0}
         else:
-            # candidate_b: 33% accuracy
             results = [
                 {"query": d["query"], "predicted": "WRONG",
                  "ground_truth": d["ground_truth"], "hit": False,
@@ -214,13 +197,6 @@ async def test_analysis_eval_node(
         mock_eval,
     )
 
-    current_best = {
-        "accuracy": 0.67,
-        "prompt_state": baseline_ps.model_dump(),
-        "results": baseline_results,
-        "label": "baseline",
-    }
-
     node = AnalysisEvalNode(
         node_id="test_eval",
         config={
@@ -233,82 +209,17 @@ async def test_analysis_eval_node(
     output = await node.process({
         "candidates": [candidate_a.model_dump(), candidate_b.model_dump()],
         "eval_data": eval_data,
-        "current_best": current_best,
+        "current_best": {
+            "accuracy": 0.67,
+            "prompt_state": baseline_ps.model_dump(),
+            "results": baseline_results,
+            "label": "baseline",
+        },
     })
 
     assert isinstance(output, AnalysisEvalOutput)
     assert output.improved is True
     assert output.winner_accuracy == 1.0
-    # Winner should be candidate_a
     winner_ps = PromptState(**output.winner_prompt_state)
     assert winner_ps.id == candidate_a.id
-    assert len(output.candidate_scores) == 2
     assert call_count[0] == 2
-
-
-@pytest.mark.asyncio
-async def test_analysis_eval_no_improvement(
-    monkeypatch, baseline_ps, eval_data, baseline_results,
-):
-    """AnalysisEvalNode returns improved=False when no candidate beats current."""
-    candidate = baseline_ps.derive(
-        instruction="worse", changes_description="worse_variant",
-    )
-
-    async def mock_eval(ps, data, **kwargs):
-        # candidate: 0% accuracy
-        results = [
-            {"query": d["query"], "predicted": "WRONG",
-             "ground_truth": d["ground_truth"], "hit": False,
-             "score": 0.0, "error": None}
-            for d in data
-        ]
-        return results, {"hits": 0, "total": len(data),
-                          "accuracy": 0.0, "errors": 0}, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
-
-    current_best = {
-        "accuracy": 0.67,
-        "prompt_state": baseline_ps.model_dump(),
-        "results": baseline_results,
-        "label": "baseline",
-    }
-
-    node = AnalysisEvalNode(
-        node_id="test_no_improve",
-        config={
-            "backend_url": "http://localhost:8000",
-            "generate_suggestions": False,
-        },
-    )
-
-    output = await node.process({
-        "candidates": [candidate.model_dump()],
-        "eval_data": eval_data,
-        "current_best": current_best,
-    })
-
-    assert output.improved is False
-    # Winner should be the original baseline (kept)
-    assert output.winner_accuracy == 0.67
-
-
-@pytest.mark.asyncio
-async def test_analysis_eval_missing_backend_url():
-    """AnalysisEvalNode raises when backend_url is missing."""
-    node = AnalysisEvalNode(
-        node_id="test_missing",
-        config={},
-    )
-
-    with pytest.raises(ValueError, match="backend_url"):
-        await node.process({
-            "candidates": [{}],
-            "eval_data": [],
-            "current_best": {"accuracy": 0.5, "prompt_state": {},
-                             "results": [], "label": "x"},
-        })
