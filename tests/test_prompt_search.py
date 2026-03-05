@@ -11,6 +11,7 @@ from api.services.search.smart_search import (
     sensitivity_scan,
     _profiles_from_rows,
 )
+from api.services.pipeline_discovery import parse_pipeline_response
 
 
 # ---------------------------------------------------------------------------
@@ -224,3 +225,170 @@ async def test_sensitivity_scan_partial_resume():
 
     finally:
         _ss.evaluate_prompt_cached = _orig
+
+
+# ---------------------------------------------------------------------------
+# scan rows include errors field
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_scan_rows_include_errors():
+    """Scan rows include 'errors' field for both baseline and perturbed variants."""
+    from api.models.prompt_state import PromptState
+
+    baseline = PromptState(
+        instruction="test",
+        persona="default_persona",
+    )
+
+    variant_library = {
+        "prompt_fields": {
+            "persona": ["default_persona", "expert"],
+        },
+        "pipeline_params": {},
+    }
+    eval_data = _make_eval_data(4)
+
+    import api.services.search.smart_search as _ss
+    _orig = _ss.evaluate_prompt_cached
+
+    async def _mock_eval(search_point, data, client, **kw):
+        ps = search_point.prompt_state
+        if ps.persona != baseline.persona:
+            return (
+                [{"hit": False, "query": d["query"]} for d in data],
+                {"accuracy": 0.0, "hits": 0, "total": 4, "errors": 2},
+                False,
+            )
+        return (
+            [{"hit": True, "query": d["query"]} for d in data],
+            {"accuracy": 1.0, "hits": 4, "total": 4},
+            False,
+        )
+
+    _ss.evaluate_prompt_cached = _mock_eval
+
+    try:
+        df, profiles = await sensitivity_scan(
+            baseline, variant_library, eval_data,
+            backend_client=None,
+            pipeline_params={"steps": ["llm_ranking"]},
+        )
+
+        # Both baseline and perturbed rows should have 'errors' field
+        assert "errors" in df.columns
+        baseline_row = df[df["value_preview"] == "default_persona"].iloc[0]
+        assert baseline_row["errors"] == 0
+        perturbed_row = df[df["value_preview"] == "expert"].iloc[0]
+        assert perturbed_row["errors"] == 2
+
+    finally:
+        _ss.evaluate_prompt_cached = _orig
+
+
+# ---------------------------------------------------------------------------
+# scan skips all-error axis
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_scan_skips_all_error_axis(caplog):
+    """Scan does not mark axis completed when all non-baseline variants errored."""
+    from api.models.prompt_state import PromptState
+
+    baseline = PromptState(
+        instruction="test",
+        persona="default_persona",
+        task_intent="default_intent",
+    )
+
+    variant_library = {
+        "prompt_fields": {
+            "persona": ["default_persona", "expert", "analyst"],
+            "task_intent": ["default_intent", "classify"],
+        },
+        "pipeline_params": {},
+    }
+    eval_data = _make_eval_data(4)
+
+    import api.services.search.smart_search as _ss
+    _orig = _ss.evaluate_prompt_cached
+
+    async def _mock_eval(search_point, data, client, **kw):
+        ps = search_point.prompt_state
+        # persona variants all error out
+        if ps.persona != baseline.persona:
+            return (
+                [{"hit": False, "query": d["query"]} for d in data],
+                {"accuracy": 0.0, "hits": 0, "total": 4, "errors": 4},
+                False,
+            )
+        # task_intent works fine
+        if ps.task_intent != baseline.task_intent:
+            return (
+                [{"hit": True, "query": d["query"]} for d in data],
+                {"accuracy": 0.75, "hits": 3, "total": 4, "errors": 0},
+                False,
+            )
+        return (
+            [{"hit": True, "query": d["query"]} for d in data],
+            {"accuracy": 1.0, "hits": 4, "total": 4},
+            False,
+        )
+
+    _ss.evaluate_prompt_cached = _mock_eval
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="api.services.search.smart_search"):
+            df, profiles = await sensitivity_scan(
+                baseline, variant_library, eval_data,
+                backend_client=None,
+                pipeline_params={"steps": ["llm_ranking"]},
+            )
+
+        # persona axis should NOT be marked completed (all errored)
+        assert any("all variants errored" in r.message for r in caplog.records)
+        # Both axes should still be in the results (rows are preserved)
+        assert set(df["axis"].unique()) == {"persona", "task_intent"}
+
+    finally:
+        _ss.evaluate_prompt_cached = _orig
+
+
+# ---------------------------------------------------------------------------
+# parse_pipeline_response parses available_models
+# ---------------------------------------------------------------------------
+
+def test_parse_pipeline_response_available_models():
+    """available_models from pipeline response is parsed into PipelineSchema."""
+    response = {
+        "name": "testpipe",
+        "version": "1.0",
+        "available_models": [
+            "meta-llama/llama-4-maverick-17b-128e-instruct",
+            "qwen/qwen3-32b",
+        ],
+        "nodes": {
+            "step_a": {
+                "type": "tool",
+                "config": {"threshold": 0.5},
+            },
+        },
+    }
+    schema = parse_pipeline_response(response)
+    assert schema.available_models == [
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "qwen/qwen3-32b",
+    ]
+
+
+def test_parse_pipeline_response_no_available_models():
+    """Missing available_models defaults to empty list."""
+    response = {
+        "name": "testpipe",
+        "version": "1.0",
+        "nodes": {
+            "step_a": {"type": "tool", "config": {}},
+        },
+    }
+    schema = parse_pipeline_response(response)
+    assert schema.available_models == []

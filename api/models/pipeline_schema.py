@@ -113,6 +113,7 @@ class PipelineSchema(BaseModel):
     version: str = ""
     description: str = ""
     steps: list[PipelineStep] = Field(default_factory=list)
+    available_models: list[str] = Field(default_factory=list)
     required_step: str | None = None
     template_variables: set[str] = Field(default_factory=set)
     dataset_name: str = ""

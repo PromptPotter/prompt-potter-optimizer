@@ -61,20 +61,27 @@ def eval_content_hash(
     eval_data: list,
     model: str,
     temperature: float,
+    pipeline_params: dict | None = None,
 ) -> str:
     """Content-addressed hash for evaluation deduplication.
 
-    ``sha256(rendered_prompt + sorted_query_gt_pairs + model + temperature)[:16]``
+    ``sha256(rendered_prompt + sorted_query_gt_pairs + model + temperature
+    + pipeline_params)[:16]``
 
     Order of eval_data queries does not affect the hash.
+    ``pipeline_params`` is included when non-empty so that different
+    pipeline configurations produce distinct hashes.
     """
     pairs = sorted(
         (d.get("query", ""), d.get("ground_truth", "")) for d in eval_data
     )
-    blob = json.dumps(
-        {"prompt": rendered_prompt, "pairs": pairs, "model": model, "temperature": temperature},
-        sort_keys=True,
-    )
+    blob_dict: dict = {
+        "prompt": rendered_prompt, "pairs": pairs,
+        "model": model, "temperature": temperature,
+    }
+    if pipeline_params:
+        blob_dict["pipeline_params"] = pipeline_params
+    blob = json.dumps(blob_dict, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
 
 
@@ -82,32 +89,33 @@ def build_dataset_run_data(
     run_id: str,
     name: str,
     content_hash: str,
-    prompt_state_id: str,
-    rendered_prompt: str,
-    model: str,
-    temperature: float,
+    search_point: "SearchPoint",
     scores: dict,
     results: list,
     *,
     source: str = "",
 ) -> dict:
     """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
-    return {
+    rendered_prompt = search_point.render()
+    data: dict = {
         "run_id": run_id,
         "name": name,
         "content_hash": content_hash,
-        "prompt_state_id": prompt_state_id,
+        "prompt_state_id": search_point.prompt_state.id,
         "rendered_prompt_hash": hashlib.sha256(
             rendered_prompt.encode(),
         ).hexdigest()[:HASH_TRUNCATE],
-        "model": model,
-        "temperature": temperature,
+        "model": search_point.model,
+        "temperature": search_point.temperature,
         "item_count": scores["total"],
         "scores": scores,
         "source": source,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "dataset_run_items": results,
     }
+    if search_point.pipeline_params:
+        data["pipeline_params"] = search_point.pipeline_params
+    return data
 
 
 def make_incremental_writer(
@@ -332,7 +340,7 @@ async def evaluate_prompt_batch(
     results = []
     rendered = search_point.render()
     consecutive_errors = 0
-    max_consecutive_errors = 10
+    max_consecutive_errors = 3
 
     for i, qd in enumerate(eval_data):
         result = await backend_reranker_eval(
@@ -340,18 +348,29 @@ async def evaluate_prompt_batch(
             pipeline_params=search_point.pipeline_params,
             pipeline_schema=pipeline_schema,
         )
+        results.append(result)
 
         if result.get("error"):
             consecutive_errors += 1
             if consecutive_errors >= max_consecutive_errors:
-                raise RuntimeError(
-                    f"Aborting: {consecutive_errors} consecutive backend errors. "
-                    f"Last error: {result['error'][:200]}"
+                logger.warning(
+                    "Aborting eval: %d consecutive errors. "
+                    "Marking remaining %d queries as errors.",
+                    consecutive_errors, len(eval_data) - i - 1,
                 )
+                for remaining_qd in eval_data[i + 1:]:
+                    results.append({
+                        "query": remaining_qd["query"],
+                        "predicted": "ERROR",
+                        "ground_truth": remaining_qd.get("ground_truth", ""),
+                        "hit": False,
+                        "score": 0.0,
+                        "error": "skipped_after_consecutive_errors",
+                        "pipeline_data": None,
+                    })
+                break
         else:
             consecutive_errors = 0
-
-        results.append(result)
 
         if on_result is not None:
             on_result(result, i, len(eval_data))
@@ -565,7 +584,7 @@ async def evaluate_prompt_cached(
         raise ValueError("backend_client is required (pass directly or via ctx)")
 
     rendered = prompt_state.render()
-    content_hash = eval_content_hash(rendered, eval_data, model, temperature)
+    content_hash = search_point.content_hash(eval_data)
 
     # --- dedup lookup ---
     if store and backend_id and not force:
@@ -639,9 +658,8 @@ async def evaluate_prompt_cached(
     # --- finalize: save complete run + observability ---
     if store and backend_id:
         run_data = build_dataset_run_data(
-            run_id, label, content_hash, prompt_state.id,
-            rendered, model, temperature, scores, results,
-            source=source,
+            run_id, label, content_hash, search_point,
+            scores, results, source=source,
         )
         store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 

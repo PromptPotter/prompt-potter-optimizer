@@ -706,11 +706,13 @@ def load_grid_plan_results(
     eval_queries_per_point: int = 0,
     shared_queries: bool = True,
     seed: int = 42,
+    pipeline_params: dict | None = None,
 ) -> "pd.DataFrame | None":
     """Load stored eval results for a grid plan and return a results DataFrame."""
     df = _load_grid_plan_results(
         store, backend_id, plan_id, eval_data,
         eval_queries_per_point, shared_queries, seed,
+        pipeline_params=pipeline_params,
     )
     if df is not None:
         plan_data = store.grid_plans.load(backend_id, plan_id)
@@ -745,6 +747,7 @@ def show_grid_overview(
     eval_queries_per_point = gs.get("eval_queries_per_point", 0)
     shared_queries_flag = gs.get("shared_queries", True)
     seed = gs.get("seed", 42)
+    _pp = campaign_config.get("pipeline_params")
 
     plan_dfs: dict = {}
     if plans:
@@ -757,6 +760,7 @@ def show_grid_overview(
                 eval_queries_per_point=eval_queries_per_point,
                 shared_queries=shared_queries_flag,
                 seed=seed,
+                pipeline_params=_pp,
             )
             if df is not None and len(df) > 0:
                 plan_dfs[p["plan_id"]] = df
@@ -879,6 +883,7 @@ async def run_grid_search(
     eval_plan = _resolve_point_evals(
         grid_points, state_lookup, eval_data,
         eval_queries_per_point, shared_queries, grid_seed,
+        pipeline_params=pipeline_params,
     )
     n_stored = 0
     if store and backend_id:
@@ -1231,6 +1236,7 @@ async def resume_or_build_diagnostic(
     backend_id: str,
     eval_data: list,
     improvement_areas: str = "",
+    variant_library: dict | None = None,
 ) -> tuple[str, PromptState, list, dict, list]:
     """Resume or build smart search diagnostic set.
 
@@ -1241,6 +1247,7 @@ async def resume_or_build_diagnostic(
         campaign_config, baseline, baseline_results, llm_client, model,
         store, backend_id, eval_data,
         improvement_areas=improvement_areas,
+        variant_library=variant_library,
     )
     plan_id, search_baseline, diagnostic, diag_summary, axis_profiles = result
 
@@ -1526,6 +1533,7 @@ async def sensitivity_scan(
     plan_id: str = "",
     prompt_result_index: dict | None = None,
     partial_scan: dict | None = None,
+    pipeline_schema=None,
 ) -> tuple:
     """Run a sensitivity scan over all axes with progress output.
 
@@ -1568,6 +1576,12 @@ async def sensitivity_scan(
     _prev_httpcore = _httpcore_log.level
     _httpx_log.setLevel(logging.WARNING)
     _httpcore_log.setLevel(logging.WARNING)
+
+    # Rebuild prompt_result_index from current disk state to avoid ghost cache hits
+    if store and backend_id:
+        from api.services.search.coverage import build_prompt_result_index
+        prompt_result_index = build_prompt_result_index(store, backend_id)
+
     try:
         print("  Evaluating baseline...")
         df, profiles = await _sensitivity_scan(
@@ -1580,6 +1594,7 @@ async def sensitivity_scan(
             prompt_result_index=prompt_result_index,
             plan_id=plan_id,
             partial_scan=partial_scan,
+            pipeline_schema=pipeline_schema,
         )
     finally:
         _httpx_log.setLevel(_prev_httpx)
@@ -1589,6 +1604,25 @@ async def sensitivity_scan(
     display_axis_profiles(profiles)
 
     return df, profiles
+
+
+def _fmt_query_result(r: dict, cached: bool = False) -> str:
+    """Format a single query result as a HIT/MISS line with timing."""
+    q = (r.get("query") or "")[:45]
+    tag = "HIT " if r.get("hit") else "MISS"
+    pred = (r.get("predicted") or "")[:35]
+    err = r.get("error")
+
+    if cached:
+        time_str = " \u26a1"  # cached marker
+    else:
+        pd = r.get("pipeline_data") or {}
+        tt = pd.get("total_time")
+        time_str = f" {tt:.1f}s" if tt is not None else ""
+
+    if err:
+        return f"        {tag}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
+    return f"        {tag}  {q:<45s}  -> {pred}{time_str}"
 
 
 def _make_scan_progress_cb():
@@ -1601,9 +1635,12 @@ def _make_scan_progress_cb():
         if t == "baseline_done":
             baseline_results.clear()
             baseline_results.extend(event.get("results", []))
-            cached = " [cached]" if event.get("cached") else ""
+            is_cached = event.get("cached", False)
+            cached = " [cached]" if is_cached else ""
             print(f"  Baseline: {event['hits']}/{event['total']} "
                   f"({event['accuracy']:.1%}){cached}")
+            for r in baseline_results:
+                print(_fmt_query_result(r, cached=is_cached))
 
         elif t == "axis_start":
             ai = event["axis_index"] + 1
@@ -1642,17 +1679,8 @@ def _make_scan_progress_cb():
                   f"{acc:.1%}  {delta_str}{marker}{cache_str}")
 
             results = event.get("results", [])
-            if results and baseline_results and not is_bl:
-                for br, vr in zip(baseline_results, results):
-                    b_hit = br.get("hit", False)
-                    v_hit = vr.get("hit", False)
-                    if b_hit != v_hit:
-                        q = (vr.get("query") or "")[:40]
-                        pred = (vr.get("predicted") or "")[:35]
-                        if v_hit:
-                            print(f"        GAINED  {q:<40s}  -> {pred}")
-                        else:
-                            print(f"        LOST    {q:<40s}  -> {pred}")
+            for vr in results:
+                print(_fmt_query_result(vr, cached=cached))
 
         elif t == "axis_done":
             budget = event["exploration_budget"]

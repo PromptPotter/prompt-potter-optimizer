@@ -77,6 +77,17 @@ def test_content_hash_matches_eval_content_hash():
     assert sp.content_hash(eval_data) == expected
 
 
+def test_content_hash_matches_eval_content_hash_with_pipeline_params():
+    ps = PromptState(instruction="Rank by relevance.")
+    pp = {"steps": ["llm_ranking"], "ranking_temperature": 0.5}
+    sp = SearchPoint(prompt_state=ps, model="llama-3", temperature=0.5, pipeline_params=pp)
+    eval_data = [
+        {"query": "aspirin", "ground_truth": "Aspirin"},
+    ]
+    expected = eval_content_hash(ps.render(), eval_data, "llama-3", 0.5, pp)
+    assert sp.content_hash(eval_data) == expected
+
+
 def test_content_hash_differs_with_model():
     ps = PromptState(instruction="Rank by relevance.")
     eval_data = [{"query": "q", "ground_truth": "a"}]
@@ -91,6 +102,16 @@ def test_content_hash_differs_with_temperature():
     sp_a = SearchPoint(prompt_state=ps, temperature=0.0)
     sp_b = SearchPoint(prompt_state=ps, temperature=0.7)
     assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
+
+
+def test_content_hash_differs_with_pipeline_params():
+    ps = PromptState(instruction="Rank by relevance.")
+    eval_data = [{"query": "q", "ground_truth": "a"}]
+    sp_a = SearchPoint(prompt_state=ps, pipeline_params={"steps": ["llm_ranking"]})
+    sp_b = SearchPoint(prompt_state=ps, pipeline_params={"steps": ["fuzzy_matching"]})
+    sp_none = SearchPoint(prompt_state=ps)
+    assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
+    assert sp_a.content_hash(eval_data) != sp_none.content_hash(eval_data)
 
 
 # ---------------------------------------------------------------------------

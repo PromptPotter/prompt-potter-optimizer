@@ -85,6 +85,7 @@ def _build_advisor_prompt(
     coverage_stats: dict | None = None,
     excluded_steps: set[str] | None = None,
     task_description: str = "",
+    available_models: list[str] | None = None,
 ) -> str:
     """Build the LLM prompt for scan configuration advice."""
     excluded_section = ""
@@ -104,12 +105,21 @@ they are inactive and will have no effect on accuracy.
 {task_description}
 """
 
+    available_models_section = ""
+    if available_models:
+        available_models_section = f"""
+## Available Models
+The backend supports the following models for LLM steps: {json.dumps(available_models)}
+When recommending "profiling_model" or "ranking_model" axes, you MUST only suggest \
+models from this list. If no models are listed, do NOT recommend model axes.
+"""
+
     return f"""You are an expert prompt optimization advisor. Analyze this LLM pipeline \
 and recommend which axes (parameters and prompt fields) to focus a sensitivity scan on.
 
 ## Pipeline Description
 {pipeline_description or "No description available."}
-{excluded_section}{task_context_section}
+{excluded_section}{task_context_section}{available_models_section}\
 ## Pipeline Anatomy (steps, types, tunable parameters)
 {json.dumps(pipeline_anatomy, indent=2)}
 
@@ -184,8 +194,12 @@ define the structured output each LLM step produces. These are HIGH-LEVERAGE axe
 fields directly determine what information downstream steps receive. Suggest concrete field \
 additions or removals based on the current output_schema shown in the anatomy. For example, \
 adding a classification field or removing a low-value field can reshape pipeline behavior
-- "profiling_model" and "ranking_model" override the LLM model per-step. Recommend varying \
-these when the budget allows exploring different model capabilities
+- "profiling_model" and "ranking_model" override the LLM model per-step. Model switching \
+is LOW priority — the default model is well-tuned for this pipeline. Only recommend model \
+axes when the budget is large enough AND other higher-impact axes are already covered. \
+If you do suggest model axes, ONLY use models from the Available Models list. \
+Always include the current/default model as the first value. If no Available Models \
+section is present, skip model axes entirely
 
 Return ONLY the JSON object, no markdown fences or extra text."""
 
@@ -305,6 +319,7 @@ async def advise_scan_config(
         coverage_stats=coverage_stats,
         excluded_steps=excluded_steps,
         task_description=task_description,
+        available_models=pipeline_schema.available_models or None,
     )
 
     response = await llm_client.chat(

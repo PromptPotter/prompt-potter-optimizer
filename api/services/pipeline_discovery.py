@@ -275,11 +275,13 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 "version": version or known.version,
                 "description": description or known.description,
                 "steps": updated_steps,
+                "available_models": config.get("available_models", []),
             })
 
         return known.model_copy(update={
             "version": version or known.version,
             "description": description or known.description,
+            "available_models": config.get("available_models", []),
         })
 
     # Unknown pipeline — build from nodes dict or steps list
@@ -319,6 +321,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             version=version,
             description=description,
             steps=steps,
+            available_models=config.get("available_models", []),
         )
 
     # Fallback: legacy steps list format
@@ -342,6 +345,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         version=version,
         description=description,
         steps=steps,
+        available_models=config.get("available_models", []),
     )
 
 

@@ -21,7 +21,6 @@ from api.services.prompt_eval import (
     backend_reranker_eval,
     build_dataset_run_data,
     compute_accuracy,
-    eval_content_hash,
     make_incremental_writer,
 )
 from api.services.search.smart_search import MIN_DIAGNOSTIC_QUERIES
@@ -292,6 +291,7 @@ def resolve_point_evals(
     eval_queries_per_point: int = 0,
     shared_queries: bool = True,
     seed: int = 42,
+    pipeline_params: dict | None = None,
 ) -> list[PointEvalInfo]:
     """Compute per-point eval query sets and content hashes.
 
@@ -305,11 +305,15 @@ def resolve_point_evals(
         eval_queries_per_point: If >0, sample this many queries per point.
         shared_queries: If True, all points share the same query sample.
         seed: Random seed for reproducible sampling.
+        pipeline_params: Optional pipeline parameter overrides included in
+            the content hash via SearchPoint.
 
     Returns:
         List of ``PointEvalInfo`` named tuples with pre-computed
         ``content_hash`` values.
     """
+    from api.models.search_point import SearchPoint
+
     if eval_queries_per_point > 0 and shared_queries:
         rng = random.Random(seed)
         shared_eval = rng.sample(
@@ -321,7 +325,6 @@ def resolve_point_evals(
     result = []
     for point_idx, (coord_dict, ps_id) in enumerate(grid_points):
         ps = state_lookup[ps_id]
-        rendered = ps.render()
 
         if eval_queries_per_point > 0 and not shared_queries:
             rng = random.Random(seed + point_idx)
@@ -333,7 +336,8 @@ def resolve_point_evals(
         else:
             point_eval = eval_data
 
-        content_hash = eval_content_hash(rendered, point_eval, "", 0.0)
+        sp = SearchPoint(prompt_state=ps, pipeline_params=pipeline_params)
+        content_hash = sp.content_hash(point_eval)
         result.append(PointEvalInfo(
             point_idx, coord_dict, ps_id, point_eval, content_hash,
         ))
@@ -369,8 +373,11 @@ async def _load_or_compute_point(
     """
     import asyncio
 
+    from api.models.search_point import SearchPoint
+
     ps = state_lookup[info.ps_id]
     rendered = ps.render()
+    sp = SearchPoint(prompt_state=ps, pipeline_params=pipeline_params)
 
     # Case 1: full cache hit
     if store and backend_id:
@@ -429,8 +436,7 @@ async def _load_or_compute_point(
     if store and backend_id:
         run_data = build_dataset_run_data(
             run_id, f"grid_point_{info.point_idx}", info.content_hash,
-            info.ps_id, rendered, "", 0.0, acc, results,
-            source="grid_search",
+            sp, acc, results, source="grid_search",
         )
         store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 
@@ -465,6 +471,7 @@ async def run_grid_search(
     eval_plan = resolve_point_evals(
         grid_points, state_lookup, eval_data,
         eval_queries_per_point, shared_queries, seed,
+        pipeline_params=pipeline_params,
     )
 
     # Only init backend session if there are uncached points that need evaluation
@@ -744,6 +751,7 @@ def load_grid_plan_results(
     eval_queries_per_point: int = 0,
     shared_queries: bool = True,
     seed: int = 42,
+    pipeline_params: dict | None = None,
 ) -> pd.DataFrame | None:
     """Load stored eval results for a grid plan and return a results DataFrame.
 
@@ -765,6 +773,7 @@ def load_grid_plan_results(
     eval_plan = resolve_point_evals(
         grid_points, state_lookup, eval_data,
         eval_queries_per_point, shared_queries, seed,
+        pipeline_params=pipeline_params,
     )
     rows = []
     for info in eval_plan:

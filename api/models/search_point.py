@@ -56,13 +56,15 @@ class SearchPoint(BaseModel):
     def content_hash(self, eval_data: list) -> str:
         """Content-addressed hash for evaluation deduplication.
 
-        Delegates to ``eval_content_hash()`` with this point's parameters.
+        Delegates to ``eval_content_hash()`` with this point's parameters,
+        including ``pipeline_params`` when non-empty.
         """
         return eval_content_hash(
             self.prompt_state.render(),
             eval_data,
             self.model,
             self.temperature,
+            self.pipeline_params,
         )
 
     def derive(self, **changes) -> SearchPoint:

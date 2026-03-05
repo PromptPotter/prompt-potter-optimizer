@@ -455,6 +455,22 @@ async def sensitivity_scan(
             key=lambda a: (0 if a[0].lower() in focus_lower else 1, a[0]),
         )
 
+    # Prune partial scan: drop axes no longer in the filtered axes set
+    if partial_scan:
+        active_axis_names = {a[0] for a in axes}
+        stale = set(partial_scan.get("completed_axes", [])) - active_axis_names
+        if stale:
+            logger.warning(
+                "Pruning %d stale axes from partial scan: %s", len(stale), stale,
+            )
+            partial_scan["completed_axes"] = [
+                a for a in partial_scan["completed_axes"] if a in active_axis_names
+            ]
+            partial_scan["rows"] = [
+                r for r in partial_scan.get("rows", [])
+                if r["axis"] in active_axis_names
+            ]
+
     rows: list[dict] = []
     axis_stats: dict[str, list[float]] = defaultdict(list)
     completed_axes: set[str] = set()
@@ -497,6 +513,7 @@ async def sensitivity_scan(
                     "hits": baseline_scores["hits"],
                     "total": baseline_scores["total"],
                     "accuracy": baseline_acc, "delta": 0.0,
+                    "errors": 0,
                 })
                 axis_stats[axis_name].append(0.0)
                 _cb({
@@ -527,6 +544,7 @@ async def sensitivity_scan(
                 "hits": scores["hits"],
                 "total": scores["total"],
                 "accuracy": acc, "delta": delta,
+                "errors": scores.get("errors", 0),
             })
             axis_stats[axis_name].append(delta)
             _cb({
@@ -540,8 +558,27 @@ async def sensitivity_scan(
                 "cached": scores.get("cached", False),
             })
 
-        # Checkpoint: mark axis as completed and persist partial state
-        completed_axes.add(axis_name)
+        # Check: did any non-baseline variant succeed?
+        axis_variants = [
+            r for r in rows
+            if r["axis"] == axis_name and r.get("delta") != 0.0
+        ]
+        all_errored = (
+            all(
+                r.get("errors", 0) > 0 and r.get("errors", 0) == r.get("total", 0)
+                for r in axis_variants
+            )
+            if axis_variants
+            else False
+        )
+
+        if all_errored:
+            logger.warning(
+                "Axis '%s': all variants errored — not marking completed",
+                axis_name,
+            )
+        else:
+            completed_axes.add(axis_name)
         if store and backend_id and plan_id:
             store.smart_search.update(backend_id, plan_id, {
                 "status": "scan_partial",
@@ -915,6 +952,7 @@ async def resume_or_build_diagnostic(
     backend_id: str,
     eval_data: list,
     improvement_areas: str = "",
+    variant_library: dict | None = None,
 ) -> tuple[str, PromptState, list, dict, list]:
     """Resume or build smart search diagnostic set.
 
@@ -937,7 +975,8 @@ async def resume_or_build_diagnostic(
     )
 
     ss = campaign_config.get("smart_search", {})
-    variant_library = load_variant_library()
+    if variant_library is None:
+        variant_library = load_variant_library()
 
     plan_id = smart_search_plan_identity(
         baseline.instruction,
