@@ -21,6 +21,7 @@ from api.services.constants import NO_RESULT
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
+    from api.models.search_point import SearchPoint
     from api.services.backend_client import BackendClient
     from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
@@ -39,17 +40,16 @@ HASH_TRUNCATE = 16
 class EvalContext:
     """Groups infrastructure parameters shared across evaluation calls.
 
-    Reduces the 13-parameter signatures of ``evaluate_prompt_cached()``
-    and ``evaluate_and_select_winner()`` to a manageable set.
+    The ``search_point`` field bundles prompt_state + model + temperature +
+    pipeline_params (the search-space dimensions).  Infrastructure fields
+    (backend_client, store, obs, …) stay at this level.
     """
 
+    search_point: SearchPoint
     backend_client: BackendClient
     store: ProjectStore | None = None
     backend_id: str = ""
-    pipeline_params: dict | None = None
     pipeline_schema: PipelineSchema | None = None
-    model: str = ""
-    temperature: float = 0.0
     obs: ObsLogger | None = None
     dataset_name: str | None = None
     dataset_item_map: dict[str, str] | None = field(default=None)
@@ -311,20 +311,18 @@ async def backend_reranker_eval(
 
 
 async def evaluate_prompt_batch(
-    prompt_state: PromptState,
+    search_point: "SearchPoint",
     eval_data: list,
-    backend_client: BackendClient,
-    pipeline_params: dict | None = None,
+    backend_client: "BackendClient",
     on_result: Callable | None = None,
     pipeline_schema: "PipelineSchema | None" = None,
 ) -> list:
     """Evaluate a prompt on all eval_data queries via the backend.
 
     Args:
-        prompt_state: PromptState whose render() produces the ranking prompt.
+        search_point: SearchPoint whose render() produces the ranking prompt.
         eval_data: List of query dicts with ``query`` and ``ground_truth``.
         backend_client: BackendClient with ``run_match()`` method.
-        pipeline_params: Optional pipeline parameter overrides.
         on_result: Optional callback ``(result, index, total)`` called after
             each query evaluation.
 
@@ -332,14 +330,14 @@ async def evaluate_prompt_batch(
         List of result dicts from backend_reranker_eval.
     """
     results = []
-    rendered = prompt_state.render()
+    rendered = search_point.render()
     consecutive_errors = 0
     max_consecutive_errors = 10
 
     for i, qd in enumerate(eval_data):
         result = await backend_reranker_eval(
             qd, backend_client, rendered,
-            pipeline_params=pipeline_params,
+            pipeline_params=search_point.pipeline_params,
             pipeline_schema=pipeline_schema,
         )
 
@@ -513,24 +511,21 @@ def _finalize_observability(
 
 
 async def evaluate_prompt_cached(
-    prompt_state: PromptState,
+    search_point: "SearchPoint",
     eval_data: list,
     backend_client: "BackendClient | None" = None,
-    pipeline_params: dict | None = None,
+    *,
     store: "ProjectStore | None" = None,
     backend_id: str = "",
     force: bool = False,
     label: str = "Eval",
-    model: str = "",
-    temperature: float = 0.0,
     on_result: Callable | None = None,
-    dataset_name: str | None = None,
-    dataset_item_map: dict[str, str] | None = None,
     obs: "ObsLogger | None" = None,
     prompt_result_index: dict | None = None,
     source: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
-    *,
+    dataset_name: str | None = None,
+    dataset_item_map: dict[str, str] | None = None,
     ctx: EvalContext | None = None,
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt with deduplication, partial resume, and finalization.
@@ -542,22 +537,25 @@ async def evaluate_prompt_cached(
     - Incremental writes for crash protection
     - Final run storage
 
-    Infrastructure params can be passed individually **or** grouped in an
-    ``EvalContext`` via the ``ctx`` keyword.  When ``ctx`` is provided its
-    fields fill in any values not explicitly supplied by the caller.
+    The ``search_point`` bundles the search-space dimensions
+    (prompt_state, model, temperature, pipeline_params).  Infrastructure
+    params can be passed individually **or** grouped in an ``EvalContext``
+    via the ``ctx`` keyword.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
     """
-    # Resolve from EvalContext when provided
+    # Extract search-space params from SearchPoint
+    prompt_state = search_point.prompt_state
+    model = search_point.model
+    temperature = search_point.temperature
+
+    # Resolve infrastructure from EvalContext when provided
     if ctx is not None:
         backend_client = backend_client or ctx.backend_client
         store = store or ctx.store
         backend_id = backend_id or ctx.backend_id
-        pipeline_params = pipeline_params if pipeline_params is not None else ctx.pipeline_params
         pipeline_schema = pipeline_schema or ctx.pipeline_schema
-        model = model or ctx.model
-        temperature = temperature or ctx.temperature
         obs = obs or ctx.obs
         dataset_name = dataset_name or ctx.dataset_name
         dataset_item_map = dataset_item_map or ctx.dataset_item_map
@@ -630,8 +628,7 @@ async def evaluate_prompt_cached(
             on_result(result, _cb_offset + index, len(eval_data))
 
     new_results = await evaluate_prompt_batch(
-        prompt_state, remaining_data, backend_client,
-        pipeline_params=pipeline_params,
+        search_point, remaining_data, backend_client,
         on_result=_on_result,
         pipeline_schema=pipeline_schema,
     )

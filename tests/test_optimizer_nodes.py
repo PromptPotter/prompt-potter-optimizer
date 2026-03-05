@@ -167,9 +167,9 @@ async def test_analysis_eval_node(
 
     call_count = [0]
 
-    async def mock_eval(ps, data, **kwargs):
+    async def mock_eval(search_point, data, **kwargs):
         call_count[0] += 1
-        if ps.id == candidate_a.id:
+        if search_point.prompt_state.id == candidate_a.id:
             results = [
                 {"query": d["query"], "predicted": d["ground_truth"],
                  "ground_truth": d["ground_truth"], "hit": True,

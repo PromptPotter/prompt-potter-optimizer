@@ -71,7 +71,7 @@ def _apply_all_mocks(monkeypatch):
     )
 
     # Mock evaluate_prompt_cached — first candidate: 75%, others: 0%
-    async def mock_eval(ps, data, **kwargs):
+    async def mock_eval(search_point, data, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
             results, scores = build_eval_results(data, hits=3)

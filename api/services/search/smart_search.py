@@ -152,10 +152,15 @@ def _make_eval_fn(
     pipeline_schema: "PipelineSchema | None" = None,
 ) -> Callable:
     """Factory for the ``_eval_ps`` closure used by scan and adaptive search."""
+    from api.models.search_point import SearchPoint
+
     async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
-        results, scores, cached = await evaluate_prompt_cached(
-            ps, eval_data, backend_client,
+        sp = SearchPoint(
+            prompt_state=ps,
             pipeline_params=pp or get_params(),
+        )
+        results, scores, cached = await evaluate_prompt_cached(
+            sp, eval_data, backend_client,
             store=store, backend_id=backend_id,
             label="scan",
             prompt_result_index=prompt_result_index,

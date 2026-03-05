@@ -43,7 +43,7 @@ See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for the full service cata
 
 ### Data model
 
-**PromptState** defines the prompt being optimized. **PipelineSchema** defines the backend pipeline being targeted. Together they parameterize every optimization service: `f(PromptState, PipelineSchema, eval_data) → scores`. See [`api/models/CLAUDE.md`](api/models/CLAUDE.md) for field details and API.
+**SearchPoint** bundles `PromptState` + `model` + `temperature` + `pipeline_params` — the four dimensions that fully specify one evaluation point. **PipelineSchema** defines the backend pipeline being targeted. Together they parameterize every optimization service: `f(SearchPoint, PipelineSchema, eval_data) → scores`. See [`api/models/CLAUDE.md`](api/models/CLAUDE.md) for field details and API.
 
 ### Pipeline discovery
 

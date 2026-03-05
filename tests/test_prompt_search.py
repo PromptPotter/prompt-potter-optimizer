@@ -177,7 +177,7 @@ async def test_sensitivity_scan_partial_resume():
 
     evaluated_axes: set[str] = set()
 
-    async def _mock_eval(ps, data, client, **kw):
+    async def _mock_eval(search_point, data, client, **kw):
         return (
             [{"hit": True, "query": d["query"]} for d in data],
             {"accuracy": 0.75, "hits": 3, "total": 4},
@@ -187,12 +187,13 @@ async def test_sensitivity_scan_partial_resume():
     import api.services.search.smart_search as _ss
     _orig = _ss.evaluate_prompt_cached
 
-    async def _patched_eval(ps, data, client, **kw):
+    async def _patched_eval(search_point, data, client, **kw):
+        ps = search_point.prompt_state
         if ps.persona != baseline.persona:
             evaluated_axes.add("persona")
         if ps.task_intent != baseline.task_intent:
             evaluated_axes.add("task_intent")
-        return await _mock_eval(ps, data, client, **kw)
+        return await _mock_eval(search_point, data, client, **kw)
 
     _ss.evaluate_prompt_cached = _patched_eval
 

@@ -431,23 +431,36 @@ async def evaluate_and_select_winner(
         Dict with keys: winner, winner_prompt_state, winner_accuracy,
         improved, next_action, suggestions, candidate_scores, winner_results.
     """
+    from api.models.search_point import SearchPoint
     from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
 
     # Build or merge EvalContext
+    _sp_model = model or ""
+    _sp_temperature = temperature
+    _sp_pipeline_params = pipeline_params
     if ctx is None and backend_client is not None:
+        _base_sp = SearchPoint(
+            prompt_state=PromptState(),
+            model=_sp_model,
+            temperature=_sp_temperature,
+            pipeline_params=_sp_pipeline_params,
+        )
         ctx = EvalContext(
+            search_point=_base_sp,
             backend_client=backend_client,
             store=store,
             backend_id=backend_id,
-            pipeline_params=pipeline_params,
-            model=model or "",
-            temperature=temperature,
             obs=obs,
             dataset_name=dataset_name,
             dataset_item_map=dataset_item_map,
         )
     elif ctx is None:
         raise ValueError("backend_client or ctx is required")
+
+    # Extract model/temp/pp from ctx's search_point for per-candidate SearchPoints
+    _sp_model = ctx.search_point.model
+    _sp_temperature = ctx.search_point.temperature
+    _sp_pipeline_params = ctx.search_point.pipeline_params
 
     ps_candidates = [PromptState(**c) for c in candidates]
     all_candidate_results: dict[str, list[dict]] = {}
@@ -459,8 +472,14 @@ async def evaluate_and_select_winner(
             def _on_result(result, qi, qt, _ci=idx, _ct=len(ps_candidates)):
                 on_query_eval(_ci, _ct, qi, qt, result)
 
+        sp = SearchPoint(
+            prompt_state=c,
+            model=_sp_model,
+            temperature=_sp_temperature,
+            pipeline_params=_sp_pipeline_params,
+        )
         results, scores, cached = await evaluate_prompt_cached(
-            c, eval_data,
+            sp, eval_data,
             label=f"candidate_{idx}",
             on_result=_on_result,
             ctx=ctx,

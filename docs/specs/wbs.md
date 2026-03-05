@@ -1,9 +1,9 @@
 # Work Breakdown Structure: PromptPotter Optimizer
 
 **Version:** 0.10.0
-**Date:** 2026-02-28
+**Date:** 2026-03-05
 **Status:** Active
-**Depends on:** [PRD v0.9.0](prd.md), [ADD v0.9.0](add.md)
+**Depends on:** [PRD v0.9.0](prd.md), [ADD v0.10.0](add.md)
 
 ---
 
@@ -41,63 +41,31 @@
 
 ## Phase 4: Integration and Polish (M4) -- Complete (Reclassified)
 
-M4 was originally planned for TermNorm variant comparison, Streamlit, Docker, and docs. Reclassified as complete — cleanup/lint/polish work was absorbed into M3–M5 sessions. Remaining items redistributed:
-
-| Original Item | New Home |
-|--------------|----------|
-| 4.1 TermNorm Variant Comparison (SC5) | Backlog (needs ConnectorProtocol + real pipeline comparison infrastructure) |
-| 4.2 Streamlit Dashboard | P2.3 Backlog (unchanged) |
-| 4.3 Docker Compose update | M6 WP 6.7 |
-| 4.4 Documentation update | M6 exit criteria |
+Cleanup absorbed into M3-M5. Remaining items: SC5 → backlog, Streamlit → backlog, Docker → M6, docs → M6 exit.
 
 ---
 
 ## Phase 5: Observability Layer (M5) -- Complete
 
-M5 is complete. See [`docs/obs-guide.md`](../obs-guide.md) for data exploration.
-
-| ID | Work Package | Sessions | PRD Ref | Status |
-|----|-------------|:--------:|---------|--------|
-| 5.0 | Write M5 spec | 1 | -- | Complete |
-| 5.1 | ObsLogger core (traces, experiments, rounds) | 1 | P1.10 | Complete |
-| 5.2 | Prompt registry (prompt versioning on disk) | 1 | P1.10 | Complete |
-| 5.3 | LLM retry logic (exponential backoff) | 1 | P1.11 | Complete |
-| 5.4 | Wire into services (prompt_eval, feedback_cycle) | 1 | P1.10 | Complete |
-| 5.5 | Integration test (obs file output E2E) | 1 | P1.10 | Complete |
-| 5.6 | Generic pipeline observation extraction | 1 | P1.10 | Complete |
+7 packages, all Complete (5.0-5.6). ObsLogger, prompt registry, LLM retry, service wiring, integration test, pipeline observation extraction. See [`docs/obs-guide.md`](../obs-guide.md).
 
 ---
 
 ## Phase 6: PipelineSchema + Cross-Repo Pipeline Composability (M6) -- In Progress
 
-See [M6 spec](m6-workflow-migration.md) for full details. Cross-repo: TermNorm task doc at [`TermNorm: docs/pipeline-composability.md`](../../../OfficeAddinApps/TermNorm-excel/docs/pipeline-composability.md). n8n research: [n8n mapper spec](m6-n8n-mapper.md) (implementation deferred to M8).
+See [M6 spec](m6-workflow-migration.md) for full details. Cross-repo: TermNorm task doc at [`TermNorm: docs/pipeline-composability.md`](../../../OfficeAdminApps/TermNorm-excel/docs/pipeline-composability.md). n8n research: [n8n mapper spec](m6-n8n-mapper.md) (implementation deferred to M8).
 
-**Wave 0: TermNorm Cleanup** (TermNorm repo)
+**Waves 0-3: Complete**
 
-| ID | Work Package | Sessions | PRD Ref | Depends | Status |
-|----|-------------|:--------:|---------|---------|--------|
-| 6.0a | Simplify fuzzy matcher + confidence constants | 1 | -- | -- | Planned |
-
-**Wave 1: Pipeline Contract** (TermNorm repo)
-
-| ID | Work Package | Sessions | PRD Ref | Depends | Status |
-|----|-------------|:--------:|---------|---------|--------|
-| 6.0b | GET /pipeline endpoint + pipeline config JSON | 1 | P1.14 | 6.0a | Planned |
-
-**Wave 2: Schema Foundation** (PromptPotter repo — prerequisite for Wave 4)
-
-| ID | Work Package | Sessions | PRD Ref | Depends | Status |
-|----|-------------|:--------:|---------|---------|--------|
-| 6.0 | Write M6 spec | 1 | -- | -- | Complete |
-| 6.0d | n8n → PipelineSchema mapper spec (research, architecture) | 1 | P1.14 | 6.1 | Complete |
-| 6.1 | PipelineSchema model + TermNorm factory | 1 | P1.14 | 6.0b | Complete |
-| 6.2 | Replace hardcoded dicts with schema derivation | 1 | P1.14 | 6.1 | Complete |
-
-**Wave 3: Unified Tracing** (TermNorm repo — parallel with Wave 2)
-
-| ID | Work Package | Sessions | PRD Ref | Depends | Status |
-|----|-------------|:--------:|---------|---------|--------|
-| 6.0c | Unified tracing (trace lifecycle + frontend integration) | 1 | P1.10 | 6.0b | Planned |
+| ID | Work Package | Status |
+|----|-------------|--------|
+| 6.0a | Simplify fuzzy matcher + confidence constants (TermNorm) | Complete |
+| 6.0b | GET /pipeline endpoint + pipeline config JSON (TermNorm) | Complete |
+| 6.0 | Write M6 spec | Complete |
+| 6.0d | n8n → PipelineSchema mapper spec (research, architecture) | Complete |
+| 6.1 | PipelineSchema model + TermNorm factory | Complete |
+| 6.2 | Replace hardcoded dicts with schema derivation | Complete |
+| 6.0c | Unified tracing (TermNorm) | Complete |
 
 **Wave 4: Workflow Nodes** (PromptPotter repo)
 
@@ -108,17 +76,11 @@ See [M6 spec](m6-workflow-migration.md) for full details. Cross-repo: TermNorm t
 | 6.5 | FeedbackCycleNode | 1 | P1.12 | 6.3 | Planned |
 | 6.6 | ScanNode + YAML workflows | 1 | P1.12 | 6.4, 6.5 | Planned |
 
-**Wave 5: Notebook Migration** (PromptPotter repo)
-
-| ID | Work Package | Sessions | PRD Ref | Depends | Status |
-|----|-------------|:--------:|---------|---------|--------|
-| 6.7 | Notebook migration + Docker Compose | 1 | P1.12 | 6.6 | Planned |
-
 ---
 
 ## Phase 7: Multi-Connector Architecture (M7) -- Planned
 
-See [M7 spec](m7-multi-connector.md) for full details.
+See [M7 spec](m7-multi-connector.md) for full details. Absorbs M6 Wave 5 (notebook migration + Docker Compose).
 
 | ID | Work Package | Sessions | PRD Ref | Status |
 |----|-------------|:--------:|---------|--------|
@@ -127,6 +89,7 @@ See [M7 spec](m7-multi-connector.md) for full details.
 | 7.2 | ConnectorRegistry | 1 | P1.13 | Planned |
 | 7.3 | Service migration (type annotation swap) | 1 | P1.13 | Planned |
 | 7.4 | Docs + integration test | 1 | P1.13 | Planned |
+| 7.5 | Notebook migration + Docker Compose (from M6 Wave 5) | 1 | P1.12 | Planned |
 
 ---
 
@@ -153,8 +116,8 @@ See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depe
 | M3: Optimization Infrastructure | 11 | 14 | Complete |
 | M4: Integration and Polish | -- | -- | Complete (reclassified) |
 | M5: Observability Layer | 7 | 7 | Complete |
-| M6: PipelineSchema + Pipeline Composability | 12 | 12 | In Progress |
-| M7: Multi-Connector | 5 | 5 | Planned |
+| M6: PipelineSchema + Pipeline Composability | 11 | 11 | In Progress (Waves 0-3 complete) |
+| M7: Multi-Connector | 6 | 6 | Planned |
 | M8: n8n Connector | 4 | 4 | Planned |
 | **Total** | **63** | **~67** | |
 
@@ -179,10 +142,10 @@ See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depe
 | P1.7 Parameter Passthrough | 1.8 | M1 | Complete |
 | P1.8 Sensitivity Scan | 3.5 | M3 | Complete |
 | P1.9 Data Loop | 3.9 | M3 | Complete |
-| P1.10 File-Based Observability | 5.1–5.6 | M5 | Complete |
+| P1.10 File-Based Observability | 5.1-5.6 | M5 | Complete |
 | P1.11 LLM Retry Logic | 5.3 | M5 | Complete |
-| P1.12 Workflow-Driven Optimization | 6.3–6.7 | M6 | Planned |
-| P1.13 Multi-Connector Support | 7.1–7.4, 8.1–8.4 | M7, M8 | Planned |
-| P1.14 PipelineSchema | 6.1–6.2 | M6 | Complete |
+| P1.12 Workflow-Driven Optimization | 6.3-6.6, 7.5 | M6, M7 | Planned |
+| P1.13 Multi-Connector Support | 7.1-7.4, 8.1-8.4 | M7, M8 | Planned |
+| P1.14 PipelineSchema | 6.1-6.2 | M6 | Complete |
 | P2.3 Streamlit Dashboard | -- | Backlog | Planned |
 | SC5 TermNorm Validation | -- | Backlog | Planned |

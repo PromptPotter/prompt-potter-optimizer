@@ -73,7 +73,7 @@ async def test_workflow_end_to_end(monkeypatch, eval_data):
         mock_generate,
     )
 
-    async def mock_eval(ps, data, **kwargs):
+    async def mock_eval(search_point, data, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
             results = [
@@ -161,7 +161,7 @@ async def test_flat_baseline_fields(monkeypatch):
         changes_description="candidate_variant",
     )
 
-    async def mock_eval(ps, data, **kwargs):
+    async def mock_eval(search_point, data, **kwargs):
         results = [
             {"query": d["query"], "predicted": d["ground_truth"],
              "ground_truth": d["ground_truth"], "hit": True,

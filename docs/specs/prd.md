@@ -30,7 +30,7 @@
 | P1.11 | LLM Retry Logic | P1 | Complete (M5) |
 | P1.12 | Workflow-Driven Optimization | P1 | Planned (M6) |
 | P1.13 | Multi-Connector Support | P1 | Planned (M7) |
-| P1.14 | PipelineSchema | P1 | Planned (M6) |
+| P1.14 | PipelineSchema | P1 | Complete (M6 Wave 2) |
 | P2.1 | Evolutionary Operators | P2 | Planned |
 | P2.2 | MCP Server Mode | P2 | Planned |
 | P2.3 | Streamlit Dashboard | P2 | Planned |
@@ -63,8 +63,8 @@ P1.1–P1.9: All implemented (M1–M3). Optimizer nodes, feedback cycling with 3
 
 | ID | What | Implementation | Milestone |
 |----|------|---------------|-----------|
-| P1.10 | File-based observability: Langfuse-compatible traces + MLflow-compatible experiments on disk. Prompt versioning. | `api/services/obs/observability_logger.py` | M5 (Complete) |
-| P1.11 | LLM retry logic: exponential backoff for transient 503/429 errors in `llm_client.py` | `api/services/llm_client.py` | M5 (Complete) |
+| P1.10 | File-based observability: Langfuse-compatible traces + MLflow-compatible experiments on disk. Prompt versioning. | See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) | M5 (Complete) |
+| P1.11 | LLM retry logic: exponential backoff for transient 503/429 errors | See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) | M5 (Complete) |
 | P1.12 | Workflow-driven optimization: `WorkflowRunner` with `runtime_config`, `FeedbackCycleNode`, `DatasetLoadNode`, YAML campaigns | [M6 spec](m6-workflow-migration.md) | M6 |
 | P1.13 | Multi-connector support: `ConnectorProtocol`, `MockConnector`, `ConnectorRegistry`, backend-agnostic evaluation | [M7 spec](m7-multi-connector.md) | M7 |
 | P1.14 | PipelineSchema: backend-agnostic pipeline description as single source of truth. Eliminates 13 backend-specific assumptions. Derived from backend discovery, consumed by all services. | [M6 spec](m6-workflow-migration.md) — WP 6.1–6.2 | M6 |

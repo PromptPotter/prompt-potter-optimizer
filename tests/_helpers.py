@@ -60,13 +60,14 @@ def apply_grow_mock(monkeypatch):
 def apply_eval_mock(monkeypatch, round_hits=None):
     """Mock evaluate_prompt_cached with configurable per-round hit counts.
 
+    The first positional arg is now a ``SearchPoint`` (not a raw PromptState).
     Returns a ``call_count`` list ([int]) so callers can track invocations.
     """
     if round_hits is None:
         round_hits = [1, 2, 3]
     call_count = [0]
 
-    async def mock_eval(ps, data, **kwargs):
+    async def mock_eval(search_point, data, **kwargs):
         idx = min(call_count[0], len(round_hits) - 1)
         target_hits = round_hits[idx]
         label = kwargs.get("label", "")

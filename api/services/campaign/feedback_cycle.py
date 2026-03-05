@@ -487,6 +487,7 @@ async def _evaluate_candidates(
 ) -> dict:
     """Evaluate candidates, select winner, optionally generate suggestions."""
     from api.models.prompt_state import PromptState
+    from api.models.search_point import SearchPoint
     from api.services.llm_client import get_llm_client
     from api.services.prompt_eval import EvalContext
     from api.services.prompt_optimizer import (
@@ -502,14 +503,18 @@ async def _evaluate_candidates(
         "label": baseline_label,
     }
 
+    base_sp = SearchPoint(
+        prompt_state=PromptState(**state.current_ps),
+        model=config.model or "",
+        temperature=config.temperature,
+        pipeline_params=config.pipeline_params,
+    )
     ctx = EvalContext(
+        search_point=base_sp,
         backend_client=state.backend_client,
         store=state.store,
         backend_id=config.backend_id,
-        pipeline_params=config.pipeline_params,
         pipeline_schema=config.pipeline_schema,
-        model=config.model or "",
-        temperature=config.temperature,
         obs=obs,
         dataset_name=dataset_name if dataset_name and dataset_item_map else None,
         dataset_item_map=dataset_item_map if dataset_name and dataset_item_map else None,
