@@ -71,8 +71,6 @@ dmypy.json
 # OS
 Thumbs.db
 
-# External reference (clone locally, not tracked)
-external/
 data/
 
 # Linting cache

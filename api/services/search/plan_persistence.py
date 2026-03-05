@@ -116,13 +116,10 @@ def smart_search_plan_identity(
     Hashes user-controlled inputs so the same config produces the same
     plan ID across kernel restarts.
     """
-    prompt_keys = sorted(variant_library.get("prompt_fields", {}).keys())
-    param_keys = sorted(variant_library.get("pipeline_params", {}).keys())
     payload = json.dumps(
         {
             "baseline_instruction": baseline_instruction,
-            "prompt_field_keys": prompt_keys,
-            "pipeline_param_keys": param_keys,
+            "variant_library": variant_library,
             "n_diagnostic": smart_search_config.get("n_diagnostic", 6),
             "max_rounds": smart_search_config.get("max_rounds", 3),
             "stop_threshold": smart_search_config.get("stop_threshold", 0.0),
@@ -130,6 +127,7 @@ def smart_search_plan_identity(
             "seed": seed,
         },
         sort_keys=True,
+        default=str,
     )
     digest = hashlib.sha256(payload.encode()).hexdigest()[:12]
     return f"{SSPLAN_PREFIX}{digest}"

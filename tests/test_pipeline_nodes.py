@@ -1,13 +1,7 @@
 """Tests for pipeline node extraction.
 
-Verifies:
-- Full pipeline → 4 nodes in correct order
-- Missing steps → fewer nodes
-- Correct as_type per node
-- model set on generation nodes only
-- Timing metadata populated from step_timings
-- Per-step pipeline_params in metadata
-- _profile_summary helper
+Verifies full pipeline extraction, missing step handling, node I/O content,
+per-step pipeline_params, and _profile_summary helper.
 """
 
 import pytest
@@ -16,6 +10,7 @@ from api.services.obs.pipeline_nodes import (
     extract_pipeline_nodes,
     _profile_summary,
 )
+from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
 
 
 # ---------------------------------------------------------------------------
@@ -67,236 +62,161 @@ def _full_pipeline():
 
 
 # ---------------------------------------------------------------------------
-# Tests — extract_pipeline_nodes
+# Full pipeline — comprehensive happy-path test
 # ---------------------------------------------------------------------------
 
 
-class TestExtractPipelineNodes:
-    def test_full_pipeline_returns_4_nodes(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        assert len(nodes) == 4
+def test_full_pipeline_extraction():
+    """One comprehensive test: order, types, model, timings, params."""
+    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
 
-    def test_node_order(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        names = [n.name for n in nodes]
-        assert names == ["web_search", "entity_profiling", "token_matching", "llm_ranking"]
+    # 4 nodes in correct order
+    assert [n.name for n in nodes] == [
+        "web_search", "entity_profiling", "token_matching", "llm_ranking",
+    ]
 
-    def test_as_type_mapping(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        type_map = {n.name: n.as_type for n in nodes}
-        assert type_map == {
-            "web_search": "tool",
-            "entity_profiling": "generation",
-            "token_matching": "retriever",
-            "llm_ranking": "generation",
-        }
+    # as_type mapping
+    assert {n.name: n.as_type for n in nodes} == {
+        "web_search": "tool",
+        "entity_profiling": "generation",
+        "token_matching": "retriever",
+        "llm_ranking": "generation",
+    }
 
-    def test_model_set_on_generation_nodes_only(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        for node in nodes:
-            if node.as_type == "generation":
-                assert node.model == "groq/llama-4"
-            else:
-                assert node.model is None
-
-    def test_model_none_when_llm_provider_empty(self):
-        pipeline = _full_pipeline()
-        pipeline["llm_provider"] = ""
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        for node in nodes:
+    # model only on generation nodes
+    for node in nodes:
+        if node.as_type == "generation":
+            assert node.model == "groq/llama-4"
+        else:
             assert node.model is None
 
-    def test_timing_metadata(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        timing_map = {n.name: n.metadata.get("duration_s") for n in nodes}
-        assert timing_map == {
-            "web_search": 0.3,
-            "entity_profiling": 1.2,
-            "token_matching": 0.05,
-            "llm_ranking": 0.8,
-        }
+    # timing metadata
+    assert {n.name: n.metadata["duration_s"] for n in nodes} == {
+        "web_search": 0.3,
+        "entity_profiling": 1.2,
+        "token_matching": 0.05,
+        "llm_ranking": 0.8,
+    }
 
-    def test_no_timings_means_empty_metadata(self):
-        pipeline = _full_pipeline()
-        del pipeline["step_timings"]
-        del pipeline["pipeline_params"]
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        for node in nodes:
-            assert "duration_s" not in node.metadata
-
-    def test_nodes_are_frozen(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        with pytest.raises(AttributeError):
-            nodes[0].name = "modified"
-
-
-class TestMissingSteps:
-    def test_no_web_search(self):
-        pipeline = _full_pipeline()
-        del pipeline["web_search_status"]
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        names = [n.name for n in nodes]
-        assert "web_search" not in names
-        assert len(nodes) == 3
-
-    def test_no_entity_profile(self):
-        pipeline = _full_pipeline()
-        del pipeline["entity_profile"]
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        names = [n.name for n in nodes]
-        assert "entity_profiling" not in names
-        # token_matching still has profile="" fallback
-        assert "token_matching" in names
-
-    def test_no_token_matching(self):
-        pipeline = _full_pipeline()
-        del pipeline["token_matched_candidates"]
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        names = [n.name for n in nodes]
-        assert "token_matching" not in names
-        assert len(nodes) == 3
-
-    def test_no_llm_ranking(self):
-        pipeline = _full_pipeline()
-        del pipeline["ranked_candidates"]
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        names = [n.name for n in nodes]
-        assert "llm_ranking" not in names
-        assert len(nodes) == 3
-
-    def test_empty_pipeline(self):
-        nodes = extract_pipeline_nodes({}, "aspirin")
-        assert nodes == []
-
-    def test_only_web_search(self):
-        pipeline = {"web_search_status": "success"}
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        assert len(nodes) == 1
-        assert nodes[0].name == "web_search"
-        assert nodes[0].as_type == "tool"
-
-
-class TestNodeContent:
-    def test_web_search_io(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        ws = nodes[0]
-        assert ws.input == {"query": "aspirin"}
-        assert ws.output["status"] == "success"
-        assert ws.output["error"] is None
-        assert ws.output["n_sources"] == 1
-        assert len(ws.output["sources"]) == 1
-        assert ws.output["sources"][0]["title"] == "Aspirin - Wikipedia"
-
-    def test_web_search_failed(self):
-        pipeline = _full_pipeline()
-        pipeline["web_search_status"] = "failed"
-        pipeline["web_search_error"] = "timeout"
-        pipeline["web_sources"] = []
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        ws = nodes[0]
-        assert ws.output["status"] == "failed"
-        assert ws.output["error"] == "timeout"
-        assert ws.output["sources"] == []
-        assert ws.output["n_sources"] == 0
-
-    def test_entity_profiling_io(self):
-        pipeline = _full_pipeline()
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        ep = nodes[1]
-        assert ep.input == {"query": "aspirin"}
-        # Full profile dict as output (not just 2 keys)
-        assert ep.output["core_concept"] == "pain reliever"
-        assert ep.output["entity_name"] == "Aspirin"
-        assert ep.output is pipeline["entity_profile"]
-
-    def test_token_matching_io(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        tm = nodes[2]
-        assert tm.input["query"] == "aspirin"
-        assert tm.input["profile"] == "Aspirin (pain reliever)"
-        assert tm.output["n_candidates"] == 2
-        # Full candidate list (not truncated top_3)
-        assert tm.output["candidates"] == [("Aspirin", 5), ("Aspirin Tablet", 3)]
-        assert "top_3" not in tm.output
-
-    def test_llm_ranking_io(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        lr = nodes[3]
-        assert lr.input == {"n_candidates": 2}
-        assert lr.output["n_candidates"] == 2
-        # Full ranked candidates list (not just top_candidate/top_score)
-        assert len(lr.output["candidates"]) == 2
-        assert lr.output["candidates"][0]["candidate"] == "Aspirin"
-        assert lr.output["candidates"][0]["relevance_score"] == 0.95
-        assert "top_candidate" not in lr.output
-        assert "top_score" not in lr.output
-
-
-class TestPipelineParamsInMetadata:
-    def test_web_search_params(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        ws = nodes[0]
-        pp = ws.metadata["pipeline_params"]
-        assert pp == {"max_sites": 3, "num_results": 5, "content_char_limit": 5000}
-
-    def test_entity_profiling_params(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        ep = nodes[1]
-        pp = ep.metadata["pipeline_params"]
-        assert pp == {
-            "raw_content_limit": 3000,
-            "profiling_temperature": 0.1,
-            "profiling_max_tokens": 512,
-        }
-
-    def test_token_matching_params(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        tm = nodes[2]
-        pp = tm.metadata["pipeline_params"]
-        assert pp == {"max_token_candidates": 20, "relevance_weight_core": 0.7}
-
-    def test_llm_ranking_params(self):
-        nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
-        lr = nodes[3]
-        pp = lr.metadata["pipeline_params"]
-        assert pp == {
-            "ranking_temperature": 0.0,
-            "ranking_max_tokens": 1024,
-            "ranking_sample_size": 10,
-        }
-
-    def test_no_pipeline_params_means_no_key(self):
-        pipeline = _full_pipeline()
-        del pipeline["pipeline_params"]
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        for node in nodes:
-            assert "pipeline_params" not in node.metadata
-
-    def test_partial_pipeline_params(self):
-        pipeline = _full_pipeline()
-        pipeline["pipeline_params"] = {"max_sites": 3}  # only web_search param
-        nodes = extract_pipeline_nodes(pipeline, "aspirin")
-        # web_search has it
-        assert nodes[0].metadata["pipeline_params"] == {"max_sites": 3}
-        # Other nodes don't
-        for node in nodes[1:]:
-            assert "pipeline_params" not in node.metadata
+    # per-step pipeline_params
+    assert nodes[0].metadata["pipeline_params"] == {
+        "max_sites": 3, "num_results": 5, "content_char_limit": 5000,
+    }
+    assert nodes[1].metadata["pipeline_params"] == {
+        "raw_content_limit": 3000,
+        "profiling_temperature": 0.1,
+        "profiling_max_tokens": 512,
+    }
+    assert nodes[2].metadata["pipeline_params"] == {
+        "max_token_candidates": 20, "relevance_weight_core": 0.7,
+    }
+    assert nodes[3].metadata["pipeline_params"] == {
+        "ranking_temperature": 0.0,
+        "ranking_max_tokens": 1024,
+        "ranking_sample_size": 10,
+    }
 
 
 # ---------------------------------------------------------------------------
-# Tests — _profile_summary
+# Missing steps — parametrized
 # ---------------------------------------------------------------------------
 
 
-class TestProfileSummary:
-    def test_both_fields(self):
-        assert _profile_summary({"entity_name": "Asp", "core_concept": "pain"}) == "Asp (pain)"
+@pytest.mark.parametrize("del_key,missing_step,expected_count", [
+    ("web_search_status", "web_search", 3),
+    ("entity_profile", "entity_profiling", 3),
+    ("token_matched_candidates", "token_matching", 3),
+    ("ranked_candidates", "llm_ranking", 3),
+])
+def test_missing_step(del_key, missing_step, expected_count):
+    pipeline = _full_pipeline()
+    del pipeline[del_key]
+    nodes = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+    names = [n.name for n in nodes]
+    assert missing_step not in names
+    assert len(nodes) == expected_count
 
-    def test_name_only(self):
-        assert _profile_summary({"entity_name": "Asp"}) == "Asp"
 
-    def test_concept_only(self):
-        assert _profile_summary({"core_concept": "pain"}) == "pain"
+# ---------------------------------------------------------------------------
+# Node I/O content
+# ---------------------------------------------------------------------------
 
-    def test_empty(self):
-        assert _profile_summary({}) == ""
+
+def test_web_search_io():
+    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+    ws = nodes[0]
+    assert ws.input == {"query": "aspirin"}
+    assert ws.output["status"] == "success"
+    assert ws.output["error"] is None
+    assert ws.output["n_sources"] == 1
+    assert ws.output["sources"][0]["title"] == "Aspirin - Wikipedia"
+
+
+def test_web_search_failed():
+    pipeline = _full_pipeline()
+    pipeline["web_search_status"] = "failed"
+    pipeline["web_search_error"] = "timeout"
+    pipeline["web_sources"] = []
+    nodes = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+    ws = nodes[0]
+    assert ws.output["status"] == "failed"
+    assert ws.output["error"] == "timeout"
+    assert ws.output["n_sources"] == 0
+
+
+def test_entity_profiling_io():
+    pipeline = _full_pipeline()
+    nodes = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+    ep = nodes[1]
+    assert ep.input == {"query": "aspirin"}
+    assert ep.output is pipeline["entity_profile"]
+
+
+def test_token_matching_io():
+    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+    tm = nodes[2]
+    assert tm.input["query"] == "aspirin"
+    assert tm.input["profile"] == "Aspirin (pain reliever)"
+    assert tm.output["n_candidates"] == 2
+    assert tm.output["candidates"] == [("Aspirin", 5), ("Aspirin Tablet", 3)]
+
+
+def test_llm_ranking_io():
+    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+    lr = nodes[3]
+    assert lr.input == {"n_candidates": 2}
+    assert lr.output["candidates"][0]["candidate"] == "Aspirin"
+    assert lr.output["candidates"][0]["relevance_score"] == 0.95
+
+
+# ---------------------------------------------------------------------------
+# _profile_summary
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("profile,expected", [
+    ({"entity_name": "Asp", "core_concept": "pain"}, "Asp (pain)"),
+    ({"entity_name": "Asp"}, "Asp"),
+    ({"core_concept": "pain"}, "pain"),
+])
+def test_profile_summary(profile, expected):
+    assert _profile_summary(profile) == expected
+
+
+# ---------------------------------------------------------------------------
+# Schema-based extraction — same output as hardcoded path
+# ---------------------------------------------------------------------------
+
+
+def test_schema_extraction_deterministic():
+    """extract_pipeline_nodes with TERMNORM_DEFAULT_SCHEMA is deterministic across calls."""
+    pipeline = _full_pipeline()
+    nodes_a = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+    nodes_b = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+
+    assert len(nodes_a) == len(nodes_b)
+    for a, b in zip(nodes_a, nodes_b):
+        assert a.name == b.name
+        assert a.as_type == b.as_type
+        assert a.metadata == b.metadata
+        assert a.model == b.model

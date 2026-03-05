@@ -78,7 +78,7 @@ Public service deployment, non-prompt optimization targets, evolutionary operato
 | 2 | **Reproducibility** | Content-addressed caching ensures identical results for same inputs. < 5% variance across runs. |
 | 3 | **Langfuse observability** | **Implemented** -- per-trial spans with scores, campaign traces, graceful fallback |
 | 4 | **Time to first optimization** | < 15 minutes from `pip install` to completed campaign |
-| 5 | **TermNorm validation** | Clear Variant A vs B recommendation with full campaign trace. **Planned for M4.** |
+| 5 | **TermNorm validation** | Clear Variant A vs B recommendation with full campaign trace. **Post-M7 backlog.** |
 | 6 | **Generalization beyond prompts** | Successful non-prompt optimization. **Post-M4.** |
 
 ---
@@ -111,7 +111,7 @@ Public service deployment, non-prompt optimization targets, evolutionary operato
 | Document | Description |
 |----------|-------------|
 | [Literature Review](../literature-review.md) | Survey of 11+ prompt optimization frameworks |
-| [Registry Design](../registry-design.md) | Campaign/trial tracking pattern (superseded — see `api/services/campaign_registry.py` and `api/services/stores/campaign_store.py`) |
+| [Registry Design](../registry-design.md) | Campaign/trial tracking pattern (superseded — see `api/services/stores/campaign_store.py`) |
 | [PRD](prd.md) | Requirements (P0/P1/P2) |
 | [ADD](add.md) | Architecture and decisions |
 | [WBS](wbs.md) | Work breakdown structure |

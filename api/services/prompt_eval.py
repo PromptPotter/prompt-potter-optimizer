@@ -19,26 +19,14 @@ from api.evaluators.exact_match import ExactMatchEvaluator
 from api.models.prompt_state import PromptState
 from api.services.constants import NO_RESULT
 
-_evaluator = ExactMatchEvaluator({"strip": True})
-
-# TermNorm pipeline data keys extracted from /matches response.
-# M6: will be derived from PipelineSchema.obs_extraction_map().
-_PIPELINE_DATA_KEYS = [
-    "entity_profile",
-    "token_matched_candidates",
-    "step_timings",
-    "llm_provider",
-    "total_time",
-    "web_search_status",
-    "pipeline_params",
-    "web_search_error",
-    "web_sources",
-]
-
 if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
+    from api.models.search_point import SearchPoint
     from api.services.backend_client import BackendClient
     from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
+
+_evaluator = ExactMatchEvaluator({"strip": True})
 
 logger = logging.getLogger(__name__)
 
@@ -52,19 +40,20 @@ HASH_TRUNCATE = 16
 class EvalContext:
     """Groups infrastructure parameters shared across evaluation calls.
 
-    Reduces the 13-parameter signatures of ``evaluate_prompt_cached()``
-    and ``evaluate_and_select_winner()`` to a manageable set.
+    The ``search_point`` field bundles prompt_state + model + temperature +
+    pipeline_params (the search-space dimensions).  Infrastructure fields
+    (backend_client, store, obs, …) stay at this level.
     """
 
+    search_point: SearchPoint
     backend_client: BackendClient
     store: ProjectStore | None = None
     backend_id: str = ""
-    pipeline_params: dict | None = None
-    model: str = ""
-    temperature: float = 0.0
+    pipeline_schema: PipelineSchema | None = None
     obs: ObsLogger | None = None
     dataset_name: str | None = None
     dataset_item_map: dict[str, str] | None = field(default=None)
+    source: str = ""
 
 
 def eval_content_hash(
@@ -72,20 +61,27 @@ def eval_content_hash(
     eval_data: list,
     model: str,
     temperature: float,
+    pipeline_params: dict | None = None,
 ) -> str:
     """Content-addressed hash for evaluation deduplication.
 
-    ``sha256(rendered_prompt + sorted_query_gt_pairs + model + temperature)[:16]``
+    ``sha256(rendered_prompt + sorted_query_gt_pairs + model + temperature
+    + pipeline_params)[:16]``
 
     Order of eval_data queries does not affect the hash.
+    ``pipeline_params`` is included when non-empty so that different
+    pipeline configurations produce distinct hashes.
     """
     pairs = sorted(
         (d.get("query", ""), d.get("ground_truth", "")) for d in eval_data
     )
-    blob = json.dumps(
-        {"prompt": rendered_prompt, "pairs": pairs, "model": model, "temperature": temperature},
-        sort_keys=True,
-    )
+    blob_dict: dict = {
+        "prompt": rendered_prompt, "pairs": pairs,
+        "model": model, "temperature": temperature,
+    }
+    if pipeline_params:
+        blob_dict["pipeline_params"] = pipeline_params
+    blob = json.dumps(blob_dict, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
 
 
@@ -93,29 +89,33 @@ def build_dataset_run_data(
     run_id: str,
     name: str,
     content_hash: str,
-    prompt_state_id: str,
-    rendered_prompt: str,
-    model: str,
-    temperature: float,
+    search_point: "SearchPoint",
     scores: dict,
     results: list,
+    *,
+    source: str = "",
 ) -> dict:
     """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
-    return {
+    rendered_prompt = search_point.render()
+    data: dict = {
         "run_id": run_id,
         "name": name,
         "content_hash": content_hash,
-        "prompt_state_id": prompt_state_id,
+        "prompt_state_id": search_point.prompt_state.id,
         "rendered_prompt_hash": hashlib.sha256(
             rendered_prompt.encode(),
         ).hexdigest()[:HASH_TRUNCATE],
-        "model": model,
-        "temperature": temperature,
+        "model": search_point.model,
+        "temperature": search_point.temperature,
         "item_count": scores["total"],
         "scores": scores,
+        "source": source,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "dataset_run_items": results,
     }
+    if search_point.pipeline_params:
+        data["pipeline_params"] = search_point.pipeline_params
+    return data
 
 
 def make_incremental_writer(
@@ -137,7 +137,7 @@ def analyze_candidate_coverage(replay_results: list) -> dict:
     """
     rows = []
     for r in replay_results:
-        if r.get("status") != "success":
+        if r.get("error"):
             continue
         pd_data = r.get("pipeline_data", {})
         candidates = pd_data.get("token_matched_candidates", [])
@@ -231,15 +231,22 @@ def extract_baseline_prompt(exp_data: dict) -> PromptState:
 
 
 def _extract_pipeline_data(
-    backend_data: dict, ranked_candidates: list,
+    backend_data: dict,
+    ranked_candidates: list,
+    pipeline_schema: "PipelineSchema",
 ) -> dict:
     """Extract pipeline data fields from a backend /matches response.
 
-    Collects ``ranked_candidates`` plus all keys in ``_PIPELINE_DATA_KEYS``
-    from ``backend_data``.
+    Derives the key set from the ``PipelineSchema``'s observation mappings.
     """
     pd: dict = {"ranked_candidates": ranked_candidates}
-    for key in _PIPELINE_DATA_KEYS:
+    keys: set[str] = set()
+    for mappings in pipeline_schema.obs_extraction_map().values():
+        for m in mappings:
+            keys.add(m.pipeline_key)
+    # Always include infrastructure keys
+    keys |= {"step_timings", "llm_provider", "total_time", "pipeline_params"}
+    for key in keys:
         val = backend_data.get(key)
         if val is not None:
             pd[key] = val
@@ -251,6 +258,7 @@ async def backend_reranker_eval(
     backend_client: BackendClient,
     rendered_prompt: str,
     pipeline_params: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> dict:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint.
 
@@ -267,16 +275,19 @@ async def backend_reranker_eval(
     query = query_data["query"]
     ground_truth = query_data["ground_truth"]
 
+    if pipeline_schema is None:
+        from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
+        pipeline_schema = TERMNORM_DEFAULT_SCHEMA
+
     try:
         pp = pipeline_params or {}
-        active_steps = pp.get("steps")
-        skip = active_steps is not None and "llm_ranking" not in active_steps
+        steps = pp.get("steps")
+        include_ranking = steps is None or "llm_ranking" in steps
 
         resp = await backend_client.run_match(
             query,
-            skip_llm_ranking=skip,
             pipeline_params=pipeline_params,
-            ranking_prompt=rendered_prompt if not skip else None,
+            ranking_prompt=rendered_prompt if include_ranking else None,
         )
         data = resp.get("data", {})
         ranked = data.get("ranked_candidates", [])
@@ -291,7 +302,7 @@ async def backend_reranker_eval(
             "hit": eval_output.result == EvalResult.PASS,
             "score": eval_output.score,
             "error": None,
-            "pipeline_data": _extract_pipeline_data(data, ranked),
+            "pipeline_data": _extract_pipeline_data(data, ranked, pipeline_schema),
         }
     except Exception as exc:
         logger.warning("backend_reranker_eval failed for %s: %s", query[:60], exc)
@@ -307,19 +318,18 @@ async def backend_reranker_eval(
 
 
 async def evaluate_prompt_batch(
-    prompt_state: PromptState,
+    search_point: "SearchPoint",
     eval_data: list,
-    backend_client: BackendClient,
-    pipeline_params: dict | None = None,
+    backend_client: "BackendClient",
     on_result: Callable | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> list:
     """Evaluate a prompt on all eval_data queries via the backend.
 
     Args:
-        prompt_state: PromptState whose render() produces the ranking prompt.
+        search_point: SearchPoint whose render() produces the ranking prompt.
         eval_data: List of query dicts with ``query`` and ``ground_truth``.
         backend_client: BackendClient with ``run_match()`` method.
-        pipeline_params: Optional pipeline parameter overrides.
         on_result: Optional callback ``(result, index, total)`` called after
             each query evaluation.
 
@@ -327,14 +337,39 @@ async def evaluate_prompt_batch(
         List of result dicts from backend_reranker_eval.
     """
     results = []
-    rendered = prompt_state.render()
+    rendered = search_point.render()
+    consecutive_errors = 0
+    max_consecutive_errors = 3
 
     for i, qd in enumerate(eval_data):
         result = await backend_reranker_eval(
             qd, backend_client, rendered,
-            pipeline_params=pipeline_params,
+            pipeline_params=search_point.pipeline_params,
+            pipeline_schema=pipeline_schema,
         )
         results.append(result)
+
+        if result.get("error"):
+            consecutive_errors += 1
+            if consecutive_errors >= max_consecutive_errors:
+                logger.warning(
+                    "Aborting eval: %d consecutive errors. "
+                    "Marking remaining %d queries as errors.",
+                    consecutive_errors, len(eval_data) - i - 1,
+                )
+                for remaining_qd in eval_data[i + 1:]:
+                    results.append({
+                        "query": remaining_qd["query"],
+                        "predicted": "ERROR",
+                        "ground_truth": remaining_qd.get("ground_truth", ""),
+                        "hit": False,
+                        "score": 0.0,
+                        "error": "skipped_after_consecutive_errors",
+                        "pipeline_data": None,
+                    })
+                break
+        else:
+            consecutive_errors = 0
 
         if on_result is not None:
             on_result(result, i, len(eval_data))
@@ -413,6 +448,29 @@ def _resolve_historical_and_partial(
     if store and backend_id:
         partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
         if partial_results:
+            # Detect stale partials: if the first N results are all errors,
+            # the partial was written during a broken session and is unreliable.
+            leading_errors = 0
+            for pr in partial_results:
+                if pr.get("error"):
+                    leading_errors += 1
+                else:
+                    break
+            if leading_errors >= 5:
+                logger.warning(
+                    "Partial eval %s: %d leading consecutive errors "
+                    "— discarding stale partial file",
+                    run_id, leading_errors,
+                )
+                partial_path = (
+                    store.dataset_runs._runs_dir(backend_id)
+                    / f"{run_id}.partial.jsonl"
+                )
+                if partial_path.exists():
+                    partial_path.unlink()
+                partial_results = []
+
+        if partial_results:
             valid = True
             for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
                 if pr.get("query") != ed.get("query"):
@@ -431,8 +489,6 @@ def _resolve_historical_and_partial(
                 remaining_data = []
             else:
                 remaining_data = remaining_data[len(partial_results):]
-        else:
-            partial_results = []
 
     return historical_results, partial_results, remaining_data, None
 
@@ -446,13 +502,12 @@ def _finalize_observability(
     model: str,
     temperature: float,
     prompt_state_id: str,
-    dataset_name: str | None,
-    dataset_item_map: dict[str, str] | None,
     obs: "ObsLogger | None",
 ) -> None:
-    """Log eval run to local obs and push to Langfuse cloud.
+    """Log eval run to local obs store.
 
-    Both paths are wrapped in their own try/except — failure never crashes eval.
+    Langfuse push is handled separately via push_all_runs() to ensure
+    dataset-item linking is always present.
     """
     try:
         _obs = obs
@@ -468,42 +523,27 @@ def _finalize_observability(
             model=model,
             temperature=temperature,
             prompt_state_id=prompt_state_id,
-            dataset_name=dataset_name,
-            dataset_item_map=dataset_item_map,
         )
     except Exception:
         logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
 
-    try:
-        from api.services.obs.langfuse_client import LangfuseLogger
-        _lf = LangfuseLogger.get_instance()
-        if _lf.enabled:
-            from api.services.obs.langfuse_push import push_run
-            push_run(
-                _lf, store, backend_id, run_id,
-                query_to_item_id=dataset_item_map,
-            )
-    except Exception:
-        logger.debug("Cloud push failed", exc_info=True)
-
 
 async def evaluate_prompt_cached(
-    prompt_state: PromptState,
+    search_point: "SearchPoint",
     eval_data: list,
     backend_client: "BackendClient | None" = None,
-    pipeline_params: dict | None = None,
+    *,
     store: "ProjectStore | None" = None,
     backend_id: str = "",
     force: bool = False,
     label: str = "Eval",
-    model: str = "",
-    temperature: float = 0.0,
     on_result: Callable | None = None,
-    dataset_name: str | None = None,
-    dataset_item_map: dict[str, str] | None = None,
     obs: "ObsLogger | None" = None,
     prompt_result_index: dict | None = None,
-    *,
+    source: str = "",
+    pipeline_schema: "PipelineSchema | None" = None,
+    dataset_name: str | None = None,
+    dataset_item_map: dict[str, str] | None = None,
     ctx: EvalContext | None = None,
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt with deduplication, partial resume, and finalization.
@@ -515,30 +555,35 @@ async def evaluate_prompt_cached(
     - Incremental writes for crash protection
     - Final run storage
 
-    Infrastructure params can be passed individually **or** grouped in an
-    ``EvalContext`` via the ``ctx`` keyword.  When ``ctx`` is provided its
-    fields fill in any values not explicitly supplied by the caller.
+    The ``search_point`` bundles the search-space dimensions
+    (prompt_state, model, temperature, pipeline_params).  Infrastructure
+    params can be passed individually **or** grouped in an ``EvalContext``
+    via the ``ctx`` keyword.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
     """
-    # Resolve from EvalContext when provided
+    # Extract search-space params from SearchPoint
+    prompt_state = search_point.prompt_state
+    model = search_point.model
+    temperature = search_point.temperature
+
+    # Resolve infrastructure from EvalContext when provided
     if ctx is not None:
         backend_client = backend_client or ctx.backend_client
         store = store or ctx.store
         backend_id = backend_id or ctx.backend_id
-        pipeline_params = pipeline_params if pipeline_params is not None else ctx.pipeline_params
-        model = model or ctx.model
-        temperature = temperature or ctx.temperature
+        pipeline_schema = pipeline_schema or ctx.pipeline_schema
         obs = obs or ctx.obs
         dataset_name = dataset_name or ctx.dataset_name
         dataset_item_map = dataset_item_map or ctx.dataset_item_map
+        source = source or ctx.source
 
     if backend_client is None:
         raise ValueError("backend_client is required (pass directly or via ctx)")
 
     rendered = prompt_state.render()
-    content_hash = eval_content_hash(rendered, eval_data, model, temperature)
+    content_hash = search_point.content_hash(eval_data)
 
     # --- dedup lookup ---
     if store and backend_id and not force:
@@ -571,6 +616,12 @@ async def evaluate_prompt_cached(
                 on_result({**r, "cached": True}, i, len(historical_results))
         return historical_results, acc, True
 
+    if partial_results:
+        logger.info(
+            "Resuming %s: %d cached results, %d remaining",
+            run_id, len(partial_results), len(remaining_data),
+        )
+
     # --- replay cached partial/historical results to callback ---
     callback_offset = 0
     if on_result is not None and historical_results:
@@ -595,9 +646,9 @@ async def evaluate_prompt_cached(
             on_result(result, _cb_offset + index, len(eval_data))
 
     new_results = await evaluate_prompt_batch(
-        prompt_state, remaining_data, backend_client,
-        pipeline_params=pipeline_params,
+        search_point, remaining_data, backend_client,
         on_result=_on_result,
+        pipeline_schema=pipeline_schema,
     )
 
     results = historical_results + partial_results + new_results
@@ -606,15 +657,14 @@ async def evaluate_prompt_cached(
     # --- finalize: save complete run + observability ---
     if store and backend_id:
         run_data = build_dataset_run_data(
-            run_id, label, content_hash, prompt_state.id,
-            rendered, model, temperature, scores, results,
+            run_id, label, content_hash, search_point,
+            scores, results, source=source,
         )
         store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
 
         _finalize_observability(
             store, backend_id, run_id, content_hash, scores,
-            model, temperature, prompt_state.id,
-            dataset_name, dataset_item_map, obs,
+            model, temperature, prompt_state.id, obs,
         )
 
     return results, scores, False

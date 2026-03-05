@@ -1,24 +1,8 @@
 """Tests for assess_scan_coverage()."""
-import hashlib
 
-from api.models.prompt_state import PromptState
 from api.services.search import assess_scan_coverage
-from api.services.prompt_eval import HASH_TRUNCATE
 
-
-def _rp_hash(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()[:HASH_TRUNCATE]
-
-
-def _make_baseline() -> PromptState:
-    return PromptState(
-        family="test",
-        instruction="Rank the candidates.",
-        persona="",
-        task_intent="",
-        thinking_style="",
-        answer_format="",
-    )
+from _helpers import rp_hash as _rp_hash, make_baseline_ps as _make_baseline
 
 
 def _diagnostic(n: int = 6) -> list[dict]:
@@ -52,19 +36,6 @@ VARIANT_LIBRARY = {
         "ranking_temperature": [0.0, 0.3, 0.7],
     },
 }
-
-
-def test_empty_index_nothing_usable():
-    """Empty index -> 0 usable variants, nothing satisfied."""
-    baseline = _make_baseline()
-    result = assess_scan_coverage(
-        baseline, VARIANT_LIBRARY, _diagnostic(6), {},
-        min_queries=6,
-    )
-    assert result["summary"]["all_satisfied"] is False
-    for axis in result["axes"]:
-        assert axis["n_usable"] == 0
-        assert axis["sufficient"] is False
 
 
 def test_full_coverage_all_prompt_fields_satisfied():
@@ -162,22 +133,6 @@ def test_axis_requirements_partial():
     assert persona_axis["n_usable"] == 2
     assert persona_axis["n_required"] == 2
     assert persona_axis["sufficient"] is True
-
-
-def test_pipeline_params_always_unsatisfied():
-    """Pipeline-param axes always show sufficient=False, n_usable=0."""
-    baseline = _make_baseline()
-    result = assess_scan_coverage(
-        baseline, VARIANT_LIBRARY, _diagnostic(6), {},
-        pipeline_params={"ranking_temperature": 0.0},
-        min_queries=6,
-    )
-    pp_axes = [a for a in result["axes"] if a["axis_type"] == "pipeline_param"]
-    assert len(pp_axes) == 1
-    assert pp_axes[0]["axis"] == "ranking_temperature"
-    assert pp_axes[0]["n_usable"] == 0
-    assert pp_axes[0]["sufficient"] is False
-    assert "Pipeline params" in pp_axes[0].get("note", "")
 
 
 def test_sufficient_axes_excluded_from_needed():

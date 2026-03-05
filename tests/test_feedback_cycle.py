@@ -17,25 +17,12 @@ from api.models.prompt_state import PromptState
 from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
 from api.services.search import select_scan_winner
 
-from _helpers import apply_grow_mock, apply_init_mock, apply_llm_mock
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def cycle_config():
-    return CycleConfig(
-        max_rounds=5,
-        patience=2,
-        n_variants=3,
-        creativity=0.5,
-        improvement_threshold=0.01,
-        backend_url="http://mock:8000",
-        generate_suggestions=False,
-    )
+from _helpers import (
+    apply_eval_mock,
+    apply_grow_mock,
+    apply_init_mock,
+    apply_llm_mock,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -51,43 +38,7 @@ async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
     apply_grow_mock(monkeypatch)
 
     # Hits improve each round: 1/3 → 2/3 → 3/3 (perfect, stops early)
-    round_hits = [1, 2, 3]
-    call_count = [0]
-
-    async def mock_eval(ps, data, **kwargs):
-        idx = min(call_count[0], len(round_hits) - 1)
-        target_hits = round_hits[idx]
-
-        label = kwargs.get("label", "")
-        # First candidate each round gets the improving accuracy
-        if label == "candidate_0":
-            results = []
-            for i, d in enumerate(data):
-                hit = i < target_hits
-                results.append({
-                    "query": d["query"],
-                    "predicted": d["ground_truth"] if hit else "WRONG",
-                    "ground_truth": d["ground_truth"],
-                    "hit": hit, "score": 1.0 if hit else 0.0, "error": None,
-                })
-            scores = {"hits": target_hits, "total": len(data),
-                      "accuracy": target_hits / len(data), "errors": 0}
-            call_count[0] += 1
-        else:
-            results = [
-                {"query": d["query"], "predicted": "WRONG",
-                 "ground_truth": d["ground_truth"], "hit": False,
-                 "score": 0.0, "error": None}
-                for d in data
-            ]
-            scores = {"hits": 0, "total": len(data),
-                      "accuracy": 0.0, "errors": 0}
-        return results, scores, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
+    apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
 
     result = await run_feedback_cycle(
         instruction="Rank candidates.",
@@ -118,20 +69,7 @@ async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
     apply_grow_mock(monkeypatch)
 
     # All candidates return 0% — never beats baseline (which is also 0%)
-    async def mock_eval(ps, data, **kwargs):
-        results = [
-            {"query": d["query"], "predicted": "WRONG",
-             "ground_truth": d["ground_truth"], "hit": False,
-             "score": 0.0, "error": None}
-            for d in data
-        ]
-        scores = {"hits": 0, "total": len(data), "accuracy": 0.0, "errors": 0}
-        return results, scores, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
+    apply_eval_mock(monkeypatch, round_hits=[0])
 
     result = await run_feedback_cycle(
         instruction="Rank candidates.",
@@ -157,42 +95,8 @@ async def test_max_rounds(monkeypatch, eval_data):
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
 
-    # Slow steady improvement — never reaches perfect or stalls
-    call_idx = [0]
-
-    async def mock_eval(ps, data, **kwargs):
-        label = kwargs.get("label", "")
-        if label == "candidate_0":
-            # Improve by small amount each round
-            acc = min(0.1 + call_idx[0] * 0.1, 0.9)
-            call_idx[0] += 1
-            hits = max(1, int(acc * len(data)))
-            results = []
-            for i, d in enumerate(data):
-                hit = i < hits
-                results.append({
-                    "query": d["query"],
-                    "predicted": d["ground_truth"] if hit else "WRONG",
-                    "ground_truth": d["ground_truth"],
-                    "hit": hit, "score": 1.0 if hit else 0.0, "error": None,
-                })
-            scores = {"hits": hits, "total": len(data),
-                      "accuracy": hits / len(data), "errors": 0}
-        else:
-            results = [
-                {"query": d["query"], "predicted": "WRONG",
-                 "ground_truth": d["ground_truth"], "hit": False,
-                 "score": 0.0, "error": None}
-                for d in data
-            ]
-            scores = {"hits": 0, "total": len(data),
-                      "accuracy": 0.0, "errors": 0}
-        return results, scores, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
+    # Slow steady improvement: 1/3, 1/3, 2/3 hits — never reaches perfect or stalls
+    apply_eval_mock(monkeypatch, round_hits=[1, 1, 2])
 
     config = CycleConfig(
         max_rounds=3,
@@ -226,37 +130,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
     apply_grow_mock(monkeypatch)
 
     # First candidate gets 33%, analysis suggestions say stop
-    async def mock_eval(ps, data, **kwargs):
-        label = kwargs.get("label", "")
-        if label == "candidate_0":
-            results = [
-                {"query": data[0]["query"],
-                 "predicted": data[0]["ground_truth"],
-                 "ground_truth": data[0]["ground_truth"],
-                 "hit": True, "score": 1.0, "error": None},
-            ] + [
-                {"query": d["query"], "predicted": "WRONG",
-                 "ground_truth": d["ground_truth"], "hit": False,
-                 "score": 0.0, "error": None}
-                for d in data[1:]
-            ]
-            scores = {"hits": 1, "total": len(data),
-                      "accuracy": 1 / len(data), "errors": 0}
-        else:
-            results = [
-                {"query": d["query"], "predicted": "WRONG",
-                 "ground_truth": d["ground_truth"], "hit": False,
-                 "score": 0.0, "error": None}
-                for d in data
-            ]
-            scores = {"hits": 0, "total": len(data),
-                      "accuracy": 0.0, "errors": 0}
-        return results, scores, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
+    apply_eval_mock(monkeypatch, round_hits=[1])
 
     # Wrap evaluate_and_select_winner to force next_action="stop"
     from api.services.prompt_optimizer import evaluate_and_select_winner
@@ -313,21 +187,7 @@ async def test_result_structure(monkeypatch, eval_data, cycle_config):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
-
-    async def mock_eval(ps, data, **kwargs):
-        results = [
-            {"query": d["query"], "predicted": "WRONG",
-             "ground_truth": d["ground_truth"], "hit": False,
-             "score": 0.0, "error": None}
-            for d in data
-        ]
-        scores = {"hits": 0, "total": len(data), "accuracy": 0.0, "errors": 0}
-        return results, scores, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
+    apply_eval_mock(monkeypatch, round_hits=[0])
 
     result = await run_feedback_cycle(
         instruction="Test.", eval_data=eval_data, config=cycle_config,
@@ -368,20 +228,7 @@ async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
     )
 
     # All candidates score 0% → patience stops after 2 rounds
-    async def mock_eval(ps, data, **kwargs):
-        results = [
-            {"query": d["query"], "predicted": "WRONG",
-             "ground_truth": d["ground_truth"], "hit": False,
-             "score": 0.0, "error": None}
-            for d in data
-        ]
-        scores = {"hits": 0, "total": len(data), "accuracy": 0.0, "errors": 0}
-        return results, scores, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
+    apply_eval_mock(monkeypatch, round_hits=[0])
 
     # Do NOT mock restructure_context — it should NOT be called
     result = await run_feedback_cycle(
@@ -429,37 +276,7 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
     )
 
     # First candidate always gets 1/3 accuracy with real results
-    async def mock_eval(ps, data, **kwargs):
-        label = kwargs.get("label", "")
-        if label == "candidate_0":
-            results = [
-                {"query": data[0]["query"],
-                 "predicted": data[0]["ground_truth"],
-                 "ground_truth": data[0]["ground_truth"],
-                 "hit": True, "score": 1.0, "error": None},
-            ] + [
-                {"query": d["query"], "predicted": "WRONG",
-                 "ground_truth": d["ground_truth"],
-                 "hit": False, "score": 0.0, "error": None}
-                for d in data[1:]
-            ]
-            scores = {"hits": 1, "total": len(data),
-                      "accuracy": 1 / len(data), "errors": 0}
-        else:
-            results = [
-                {"query": d["query"], "predicted": "WRONG",
-                 "ground_truth": d["ground_truth"],
-                 "hit": False, "score": 0.0, "error": None}
-                for d in data
-            ]
-            scores = {"hits": 0, "total": len(data),
-                      "accuracy": 0.0, "errors": 0}
-        return results, scores, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
+    apply_eval_mock(monkeypatch, round_hits=[1])
 
     result = await run_feedback_cycle(
         instruction="Test.", eval_data=eval_data, config=cycle_config,
@@ -491,21 +308,7 @@ async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
-
-    async def mock_eval(ps, data, **kwargs):
-        results = [
-            {"query": d["query"], "predicted": "WRONG",
-             "ground_truth": d["ground_truth"], "hit": False,
-             "score": 0.0, "error": None}
-            for d in data
-        ]
-        scores = {"hits": 0, "total": len(data), "accuracy": 0.0, "errors": 0}
-        return results, scores, False
-
-    monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
-        mock_eval,
-    )
+    apply_eval_mock(monkeypatch, round_hits=[0])
 
     callbacks = []
 

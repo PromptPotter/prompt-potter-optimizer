@@ -26,6 +26,8 @@ from api.services.search.smart_search import (
     ScanEvent,
     adaptive_search,
     build_diagnostic_set,
+    filter_variant_library,
+    load_scan_results_from_plan,
     resume_or_build_diagnostic,
     select_scan_winner,
     sensitivity_scan,
@@ -43,6 +45,9 @@ from api.services.search.eval_dataset import load_eval_dataset
 
 # context
 from api.services.search.context import restructure_context
+
+# scan_advisor
+from api.services.search.scan_advisor import advise_scan_config
 
 # synthesis
 from api.services.search.synthesis import synthesize_sensitivity_from_grid
@@ -65,6 +70,8 @@ __all__ = [
     "ScanEvent",
     "adaptive_search",
     "build_diagnostic_set",
+    "filter_variant_library",
+    "load_scan_results_from_plan",
     "resume_or_build_diagnostic",
     "select_scan_winner",
     "sensitivity_scan",
@@ -76,6 +83,8 @@ __all__ = [
     "load_eval_dataset",
     # context
     "restructure_context",
+    # scan_advisor
+    "advise_scan_config",
     # synthesis
     "synthesize_sensitivity_from_grid",
 ]

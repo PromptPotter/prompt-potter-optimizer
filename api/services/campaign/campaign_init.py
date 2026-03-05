@@ -5,10 +5,13 @@ evaluates baselines, and returns a services dict ready for use.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
+
+import httpx
 
 from api.models.backend import BackendConnection
 from api.services.backend_client import BackendClient
@@ -67,11 +70,22 @@ async def init_services(
             backend_type="termnorm", base_url=backend_url,
         ))
 
+    # Fetch pipeline schema (best-effort — non-fatal)
+    pipeline_schema = None
+    try:
+        from api.services.pipeline_discovery import parse_pipeline_response
+        pipeline_resp = await client.fetch_pipeline()
+        pipeline_schema = parse_pipeline_response(pipeline_resp)
+        logger.info("Pipeline schema loaded: %s v%s", pipeline_schema.name, pipeline_schema.version)
+    except Exception as exc:
+        logger.info("Could not fetch pipeline schema: %s", exc)
+
     base = {
         "store": store,
         "backend_id": backend_id,
         "experiment_id": experiment_id,
         "backend_client": client,
+        "pipeline_schema": pipeline_schema,
         "synced": False,
     }
 
@@ -158,6 +172,84 @@ def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
     return queries
 
 
+async def _wait_session_ready(
+    backend_client: BackendClient,
+    max_attempts: int = 5,
+    delay: float = 1.0,
+) -> None:
+    """Poll check_status until session is active with terms loaded.
+
+    Retries up to ``max_attempts`` times with ``delay`` seconds between.
+    Logs a warning if the session never becomes ready.
+    """
+    for attempt in range(1, max_attempts + 1):
+        status = await backend_client.check_status()
+        data = status.get("data", {})
+        if data.get("session_active") and data.get("terms_loaded", 0) > 0:
+            logger.info(
+                "Session ready (attempt %d/%d): %d terms loaded",
+                attempt, max_attempts, data["terms_loaded"],
+            )
+            return
+        logger.debug(
+            "Session not ready (attempt %d/%d): session_active=%s, terms_loaded=%s",
+            attempt, max_attempts,
+            data.get("session_active"), data.get("terms_loaded"),
+        )
+        if attempt < max_attempts:
+            await asyncio.sleep(delay)
+
+    logger.warning(
+        "Session not ready after %d attempts — evaluation may produce errors. "
+        "Last status: %s", max_attempts, status,
+    )
+
+
+async def _verify_matches_liveness(
+    backend_client: BackendClient,
+    probe_query: str,
+    max_attempts: int = 3,
+    delay: float = 2.0,
+) -> None:
+    """Send a lightweight /matches probe to verify the endpoint is live.
+
+    Retries on 400 (the exact symptom of an unready session).
+    Non-fatal: logs a warning if all probes fail.
+    """
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{backend_client.base_url}/matches",
+                    json={"query": probe_query},
+                )
+                resp.raise_for_status()
+            logger.info(
+                "Matches liveness probe succeeded (attempt %d/%d)",
+                attempt, max_attempts,
+            )
+            return
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 400 and attempt < max_attempts:
+                logger.debug(
+                    "Matches probe got 400 (attempt %d/%d), retrying in %.0fs",
+                    attempt, max_attempts, delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.warning(
+                    "Matches liveness probe failed (attempt %d/%d): %s",
+                    attempt, max_attempts, exc,
+                )
+                return
+        except Exception as exc:
+            logger.warning(
+                "Matches liveness probe failed (attempt %d/%d): %s",
+                attempt, max_attempts, exc,
+            )
+            return
+
+
 async def run_baseline_eval(
     baseline: "PromptState",
     eval_data: list,
@@ -170,6 +262,7 @@ async def run_baseline_eval(
     temperature: float = 0.0,
     on_result: Callable | None = None,
     obs: Any | None = None,
+    session_terms: list[str] | None = None,
 ) -> tuple[list, list]:
     """Evaluate baseline prompt and build initial campaign_rounds list.
 
@@ -193,6 +286,7 @@ async def run_baseline_eval(
     Raises:
         RuntimeError: If no evaluation data is available.
     """
+    from api.models.search_point import SearchPoint
     from api.services.prompt_eval import evaluate_prompt_cached
 
     if not eval_data and store and experiment_id:
@@ -202,8 +296,14 @@ async def run_baseline_eval(
     if not eval_data:
         raise RuntimeError(
             "No evaluation data available. "
-            "Generate data first (e.g. run termnorm_backend.ipynb)."
+            "Generate data first (e.g. run evaluation.ipynb or load from DatasetStore)."
         )
+
+    # Initialize backend session so /matches doesn't 400
+    if session_terms:
+        await backend_client.init_session(session_terms)
+        await _wait_session_ready(backend_client)
+        await _verify_matches_liveness(backend_client, probe_query=session_terms[0])
 
     # Register dataset items in obs if available
     if obs and eval_data:
@@ -212,13 +312,19 @@ async def run_baseline_eval(
         except Exception:
             logger.warning("Dataset registration in run_baseline_eval failed", exc_info=True)
 
-    baseline_results, scores, _cached = await evaluate_prompt_cached(
-        baseline, eval_data, backend_client,
+    sp = SearchPoint(
+        prompt_state=baseline,
+        model=model,
+        temperature=temperature,
         pipeline_params=pipeline_params,
+    )
+    baseline_results, scores, _cached = await evaluate_prompt_cached(
+        sp, eval_data, backend_client,
         store=store, backend_id=backend_id,
         label="Baseline",
-        model=model, temperature=temperature,
         on_result=on_result,
+        obs=obs,
+        source="baseline",
     )
 
     campaign_rounds = [{

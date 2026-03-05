@@ -1,4 +1,4 @@
-"""Helper library for optimization_campaign.ipynb and termnorm_backend.ipynb.
+"""Helper library for optimization_campaign.ipynb and evaluation.ipynb.
 
 Thin notebook-facing layer that delegates to ``api.services`` for core logic
 and adds tqdm progress bars, print statements, and IPython display for
@@ -13,7 +13,6 @@ from tqdm.auto import tqdm
 
 from api.models.prompt_state import PromptState
 from api.services.backend_client import (
-    PIPELINE_STEP_PARAMS,
     build_pipeline_params,
     load_pipeline_config,
 )
@@ -60,12 +59,13 @@ from api.services.search import (
     resume_or_build_grid as _resume_or_build_grid,
     load_grid_plan_results as _load_grid_plan_results,
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
+    advise_scan_config as _advise_scan_config,
 )
 
 # Public API — every name the notebook imports.
 __all__ = [
     # Constants
-    "DEFAULT_GRID_AXES", "PIPELINE_STEP_PARAMS",
+    "DEFAULT_GRID_AXES",
     # Service init
     "init_services", "setup_llm", "load_variant_library",
     # Backend status & datasets
@@ -87,7 +87,8 @@ __all__ = [
     "load_pipeline_config", "build_pipeline_params",
     # Smart search
     "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
-    "display_axis_profiles", "resume_or_build_diagnostic",
+    "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
+    "advisory_to_scan_variants",
     "select_scan_winner_notebook", "build_historical_index",
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
     # Campaign
@@ -95,10 +96,83 @@ __all__ = [
     "display_progress", "run_manual_round",
     "select_and_seed_grid_winner",
     # Notebook-facing wrappers
-    "show_entity_profiles", "show_grid_overview",
+    "show_entity_profiles", "show_grid_overview", "smoke_test_override",
     # Langfuse
     "push_langfuse", "backfill_langfuse", "configure_langfuse",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Smoke-test helpers
+# ---------------------------------------------------------------------------
+
+
+async def smoke_test_override(
+    svc: dict,
+    pipeline_config: dict,
+    eval_data: list,
+    *,
+    step: str = "entity_profiling",
+    schema_ref: str = "entity_profile/1",
+    extra_fields: dict[str, str] | None = None,
+) -> None:
+    """Fire one /matches call with a schema override and print the result.
+
+    Parameters
+    ----------
+    svc : dict
+        Services dict from ``init_services()``.
+    pipeline_config : dict
+        Full pipeline config from ``fetch_pipeline()``.
+    eval_data : list
+        Eval dataset (first query used as test input).
+    step : str
+        Pipeline step to override (default ``entity_profiling``).
+    schema_ref : str
+        Key into ``resolved_schemas`` (default ``entity_profile/1``).
+    extra_fields : dict
+        ``{field_name: description}`` to inject into the schema.
+        Defaults to ``{"industry_sector": "Primary industry sector ..."}``.
+    """
+    import copy
+
+    if extra_fields is None:
+        extra_fields = {
+            "industry_sector":
+                "Primary industry sector (e.g. automotive, construction, electronics)",
+        }
+
+    bc = svc["backend_client"]
+    query = eval_data[0]["query"] if eval_data else "Stahl S235"
+
+    await bc.init_session(svc.get("session_terms", []))
+
+    schema = copy.deepcopy(
+        pipeline_config["resolved_schemas"][schema_ref]["json_schema"],
+    )
+    for name, desc in extra_fields.items():
+        schema["properties"][name] = {"type": "string", "description": desc}
+        schema.setdefault("required", []).append(name)
+
+    result = await bc.run_match(
+        query,
+        pipeline_params={"node_overrides": {step: {"output_schema": schema}}},
+    )
+
+    data = result.get("data", {})
+    profile = data.get("entity_profile", {})
+    top = (data.get("ranked_candidates") or [{}])[0]
+
+    print(f"Query   : {query}")
+    print(f"Top hit : {top.get('candidate', 'N/A')}"
+          f" (score: {top.get('relevance_score', 0):.3f})")
+    added = set(extra_fields)
+    found = added & set(profile)
+    print(f"Override: added {added} — {'found' if found == added else 'MISSING'} in response")
+    print()
+    for k, v in profile.items():
+        tag = " ← injected" if k in added else ""
+        print(f"  {k}: {v}{tag}")
 
 
 # ---------------------------------------------------------------------------
@@ -170,12 +244,13 @@ def save_campaign_winner(
             winner = rd["prompt_state"]
             winner_acc = rd["accuracy"]
 
+    baseline_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else None
     save_data = {
         "winner": winner.model_dump(),
         "accuracy": winner_acc,
         "campaign_rounds": len(campaign_rounds),
-        "baseline_accuracy": campaign_rounds[0]["accuracy"],
-        "improvement": winner_acc - campaign_rounds[0]["accuracy"],
+        "baseline_accuracy": baseline_acc,
+        "improvement": (winner_acc - baseline_acc) if baseline_acc is not None else None,
         "config": campaign_config,
         "saved_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -382,7 +457,12 @@ def load_or_create_datasets(
             result = {"train": existing["items"]}
             for name in ("test_processes", "test_material"):
                 ds = store.datasets.load(backend_id, name)
-                result[name] = ds["items"] if ds else []
+                if ds:
+                    result[name] = ds["items"]
+                else:
+                    result[name] = []
+                    print(f"  WARNING: {name} not found on disk"
+                          " — run with force=True to recreate")
             total = sum(len(v) for v in result.values())
             print(f"Loaded stored datasets: {total} total rows")
             for name, items in result.items():
@@ -445,6 +525,13 @@ def analyze_candidate_coverage(replay_results: list) -> pd.DataFrame:
     rank_dist = result["rank_distribution"]
 
     cov_df = pd.DataFrame(rows)
+
+    if total_cov == 0 and replay_results:
+        print("CANDIDATE COVERAGE")
+        print("=" * 50)
+        print(f"  No pipeline data in {len(replay_results)} items.")
+        print("  Run baseline eval first to get coverage analysis.")
+        return cov_df
 
     print("CANDIDATE COVERAGE")
     print("=" * 50)
@@ -509,12 +596,21 @@ async def run_baseline_eval(
 
     def _on_result(result, index, total):
         pbar.total = total
-        tag = "HIT " if result["hit"] else "MISS"
+        if result.get("cached"):
+            tag = "HIT+" if result["hit"] else "MISS+"
+        else:
+            tag = "HIT " if result["hit"] else "MISS"
+        pred = result["predicted"][:35]
+        if result.get("error"):
+            pred = f"ERROR: {result['error'][:50]}"
         tqdm.write(
             f"[{index + 1}/{total}] {tag}  {result['query'][:50]:<50s} "
-            f"| pred: {result['predicted'][:35]:<35s}"
+            f"| {pred:<55s}"
         )
         pbar.update(1)
+
+    from api.services.obs.observability_logger import ObsLogger
+    _obs = ObsLogger(svc["store"].base_dir, svc.get("backend_id", ""), langfuse=None)
 
     campaign_rounds, baseline_results = await _run_baseline_eval(
         baseline, eval_data, svc.get("backend_client"),
@@ -523,6 +619,8 @@ async def run_baseline_eval(
         experiment_id=svc.get("experiment_id", ""),
         model=model, temperature=temperature,
         on_result=_on_result,
+        session_terms=svc.get("session_terms"),
+        obs=_obs,
     )
     pbar.close()
 
@@ -607,11 +705,13 @@ def load_grid_plan_results(
     eval_queries_per_point: int = 0,
     shared_queries: bool = True,
     seed: int = 42,
+    pipeline_params: dict | None = None,
 ) -> "pd.DataFrame | None":
     """Load stored eval results for a grid plan and return a results DataFrame."""
     df = _load_grid_plan_results(
         store, backend_id, plan_id, eval_data,
         eval_queries_per_point, shared_queries, seed,
+        pipeline_params=pipeline_params,
     )
     if df is not None:
         plan_data = store.grid_plans.load(backend_id, plan_id)
@@ -646,6 +746,7 @@ def show_grid_overview(
     eval_queries_per_point = gs.get("eval_queries_per_point", 0)
     shared_queries_flag = gs.get("shared_queries", True)
     seed = gs.get("seed", 42)
+    _pp = campaign_config.get("pipeline_params")
 
     plan_dfs: dict = {}
     if plans:
@@ -658,6 +759,7 @@ def show_grid_overview(
                 eval_queries_per_point=eval_queries_per_point,
                 shared_queries=shared_queries_flag,
                 seed=seed,
+                pipeline_params=_pp,
             )
             if df is not None and len(df) > 0:
                 plan_dfs[p["plan_id"]] = df
@@ -780,6 +882,7 @@ async def run_grid_search(
     eval_plan = _resolve_point_evals(
         grid_points, state_lookup, eval_data,
         eval_queries_per_point, shared_queries, grid_seed,
+        pipeline_params=pipeline_params,
     )
     n_stored = 0
     if store and backend_id:
@@ -1132,6 +1235,7 @@ async def resume_or_build_diagnostic(
     backend_id: str,
     eval_data: list,
     improvement_areas: str = "",
+    variant_library: dict | None = None,
 ) -> tuple[str, PromptState, list, dict, list]:
     """Resume or build smart search diagnostic set.
 
@@ -1142,6 +1246,7 @@ async def resume_or_build_diagnostic(
         campaign_config, baseline, baseline_results, llm_client, model,
         store, backend_id, eval_data,
         improvement_areas=improvement_areas,
+        variant_library=variant_library,
     )
     plan_id, search_baseline, diagnostic, diag_summary, axis_profiles = result
 
@@ -1298,6 +1403,122 @@ def show_data_inventory(
     return inv
 
 
+async def scan_advisor(
+    pipeline_schema,
+    variant_library: dict,
+    baseline_results: list,
+    eval_data_size: int,
+    llm_client: "LLMClientBase",
+    model: str = "",
+    query_budget: int = 120,
+    coverage_stats: dict | None = None,
+    excluded_steps: set[str] | None = None,
+    task_description: str = "",
+) -> dict:
+    """LLM-powered scan configuration advice.
+
+    Analyzes the pipeline and recommends which axes to focus the sensitivity
+    scan on. Run BEFORE the scan to guide axis selection and budget allocation.
+
+    Returns:
+        Advisory dict with priority_axes, suggested_n_diagnostic,
+        axes_to_skip, budget_breakdown, and reasoning.
+    """
+    print("=" * 70)
+    print("SCAN ADVISOR — pipeline-aware sensitivity setup")
+    print("=" * 70)
+    print(f"  Pipeline: {pipeline_schema.name} ({pipeline_schema.version})")
+    print(f"  Steps: {[s.name for s in pipeline_schema.steps]}")
+    if excluded_steps:
+        print(f"  Excluded: {sorted(excluded_steps)}")
+    print(f"  Eval data size: {eval_data_size} queries")
+    print(f"  Query budget: {query_budget}")
+    if task_description:
+        print(f"  Task context: {task_description[:80].strip()}...")
+    print(f"  Calling {model or '?'} ...")
+    print()
+
+    advisory = await _advise_scan_config(
+        pipeline_schema=pipeline_schema,
+        variant_library=variant_library,
+        baseline_results=baseline_results,
+        eval_data_size=eval_data_size,
+        llm_client=llm_client,
+        model=model,
+        query_budget=query_budget,
+        coverage_stats=coverage_stats,
+        excluded_steps=excluded_steps,
+        task_description=task_description,
+    )
+
+    # Display results
+    print(f"{'─' * 70}")
+    print("PRIORITY AXES (ranked by importance)")
+    print(f"{'─' * 70}")
+    for i, ax in enumerate(advisory.get("priority_axes", []), 1):
+        imp = ax.get("importance", "?").upper()
+        src = ax.get("source", "?")
+        label = f"[{imp}] {ax.get('axis', '?')} ({src})"
+        if ax.get("step"):
+            label += f" — step: {ax['step']}"
+        print(f"  {i}. {label}")
+        print(f"     {ax.get('rationale', '')}")
+        if ax.get("suggested_values"):
+            print(f"     Values: {ax['suggested_values']}")
+
+    skipped = advisory.get("axes_to_skip", [])
+    if skipped:
+        print(f"\n{'─' * 70}")
+        print("AXES TO SKIP")
+        print(f"{'─' * 70}")
+        for ax in skipped:
+            print(f"  - {ax.get('axis', '?')}: {ax.get('reason', '?')}")
+
+    budget = advisory.get("budget_breakdown", {})
+    if budget:
+        print(f"\n{'─' * 70}")
+        print("BUDGET BREAKDOWN")
+        print(f"{'─' * 70}")
+        for k, v in budget.items():
+            print(f"  {k}: {v}")
+
+    n_diag = advisory.get("suggested_n_diagnostic", 6)
+    print(f"\n  Suggested n_diagnostic: {n_diag}")
+
+    reasoning = advisory.get("reasoning", "")
+    if reasoning:
+        print(f"\n{'─' * 70}")
+        print("REASONING")
+        print(f"{'─' * 70}")
+        print(f"  {reasoning}")
+
+    warnings = advisory.get("validation_warnings", [])
+    if warnings:
+        print(f"\n{'─' * 70}")
+        print("VALIDATION WARNINGS")
+        print(f"{'─' * 70}")
+        for w in warnings:
+            print(f"  ⚠ {w}")
+
+    print("=" * 70)
+
+    return advisory
+
+
+def advisory_to_scan_variants(advisory: dict) -> dict:
+    """Convert scan advisory into editable pipeline_params dict.
+
+    Extracts ``priority_axes`` entries whose ``source`` is ``"pipeline_param"``
+    and that carry ``suggested_values``.  Returns a dict the user can edit
+    before passing to the sensitivity scan as ``variant_library["pipeline_params"]``.
+    """
+    params: dict[str, list] = {}
+    for ax in advisory.get("priority_axes", []):
+        if ax.get("source") == "pipeline_param" and ax.get("suggested_values"):
+            params[ax["axis"]] = ax["suggested_values"]
+    return params
+
+
 async def sensitivity_scan(
     baseline_ps,
     variant_library: dict,
@@ -1310,12 +1531,18 @@ async def sensitivity_scan(
     session_terms: list | None = None,
     plan_id: str = "",
     prompt_result_index: dict | None = None,
+    partial_scan: dict | None = None,
+    pipeline_schema=None,
 ) -> tuple:
     """Run a sensitivity scan over all axes with progress output.
 
     Returns (per_variant_df, axis_profiles).
     """
-    print("Running sensitivity scan...")
+    if partial_scan:
+        n_done = len(partial_scan.get("completed_axes", []))
+        print(f"Resuming sensitivity scan ({n_done} axes already done)...")
+    else:
+        print("Running sensitivity scan...")
     if user_focus:
         print(f"  User focus: {user_focus}")
 
@@ -1348,6 +1575,12 @@ async def sensitivity_scan(
     _prev_httpcore = _httpcore_log.level
     _httpx_log.setLevel(logging.WARNING)
     _httpcore_log.setLevel(logging.WARNING)
+
+    # Rebuild prompt_result_index from current disk state to avoid ghost cache hits
+    if store and backend_id:
+        from api.services.search.coverage import build_prompt_result_index
+        prompt_result_index = build_prompt_result_index(store, backend_id)
+
     try:
         print("  Evaluating baseline...")
         df, profiles = await _sensitivity_scan(
@@ -1359,6 +1592,8 @@ async def sensitivity_scan(
             progress_cb=cb,
             prompt_result_index=prompt_result_index,
             plan_id=plan_id,
+            partial_scan=partial_scan,
+            pipeline_schema=pipeline_schema,
         )
     finally:
         _httpx_log.setLevel(_prev_httpx)
@@ -1368,6 +1603,25 @@ async def sensitivity_scan(
     display_axis_profiles(profiles)
 
     return df, profiles
+
+
+def _fmt_query_result(r: dict, cached: bool = False) -> str:
+    """Format a single query result as a HIT/MISS line with timing."""
+    q = (r.get("query") or "")[:45]
+    tag = "HIT " if r.get("hit") else "MISS"
+    pred = (r.get("predicted") or "")[:35]
+    err = r.get("error")
+
+    if cached:
+        time_str = " \u26a1"  # cached marker
+    else:
+        pd = r.get("pipeline_data") or {}
+        tt = pd.get("total_time")
+        time_str = f" {tt:.1f}s" if tt is not None else ""
+
+    if err:
+        return f"        {tag}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
+    return f"        {tag}  {q:<45s}  -> {pred}{time_str}"
 
 
 def _make_scan_progress_cb():
@@ -1380,9 +1634,12 @@ def _make_scan_progress_cb():
         if t == "baseline_done":
             baseline_results.clear()
             baseline_results.extend(event.get("results", []))
-            cached = " [cached]" if event.get("cached") else ""
+            is_cached = event.get("cached", False)
+            cached = " [cached]" if is_cached else ""
             print(f"  Baseline: {event['hits']}/{event['total']} "
                   f"({event['accuracy']:.1%}){cached}")
+            for r in baseline_results:
+                print(_fmt_query_result(r, cached=is_cached))
 
         elif t == "axis_start":
             ai = event["axis_index"] + 1
@@ -1421,17 +1678,8 @@ def _make_scan_progress_cb():
                   f"{acc:.1%}  {delta_str}{marker}{cache_str}")
 
             results = event.get("results", [])
-            if results and baseline_results and not is_bl:
-                for br, vr in zip(baseline_results, results):
-                    b_hit = br.get("hit", False)
-                    v_hit = vr.get("hit", False)
-                    if b_hit != v_hit:
-                        q = (vr.get("query") or "")[:40]
-                        pred = (vr.get("predicted") or "")[:35]
-                        if v_hit:
-                            print(f"        GAINED  {q:<40s}  -> {pred}")
-                        else:
-                            print(f"        LOST    {q:<40s}  -> {pred}")
+            for vr in results:
+                print(_fmt_query_result(vr, cached=cached))
 
         elif t == "axis_done":
             budget = event["exploration_budget"]
@@ -1605,14 +1853,8 @@ def select_scan_winner_notebook(
     """
     # Load scan rows from plan if scan_df not in memory
     if scan_df is None and store and backend_id and plan_id:
-        from api.services.search.plan_persistence import deserialize_smart_search_plan
-
-        plan_data = store.smart_search.load(backend_id, plan_id)
-        if plan_data:
-            plan = deserialize_smart_search_plan(plan_data)
-            rows = (plan.get("scan_results") or {}).get("rows", [])
-            if rows:
-                scan_df = pd.DataFrame(rows)
+        from api.services.search.smart_search import load_scan_results_from_plan
+        scan_df = load_scan_results_from_plan(store, backend_id, plan_id)
 
     if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
         print("No scan data available. Run sensitivity scan (4.5b) first.")
@@ -1721,10 +1963,10 @@ async def run_feedback_cycle_notebook(
     session_terms: "list[str] | None" = None,
     langfuse_session_id: str | None = None,
 ) -> list:
-    """Run optimization via M3 feedback cycle (node-based architecture).
+    """Run optimization via feedback cycle with optional L2/L3 escalation.
 
-    Drop-in replacement for ``run_optimization_loop()`` — accepts and returns
-    the same ``campaign_rounds`` list format for downstream notebook sections.
+    Accepts and returns the ``campaign_rounds`` list format for downstream
+    notebook sections.
 
     Internally uses InitNode → GrowFilterNode → AnalysisEvalNode with Langfuse
     tracing and ``next_action`` routing.

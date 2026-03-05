@@ -1,7 +1,7 @@
 # TermNorm Connector
 
-**Version:** 0.6.0
-**Date:** 2026-02-22
+**Version:** 0.7.0
+**Date:** 2026-03-04
 
 Validated connector contract for TermNorm backend integration.
 
@@ -52,21 +52,7 @@ Full pipeline execution for a single query. Four-stage pipeline:
 3. **token_matching** — deterministic token-overlap scoring against session terms
 4. **llm_ranking** (LLM2) — LLM reranks token-matched candidates using entity profile
 
-**Request:**
-```json
-{
-  "query": "Kupferblech CW004A / Laserschneiden",
-  "skip_llm_ranking": false
-}
-```
-
-Set `skip_llm_ranking: true` to skip stage 4 and return raw token-match scores.
-
-#### Pipeline Step Control (`steps`)
-
-The `steps` parameter controls which pipeline stages execute. When provided, it takes precedence over `skip_llm_ranking`. When absent, the backend falls back to `skip_llm_ranking` (full backward compatibility).
-
-**Request with `steps` (shortened pipeline — no LLM reranking):**
+**Request (shortened pipeline — no LLM reranking):**
 ```json
 {
   "query": "Kupferblech CW004A / Laserschneiden",
@@ -74,7 +60,7 @@ The `steps` parameter controls which pipeline stages execute. When provided, it 
 }
 ```
 
-**Request with `steps` (full pipeline):**
+**Request (full pipeline):**
 ```json
 {
   "query": "Kupferblech CW004A / Laserschneiden",
@@ -83,54 +69,70 @@ The `steps` parameter controls which pipeline stages execute. When provided, it 
 }
 ```
 
-The response `pipeline_params.steps` echoes the actual steps that ran, regardless of how stage control was specified.
+The response `pipeline_params.steps` echoes the actual steps that ran.
 
 | Step name | Always runs | Description |
 |-----------|-------------|-------------|
 | `web_search` | Yes | External web search and page scraping |
 | `entity_profiling` | Yes | LLM builds structured entity profile |
 | `token_matching` | Yes | Deterministic token-overlap scoring |
-| `llm_ranking` | No | LLM reranks candidates (controlled by `steps` or `skip_llm_ranking`) |
+| `llm_ranking` | No | LLM reranks candidates (controlled by `steps`) |
 
-#### Pipeline Parameter Overrides
+#### Pipeline Parameter Overrides (`node_overrides`)
 
-PromptPotter forwards `pipeline_params` into the `/matches` request body, giving the optimizer control over every influential knob. All parameters are optional and fall back to their defaults when omitted.
+PromptPotter controls backend pipeline behavior through **`node_overrides`** — structured per-node override dicts that mirror the backend's `GET /pipeline` config shape. `run_match()` in `backend_client.py` translates PromptPotter's internal flat param names (e.g. `ranking_temperature`) to `node_overrides` format at the HTTP boundary. The backend only accepts `node_overrides`.
 
-| Parameter | Default | Stage | Description |
-|-----------|---------|-------|-------------|
-| `max_sites` | `7` | Web scraping | Number of pages fetched and scraped |
-| `num_results` | `20` | Web search | Search result count (Brave / SearXNG) |
-| `content_char_limit` | `800` | Web scraping | Max characters kept per scraped page |
-| `raw_content_limit` | `5000` | Entity profiling | Total research text sent to LLM1 |
-| `profiling_temperature` | `0.3` | Entity profiling | LLM1 temperature |
-| `profiling_max_tokens` | `1800` | Entity profiling | LLM1 output token limit |
-| `ranking_prompt` | (registry default) | LLM ranking | Full LLM2 prompt template override. When provided, replaces the prompt from TermNorm's prompt registry. Used by PromptPotter to inject candidate prompts during optimization. |
-| `ranking_temperature` | `0` | LLM ranking | LLM2 temperature |
-| `ranking_max_tokens` | `4000` | LLM ranking | LLM2 output token limit |
-| `ranking_sample_size` | `20` | LLM ranking | Candidates sampled for LLM2 |
-| `max_token_candidates` | `20` | Token matching | Candidates kept from token matching |
-| `relevance_weight_core` | `0.7` | Scoring | Weight of core concept score (`spec_score` gets `1 - weight`) |
-
-**Example request with pipeline parameter overrides:**
+**Example request:**
 ```json
 {
   "query": "Kupferblech CW004A / Laserschneiden",
-  "skip_llm_ranking": false,
-  "max_sites": 3,
-  "profiling_temperature": 0.1,
-  "ranking_sample_size": 15,
-  "relevance_weight_core": 0.8
+  "steps": ["web_search", "entity_profiling", "token_matching", "llm_ranking"],
+  "node_overrides": {
+    "entity_profiling": {
+      "prompt": "Custom profiling prompt with {{query}} {{format_string}} {{combined_text}}",
+      "temperature": 0.5,
+      "max_tokens": 2000,
+      "model": "gpt-4o"
+    },
+    "llm_ranking": {
+      "prompt": "Custom ranking prompt with {{core_concept}} {{entity_profile_json}} {{matches}}",
+      "temperature": 0.0,
+      "sample_size": 15,
+      "model": "gpt-4o"
+    },
+    "web_search": {
+      "max_sites": 3,
+      "num_results": 10,
+      "query_suffix": "material datasheet"
+    }
+  }
 }
 ```
 
-**Example request with ranking prompt override (grid search / optimization):**
-```json
-{
-  "query": "Kupferblech CW004A / Laserschneiden",
-  "skip_llm_ranking": false,
-  "ranking_prompt": "You are a domain expert...\n\nGiven the entity profile:\n{{entity_profile_json}}\n\nRank these candidates:\n{{matches}}\n\n..."
-}
-```
+**`node_overrides` key mapping** (internal flat name = what PromptPotter uses internally, translated by `run_match()`):
+
+| Node | Override key | Internal flat name |
+|------|-------------|----------------------|
+| `entity_profiling` | `prompt` | `profiling_prompt` |
+| `entity_profiling` | `output_schema` | `profiling_schema` |
+| `entity_profiling` | `model` | `profiling_model` |
+| `entity_profiling` | `temperature` | `profiling_temperature` |
+| `entity_profiling` | `max_tokens` | `profiling_max_tokens` |
+| `llm_ranking` | `prompt` | `ranking_prompt` |
+| `llm_ranking` | `output_schema` | `ranking_schema` |
+| `llm_ranking` | `model` | `ranking_model` |
+| `llm_ranking` | `temperature` | `ranking_temperature` |
+| `llm_ranking` | `max_tokens` | `ranking_max_tokens` |
+| `llm_ranking` | `sample_size` | `ranking_sample_size` |
+| `web_search` | `max_sites` | `max_sites` |
+| `web_search` | `num_results` | `num_results` |
+| `web_search` | `content_char_limit` | `content_char_limit` |
+| `web_search` | `query_prefix` | `query_prefix` |
+| `web_search` | `query_suffix` | `query_suffix` |
+| `fuzzy_matching` | `threshold` | `fuzzy_threshold` |
+| `fuzzy_matching` | `scorer` | `fuzzy_scorer` |
+| `token_matching` | `max_token_candidates` | `max_token_candidates` |
+| `token_matching` | `relevance_weight_core` | `relevance_weight_core` |
 
 **Response:**
 ```json
@@ -175,93 +177,156 @@ PromptPotter forwards `pipeline_params` into the `/matches` request body, giving
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `ranked_candidates` | `list[dict]` | LLM-ranked results (or token-match results if `skip_llm_ranking=true`). Top-1 is the prediction. |
+| `ranked_candidates` | `list[dict]` | LLM-ranked results (or token-match results if `llm_ranking` not in `steps`). Top-1 is the prediction. |
 | `entity_profile` | `dict` | Structured profile from web research (LLM1). Contains `core_concept`, `entity_category`, `materials`, `processes`, `specifications`, `aliases`, and more. |
 | `token_matched_candidates` | `list[tuple]` | Raw `[term, score]` pairs from deterministic token matching (up to 20). These are the candidates fed to LLM2. |
-| `llm_provider` | `string` | Provider/model used for ranking (e.g. `groq/llama-4-maverick`). `null` when `skip_llm_ranking=true`. |
+| `llm_provider` | `string` | Provider/model used for ranking (e.g. `groq/llama-4-maverick`). `null` when `llm_ranking` not in `steps`. |
 | `total_time` | `float` | Wall-clock seconds for the full pipeline. |
 | `web_search_status` | `string` | `"success"` or `"failed"` for the web research step. |
 | `web_search_error` | `string\|null` | Error message if web search failed, else `null`. |
 
-#### `skip_llm_ranking` Behavior (legacy)
-
-**Preferred:** Use `steps` to control which stages execute. `skip_llm_ranking` is supported for backward compatibility.
-
-When `true` (or when `steps` omits `"llm_ranking"`), the pipeline stops after token matching. `ranked_candidates` contains raw token-match results formatted as:
+When `steps` omits `"llm_ranking"`, the pipeline stops after token matching. `ranked_candidates` contains raw token-match results formatted as:
 ```json
 { "candidate": "term", "relevance_score": 0.85, "core_concept_score": 0.85, "spec_score": 0 }
 ```
-`entity_profile` is still computed (web research always runs). `llm_provider` is `null`.
+`entity_profile` is still computed (if `entity_profiling` is in `steps`). `llm_provider` is `null`.
 
 ### `GET /pipeline` — Discover Pipeline Schema
 
-Returns the full pipeline topology with typed steps, input/output signatures, and tunable parameter schema. This is the **discovery endpoint** — PromptPotter calls it to learn what the backend's pipeline looks like and which parameters are available for optimization, instead of hardcoding knowledge of the pipeline structure.
+Returns the full pipeline configuration with typed nodes, tunable parameters, named pipeline variants, and **resolved registry metadata** (schemas + prompts). This is the **discovery endpoint** — PromptPotter calls it to learn what the backend's pipeline looks like and which parameters, schemas, and prompts are available, instead of hardcoding knowledge of the pipeline structure.
 
-**Response:**
+**Response (abbreviated):**
 ```json
 {
-  "name": "TermNormPipeline",
-  "version": "production_v1",
-  "steps": [
-    {
-      "name": "web_search",
-      "type": "ExternalService",
-      "signature": { "input_fields": ["query"], "output_fields": ["web_content"] },
-      "config": {}
-    },
-    {
-      "name": "entity_profiling",
-      "type": "LLMGeneration",
-      "signature": { "input_fields": ["query", "web_content"], "output_fields": ["entity_profile"] },
-      "config": { "model": "...", "temperature": 0.0, "prompt_version": "production_v1" }
-    },
-    {
-      "name": "token_matching",
+  "name": "TermNorm",
+  "version": "v1.1",
+  "nodes": {
+    "fuzzy_matching": {
       "type": "DeterministicFunction",
-      "signature": { "input_fields": ["entity_profile"], "output_fields": ["candidates"] },
-      "config": { "fuzzy_threshold": 0.7 }
+      "short_circuit": true,
+      "config": { "threshold": 70, "scorer": "WRatio", "limit": 5 }
     },
-    {
-      "name": "llm_ranking",
+    "web_search": {
+      "type": "ExternalService",
+      "config": { "max_sites": 7, "num_results": 20, "content_char_limit": 800, "query_prefix": "", "query_suffix": "", "..." : "..." }
+    },
+    "entity_profiling": {
       "type": "LLMGeneration",
-      "signature": { "input_fields": ["entity_profile", "candidates"], "output_fields": ["ranked_list"] },
-      "config": { "model": "...", "temperature": 0.0, "prompt_version": "reranker_v1" }
+      "config": {
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "temperature": 0.3, "max_tokens": 1800, "output_format": "json",
+        "prompt_family": "entity_profiling", "prompt_version": 1,
+        "schema_family": "entity_profile", "schema_version": 1
+      }
+    },
+    "token_matching": {
+      "type": "DeterministicFunction",
+      "config": { "max_token_candidates": 20, "relevance_weight_core": 0.7, "..." : "..." }
+    },
+    "llm_ranking": {
+      "type": "LLMGeneration",
+      "config": {
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "temperature": 0.0, "max_tokens": 4000, "ranking_sample_size": 20,
+        "prompt_family": "llm_ranking", "prompt_version": 1,
+        "schema_family": "llm_ranking_output", "schema_version": 1
+      }
     }
-  ],
-  "parameters": [
-    { "name": "max_sites", "type": "int", "default": 7, "step": "web_search", "description": "Number of pages fetched and scraped" },
-    { "name": "num_results", "type": "int", "default": 20, "step": "web_search", "description": "Search result count" },
-    { "name": "content_char_limit", "type": "int", "default": 800, "step": "web_search", "description": "Max chars kept per scraped page" },
-    { "name": "raw_content_limit", "type": "int", "default": 5000, "step": "entity_profiling", "description": "Total research text sent to LLM1" },
-    { "name": "profiling_temperature", "type": "float", "default": 0.3, "step": "entity_profiling", "description": "LLM1 temperature" },
-    { "name": "profiling_max_tokens", "type": "int", "default": 1800, "step": "entity_profiling", "description": "LLM1 output token limit" },
-    { "name": "ranking_temperature", "type": "float", "default": 0, "step": "llm_ranking", "description": "LLM2 temperature" },
-    { "name": "ranking_max_tokens", "type": "int", "default": 4000, "step": "llm_ranking", "description": "LLM2 output token limit" },
-    { "name": "ranking_sample_size", "type": "int", "default": 20, "step": "llm_ranking", "description": "Candidates sampled for LLM2" },
-    { "name": "ranking_prompt", "type": "string", "default": null, "step": "llm_ranking", "description": "Full LLM2 prompt template override" },
-    { "name": "max_token_candidates", "type": "int", "default": 20, "step": "token_matching", "description": "Candidates kept from token matching" },
-    { "name": "relevance_weight_core", "type": "float", "default": 0.7, "step": "token_matching", "description": "Weight of core concept score" }
-  ]
+  },
+  "pipelines": {
+    "default": ["web_search", "entity_profiling", "token_matching", "llm_ranking"],
+    "with_fuzzy": ["fuzzy_matching", "web_search", "entity_profiling", "token_matching", "llm_ranking"],
+    "fuzzy_only": ["fuzzy_matching"]
+  },
+  "llm_defaults": { "provider": "groq", "model": "...", "timeout": 60, "retry_attempts": 3 },
+  "batch_overrides": { "max_sites": 5, "verbose": false },
+  "resolved_schemas": {
+    "entity_profile/1": {
+      "family": "entity_profile", "version": 1,
+      "description": "Entity profile extraction schema for web research pipeline",
+      "fields": ["entity_name", "core_concept", "distinguishing_features", "..."],
+      "json_schema": { "type": "object", "properties": { "...": "..." }, "required": ["..."] }
+    },
+    "llm_ranking_output/1": {
+      "family": "llm_ranking_output", "version": 1,
+      "description": "LLM ranking step output schema",
+      "fields": ["profile_summary", "core_concept_description", "ranked_candidates"],
+      "json_schema": { "...": "..." }
+    }
+  },
+  "resolved_prompts": {
+    "entity_profiling/1": {
+      "family": "entity_profiling", "version": 1,
+      "description": "Extract comprehensive entity profile from web research data",
+      "template_variables": ["query", "format_string", "combined_text"],
+      "template": "You are a comprehensive technical database API..."
+    },
+    "llm_ranking/1": {
+      "family": "llm_ranking", "version": 1,
+      "description": "Rank candidate matches based on entity profile relevance",
+      "template_variables": ["core_concept", "entity_profile_json", "matches"],
+      "template": "You are a candidate evaluation expert..."
+    }
+  }
 }
 ```
 
-**Step types:**
+**Node types:**
 
 | Type | Description |
 |------|-------------|
 | `ExternalService` | External API call (web search, scraping) — no LLM involved |
-| `LLMGeneration` | LLM inference step with prompt, temperature, and token limits |
-| `DeterministicFunction` | Pure computation — same input always produces same output |
+| `LLMGeneration` | LLM inference step. Carries `prompt_family`/`prompt_version` and optionally `schema_family`/`schema_version` references into registries. |
+| `DeterministicFunction` | Pure computation — same input always produces same output. May have `short_circuit: true` (stops pipeline on hit). |
 
-**Parameter schema fields:**
+**Top-level response sections:**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | `string` | Parameter name (matches the key in `/matches` request body) |
-| `type` | `string` | Data type: `int`, `float`, `string` |
-| `default` | `any` | Default value used when omitted from `/matches` request |
-| `step` | `string` | Which pipeline step this parameter controls |
-| `description` | `string` | Human-readable description |
+| Section | Description |
+|---------|-------------|
+| `nodes` | Node definitions with type, config, and optional `short_circuit` flag |
+| `pipelines` | Named pipeline variants — ordered lists of node names to execute |
+| `llm_defaults` | Default LLM provider, model, timeout, retry settings |
+| `batch_overrides` | Parameter overrides applied during batch processing |
+| `resolved_schemas` | Output schemas resolved from the schema registry, keyed by `{family}/{version}` |
+| `resolved_prompts` | Prompt templates resolved from the prompt registry, keyed by `{family}/{version}` |
+
+#### Registry Metadata Resolution
+
+LLMGeneration nodes reference schemas and prompts by family + version (e.g. `schema_family: "entity_profile"`, `schema_version: 1`). The `GET /pipeline` handler resolves these references from TermNorm's on-disk registries via `_enrich_with_registries()`:
+
+- **Schema registry** (`logs/schemas/{family}/{version}/`): `schema.json` (full JSON schema) + `metadata.json` (family, version, description, fields)
+- **Prompt registry** (`logs/prompts/{family}/{version}/`): `prompt.txt` (template) + `metadata.json` (family, version, template_variables, description)
+
+Resolved artifacts appear in `resolved_schemas` and `resolved_prompts` as top-level dicts. Node configs are NOT modified — they keep the `schema_family`/`prompt_family` references. Missing registrations are silently skipped (debug logged).
+
+**Key principle:** Registry defaults are committed to git (not runtime-initialized). TermNorm owns these artifacts; PromptPotter consumes them from the live response and never hardcodes them.
+
+### `GET /status` — Server Status
+
+Returns current server state for external tools. Aggregates session, match database, experiment, and pipeline info.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "session_active": true,
+    "active_sessions": 1,
+    "terms_loaded": 847,
+    "match_database_identifiers": 1200,
+    "match_database_aliases": 3500,
+    "experiments_count": 2,
+    "mappings_count": 150,
+    "experiments": [
+      { "id": "1_production_historical", "mappings": 100 },
+      { "id": "2_evaluation_run", "mappings": 50 }
+    ],
+    "pipeline_version": "v1.1",
+    "llm_provider": "groq",
+    "llm_model": "meta-llama/llama-4-maverick-17b-128e-instruct"
+  }
+}
+```
 
 ### `GET /experiments` — List Experiments
 
@@ -328,25 +393,30 @@ The pipeline topology and all tunable parameters are discoverable via `GET /pipe
 
 ### Discovery-Driven Pipeline Protocol
 
-PromptPotter uses a three-step discovery protocol to optimize backend pipelines without hardcoding knowledge of their structure:
+PromptPotter uses a discovery-driven protocol to optimize backend pipelines without hardcoding knowledge of their structure:
 
-1. **Discover** — `GET /pipeline` returns the pipeline topology (steps, types, signatures) and tunable parameter schema (names, types, defaults, which step each belongs to). PromptPotter learns what the pipeline looks like and what knobs are available.
+1. **Discover** — `GET /pipeline` returns the pipeline topology (nodes, types, configs), tunable parameters, and **resolved registry metadata** (output schemas, prompt templates). `parse_pipeline_response()` merges this live metadata onto the known pipeline schema — live always wins over any static defaults.
 
-2. **Load eval data** — `GET /experiments/{id}/mappings` returns ground-truth query→answer pairs for scoring. (Already exists, no changes needed.)
+2. **Load eval data** — `GET /experiments/{id}/mappings` returns ground-truth query→answer pairs for scoring.
 
-3. **Generate + evaluate** — The notebook (or API) uses the discovered `parameters` schema to generate new parameter combinations, then sends each configuration one-by-one to `POST /matches` with the parameter overrides. Results are scored against the eval data from step 2.
+3. **Filter axes** — `filter_variant_library()` drops optimization axes not owned by active pipeline steps (e.g. drops `prompt_fields` when `llm_ranking` is inactive). The scan advisor uses the enriched schema (output schema fields + prompt metadata) to recommend which axes to explore.
+
+4. **Generate + evaluate** — The notebook uses the discovered schema to generate parameter combinations, then sends each to `POST /matches` with overrides. Results are scored against eval data.
 
 ```
 PromptPotter                              TermNorm
     │                                        │
     ├── GET /pipeline ──────────────────────►│
-    │◄── pipeline topology + parameter schema│
+    │◄── nodes + resolved_schemas/prompts    │
+    │                                        │
+    │  [parse_pipeline_response() merges     │
+    │   live metadata onto PipelineSchema]   │
+    │                                        │
+    │  [filter_variant_library() drops       │
+    │   axes not in active pipeline]         │
     │                                        │
     ├── GET /experiments/{id}/mappings ─────►│
     │◄── eval data (query → ground truth)    │
-    │                                        │
-    │  [generate param combinations from     │
-    │   discovered schema]                   │
     │                                        │
     ├── POST /matches { params_1 } ────────►│
     │◄── results_1                           │
@@ -357,7 +427,7 @@ PromptPotter                              TermNorm
     │  [score results, select winner]        │
 ```
 
-This replaces any hardcoded knowledge of TermNorm's pipeline structure (step count, parameter names, defaults) with runtime discovery. New parameters added to TermNorm are automatically available to PromptPotter without code changes.
+This replaces any hardcoded knowledge of TermNorm's pipeline structure with runtime discovery. New parameters, schemas, or prompts added to TermNorm are automatically available to PromptPotter without code changes.
 
 ### Evaluation Mode
 

@@ -1,7 +1,7 @@
 # Architecture Design Document: PromptPotter Optimizer
 
-**Version:** 0.9.0
-**Date:** 2026-02-27
+**Version:** 0.10.0
+**Date:** 2026-03-05
 **Status:** Active
 **Depends on:** [Project Charter v0.7.0](project-charter.md), [PRD v0.9.0](prd.md)
 
@@ -18,8 +18,8 @@
             v                           v
 +-----------+-----------+  +------------+-------------------+
 | _campaign_lib.py      |  |  FastAPI (api/main.py)         |
-| (tqdm, IPython,       |  |  backends / workflows / health |
-|  progress display)    |  |  / campaigns routers           |
+| (tqdm, IPython,       |  |  backends (+pipeline discovery)|
+|  progress display)    |  |  workflows / health / campaigns|
 +-----------+-----------+  +--------------------------------+
             |                           |
             +-------------+-------------+
@@ -50,7 +50,7 @@
 ```
 
 - **Notebooks** are the primary optimization interface. `_campaign_lib.py` wraps services with progress bars; no business logic.
-- **The API** provides backend management, experiment sync, pipeline replay, and statistical comparison.
+- **The API** provides backend management, experiment sync, and pipeline discovery.
 - **LLM providers** handle inference through an OpenAI-compatible client (Groq default, OpenAI alternative).
 - **Langfuse** provides per-trial tracing with accuracy scores and campaign-level grouping.
 
@@ -76,77 +76,15 @@ Each round generates Layer 1 variants. Stopping: `max_rounds`, `patience`, `next
 
 ## Service Architecture
 
-Stateless services; all persistence goes through `ProjectStore`. See [CLAUDE.md](../../CLAUDE.md) service table for the full listing.
-
-Key services:
-
-| Service | Responsibility |
-|---------|---------------|
-| `feedback_cycle.py` | Iterative optimization orchestrator with patience-based stopping, progress callbacks, Langfuse logging |
-| `search/smart_search.py` | Sensitivity scan (OAT perturbation), adaptive search (coordinate descent), axis classification |
-| `search/grid_core.py` | Grid search evaluation engine with content-addressed caching |
-| `search/coverage.py` | Historical index and coverage advisor -- discovers all stored `dataset_runs` for reuse |
-| `prompt_eval.py` | Backend evaluation via `/matches`, content-addressed dedup, incremental `.partial.jsonl` crash recovery, `evaluate_prompt_cached()` as single eval gateway |
-| `prompt_optimizer.py` | LLM meta-prompt candidate generation, winner selection, suggestions |
-| `stores/campaign_store.py` | Campaign/trial lifecycle and persistence |
-| `backend_client.py` | HTTP client for TermNorm backend |
-| `project_store.py` | Facade over focused store modules in `stores/` |
-| `llm_client.py` | `_OpenAICompatibleClient` base. Groq (default), OpenAI. Global singleton. |
-| `langfuse_client.py` | Per-trial tracing, campaign grouping, graceful fallback when credentials missing |
+See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full service catalog, evaluation gateway, and conventions.
 
 ---
 
 ## Data Model
 
-### Core Data Models
+**SearchPoint** bundles `PromptState` + `model` + `temperature` + `pipeline_params` — the four search-space dimensions for one evaluation. **PipelineSchema** (what pipeline) provides the structural context: `f(SearchPoint, PipelineSchema, eval_data) → scores`. See [`api/models/CLAUDE.md`](../../api/models/CLAUDE.md) for field details, derivation methods, and factory patterns.
 
-**PromptState** defines the prompt being optimized. **PipelineSchema** defines the backend pipeline being targeted. Together they parameterize every optimization service: `f(PromptState, PipelineSchema, eval_data) → scores`.
-
-### PromptState
-
-Immutable, versioned prompt configuration in three optimization layers. See [PRD P0.5](prd.md).
-
-- **Layer 1 (Generate):** persona, task_intent, problem_description, instruction, thinking_style, answer_format, few_shot_examples
-- **Layer 2 (Refine Context):** context, parameters (dict)
-- **Layer 3 (Modify Plan):** plan
-- **Metadata:** id (uuid.hex), parent_id, created_at, changes_description
-
-`render()` assembles Layer 1 into prompt text. `derive(**changes)` creates children. `diff(a, b)` produces structured comparison.
-
-### PipelineSchema
-
-Backend-agnostic pipeline description — single source of truth for what the backend pipeline looks like. See [PRD P1.14](prd.md), [M6 spec](m6-workflow-migration.md).
-
-- **`PipelineStep`:** name, type (generation/span/event), param_keys, observation_name
-- **`ObservationMapping`:** obs_name → target_field extraction rules
-- **Derivation methods:** `step_param_keys()`, `obs_extraction_map()`, `template_variables`, `langfuse_type_map()`
-- **Factory:** `pipeline_discovery.py` parses `GET /pipeline` → `PipelineSchema`. Static `TERMNORM_DEFAULT_SCHEMA` for offline use.
-
-Provides derivation methods for 6 pipeline-specific constants (M6 Wave 1). Remaining 7 are covered by `ConnectorProtocol` (M7).
-
-### ProjectStore File Layout
-
-```
-.promptpotter/projects/{backend_id}/
-  backend.json
-  sync/experiments/{exp_id}.json
-  executions/{execution_id}.json
-  dataset_runs.json                # Index (content_hash -> run_id)
-  dataset_runs/{run_id}.json       # Completed eval runs
-  dataset_runs/{run_id}.partial.jsonl  # In-progress (crash recovery)
-  grid_plans/{plan_id}.json
-  smart_search_plans/{plan_id}.json
-  campaigns/{campaign_id}.json     # Metadata + trial index
-  campaigns/{campaign_id}/trial_NNNN.json
-  obs/
-    langfuse/events.jsonl          # flat navigation log (START HERE for data exploration)
-    langfuse/traces/{trace_id}.json
-    langfuse/scores/{trace_id}.jsonl
-    experiments/{campaign_id}/     # MLflow FileStore format (mlflow ui compatible)
-    prompts/{family}/{version}/    # prompt versioning (prompt.txt + metadata.json)
-```
-
-Dataset runs are indexed by content hash. Grid plans and smart search plans use separate identity hashes. Campaign data uses a two-level structure (metadata + trial details).
+**ProjectStore** file layout and store module breakdown: see [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) § "Store layout".
 
 ---
 
@@ -177,23 +115,8 @@ Dataset runs are indexed by content hash. Grid plans and smart search plans use 
 | Langfuse | Python SDK v2 | Implemented |
 | TermNorm backend | HTTP REST (`/matches`, `/pipeline`) | Implemented |
 | ProjectStore | JSON files in `.promptpotter/projects/` | Implemented |
-| Evaluator framework | Python API (ExactMatchEvaluator) | Implemented |
+| Evaluator framework | Python API (ExactMatchEvaluator) | Scaffold (no consumers) |
 | File-based observability | Langfuse trace JSON + MLflow FileStore YAML in `obs/` | Implemented |
 | PipelineSchema | Backend-agnostic pipeline description, derivation methods | Implemented ([M6](m6-workflow-migration.md) WP 6.1) |
 | CWL workflow engine | `WorkflowRunner` with `runtime_config`, YAML workflow definitions | Planned ([M6](m6-workflow-migration.md)) |
 | ConnectorProtocol | `typing.Protocol` abstraction over backend connectors | Planned ([M7](m7-multi-connector.md)) |
-
----
-
-## Validation Scenario: TermNorm
-
-The pinnacle validation is the **TermNorm pipeline variant comparison** (SC5):
-
-- **Variant A**: Web scrape -> LLM1 -> Table Reranker -> done (skip LLM2)
-- **Variant B**: Web scrape -> LLM1 -> Table Reranker -> LLM2 (`llm_ranking`) -> done
-
-**Research question:** Does LLM2 semantic reranking justify the extra cost and latency?
-
-**Benchmark:** BC5CDR 500-term subset (primary), MedMentions 500-term subset (secondary).
-
-**Evaluation constraint:** Each query runs the full pipeline via `/matches` with `ranking_prompt` override (~10-30s/query). A future `/rerank` endpoint would eliminate redundant steps 1-3.

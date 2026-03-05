@@ -1,6 +1,6 @@
 # api/core — Workflow Engine Scaffold
 
-CWL-inspired workflow engine — **future architecture, not dead code**. M6 migration will wrap service-layer functions into workflow nodes.
+CWL-inspired workflow engine — **future architecture, not dead code**. M6 Wave 2 (PipelineSchema) is complete. Remaining M6 waves will wrap service-layer functions into workflow nodes.
 
 ## Key files
 
@@ -11,7 +11,7 @@ CWL-inspired workflow engine — **future architecture, not dead code**. M6 migr
 | `../nodes/__init__.py` | Auto-registration by class name |
 | `../evaluators/` | `EvaluatorBase`, registry, field-level rules |
 | `../models/workflow.py` | Workflow data models |
-| `../routers/workflows.py` | REST endpoints for workflow execution |
+| `../routers/workflows.py` | REST endpoint: `POST /workflows/execute` only (management/evaluation/discovery endpoints removed) |
 | `../../workflows/*.yaml` | Workflow definitions (CWL v1.2 structure) |
 
 ## CWL conventions
@@ -24,6 +24,14 @@ Workflow YAML follows CWL v1.2 structure: `cwlVersion`, `class`, `steps`, `outpu
 
 Nodes use `NodeBase[TInput, TOutput]` — a generic base with Pydantic models for input/output typing and a `_execute()` template method that subclasses implement.
 
+## Future / Scaffold Nodes (no consumers yet)
+
+Registered but zero callers today. Building blocks for the workflow server vision:
+
+- **LLMNode** (`llm_node.py`) — General-purpose LLM inference with {{variable}} templates
+- **RankerNode** (`ranker_node.py`) — LLM-based candidate ranking with scoring
+- **PipelineConfigNode** (`pipeline_config_node.py`) — Pipeline parameter assembly
+
 ## Migration intent
 
-M6 adds `PipelineSchema` (replacing hardcoded TermNorm constants) then wraps service-layer functions into workflow nodes. The notebook will drive optimization via `WorkflowRunner` instead of direct service calls. See [`docs/specs/m6-workflow-migration.md`](../../docs/specs/m6-workflow-migration.md).
+M6 Wave 2 added PipelineSchema (derivation methods now wired through services). Remaining waves wrap service-layer functions into workflow nodes. The notebook will drive optimization via `WorkflowRunner` instead of direct service calls. See [`docs/specs/m6-workflow-migration.md`](../../docs/specs/m6-workflow-migration.md).

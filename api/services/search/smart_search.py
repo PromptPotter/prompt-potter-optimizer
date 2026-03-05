@@ -4,10 +4,12 @@ One-at-a-time (OAT) perturbation scanning and importance-weighted
 coordinate descent over prompt-field and pipeline-param axes.
 """
 
+from __future__ import annotations
+
 import logging
 import random
 from collections import defaultdict
-from typing import Any, Callable, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict
 
 import pandas as pd
 
@@ -15,6 +17,9 @@ from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
 from api.services.prompt_eval import evaluate_prompt_cached
 from api.services.search.utils import preview as _preview
+
+if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +102,46 @@ DEFAULT_DIAGNOSTIC_QUERIES = 6
 DIAGNOSTIC_HIT_RATIO = 0.75
 
 
+def _profiles_from_rows(
+    rows: list[dict],
+    axes: list[tuple[str, str, list]],
+    n_eval: int,
+) -> list[dict]:
+    """Build axis profiles from scan rows.
+
+    Args:
+        rows: Per-variant result dicts with ``axis``, ``delta`` keys.
+        axes: List of ``(axis_name, axis_type, values)`` tuples.
+        n_eval: Number of diagnostic queries (for noise threshold).
+
+    Returns:
+        Axis profiles sorted by sensitivity_range (descending).
+    """
+    axis_deltas: dict[str, list[float]] = defaultdict(list)
+    for row in rows:
+        axis_deltas[row["axis"]].append(row["delta"])
+
+    profiles: list[dict] = []
+    for axis_name, axis_type, values in axes:
+        deltas = axis_deltas.get(axis_name, [0.0])
+        sens_range = max(deltas) - min(deltas) if deltas else 0.0
+        card = len(values)
+        budget = classify_axis(card, sens_range, n_eval)
+        profiles.append({
+            "axis": axis_name,
+            "axis_type": axis_type,
+            "cardinality": card,
+            "sensitivity_range": round(sens_range, 4),
+            "best_delta": round(max(deltas), 4) if deltas else 0.0,
+            "worst_delta": round(min(deltas), 4) if deltas else 0.0,
+            "exploration_budget": budget,
+            "estimated_eval_cost": card * n_eval,
+        })
+
+    profiles.sort(key=lambda p: -p["sensitivity_range"])
+    return profiles
+
+
 def _make_eval_fn(
     eval_data: list,
     backend_client: Any,
@@ -104,15 +149,23 @@ def _make_eval_fn(
     backend_id: str,
     get_params: Callable[[], dict],
     prompt_result_index: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> Callable:
     """Factory for the ``_eval_ps`` closure used by scan and adaptive search."""
+    from api.models.search_point import SearchPoint
+
     async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
-        results, scores, cached = await evaluate_prompt_cached(
-            ps, eval_data, backend_client,
+        sp = SearchPoint(
+            prompt_state=ps,
             pipeline_params=pp or get_params(),
+        )
+        results, scores, cached = await evaluate_prompt_cached(
+            sp, eval_data, backend_client,
             store=store, backend_id=backend_id,
             label="scan",
             prompt_result_index=prompt_result_index,
+            source="sensitivity_scan",
+            pipeline_schema=pipeline_schema,
         )
         return {**scores, "results": results, "cached": cached}
     return _eval_ps
@@ -165,6 +218,20 @@ def build_diagnostic_set(
             misses.append(query_to_eval[q])
 
     rng = random.Random(seed)
+
+    # Fallback: no baseline results — sample randomly from eval_data
+    if not hits and not misses:
+        n = min(n_queries, len(eval_data))
+        diagnostic = rng.sample(eval_data, n)
+        summary = {
+            "n_queries": len(diagnostic),
+            "n_hits": 0,
+            "n_misses": 0,
+            "total_pool_hits": 0,
+            "total_pool_misses": 0,
+            "stratified": False,
+        }
+        return diagnostic, summary
     n_queries = min(n_queries, len(hits) + len(misses))
 
     n_hits = max(1, round(n_queries * DIAGNOSTIC_HIT_RATIO))
@@ -228,6 +295,71 @@ def classify_axis(
 
 
 # ---------------------------------------------------------------------------
+# Variant library filtering
+# ---------------------------------------------------------------------------
+
+
+def filter_variant_library(
+    variant_library: dict,
+    pipeline_params: dict | None,
+    schema: "PipelineSchema",
+) -> dict:
+    """Filter variant library to axes relevant for the active pipeline.
+
+    - Keeps only ``pipeline_params`` axes whose owning step is active.
+    - Drops all ``prompt_fields`` when ``llm_ranking`` is not active
+      (``PromptState.render()`` produces ``ranking_prompt`` consumed only
+      by that step).
+
+    Args:
+        variant_library: Full variant library dict with ``prompt_fields``
+            and optional ``pipeline_params`` sections.
+        pipeline_params: Current pipeline parameters (must contain ``steps``
+            key listing active step names).
+        schema: PipelineSchema for step-param lookup.
+
+    Returns:
+        Filtered copy of the variant library.
+    """
+    active_steps = set((pipeline_params or {}).get("steps", []))
+
+    # Build set of param keys owned by active steps
+    step_param_map = schema.step_param_keys()
+    active_param_keys: set[str] = set()
+    for step_name, param_keys in step_param_map.items():
+        if step_name in active_steps:
+            active_param_keys |= param_keys
+
+    # Filter pipeline_params to only active-step keys
+    filtered_pp: dict[str, list] = {}
+    for axis, values in variant_library.get("pipeline_params", {}).items():
+        if axis in active_param_keys:
+            filtered_pp[axis] = values
+
+    # Drop prompt_fields when llm_ranking is not active
+    filtered_pf = variant_library.get("prompt_fields", {})
+    if "llm_ranking" not in active_steps:
+        filtered_pf = {}
+
+    result: dict = {}
+    if filtered_pf:
+        result["prompt_fields"] = filtered_pf
+    if filtered_pp:
+        result["pipeline_params"] = filtered_pp
+
+    removed_pp = set(variant_library.get("pipeline_params", {})) - set(filtered_pp)
+    if removed_pp:
+        logger.info("filter_variant_library: dropped pipeline_params %s", removed_pp)
+    if not filtered_pf and variant_library.get("prompt_fields"):
+        logger.info(
+            "filter_variant_library: dropped all prompt_fields "
+            "(llm_ranking not active)"
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Sensitivity scan
 # ---------------------------------------------------------------------------
 
@@ -245,6 +377,8 @@ async def sensitivity_scan(
     progress_cb: Callable[[ScanEvent], None] | None = None,
     prompt_result_index: dict | None = None,
     plan_id: str = "",
+    partial_scan: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -266,6 +400,9 @@ async def sensitivity_scan(
         progress_cb: Optional callback ``(event: dict) -> None`` for
             progress reporting. Event types: ``baseline_done``,
             ``axis_start``, ``variant_done``, ``axis_done``.
+        partial_scan: Optional dict with ``rows`` and ``completed_axes``
+            from a previously interrupted scan. Completed axes are
+            skipped and their rows are included in the output.
 
     Returns:
         Tuple of (per_variant_df, axis_profiles).
@@ -277,10 +414,17 @@ async def sensitivity_scan(
 
     base_params = dict(pipeline_params or {})
 
+    # Filter axes to only those relevant for the active pipeline
+    if pipeline_schema is not None:
+        variant_library = filter_variant_library(
+            variant_library, pipeline_params, schema=pipeline_schema,
+        )
+
     _eval_ps = _make_eval_fn(
         eval_data, backend_client, store, backend_id,
         get_params=lambda: base_params,
         prompt_result_index=prompt_result_index,
+        pipeline_schema=pipeline_schema,
     )
 
     # Evaluate baseline
@@ -311,10 +455,42 @@ async def sensitivity_scan(
             key=lambda a: (0 if a[0].lower() in focus_lower else 1, a[0]),
         )
 
+    # Prune partial scan: drop axes no longer in the filtered axes set
+    if partial_scan:
+        active_axis_names = {a[0] for a in axes}
+        stale = set(partial_scan.get("completed_axes", [])) - active_axis_names
+        if stale:
+            logger.warning(
+                "Pruning %d stale axes from partial scan: %s", len(stale), stale,
+            )
+            partial_scan["completed_axes"] = [
+                a for a in partial_scan["completed_axes"] if a in active_axis_names
+            ]
+            partial_scan["rows"] = [
+                r for r in partial_scan.get("rows", [])
+                if r["axis"] in active_axis_names
+            ]
+
     rows: list[dict] = []
     axis_stats: dict[str, list[float]] = defaultdict(list)
+    completed_axes: set[str] = set()
+
+    # Restore partial state from a previously interrupted scan
+    if partial_scan:
+        for row in partial_scan.get("rows", []):
+            rows.append(row)
+            axis_stats[row["axis"]].append(row["delta"])
+        completed_axes = set(partial_scan.get("completed_axes", []))
+        logger.info(
+            "Resuming scan: %d rows, %d/%d axes completed",
+            len(rows), len(completed_axes), len(axes),
+        )
 
     for ai, (axis_name, axis_type, values) in enumerate(axes):
+        if axis_name in completed_axes:
+            logger.info("Skipping completed axis: %s", axis_name)
+            continue
+
         _cb({
             "type": "axis_start",
             "axis": axis_name, "axis_type": axis_type,
@@ -337,6 +513,7 @@ async def sensitivity_scan(
                     "hits": baseline_scores["hits"],
                     "total": baseline_scores["total"],
                     "accuracy": baseline_acc, "delta": 0.0,
+                    "errors": 0,
                 })
                 axis_stats[axis_name].append(0.0)
                 _cb({
@@ -367,6 +544,7 @@ async def sensitivity_scan(
                 "hits": scores["hits"],
                 "total": scores["total"],
                 "accuracy": acc, "delta": delta,
+                "errors": scores.get("errors", 0),
             })
             axis_stats[axis_name].append(delta)
             _cb({
@@ -380,27 +558,42 @@ async def sensitivity_scan(
                 "cached": scores.get("cached", False),
             })
 
-    # Build axis profiles
-    profiles: list[dict] = []
-    for axis_name, axis_type, values in axes:
-        deltas = axis_stats.get(axis_name, [0.0])
-        sens_range = max(deltas) - min(deltas) if deltas else 0.0
-        card = len(values)
-        budget = classify_axis(card, sens_range, len(eval_data))
-        profile = {
-            "axis": axis_name,
-            "axis_type": axis_type,
-            "cardinality": card,
-            "sensitivity_range": round(sens_range, 4),
-            "best_delta": round(max(deltas), 4) if deltas else 0.0,
-            "worst_delta": round(min(deltas), 4) if deltas else 0.0,
-            "exploration_budget": budget,
-            "estimated_eval_cost": card * len(eval_data),
-        }
-        profiles.append(profile)
-        _cb({"type": "axis_done", **profile})
+        # Check: did any non-baseline variant succeed?
+        axis_variants = [
+            r for r in rows
+            if r["axis"] == axis_name and r.get("delta") != 0.0
+        ]
+        all_errored = (
+            all(
+                r.get("errors", 0) > 0 and r.get("errors", 0) == r.get("total", 0)
+                for r in axis_variants
+            )
+            if axis_variants
+            else False
+        )
 
-    profiles.sort(key=lambda p: -p["sensitivity_range"])
+        if all_errored:
+            logger.warning(
+                "Axis '%s': all variants errored — not marking completed",
+                axis_name,
+            )
+        else:
+            completed_axes.add(axis_name)
+        if store and backend_id and plan_id:
+            store.smart_search.update(backend_id, plan_id, {
+                "status": "scan_partial",
+                "scan_results": {
+                    "rows": rows,
+                    "completed_axes": list(completed_axes),
+                },
+            })
+            logger.info("Checkpoint: axis '%s' complete (%d/%d)", axis_name,
+                        len(completed_axes), len(axes))
+
+    # Build axis profiles
+    profiles = _profiles_from_rows(rows, axes, len(eval_data))
+    for profile in profiles:
+        _cb({"type": "axis_done", **profile})
 
     # Persist scan results to plan
     if store and backend_id and plan_id:
@@ -515,6 +708,7 @@ async def adaptive_search(
     progress_cb: Callable[[ScanEvent], None] | None = None,
     prompt_result_index: dict | None = None,
     plan_id: str = "",
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> tuple[PromptState, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.
 
@@ -562,6 +756,7 @@ async def adaptive_search(
         eval_data, backend_client, store, backend_id,
         get_params=lambda: current_params,
         prompt_result_index=prompt_result_index,
+        pipeline_schema=pipeline_schema,
     )
 
     # Get baseline accuracy
@@ -717,6 +912,32 @@ async def adaptive_search(
 
 
 # ---------------------------------------------------------------------------
+# Load scan results from plan store
+# ---------------------------------------------------------------------------
+
+
+def load_scan_results_from_plan(
+    store: ProjectStore,
+    backend_id: str,
+    plan_id: str,
+) -> pd.DataFrame | None:
+    """Load scan results DataFrame from a persisted smart search plan.
+
+    Returns ``None`` if no plan or no scan rows found.
+    """
+    from api.services.search.plan_persistence import deserialize_smart_search_plan
+
+    plan_data = store.smart_search.load(backend_id, plan_id)
+    if not plan_data:
+        return None
+    plan = deserialize_smart_search_plan(plan_data)
+    rows = (plan.get("scan_results") or {}).get("rows", [])
+    if not rows:
+        return None
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
 # Diagnostic set resume / build
 # ---------------------------------------------------------------------------
 
@@ -731,6 +952,7 @@ async def resume_or_build_diagnostic(
     backend_id: str,
     eval_data: list,
     improvement_areas: str = "",
+    variant_library: dict | None = None,
 ) -> tuple[str, PromptState, list, dict, list]:
     """Resume or build smart search diagnostic set.
 
@@ -753,7 +975,8 @@ async def resume_or_build_diagnostic(
     )
 
     ss = campaign_config.get("smart_search", {})
-    variant_library = load_variant_library()
+    if variant_library is None:
+        variant_library = load_variant_library()
 
     plan_id = smart_search_plan_identity(
         baseline.instruction,
@@ -778,6 +1001,33 @@ async def resume_or_build_diagnostic(
                 plan["diag_summary"],
                 cached_profiles,
             )
+        if plan["scan_results"] and status == "scan_partial":
+            partial_rows = plan["scan_results"].get("rows", [])
+            partial_completed = plan["scan_results"].get("completed_axes", [])
+            # Rebuild axes list to compute partial profiles
+            _vl = load_variant_library()
+            _axes: list[tuple[str, str, list]] = []
+            for name, vals in _vl.get("prompt_fields", {}).items():
+                if len(vals) > 1:
+                    _axes.append((name, "prompt_field", vals))
+            for name, vals in _vl.get("pipeline_params", {}).items():
+                if len(vals) > 1:
+                    _axes.append((name, "pipeline_param", vals))
+            partial_profiles = _profiles_from_rows(
+                partial_rows, _axes, len(plan["diagnostic"]),
+            )
+            logger.info(
+                "Scan partial in plan %s: %d axes done, %d profiles",
+                plan_id, len(partial_completed), len(partial_profiles),
+            )
+            return (
+                plan_id,
+                plan["search_baseline_ps"],
+                plan["diagnostic"],
+                plan["diag_summary"],
+                partial_profiles,
+            )
+
         # diagnostic_built -> reuse saved baseline; prefer sibling with scan data
         siblings = [
             s for s in store.smart_search.list_all(backend_id)

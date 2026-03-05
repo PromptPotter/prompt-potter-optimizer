@@ -7,19 +7,17 @@ Each trace shows the backend pipeline graph (web_search → entity_profiling
 → token_matching → llm_ranking) — standard Langfuse pattern: 1 trace =
 1 pipeline invocation.
 
-Two entry points:
-
-- ``push_run()`` — push a single run (called automatically after each eval)
-- ``push_all_runs()`` — batch push all historical runs (called from notebook)
+Single entry point: ``push_all_runs()`` — batch push all historical runs
+(called from the notebook's ``push_langfuse()`` cell). Internally delegates
+to ``push_run()`` per run, always with dataset-item linking.
 
 State is tracked in ``{backend_id}/obs/langfuse/backfill_state.json`` so
 re-running only pushes new runs.
 
 Usage::
 
-    from api.services.obs.langfuse_push import push_run, push_all_runs
-    push_run(lf, store, backend_id, run_id)       # single run
-    stats = push_all_runs(store, backend_id)       # batch
+    from api.services.obs.langfuse_push import push_all_runs
+    stats = push_all_runs(store, backend_id)
 """
 
 import json
@@ -55,12 +53,17 @@ _PREFIX_MAP = [
 _STATE_FORMAT_VERSION = 3
 
 
-def classify_run_origin(run_id: str) -> str:
-    """Classify a dataset run by its ID prefix.
+def classify_run_origin(run_id: str, source: str = "") -> str:
+    """Classify a dataset run's origin protocol.
+
+    Uses the explicit ``source`` field when available, falls back to
+    run_id prefix matching for legacy runs without a source field.
 
     Returns one of: baseline, grid_search, sensitivity_scan,
     feedback_cycle, smart_search_winner, other.
     """
+    if source:
+        return source
     for prefix, origin in _PREFIX_MAP:
         if run_id.startswith(prefix):
             return origin
@@ -131,12 +134,17 @@ def _register_dataset_items(
     """
     query_to_item_id: dict[str, str] = dict(state.get("dataset_items", {}))
 
-    # Create dataset (idempotent)
-    lf.create_dataset(
+    # Create dataset (idempotent) — fail fast on auth errors
+    ok = lf.create_dataset(
         name=DATASET_NAME,
         description="TermNorm production ground truth queries for prompt evaluation",
         metadata={"n_queries": len(gt_map)},
     )
+    if not ok:
+        raise RuntimeError(
+            f"Langfuse: failed to create/access dataset '{DATASET_NAME}'. "
+            "Check LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY in .env."
+        )
 
     # Fetch existing items to find those needing updates
     existing_items: dict[str, Any] = {}  # query_str -> SDK item
@@ -244,7 +252,7 @@ def push_run(
         return None
 
     items = detail.get("dataset_run_items", [])
-    origin = classify_run_origin(run_id)
+    origin = classify_run_origin(run_id, detail.get("source", ""))
     sid = session_id or f"dataset_{backend_id}"
     trace_ids: list[str] = []
 
@@ -275,7 +283,8 @@ def push_run(
             continue
 
         if pipeline:
-            nodes = extract_pipeline_nodes(pipeline, query)
+            from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
+            nodes = extract_pipeline_nodes(pipeline, query, schema=TERMNORM_DEFAULT_SCHEMA)
             for node in nodes:
                 lf.create_span(
                     trace_id, node.name, node.input, node.output, node.metadata,
@@ -378,7 +387,11 @@ def push_all_runs(
     # Step 1: Collect ground truth and register dataset items
     _emit("Collecting ground truth from dataset runs...")
     gt_map = _collect_ground_truth(store, backend_id, summaries)
-    query_to_item_id = _register_dataset_items(lf, gt_map, state, on_progress)
+    try:
+        query_to_item_id = _register_dataset_items(lf, gt_map, state, on_progress)
+    except RuntimeError as exc:
+        _emit(f"  SKIP: {exc}")
+        return {"skipped": True, "reason": str(exc)}
     state["dataset_items"] = query_to_item_id
 
     # Step 2: Group new runs by origin for stats
@@ -387,7 +400,7 @@ def push_all_runs(
         rid = s.get("run_id", "")
         if rid in already_done:
             continue
-        origin = classify_run_origin(rid)
+        origin = classify_run_origin(rid, s.get("source", ""))
         groups[origin].append(s)
 
     new_runs = sum(len(v) for v in groups.values())

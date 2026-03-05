@@ -14,6 +14,8 @@ from api.core.workflow_runner import WorkflowRunner
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
 
+from _helpers import build_eval_results
+
 
 WORKFLOW_PATH = Path(__file__).parent.parent / "workflows" / "optimizer_single_pass.yaml"
 BACKEND_ID = "e2e-test-backend"
@@ -68,33 +70,13 @@ def _apply_all_mocks(monkeypatch):
         mock_generate,
     )
 
-    # Mock evaluate_prompt_cached — first candidate: 75%, others: 25%
-    async def mock_eval(ps, data, **kwargs):
+    # Mock evaluate_prompt_cached — first candidate: 75%, others: 0%
+    async def mock_eval(search_point, data, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
-            hits = 3  # 3 out of 4
-            results = []
-            for i, d in enumerate(data):
-                hit = i < hits
-                results.append({
-                    "query": d["query"],
-                    "predicted": d["ground_truth"] if hit else "WRONG",
-                    "ground_truth": d["ground_truth"],
-                    "hit": hit,
-                    "score": 1.0 if hit else 0.0,
-                    "error": None,
-                })
-            scores = {"hits": hits, "total": len(data),
-                      "accuracy": hits / len(data), "errors": 0}
+            results, scores = build_eval_results(data, hits=3)
         else:
-            results = [
-                {"query": d["query"], "predicted": "WRONG",
-                 "ground_truth": d["ground_truth"], "hit": False,
-                 "score": 0.0, "error": None}
-                for d in data
-            ]
-            scores = {"hits": 0, "total": len(data),
-                      "accuracy": 0.0, "errors": 0}
+            results, scores = build_eval_results(data, hits=0)
         return results, scores, False
 
     monkeypatch.setattr(

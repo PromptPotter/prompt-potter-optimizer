@@ -31,14 +31,13 @@ PromptPotter uses two nested loops:
 
 Every evaluation is saved. When one optimization thread stops improving, the next sensitivity scan automatically discovers all stored data and computes a better starting point.
 
-### 1. Exploration Notebook
+### 1. Evaluation Notebook
 
-Open `notebooks/termnorm_backend.ipynb`:
+Open `notebooks/evaluation.ipynb`:
 
-1. **Register** your backend connection
-2. **Sync** experiment data (queries, ground truth, pipeline traces)
-3. **Replay** queries through the pipeline to establish baseline
-4. **Compare** pipeline variants statistically
+1. **Load** ground-truth dataset and connect to backend
+2. **Evaluate** test-set accuracy against the current pipeline
+3. **Compare** results across prompt variants
 
 ### 2. Optimization Campaign
 
@@ -353,13 +352,26 @@ Start the API server: `uvicorn api.main:app --port 8001 --reload`
 
 Response models and endpoints are auto-documented at `http://localhost:8001/docs` (Swagger UI).
 
+### Key endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/v1/backends` | Register a new backend connection |
+| `GET /api/v1/backends` | List registered backends |
+| `POST /api/v1/backends/{id}/sync` | Sync experiments from backend |
+| `GET /api/v1/backends/{id}/pipeline` | Dynamic pipeline view: backend pipeline config + local workflow nodes (30s cache) |
+| `GET /api/v1/campaigns` | List optimization campaigns |
+| `GET /api/v1/campaigns/{id}` | Campaign detail with trial summaries |
+| `POST /api/v1/workflows/execute` | Execute a workflow definition |
+| `GET /api/v1/health` | Service health check |
+
 ## Troubleshooting
 
-**"No synced experiment data"** — Run the sync cell in `termnorm_backend.ipynb` first, or call `await client.sync_experiments(store, backend_id)`.
+**"No synced experiment data"** — Run the sync cell in `evaluation.ipynb` first, or call `await client.sync_experiments(store, backend_id)`.
 
 **"No llm_ranking prompt found"** — Your backend needs to expose prompts in the experiment data. Ensure TermNorm's prompt registry is initialized before syncing.
 
-**"No queries have entity_profile"** — Re-run replay with `skip_llm_ranking=False`. The entity_profile is populated by the full pipeline.
+**"No queries have entity_profile"** — Re-run replay with `entity_profiling` in the pipeline `steps`. The entity_profile is populated by the full pipeline.
 
 **Grid search takes too long** — Reduce `grid_budget` in `grid_search` config, or reduce `eval_queries_per_point` for fewer queries per grid point.
 

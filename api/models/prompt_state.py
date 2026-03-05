@@ -189,20 +189,13 @@ def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
             new=b.plan,
         ))
 
-    # Few-shot examples
+    # Few-shot examples (dedicated fields only, no redundant FieldChange)
     a_examples = [ex.model_dump() for ex in a.few_shot_examples]
     b_examples = [ex.model_dump() for ex in b.few_shot_examples]
     fs_added = [FewShotExample(**ex) for ex in b_examples if ex not in a_examples]
     fs_removed = [FewShotExample(**ex) for ex in a_examples if ex not in b_examples]
-    if fs_added or fs_removed:
-        field_changes.append(FieldChange(
-            field="few_shot_examples",
-            layer="generate",
-            old=a_examples,
-            new=b_examples,
-        ))
 
-    # Parameters
+    # Parameters (dedicated fields only, no redundant FieldChange)
     a_keys = set(a.parameters)
     b_keys = set(b.parameters)
     params_added = {k: b.parameters[k] for k in b_keys - a_keys}
@@ -211,17 +204,16 @@ def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
     for k in a_keys & b_keys:
         if a.parameters[k] != b.parameters[k]:
             params_changed[k] = {"old": a.parameters[k], "new": b.parameters[k]}
-    if params_added or params_removed or params_changed:
-        field_changes.append(FieldChange(
-            field="parameters",
-            layer="refine_context",
-            old=a.parameters,
-            new=b.parameters,
-        ))
 
-    # Layer flags
-    generate_changed = any(fc.layer == "generate" for fc in field_changes)
-    context_changed = any(fc.layer == "refine_context" for fc in field_changes)
+    # Layer flags — check both field_changes and dedicated sub-diffs
+    generate_changed = (
+        any(fc.layer == "generate" for fc in field_changes)
+        or bool(fs_added) or bool(fs_removed)
+    )
+    context_changed = (
+        any(fc.layer == "refine_context" for fc in field_changes)
+        or bool(params_added) or bool(params_removed) or bool(params_changed)
+    )
     plan_changed = any(fc.layer == "modify_plan" for fc in field_changes)
 
     # Rendered diff

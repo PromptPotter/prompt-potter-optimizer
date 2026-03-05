@@ -4,7 +4,11 @@ Fixtures live in ``conftest.py``; this module holds plain functions and classes
 that test modules can import directly.
 """
 
+import hashlib
+
+from api.models.prompt_state import PromptState
 from api.services.llm_client import MockLLMClient
+from api.services.prompt_eval import HASH_TRUNCATE
 
 
 # ---------------------------------------------------------------------------
@@ -56,13 +60,14 @@ def apply_grow_mock(monkeypatch):
 def apply_eval_mock(monkeypatch, round_hits=None):
     """Mock evaluate_prompt_cached with configurable per-round hit counts.
 
+    The first positional arg is now a ``SearchPoint`` (not a raw PromptState).
     Returns a ``call_count`` list ([int]) so callers can track invocations.
     """
     if round_hits is None:
         round_hits = [1, 2, 3]
     call_count = [0]
 
-    async def mock_eval(ps, data, **kwargs):
+    async def mock_eval(search_point, data, **kwargs):
         idx = min(call_count[0], len(round_hits) - 1)
         target_hits = round_hits[idx]
         label = kwargs.get("label", "")
@@ -300,3 +305,91 @@ class MockCompletion:
         total_tokens = 15
     usage = Usage()
     model = "test-model"
+
+
+# ---------------------------------------------------------------------------
+# Shared factories — replace duplicated helpers across test files
+# ---------------------------------------------------------------------------
+
+
+def rp_hash(text: str) -> str:
+    """Compute rendered_prompt_hash the same way build_dataset_run_data does."""
+    return hashlib.sha256(text.encode()).hexdigest()[:HASH_TRUNCATE]
+
+
+def make_baseline_ps(**overrides) -> PromptState:
+    """Build a baseline PromptState with sensible defaults."""
+    defaults = {
+        "instruction": "Rank the candidates.",
+        "persona": "",
+        "task_intent": "",
+        "thinking_style": "",
+        "answer_format": "",
+    }
+    defaults.update(overrides)
+    return PromptState(**defaults)
+
+
+def make_dataset_run(
+    run_id: str = "baseline_aabbccdd",
+    accuracy: float = 0.5,
+    items: list[dict] | None = None,
+    *,
+    content_hash: str | None = None,
+    name: str | None = None,
+    rendered_prompt: str | None = None,
+    n_queries: int = 2,
+) -> dict:
+    """Build a minimal dataset_run dict.
+
+    - If *items* is None, generates *n_queries* synthetic items (all hits).
+    - *rendered_prompt* sets rendered_prompt_hash if provided.
+    """
+    if items is None:
+        items = [
+            {"query": f"q{i}", "predicted": "p", "ground_truth": "p",
+             "hit": True, "confidence": 0.9, "error": None}
+            for i in range(n_queries)
+        ]
+    hits = sum(1 for it in items if it.get("hit"))
+    total = len(items)
+    run: dict = {
+        "run_id": run_id,
+        "name": name or run_id,
+        "content_hash": content_hash or f"hash_{run_id}",
+        "prompt_state_id": f"ps_{run_id}",
+        "model": "test-model",
+        "temperature": 0,
+        "item_count": total,
+        "scores": {
+            "hits": hits, "total": total,
+            "accuracy": accuracy if accuracy is not None else (hits / total if total else 0.0),
+            "errors": 0,
+        },
+        "created_at": "2026-02-22T14:00:00Z",
+        "dataset_run_items": items,
+    }
+    if rendered_prompt is not None:
+        run["rendered_prompt_hash"] = rp_hash(rendered_prompt)
+    return run
+
+
+def build_eval_results(data: list[dict], hits: int):
+    """Build (results, scores) for eval mocking — *hits* of *data* items are correct."""
+    results = []
+    for i, d in enumerate(data):
+        hit = i < hits
+        results.append({
+            "query": d["query"],
+            "predicted": d["ground_truth"] if hit else "WRONG",
+            "ground_truth": d["ground_truth"],
+            "hit": hit, "score": 1.0 if hit else 0.0, "error": None,
+        })
+    scores = {"hits": hits, "total": len(data),
+              "accuracy": hits / len(data) if data else 0.0, "errors": 0}
+    return results, scores
+
+
+def make_http_error(status_code: int, message: str = "error"):
+    """Create a mock HTTP error class with the given status_code."""
+    return type(f"Mock{status_code}Error", (Exception,), {"status_code": status_code})(message)

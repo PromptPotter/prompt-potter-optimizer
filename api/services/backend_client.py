@@ -20,6 +20,7 @@ from api.services.constants import NO_RESULT
 from api.services.query_utils import parse_bom_material
 
 if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -28,13 +29,47 @@ MATCH_TIMEOUT = 120.0
 
 # Maps each pipeline step name to the set of parameter names it uses.
 PIPELINE_STEP_PARAMS = {
-    "web_search": {"max_sites", "num_results", "content_char_limit"},
-    "entity_profiling": {"raw_content_limit", "profiling_temperature", "profiling_max_tokens"},
+    "fuzzy_matching": {"fuzzy_threshold", "fuzzy_scorer"},
+    "web_search": {
+        "max_sites", "num_results", "content_char_limit",
+        "query_prefix", "query_suffix",
+    },
+    "entity_profiling": {
+        "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
+        "profiling_prompt", "profiling_schema", "profiling_model",
+    },
     "token_matching": {"max_token_candidates", "relevance_weight_core"},
     "llm_ranking": {
         "ranking_temperature", "ranking_max_tokens",
         "ranking_sample_size", "ranking_prompt",
+        "ranking_schema", "ranking_model",
     },
+}
+
+# Maps internal flat param name → (node_name, node_override_key).
+# Used by run_match() to translate flat params into node_overrides wire format.
+FLAT_TO_NODE_OVERRIDE: dict[str, tuple[str, str]] = {
+    "max_sites": ("web_search", "max_sites"),
+    "num_results": ("web_search", "num_results"),
+    "content_char_limit": ("web_search", "content_char_limit"),
+    "query_prefix": ("web_search", "query_prefix"),
+    "query_suffix": ("web_search", "query_suffix"),
+    "raw_content_limit": ("entity_profiling", "raw_content_limit"),
+    "profiling_temperature": ("entity_profiling", "temperature"),
+    "profiling_max_tokens": ("entity_profiling", "max_tokens"),
+    "profiling_prompt": ("entity_profiling", "prompt"),
+    "profiling_schema": ("entity_profiling", "output_schema"),
+    "profiling_model": ("entity_profiling", "model"),
+    "max_token_candidates": ("token_matching", "max_token_candidates"),
+    "relevance_weight_core": ("token_matching", "relevance_weight_core"),
+    "ranking_temperature": ("llm_ranking", "temperature"),
+    "ranking_max_tokens": ("llm_ranking", "max_tokens"),
+    "ranking_sample_size": ("llm_ranking", "sample_size"),
+    "ranking_prompt": ("llm_ranking", "prompt"),
+    "ranking_schema": ("llm_ranking", "output_schema"),
+    "ranking_model": ("llm_ranking", "model"),
+    "fuzzy_threshold": ("fuzzy_matching", "threshold"),
+    "fuzzy_scorer": ("fuzzy_matching", "scorer"),
 }
 
 
@@ -57,19 +92,35 @@ def load_pipeline_config(exp_data: dict) -> dict:
 
 
 def build_pipeline_params(
-    pipeline_config: dict, overrides: dict | None = None,
+    pipeline_config: dict,
+    overrides: dict | None = None,
+    exclude_steps: list[str] | None = None,
+    schema: "PipelineSchema | None" = None,
 ) -> dict:
     """Build pipeline_params from a (possibly shortened) pipeline config.
 
     Returns dict ready for evaluate_prompt(..., pipeline_params=params).
     Includes 'steps' list (sent to TermNorm) and any user overrides.
+
+    When a ``PipelineSchema`` is provided, uses ``schema.step_param_keys()``
+    instead of the hardcoded ``PIPELINE_STEP_PARAMS`` constant.
+
+    Args:
+        pipeline_config: Pipeline config with ``steps`` list.
+        overrides: Optional parameter overrides (e.g. ``ranking_temperature``).
+        exclude_steps: Step names to remove from the active pipeline
+            (e.g. ``["llm_ranking"]`` for token-matching-only evaluation).
+        schema: Optional PipelineSchema for step-param lookup.
     """
     step_names = [s["name"] for s in pipeline_config["steps"]]
+    if exclude_steps:
+        step_names = [s for s in step_names if s not in exclude_steps]
     params: dict = {"steps": step_names}
 
+    step_param_map = schema.step_param_keys() if schema else PIPELINE_STEP_PARAMS
     active_param_names: set = set()
     for name in step_names:
-        active_param_names |= PIPELINE_STEP_PARAMS.get(name, set())
+        active_param_names |= step_param_map.get(name, set())
 
     if overrides:
         for k, v in overrides.items():
@@ -160,6 +211,19 @@ class BackendClient:
             logger.warning("Backend status check failed: %s", exc)
             return {"status": "error", "error": str(exc)}
 
+    # -- pipeline config ---------------------------------------------------
+
+    async def fetch_pipeline(self) -> dict[str, Any]:
+        """GET /pipeline — returns full pipeline configuration.
+
+        Includes node configs, models, temperatures, and resolved schema/prompt
+        registry data (if the backend supports enrichment).
+        """
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(f"{self.base_url}/pipeline")
+            resp.raise_for_status()
+            return resp.json()
+
     # -- sync operations (fetch verbatim API responses) -------------------
 
     async def fetch_experiments(self) -> dict[str, Any]:
@@ -203,19 +267,32 @@ class BackendClient:
     async def run_match(
         self,
         query: str,
-        skip_llm_ranking: bool = True,
         pipeline_params: dict[str, Any] | None = None,
         ranking_prompt: str | None = None,
     ) -> dict[str, Any]:
-        """POST /matches — run a single query through the backend pipeline."""
-        payload: dict[str, Any] = {
-            "query": query,
-            "skip_llm_ranking": skip_llm_ranking,
-        }
-        if pipeline_params:
-            payload.update(pipeline_params)
+        """POST /matches — translate internal flat params into node_overrides wire format."""
+        payload: dict[str, Any] = {"query": query}
+
+        pp = dict(pipeline_params or {})
         if ranking_prompt:
-            payload["ranking_prompt"] = ranking_prompt
+            pp["ranking_prompt"] = ranking_prompt
+
+        if "steps" in pp:
+            payload["steps"] = pp.pop("steps")
+
+        node_overrides: dict[str, dict] = {}
+        if "node_overrides" in pp:
+            for node, params in pp.pop("node_overrides").items():
+                node_overrides.setdefault(node, {}).update(params)
+
+        for flat_key, val in pp.items():
+            if flat_key in FLAT_TO_NODE_OVERRIDE:
+                node, param = FLAT_TO_NODE_OVERRIDE[flat_key]
+                node_overrides.setdefault(node, {})[param] = val
+
+        if node_overrides:
+            payload["node_overrides"] = node_overrides
+
         async with httpx.AsyncClient(timeout=MATCH_TIMEOUT) as client:
             resp = await client.post(
                 f"{self.base_url}/matches",
@@ -318,7 +395,6 @@ class BackendClient:
         self,
         queries: list[dict[str, Any]],
         terms: list[str],
-        skip_llm_ranking: bool = True,
         delay_between: float = 0.0,
         on_result: Callable[[dict[str, Any], int, int], Any] | None = None,
         pipeline_params: dict[str, Any] | None = None,
@@ -340,7 +416,6 @@ class BackendClient:
             try:
                 response = await self.run_match(
                     q["query"],
-                    skip_llm_ranking=skip_llm_ranking,
                     pipeline_params=pipeline_params,
                 )
                 elapsed = time.time() - start

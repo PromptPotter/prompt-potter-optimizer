@@ -3,6 +3,7 @@ import pytest
 
 import api.services.llm_client as llm_mod
 from api.services.llm_client import MockLLMClient
+from api.services.campaign.feedback_cycle import CycleConfig
 from api.services.obs.langfuse_client import LangfuseLogger
 from api.services.project_store import ProjectStore
 
@@ -44,3 +45,17 @@ def eval_data():
         {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
         {"query": "acetaminophen", "ground_truth": "Acetaminophen"},
     ]
+
+
+@pytest.fixture
+def cycle_config():
+    """Standard CycleConfig for feedback cycle tests."""
+    return CycleConfig(
+        max_rounds=5,
+        patience=2,
+        n_variants=3,
+        creativity=0.5,
+        improvement_threshold=0.01,
+        backend_url="http://mock:8000",
+        generate_suggestions=False,
+    )
