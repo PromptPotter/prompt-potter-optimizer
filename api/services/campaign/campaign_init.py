@@ -70,11 +70,22 @@ async def init_services(
             backend_type="termnorm", base_url=backend_url,
         ))
 
+    # Fetch pipeline schema (best-effort — non-fatal)
+    pipeline_schema = None
+    try:
+        from api.services.pipeline_discovery import parse_pipeline_response
+        pipeline_resp = await client.fetch_pipeline()
+        pipeline_schema = parse_pipeline_response(pipeline_resp)
+        logger.info("Pipeline schema loaded: %s v%s", pipeline_schema.name, pipeline_schema.version)
+    except Exception as exc:
+        logger.info("Could not fetch pipeline schema: %s", exc)
+
     base = {
         "store": store,
         "backend_id": backend_id,
         "experiment_id": experiment_id,
         "backend_client": client,
+        "pipeline_schema": pipeline_schema,
         "synced": False,
     }
 

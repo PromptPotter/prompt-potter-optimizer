@@ -10,6 +10,7 @@ from api.services.obs.pipeline_nodes import (
     extract_pipeline_nodes,
     _profile_summary,
 )
+from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
 
 
 # ---------------------------------------------------------------------------
@@ -200,3 +201,22 @@ def test_llm_ranking_io():
 ])
 def test_profile_summary(profile, expected):
     assert _profile_summary(profile) == expected
+
+
+# ---------------------------------------------------------------------------
+# Schema-based extraction — same output as hardcoded path
+# ---------------------------------------------------------------------------
+
+
+def test_schema_extraction_matches_hardcoded():
+    """extract_pipeline_nodes with TERMNORM_DEFAULT_SCHEMA produces same result as no schema."""
+    pipeline = _full_pipeline()
+    nodes_hardcoded = extract_pipeline_nodes(pipeline, "aspirin")
+    nodes_schema = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+
+    assert len(nodes_schema) == len(nodes_hardcoded)
+    for h, s in zip(nodes_hardcoded, nodes_schema):
+        assert h.name == s.name
+        assert h.as_type == s.as_type
+        assert h.metadata == s.metadata
+        assert h.model == s.model

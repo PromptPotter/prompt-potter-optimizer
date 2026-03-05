@@ -1,5 +1,5 @@
 """Tests for PromptState model."""
-from api.models.prompt_state import PromptState, diff
+from api.models.prompt_state import FewShotExample, PromptState, diff
 
 
 def test_create_and_derive():
@@ -45,3 +45,27 @@ def test_diff():
     assert result.context_changed is True
     assert any(fc.field == "instruction" for fc in result.field_changes)
     assert result.parameters_changed == {"k": {"old": 1, "new": 2}}
+
+
+def test_diff_no_redundant_few_shot_field_change():
+    """few_shot changes tracked only in dedicated fields, not in field_changes."""
+    a = PromptState(instruction="same")
+    b = PromptState(
+        instruction="same",
+        few_shot_examples=[FewShotExample(input="x", output="y")],
+    )
+    result = diff(a, b)
+    assert result.generate_changed is True
+    assert result.few_shot_added == [FewShotExample(input="x", output="y")]
+    assert not any(fc.field == "few_shot_examples" for fc in result.field_changes)
+
+
+def test_diff_no_redundant_parameters_field_change():
+    """parameters changes tracked only in dedicated fields, not in field_changes."""
+    a = PromptState(instruction="same", parameters={"k": 1})
+    b = PromptState(instruction="same", parameters={"k": 2, "new_key": 3})
+    result = diff(a, b)
+    assert result.context_changed is True
+    assert result.parameters_changed == {"k": {"old": 1, "new": 2}}
+    assert result.parameters_added == {"new_key": 3}
+    assert not any(fc.field == "parameters" for fc in result.field_changes)

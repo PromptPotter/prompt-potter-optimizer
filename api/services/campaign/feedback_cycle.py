@@ -53,6 +53,12 @@ class CycleConfig(BaseModel):
     queries_per_eval: int = Field(0, description="Subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
 
+    # L2/L3 escalation
+    enable_l2: bool = Field(False, description="Enable L2 refine_context loop")
+    enable_l3: bool = Field(False, description="Enable L3 modify_plan loop")
+    l2_patience: int = Field(2, description="L2 stalls before escalating to L3")
+    l3_patience: int = Field(1, description="L3 stalls before stopping")
+
 
 class CycleRoundResult(BaseModel):
     """Result of a single feedback cycle round."""
@@ -101,6 +107,14 @@ class _LoopState:
     stall_count: int = 0
     backend_client: Any = None   # BackendClient (future: ConnectorProtocol)
     store: "ProjectStore | None" = None
+
+    # L2/L3 state
+    l2_stall_count: int = 0
+    l3_stall_count: int = 0
+    l2_round: int = 0
+    l3_round: int = 0
+    best_accuracy_at_l2_entry: float = 0.0
+    best_accuracy_at_l3_entry: float = 0.0
 
 
 def cycle_config_identity(
@@ -205,6 +219,10 @@ def _restore_round_state(
     best_round = -1
     best_ps: dict = {}
     stall_count = 0
+    l2_stall_count = 0
+    l3_stall_count = 0
+    l2_round = 0
+    l3_round = 0
 
     for trial_summary in campaign_data.get("trials", []):
         detail = store.load_trial(backend_id, cycle_id, trial_summary["round"])
@@ -230,9 +248,16 @@ def _restore_round_state(
         else:
             stall_count += 1
 
+        # L2/L3 state
+        l2_stall_count = detail.get("l2_stall_count", l2_stall_count)
+        l3_stall_count = detail.get("l3_stall_count", l3_stall_count)
+        l2_round = detail.get("l2_round", l2_round)
+        l3_round = detail.get("l3_round", l3_round)
+
     return (
         rounds, current_ps, current_accuracy, current_results,
         best_accuracy, best_round, best_ps, stall_count,
+        l2_stall_count, l3_stall_count, l2_round, l3_round,
     )
 
 
@@ -317,6 +342,7 @@ def _restore_in_progress_campaign(
     (
         rounds, cur_ps, cur_acc, cur_results,
         best_acc, best_rnd, best_ps, stall,
+        l2_stall, l3_stall, l2_rnd, l3_rnd,
     ) = _restore_round_state(
         campaign_data, campaign_store, config.backend_id,
         cycle_id, config.improvement_threshold,
@@ -335,6 +361,10 @@ def _restore_in_progress_campaign(
         best_round=best_rnd,
         best_ps=best_ps,
         stall_count=stall,
+        l2_stall_count=l2_stall,
+        l3_stall_count=l3_stall,
+        l2_round=l2_rnd,
+        l3_round=l3_rnd,
     )
     return resumed_from, restored
 
@@ -418,9 +448,14 @@ async def _generate_or_load_candidates(
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
     llm_client = get_llm_client(config.provider)
     current_ps = PromptState(**state.current_ps)
+
+    # L2 meta-param overrides from PromptState.parameters
+    n_variants = current_ps.parameters.get("n_variants", config.n_variants)
+    creativity = current_ps.parameters.get("creativity", config.creativity)
+
     raw_candidates = await generate_candidates(
         current_ps, state.current_accuracy, state.current_results,
-        config.n_variants, config.creativity, llm_client,
+        n_variants, creativity, llm_client,
         model=config.model,
     )
     candidates = [c.model_dump() for c in raw_candidates]
@@ -503,7 +538,7 @@ async def _evaluate_candidates(
                 llm_client, model=config.model,
             )
             next_action = suggestions.get("next_action", "generate")
-            if next_action in ("generate", "stop"):
+            if next_action in ("generate", "stop", "refine_context", "modify_plan"):
                 eval_out["next_action"] = next_action
             eval_out["suggestions"] = suggestions
         except Exception:
@@ -653,6 +688,103 @@ def _finalize_campaign(
             logger.warning("ObsLogger campaign end failed", exc_info=True)
 
     return cloud_trace_id
+
+
+# ---------------------------------------------------------------------------
+# Layer escalation helpers
+# ---------------------------------------------------------------------------
+
+
+async def _escalate_l2(
+    state: _LoopState,
+    config: CycleConfig,
+    round_num: int,
+    eval_data: list[dict],
+) -> str | None:
+    """Handle L1→L2 escalation and optionally L2→L3.
+
+    Returns a stop_reason string if the cycle should stop, or None to continue.
+    """
+    from api.models.prompt_state import PromptState
+    from api.services.campaign.layer_transitions import modify_plan, refine_context
+    from api.services.llm_client import get_llm_client
+
+    llm_client = get_llm_client(config.provider)
+    current_ps = PromptState(**state.current_ps)
+
+    # Check if L2 itself has stalled (no improvement since last L2 entry)
+    l2_improved = state.best_accuracy > state.best_accuracy_at_l2_entry
+    if not l2_improved and state.l2_round > 0:
+        state.l2_stall_count += 1
+    else:
+        state.l2_stall_count = 0
+
+    # L2 stalled → check L3
+    if state.l2_stall_count >= config.l2_patience:
+        if config.enable_l3:
+            # L2→L3 escalation
+            l3_improved = state.best_accuracy > state.best_accuracy_at_l3_entry
+            if not l3_improved and state.l3_round > 0:
+                state.l3_stall_count += 1
+            else:
+                state.l3_stall_count = 0
+
+            if state.l3_stall_count >= config.l3_patience:
+                logger.info(
+                    "L3 patience exhausted (%d stalls) at round %d",
+                    state.l3_stall_count, round_num,
+                )
+                return "l3_patience_exhausted"
+
+            # Perform L3 transition
+            l2_history = [{
+                "l2_round": state.l2_round,
+                "parameters": current_ps.parameters,
+                "accuracy_change": state.best_accuracy - state.best_accuracy_at_l3_entry,
+            }]
+            new_ps = await modify_plan(
+                current_ps, l2_history, eval_data, llm_client, model=config.model,
+            )
+            state.current_ps = new_ps.model_dump()
+            state.l3_round += 1
+            state.best_accuracy_at_l3_entry = state.best_accuracy
+            state.l2_stall_count = 0
+            state.l2_round = 0
+            state.stall_count = 0
+            state.best_accuracy_at_l2_entry = state.best_accuracy
+            logger.info(
+                "L3 modify_plan at round %d (l3_round=%d)",
+                round_num, state.l3_round,
+            )
+            return None  # continue
+        else:
+            logger.info(
+                "L2 patience exhausted (%d stalls) at round %d",
+                state.l2_stall_count, round_num,
+            )
+            return "l2_patience_exhausted"
+
+    # Perform L2 transition
+    stalled_rounds = [
+        {
+            "round": r.round,
+            "accuracy": r.accuracy,
+            "results": r.results,
+        }
+        for r in state.rounds[-config.patience:]
+    ]
+    new_ps = await refine_context(
+        current_ps, stalled_rounds, eval_data, llm_client, model=config.model,
+    )
+    state.current_ps = new_ps.model_dump()
+    state.l2_round += 1
+    state.best_accuracy_at_l2_entry = state.best_accuracy
+    state.stall_count = 0  # reset L1 patience
+    logger.info(
+        "L2 refine_context at round %d (l2_round=%d)",
+        round_num, state.l2_round,
+    )
+    return None  # continue
 
 
 # ---------------------------------------------------------------------------
@@ -818,6 +950,10 @@ async def run_feedback_cycle(
                         for s in round_result.candidate_scores
                     ],
                     "stall_count": state.stall_count,
+                    "l2_stall_count": state.l2_stall_count,
+                    "l3_stall_count": state.l3_stall_count,
+                    "l2_round": state.l2_round,
+                    "l3_round": state.l3_round,
                 })
             except Exception:
                 logger.warning("Round checkpoint failed", exc_info=True)
@@ -827,17 +963,27 @@ async def run_feedback_cycle(
             stop_reason = "perfect_score"
             logger.info("Perfect score reached at round %d", round_num)
             break
-        if state.stall_count >= config.patience:
-            stop_reason = "patience_exhausted"
-            logger.info(
-                "Patience exhausted after %d stalls at round %d",
-                state.stall_count, round_num,
-            )
-            break
         if round_result.next_action == "stop":
             stop_reason = "next_action_stop"
             logger.info("Analysis node signaled stop at round %d", round_num)
             break
+
+        # Hierarchical patience escalation
+        if state.stall_count >= config.patience:
+            if config.enable_l2:
+                # L1 stalled → escalate to L2
+                stop_reason = await _escalate_l2(
+                    state, config, round_num, round_eval_data,
+                )
+                if stop_reason:
+                    break
+            else:
+                stop_reason = "patience_exhausted"
+                logger.info(
+                    "Patience exhausted after %d stalls at round %d",
+                    state.stall_count, round_num,
+                )
+                break
 
     # -- Step 6: Finalize --
     finished_at = datetime.now(timezone.utc).isoformat()

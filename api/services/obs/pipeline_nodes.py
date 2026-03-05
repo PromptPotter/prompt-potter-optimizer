@@ -11,8 +11,13 @@ as_type mapping:
     llm_ranking      → "generation" (LLM call 2, conditional)
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
 
 
 @dataclass(frozen=True)
@@ -28,16 +33,6 @@ class PipelineNode:
     usage_details: dict[str, int] | None = None
 
 
-# Maps each pipeline step to its relevant pipeline_params keys.
-# Kept local (no import from backend_client) to keep the obs module independent.
-_STEP_PARAM_KEYS: dict[str, set[str]] = {
-    "web_search": {"max_sites", "num_results", "content_char_limit"},
-    "entity_profiling": {"raw_content_limit", "profiling_temperature", "profiling_max_tokens"},
-    "token_matching": {"max_token_candidates", "relevance_weight_core"},
-    "llm_ranking": {"ranking_temperature", "ranking_max_tokens", "ranking_sample_size"},
-}
-
-
 def _profile_summary(profile: dict) -> str:
     """One-line summary of an entity profile for token_matching input."""
     name = profile.get("entity_name", "")
@@ -48,13 +43,20 @@ def _profile_summary(profile: dict) -> str:
 
 
 def _step_meta(
-    timings: dict, step_params: dict, step_name: str,
+    timings: dict,
+    step_params: dict,
+    step_name: str,
+    schema: PipelineSchema | None = None,
 ) -> dict[str, Any]:
     """Build metadata dict for a pipeline step: timing + per-step params."""
     meta: dict[str, Any] = {}
     if step_name in timings:
         meta["duration_s"] = timings[step_name]
-    param_keys = _STEP_PARAM_KEYS.get(step_name, set())
+    if schema is not None:
+        param_keys = schema.step_param_keys().get(step_name, set())
+    else:
+        from api.services.backend_client import PIPELINE_STEP_PARAMS
+        param_keys = PIPELINE_STEP_PARAMS.get(step_name, set())
     node_params = {k: step_params[k] for k in param_keys if k in step_params}
     if node_params:
         meta["pipeline_params"] = node_params
@@ -64,6 +66,7 @@ def _step_meta(
 def extract_pipeline_nodes(
     pipeline_data: dict,
     query: str,
+    schema: PipelineSchema | None = None,
 ) -> list[PipelineNode]:
     """Parse pipeline_data into an ordered list of typed nodes.
 
@@ -73,13 +76,14 @@ def extract_pipeline_nodes(
     timings = pipeline_data.get("step_timings") or {}
     llm_provider = pipeline_data.get("llm_provider", "")
     step_params = pipeline_data.get("pipeline_params") or {}
+    lf_types = schema.langfuse_type_map() if schema else {}
 
     # 1. web_search — tool
     if pipeline_data.get("web_search_status"):
-        meta = _step_meta(timings, step_params, "web_search")
+        meta = _step_meta(timings, step_params, "web_search", schema)
         nodes.append(PipelineNode(
             name="web_search",
-            as_type="tool",
+            as_type=lf_types.get("web_search", "tool"),
             input={"query": query},
             output={
                 "status": pipeline_data["web_search_status"],
@@ -93,10 +97,10 @@ def extract_pipeline_nodes(
     # 2. entity_profiling — generation (LLM call 1)
     if pipeline_data.get("entity_profile"):
         profile = pipeline_data["entity_profile"]
-        meta = _step_meta(timings, step_params, "entity_profiling")
+        meta = _step_meta(timings, step_params, "entity_profiling", schema)
         nodes.append(PipelineNode(
             name="entity_profiling",
-            as_type="generation",
+            as_type=lf_types.get("entity_profiling", "generation"),
             input={"query": query},
             output=profile,
             metadata=meta,
@@ -106,10 +110,10 @@ def extract_pipeline_nodes(
     # 3. token_matching — retriever
     if pipeline_data.get("token_matched_candidates"):
         candidates = pipeline_data["token_matched_candidates"]
-        meta = _step_meta(timings, step_params, "token_matching")
+        meta = _step_meta(timings, step_params, "token_matching", schema)
         nodes.append(PipelineNode(
             name="token_matching",
-            as_type="retriever",
+            as_type=lf_types.get("token_matching", "retriever"),
             input={
                 "query": query,
                 "profile": _profile_summary(
@@ -126,10 +130,10 @@ def extract_pipeline_nodes(
     # 4. llm_ranking — generation (LLM call 2, conditional)
     if pipeline_data.get("ranked_candidates"):
         ranked = pipeline_data["ranked_candidates"]
-        meta = _step_meta(timings, step_params, "llm_ranking")
+        meta = _step_meta(timings, step_params, "llm_ranking", schema)
         nodes.append(PipelineNode(
             name="llm_ranking",
-            as_type="generation",
+            as_type=lf_types.get("llm_ranking", "generation"),
             input={"n_candidates": len(ranked)},
             output={
                 "n_candidates": len(ranked),

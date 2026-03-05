@@ -4,10 +4,12 @@ One-at-a-time (OAT) perturbation scanning and importance-weighted
 coordinate descent over prompt-field and pipeline-param axes.
 """
 
+from __future__ import annotations
+
 import logging
 import random
 from collections import defaultdict
-from typing import Any, Callable, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict
 
 import pandas as pd
 
@@ -16,6 +18,9 @@ from api.services.backend_client import PIPELINE_STEP_PARAMS
 from api.services.project_store import ProjectStore
 from api.services.prompt_eval import evaluate_prompt_cached
 from api.services.search.utils import preview as _preview
+
+if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +296,7 @@ def classify_axis(
 def filter_variant_library(
     variant_library: dict,
     pipeline_params: dict | None,
+    schema: PipelineSchema | None = None,
 ) -> dict:
     """Filter variant library to axes relevant for the active pipeline.
 
@@ -299,11 +305,15 @@ def filter_variant_library(
       (``PromptState.render()`` produces ``ranking_prompt`` consumed only
       by that step).
 
+    When a ``PipelineSchema`` is provided, uses ``schema.step_param_keys()``
+    instead of the hardcoded ``PIPELINE_STEP_PARAMS`` constant.
+
     Args:
         variant_library: Full variant library dict with ``prompt_fields``
             and optional ``pipeline_params`` sections.
         pipeline_params: Current pipeline parameters (must contain ``steps``
             key listing active step names).
+        schema: Optional PipelineSchema for step-param lookup.
 
     Returns:
         Filtered copy of the variant library.
@@ -311,8 +321,9 @@ def filter_variant_library(
     active_steps = set((pipeline_params or {}).get("steps", []))
 
     # Build set of param keys owned by active steps
+    step_param_map = schema.step_param_keys() if schema else PIPELINE_STEP_PARAMS
     active_param_keys: set[str] = set()
-    for step_name, param_keys in PIPELINE_STEP_PARAMS.items():
+    for step_name, param_keys in step_param_map.items():
         if step_name in active_steps:
             active_param_keys |= param_keys
 
@@ -851,6 +862,32 @@ async def adaptive_search(
         logger.info("Saved search results to plan: %s", plan_id)
 
     return current_ps, current_params, log_df
+
+
+# ---------------------------------------------------------------------------
+# Load scan results from plan store
+# ---------------------------------------------------------------------------
+
+
+def load_scan_results_from_plan(
+    store: ProjectStore,
+    backend_id: str,
+    plan_id: str,
+) -> pd.DataFrame | None:
+    """Load scan results DataFrame from a persisted smart search plan.
+
+    Returns ``None`` if no plan or no scan rows found.
+    """
+    from api.services.search.plan_persistence import deserialize_smart_search_plan
+
+    plan_data = store.smart_search.load(backend_id, plan_id)
+    if not plan_data:
+        return None
+    plan = deserialize_smart_search_plan(plan_data)
+    rows = (plan.get("scan_results") or {}).get("rows", [])
+    if not rows:
+        return None
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------

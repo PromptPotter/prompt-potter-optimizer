@@ -13,7 +13,6 @@ from tqdm.auto import tqdm
 
 from api.models.prompt_state import PromptState
 from api.services.backend_client import (
-    PIPELINE_STEP_PARAMS,
     build_pipeline_params,
     load_pipeline_config,
 )
@@ -66,7 +65,7 @@ from api.services.search import (
 # Public API — every name the notebook imports.
 __all__ = [
     # Constants
-    "DEFAULT_GRID_AXES", "PIPELINE_STEP_PARAMS",
+    "DEFAULT_GRID_AXES",
     # Service init
     "init_services", "setup_llm", "load_variant_library",
     # Backend status & datasets
@@ -1819,14 +1818,8 @@ def select_scan_winner_notebook(
     """
     # Load scan rows from plan if scan_df not in memory
     if scan_df is None and store and backend_id and plan_id:
-        from api.services.search.plan_persistence import deserialize_smart_search_plan
-
-        plan_data = store.smart_search.load(backend_id, plan_id)
-        if plan_data:
-            plan = deserialize_smart_search_plan(plan_data)
-            rows = (plan.get("scan_results") or {}).get("rows", [])
-            if rows:
-                scan_df = pd.DataFrame(rows)
+        from api.services.search.smart_search import load_scan_results_from_plan
+        scan_df = load_scan_results_from_plan(store, backend_id, plan_id)
 
     if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
         print("No scan data available. Run sensitivity scan (4.5b) first.")

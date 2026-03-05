@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/backends", tags=["Backends"])
 
-# Shared store instance
-store = ProjectStore()
+
+def _get_store() -> ProjectStore:
+    return ProjectStore()
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +116,8 @@ def _slugify(name: str) -> str:
     return slug.strip("-")
 
 
-def _get_backend_or_404(backend_id: str) -> BackendConnection:
+def _get_backend_or_404(backend_id: str, store: ProjectStore | None = None) -> BackendConnection:
+    store = store or _get_store()
     backend = store.backends.get(backend_id)
     if not backend:
         raise HTTPException(status_code=404, detail=f"Backend '{backend_id}' not found")
@@ -130,6 +132,7 @@ def _get_backend_or_404(backend_id: str) -> BackendConnection:
 @router.post("", response_model=RegisterBackendResponse, status_code=201)
 async def register_backend(request: RegisterBackendRequest):
     """Register a new backend connection."""
+    store = _get_store()
     backend_id = request.id or _slugify(request.name)
     if store.backends.get(backend_id):
         raise HTTPException(
@@ -156,6 +159,7 @@ async def register_backend(request: RegisterBackendRequest):
 @router.get("", response_model=list[RegisterBackendResponse])
 async def list_backends():
     """List all registered backends."""
+    store = _get_store()
     return [
         RegisterBackendResponse(
             id=b.id,
@@ -171,7 +175,7 @@ async def list_backends():
 @router.get("/{backend_id}", response_model=RegisterBackendResponse)
 async def get_backend(backend_id: str):
     """Get backend details."""
-    b = _get_backend_or_404(backend_id)
+    b = _get_backend_or_404(backend_id, _get_store())
     return RegisterBackendResponse(
         id=b.id,
         name=b.name,
@@ -184,6 +188,7 @@ async def get_backend(backend_id: str):
 @router.delete("/{backend_id}", status_code=204)
 async def delete_backend(backend_id: str):
     """Remove a backend and all its stored data."""
+    store = _get_store()
     if not store.backends.delete(backend_id):
         raise HTTPException(status_code=404, detail=f"Backend '{backend_id}' not found")
 
@@ -196,7 +201,8 @@ async def delete_backend(backend_id: str):
 @router.post("/{backend_id}/sync", response_model=SyncResponse)
 async def sync_experiments(backend_id: str):
     """Sync experiments from backend API into project store (verbatim)."""
-    backend = _get_backend_or_404(backend_id)
+    store = _get_store()
+    backend = _get_backend_or_404(backend_id, store)
     client = BackendClient(backend.base_url)
 
     try:
@@ -221,7 +227,8 @@ async def sync_experiments(backend_id: str):
 @router.get("/{backend_id}/experiments")
 async def list_experiments(backend_id: str):
     """List synced experiments (from local store, native format)."""
-    _get_backend_or_404(backend_id)
+    store = _get_store()
+    _get_backend_or_404(backend_id, store)
 
     # First try the experiments list file
     data = store.backends.load_sync(backend_id, "experiments.json")
@@ -241,7 +248,8 @@ async def list_experiments(backend_id: str):
 @router.get("/{backend_id}/experiments/{experiment_id}")
 async def get_experiment(backend_id: str, experiment_id: str):
     """Get a synced experiment in native backend format."""
-    _get_backend_or_404(backend_id)
+    store = _get_store()
+    _get_backend_or_404(backend_id, store)
     data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
     if not data:
         raise HTTPException(
@@ -264,7 +272,8 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
     calls the backend's /sessions and /matches endpoints, and stores
     results as an Execution.
     """
-    backend = _get_backend_or_404(backend_id)
+    store = _get_store()
+    backend = _get_backend_or_404(backend_id, store)
 
     # Load synced experiment
     exp_data = store.backends.load_sync(
@@ -357,14 +366,16 @@ async def execute_replay(backend_id: str, request: ExecuteRequest):
 @router.get("/{backend_id}/executions")
 async def list_executions(backend_id: str):
     """List all executions for a backend."""
-    _get_backend_or_404(backend_id)
+    store = _get_store()
+    _get_backend_or_404(backend_id, store)
     return store.executions.list_all(backend_id)
 
 
 @router.get("/{backend_id}/executions/{execution_id}")
 async def get_execution(backend_id: str, execution_id: str):
     """Get full execution results."""
-    _get_backend_or_404(backend_id)
+    store = _get_store()
+    _get_backend_or_404(backend_id, store)
     execution = store.executions.load(backend_id, execution_id)
     if not execution:
         raise HTTPException(
@@ -383,7 +394,8 @@ async def get_execution(backend_id: str, execution_id: str):
 )
 async def compare_execution(backend_id: str, execution_id: str):
     """Compute statistical comparison for an execution."""
-    _get_backend_or_404(backend_id)
+    store = _get_store()
+    _get_backend_or_404(backend_id, store)
     execution = store.executions.load(backend_id, execution_id)
     if not execution:
         raise HTTPException(

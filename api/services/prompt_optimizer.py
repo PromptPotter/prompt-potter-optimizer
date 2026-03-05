@@ -171,6 +171,13 @@ async def generate_candidates(
             current_results, failure_examples,
         )
 
+    # Append strategic plan guidance when available
+    if current_ps.plan:
+        meta_prompt += (
+            f"\n\nSTRATEGIC GUIDANCE (from optimization plan):\n"
+            f"{current_ps.plan}\n"
+        )
+
     response = await llm_client.chat(
         messages=[{"role": "user", "content": meta_prompt}],
         model=model,

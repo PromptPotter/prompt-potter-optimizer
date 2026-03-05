@@ -1,10 +1,16 @@
 """Eval dataset loading from synced experiments or stored replays."""
 
+from __future__ import annotations
+
 import random
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from api.services.project_store import ProjectStore
 from api.services.query_utils import parse_bom_material
+
+if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +52,10 @@ REQUIRED_PIPELINE_KEY = "entity_profile"
 # Extraction
 # ---------------------------------------------------------------------------
 
-def _extract_eval_from_traces(exp_data: dict) -> list:
+def _extract_eval_from_traces(
+    exp_data: dict,
+    schema: PipelineSchema | None = None,
+) -> list:
     """Build eval data from Langfuse-style traces in synced experiment data.
 
     Each trace in ``runs[0].traces[]`` carries named observations with
@@ -89,13 +98,19 @@ def _extract_eval_from_traces(exp_data: dict) -> list:
         pipeline_data: dict = {}
         llm_provider: str | None = None
 
+        # Use schema-derived extraction map when available
+        if schema is not None:
+            _obs_map = schema.obs_extraction_map()
+        else:
+            _obs_map = OBS_EXTRACTION_MAP
+
         for obs in trace.get("observations", []):
             name = obs.get("name", "")
             output = obs.get("output")
             if not name or not output:
                 continue
 
-            for field in OBS_EXTRACTION_MAP.get(name, []):
+            for field in _obs_map.get(name, []):
                 if field.output_field is None:
                     pipeline_data[field.pipeline_key] = output
                 else:
@@ -134,6 +149,7 @@ def load_eval_dataset(
     backend_id: str,
     experiment_id: str,
     query_limit: int = 0,
+    schema: PipelineSchema | None = None,
 ) -> list:
     """Load per-query evaluation data from synced experiments or stored replays.
 
@@ -147,7 +163,7 @@ def load_eval_dataset(
     )
 
     if exp_data:
-        eval_data = _extract_eval_from_traces(exp_data)
+        eval_data = _extract_eval_from_traces(exp_data, schema=schema)
         if eval_data:
             if query_limit > 0 and len(eval_data) > query_limit:
                 rng = random.Random(42)

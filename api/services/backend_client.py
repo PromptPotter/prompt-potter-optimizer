@@ -20,6 +20,7 @@ from api.services.constants import NO_RESULT
 from api.services.query_utils import parse_bom_material
 
 if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -89,26 +90,32 @@ def build_pipeline_params(
     pipeline_config: dict,
     overrides: dict | None = None,
     exclude_steps: list[str] | None = None,
+    schema: "PipelineSchema | None" = None,
 ) -> dict:
     """Build pipeline_params from a (possibly shortened) pipeline config.
 
     Returns dict ready for evaluate_prompt(..., pipeline_params=params).
     Includes 'steps' list (sent to TermNorm) and any user overrides.
 
+    When a ``PipelineSchema`` is provided, uses ``schema.step_param_keys()``
+    instead of the hardcoded ``PIPELINE_STEP_PARAMS`` constant.
+
     Args:
         pipeline_config: Pipeline config with ``steps`` list.
         overrides: Optional parameter overrides (e.g. ``ranking_temperature``).
         exclude_steps: Step names to remove from the active pipeline
             (e.g. ``["llm_ranking"]`` for token-matching-only evaluation).
+        schema: Optional PipelineSchema for step-param lookup.
     """
     step_names = [s["name"] for s in pipeline_config["steps"]]
     if exclude_steps:
         step_names = [s for s in step_names if s not in exclude_steps]
     params: dict = {"steps": step_names}
 
+    step_param_map = schema.step_param_keys() if schema else PIPELINE_STEP_PARAMS
     active_param_names: set = set()
     for name in step_names:
-        active_param_names |= PIPELINE_STEP_PARAMS.get(name, set())
+        active_param_names |= step_param_map.get(name, set())
 
     if overrides:
         for k, v in overrides.items():

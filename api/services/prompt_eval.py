@@ -19,10 +19,16 @@ from api.evaluators.exact_match import ExactMatchEvaluator
 from api.models.prompt_state import PromptState
 from api.services.constants import NO_RESULT
 
+if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
+    from api.services.backend_client import BackendClient
+    from api.services.obs.observability_logger import ObsLogger
+    from api.services.project_store import ProjectStore
+
 _evaluator = ExactMatchEvaluator({"strip": True})
 
 # TermNorm pipeline data keys extracted from /matches response.
-# M6: will be derived from PipelineSchema.obs_extraction_map().
+# Fallback when no PipelineSchema is available.
 _PIPELINE_DATA_KEYS = [
     "entity_profile",
     "token_matched_candidates",
@@ -34,11 +40,6 @@ _PIPELINE_DATA_KEYS = [
     "web_search_error",
     "web_sources",
 ]
-
-if TYPE_CHECKING:
-    from api.services.backend_client import BackendClient
-    from api.services.obs.observability_logger import ObsLogger
-    from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class EvalContext:
     store: ProjectStore | None = None
     backend_id: str = ""
     pipeline_params: dict | None = None
+    pipeline_schema: PipelineSchema | None = None
     model: str = ""
     temperature: float = 0.0
     obs: ObsLogger | None = None
@@ -235,18 +237,32 @@ def extract_baseline_prompt(exp_data: dict) -> PromptState:
 
 
 def _extract_pipeline_data(
-    backend_data: dict, ranked_candidates: list,
+    backend_data: dict,
+    ranked_candidates: list,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> dict:
     """Extract pipeline data fields from a backend /matches response.
 
-    Collects ``ranked_candidates`` plus all keys in ``_PIPELINE_DATA_KEYS``
-    from ``backend_data``.
+    When a ``PipelineSchema`` is provided, derives the key set from its
+    observation mappings. Falls back to ``_PIPELINE_DATA_KEYS``.
     """
     pd: dict = {"ranked_candidates": ranked_candidates}
-    for key in _PIPELINE_DATA_KEYS:
-        val = backend_data.get(key)
-        if val is not None:
-            pd[key] = val
+    if pipeline_schema is not None:
+        keys: set[str] = set()
+        for mappings in pipeline_schema.obs_extraction_map().values():
+            for m in mappings:
+                keys.add(m.pipeline_key)
+        # Always include infrastructure keys
+        keys |= {"step_timings", "llm_provider", "total_time", "pipeline_params"}
+        for key in keys:
+            val = backend_data.get(key)
+            if val is not None:
+                pd[key] = val
+    else:
+        for key in _PIPELINE_DATA_KEYS:
+            val = backend_data.get(key)
+            if val is not None:
+                pd[key] = val
     return pd
 
 
@@ -255,6 +271,7 @@ async def backend_reranker_eval(
     backend_client: BackendClient,
     rendered_prompt: str,
     pipeline_params: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> dict:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint.
 
@@ -295,7 +312,7 @@ async def backend_reranker_eval(
             "hit": eval_output.result == EvalResult.PASS,
             "score": eval_output.score,
             "error": None,
-            "pipeline_data": _extract_pipeline_data(data, ranked),
+            "pipeline_data": _extract_pipeline_data(data, ranked, pipeline_schema),
         }
     except Exception as exc:
         logger.warning("backend_reranker_eval failed for %s: %s", query[:60], exc)
@@ -316,6 +333,7 @@ async def evaluate_prompt_batch(
     backend_client: BackendClient,
     pipeline_params: dict | None = None,
     on_result: Callable | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> list:
     """Evaluate a prompt on all eval_data queries via the backend.
 
@@ -339,6 +357,7 @@ async def evaluate_prompt_batch(
         result = await backend_reranker_eval(
             qd, backend_client, rendered,
             pipeline_params=pipeline_params,
+            pipeline_schema=pipeline_schema,
         )
 
         if result.get("error"):
@@ -566,11 +585,13 @@ async def evaluate_prompt_cached(
         Tuple of (results, scores_dict, was_cached).
     """
     # Resolve from EvalContext when provided
+    pipeline_schema: PipelineSchema | None = None
     if ctx is not None:
         backend_client = backend_client or ctx.backend_client
         store = store or ctx.store
         backend_id = backend_id or ctx.backend_id
         pipeline_params = pipeline_params if pipeline_params is not None else ctx.pipeline_params
+        pipeline_schema = ctx.pipeline_schema
         model = model or ctx.model
         temperature = temperature or ctx.temperature
         obs = obs or ctx.obs
@@ -648,6 +669,7 @@ async def evaluate_prompt_cached(
         prompt_state, remaining_data, backend_client,
         pipeline_params=pipeline_params,
         on_result=_on_result,
+        pipeline_schema=pipeline_schema,
     )
 
     results = historical_results + partial_results + new_results
