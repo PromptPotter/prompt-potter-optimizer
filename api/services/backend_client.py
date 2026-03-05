@@ -30,7 +30,10 @@ MATCH_TIMEOUT = 120.0
 # Maps each pipeline step name to the set of parameter names it uses.
 PIPELINE_STEP_PARAMS = {
     "fuzzy_matching": {"fuzzy_threshold", "fuzzy_scorer"},
-    "web_search": {"max_sites", "num_results", "content_char_limit"},
+    "web_search": {
+        "max_sites", "num_results", "content_char_limit",
+        "query_prefix", "query_suffix",
+    },
     "entity_profiling": {
         "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
         "profiling_prompt", "profiling_schema", "profiling_model",
@@ -49,6 +52,8 @@ FLAT_TO_NODE_OVERRIDE: dict[str, tuple[str, str]] = {
     "max_sites": ("web_search", "max_sites"),
     "num_results": ("web_search", "num_results"),
     "content_char_limit": ("web_search", "content_char_limit"),
+    "query_prefix": ("web_search", "query_prefix"),
+    "query_suffix": ("web_search", "query_suffix"),
     "raw_content_limit": ("entity_profiling", "raw_content_limit"),
     "profiling_temperature": ("entity_profiling", "temperature"),
     "profiling_max_tokens": ("entity_profiling", "max_tokens"),

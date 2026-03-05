@@ -60,7 +60,10 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             name="web_search",
             type="tool",
             runtime="backend",
-            param_keys={"max_sites", "num_results", "content_char_limit"},
+            param_keys={
+                "max_sites", "num_results", "content_char_limit",
+                "query_prefix", "query_suffix",
+            },
             observation_name="web_search",
             observation_mappings=[
                 ObservationMapping(pipeline_key="web_sources", output_field="sources"),

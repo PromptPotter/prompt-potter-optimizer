@@ -116,7 +116,8 @@ PromptPotter controls backend pipeline behavior through **`node_overrides`** —
     },
     "web_search": {
       "max_sites": 3,
-      "num_results": 10
+      "num_results": 10,
+      "query_suffix": "material datasheet"
     }
   }
 }
@@ -140,6 +141,8 @@ PromptPotter controls backend pipeline behavior through **`node_overrides`** —
 | `web_search` | `max_sites` | `max_sites` |
 | `web_search` | `num_results` | `num_results` |
 | `web_search` | `content_char_limit` | `content_char_limit` |
+| `web_search` | `query_prefix` | `query_prefix` |
+| `web_search` | `query_suffix` | `query_suffix` |
 | `fuzzy_matching` | `threshold` | `fuzzy_threshold` |
 | `fuzzy_matching` | `scorer` | `fuzzy_scorer` |
 | `token_matching` | `max_token_candidates` | `max_token_candidates` |
@@ -223,7 +226,7 @@ Returns the full pipeline configuration with typed nodes, tunable parameters, na
     },
     "web_search": {
       "type": "ExternalService",
-      "config": { "max_sites": 7, "num_results": 20, "content_char_limit": 800, "..." : "..." }
+      "config": { "max_sites": 7, "num_results": 20, "content_char_limit": 800, "query_prefix": "", "query_suffix": "", "..." : "..." }
     },
     "entity_profiling": {
       "type": "LLMGeneration",
