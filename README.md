@@ -70,6 +70,15 @@ pip install -r requirements.txt  # then configure .env (see .env.example)
 
 See the [User Guide](docs/user-guide.md) for setup, configuration, and the complete workflow.
 
+
+## Jupyter Notebook
+What *Claude Code* says about your operating interface:
+>The notebook is a 40+ cell orchestration masterpiece covering:
+>- Service init, pipeline config fetch, dataset loading (Excel + trace-based)
+>- Scan advisor → sensitivity scan → coverage advisor → grid search → smart search
+>- Feedback cycle with patience, campaign rounds, Langfuse sync
+>- Flip tracking, lineage chains, winner persistence
+
 ## Documentation
 
 - [User Guide](docs/user-guide.md) — Setup, optimization workflow, configuration reference
