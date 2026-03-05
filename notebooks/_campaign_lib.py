@@ -97,10 +97,84 @@ __all__ = [
     "display_progress", "run_manual_round",
     "select_and_seed_grid_winner",
     # Notebook-facing wrappers
-    "show_entity_profiles", "show_grid_overview",
+    "show_entity_profiles", "show_grid_overview", "smoke_test_override",
     # Langfuse
     "push_langfuse", "backfill_langfuse", "configure_langfuse",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Smoke-test helpers
+# ---------------------------------------------------------------------------
+
+
+async def smoke_test_override(
+    svc: dict,
+    pipeline_config: dict,
+    eval_data: list,
+    *,
+    step: str = "entity_profiling",
+    schema_ref: str = "entity_profile/1",
+    extra_fields: dict[str, str] | None = None,
+) -> None:
+    """Fire one /matches call with a schema override and print the result.
+
+    Parameters
+    ----------
+    svc : dict
+        Services dict from ``init_services()``.
+    pipeline_config : dict
+        Full pipeline config from ``fetch_pipeline()``.
+    eval_data : list
+        Eval dataset (first query used as test input).
+    step : str
+        Pipeline step to override (default ``entity_profiling``).
+    schema_ref : str
+        Key into ``resolved_schemas`` (default ``entity_profile/1``).
+    extra_fields : dict
+        ``{field_name: description}`` to inject into the schema.
+        Defaults to ``{"industry_sector": "Primary industry sector ..."}``.
+    """
+    import copy
+
+    if extra_fields is None:
+        extra_fields = {
+            "industry_sector":
+                "Primary industry sector (e.g. automotive, construction, electronics)",
+        }
+
+    bc = svc["backend_client"]
+    query = eval_data[0]["query"] if eval_data else "Stahl S235"
+
+    await bc.init_session(svc.get("session_terms", []))
+
+    schema = copy.deepcopy(
+        pipeline_config["resolved_schemas"][schema_ref]["json_schema"],
+    )
+    for name, desc in extra_fields.items():
+        schema["properties"][name] = {"type": "string", "description": desc}
+        schema.setdefault("required", []).append(name)
+
+    result = await bc.run_match(
+        query,
+        skip_llm_ranking=True,
+        pipeline_params={"node_overrides": {step: {"output_schema": schema}}},
+    )
+
+    data = result.get("data", {})
+    profile = data.get("entity_profile", {})
+    top = (data.get("ranked_candidates") or [{}])[0]
+
+    print(f"Query   : {query}")
+    print(f"Top hit : {top.get('candidate', 'N/A')}"
+          f" (score: {top.get('relevance_score', 0):.3f})")
+    added = set(extra_fields)
+    found = added & set(profile)
+    print(f"Override: added {added} — {'found' if found == added else 'MISSING'} in response")
+    print()
+    for k, v in profile.items():
+        tag = " ← injected" if k in added else ""
+        print(f"  {k}: {v}{tag}")
 
 
 # ---------------------------------------------------------------------------

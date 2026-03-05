@@ -84,6 +84,12 @@ PromptState is frozen (`model_config = {"frozen": True}`). Use `derive(**changes
 
 **ProjectStore** disk layout, store conventions, and evaluation flow details: see [`api/services/CLAUDE.md`](api/services/CLAUDE.md).
 
+### Pipeline composability
+
+PromptPotter controls backend pipeline behavior through **`node_overrides`** — structured per-node override dicts that mirror the backend's `GET /pipeline` config shape. `run_match()` translates internal flat param names (e.g. `ranking_temperature`) to `node_overrides` format (e.g. `{"llm_ranking": {"temperature": 0.5}}`) at the HTTP boundary. Backends only accept `node_overrides`.
+
+Each LLM node supports `prompt`, `output_schema`, and `model` overrides. See [`docs/connectors/termnorm.md`](docs/connectors/termnorm.md) for the full key mapping.
+
 ### North star workflow (HITL optimization cycle)
 
 The human workflow is a repeatable loop:

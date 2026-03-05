@@ -123,6 +123,10 @@ class TestTermNormConsistency:
         for step_name, expected_type in expected.items():
             assert lf_map[step_name] == expected_type
 
+    def test_fuzzy_matching_param_keys(self):
+        fm = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "fuzzy_matching")
+        assert fm.param_keys == {"fuzzy_threshold", "fuzzy_scorer"}
+
     def test_runtime_classification(self):
         frontend = [s.name for s in TERMNORM_DEFAULT_SCHEMA.frontend_steps()]
         assert frontend == ["cache_lookup", "fuzzy_matching"]
@@ -263,7 +267,10 @@ def test_termnorm_default_no_hardcoded_metadata():
     assert ep.langfuse_type == "generation"
     assert ep.observation_name == "entity_profiling"
     assert len(ep.observation_mappings) == 1
-    assert ep.param_keys == {"raw_content_limit", "profiling_temperature", "profiling_max_tokens"}
+    assert ep.param_keys == {
+        "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
+        "profiling_prompt", "profiling_schema", "profiling_model",
+    }
     assert lr.langfuse_type == "generation"
 
 

@@ -149,6 +149,12 @@ Rules:
 - Budget total must not exceed {query_budget}
 - Skip axes that are unlikely to affect accuracy (explain why)
 - Prioritize axes with the highest expected impact
+- Never recommend "ranking_prompt" or "profiling_prompt" as pipeline_param scan axes — \
+these are prompt template overrides managed via prompt_field optimization, not numeric knobs
+- "profiling_schema" and "ranking_schema" are output schema overrides (JSON schema dicts). \
+Only recommend varying these if the output format itself is suspected to affect accuracy
+- "profiling_model" and "ranking_model" override the LLM model per-step. Recommend varying \
+these when the budget allows exploring different model capabilities
 
 Return ONLY the JSON object, no markdown fences or extra text."""
 

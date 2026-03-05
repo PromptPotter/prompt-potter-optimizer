@@ -92,45 +92,58 @@ The response `pipeline_params.steps` echoes the actual steps that ran, regardles
 | `token_matching` | Yes | Deterministic token-overlap scoring |
 | `llm_ranking` | No | LLM reranks candidates (controlled by `steps` or `skip_llm_ranking`) |
 
-#### Pipeline Parameter Overrides
+#### Pipeline Parameter Overrides (`node_overrides`)
 
-PromptPotter forwards `pipeline_params` into the `/matches` request body, giving the optimizer control over every influential knob. All parameters are optional and fall back to their defaults when omitted.
+PromptPotter controls backend pipeline behavior through **`node_overrides`** — structured per-node override dicts that mirror the backend's `GET /pipeline` config shape. `run_match()` in `backend_client.py` translates PromptPotter's internal flat param names (e.g. `ranking_temperature`) to `node_overrides` format at the HTTP boundary. The backend only accepts `node_overrides`.
 
-| Parameter | Default | Stage | Description |
-|-----------|---------|-------|-------------|
-| `max_sites` | `7` | Web scraping | Number of pages fetched and scraped |
-| `num_results` | `20` | Web search | Search result count (Brave / SearXNG) |
-| `content_char_limit` | `800` | Web scraping | Max characters kept per scraped page |
-| `raw_content_limit` | `5000` | Entity profiling | Total research text sent to LLM1 |
-| `profiling_temperature` | `0.3` | Entity profiling | LLM1 temperature |
-| `profiling_max_tokens` | `1800` | Entity profiling | LLM1 output token limit |
-| `ranking_prompt` | (registry default) | LLM ranking | Full LLM2 prompt template override. When provided, replaces the prompt from TermNorm's prompt registry. Used by PromptPotter to inject candidate prompts during optimization. |
-| `ranking_temperature` | `0` | LLM ranking | LLM2 temperature |
-| `ranking_max_tokens` | `4000` | LLM ranking | LLM2 output token limit |
-| `ranking_sample_size` | `20` | LLM ranking | Candidates sampled for LLM2 |
-| `max_token_candidates` | `20` | Token matching | Candidates kept from token matching |
-| `relevance_weight_core` | `0.7` | Scoring | Weight of core concept score (`spec_score` gets `1 - weight`) |
-
-**Example request with pipeline parameter overrides:**
+**Example request:**
 ```json
 {
   "query": "Kupferblech CW004A / Laserschneiden",
-  "skip_llm_ranking": false,
-  "max_sites": 3,
-  "profiling_temperature": 0.1,
-  "ranking_sample_size": 15,
-  "relevance_weight_core": 0.8
+  "steps": ["web_search", "entity_profiling", "token_matching", "llm_ranking"],
+  "node_overrides": {
+    "entity_profiling": {
+      "prompt": "Custom profiling prompt with {{query}} {{format_string}} {{combined_text}}",
+      "temperature": 0.5,
+      "max_tokens": 2000,
+      "model": "gpt-4o"
+    },
+    "llm_ranking": {
+      "prompt": "Custom ranking prompt with {{core_concept}} {{entity_profile_json}} {{matches}}",
+      "temperature": 0.0,
+      "sample_size": 15,
+      "model": "gpt-4o"
+    },
+    "web_search": {
+      "max_sites": 3,
+      "num_results": 10
+    }
+  }
 }
 ```
 
-**Example request with ranking prompt override (grid search / optimization):**
-```json
-{
-  "query": "Kupferblech CW004A / Laserschneiden",
-  "skip_llm_ranking": false,
-  "ranking_prompt": "You are a domain expert...\n\nGiven the entity profile:\n{{entity_profile_json}}\n\nRank these candidates:\n{{matches}}\n\n..."
-}
-```
+**`node_overrides` key mapping** (internal flat name = what PromptPotter uses internally, translated by `run_match()`):
+
+| Node | Override key | Internal flat name |
+|------|-------------|----------------------|
+| `entity_profiling` | `prompt` | `profiling_prompt` |
+| `entity_profiling` | `output_schema` | `profiling_schema` |
+| `entity_profiling` | `model` | `profiling_model` |
+| `entity_profiling` | `temperature` | `profiling_temperature` |
+| `entity_profiling` | `max_tokens` | `profiling_max_tokens` |
+| `llm_ranking` | `prompt` | `ranking_prompt` |
+| `llm_ranking` | `output_schema` | `ranking_schema` |
+| `llm_ranking` | `model` | `ranking_model` |
+| `llm_ranking` | `temperature` | `ranking_temperature` |
+| `llm_ranking` | `max_tokens` | `ranking_max_tokens` |
+| `llm_ranking` | `sample_size` | `ranking_sample_size` |
+| `web_search` | `max_sites` | `max_sites` |
+| `web_search` | `num_results` | `num_results` |
+| `web_search` | `content_char_limit` | `content_char_limit` |
+| `fuzzy_matching` | `threshold` | `fuzzy_threshold` |
+| `fuzzy_matching` | `scorer` | `fuzzy_scorer` |
+| `token_matching` | `max_token_candidates` | `max_token_candidates` |
+| `token_matching` | `relevance_weight_core` | `relevance_weight_core` |
 
 **Response:**
 ```json

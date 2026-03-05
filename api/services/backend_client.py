@@ -28,13 +28,42 @@ MATCH_TIMEOUT = 120.0
 
 # Maps each pipeline step name to the set of parameter names it uses.
 PIPELINE_STEP_PARAMS = {
+    "fuzzy_matching": {"fuzzy_threshold", "fuzzy_scorer"},
     "web_search": {"max_sites", "num_results", "content_char_limit"},
-    "entity_profiling": {"raw_content_limit", "profiling_temperature", "profiling_max_tokens"},
+    "entity_profiling": {
+        "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
+        "profiling_prompt", "profiling_schema", "profiling_model",
+    },
     "token_matching": {"max_token_candidates", "relevance_weight_core"},
     "llm_ranking": {
         "ranking_temperature", "ranking_max_tokens",
         "ranking_sample_size", "ranking_prompt",
+        "ranking_schema", "ranking_model",
     },
+}
+
+# Maps internal flat param name → (node_name, node_override_key).
+# Used by run_match() to translate flat params into node_overrides wire format.
+FLAT_TO_NODE_OVERRIDE: dict[str, tuple[str, str]] = {
+    "max_sites": ("web_search", "max_sites"),
+    "num_results": ("web_search", "num_results"),
+    "content_char_limit": ("web_search", "content_char_limit"),
+    "raw_content_limit": ("entity_profiling", "raw_content_limit"),
+    "profiling_temperature": ("entity_profiling", "temperature"),
+    "profiling_max_tokens": ("entity_profiling", "max_tokens"),
+    "profiling_prompt": ("entity_profiling", "prompt"),
+    "profiling_schema": ("entity_profiling", "output_schema"),
+    "profiling_model": ("entity_profiling", "model"),
+    "max_token_candidates": ("token_matching", "max_token_candidates"),
+    "relevance_weight_core": ("token_matching", "relevance_weight_core"),
+    "ranking_temperature": ("llm_ranking", "temperature"),
+    "ranking_max_tokens": ("llm_ranking", "max_tokens"),
+    "ranking_sample_size": ("llm_ranking", "sample_size"),
+    "ranking_prompt": ("llm_ranking", "prompt"),
+    "ranking_schema": ("llm_ranking", "output_schema"),
+    "ranking_model": ("llm_ranking", "model"),
+    "fuzzy_threshold": ("fuzzy_matching", "threshold"),
+    "fuzzy_scorer": ("fuzzy_matching", "scorer"),
 }
 
 
@@ -230,15 +259,32 @@ class BackendClient:
         pipeline_params: dict[str, Any] | None = None,
         ranking_prompt: str | None = None,
     ) -> dict[str, Any]:
-        """POST /matches — run a single query through the backend pipeline."""
+        """POST /matches — translate internal flat params into node_overrides wire format."""
         payload: dict[str, Any] = {
             "query": query,
             "skip_llm_ranking": skip_llm_ranking,
         }
-        if pipeline_params:
-            payload.update(pipeline_params)
+
+        pp = dict(pipeline_params or {})
         if ranking_prompt:
-            payload["ranking_prompt"] = ranking_prompt
+            pp["ranking_prompt"] = ranking_prompt
+
+        if "steps" in pp:
+            payload["steps"] = pp.pop("steps")
+
+        node_overrides: dict[str, dict] = {}
+        if "node_overrides" in pp:
+            for node, params in pp.pop("node_overrides").items():
+                node_overrides.setdefault(node, {}).update(params)
+
+        for flat_key, val in pp.items():
+            if flat_key in FLAT_TO_NODE_OVERRIDE:
+                node, param = FLAT_TO_NODE_OVERRIDE[flat_key]
+                node_overrides.setdefault(node, {})[param] = val
+
+        if node_overrides:
+            payload["node_overrides"] = node_overrides
+
         async with httpx.AsyncClient(timeout=MATCH_TIMEOUT) as client:
             resp = await client.post(
                 f"{self.base_url}/matches",

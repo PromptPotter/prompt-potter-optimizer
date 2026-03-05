@@ -45,6 +45,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             type="retriever",
             runtime="frontend",
             short_circuit=True,
+            param_keys={"fuzzy_threshold", "fuzzy_scorer"},
             langfuse_type="span",
         ),
         PipelineStep(
@@ -65,6 +66,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             runtime="backend",
             param_keys={
                 "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
+                "profiling_prompt", "profiling_schema", "profiling_model",
             },
             observation_name="entity_profiling",
             observation_mappings=[
@@ -94,6 +96,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             param_keys={
                 "ranking_temperature", "ranking_max_tokens",
                 "ranking_sample_size", "ranking_prompt",
+                "ranking_schema", "ranking_model",
             },
             observation_name="llm_ranking",
             observation_mappings=[
