@@ -1,4 +1,4 @@
-"""Helper library for optimization_campaign.ipynb and termnorm_backend.ipynb.
+"""Helper library for optimization_campaign.ipynb and evaluation.ipynb.
 
 Thin notebook-facing layer that delegates to ``api.services`` for core logic
 and adds tqdm progress bars, print statements, and IPython display for
@@ -1928,10 +1928,10 @@ async def run_feedback_cycle_notebook(
     session_terms: "list[str] | None" = None,
     langfuse_session_id: str | None = None,
 ) -> list:
-    """Run optimization via M3 feedback cycle (node-based architecture).
+    """Run optimization via feedback cycle with optional L2/L3 escalation.
 
-    Drop-in replacement for ``run_optimization_loop()`` — accepts and returns
-    the same ``campaign_rounds`` list format for downstream notebook sections.
+    Accepts and returns the ``campaign_rounds`` list format for downstream
+    notebook sections.
 
     Internally uses InitNode → GrowFilterNode → AnalysisEvalNode with Langfuse
     tracing and ``next_action`` routing.

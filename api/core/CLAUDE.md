@@ -1,6 +1,6 @@
 # api/core — Workflow Engine Scaffold
 
-CWL-inspired workflow engine — **future architecture, not dead code**. M6 migration will wrap service-layer functions into workflow nodes.
+CWL-inspired workflow engine — **future architecture, not dead code**. M6 Wave 2 (PipelineSchema) is complete. Remaining M6 waves will wrap service-layer functions into workflow nodes.
 
 ## Key files
 
@@ -26,4 +26,4 @@ Nodes use `NodeBase[TInput, TOutput]` — a generic base with Pydantic models fo
 
 ## Migration intent
 
-M6 adds `PipelineSchema` (replacing hardcoded TermNorm constants) then wraps service-layer functions into workflow nodes. The notebook will drive optimization via `WorkflowRunner` instead of direct service calls. See [`docs/specs/m6-workflow-migration.md`](../../docs/specs/m6-workflow-migration.md).
+M6 Wave 2 added PipelineSchema (derivation methods now wired through services). Remaining waves wrap service-layer functions into workflow nodes. The notebook will drive optimization via `WorkflowRunner` instead of direct service calls. See [`docs/specs/m6-workflow-migration.md`](../../docs/specs/m6-workflow-migration.md).

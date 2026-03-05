@@ -17,7 +17,7 @@
 | M3 | Optimization Infrastructure | Complete |
 | M4 | Integration and Polish (reclassified — absorbed into M3–M5) | Complete |
 | M5 | Observability Layer | Complete |
-| M6 | CWL Workflow Migration + PipelineSchema Foundation | Planned |
+| M6 | CWL Workflow Migration + PipelineSchema Foundation | In Progress |
 | M7 | Multi-Connector Architecture | Future |
 
 ---
@@ -69,7 +69,7 @@ Adopted TermNorm-excel's zero-dependency file-based patterns for production-grad
 
 ---
 
-## M6: CWL Workflow Migration + PipelineSchema Foundation -- Planned
+## M6: CWL Workflow Migration + PipelineSchema Foundation -- In Progress
 
 Wire existing service functions into the workflow engine scaffold (`api/core/`, `api/nodes/`). PipelineSchema as a prerequisite foundation — backend-agnostic pipeline description that provides derivation methods for all pipeline-specific constants.
 

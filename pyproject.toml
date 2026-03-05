@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "promptpotter-optimizer"
-version = "0.6.0"
+version = "0.6.1"
 description = "Backend-first prompt optimization service"
 readme = "README.md"
 license = "MIT"

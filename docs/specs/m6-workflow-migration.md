@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0
 **Date:** 2026-02-28
-**Status:** Planned
+**Status:** In Progress (Wave 2 complete)
 **Depends on:** [Roadmap M6](roadmap.md), [ADD v0.9.0](add.md), [PRD P1.12, P1.14](prd.md)
 
 ---

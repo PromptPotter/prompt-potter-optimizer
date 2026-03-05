@@ -27,7 +27,7 @@ class _ObsField:
 
 
 # Declarative mapping: observation name → extraction rules.
-# When M6 lands, this will be derived from CWL workflow step definitions.
+# Schema-driven extraction available via schema.obs_extraction_map(); this constant is the fallback.
 OBS_EXTRACTION_MAP: dict[str, list[_ObsField]] = {
     "entity_profiling": [
         _ObsField("entity_profile", output_field=None, is_llm=True),

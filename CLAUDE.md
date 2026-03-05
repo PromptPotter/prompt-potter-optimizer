@@ -32,7 +32,7 @@ cd docker && docker-compose up --build
 
 ### Two entry points, shared core
 
-1. **FastAPI API** (`api/main.py`) — REST endpoints at `/api/v1/`. Routers: `backends` (connect, sync, execute, compare), `health`.
+1. **FastAPI API** (`api/main.py`) — REST endpoints at `/api/v1/`. Routers: `backends`, `campaigns`, `health`, `workflows`.
 2. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` is the **primary working interface** at this stage. Uses `notebooks/_campaign_lib.py`, a thin wrapper that delegates to `api/services/` and adds tqdm progress bars + IPython display. The notebook flow:
    - **Setup** — `init_services()` connects to TermNorm, syncs experiments, loads session terms
    - **Configuration** — `campaign_config` dict: query budget, exploration rate, pipeline overrides, grid/smart search knobs, LLM settings
@@ -56,7 +56,9 @@ All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py
 | `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions, `fetch_pipeline()`). |
 | `pipeline_discovery.py` | Pipeline schema factory. `TERMNORM_DEFAULT_SCHEMA` (structural only) + `parse_pipeline_response()` merges live `GET /pipeline` metadata. |
 | `project_store.py` | Facade over focused store modules in `stores/`. File I/O for `.promptpotter/projects/`. |
-| `campaign/feedback_cycle.py` | Iterative optimization orchestrator: `CycleConfig` → `GrowFilterNode` → `AnalysisEvalNode` loop with patience-based stopping, 3-path routing (`generate`/`refine_context`/`modify_plan`/`stop`). |
+| `campaign/feedback_cycle.py` | Iterative optimization orchestrator: `CycleConfig` → generate_candidates → evaluate_and_select_winner loop with patience-based stopping. Hierarchical 3-loop escalation (L1 generate → L2 refine_context → L3 modify_plan) when enable_l2/enable_l3 are set. 4-path routing (generate/refine_context/modify_plan/stop). |
+| `campaign/layer_transitions.py` | L2 (refine_context) and L3 (modify_plan) LLM-driven transitions for the 3-loop feedback cycle. |
+| `dataset_builder.py` | Excel ground-truth loading (`load_excel_ground_truth`) and train/test splitting. Column mapping via `SHEET_COLUMN_MAP`. |
 | `campaign/campaign_init.py` | Campaign initialization: project store setup, backend sync, baseline evaluation. |
 | `search/smart_search.py` | Sensitivity scan (OAT perturbation), adaptive search (coordinate descent), axis classification. `filter_variant_library()` drops axes not in active pipeline. |
 | `search/scan_advisor.py` | LLM-driven scan recommendations. Enriched with output schema fields + prompt metadata from `PipelineSchema`. |
@@ -64,7 +66,7 @@ All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py
 | `obs/observability_logger.py` | File-based observability: Langfuse-compatible traces, MLflow experiments, prompt versioning. `events.jsonl` flat nav log. |
 | `obs/langfuse_client.py` | Langfuse v2 cloud integration (singleton). |
 | `obs/langfuse_push.py` | Push eval runs to Langfuse cloud. `push_run()` (auto, per-eval) + `push_all_runs()` (batch). |
-| `stores/` | Focused store modules: `BackendStore`, `ExecutionStore`, `DatasetRunStore`, `GridPlanStore`, `SmartSearchStore`, `CampaignStore`. Shared I/O in `stores/base.py`. |
+| `stores/` | Focused store modules: `BackendStore`, `ExecutionStore`, `DatasetRunStore`, `DatasetStore`, `GridPlanStore`, `SmartSearchStore`, `CampaignStore`. Shared I/O in `stores/base.py`. |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with `_OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. Exponential backoff for transient 503/429 errors. |
 | `query_utils.py` | Shared query-parsing utilities (e.g. `parse_bom_material()`). |
 | `comparison.py` | Statistical comparison (hit@k, McNemar, Wilcoxon). |
@@ -107,9 +109,9 @@ The human workflow is a repeatable loop:
 
 All evaluation paths (grid search, smart search, feedback cycle) converge on `evaluate_prompt_cached()` — the single gateway for eval persistence with content-addressed deduplication. See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for details.
 
-### Scaffold (not yet wired)
+### Workflow engine scaffold
 
-CWL-inspired workflow engine scaffold — **future architecture, not dead code**. See [`api/core/CLAUDE.md`](api/core/CLAUDE.md) for workflow engine details, node types, and M6 migration intent.
+CWL-inspired workflow engine (`api/core/`, `api/nodes/`). The node base classes and optimizer nodes (InitNode, GrowFilterNode, AnalysisEvalNode) are actively used by the feedback cycle. The YAML-driven WorkflowRunner and REST endpoints are scaffold for future migration. See [`api/core/CLAUDE.md`](api/core/CLAUDE.md).
 
 ### How to start a milestone
 
@@ -124,7 +126,7 @@ Each milestone has an executable spec in `docs/specs/`. One Claude Code session 
 | Milestone | Spec file | Pre-reading hint |
 |-----------|-----------|-----------------|
 | M5: Observability | Complete | See [`docs/obs-guide.md`](docs/obs-guide.md) for data exploration. |
-| M6: Workflow Migration + PipelineSchema | [`docs/specs/m6-workflow-migration.md`](docs/specs/m6-workflow-migration.md) | Wave 1: read hardcoded constants in `backend_client.py`, `eval_dataset.py`, `grid_core.py`. Wave 2: read `api/core/workflow_runner.py` and `workflows/optimizer_single_pass.yaml` |
+| M6: PipelineSchema + Workflow Migration | Wave 2 complete. [`docs/specs/m6-workflow-migration.md`](docs/specs/m6-workflow-migration.md) | Waves 4-5: read `api/core/workflow_runner.py` and `workflows/optimizer_single_pass.yaml` |
 | M7: Multi-Connector | [`docs/specs/m7-multi-connector.md`](docs/specs/m7-multi-connector.md) | Read `docs/connectors/termnorm.md` and `api/services/backend_client.py` |
 
 ### TermNorm reference patterns
