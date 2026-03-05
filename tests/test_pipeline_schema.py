@@ -104,9 +104,9 @@ class TestTermNormConsistency:
         from api.services.search.eval_dataset import REQUIRED_PIPELINE_KEY
         assert TERMNORM_DEFAULT_SCHEMA.required_step == REQUIRED_PIPELINE_KEY
 
-    def test_template_variables_matches(self):
-        from api.services.search.grid_core import REQUIRED_TEMPLATE_VARS
-        assert TERMNORM_DEFAULT_SCHEMA.template_variables == REQUIRED_TEMPLATE_VARS
+    def test_template_variables(self):
+        expected = {"{{core_concept}}", "{{entity_profile_json}}", "{{matches}}"}
+        assert TERMNORM_DEFAULT_SCHEMA.template_variables == expected
 
     def test_dataset_name_matches(self):
         from api.services.constants import DATASET_NAME

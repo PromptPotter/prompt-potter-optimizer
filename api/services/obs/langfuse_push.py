@@ -285,7 +285,8 @@ def push_run(
             continue
 
         if pipeline:
-            nodes = extract_pipeline_nodes(pipeline, query)
+            from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
+            nodes = extract_pipeline_nodes(pipeline, query, schema=TERMNORM_DEFAULT_SCHEMA)
             for node in nodes:
                 lf.create_span(
                     trace_id, node.name, node.input, node.output, node.metadata,

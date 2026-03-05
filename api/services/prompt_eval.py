@@ -27,20 +27,6 @@ if TYPE_CHECKING:
 
 _evaluator = ExactMatchEvaluator({"strip": True})
 
-# TermNorm pipeline data keys extracted from /matches response.
-# Fallback when no PipelineSchema is available.
-_PIPELINE_DATA_KEYS = [
-    "entity_profile",
-    "token_matched_candidates",
-    "step_timings",
-    "llm_provider",
-    "total_time",
-    "web_search_status",
-    "pipeline_params",
-    "web_search_error",
-    "web_sources",
-]
-
 logger = logging.getLogger(__name__)
 
 # SHA256 truncated to 16 hex chars (64 bits) — sufficient for content-addressed
@@ -239,30 +225,23 @@ def extract_baseline_prompt(exp_data: dict) -> PromptState:
 def _extract_pipeline_data(
     backend_data: dict,
     ranked_candidates: list,
-    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_schema: "PipelineSchema",
 ) -> dict:
     """Extract pipeline data fields from a backend /matches response.
 
-    When a ``PipelineSchema`` is provided, derives the key set from its
-    observation mappings. Falls back to ``_PIPELINE_DATA_KEYS``.
+    Derives the key set from the ``PipelineSchema``'s observation mappings.
     """
     pd: dict = {"ranked_candidates": ranked_candidates}
-    if pipeline_schema is not None:
-        keys: set[str] = set()
-        for mappings in pipeline_schema.obs_extraction_map().values():
-            for m in mappings:
-                keys.add(m.pipeline_key)
-        # Always include infrastructure keys
-        keys |= {"step_timings", "llm_provider", "total_time", "pipeline_params"}
-        for key in keys:
-            val = backend_data.get(key)
-            if val is not None:
-                pd[key] = val
-    else:
-        for key in _PIPELINE_DATA_KEYS:
-            val = backend_data.get(key)
-            if val is not None:
-                pd[key] = val
+    keys: set[str] = set()
+    for mappings in pipeline_schema.obs_extraction_map().values():
+        for m in mappings:
+            keys.add(m.pipeline_key)
+    # Always include infrastructure keys
+    keys |= {"step_timings", "llm_provider", "total_time", "pipeline_params"}
+    for key in keys:
+        val = backend_data.get(key)
+        if val is not None:
+            pd[key] = val
     return pd
 
 
@@ -287,6 +266,10 @@ async def backend_reranker_eval(
     """
     query = query_data["query"]
     ground_truth = query_data["ground_truth"]
+
+    if pipeline_schema is None:
+        from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
+        pipeline_schema = TERMNORM_DEFAULT_SCHEMA
 
     try:
         pp = pipeline_params or {}
@@ -565,6 +548,7 @@ async def evaluate_prompt_cached(
     obs: "ObsLogger | None" = None,
     prompt_result_index: dict | None = None,
     source: str = "",
+    pipeline_schema: "PipelineSchema | None" = None,
     *,
     ctx: EvalContext | None = None,
 ) -> tuple[list, dict, bool]:
@@ -585,13 +569,12 @@ async def evaluate_prompt_cached(
         Tuple of (results, scores_dict, was_cached).
     """
     # Resolve from EvalContext when provided
-    pipeline_schema: PipelineSchema | None = None
     if ctx is not None:
         backend_client = backend_client or ctx.backend_client
         store = store or ctx.store
         backend_id = backend_id or ctx.backend_id
         pipeline_params = pipeline_params if pipeline_params is not None else ctx.pipeline_params
-        pipeline_schema = ctx.pipeline_schema
+        pipeline_schema = pipeline_schema or ctx.pipeline_schema
         model = model or ctx.model
         temperature = temperature or ctx.temperature
         obs = obs or ctx.obs

@@ -2,8 +2,8 @@
 
 from unittest.mock import MagicMock
 
+from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
 from api.services.search.eval_dataset import (
-    OBS_EXTRACTION_MAP,
     _extract_eval_from_traces,
     load_eval_dataset,
 )
@@ -90,7 +90,7 @@ def test_full_trace_extracts_all_fields():
             _make_obs("web_search", WEB_SEARCH_OUTPUT),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]))
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
 
     assert len(result) == 1
     pd = result[0]["pipeline_data"]
@@ -109,7 +109,7 @@ def test_minimal_trace_only_required():
             _make_obs("entity_profiling", ENTITY_PROFILE_OUTPUT),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]))
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
 
     assert len(result) == 1
     pd = result[0]["pipeline_data"]
@@ -128,7 +128,7 @@ def test_optional_observations_missing():
             _make_obs("token_matching", TOKEN_MATCHING_OUTPUT),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]))
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
 
     pd = result[0]["pipeline_data"]
     assert "web_sources" not in pd
@@ -147,7 +147,7 @@ def test_missing_entity_profile_skips():
             _make_obs("web_search", WEB_SEARCH_OUTPUT),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]))
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
     assert len(result) == 0
 
 
@@ -163,7 +163,7 @@ def test_llm_provider_extraction():
                       metadata={"model": "model-b"}),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]))
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
     assert result[0]["pipeline_data"]["llm_provider"] == "model-a"
 
     # No metadata -> no llm_provider
@@ -173,7 +173,7 @@ def test_llm_provider_extraction():
             _make_obs("entity_profiling", ENTITY_PROFILE_OUTPUT),
         ],
     )
-    result2 = _extract_eval_from_traces(_make_exp([trace2]))
+    result2 = _extract_eval_from_traces(_make_exp([trace2]), schema=TERMNORM_DEFAULT_SCHEMA)
     assert "llm_provider" not in result2[0]["pipeline_data"]
 
 
@@ -188,21 +188,34 @@ def test_total_time_from_scores():
             {"name": "latency_ms", "value": 1500},
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]))
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
     assert result[0]["pipeline_data"]["total_time"] == 1.5
 
 
-def test_custom_obs_mapping(monkeypatch):
-    """Patching OBS_EXTRACTION_MAP with a custom entry works."""
-    from api.services.search import eval_dataset
+def test_custom_schema_obs_mapping():
+    """Schema-driven extraction with a custom step works."""
+    from api.models.pipeline_schema import ObservationMapping, PipelineSchema, PipelineStep
 
-    custom_map = {
-        "entity_profiling": OBS_EXTRACTION_MAP["entity_profiling"],
-        "custom_step": [
-            eval_dataset._ObsField("custom_output", output_field="data"),
+    custom_schema = PipelineSchema(
+        name="custom",
+        required_step="entity_profile",
+        steps=[
+            PipelineStep(
+                name="entity_profiling",
+                observation_name="entity_profiling",
+                observation_mappings=[
+                    ObservationMapping(pipeline_key="entity_profile", is_llm=True),
+                ],
+            ),
+            PipelineStep(
+                name="custom_step",
+                observation_name="custom_step",
+                observation_mappings=[
+                    ObservationMapping(pipeline_key="custom_output", output_field="data"),
+                ],
+            ),
         ],
-    }
-    monkeypatch.setattr(eval_dataset, "OBS_EXTRACTION_MAP", custom_map)
+    )
 
     trace = _make_trace(
         query="STEEL-001 / hot rolled",
@@ -211,7 +224,7 @@ def test_custom_obs_mapping(monkeypatch):
             _make_obs("custom_step", {"data": [1, 2, 3]}),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]))
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=custom_schema)
 
     pd = result[0]["pipeline_data"]
     assert pd["custom_output"] == [1, 2, 3]

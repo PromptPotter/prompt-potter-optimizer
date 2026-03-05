@@ -54,7 +54,7 @@ REQUIRED_PIPELINE_KEY = "entity_profile"
 
 def _extract_eval_from_traces(
     exp_data: dict,
-    schema: PipelineSchema | None = None,
+    schema: "PipelineSchema",
 ) -> list:
     """Build eval data from Langfuse-style traces in synced experiment data.
 
@@ -62,8 +62,7 @@ def _extract_eval_from_traces(
     pipeline step outputs.  Ground truth is joined from ``mappings[]``
     via the ``bom_material`` extracted from the query string.
 
-    Observation extraction is driven by :data:`OBS_EXTRACTION_MAP` — no
-    hardcoded step names appear in the loop body.
+    Observation extraction is driven by the schema's ``obs_extraction_map()``.
 
     Returns:
         List of eval-data dicts (may be empty).
@@ -98,11 +97,7 @@ def _extract_eval_from_traces(
         pipeline_data: dict = {}
         llm_provider: str | None = None
 
-        # Use schema-derived extraction map when available
-        if schema is not None:
-            _obs_map = schema.obs_extraction_map()
-        else:
-            _obs_map = OBS_EXTRACTION_MAP
+        _obs_map = schema.obs_extraction_map()
 
         for obs in trace.get("observations", []):
             name = obs.get("name", "")
@@ -163,6 +158,9 @@ def load_eval_dataset(
     )
 
     if exp_data:
+        if schema is None:
+            from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
+            schema = TERMNORM_DEFAULT_SCHEMA
         eval_data = _extract_eval_from_traces(exp_data, schema=schema)
         if eval_data:
             if query_limit > 0 and len(eval_data) > query_limit:

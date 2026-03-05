@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict
 import pandas as pd
 
 from api.models.prompt_state import PromptState
-from api.services.backend_client import PIPELINE_STEP_PARAMS
 from api.services.project_store import ProjectStore
 from api.services.prompt_eval import evaluate_prompt_cached
 from api.services.search.utils import preview as _preview
@@ -150,6 +149,7 @@ def _make_eval_fn(
     backend_id: str,
     get_params: Callable[[], dict],
     prompt_result_index: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> Callable:
     """Factory for the ``_eval_ps`` closure used by scan and adaptive search."""
     async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
@@ -160,6 +160,7 @@ def _make_eval_fn(
             label="scan",
             prompt_result_index=prompt_result_index,
             source="sensitivity_scan",
+            pipeline_schema=pipeline_schema,
         )
         return {**scores, "results": results, "cached": cached}
     return _eval_ps
@@ -296,7 +297,7 @@ def classify_axis(
 def filter_variant_library(
     variant_library: dict,
     pipeline_params: dict | None,
-    schema: PipelineSchema | None = None,
+    schema: "PipelineSchema",
 ) -> dict:
     """Filter variant library to axes relevant for the active pipeline.
 
@@ -305,15 +306,12 @@ def filter_variant_library(
       (``PromptState.render()`` produces ``ranking_prompt`` consumed only
       by that step).
 
-    When a ``PipelineSchema`` is provided, uses ``schema.step_param_keys()``
-    instead of the hardcoded ``PIPELINE_STEP_PARAMS`` constant.
-
     Args:
         variant_library: Full variant library dict with ``prompt_fields``
             and optional ``pipeline_params`` sections.
         pipeline_params: Current pipeline parameters (must contain ``steps``
             key listing active step names).
-        schema: Optional PipelineSchema for step-param lookup.
+        schema: PipelineSchema for step-param lookup.
 
     Returns:
         Filtered copy of the variant library.
@@ -321,7 +319,7 @@ def filter_variant_library(
     active_steps = set((pipeline_params or {}).get("steps", []))
 
     # Build set of param keys owned by active steps
-    step_param_map = schema.step_param_keys() if schema else PIPELINE_STEP_PARAMS
+    step_param_map = schema.step_param_keys()
     active_param_keys: set[str] = set()
     for step_name, param_keys in step_param_map.items():
         if step_name in active_steps:
@@ -375,6 +373,7 @@ async def sensitivity_scan(
     prompt_result_index: dict | None = None,
     plan_id: str = "",
     partial_scan: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -411,12 +410,16 @@ async def sensitivity_scan(
     base_params = dict(pipeline_params or {})
 
     # Filter axes to only those relevant for the active pipeline
-    variant_library = filter_variant_library(variant_library, pipeline_params)
+    if pipeline_schema is not None:
+        variant_library = filter_variant_library(
+            variant_library, pipeline_params, schema=pipeline_schema,
+        )
 
     _eval_ps = _make_eval_fn(
         eval_data, backend_client, store, backend_id,
         get_params=lambda: base_params,
         prompt_result_index=prompt_result_index,
+        pipeline_schema=pipeline_schema,
     )
 
     # Evaluate baseline
@@ -663,6 +666,7 @@ async def adaptive_search(
     progress_cb: Callable[[ScanEvent], None] | None = None,
     prompt_result_index: dict | None = None,
     plan_id: str = "",
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> tuple[PromptState, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.
 
@@ -710,6 +714,7 @@ async def adaptive_search(
         eval_data, backend_client, store, backend_id,
         get_params=lambda: current_params,
         prompt_result_index=prompt_result_index,
+        pipeline_schema=pipeline_schema,
     )
 
     # Get baseline accuracy

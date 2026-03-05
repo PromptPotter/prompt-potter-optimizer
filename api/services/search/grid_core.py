@@ -10,7 +10,7 @@ import logging
 import math
 import random
 from collections import defaultdict
-from typing import Any, Callable, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
 import pandas as pd
 
@@ -26,6 +26,9 @@ from api.services.prompt_eval import (
 )
 from api.services.search.smart_search import MIN_DIAGNOSTIC_QUERIES
 
+if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -38,10 +41,6 @@ GRID_PREFIX = "grid_"
 GRID_SEARCHABLE_FIELDS = {
     "persona", "task_intent", "problem_description",
     "instruction", "thinking_style", "answer_format",
-}
-
-REQUIRED_TEMPLATE_VARS = {
-    "{{core_concept}}", "{{entity_profile_json}}", "{{matches}}",
 }
 
 
@@ -80,6 +79,7 @@ def validate_grid_config(
     grid_config: dict,
     baseline_ps: PromptState,
     grid_budget: int = 0,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> dict:
     """Validate grid axes and compute cartesian product size.
 
@@ -99,12 +99,13 @@ def validate_grid_config(
             f"Must be in {GRID_SEARCHABLE_FIELDS}"
         )
 
-    if "instruction" in grid_config:
+    if "instruction" in grid_config and pipeline_schema is not None:
+        required_vars = pipeline_schema.template_variables
         for i, variant in enumerate(grid_config["instruction"]):
             if not variant:
                 continue
-            missing = REQUIRED_TEMPLATE_VARS - set(
-                var for var in REQUIRED_TEMPLATE_VARS if var in variant
+            missing = required_vars - set(
+                var for var in required_vars if var in variant
             )
             if missing:
                 raise ValueError(
@@ -354,6 +355,7 @@ async def _load_or_compute_point(
     backend_id: str,
     pipeline_params: dict | None,
     on_query_done: Callable | None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> tuple[dict[str, Any], bool]:
     """Evaluate (or load from cache) a single grid point.
 
@@ -405,6 +407,7 @@ async def _load_or_compute_point(
         result = await backend_reranker_eval(
             qd, backend_client, rendered,
             pipeline_params=pipeline_params,
+            pipeline_schema=pipeline_schema,
         )
         new_results.append(result)
 
@@ -451,6 +454,7 @@ async def run_grid_search(
     shared_queries: bool = True,
     seed: int = 42,
     plan_id: str = "",
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> pd.DataFrame:
     """Evaluate each grid point on eval_data via the backend.
 
@@ -479,6 +483,7 @@ async def run_grid_search(
         acc, was_cached = await _load_or_compute_point(
             info, state_lookup, backend_client, request_delay,
             store, backend_id, pipeline_params, on_query_done,
+            pipeline_schema=pipeline_schema,
         )
 
         row = dict(info.coord_dict)
@@ -639,6 +644,7 @@ async def resume_or_build_grid(
     store: "ProjectStore",
     backend_id: str,
     improvement_areas: str = "",
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> tuple:
     """Resume an existing grid plan or build a new one.
 
@@ -706,7 +712,10 @@ async def resume_or_build_grid(
         changes_description="grid_baseline",
     )
 
-    validate_grid_config(grid_axes, grid_baseline, grid_budget=grid_budget)
+    validate_grid_config(
+        grid_axes, grid_baseline, grid_budget=grid_budget,
+        pipeline_schema=pipeline_schema,
+    )
     points, state_lookup, sampling_meta = build_grid_points(
         grid_axes, grid_baseline,
         grid_budget=grid_budget,

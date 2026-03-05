@@ -307,11 +307,13 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
             store=store,
             backend_id=self.config.get("backend_id", ""),
             pipeline_params=self.config.get("pipeline_params"),
+            pipeline_schema=self.config.get("pipeline_schema"),
             model=self.config.get("model") or "",
             temperature=self.config.get("temperature", 0.0),
             obs=self.config.get("obs"),
             dataset_name=self.config.get("dataset_name"),
             dataset_item_map=self.config.get("dataset_item_map"),
+            source="analysis_eval_node",
         )
 
         result = await evaluate_and_select_winner(

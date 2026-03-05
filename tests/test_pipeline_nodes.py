@@ -68,7 +68,7 @@ def _full_pipeline():
 
 def test_full_pipeline_extraction():
     """One comprehensive test: order, types, model, timings, params."""
-    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
+    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
 
     # 4 nodes in correct order
     assert [n.name for n in nodes] == [
@@ -131,7 +131,7 @@ def test_full_pipeline_extraction():
 def test_missing_step(del_key, missing_step, expected_count):
     pipeline = _full_pipeline()
     del pipeline[del_key]
-    nodes = extract_pipeline_nodes(pipeline, "aspirin")
+    nodes = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
     names = [n.name for n in nodes]
     assert missing_step not in names
     assert len(nodes) == expected_count
@@ -143,7 +143,7 @@ def test_missing_step(del_key, missing_step, expected_count):
 
 
 def test_web_search_io():
-    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
+    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
     ws = nodes[0]
     assert ws.input == {"query": "aspirin"}
     assert ws.output["status"] == "success"
@@ -157,7 +157,7 @@ def test_web_search_failed():
     pipeline["web_search_status"] = "failed"
     pipeline["web_search_error"] = "timeout"
     pipeline["web_sources"] = []
-    nodes = extract_pipeline_nodes(pipeline, "aspirin")
+    nodes = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
     ws = nodes[0]
     assert ws.output["status"] == "failed"
     assert ws.output["error"] == "timeout"
@@ -166,14 +166,14 @@ def test_web_search_failed():
 
 def test_entity_profiling_io():
     pipeline = _full_pipeline()
-    nodes = extract_pipeline_nodes(pipeline, "aspirin")
+    nodes = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
     ep = nodes[1]
     assert ep.input == {"query": "aspirin"}
     assert ep.output is pipeline["entity_profile"]
 
 
 def test_token_matching_io():
-    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
+    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
     tm = nodes[2]
     assert tm.input["query"] == "aspirin"
     assert tm.input["profile"] == "Aspirin (pain reliever)"
@@ -182,7 +182,7 @@ def test_token_matching_io():
 
 
 def test_llm_ranking_io():
-    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin")
+    nodes = extract_pipeline_nodes(_full_pipeline(), "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
     lr = nodes[3]
     assert lr.input == {"n_candidates": 2}
     assert lr.output["candidates"][0]["candidate"] == "Aspirin"
@@ -208,15 +208,15 @@ def test_profile_summary(profile, expected):
 # ---------------------------------------------------------------------------
 
 
-def test_schema_extraction_matches_hardcoded():
-    """extract_pipeline_nodes with TERMNORM_DEFAULT_SCHEMA produces same result as no schema."""
+def test_schema_extraction_deterministic():
+    """extract_pipeline_nodes with TERMNORM_DEFAULT_SCHEMA is deterministic across calls."""
     pipeline = _full_pipeline()
-    nodes_hardcoded = extract_pipeline_nodes(pipeline, "aspirin")
-    nodes_schema = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+    nodes_a = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
+    nodes_b = extract_pipeline_nodes(pipeline, "aspirin", schema=TERMNORM_DEFAULT_SCHEMA)
 
-    assert len(nodes_schema) == len(nodes_hardcoded)
-    for h, s in zip(nodes_hardcoded, nodes_schema):
-        assert h.name == s.name
-        assert h.as_type == s.as_type
-        assert h.metadata == s.metadata
-        assert h.model == s.model
+    assert len(nodes_a) == len(nodes_b)
+    for a, b in zip(nodes_a, nodes_b):
+        assert a.name == b.name
+        assert a.as_type == b.as_type
+        assert a.metadata == b.metadata
+        assert a.model == b.model

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from api.models.pipeline_schema import PipelineSchema
 from api.services.constants import DATASET_NAME
 
 if TYPE_CHECKING:
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 class CycleConfig(BaseModel):
     """Configuration for feedback cycling."""
+
+    model_config = {"arbitrary_types_allowed": True}
 
     max_rounds: int = Field(10, description="Maximum optimization rounds")
     patience: int = Field(3, description="Stop after N consecutive non-improvements")
@@ -52,6 +55,8 @@ class CycleConfig(BaseModel):
     temperature: float = Field(0.0, description="Temperature for content hash")
     queries_per_eval: int = Field(0, description="Subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
+
+    pipeline_schema: PipelineSchema | None = Field(None, description="Pipeline schema for eval")
 
     # L2/L3 escalation
     enable_l2: bool = Field(False, description="Enable L2 refine_context loop")
@@ -502,6 +507,7 @@ async def _evaluate_candidates(
         store=state.store,
         backend_id=config.backend_id,
         pipeline_params=config.pipeline_params,
+        pipeline_schema=config.pipeline_schema,
         model=config.model or "",
         temperature=config.temperature,
         obs=obs,

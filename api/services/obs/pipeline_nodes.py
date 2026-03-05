@@ -46,17 +46,13 @@ def _step_meta(
     timings: dict,
     step_params: dict,
     step_name: str,
-    schema: PipelineSchema | None = None,
+    schema: "PipelineSchema",
 ) -> dict[str, Any]:
     """Build metadata dict for a pipeline step: timing + per-step params."""
     meta: dict[str, Any] = {}
     if step_name in timings:
         meta["duration_s"] = timings[step_name]
-    if schema is not None:
-        param_keys = schema.step_param_keys().get(step_name, set())
-    else:
-        from api.services.backend_client import PIPELINE_STEP_PARAMS
-        param_keys = PIPELINE_STEP_PARAMS.get(step_name, set())
+    param_keys = schema.step_param_keys().get(step_name, set())
     node_params = {k: step_params[k] for k in param_keys if k in step_params}
     if node_params:
         meta["pipeline_params"] = node_params
@@ -66,7 +62,7 @@ def _step_meta(
 def extract_pipeline_nodes(
     pipeline_data: dict,
     query: str,
-    schema: PipelineSchema | None = None,
+    schema: "PipelineSchema",
 ) -> list[PipelineNode]:
     """Parse pipeline_data into an ordered list of typed nodes.
 
