@@ -31,14 +31,13 @@ PromptPotter uses two nested loops:
 
 Every evaluation is saved. When one optimization thread stops improving, the next sensitivity scan automatically discovers all stored data and computes a better starting point.
 
-### 1. Exploration Notebook
+### 1. Evaluation Notebook
 
-Open `notebooks/termnorm_backend.ipynb`:
+Open `notebooks/evaluation.ipynb`:
 
-1. **Register** your backend connection
-2. **Sync** experiment data (queries, ground truth, pipeline traces)
-3. **Replay** queries through the pipeline to establish baseline
-4. **Compare** pipeline variants statistically
+1. **Load** ground-truth dataset and connect to backend
+2. **Evaluate** test-set accuracy against the current pipeline
+3. **Compare** results across prompt variants
 
 ### 2. Optimization Campaign
 
@@ -355,7 +354,7 @@ Response models and endpoints are auto-documented at `http://localhost:8001/docs
 
 ## Troubleshooting
 
-**"No synced experiment data"** — Run the sync cell in `termnorm_backend.ipynb` first, or call `await client.sync_experiments(store, backend_id)`.
+**"No synced experiment data"** — Run the sync cell in `evaluation.ipynb` first, or call `await client.sync_experiments(store, backend_id)`.
 
 **"No llm_ranking prompt found"** — Your backend needs to expose prompts in the experiment data. Ensure TermNorm's prompt registry is initialized before syncing.
 

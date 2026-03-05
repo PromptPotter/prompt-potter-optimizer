@@ -3,10 +3,10 @@
 # See: https://jupyter-app-launcher.readthedocs.io/
 
 # Notebooks
-- title: TermNorm Backend Workflow
-  description: Register backend, sync experiments, replay queries, compare variants, optimize
+- title: Optimization Campaign
+  description: Baseline evaluation, sensitivity scan, grid search, feedback cycle optimization
   type: notebook
-  source: notebooks/termnorm_backend.ipynb
+  source: notebooks/optimization_campaign.ipynb
   catalog: PromptPotter
 
 # Interactive Tools

@@ -2,6 +2,31 @@
 
 This is where 90% of implementation work happens. All core logic lives here.
 
+## Service catalog
+
+| Service | Purpose |
+|---------|---------|
+| `prompt_eval.py` | Evaluate prompts against datasets via backend `/matches` endpoint. Content-addressed deduplication via `eval_content_hash()`. Incremental writes (`.partial.jsonl`) for crash recovery. |
+| `search/grid_core.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. Grid plan persistence. Skips `init_session` when all points are cached. |
+| `prompt_optimizer.py` | LLM meta-prompt candidate generation, round winner selection, improvement suggestions. |
+| `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions, `fetch_pipeline()`). |
+| `pipeline_discovery.py` | Pipeline schema factory. `TERMNORM_DEFAULT_SCHEMA` (structural only) + `parse_pipeline_response()` merges live `GET /pipeline` metadata. |
+| `project_store.py` | Facade over focused store modules in `stores/`. File I/O for `.promptpotter/projects/`. |
+| `campaign/feedback_cycle.py` | Iterative optimization orchestrator: `CycleConfig` → generate_candidates → evaluate_and_select_winner loop with patience-based stopping. Hierarchical 3-loop escalation (L1 generate → L2 refine_context → L3 modify_plan) when enable_l2/enable_l3 are set. 4-path routing (generate/refine_context/modify_plan/stop). |
+| `campaign/layer_transitions.py` | L2 (refine_context) and L3 (modify_plan) LLM-driven transitions for the 3-loop feedback cycle. |
+| `dataset_builder.py` | Excel ground-truth loading (`load_excel_ground_truth`) and train/test splitting. Column mapping via `SHEET_COLUMN_MAP`. |
+| `campaign/campaign_init.py` | Campaign initialization: project store setup, backend sync, baseline evaluation. |
+| `search/smart_search.py` | Sensitivity scan (OAT perturbation), adaptive search (coordinate descent), axis classification. `filter_variant_library()` drops axes not in active pipeline. |
+| `search/scan_advisor.py` | LLM-driven scan recommendations. Enriched with output schema fields + prompt metadata from `PipelineSchema`. |
+| `search/coverage.py` | Historical index (`build_prompt_result_index`) and coverage advisor. Discovers all stored `dataset_runs` for reuse across optimization threads. |
+| `obs/observability_logger.py` | File-based observability: Langfuse-compatible traces, MLflow experiments, prompt versioning. `events.jsonl` flat nav log. |
+| `obs/langfuse_client.py` | Langfuse v2 cloud integration (singleton). |
+| `obs/langfuse_push.py` | Push eval runs to Langfuse cloud. `push_run()` (auto, per-eval) + `push_all_runs()` (batch). |
+| `stores/` | Focused store modules: `BackendStore`, `ExecutionStore`, `DatasetRunStore`, `DatasetStore`, `GridPlanStore`, `SmartSearchStore`, `CampaignStore`. Shared I/O in `stores/base.py`. |
+| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with `_OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. Exponential backoff for transient 503/429 errors. |
+| `query_utils.py` | Shared query-parsing utilities (e.g. `parse_bom_material()`). |
+| `comparison.py` | Statistical comparison (hit@k, McNemar, Wilcoxon). |
+
 ## Evaluation gateway
 
 `evaluate_prompt_cached()` in `prompt_eval.py` is the **single entry point** for all eval persistence:
