@@ -279,6 +279,104 @@ def test_termnorm_default_no_hardcoded_metadata():
 # ---------------------------------------------------------------------------
 
 
+def test_data_envelope_unwrap():
+    """TermNorm wraps response in {"status": "success", "data": {...}}.
+
+    parse_pipeline_response must unwrap the "data" envelope to find the
+    pipeline name, nodes, and resolved metadata.
+    """
+    data = {
+        "status": "success",
+        "data": {
+            "name": "TermNorm",
+            "version": "2.0",
+            "nodes": {
+                "entity_profiling": {
+                    "type": "LLMGeneration",
+                    "config": {
+                        "schema_family": "entity_profile", "schema_version": 1,
+                        "profiling_temperature": 0.3,
+                        "profiling_model": "llama-4-maverick",
+                        "raw_content_limit": 4000,
+                        "_internal_flag": True,
+                    },
+                },
+            },
+            "resolved_schemas": {
+                "entity_profile/1": {
+                    "family": "entity_profile", "version": 1,
+                    "fields": ["entity_name", "core_concept"],
+                    "json_schema": {"properties": {
+                        "entity_name": {"type": "string", "description": "Canonical name"},
+                        "core_concept": {"type": "string", "description": "Conceptual essence"},
+                    }},
+                },
+            },
+        },
+    }
+    schema = parse_pipeline_response(data)
+
+    # Must match known pipeline (not "unknown pipeline ''")
+    assert schema.name == "termnorm"
+    assert len(schema.steps) == 6
+
+    # Resolved metadata must be merged
+    ep = next(s for s in schema.steps if s.name == "entity_profiling")
+    assert ep.output_schema is not None
+    assert ep.output_schema.fields == ["entity_name", "core_concept"]
+    assert ep.output_schema.field_descriptions == {
+        "entity_name": "Canonical name", "core_concept": "Conceptual essence",
+    }
+
+    # current_config populated from node config, filtered to param_keys only
+    assert ep.current_config == {
+        "profiling_temperature": 0.3,
+        "profiling_model": "llama-4-maverick",
+        "raw_content_limit": 4000,
+    }
+    # Internal keys and non-param keys excluded
+    assert "_internal_flag" not in ep.current_config
+    assert "schema_family" not in ep.current_config
+
+
+def test_unknown_pipeline_current_config():
+    """Unknown pipeline path captures all non-internal config keys as current_config."""
+    data = {
+        "name": "CustomPipeline",
+        "version": "1.0",
+        "nodes": {
+            "my_llm": {
+                "type": "LLMGeneration",
+                "config": {
+                    "temperature": 0.5,
+                    "model": "gpt-4",
+                    "max_tokens": 1000,
+                    "_cache_key": "abc",
+                },
+            },
+            "my_retriever": {
+                "type": "Retriever",
+                "config": {
+                    "top_k": 10,
+                    "threshold": 0.8,
+                },
+            },
+        },
+    }
+    schema = parse_pipeline_response(data)
+
+    llm_step = next(s for s in schema.steps if s.name == "my_llm")
+    assert llm_step.current_config == {
+        "temperature": 0.5,
+        "model": "gpt-4",
+        "max_tokens": 1000,
+    }
+    assert "_cache_key" not in llm_step.current_config
+
+    ret_step = next(s for s in schema.steps if s.name == "my_retriever")
+    assert ret_step.current_config == {"top_k": 10, "threshold": 0.8}
+
+
 def test_known_pipeline_metadata_from_live_response():
     """Live response resolved metadata merges onto correct known-pipeline steps."""
     data = {

@@ -1406,6 +1406,8 @@ async def scan_advisor(
     model: str = "",
     query_budget: int = 120,
     coverage_stats: dict | None = None,
+    excluded_steps: set[str] | None = None,
+    task_description: str = "",
 ) -> dict:
     """LLM-powered scan configuration advice.
 
@@ -1421,8 +1423,12 @@ async def scan_advisor(
     print("=" * 70)
     print(f"  Pipeline: {pipeline_schema.name} ({pipeline_schema.version})")
     print(f"  Steps: {[s.name for s in pipeline_schema.steps]}")
+    if excluded_steps:
+        print(f"  Excluded: {sorted(excluded_steps)}")
     print(f"  Eval data size: {eval_data_size} queries")
     print(f"  Query budget: {query_budget}")
+    if task_description:
+        print(f"  Task context: {task_description[:80].strip()}...")
     print(f"  Calling {model or '?'} ...")
     print()
 
@@ -1435,6 +1441,8 @@ async def scan_advisor(
         model=model,
         query_budget=query_budget,
         coverage_stats=coverage_stats,
+        excluded_steps=excluded_steps,
+        task_description=task_description,
     )
 
     # Display results

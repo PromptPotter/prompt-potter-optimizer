@@ -13,6 +13,8 @@ Derivation methods replace scattered constants:
   frontend_steps()     → runtime filtering
 """
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -91,6 +93,7 @@ class PipelineStep(BaseModel):
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"
     output_schema: StepOutputSchema | None = None
     prompt_meta: StepPromptMeta | None = None
+    current_config: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

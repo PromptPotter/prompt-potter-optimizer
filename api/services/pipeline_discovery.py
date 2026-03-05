@@ -234,7 +234,8 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         logger.warning("Empty pipeline response; returning empty schema")
         return PipelineSchema()
 
-    config = data.get("config", data)
+    config = data.get("data", data)
+    config = config.get("config", config)
     pipeline_name = config.get("name", "").lower()
     version = config.get("version", "")
     description = config.get("description", "")
@@ -248,19 +249,27 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         known = _KNOWN_PIPELINES[pipeline_name]
         logger.info("Matched known pipeline '%s'; using enriched schema", pipeline_name)
 
-        # Merge any resolved metadata from the live response into known steps
-        if resolved_metadata:
+        # Merge any resolved metadata and config values from the live response
+        if resolved_metadata or nodes:
             updated_steps = []
             for step in known.steps:
+                updates = {}
                 if step.name in resolved_metadata:
-                    updates = {}
                     rm = resolved_metadata[step.name]
                     if "output_schema" in rm:
                         updates["output_schema"] = rm["output_schema"]
                     if "prompt_meta" in rm:
                         updates["prompt_meta"] = rm["prompt_meta"]
-                    if updates:
-                        step = step.model_copy(update=updates)
+                if step.name in nodes:
+                    nc = nodes[step.name].get("config", {})
+                    config_values = {
+                        k: v for k, v in nc.items()
+                        if not k.startswith("_") and k in step.param_keys
+                    }
+                    if config_values:
+                        updates["current_config"] = config_values
+                if updates:
+                    step = step.model_copy(update=updates)
                 updated_steps.append(step)
             return known.model_copy(update={
                 "version": version or known.version,
@@ -283,11 +292,16 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 k for k in nc
                 if not k.startswith("_")
             } if nc else set()
+            config_values = {
+                k: v for k, v in nc.items()
+                if not k.startswith("_")
+            }
             step_kwargs: dict[str, Any] = {
                 "name": node_name,
                 "type": node_data.get("type", "tool"),
                 "short_circuit": node_data.get("short_circuit", False),
                 "param_keys": param_keys,
+                "current_config": config_values,
             }
             rm = resolved_metadata.get(node_name, {})
             if "output_schema" in rm:
