@@ -123,7 +123,7 @@ Each milestone has an executable spec in `docs/specs/`. One Claude Code session 
 
 ### TermNorm reference patterns
 
-See [`external/CLAUDE.md`](external/CLAUDE.md) for TermNorm reference implementations (Langfuse, MLflow, prompt registry).
+The TermNorm repo lives at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\`. See its `CLAUDE.md` for reference implementations (Langfuse, MLflow, prompt registry).
 
 ## Project Conventions
 
