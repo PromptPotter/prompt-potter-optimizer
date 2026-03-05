@@ -601,10 +601,3 @@ class LangfuseLogger:
             except Exception:
                 logger.warning("Failed to flush Langfuse events", exc_info=True)
 
-    def shutdown(self) -> None:
-        """Gracefully shutdown the Langfuse client."""
-        if self.enabled and self.client:
-            try:
-                self.client.shutdown()
-            except Exception:
-                logger.warning("Failed to shutdown Langfuse", exc_info=True)

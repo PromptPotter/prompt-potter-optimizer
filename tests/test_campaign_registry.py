@@ -264,18 +264,16 @@ def test_api_crud_lifecycle(api_client, store, baseline_ps):
     assert len(resp.json()["results"]) == 1
 
 
-def test_api_delete(api_client, store):
-    """Delete campaign via API."""
+def test_api_delete_removed(api_client, store):
+    """DELETE endpoint was removed; verify 405."""
     c = store.campaigns.create_campaign(BACKEND_ID, name="Delete Test")
     cid = c["campaign_id"]
 
     resp = api_client.delete(
         f"/api/v1/campaigns/{cid}", params={"backend_id": BACKEND_ID},
     )
-    assert resp.status_code == 200
-    assert resp.json()["deleted"] is True
+    assert resp.status_code == 405
 
-    resp = api_client.get(
-        f"/api/v1/campaigns/{cid}", params={"backend_id": BACKEND_ID},
-    )
-    assert resp.status_code == 404
+    # Store-level delete still works
+    assert store.campaigns.delete(BACKEND_ID, cid) is True
+    assert store.campaigns.load(BACKEND_ID, cid) is None

@@ -352,6 +352,19 @@ Start the API server: `uvicorn api.main:app --port 8001 --reload`
 
 Response models and endpoints are auto-documented at `http://localhost:8001/docs` (Swagger UI).
 
+### Key endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/v1/backends` | Register a new backend connection |
+| `GET /api/v1/backends` | List registered backends |
+| `POST /api/v1/backends/{id}/sync` | Sync experiments from backend |
+| `GET /api/v1/backends/{id}/pipeline` | Dynamic pipeline view: backend pipeline config + local workflow nodes (30s cache) |
+| `GET /api/v1/campaigns` | List optimization campaigns |
+| `GET /api/v1/campaigns/{id}` | Campaign detail with trial summaries |
+| `POST /api/v1/workflows/execute` | Execute a workflow definition |
+| `GET /api/v1/health` | Service health check |
+
 ## Troubleshooting
 
 **"No synced experiment data"** — Run the sync cell in `evaluation.ipynb` first, or call `await client.sync_experiments(store, backend_id)`.

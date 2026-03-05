@@ -1,13 +1,17 @@
 """
-Pipeline discovery: static defaults and factory for PipelineSchema.
+Pipeline discovery: static defaults, factory, and dynamic pipeline view.
 
-Provides ``TERMNORM_DEFAULT_SCHEMA`` (the 6-step TermNorm pipeline) and
+Provides ``TERMNORM_DEFAULT_SCHEMA`` (the 6-step TermNorm pipeline),
 ``parse_pipeline_response()`` which parses a backend ``GET /pipeline``
-JSON response into a ``PipelineSchema``.
+JSON response into a ``PipelineSchema``, and ``compute_pipeline_view()``
+which combines backend pipeline data with local workflow node info.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Any
+import time as _time
+from typing import TYPE_CHECKING, Any
 
 from api.models.pipeline_schema import (
     ObservationMapping,
@@ -16,7 +20,11 @@ from api.models.pipeline_schema import (
     StepOutputSchema,
     StepPromptMeta,
 )
+from api.nodes import get_node_info_all
 from api.services.constants import DATASET_NAME
+
+if TYPE_CHECKING:
+    from api.services.backend_client import BackendClient
 
 logger = logging.getLogger(__name__)
 
@@ -318,3 +326,92 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         description=description,
         steps=steps,
     )
+
+
+# ---------------------------------------------------------------------------
+# TTL cache for pipeline responses
+# ---------------------------------------------------------------------------
+
+_PIPELINE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_CACHE_TTL_SECONDS = 30.0
+
+
+def _get_cached(base_url: str) -> dict[str, Any] | None:
+    """Return cached raw response if still within TTL, else None."""
+    entry = _PIPELINE_CACHE.get(base_url)
+    if entry is None:
+        return None
+    ts, data = entry
+    if (_time.monotonic() - ts) > _CACHE_TTL_SECONDS:
+        del _PIPELINE_CACHE[base_url]
+        return None
+    return data
+
+
+def _set_cached(base_url: str, data: dict[str, Any]) -> None:
+    _PIPELINE_CACHE[base_url] = (_time.monotonic(), data)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic pipeline view
+# ---------------------------------------------------------------------------
+
+
+async def compute_pipeline_view(
+    backend_client: BackendClient,
+    *,
+    include_nodes: bool = True,
+) -> dict[str, Any]:
+    """Build a combined view of backend pipeline + local workflow nodes.
+
+    Returns a dict with keys:
+      backend_pipeline  — PipelineSchema.model_dump()
+      local_nodes       — list of node info dicts from api.nodes
+      computed_steps    — pipeline steps as dicts (direct copy for now)
+      fetched_at        — ISO timestamp
+      source            — "live" | "cached" | "default"
+    """
+    from datetime import datetime, timezone
+
+    base_url = backend_client.base_url
+    source = "live"
+    raw: dict[str, Any] | None = None
+
+    # Check cache
+    cached = _get_cached(base_url)
+    if cached is not None:
+        raw = cached
+        source = "cached"
+
+    # Fetch from backend
+    if raw is None:
+        try:
+            raw = await backend_client.fetch_pipeline()
+            _set_cached(base_url, raw)
+            source = "live"
+        except Exception:
+            logger.warning("Backend unreachable at %s; using default schema", base_url)
+            raw = None
+            source = "default"
+
+    # Parse to PipelineSchema
+    if raw is not None:
+        schema = parse_pipeline_response(raw)
+    else:
+        schema = TERMNORM_DEFAULT_SCHEMA
+
+    # Local nodes
+    local_nodes: list[dict[str, Any]] = []
+    if include_nodes:
+        local_nodes = get_node_info_all()
+
+    # Computed steps (direct copy from backend pipeline for now)
+    computed_steps = [s.model_dump() for s in schema.steps]
+
+    return {
+        "backend_pipeline": schema.model_dump(),
+        "local_nodes": local_nodes,
+        "computed_steps": computed_steps,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "source": source,
+    }

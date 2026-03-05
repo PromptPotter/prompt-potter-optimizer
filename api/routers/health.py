@@ -19,12 +19,3 @@ async def health_check():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": APP_VERSION,
     }
-
-
-@router.get("/ready")
-async def readiness_check():
-    """Verify all dependencies are available."""
-    return {
-        "status": "ready",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }

@@ -18,8 +18,8 @@
             v                           v
 +-----------+-----------+  +------------+-------------------+
 | _campaign_lib.py      |  |  FastAPI (api/main.py)         |
-| (tqdm, IPython,       |  |  backends / workflows / health |
-|  progress display)    |  |  / campaigns routers           |
+| (tqdm, IPython,       |  |  backends (+pipeline discovery)|
+|  progress display)    |  |  workflows / health / campaigns|
 +-----------+-----------+  +--------------------------------+
             |                           |
             +-------------+-------------+
@@ -50,7 +50,7 @@
 ```
 
 - **Notebooks** are the primary optimization interface. `_campaign_lib.py` wraps services with progress bars; no business logic.
-- **The API** provides backend management, experiment sync, pipeline replay, and statistical comparison.
+- **The API** provides backend management, experiment sync, and pipeline discovery.
 - **LLM providers** handle inference through an OpenAI-compatible client (Groq default, OpenAI alternative).
 - **Langfuse** provides per-trial tracing with accuracy scores and campaign-level grouping.
 
@@ -90,6 +90,7 @@ Key services:
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation, winner selection, suggestions |
 | `stores/campaign_store.py` | Campaign/trial lifecycle and persistence |
 | `backend_client.py` | HTTP client for TermNorm backend |
+| `pipeline_discovery.py` | Pipeline schema factory + `compute_pipeline_view()` (dynamic view with TTL cache) |
 | `project_store.py` | Facade over focused store modules in `stores/` |
 | `llm_client.py` | `_OpenAICompatibleClient` base. Groq (default), OpenAI. Global singleton. |
 | `langfuse_client.py` | Per-trial tracing, campaign grouping, graceful fallback when credentials missing |
@@ -181,7 +182,7 @@ Dataset runs are indexed by content hash. Grid plans and smart search plans use 
 | Langfuse | Python SDK v2 | Implemented |
 | TermNorm backend | HTTP REST (`/matches`, `/pipeline`) | Implemented |
 | ProjectStore | JSON files in `.promptpotter/projects/` | Implemented |
-| Evaluator framework | Python API (ExactMatchEvaluator) | Implemented |
+| Evaluator framework | Python API (ExactMatchEvaluator) | Scaffold (no consumers) |
 | File-based observability | Langfuse trace JSON + MLflow FileStore YAML in `obs/` | Implemented |
 | PipelineSchema | Backend-agnostic pipeline description, derivation methods | Implemented ([M6](m6-workflow-migration.md) WP 6.1) |
 | CWL workflow engine | `WorkflowRunner` with `runtime_config`, YAML workflow definitions | Planned ([M6](m6-workflow-migration.md)) |

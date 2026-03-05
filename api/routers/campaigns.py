@@ -1,7 +1,7 @@
 """
 Campaign registry endpoints.
 
-Provides REST API for listing, viewing, and exporting optimization campaigns.
+Provides REST API for listing and viewing optimization campaigns.
 """
 from typing import Any
 
@@ -66,20 +66,6 @@ class CampaignDetailResponse(BaseModel):
     langfuse_trace_id: str | None = None
 
 
-class LineageEntry(BaseModel):
-    trial_id: str
-    round: int
-    prompt_state_id: str
-    parent_prompt_state_id: str | None
-    accuracy: float
-    label: str
-
-
-class CampaignLineageResponse(BaseModel):
-    campaign_id: str
-    lineage: list[LineageEntry]
-
-
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -126,53 +112,3 @@ async def get_trial(
     if trial is None:
         raise HTTPException(404, f"Trial round {round_num} not found")
     return trial
-
-
-@router.get(
-    "/campaigns/{campaign_id}/export",
-    response_model=dict[str, Any],
-)
-async def export_campaign(
-    campaign_id: str,
-    backend_id: str = Query(..., description="Backend identifier"),
-):
-    """Full campaign export: metadata + all trial details."""
-    store = _get_store()
-    data = store.campaigns.export(backend_id, campaign_id)
-    if data is None:
-        raise HTTPException(404, f"Campaign not found: {campaign_id}")
-    return data
-
-
-@router.get(
-    "/campaigns/{campaign_id}/lineage",
-    response_model=CampaignLineageResponse,
-)
-async def get_campaign_lineage(
-    campaign_id: str,
-    backend_id: str = Query(..., description="Backend identifier"),
-):
-    """Reconstruct the PromptState lineage chain for a campaign."""
-    store = _get_store()
-    lineage = store.campaigns.get_lineage(backend_id, campaign_id)
-    if not lineage:
-        # Check if campaign exists at all vs just having no trials
-        if store.campaigns.load(backend_id, campaign_id) is None:
-            raise HTTPException(404, f"Campaign not found: {campaign_id}")
-    return CampaignLineageResponse(
-        campaign_id=campaign_id,
-        lineage=[LineageEntry(**e) for e in lineage],
-    )
-
-
-@router.delete("/campaigns/{campaign_id}")
-async def delete_campaign(
-    campaign_id: str,
-    backend_id: str = Query(..., description="Backend identifier"),
-):
-    """Delete a campaign and its trials."""
-    store = _get_store()
-    deleted = store.campaigns.delete(backend_id, campaign_id)
-    if not deleted:
-        raise HTTPException(404, f"Campaign not found: {campaign_id}")
-    return {"deleted": True, "campaign_id": campaign_id}

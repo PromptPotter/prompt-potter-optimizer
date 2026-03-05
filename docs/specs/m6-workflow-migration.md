@@ -141,6 +141,7 @@ class PipelineSchema(BaseModel):
 **Factory:** `api/services/pipeline_discovery.py`
 - `parse_pipeline_response(json) → PipelineSchema` — from `GET /pipeline` response (full 6-step config)
 - `TERMNORM_DEFAULT_SCHEMA` — static fallback for offline use (includes frontend steps)
+- `compute_pipeline_view(backend_client) → dict` — dynamic view combining backend pipeline + local workflow nodes. 30s TTL cache. Exposed via `GET /backends/{id}/pipeline`.
 
 ---
 

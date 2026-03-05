@@ -10,7 +10,7 @@ This is where 90% of implementation work happens. All core logic lives here.
 | `search/grid_core.py` | Grid search over Layer 1 prompt fields. Distance-weighted stratified sampling. LLM-assisted context restructuring and result analysis. Grid plan persistence. Skips `init_session` when all points are cached. |
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation, round winner selection, improvement suggestions. |
 | `backend_client.py` | HTTP client for backend APIs (sync experiments, replay queries, init sessions, `fetch_pipeline()`). |
-| `pipeline_discovery.py` | Pipeline schema factory. `TERMNORM_DEFAULT_SCHEMA` (structural only) + `parse_pipeline_response()` merges live `GET /pipeline` metadata. |
+| `pipeline_discovery.py` | Pipeline schema factory. `TERMNORM_DEFAULT_SCHEMA` (structural only) + `parse_pipeline_response()` merges live `GET /pipeline` metadata. `compute_pipeline_view()` combines backend pipeline + local nodes with 30s TTL cache. |
 | `project_store.py` | Facade over focused store modules in `stores/`. File I/O for `.promptpotter/projects/`. |
 | `campaign/feedback_cycle.py` | Iterative optimization orchestrator: `CycleConfig` → generate_candidates → evaluate_and_select_winner loop with patience-based stopping. Hierarchical 3-loop escalation (L1 generate → L2 refine_context → L3 modify_plan) when enable_l2/enable_l3 are set. 4-path routing (generate/refine_context/modify_plan/stop). |
 | `campaign/layer_transitions.py` | L2 (refine_context) and L3 (modify_plan) LLM-driven transitions for the 3-loop feedback cycle. |
@@ -23,7 +23,7 @@ This is where 90% of implementation work happens. All core logic lives here.
 | `obs/langfuse_client.py` | Langfuse v2 cloud integration (singleton). |
 | `obs/langfuse_push.py` | Push eval runs to Langfuse cloud. Single path via `push_all_runs()` (batch, with dataset-item linking). |
 | `stores/` | Focused store modules: `BackendStore`, `ExecutionStore`, `DatasetRunStore`, `DatasetStore`, `GridPlanStore`, `SmartSearchStore`, `CampaignStore`. Shared I/O in `stores/base.py`. |
-| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with `_OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. Exponential backoff for transient 503/429 errors. |
+| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI; Anthropic available but not wired as default) with `_OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. Exponential backoff for transient 503/429 errors. |
 | `query_utils.py` | Shared query-parsing utilities (e.g. `parse_bom_material()`). |
 | `comparison.py` | Statistical comparison (hit@k, McNemar, Wilcoxon). |
 
@@ -112,3 +112,8 @@ File-first + cloud-optional. `ObsLogger` writes to disk, delegates to `CloudObsB
 
 - `LangfuseLogger.get_instance()` — Langfuse v2 cloud client (reset in tests via `_reset_langfuse` fixture)
 - `get_llm_client()` — LLM abstraction (Groq/OpenAI). Swap with `MockLLMClient` in tests.
+
+## Future / Scaffold
+
+- **`api/evaluators/`** — Pluggable evaluator framework (EvaluatorBase ABC + ExactMatchEvaluator). No consumers yet.
+- **AnthropicClient** — in `llm_client.py`. Available via `get_llm_client("anthropic")`. Not yet wired as default.

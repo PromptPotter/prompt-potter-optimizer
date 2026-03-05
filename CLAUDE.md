@@ -45,6 +45,10 @@ See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for the full service cata
 
 **PromptState** defines the prompt being optimized. **PipelineSchema** defines the backend pipeline being targeted. Together they parameterize every optimization service: `f(PromptState, PipelineSchema, eval_data) → scores`. See [`api/models/CLAUDE.md`](api/models/CLAUDE.md) for field details and API.
 
+### Pipeline discovery
+
+`GET /backends/{id}/pipeline` returns a dynamic view of the backend's pipeline config (via `compute_pipeline_view()`) combined with local workflow nodes. Uses a 30s TTL cache. Falls back to `TERMNORM_DEFAULT_SCHEMA` when the backend is unreachable.
+
 ### Pipeline composability
 
 PromptPotter controls backend pipeline behavior through **`node_overrides`** — structured per-node override dicts that mirror the backend's `GET /pipeline` config shape. `run_match()` translates internal flat param names (e.g. `ranking_temperature`) to `node_overrides` format (e.g. `{"llm_ranking": {"temperature": 0.5}}`) at the HTTP boundary. Backends only accept `node_overrides`.
