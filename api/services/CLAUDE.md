@@ -21,7 +21,7 @@ This is where 90% of implementation work happens. All core logic lives here.
 | `search/coverage.py` | Historical index (`build_prompt_result_index`) and coverage advisor. Discovers all stored `dataset_runs` for reuse across optimization threads. |
 | `obs/observability_logger.py` | File-based observability: Langfuse-compatible traces, MLflow experiments, prompt versioning. `events.jsonl` flat nav log. |
 | `obs/langfuse_client.py` | Langfuse v2 cloud integration (singleton). |
-| `obs/langfuse_push.py` | Push eval runs to Langfuse cloud. `push_run()` (auto, per-eval) + `push_all_runs()` (batch). |
+| `obs/langfuse_push.py` | Push eval runs to Langfuse cloud. Single path via `push_all_runs()` (batch, with dataset-item linking). |
 | `stores/` | Focused store modules: `BackendStore`, `ExecutionStore`, `DatasetRunStore`, `DatasetStore`, `GridPlanStore`, `SmartSearchStore`, `CampaignStore`. Shared I/O in `stores/base.py`. |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with `_OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. Exponential backoff for transient 503/429 errors. |
 | `query_utils.py` | Shared query-parsing utilities (e.g. `parse_bom_material()`). |

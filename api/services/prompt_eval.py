@@ -486,13 +486,12 @@ def _finalize_observability(
     model: str,
     temperature: float,
     prompt_state_id: str,
-    dataset_name: str | None,
-    dataset_item_map: dict[str, str] | None,
     obs: "ObsLogger | None",
 ) -> None:
-    """Log eval run to local obs and push to Langfuse cloud.
+    """Log eval run to local obs store.
 
-    Both paths are wrapped in their own try/except — failure never crashes eval.
+    Langfuse push is handled separately via push_all_runs() to ensure
+    dataset-item linking is always present.
     """
     try:
         _obs = obs
@@ -508,27 +507,9 @@ def _finalize_observability(
             model=model,
             temperature=temperature,
             prompt_state_id=prompt_state_id,
-            dataset_name=dataset_name,
-            dataset_item_map=dataset_item_map,
         )
     except Exception:
         logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
-
-    # Per-query cloud push — only when no explicit obs was provided.
-    # When obs IS provided, the caller controls cloud behavior through
-    # their ObsLogger's CloudObsBackend configuration.
-    if obs is None:
-        try:
-            from api.services.obs.langfuse_client import LangfuseLogger
-            _lf = LangfuseLogger.get_instance()
-            if _lf.enabled:
-                from api.services.obs.langfuse_push import push_run
-                push_run(
-                    _lf, store, backend_id, run_id,
-                    query_to_item_id=dataset_item_map,
-                )
-        except Exception:
-            logger.debug("Cloud push failed", exc_info=True)
 
 
 async def evaluate_prompt_cached(
@@ -669,8 +650,7 @@ async def evaluate_prompt_cached(
 
         _finalize_observability(
             store, backend_id, run_id, content_hash, scores,
-            model, temperature, prompt_state.id,
-            dataset_name, dataset_item_map, obs,
+            model, temperature, prompt_state.id, obs,
         )
 
     return results, scores, False

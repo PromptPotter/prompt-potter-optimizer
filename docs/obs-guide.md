@@ -61,8 +61,7 @@ This pattern is proven in production by TermNorm-excel (reference: `backend-api/
 
 In addition to file-based traces, PromptPotter can push eval runs to Langfuse cloud via `obs/langfuse_push.py`:
 
-- `push_run()` — auto-push after each evaluation (when Langfuse credentials are configured)
-- `push_all_runs()` — batch backfill all stored dataset_runs to Langfuse cloud
+- `push_all_runs()` — batch push all stored dataset_runs to Langfuse cloud (called from the notebook's `push_langfuse()` cell, always with dataset-item linking)
 
 Cloud push is optional; all data is always available on disk first.
 

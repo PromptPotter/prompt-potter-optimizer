@@ -7,19 +7,17 @@ Each trace shows the backend pipeline graph (web_search → entity_profiling
 → token_matching → llm_ranking) — standard Langfuse pattern: 1 trace =
 1 pipeline invocation.
 
-Two entry points:
-
-- ``push_run()`` — push a single run (called automatically after each eval)
-- ``push_all_runs()`` — batch push all historical runs (called from notebook)
+Single entry point: ``push_all_runs()`` — batch push all historical runs
+(called from the notebook's ``push_langfuse()`` cell). Internally delegates
+to ``push_run()`` per run, always with dataset-item linking.
 
 State is tracked in ``{backend_id}/obs/langfuse/backfill_state.json`` so
 re-running only pushes new runs.
 
 Usage::
 
-    from api.services.obs.langfuse_push import push_run, push_all_runs
-    push_run(lf, store, backend_id, run_id)       # single run
-    stats = push_all_runs(store, backend_id)       # batch
+    from api.services.obs.langfuse_push import push_all_runs
+    stats = push_all_runs(store, backend_id)
 """
 
 import json

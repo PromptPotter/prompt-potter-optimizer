@@ -417,12 +417,12 @@ def test_fallback_no_pipeline_data(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Cloud push gating
+# Local obs finalization
 # ---------------------------------------------------------------------------
 
 
-def test_explicit_obs_skips_singleton_push(tmp_path, monkeypatch):
-    """When obs is explicitly provided, singleton push_run must NOT fire."""
+def test_finalize_obs_with_explicit_obs(tmp_path):
+    """_finalize_observability logs to the provided ObsLogger without error."""
     from api.services.prompt_eval import _finalize_observability
     from api.services.obs.observability_logger import ObsLogger
 
@@ -435,16 +435,9 @@ def test_explicit_obs_skips_singleton_push(tmp_path, monkeypatch):
     obs._campaign_traces = {}
     obs._cloud = None
 
-    push_called = []
-    monkeypatch.setattr(
-        "api.services.obs.langfuse_push.push_run",
-        lambda *a, **kw: push_called.append(1),
-    )
-
     _finalize_observability(
         store, backend_id, "baseline_aabb", "aabb1122",
         {"accuracy": 1.0, "total": 1, "hits": 1},
-        "model", 0.0, "ps-1", None, None,
+        "model", 0.0, "ps-1",
         obs=obs,
     )
-    assert push_called == [], "push_run should NOT be called when obs is explicit"

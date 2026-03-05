@@ -63,7 +63,7 @@ Adopted TermNorm-excel's zero-dependency file-based patterns for production-grad
 - LLM retry logic (exponential backoff for Groq 503s)
 - Wired into `evaluate_prompt_cached()` and `run_feedback_cycle()`
 - Generic pipeline observation extraction via `OBS_EXTRACTION_MAP`
-- Langfuse cloud push (`push_run()`, `push_all_runs()`)
+- Langfuse cloud push (`push_all_runs()` batch path with dataset-item linking)
 
 **Exit gate:** All eval runs produce obs files. `mlflow ui` visualizes optimization history. `OBS_EXTRACTION_MAP` is the single config point for observation mapping.
 
