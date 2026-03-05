@@ -27,10 +27,8 @@ steps:
       query: query
     out:
       - query
-      - skip_llm_ranking
       - pipeline_params
     config:
-      skip_llm_ranking: true
       pipeline_params: {}
     metadata:
       type: config

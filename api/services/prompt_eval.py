@@ -281,14 +281,13 @@ async def backend_reranker_eval(
 
     try:
         pp = pipeline_params or {}
-        active_steps = pp.get("steps")
-        skip = active_steps is not None and "llm_ranking" not in active_steps
+        steps = pp.get("steps")
+        include_ranking = steps is None or "llm_ranking" in steps
 
         resp = await backend_client.run_match(
             query,
-            skip_llm_ranking=skip,
             pipeline_params=pipeline_params,
-            ranking_prompt=rendered_prompt if not skip else None,
+            ranking_prompt=rendered_prompt if include_ranking else None,
         )
         data = resp.get("data", {})
         ranked = data.get("ranked_candidates", [])

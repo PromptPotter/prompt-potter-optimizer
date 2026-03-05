@@ -52,21 +52,7 @@ Full pipeline execution for a single query. Four-stage pipeline:
 3. **token_matching** — deterministic token-overlap scoring against session terms
 4. **llm_ranking** (LLM2) — LLM reranks token-matched candidates using entity profile
 
-**Request:**
-```json
-{
-  "query": "Kupferblech CW004A / Laserschneiden",
-  "skip_llm_ranking": false
-}
-```
-
-Set `skip_llm_ranking: true` to skip stage 4 and return raw token-match scores.
-
-#### Pipeline Step Control (`steps`)
-
-The `steps` parameter controls which pipeline stages execute. When provided, it takes precedence over `skip_llm_ranking`. When absent, the backend falls back to `skip_llm_ranking` (full backward compatibility).
-
-**Request with `steps` (shortened pipeline — no LLM reranking):**
+**Request (shortened pipeline — no LLM reranking):**
 ```json
 {
   "query": "Kupferblech CW004A / Laserschneiden",
@@ -74,7 +60,7 @@ The `steps` parameter controls which pipeline stages execute. When provided, it 
 }
 ```
 
-**Request with `steps` (full pipeline):**
+**Request (full pipeline):**
 ```json
 {
   "query": "Kupferblech CW004A / Laserschneiden",
@@ -83,14 +69,14 @@ The `steps` parameter controls which pipeline stages execute. When provided, it 
 }
 ```
 
-The response `pipeline_params.steps` echoes the actual steps that ran, regardless of how stage control was specified.
+The response `pipeline_params.steps` echoes the actual steps that ran.
 
 | Step name | Always runs | Description |
 |-----------|-------------|-------------|
 | `web_search` | Yes | External web search and page scraping |
 | `entity_profiling` | Yes | LLM builds structured entity profile |
 | `token_matching` | Yes | Deterministic token-overlap scoring |
-| `llm_ranking` | No | LLM reranks candidates (controlled by `steps` or `skip_llm_ranking`) |
+| `llm_ranking` | No | LLM reranks candidates (controlled by `steps`) |
 
 #### Pipeline Parameter Overrides (`node_overrides`)
 
@@ -191,23 +177,19 @@ PromptPotter controls backend pipeline behavior through **`node_overrides`** —
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `ranked_candidates` | `list[dict]` | LLM-ranked results (or token-match results if `skip_llm_ranking=true`). Top-1 is the prediction. |
+| `ranked_candidates` | `list[dict]` | LLM-ranked results (or token-match results if `llm_ranking` not in `steps`). Top-1 is the prediction. |
 | `entity_profile` | `dict` | Structured profile from web research (LLM1). Contains `core_concept`, `entity_category`, `materials`, `processes`, `specifications`, `aliases`, and more. |
 | `token_matched_candidates` | `list[tuple]` | Raw `[term, score]` pairs from deterministic token matching (up to 20). These are the candidates fed to LLM2. |
-| `llm_provider` | `string` | Provider/model used for ranking (e.g. `groq/llama-4-maverick`). `null` when `skip_llm_ranking=true`. |
+| `llm_provider` | `string` | Provider/model used for ranking (e.g. `groq/llama-4-maverick`). `null` when `llm_ranking` not in `steps`. |
 | `total_time` | `float` | Wall-clock seconds for the full pipeline. |
 | `web_search_status` | `string` | `"success"` or `"failed"` for the web research step. |
 | `web_search_error` | `string\|null` | Error message if web search failed, else `null`. |
 
-#### `skip_llm_ranking` Behavior (legacy)
-
-**Preferred:** Use `steps` to control which stages execute. `skip_llm_ranking` is supported for backward compatibility.
-
-When `true` (or when `steps` omits `"llm_ranking"`), the pipeline stops after token matching. `ranked_candidates` contains raw token-match results formatted as:
+When `steps` omits `"llm_ranking"`, the pipeline stops after token matching. `ranked_candidates` contains raw token-match results formatted as:
 ```json
 { "candidate": "term", "relevance_score": 0.85, "core_concept_score": 0.85, "spec_score": 0 }
 ```
-`entity_profile` is still computed (web research always runs). `llm_provider` is `null`.
+`entity_profile` is still computed (if `entity_profiling` is in `steps`). `llm_provider` is `null`.
 
 ### `GET /pipeline` — Discover Pipeline Schema
 

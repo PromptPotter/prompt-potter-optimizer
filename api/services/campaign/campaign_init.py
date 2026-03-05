@@ -213,16 +213,15 @@ async def _verify_matches_liveness(
 ) -> None:
     """Send a lightweight /matches probe to verify the endpoint is live.
 
-    Uses ``skip_llm_ranking=True`` for speed. Retries on 400 (the exact
-    symptom of an unready session). Non-fatal: logs a warning if all
-    probes fail.
+    Retries on 400 (the exact symptom of an unready session).
+    Non-fatal: logs a warning if all probes fail.
     """
     for attempt in range(1, max_attempts + 1):
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
                     f"{backend_client.base_url}/matches",
-                    json={"query": probe_query, "skip_llm_ranking": True},
+                    json={"query": probe_query},
                 )
                 resp.raise_for_status()
             logger.info(

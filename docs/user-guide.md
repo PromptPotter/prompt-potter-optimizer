@@ -371,7 +371,7 @@ Response models and endpoints are auto-documented at `http://localhost:8001/docs
 
 **"No llm_ranking prompt found"** — Your backend needs to expose prompts in the experiment data. Ensure TermNorm's prompt registry is initialized before syncing.
 
-**"No queries have entity_profile"** — Re-run replay with `skip_llm_ranking=False`. The entity_profile is populated by the full pipeline.
+**"No queries have entity_profile"** — Re-run replay with `entity_profiling` in the pipeline `steps`. The entity_profile is populated by the full pipeline.
 
 **Grid search takes too long** — Reduce `grid_budget` in `grid_search` config, or reduce `eval_queries_per_point` for fewer queries per grid point.
 

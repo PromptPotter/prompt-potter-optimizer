@@ -156,7 +156,6 @@ async def smoke_test_override(
 
     result = await bc.run_match(
         query,
-        skip_llm_ranking=True,
         pipeline_params={"node_overrides": {step: {"output_schema": schema}}},
     )
 

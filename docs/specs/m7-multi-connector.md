@@ -22,7 +22,7 @@ Methods derived from actual usage across `prompt_eval.py`, `feedback_cycle.py`, 
 | Method | Signature | Used by |
 |--------|-----------|---------|
 | `init_session` | `async (terms: list[str]) -> dict[str, Any]` | `feedback_cycle.py`, `prompt_eval.py` |
-| `run_match` | `async (query: str, skip_llm_ranking: bool, pipeline_params: dict \| None, ranking_prompt: str \| None) -> dict[str, Any]` | `prompt_eval.py` (via `backend_reranker_eval`) |
+| `run_match` | `async (query: str, pipeline_params: dict \| None, ranking_prompt: str \| None) -> dict[str, Any]` | `prompt_eval.py` (via `backend_reranker_eval`) |
 | `fetch_experiments` | `async () -> dict[str, Any]` | `backend_client.py` (sync operations) |
 | `fetch_experiment` | `async (experiment_id: str, include_traces: bool) -> dict[str, Any]` | `backend_client.py` (sync operations) |
 | `extract_session_terms` | `@staticmethod (experiment_data: dict) -> list[str]` | `feedback_cycle.py`, `_campaign_lib.py` |
@@ -93,7 +93,6 @@ class ConnectorProtocol(Protocol):
     async def run_match(
         self,
         query: str,
-        skip_llm_ranking: bool = True,
         pipeline_params: dict[str, Any] | None = None,
         ranking_prompt: str | None = None,
     ) -> dict[str, Any]:

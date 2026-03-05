@@ -267,15 +267,11 @@ class BackendClient:
     async def run_match(
         self,
         query: str,
-        skip_llm_ranking: bool = True,
         pipeline_params: dict[str, Any] | None = None,
         ranking_prompt: str | None = None,
     ) -> dict[str, Any]:
         """POST /matches — translate internal flat params into node_overrides wire format."""
-        payload: dict[str, Any] = {
-            "query": query,
-            "skip_llm_ranking": skip_llm_ranking,
-        }
+        payload: dict[str, Any] = {"query": query}
 
         pp = dict(pipeline_params or {})
         if ranking_prompt:
@@ -399,7 +395,6 @@ class BackendClient:
         self,
         queries: list[dict[str, Any]],
         terms: list[str],
-        skip_llm_ranking: bool = True,
         delay_between: float = 0.0,
         on_result: Callable[[dict[str, Any], int, int], Any] | None = None,
         pipeline_params: dict[str, Any] | None = None,
@@ -421,7 +416,6 @@ class BackendClient:
             try:
                 response = await self.run_match(
                     q["query"],
-                    skip_llm_ranking=skip_llm_ranking,
                     pipeline_params=pipeline_params,
                 )
                 elapsed = time.time() - start

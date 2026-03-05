@@ -41,7 +41,7 @@ Two repos affected:
 | 4 | `parse_bom_material()` | Query parser registry |
 | 5 | GT mapping (bom→entry) | `schema.query_config` |
 | 7 | Hit@1 exact match | `schema.eval_config` |
-| 10 | `skip_llm_ranking` | Generic `excluded_steps` |
+| 10 | ~~`skip_llm_ranking`~~ (removed) | Controlled via `steps` list |
 | 11 | `BackendClient` concrete | `ConnectorProtocol` |
 | 12 | `ExecutionResultItem.bom_material` | Generic `query_fields` |
 | 13 | `extract_session_terms()` | `schema.session_config` |
