@@ -27,51 +27,6 @@ logger = logging.getLogger(__name__)
 
 MATCH_TIMEOUT = 120.0
 
-# Maps each pipeline step name to the set of parameter names it uses.
-PIPELINE_STEP_PARAMS = {
-    "fuzzy_matching": {"fuzzy_threshold", "fuzzy_scorer"},
-    "web_search": {
-        "max_sites", "num_results", "content_char_limit",
-        "query_prefix", "query_suffix",
-    },
-    "entity_profiling": {
-        "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
-        "profiling_prompt", "profiling_schema", "profiling_model",
-    },
-    "token_matching": {"max_token_candidates", "relevance_weight_core"},
-    "llm_ranking": {
-        "ranking_temperature", "ranking_max_tokens",
-        "ranking_sample_size", "ranking_prompt",
-        "ranking_schema", "ranking_model",
-    },
-}
-
-# Maps internal flat param name → (node_name, node_override_key).
-# Used by run_match() to translate flat params into node_overrides wire format.
-FLAT_TO_NODE_OVERRIDE: dict[str, tuple[str, str]] = {
-    "max_sites": ("web_search", "max_sites"),
-    "num_results": ("web_search", "num_results"),
-    "content_char_limit": ("web_search", "content_char_limit"),
-    "query_prefix": ("web_search", "query_prefix"),
-    "query_suffix": ("web_search", "query_suffix"),
-    "raw_content_limit": ("entity_profiling", "raw_content_limit"),
-    "profiling_temperature": ("entity_profiling", "temperature"),
-    "profiling_max_tokens": ("entity_profiling", "max_tokens"),
-    "profiling_prompt": ("entity_profiling", "prompt"),
-    "profiling_schema": ("entity_profiling", "output_schema"),
-    "profiling_model": ("entity_profiling", "model"),
-    "max_token_candidates": ("token_matching", "max_token_candidates"),
-    "relevance_weight_core": ("token_matching", "relevance_weight_core"),
-    "ranking_temperature": ("llm_ranking", "temperature"),
-    "ranking_max_tokens": ("llm_ranking", "max_tokens"),
-    "ranking_sample_size": ("llm_ranking", "sample_size"),
-    "ranking_prompt": ("llm_ranking", "prompt"),
-    "ranking_schema": ("llm_ranking", "output_schema"),
-    "ranking_model": ("llm_ranking", "model"),
-    "fuzzy_threshold": ("fuzzy_matching", "threshold"),
-    "fuzzy_scorer": ("fuzzy_matching", "scorer"),
-}
-
 
 def load_pipeline_config(exp_data: dict) -> dict:
     """Extract pipeline config (steps + params) from synced experiment data."""
@@ -100,32 +55,48 @@ def build_pipeline_params(
     """Build pipeline_params from a (possibly shortened) pipeline config.
 
     Returns dict ready for evaluate_prompt(..., pipeline_params=params).
-    Includes 'steps' list (sent to TermNorm) and any user overrides.
-
-    When a ``PipelineSchema`` is provided, uses ``schema.step_param_keys()``
-    instead of the hardcoded ``PIPELINE_STEP_PARAMS`` constant.
+    Includes ``steps`` list and ``node_config`` dict in the same
+    shape the backend already expects.
 
     Args:
         pipeline_config: Pipeline config with ``steps`` list.
-        overrides: Optional parameter overrides (e.g. ``ranking_temperature``).
+        overrides: Optional parameter overrides using flat param names
+            (e.g. ``ranking_temperature``). Translated to ``node_config``
+            via the schema's ``override_map``.
         exclude_steps: Step names to remove from the active pipeline
             (e.g. ``["llm_ranking"]`` for token-matching-only evaluation).
-        schema: Optional PipelineSchema for step-param lookup.
+        schema: PipelineSchema for step-param and flat→wire lookup.
     """
     step_names = [s["name"] for s in pipeline_config["steps"]]
     if exclude_steps:
         step_names = [s for s in step_names if s not in exclude_steps]
     params: dict = {"steps": step_names}
 
-    step_param_map = schema.step_param_keys() if schema else PIPELINE_STEP_PARAMS
-    active_param_names: set = set()
-    for name in step_names:
-        active_param_names |= step_param_map.get(name, set())
+    if not overrides:
+        return params
 
-    if overrides:
+    if schema is not None:
+        step_param_map = schema.step_param_keys()
+        active_param_names: set = set()
+        for name in step_names:
+            active_param_names |= step_param_map.get(name, set())
+
+        nc: dict[str, dict] = {}
         for k, v in overrides.items():
-            if k in active_param_names:
+            if k not in active_param_names:
+                continue
+            resolved = schema.resolve_flat_param(k)
+            if resolved:
+                node, wire_key = resolved
+                nc.setdefault(node, {})[wire_key] = v
+            else:
+                # No override_map entry — pass through as flat key
                 params[k] = v
+        if nc:
+            params["node_config"] = nc
+    else:
+        # No schema — pass overrides through as-is (legacy fallback)
+        params.update(overrides)
 
     return params
 
@@ -270,28 +241,24 @@ class BackendClient:
         pipeline_params: dict[str, Any] | None = None,
         ranking_prompt: str | None = None,
     ) -> dict[str, Any]:
-        """POST /matches — translate internal flat params into node_overrides wire format."""
+        """POST /matches — forward node_config to the backend as-is."""
         payload: dict[str, Any] = {"query": query}
 
         pp = dict(pipeline_params or {})
-        if ranking_prompt:
-            pp["ranking_prompt"] = ranking_prompt
 
         if "steps" in pp:
             payload["steps"] = pp.pop("steps")
 
-        node_overrides: dict[str, dict] = {}
-        if "node_overrides" in pp:
-            for node, params in pp.pop("node_overrides").items():
-                node_overrides.setdefault(node, {}).update(params)
+        node_config: dict[str, dict] = {}
+        if "node_config" in pp:
+            node_config = pp.pop("node_config")
 
-        for flat_key, val in pp.items():
-            if flat_key in FLAT_TO_NODE_OVERRIDE:
-                node, param = FLAT_TO_NODE_OVERRIDE[flat_key]
-                node_overrides.setdefault(node, {})[param] = val
+        # ranking_prompt shorthand → inject into node_config.llm_ranking.prompt
+        if ranking_prompt:
+            node_config.setdefault("llm_ranking", {})["prompt"] = ranking_prompt
 
-        if node_overrides:
-            payload["node_overrides"] = node_overrides
+        if node_config:
+            payload["node_config"] = node_config
 
         async with httpx.AsyncClient(timeout=MATCH_TIMEOUT) as client:
             resp = await client.post(

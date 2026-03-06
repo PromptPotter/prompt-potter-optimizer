@@ -20,7 +20,7 @@ A point in the optimization search space. Bundles the four dimensions that fully
 - `prompt_state: PromptState` -- the prompt configuration (layers 1-3)
 - `model: str` -- LLM model identifier
 - `temperature: float` -- LLM inference temperature
-- `pipeline_params: dict | None` -- backend pipeline overrides (node_overrides)
+- `pipeline_params: dict | None` -- backend pipeline overrides (node_config)
 
 Frozen (`model_config = {"frozen": True}`). Key API:
 - `render()` -- delegates to `prompt_state.render()`

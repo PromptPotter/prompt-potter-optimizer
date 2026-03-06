@@ -39,7 +39,6 @@ from api.services.prompt_optimizer import (
 )
 from api.config.settings import load_variant_library
 from api.services.search import (
-    DEFAULT_GRID_AXES,
     validate_grid_config,
     build_grid_points as _build_grid_points,
     build_combined_state_lookup as _build_combined_state_lookup,
@@ -105,7 +104,6 @@ def _infer_terminated_step(step_timings: dict) -> str | None:
 # Public API -- every name the notebook imports.
 __all__ = [
     # Constants
-    "DEFAULT_GRID_AXES",
     "RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
     # Service init
     "init_services", "setup_llm", "load_variant_library",
@@ -200,7 +198,7 @@ async def smoke_test_override(
 
     result = await bc.run_match(
         query,
-        pipeline_params={"node_overrides": {step: {"output_schema": schema}}},
+        pipeline_params={"node_config": {step: {"output_schema": schema}}},
     )
 
     data = result.get("data", {})
@@ -1702,7 +1700,7 @@ async def scan_advisor(
     model: str = "",
     query_budget: int = 120,
     coverage_stats: dict | None = None,
-    excluded_steps: set[str] | None = None,
+    pipeline_params: dict | None = None,
     task_description: str = "",
 ) -> dict:
     """LLM-powered scan configuration advice.
@@ -1714,6 +1712,10 @@ async def scan_advisor(
         Advisory dict with priority_axes, suggested_n_diagnostic,
         axes_to_skip, budget_breakdown, and reasoning.
     """
+    from api.services.search.scan_advisor import _excluded_from_schema
+
+    excluded_steps = _excluded_from_schema(pipeline_schema, pipeline_params)
+
     print("=" * 70)
     print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
     print("=" * 70)
@@ -1737,7 +1739,7 @@ async def scan_advisor(
         model=model,
         query_budget=query_budget,
         coverage_stats=coverage_stats,
-        excluded_steps=excluded_steps,
+        pipeline_params=pipeline_params,
         task_description=task_description,
     )
 
@@ -1761,7 +1763,6 @@ def advisory_to_scan_variants(
     Returns ``(scan_variants, schema_labels)`` where ``schema_labels`` maps
     schema axis names to human-readable labels (``"(baseline)"`` at index 0).
     """
-    from api.services.backend_client import FLAT_TO_NODE_OVERRIDE
     from api.models.schema_mutation import (
         baseline_schema_from_step,
         parse_mutation_tuples,
@@ -1779,9 +1780,7 @@ def advisory_to_scan_variants(
 
         # Schema axis detection: ends with _schema AND is a pipeline_param
         if axis_name.endswith("_schema") and pipeline_schema is not None:
-            # Map axis -> step name via FLAT_TO_NODE_OVERRIDE
-            override_info = FLAT_TO_NODE_OVERRIDE.get(axis_name)
-            step_name = override_info[0] if override_info else None
+            step_name = pipeline_schema.step_for_flat_param(axis_name)
             step = pipeline_schema.get_step(step_name) if step_name else None
 
             if step and step.output_schema:

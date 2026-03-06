@@ -5,12 +5,13 @@ Describes the steps, parameters, observation mappings, and metadata of
 a backend pipeline so that PromptPotter services can work generically
 instead of hardcoding TermNorm-specific constants.
 
-Derivation methods replace scattered constants:
-  step_param_keys()    → PIPELINE_STEP_PARAMS  (backend_client.py)
-  obs_extraction_map() → OBS_EXTRACTION_MAP    (eval_dataset.py)
-  langfuse_type_map()  → as_type mapping       (pipeline_nodes.py)
-  backend_steps()      → runtime filtering
-  frontend_steps()     → runtime filtering
+Derivation methods:
+  step_param_keys()       → step name → param keys
+  flat_to_node_config()   → flat param → (node, wire_key)
+  obs_extraction_map()    → observation name → extraction rules
+  langfuse_type_map()     → step name → Langfuse as_type
+  backend_steps()         → runtime filtering
+  frontend_steps()        → runtime filtering
 """
 
 from typing import Any
@@ -90,6 +91,7 @@ class PipelineStep(BaseModel):
     short_circuit: bool = False
     node_role: str = ""  # "candidate_source" | "ranker" | "enricher" | "cache" | ""
     param_keys: set[str] = Field(default_factory=set)
+    override_map: dict[str, str] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"
@@ -176,6 +178,34 @@ class PipelineSchema(BaseModel):
                 return step
         return None
 
+    def flat_to_node_config(self) -> dict[str, tuple[str, str]]:
+        """Build a flat_param_name → (node_name, wire_key) mapping.
+
+        Aggregates ``override_map`` from every step.
+        """
+        result: dict[str, tuple[str, str]] = {}
+        for step in self.steps:
+            for flat_key, wire_key in step.override_map.items():
+                result[flat_key] = (step.name, wire_key)
+        return result
+
+    def resolve_flat_param(self, flat_key: str) -> tuple[str, str] | None:
+        """Resolve a single flat param name to ``(node_name, wire_key)``.
+
+        Returns ``None`` if the key is not mapped by any step.
+        """
+        for step in self.steps:
+            if flat_key in step.override_map:
+                return (step.name, step.override_map[flat_key])
+        return None
+
+    def step_for_flat_param(self, flat_key: str) -> str | None:
+        """Return the step name that owns a flat param, or None."""
+        for step in self.steps:
+            if flat_key in step.param_keys:
+                return step.name
+        return None
+
     def infer_terminating_step(self, step_timings: dict[str, float | None]) -> str | None:
         """Infer which pipeline step produced the final result.
 
@@ -194,8 +224,6 @@ class PipelineSchema(BaseModel):
 
     def step_param_keys(self) -> dict[str, set[str]]:
         """Map step name → parameter keys.
-
-        Replaces ``PIPELINE_STEP_PARAMS`` in ``backend_client.py``.
         """
         return {
             step.name: step.param_keys

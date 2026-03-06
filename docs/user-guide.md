@@ -149,14 +149,7 @@ Controls how many queries each grid point is evaluated on:
 
 ### Default Grid Axes
 
-```python
-DEFAULT_GRID_AXES = {
-    "persona": ["", "You are a domain expert...", "You are a precise, analytical system...", ...],
-    "task_intent": ["", "Your task is to identify the single best match...", ...],
-    "thinking_style": ["", "Think step by step.", "Focus on semantic meaning...", ...],
-    "answer_format": ["", "Rank all candidates from most to least relevant."],
-}
-```
+Grid axes default to `load_variant_library()["prompt_fields"]` — the prompt field variants defined in `variant_library.yaml`. Override with `custom_axes` in the grid search config.
 
 ### Improvement Areas
 

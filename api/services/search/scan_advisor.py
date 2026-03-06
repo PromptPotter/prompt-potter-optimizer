@@ -307,6 +307,18 @@ def _validate_advisory(
     return warnings
 
 
+def _excluded_from_schema(
+    schema: PipelineSchema, pipeline_params: dict | None,
+) -> set[str] | None:
+    """Derive excluded steps by diffing schema steps vs pipeline_params["steps"]."""
+    if not pipeline_params or "steps" not in pipeline_params:
+        return None
+    all_step_names = {s.name for s in schema.steps}
+    active = set(pipeline_params["steps"])
+    excluded = all_step_names - active
+    return excluded or None
+
+
 async def advise_scan_config(
     pipeline_schema: PipelineSchema,
     variant_library: dict,
@@ -316,7 +328,7 @@ async def advise_scan_config(
     model: str = "",
     query_budget: int = 120,
     coverage_stats: dict | None = None,
-    excluded_steps: set[str] | None = None,
+    pipeline_params: dict | None = None,
     task_description: str = "",
 ) -> dict:
     """Generate LLM-powered scan configuration advice.
@@ -331,7 +343,8 @@ async def advise_scan_config(
         query_budget: Maximum number of backend eval calls to budget.
         coverage_stats: Optional dict from ``analyze_candidate_coverage()``
             with keys ``covered``, ``total``, ``coverage_pct``, ``viable``.
-        excluded_steps: Step names excluded from evaluation (e.g. ``{"llm_ranking"}``).
+        pipeline_params: Pipeline params dict with ``steps`` key. Excluded
+            steps are derived by diffing schema steps vs active steps.
         task_description: Domain context for the advisor LLM (e.g. input patterns,
             matching challenges). Helps generate domain-specific value suggestions.
 
@@ -340,6 +353,8 @@ async def advise_scan_config(
         ``axes_to_skip``, ``budget_breakdown``, ``reasoning``, and
         ``validation_warnings``.
     """
+    excluded_steps = _excluded_from_schema(pipeline_schema, pipeline_params)
+
     # Compute baseline accuracy
     if baseline_results:
         hits = sum(1 for r in baseline_results if r.get("hit"))

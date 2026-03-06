@@ -7,7 +7,6 @@ Re-exports entry-point functions so callers use one import path::
 
 # grid_core
 from api.services.search.grid_core import (
-    DEFAULT_GRID_AXES,
     analyze_grid_results,
     build_combined_state_lookup,
     build_grid_analysis_prompt,
@@ -54,7 +53,6 @@ from api.services.search.synthesis import synthesize_sensitivity_from_grid
 
 __all__ = [
     # grid_core
-    "DEFAULT_GRID_AXES",
     "analyze_grid_results",
     "build_combined_state_lookup",
     "build_grid_analysis_prompt",

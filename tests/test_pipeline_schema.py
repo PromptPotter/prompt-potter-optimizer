@@ -81,9 +81,23 @@ def test_derivation_methods():
 class TestTermNormConsistency:
     """Verify TERMNORM_DEFAULT_SCHEMA matches every hardcoded constant."""
 
-    def test_step_param_keys_matches(self):
-        from api.services.backend_client import PIPELINE_STEP_PARAMS
-        assert TERMNORM_DEFAULT_SCHEMA.step_param_keys() == PIPELINE_STEP_PARAMS
+    def test_flat_to_node_config(self):
+        """flat_to_node_config() returns expected mapping from TERMNORM_DEFAULT_SCHEMA."""
+        mapping = TERMNORM_DEFAULT_SCHEMA.flat_to_node_config()
+        # Spot-check key entries
+        assert mapping["ranking_temperature"] == ("llm_ranking", "temperature")
+        assert mapping["profiling_prompt"] == ("entity_profiling", "prompt")
+        assert mapping["fuzzy_threshold"] == ("fuzzy_matching", "threshold")
+        assert mapping["max_sites"] == ("web_search", "max_sites")
+        assert mapping["max_token_candidates"] == ("token_matching", "max_token_candidates")
+
+    def test_override_map_covers_param_keys(self):
+        """Every param_keys entry has a corresponding override_map entry."""
+        for step in TERMNORM_DEFAULT_SCHEMA.steps:
+            for pk in step.param_keys:
+                assert pk in step.override_map, (
+                    f"Step '{step.name}': param_key '{pk}' missing from override_map"
+                )
 
     def test_obs_extraction_map_matches(self):
         from api.services.search.eval_dataset import OBS_EXTRACTION_MAP

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
 import pandas as pd
 
-from api.models.prompt_state import PromptState
+from api.models.prompt_state import LAYER1_STRING_FIELDS, PromptState
 from api.services.llm_client import LLMClientBase
 from api.services.project_store import ProjectStore
 from api.services.prompt_eval import (
@@ -38,36 +38,7 @@ logger = logging.getLogger(__name__)
 SAMPLING_ALPHA = 3.0
 GRID_PREFIX = "grid_"
 
-GRID_SEARCHABLE_FIELDS = {
-    "persona", "task_intent", "problem_description",
-    "instruction", "thinking_style", "answer_format",
-}
-
-
-# Lazy-loaded default for backward compat with notebooks importing the name.
-DEFAULT_GRID_AXES: dict[str, list[str]] = {
-    "persona": [
-        "",
-        "You are a domain expert with deep knowledge of this field.",
-        "You are a precise, analytical system that evaluates candidates methodically.",
-        "You are a careful assistant that considers all options before deciding.",
-    ],
-    "task_intent": [
-        "",
-        "Your task is to identify the single best match from the candidates.",
-        "Rank candidates by how well they match the concept described.",
-    ],
-    "thinking_style": [
-        "",
-        "Think step by step.",
-        "Focus on semantic meaning, not surface-level word overlap.",
-        "First understand the core concept, then evaluate each candidate against it.",
-    ],
-    "answer_format": [
-        "",
-        "Rank all candidates from most to least relevant.",
-    ],
-}
+GRID_SEARCHABLE_FIELDS = set(LAYER1_STRING_FIELDS)
 
 
 # ---------------------------------------------------------------------------
@@ -686,9 +657,11 @@ async def resume_or_build_grid(
     seed = gs.get("seed", 42)
     context_input = gs.get("context_fields", gs.get("context", ""))
 
-    # Build grid axes
+    # Build grid axes from variant library prompt_fields
     if gs.get("use_defaults", True):
-        grid_axes = dict(DEFAULT_GRID_AXES)
+        from api.config.settings import load_variant_library
+        vl = load_variant_library()
+        grid_axes = dict(vl.get("prompt_fields", {}))
     else:
         grid_axes = {}
     if gs.get("custom_axes"):

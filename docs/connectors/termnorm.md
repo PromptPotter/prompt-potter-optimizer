@@ -78,16 +78,16 @@ The response `pipeline_params.steps` echoes the actual steps that ran.
 | `token_matching` | Yes | Deterministic token-overlap scoring |
 | `llm_ranking` | No | LLM reranks candidates (controlled by `steps`) |
 
-#### Pipeline Parameter Overrides (`node_overrides`)
+#### Pipeline Node Configuration (`node_config`)
 
-PromptPotter controls backend pipeline behavior through **`node_overrides`** — structured per-node override dicts that mirror the backend's `GET /pipeline` config shape. `run_match()` in `backend_client.py` translates PromptPotter's internal flat param names (e.g. `ranking_temperature`) to `node_overrides` format at the HTTP boundary. The backend only accepts `node_overrides`.
+PromptPotter uses **`node_config`** format throughout — the same nested dict shape as `pipeline.json` and the `/matches` wire format. `run_match()` forwards `node_config` as-is. No translation layer.
 
 **Example request:**
 ```json
 {
   "query": "Kupferblech CW004A / Laserschneiden",
   "steps": ["web_search", "entity_profiling", "token_matching", "llm_ranking"],
-  "node_overrides": {
+  "node_config": {
     "entity_profiling": {
       "prompt": "Custom profiling prompt with {{query}} {{format_string}} {{combined_text}}",
       "temperature": 0.5,
@@ -109,30 +109,31 @@ PromptPotter controls backend pipeline behavior through **`node_overrides`** —
 }
 ```
 
-**`node_overrides` key mapping** (internal flat name = what PromptPotter uses internally, translated by `run_match()`):
+**`node_config` key mapping:**
 
-| Node | Override key | Internal flat name |
-|------|-------------|----------------------|
-| `entity_profiling` | `prompt` | `profiling_prompt` |
-| `entity_profiling` | `output_schema` | `profiling_schema` |
-| `entity_profiling` | `model` | `profiling_model` |
-| `entity_profiling` | `temperature` | `profiling_temperature` |
-| `entity_profiling` | `max_tokens` | `profiling_max_tokens` |
-| `llm_ranking` | `prompt` | `ranking_prompt` |
-| `llm_ranking` | `output_schema` | `ranking_schema` |
-| `llm_ranking` | `model` | `ranking_model` |
-| `llm_ranking` | `temperature` | `ranking_temperature` |
-| `llm_ranking` | `max_tokens` | `ranking_max_tokens` |
-| `llm_ranking` | `sample_size` | `ranking_sample_size` |
-| `web_search` | `max_sites` | `max_sites` |
-| `web_search` | `num_results` | `num_results` |
-| `web_search` | `content_char_limit` | `content_char_limit` |
-| `web_search` | `query_prefix` | `query_prefix` |
-| `web_search` | `query_suffix` | `query_suffix` |
-| `fuzzy_matching` | `threshold` | `fuzzy_threshold` |
-| `fuzzy_matching` | `scorer` | `fuzzy_scorer` |
-| `token_matching` | `max_token_candidates` | `max_token_candidates` |
-| `token_matching` | `relevance_weight_core` | `relevance_weight_core` |
+| Node | Config key |
+|------|-----------|
+| `entity_profiling` | `prompt` |
+| `entity_profiling` | `output_schema` |
+| `entity_profiling` | `model` |
+| `entity_profiling` | `temperature` |
+| `entity_profiling` | `max_tokens` |
+| `entity_profiling` | `raw_content_limit` |
+| `llm_ranking` | `prompt` |
+| `llm_ranking` | `output_schema` |
+| `llm_ranking` | `model` |
+| `llm_ranking` | `temperature` |
+| `llm_ranking` | `max_tokens` |
+| `llm_ranking` | `sample_size` |
+| `web_search` | `max_sites` |
+| `web_search` | `num_results` |
+| `web_search` | `content_char_limit` |
+| `web_search` | `query_prefix` |
+| `web_search` | `query_suffix` |
+| `fuzzy_matching` | `threshold` |
+| `fuzzy_matching` | `scorer` |
+| `token_matching` | `max_token_candidates` |
+| `token_matching` | `relevance_weight_core` |
 
 **Response:**
 ```json

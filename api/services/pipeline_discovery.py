@@ -56,6 +56,10 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             short_circuit=True,
             node_role="candidate_source",
             param_keys={"fuzzy_threshold", "fuzzy_scorer"},
+            override_map={
+                "fuzzy_threshold": "threshold",
+                "fuzzy_scorer": "scorer",
+            },
             langfuse_type="span",
         ),
         PipelineStep(
@@ -66,6 +70,13 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             param_keys={
                 "max_sites", "num_results", "content_char_limit",
                 "query_prefix", "query_suffix",
+            },
+            override_map={
+                "max_sites": "max_sites",
+                "num_results": "num_results",
+                "content_char_limit": "content_char_limit",
+                "query_prefix": "query_prefix",
+                "query_suffix": "query_suffix",
             },
             observation_name="web_search",
             observation_mappings=[
@@ -83,6 +94,14 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
                 "profiling_prompt", "profiling_schema", "profiling_model",
             },
+            override_map={
+                "raw_content_limit": "raw_content_limit",
+                "profiling_temperature": "temperature",
+                "profiling_max_tokens": "max_tokens",
+                "profiling_prompt": "prompt",
+                "profiling_schema": "output_schema",
+                "profiling_model": "model",
+            },
             observation_name="entity_profiling",
             observation_mappings=[
                 ObservationMapping(
@@ -97,6 +116,10 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             runtime="backend",
             node_role="candidate_source",
             param_keys={"max_token_candidates", "relevance_weight_core"},
+            override_map={
+                "max_token_candidates": "max_token_candidates",
+                "relevance_weight_core": "relevance_weight_core",
+            },
             observation_name="token_matching",
             observation_mappings=[
                 ObservationMapping(
@@ -114,6 +137,14 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "ranking_temperature", "ranking_max_tokens",
                 "ranking_sample_size", "ranking_prompt",
                 "ranking_schema", "ranking_model",
+            },
+            override_map={
+                "ranking_temperature": "temperature",
+                "ranking_max_tokens": "max_tokens",
+                "ranking_sample_size": "sample_size",
+                "ranking_prompt": "prompt",
+                "ranking_schema": "output_schema",
+                "ranking_model": "model",
             },
             observation_name="llm_ranking",
             observation_mappings=[
