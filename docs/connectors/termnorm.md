@@ -239,7 +239,6 @@ Returns the full pipeline configuration with typed nodes, tunable parameters, na
     "fuzzy_only": ["fuzzy_matching"]
   },
   "llm_defaults": { "provider": "groq", "model": "...", "timeout": 60, "retry_attempts": 3 },
-  "batch_overrides": { "max_sites": 5, "verbose": false },
   "resolved_schemas": {
     "entity_profile/1": {
       "family": "entity_profile", "version": 1,
@@ -286,7 +285,6 @@ Returns the full pipeline configuration with typed nodes, tunable parameters, na
 | `nodes` | Node definitions with type, config, and optional `short_circuit` flag |
 | `pipelines` | Named pipeline variants — ordered lists of node names to execute |
 | `llm_defaults` | Default LLM provider, model, timeout, retry settings |
-| `batch_overrides` | Parameter overrides applied during batch processing |
 | `resolved_schemas` | Output schemas resolved from the schema registry, keyed by `{family}/{version}` |
 | `resolved_prompts` | Prompt templates resolved from the prompt registry, keyed by `{family}/{version}` |
 

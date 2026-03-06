@@ -62,10 +62,21 @@ from api.services.search import (
     advise_scan_config as _advise_scan_config,
 )
 
+# ANSI foreground colors
+RESET   = "\033[0m"
+BOLD    = "\033[1m"
+RED     = "\033[31m"
+GREEN   = "\033[32m"
+YELLOW  = "\033[33m"
+BLUE    = "\033[34m"
+MAGENTA = "\033[35m"
+CYAN    = "\033[36m"
+
 # Public API — every name the notebook imports.
 __all__ = [
     # Constants
     "DEFAULT_GRID_AXES",
+    "RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
     # Service init
     "init_services", "setup_llm", "load_variant_library",
     # Backend status & datasets
