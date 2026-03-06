@@ -1914,7 +1914,6 @@ def _find_gt_rank(r: dict) -> int | None:
 def _fmt_query_result(r: dict, cached: bool = False) -> str:
     """Format a single query result as a HIT/MISS line with timing."""
     q = (r.get("query") or "")[:45]
-    tag = "HIT " if r.get("hit") else "MISS"
     pred = (r.get("predicted") or "")[:35]
     err = r.get("error")
     pd = r.get("pipeline_data") or {}
@@ -1931,20 +1930,24 @@ def _fmt_query_result(r: dict, cached: bool = False) -> str:
         tt = pd.get("total_time")
         time_str = f" {tt:.1f}s" if tt is not None else ""
 
-    if err:
-        return f"        {tag} {step:>8s}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
-
-    rank_str = ""
-    if not r.get("hit"):
+    # Build tag: "HIT " or "MISS 3/20" with rank info inline
+    if r.get("hit"):
+        tag = "HIT "
+    else:
         ranked = pd.get("ranked_candidates", [])
         n_cand = len(ranked)
         gt_rank = _find_gt_rank(r)
         if gt_rank is not None:
-            rank_str = f"  (#{gt_rank} of {n_cand})"
+            tag = f"MISS {gt_rank}/{n_cand}"
         elif n_cand:
-            rank_str = f"  (not in {n_cand} candidates)"
+            tag = f"MISS --/{n_cand}"
+        else:
+            tag = "MISS"
 
-    return f"        {tag} {step:>8s}  {q:<45s}  -> {pred}{rank_str}{time_str}"
+    if err:
+        return f"        {tag} {step:>8s}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
+
+    return f"        {tag} {step:>8s}  {q:<45s}  -> {pred}{time_str}"
 
 
 def _make_scan_progress_cb():
@@ -2361,7 +2364,13 @@ async def run_feedback_cycle_notebook(
         print(f"{prefix}\n{_fmt_query_result(result, cached=is_cached)}", flush=True)
 
     def _on_candidate(idx, total, scores):
-        tag = "cached" if scores.get("cached") else f"{scores['accuracy']:.1%}"
+        if scores.get("cached"):
+            tag = "cached"
+        else:
+            comp = scores.get("composite")
+            tag = f"{scores['accuracy']:.1%}"
+            if comp is not None and comp != scores['accuracy']:
+                tag += f" (c={comp:.4f})"
         print(f"  >> Candidate {idx + 1}/{total} done: {tag}")
 
     def _on_round(round_result, stall_count):

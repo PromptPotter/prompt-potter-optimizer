@@ -435,6 +435,7 @@ async def sensitivity_scan(
     # Evaluate baseline
     baseline_scores = await _eval_ps(baseline_ps)
     baseline_acc = baseline_scores["accuracy"]
+    baseline_composite = baseline_scores.get("composite", baseline_acc)
     _cb({
         "type": "baseline_done",
         "accuracy": baseline_acc,
@@ -542,7 +543,8 @@ async def sensitivity_scan(
                     scores = await _eval_ps(baseline_ps, perturbed_params)
 
                 acc = scores["accuracy"]
-                delta = acc - baseline_acc
+                composite = scores.get("composite", acc)
+                delta = composite - baseline_composite
                 rows.append({
                     "axis": axis_name, "axis_type": axis_type,
                     "value_idx": vi,
@@ -550,6 +552,7 @@ async def sensitivity_scan(
                     "hits": scores["hits"],
                     "total": scores["total"],
                     "accuracy": acc, "delta": delta,
+                    "composite": composite,
                     "errors": scores.get("errors", 0),
                 })
                 axis_stats[axis_name].append(delta)
@@ -559,6 +562,7 @@ async def sensitivity_scan(
                     "value_preview": _preview(value),
                     "is_baseline_value": False,
                     "accuracy": acc, "delta": delta,
+                    "composite": composite,
                     "hits": scores["hits"], "total": scores["total"],
                     "results": scores.get("results", []),
                     "cached": scores.get("cached", False),
@@ -783,13 +787,14 @@ async def adaptive_search(
     # Get baseline accuracy
     baseline_scores = await _eval_ps(current_ps)
     current_acc = baseline_scores["accuracy"]
+    current_composite = baseline_scores.get("composite", current_acc)
 
     for round_num in range(1, max_rounds + 1):
         round_improved = False
         _cb({
             "type": "round_start",
             "round": round_num, "max_rounds": max_rounds,
-            "current_accuracy": current_acc,
+            "current_accuracy": current_composite,
             "active_axes": [
                 p["axis"] for p in active_axes
                 if p["axis"] not in resolved_axes
@@ -831,7 +836,7 @@ async def adaptive_search(
                 if axis_type == "prompt_field"
                 else current_params.get(axis_name)
             )
-            best_acc = current_acc
+            best_composite = current_composite
 
             for value in values:
                 if axis_type == "prompt_field":
@@ -843,13 +848,15 @@ async def adaptive_search(
 
                 scores = await _eval_ps(test_ps, test_params)
 
-                delta = scores["accuracy"] - current_acc
+                composite = scores.get("composite", scores["accuracy"])
+                delta = composite - current_composite
                 log_rows.append({
                     "round": round_num,
                     "axis": axis_name,
                     "axis_type": axis_type,
                     "value_preview": _preview(value),
                     "accuracy": scores["accuracy"],
+                    "composite": composite,
                     "delta": delta,
                 })
                 _cb({
@@ -857,17 +864,18 @@ async def adaptive_search(
                     "round": round_num,
                     "axis": axis_name, "value_preview": _preview(value),
                     "accuracy": scores["accuracy"], "delta": delta,
+                    "composite": composite,
                     "hits": scores["hits"], "total": scores["total"],
                     "results": scores.get("results", []),
                     "cached": scores.get("cached", False),
                 })
 
-                if scores["accuracy"] > best_acc:
-                    best_acc = scores["accuracy"]
+                if composite > best_composite:
+                    best_composite = composite
                     best_value = value
 
             # Apply best value if improved
-            improvement = best_acc - current_acc
+            improvement = best_composite - current_composite
             if improvement > stop_threshold:
                 if axis_type == "prompt_field":
                     current_ps = current_ps.derive(
@@ -878,7 +886,7 @@ async def adaptive_search(
                     )
                 else:
                     current_params[axis_name] = best_value
-                current_acc = best_acc
+                current_composite = best_composite
                 round_improved = True
                 _cb({
                     "type": "axis_resolved",
@@ -886,7 +894,7 @@ async def adaptive_search(
                     "axis": axis_name, "action": "improved",
                     "best_value": _preview(best_value),
                     "improvement": round(improvement, 4),
-                    "new_accuracy": current_acc,
+                    "new_accuracy": current_composite,
                 })
             else:
                 resolved_axes.add(axis_name)
@@ -905,13 +913,13 @@ async def adaptive_search(
             _cb({
                 "type": "round_done",
                 "round": round_num, "improved": False,
-                "accuracy": current_acc,
+                "accuracy": current_composite,
             })
             break
         _cb({
             "type": "round_done",
             "round": round_num, "improved": True,
-            "accuracy": current_acc,
+            "accuracy": current_composite,
         })
 
     log_df = pd.DataFrame(log_rows)

@@ -7,7 +7,7 @@ from collections import defaultdict
 import pandas as pd
 
 from api.services.project_store import ProjectStore
-from api.services.prompt_eval import HASH_TRUNCATE, compute_accuracy
+from api.services.prompt_eval import HASH_TRUNCATE, compute_composite_score
 from api.services.search.plan_persistence import deserialize_grid_plan
 from api.services.search.smart_search import classify_axis
 from api.services.search.utils import preview as _preview
@@ -82,7 +82,7 @@ def synthesize_sensitivity_from_grid(
                 continue
 
             covered_points += 1
-            acc = compute_accuracy(matched)["accuracy"]
+            acc = compute_composite_score(matched)["accuracy"]
 
             # Attribute this accuracy to each axis value at this grid point
             for ax_name in axis_names:

@@ -72,6 +72,7 @@ class CycleRoundResult(BaseModel):
     round: int
     label: str
     accuracy: float
+    composite: float = 0.0
     hits: int
     total: int
     improved: bool
@@ -106,8 +107,10 @@ class _LoopState:
     rounds: list[CycleRoundResult] = field(default_factory=list)
     current_ps: dict = field(default_factory=dict)
     current_accuracy: float = 0.0
+    current_composite: float = 0.0
     current_results: list = field(default_factory=list)
     best_accuracy: float = 0.0
+    best_composite: float = 0.0
     best_round: int = -1
     best_ps: dict = field(default_factory=dict)
     stall_count: int = 0
@@ -121,6 +124,8 @@ class _LoopState:
     l3_round: int = 0
     best_accuracy_at_l2_entry: float = 0.0
     best_accuracy_at_l3_entry: float = 0.0
+    best_composite_at_l2_entry: float = 0.0
+    best_composite_at_l3_entry: float = 0.0
 
 
 def cycle_config_identity(
@@ -160,10 +165,12 @@ def cycle_config_identity(
 
 def _round_result_from_detail(detail: dict) -> CycleRoundResult:
     """Build a CycleRoundResult from a persisted trial detail dict."""
+    acc = detail.get("accuracy", 0.0)
     return CycleRoundResult(
         round=detail["round"],
         label=detail.get("label", ""),
-        accuracy=detail.get("accuracy", 0.0),
+        accuracy=acc,
+        composite=detail.get("composite", acc),
         hits=detail.get("hits", 0),
         total=detail.get("total", 0),
         improved=detail.get("improved", False),
@@ -220,8 +227,10 @@ def _restore_round_state(
     rounds: list[CycleRoundResult] = []
     current_ps: dict = {}
     current_accuracy = 0.0
+    current_composite = 0.0
     current_results: list = []
     best_accuracy = 0.0
+    best_composite = 0.0
     best_round = -1
     best_ps: dict = {}
     stall_count = 0
@@ -239,9 +248,11 @@ def _restore_round_state(
 
         current_ps = rr.prompt_state
         current_accuracy = rr.accuracy
+        current_composite = rr.composite
         current_results = rr.results
 
-        if rr.accuracy > best_accuracy:
+        if rr.composite > best_composite:
+            best_composite = rr.composite
             best_accuracy = rr.accuracy
             best_round = rr.round
             best_ps = rr.prompt_state
@@ -261,8 +272,8 @@ def _restore_round_state(
         l3_round = detail.get("l3_round", l3_round)
 
     return (
-        rounds, current_ps, current_accuracy, current_results,
-        best_accuracy, best_round, best_ps, stall_count,
+        rounds, current_ps, current_accuracy, current_composite, current_results,
+        best_accuracy, best_composite, best_round, best_ps, stall_count,
         l2_stall_count, l3_stall_count, l2_round, l3_round,
     )
 
@@ -352,8 +363,8 @@ def _restore_in_progress_campaign(
         return None
 
     (
-        rounds, cur_ps, cur_acc, cur_results,
-        best_acc, best_rnd, best_ps, stall,
+        rounds, cur_ps, cur_acc, cur_composite, cur_results,
+        best_acc, best_composite, best_rnd, best_ps, stall,
         l2_stall, l3_stall, l2_rnd, l3_rnd,
     ) = _restore_round_state(
         campaign_data, campaign_store, config.backend_id,
@@ -368,8 +379,10 @@ def _restore_in_progress_campaign(
         rounds=rounds,
         current_ps=cur_ps,
         current_accuracy=cur_acc,
+        current_composite=cur_composite,
         current_results=cur_results,
         best_accuracy=best_acc,
+        best_composite=best_composite,
         best_round=best_rnd,
         best_ps=best_ps,
         stall_count=stall,
@@ -646,6 +659,7 @@ async def _execute_round(
         round=round_num,
         label=eval_out["winner"].get("label", f"round_{round_num}"),
         accuracy=eval_out["winner_accuracy"],
+        composite=eval_out.get("winner_composite", eval_out["winner_accuracy"]),
         hits=eval_out["winner"].get("hits", 0),
         total=eval_out["winner"].get("total", 0),
         improved=eval_out["improved"],
@@ -731,7 +745,7 @@ async def _escalate_l2(
     current_ps = PromptState(**state.current_ps)
 
     # Check if L2 itself has stalled (no improvement since last L2 entry)
-    l2_improved = state.best_accuracy > state.best_accuracy_at_l2_entry
+    l2_improved = state.best_composite > state.best_composite_at_l2_entry
     if not l2_improved and state.l2_round > 0:
         state.l2_stall_count += 1
     else:
@@ -741,7 +755,7 @@ async def _escalate_l2(
     if state.l2_stall_count >= config.l2_patience:
         if config.enable_l3:
             # L2→L3 escalation
-            l3_improved = state.best_accuracy > state.best_accuracy_at_l3_entry
+            l3_improved = state.best_composite > state.best_composite_at_l3_entry
             if not l3_improved and state.l3_round > 0:
                 state.l3_stall_count += 1
             else:
@@ -758,7 +772,7 @@ async def _escalate_l2(
             l2_history = [{
                 "l2_round": state.l2_round,
                 "parameters": current_ps.parameters,
-                "accuracy_change": state.best_accuracy - state.best_accuracy_at_l3_entry,
+                "accuracy_change": state.best_composite - state.best_composite_at_l3_entry,
             }]
             new_ps = await modify_plan(
                 current_ps, l2_history, eval_data, llm_client, model=config.model,
@@ -766,10 +780,12 @@ async def _escalate_l2(
             state.current_ps = new_ps.model_dump()
             state.l3_round += 1
             state.best_accuracy_at_l3_entry = state.best_accuracy
+            state.best_composite_at_l3_entry = state.best_composite
             state.l2_stall_count = 0
             state.l2_round = 0
             state.stall_count = 0
             state.best_accuracy_at_l2_entry = state.best_accuracy
+            state.best_composite_at_l2_entry = state.best_composite
             logger.info(
                 "L3 modify_plan at round %d (l3_round=%d)",
                 round_num, state.l3_round,
@@ -797,6 +813,7 @@ async def _escalate_l2(
     state.current_ps = new_ps.model_dump()
     state.l2_round += 1
     state.best_accuracy_at_l2_entry = state.best_accuracy
+    state.best_composite_at_l2_entry = state.best_composite
     state.stall_count = 0  # reset L1 patience
     logger.info(
         "L2 refine_context at round %d (l2_round=%d)",
@@ -905,8 +922,10 @@ async def run_feedback_cycle(
         state = _LoopState(
             current_ps=current_ps,
             current_accuracy=current_accuracy,
+            current_composite=current_accuracy,
             current_results=current_results,
             best_accuracy=current_accuracy,
+            best_composite=current_accuracy,
             best_ps=current_ps,
         )
 
@@ -937,9 +956,11 @@ async def run_feedback_cycle(
             state.rounds.append(round_result)
             state.current_ps = round_result.prompt_state
             state.current_accuracy = round_result.accuracy
+            state.current_composite = round_result.composite
             state.current_results = round_result.results
 
-            if state.current_accuracy > state.best_accuracy:
+            if state.current_composite > state.best_composite:
+                state.best_composite = state.current_composite
                 state.best_accuracy = state.current_accuracy
                 state.best_round = round_num
                 state.best_ps = state.current_ps
@@ -957,6 +978,7 @@ async def run_feedback_cycle(
                         "round": round_num,
                         "label": round_result.label,
                         "accuracy": round_result.accuracy,
+                        "composite": round_result.composite,
                         "hits": round_result.hits,
                         "total": round_result.total,
                         "improved": round_result.improved,

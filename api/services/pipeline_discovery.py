@@ -46,6 +46,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             type="cache",
             runtime="frontend",
             short_circuit=True,
+            node_role="cache",
             langfuse_type="span",
         ),
         PipelineStep(
@@ -53,6 +54,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             type="retriever",
             runtime="frontend",
             short_circuit=True,
+            node_role="candidate_source",
             param_keys={"fuzzy_threshold", "fuzzy_scorer"},
             langfuse_type="span",
         ),
@@ -60,6 +62,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             name="web_search",
             type="tool",
             runtime="backend",
+            node_role="enricher",
             param_keys={
                 "max_sites", "num_results", "content_char_limit",
                 "query_prefix", "query_suffix",
@@ -75,6 +78,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             name="entity_profiling",
             type="generation",
             runtime="backend",
+            node_role="enricher",
             param_keys={
                 "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
                 "profiling_prompt", "profiling_schema", "profiling_model",
@@ -91,6 +95,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             name="token_matching",
             type="retriever",
             runtime="backend",
+            node_role="candidate_source",
             param_keys={"max_token_candidates", "relevance_weight_core"},
             observation_name="token_matching",
             observation_mappings=[
@@ -104,6 +109,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             name="llm_ranking",
             type="generation",
             runtime="backend",
+            node_role="ranker",
             param_keys={
                 "ranking_temperature", "ranking_max_tokens",
                 "ranking_sample_size", "ranking_prompt",

@@ -412,6 +412,75 @@ def compute_accuracy(results: list) -> dict:
     return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
 
 
+def compute_composite_score(
+    results: list,
+    pipeline_schema: "PipelineSchema | None" = None,
+    *,
+    accuracy_weight: float = 0.9,
+) -> dict:
+    """Compute composite score combining accuracy with intermediate metrics.
+
+    When ``pipeline_schema`` is provided and has steps with ``node_role``,
+    delegates to ``pipeline_schema.derive_metrics()`` for role-based metrics.
+    Otherwise falls back to hardcoded ``token_recall``.
+
+    Returns dict with at least: hits, total, accuracy, errors, composite,
+    and optionally token_recall or other role-derived metrics.
+    """
+    if pipeline_schema is not None:
+        has_roles = any(s.node_role for s in pipeline_schema.steps)
+        if has_roles:
+            return pipeline_schema.derive_metrics(
+                results, accuracy_weight=accuracy_weight,
+            )
+
+    # Fallback: hardcoded token_recall
+    base = compute_accuracy(results)
+    accuracy = base["accuracy"]
+
+    # token_recall: for queries that reached llm_ranking, was GT in candidates?
+    n_llm = 0
+    found = 0
+    for r in results:
+        if r.get("error"):
+            continue
+        pd = r.get("pipeline_data") or {}
+        terminated = pd.get("terminated_at")
+        if terminated != "llm_ranking":
+            continue
+        n_llm += 1
+        gt = r.get("ground_truth", "")
+        candidates = pd.get("token_matched_candidates", [])
+        for c in candidates:
+            name = c[0] if isinstance(c, (list, tuple)) else str(c)
+            if name == gt:
+                found += 1
+                break
+
+    token_recall = found / n_llm if n_llm else 0.0
+    recall_weight = 1.0 - accuracy_weight
+    composite = accuracy_weight * accuracy + recall_weight * token_recall
+
+    return {
+        **base,
+        "token_recall": token_recall,
+        "composite": round(composite, 6),
+    }
+
+
+def _ensure_composite(
+    scores: dict,
+    results: list | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
+) -> dict:
+    """Ensure scores dict has a ``composite`` key (backward-compat for old data)."""
+    if "composite" in scores:
+        return scores
+    if results is not None:
+        return compute_composite_score(results, pipeline_schema)
+    return {**scores, "token_recall": 0.0, "composite": scores.get("accuracy", 0.0)}
+
+
 def _resolve_historical_and_partial(
     rendered: str,
     eval_data: list,
@@ -609,7 +678,10 @@ async def evaluate_prompt_cached(
         existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
         if existing:
             results = existing["dataset_run_items"]
-            scores = existing.get("scores", compute_accuracy(results))
+            scores = _ensure_composite(
+                existing.get("scores", compute_accuracy(results)),
+                results, pipeline_schema,
+            )
             if on_result is not None:
                 for i, r in enumerate(results):
                     on_result({**r, "cached": True}, i, len(results))
@@ -629,7 +701,7 @@ async def evaluate_prompt_cached(
         )
     )
     if full_signal == "full":
-        acc = compute_accuracy(historical_results)
+        acc = compute_composite_score(historical_results, pipeline_schema)
         if on_result is not None:
             for i, r in enumerate(historical_results):
                 on_result({**r, "cached": True}, i, len(historical_results))
@@ -679,7 +751,7 @@ async def evaluate_prompt_cached(
         raise
 
     results = historical_results + partial_results + new_results
-    scores = compute_accuracy(results)
+    scores = compute_composite_score(results, pipeline_schema)
 
     # --- finalize: save complete run + observability ---
     if store and backend_id:

@@ -88,6 +88,7 @@ class PipelineStep(BaseModel):
     type: str = "tool"
     runtime: str = "backend"  # "backend" | "frontend"
     short_circuit: bool = False
+    node_role: str = ""  # "candidate_source" | "ranker" | "enricher" | "cache" | ""
     param_keys: set[str] = Field(default_factory=set)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
@@ -95,6 +96,51 @@ class PipelineStep(BaseModel):
     output_schema: StepOutputSchema | None = None
     prompt_meta: StepPromptMeta | None = None
     current_config: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Intermediate metrics
+# ---------------------------------------------------------------------------
+
+class IntermediateMetric(BaseModel):
+    """A metric derived from a pipeline step's node_role."""
+
+    model_config = {"frozen": True}
+
+    name: str
+    node_role: str
+    pipeline_data_key: str
+    description: str = ""
+    default_weight: float = 0.0  # 0 = display-only
+
+
+ROLE_METRIC_REGISTRY: dict[str, list[IntermediateMetric]] = {
+    "candidate_source": [
+        IntermediateMetric(
+            name="source_recall",
+            node_role="candidate_source",
+            pipeline_data_key="token_matched_candidates",
+            description="Fraction of queries where ground truth appears in candidate list",
+        ),
+    ],
+    "ranker": [
+        IntermediateMetric(
+            name="candidate_recall",
+            node_role="ranker",
+            pipeline_data_key="ranked_candidates",
+            description="Fraction of LLM-ranked queries where ground truth was available",
+        ),
+    ],
+    "cache": [
+        IntermediateMetric(
+            name="cache_hit_rate",
+            node_role="cache",
+            pipeline_data_key="step_timings",
+            description="Fraction of queries resolved by cache",
+        ),
+    ],
+    "enricher": [],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -182,3 +228,138 @@ class PipelineSchema(BaseModel):
     def frontend_steps(self) -> list[PipelineStep]:
         """Steps that run on the frontend."""
         return [s for s in self.steps if s.runtime == "frontend"]
+
+    def derive_metrics(
+        self,
+        results: list[dict],
+        *,
+        metric_weights: dict[str, float] | None = None,
+        accuracy_weight: float = 0.9,
+    ) -> dict[str, float]:
+        """Compute intermediate metrics from pipeline step node_roles.
+
+        Walks ``self.steps``; for each with a ``node_role`` in the registry,
+        computes the corresponding metric scoped to queries where the step ran.
+
+        Returns dict with per-metric values and a weighted ``composite`` score.
+        """
+        from api.services.prompt_eval import compute_accuracy
+
+        base = compute_accuracy(results)
+        accuracy = base["accuracy"]
+        weights = dict(metric_weights or {})
+        metric_values: dict[str, float] = {}
+
+        # Collect steps by role (namespace when >1 step shares a role)
+        role_steps: dict[str, list[PipelineStep]] = {}
+        for step in self.steps:
+            if step.node_role and step.node_role in ROLE_METRIC_REGISTRY:
+                role_steps.setdefault(step.node_role, []).append(step)
+
+        for role, steps in role_steps.items():
+            metrics = ROLE_METRIC_REGISTRY.get(role, [])
+            needs_namespace = len(steps) > 1
+            for step in steps:
+                for metric_def in metrics:
+                    metric_name = (
+                        f"{step.name}_{metric_def.name}"
+                        if needs_namespace
+                        else metric_def.name
+                    )
+                    value = self._compute_role_metric(
+                        metric_def, step, results,
+                    )
+                    metric_values[metric_name] = value
+
+        # Composite: accuracy_weight * accuracy + distributed remaining weight
+        remaining_weight = 1.0 - accuracy_weight
+        weighted_sum = accuracy_weight * accuracy
+        if metric_values:
+            n_metrics = len(metric_values)
+            for m_name, m_val in metric_values.items():
+                w = weights.get(m_name, remaining_weight / n_metrics)
+                weighted_sum += w * m_val
+        composite = weighted_sum
+
+        return {
+            **base,
+            **metric_values,
+            "composite": round(composite, 6),
+        }
+
+    @staticmethod
+    def _compute_role_metric(
+        metric_def: "IntermediateMetric",
+        step: "PipelineStep",
+        results: list[dict],
+    ) -> float:
+        """Compute a single role-based metric value."""
+        if metric_def.name == "source_recall":
+            return _compute_source_recall(step, results)
+        if metric_def.name == "candidate_recall":
+            return _compute_candidate_recall(step, results)
+        if metric_def.name == "cache_hit_rate":
+            return _compute_cache_hit_rate(step, results)
+        return 0.0
+
+
+def _compute_source_recall(step: PipelineStep, results: list[dict]) -> float:
+    """Fraction of queries where GT appears in the candidate source output."""
+    scoped = [r for r in results if _step_ran(step.name, r) and not r.get("error")]
+    if not scoped:
+        return 0.0
+    found = 0
+    for r in scoped:
+        pd = r.get("pipeline_data") or {}
+        candidates = pd.get("token_matched_candidates", [])
+        gt = r.get("ground_truth", "")
+        for c in candidates:
+            name = c[0] if isinstance(c, (list, tuple)) else str(c)
+            if name == gt:
+                found += 1
+                break
+    return found / len(scoped)
+
+
+def _compute_candidate_recall(step: PipelineStep, results: list[dict]) -> float:
+    """Fraction of LLM-ranked queries where GT was in the candidate list."""
+    scoped = [r for r in results if _step_ran(step.name, r) and not r.get("error")]
+    if not scoped:
+        return 0.0
+    found = 0
+    for r in scoped:
+        pd = r.get("pipeline_data") or {}
+        candidates = pd.get("token_matched_candidates", [])
+        gt = r.get("ground_truth", "")
+        for c in candidates:
+            name = c[0] if isinstance(c, (list, tuple)) else str(c)
+            if name == gt:
+                found += 1
+                break
+    return found / len(scoped)
+
+
+def _compute_cache_hit_rate(step: PipelineStep, results: list[dict]) -> float:
+    """Fraction of queries resolved by cache (non-null cache timing)."""
+    if not results:
+        return 0.0
+    cache_hits = 0
+    for r in results:
+        if r.get("error"):
+            continue
+        pd = r.get("pipeline_data") or {}
+        timings = pd.get("step_timings") or {}
+        if timings.get(step.name) is not None:
+            cache_hits += 1
+    non_error = sum(1 for r in results if not r.get("error"))
+    return cache_hits / non_error if non_error else 0.0
+
+
+def _step_ran(step_name: str, result: dict) -> bool:
+    """Check if a step ran for a given result (via step_timings or terminated_at)."""
+    pd = result.get("pipeline_data") or {}
+    terminated_at = pd.get("terminated_at")
+    if terminated_at == step_name:
+        return True
+    timings = pd.get("step_timings") or {}
+    return timings.get(step_name) is not None

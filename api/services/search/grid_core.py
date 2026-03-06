@@ -21,7 +21,7 @@ from api.services.project_store import ProjectStore
 from api.services.prompt_eval import (
     backend_reranker_eval,
     build_dataset_run_data,
-    compute_accuracy,
+    compute_composite_score,
     make_incremental_writer,
 )
 from api.services.search.smart_search import MIN_DIAGNOSTIC_QUERIES
@@ -431,7 +431,7 @@ async def _load_or_compute_point(
             await asyncio.sleep(request_delay)
 
     results = partial + new_results
-    acc = compute_accuracy(results)
+    acc = compute_composite_score(results, pipeline_schema)
 
     # Finalize: save complete run, delete .partial.jsonl
     if store and backend_id:

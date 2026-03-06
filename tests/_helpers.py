@@ -81,8 +81,10 @@ def apply_eval_mock(monkeypatch, round_hits=None):
                     "ground_truth": d["ground_truth"],
                     "hit": hit, "score": 1.0 if hit else 0.0, "error": None,
                 })
+            accuracy = target_hits / len(data)
             scores = {"hits": target_hits, "total": len(data),
-                      "accuracy": target_hits / len(data), "errors": 0}
+                      "accuracy": accuracy, "errors": 0,
+                      "token_recall": 0.0, "composite": accuracy}
             call_count[0] += 1
         else:
             results = [
@@ -92,7 +94,8 @@ def apply_eval_mock(monkeypatch, round_hits=None):
                 for d in data
             ]
             scores = {"hits": 0, "total": len(data),
-                      "accuracy": 0.0, "errors": 0}
+                      "accuracy": 0.0, "errors": 0,
+                      "token_recall": 0.0, "composite": 0.0}
         return results, scores, False
 
     monkeypatch.setattr(
@@ -385,8 +388,10 @@ def build_eval_results(data: list[dict], hits: int):
             "ground_truth": d["ground_truth"],
             "hit": hit, "score": 1.0 if hit else 0.0, "error": None,
         })
+    accuracy = hits / len(data) if data else 0.0
     scores = {"hits": hits, "total": len(data),
-              "accuracy": hits / len(data) if data else 0.0, "errors": 0}
+              "accuracy": accuracy, "errors": 0,
+              "token_recall": 0.0, "composite": accuracy}
     return results, scores
 
 

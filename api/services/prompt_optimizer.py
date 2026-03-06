@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
-from api.services.prompt_eval import compute_accuracy
+from api.services.prompt_eval import compute_composite_score
 
 if TYPE_CHECKING:
     from api.services.backend_client import BackendClient
@@ -245,9 +245,11 @@ def _select_round_winner(
         candidates_evaluated, comparison_rows, improved.
     """
     current_acc = current_best["accuracy"]
+    current_composite = current_best.get("composite", current_acc)
     current_ps = current_best["prompt_state"]
     current_results = current_best["results"]
 
+    best_composite = current_composite
     best_acc = current_acc
     best_ps = current_ps
     best_results = current_results
@@ -255,9 +257,11 @@ def _select_round_winner(
 
     for candidate in candidates:
         c_results = all_candidate_results[candidate.id]
-        c_acc = compute_accuracy(c_results)["accuracy"]
-        if c_acc > best_acc:
-            best_acc = c_acc
+        c_scores = compute_composite_score(c_results)
+        c_composite = c_scores["composite"]
+        if c_composite > best_composite:
+            best_composite = c_composite
+            best_acc = c_scores["accuracy"]
             best_ps = candidate
             best_results = c_results
             best_label = candidate.changes_description or candidate.id[:12]
@@ -266,27 +270,31 @@ def _select_round_winner(
         {
             "prompt": f"current_best ({current_best['label'][:30]})",
             "hit@1": f"{current_acc:.1%}",
+            "composite": f"{current_composite:.4f}",
             "delta": "-",
         }
     ]
     for candidate in candidates:
         c_results = all_candidate_results[candidate.id]
-        c_acc = compute_accuracy(c_results)["accuracy"]
-        delta = c_acc - current_acc
+        c_scores = compute_composite_score(c_results)
+        c_composite = c_scores["composite"]
+        delta = c_composite - current_composite
         rows.append({
             "prompt": (
                 candidate.changes_description or candidate.id[:12]
             )[:DISPLAY_TRUNCATE],
-            "hit@1": f"{c_acc:.1%}",
-            "delta": f"{delta:+.1%}",
+            "hit@1": f"{c_scores['accuracy']:.1%}",
+            "composite": f"{c_composite:.4f}",
+            "delta": f"{delta:+.4f}",
         })
 
-    improved = best_acc > current_acc + improvement_threshold
+    improved = best_composite > current_composite + improvement_threshold
 
     return {
         "label": best_label,
         "prompt_state": best_ps,
         "accuracy": best_acc,
+        "composite": best_composite,
         "hits": sum(1 for r in best_results if r["hit"]),
         "total": len(best_results),
         "results": best_results,
@@ -488,6 +496,7 @@ async def evaluate_and_select_winner(
         candidate_scores.append({
             "candidate_id": c.id,
             "accuracy": scores["accuracy"],
+            "composite": scores.get("composite", scores["accuracy"]),
             "hits": scores["hits"],
             "total": scores["total"],
             "cached": cached,
@@ -509,6 +518,7 @@ async def evaluate_and_select_winner(
         "winner": {
             "label": winner_entry["label"],
             "accuracy": winner_entry["accuracy"],
+            "composite": winner_entry.get("composite", winner_entry["accuracy"]),
             "hits": winner_entry["hits"],
             "total": winner_entry["total"],
             "improved": winner_entry["improved"],
@@ -516,6 +526,7 @@ async def evaluate_and_select_winner(
         },
         "winner_prompt_state": winner_ps.model_dump(),
         "winner_accuracy": winner_entry["accuracy"],
+        "winner_composite": winner_entry.get("composite", winner_entry["accuracy"]),
         "improved": winner_entry["improved"],
         "next_action": "generate",
         "suggestions": {},
