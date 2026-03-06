@@ -65,6 +65,45 @@ class CycleConfig(BaseModel):
     l2_patience: int = Field(2, description="L2 stalls before escalating to L3")
     l3_patience: int = Field(1, description="L3 stalls before stopping")
 
+    @classmethod
+    def from_campaign_config(
+        cls,
+        campaign_config: dict,
+        *,
+        backend_url: str = "",
+        backend_id: str = "",
+        project_root: str = "",
+        pipeline_params: dict | None = None,
+        session_terms: list[str] | None = None,
+        pipeline_schema: PipelineSchema | None = None,
+    ) -> "CycleConfig":
+        """Build from the notebook's ``campaign_config`` dict."""
+        opt = campaign_config.get("optimization", {})
+        eval_llm = campaign_config.get("eval_llm", {})
+        return cls(
+            max_rounds=opt.get("max_rounds", 10),
+            patience=opt.get("patience", 3),
+            n_variants=opt.get("n_variants", 5),
+            creativity=opt.get("creativity", 0.7),
+            improvement_threshold=opt.get("improvement_threshold", 0.01),
+            model=eval_llm.get("model"),
+            provider=None,
+            backend_url=backend_url,
+            backend_id=backend_id,
+            project_root=project_root,
+            generate_suggestions=False,
+            pipeline_params=pipeline_params,
+            session_terms=session_terms,
+            temperature=eval_llm.get("temperature", 0.0),
+            queries_per_eval=campaign_config.get("queries_per_eval", 0),
+            seed=42,
+            pipeline_schema=pipeline_schema,
+            enable_l2=opt.get("enable_l2", False),
+            enable_l3=opt.get("enable_l3", False),
+            l2_patience=opt.get("l2_patience", 2),
+            l3_patience=opt.get("l3_patience", 1),
+        )
+
 
 class CycleRoundResult(BaseModel):
     """Result of a single feedback cycle round."""

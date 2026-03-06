@@ -102,7 +102,7 @@ def _infer_terminated_step(step_timings: dict) -> str | None:
     return last
 
 
-# Public API — every name the notebook imports.
+# Public API -- every name the notebook imports.
 __all__ = [
     # Constants
     "DEFAULT_GRID_AXES",
@@ -136,13 +136,13 @@ __all__ = [
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
     "audit_historical_data",
     # Campaign
-    "run_feedback_cycle_notebook", "save_campaign_winner",
+    "show_feedback_preflight", "run_feedback_cycle_notebook", "save_campaign_winner",
     "display_progress", "run_manual_round",
     "select_and_seed_grid_winner",
     # Notebook-facing wrappers
-    "show_entity_profiles", "show_grid_overview", "smoke_test_override",
+    "show_grid_overview", "smoke_test_override",
     # Langfuse
-    "push_langfuse", "backfill_langfuse", "configure_langfuse", "sync_langfuse",
+    "push_langfuse", "sync_langfuse",
 ]
 
 
@@ -212,10 +212,10 @@ async def smoke_test_override(
           f" (score: {top.get('relevance_score', 0):.3f})")
     added = set(extra_fields)
     found = added & set(profile)
-    print(f"Override: added {added} — {'found' if found == added else 'MISSING'} in response")
+    print(f"Override: added {added} -- {'found' if found == added else 'MISSING'} in response")
     print()
     for k, v in profile.items():
-        tag = " ← injected" if k in added else ""
+        tag = " <- injected" if k in added else ""
         print(f"  {k}: {v}{tag}")
 
 
@@ -392,7 +392,7 @@ async def show_backend_status(client) -> dict:
         print(f"  {status['error']}")
         return status
 
-    # Success — TermNorm wraps data under "data" key
+    # Success -- TermNorm wraps data under "data" key
     data = status.get("data", status)
 
     print("\nBACKEND STATUS")
@@ -406,7 +406,7 @@ async def show_backend_status(client) -> dict:
     # Per-experiment breakdown (if backend provides it)
     experiments = data.get("experiments")
     if experiments:
-        print(f"  {'─' * 48}")
+        print(f"  {'-' * 48}")
         print(f"  {'Experiments':30s}")
         for exp in experiments:
             eid = exp.get("id", "?")
@@ -443,7 +443,7 @@ def build_all_session_terms(
     """Unique ground_truth identifiers across all stored datasets (train + test).
 
     For /match to work correctly, the session must contain ALL identifiers:
-    - Train: query→ground_truth mappings (used for optimization evaluation)
+    - Train: query->ground_truth mappings (used for optimization evaluation)
     - Test: ground_truth only (identifiers in candidate pool, no query mapping)
     """
     gt_set: set[str] = set()
@@ -482,7 +482,7 @@ def show_dataset_summary(store: "ProjectStore", backend_id: str) -> dict:
     print(f"  Train              : {len(result['train'])} queries")
     print(f"  Test (processes)   : {len(result['test_processes'])} queries")
     print(f"  Test (material)    : {len(result['test_material'])} queries")
-    print(f"  {'─' * 48}")
+    print(f"  {'-' * 48}")
     print(f"  Combined queries   : {len(all_queries)} (deduplicated)")
     print(f"  Session identifiers: {len(session_terms)} unique targets")
     print("=" * 50)
@@ -544,7 +544,7 @@ def prepare_datasets(
     print(f"  Train              : {len(splits['train'])} queries")
     print(f"  Test (processes)   : {len(splits['test_processes'])} queries")
     print(f"  Test (material)    : {len(splits['test_material'])} queries")
-    print(f"  {'─' * 48}")
+    print(f"  {'-' * 48}")
     print(f"  Combined queries   : {len(all_queries)} (deduplicated)")
     print(f"  Session identifiers: {len(session_terms)} unique targets")
     print(f"{'='*50}")
@@ -582,7 +582,7 @@ def load_or_create_datasets(
                 else:
                     result[name] = []
                     print(f"  WARNING: {name} not found on disk"
-                          " — run with force=True to recreate")
+                          " -- run with force=True to recreate")
             total = sum(len(v) for v in result.values())
             print(f"Loaded stored datasets: {total} total rows")
             for name, items in result.items():
@@ -716,7 +716,7 @@ def run_coverage_diagnostic(
         ]
 
     if not cov_data:
-        print("No coverage data — run baseline eval or sync traces first.")
+        print("No coverage data -- run baseline eval or sync traces first.")
         return None
 
     cov_df = analyze_candidate_coverage(cov_data)
@@ -1097,7 +1097,7 @@ def display_grid_results(
     axis_names = list(grid_config.keys())
 
     print(f"\n{'=' * 70}")
-    print(f"GRID RESULTS — TOP {top_k}")
+    print(f"GRID RESULTS -- TOP {top_k}")
     print(f"{'=' * 70}")
     display_cols = axis_names + ["accuracy", "hits", "total", "errors"]
     ipy_display(grid_df[display_cols].head(top_k))
@@ -1237,7 +1237,7 @@ def _print_eval_summary(store: ProjectStore, backend_id: str) -> None:
     for r in completed:
         scores = r.get("scores", {})
         accuracy = scores.get("accuracy")
-        acc_str = f"{accuracy:.1%}" if accuracy is not None else "—"
+        acc_str = f"{accuracy:.1%}" if accuracy is not None else "--"
         model_str = r.get("model", "")
         if len(model_str) > 25:
             model_str = model_str[:22] + "..."
@@ -1254,8 +1254,8 @@ def _print_eval_summary(store: ProjectStore, backend_id: str) -> None:
             "run_id": p["run_id"],
             "name": "(in-progress)",
             "model": "",
-            "temp": "—",
-            "accuracy": "—",
+            "temp": "--",
+            "accuracy": "--",
             "queries": f"{p['items']}/?",
         })
 
@@ -1429,7 +1429,7 @@ def show_scan_coverage(
     print(f"  COVERAGE ADVISOR  (min_queries={result['min_queries']})")
     print("=" * 70)
     print(f"  Baseline: {bl['n_cached']}/{bl['n_needed']} queries cached"
-          f" {'✓' if bl['sufficient'] else '✗'}")
+          f" {'[ok]' if bl['sufficient'] else '[!!]'}")
     print()
 
     pf_axes = [a for a in axes if a["axis_type"] == "prompt_field"]
@@ -1454,7 +1454,7 @@ def show_scan_coverage(
                 if n_uncovered:
                     usable_parts.append(f"{n_uncovered} uncovered")
             detail = f"  ({', '.join(usable_parts)})" if usable_parts else ""
-            mark = "✓" if a["sufficient"] else "✗"
+            mark = "[ok]" if a["sufficient"] else "[!!]"
             print(f"    {a['axis']:<22s} {a['n_values']} {label:<6s} "
                   f"| {a['n_usable']}/{a['n_required']} required  "
                   f"{mark}{detail}")
@@ -1466,7 +1466,7 @@ def show_scan_coverage(
         for a in pp_axes:
             n_calls = a["n_values"] * n_diag
             print(f"    {a['axis']:<22s} {a['n_values']} variants "
-                  f"× {n_diag} queries = {n_calls} calls")
+                  f"x {n_diag} queries = {n_calls} calls")
         print()
 
     saved = summary["backend_calls_saved"]
@@ -1509,7 +1509,7 @@ def show_data_inventory(
 
     bp = inv["baseline_prompts"]
     bq = inv["baseline_queries"]
-    print(f"  Baselines: {bp} plan baseline(s) — {bq} queries cached")
+    print(f"  Baselines: {bp} plan baseline(s) -- {bq} queries cached")
     print()
 
     axes = inv["axes"]
@@ -1559,7 +1559,7 @@ def audit_historical_data(
     Combines the historical-data audit and data-inventory display into one call.
 
     Returns:
-        (prompt_index, cached_profiles) — profiles may be updated from synthesis.
+        (prompt_index, cached_profiles) -- profiles may be updated from synthesis.
     """
     prompt_index = build_historical_index(store, backend_id)
 
@@ -1571,7 +1571,7 @@ def audit_historical_data(
         if synth:
             _scan_df, axis_profiles = synth
             cached_profiles = axis_profiles
-            print("Sensitivity derived from grid data — scan may be skippable.")
+            print("Sensitivity derived from grid data -- scan may be skippable.")
 
     # Display data inventory
     inv = _build_data_inventory(prompt_index, store, backend_id)
@@ -1584,7 +1584,7 @@ def audit_historical_data(
 
     bp = inv["baseline_prompts"]
     bq = inv["baseline_queries"]
-    print(f"  Baselines: {bp} plan baseline(s) — {bq} queries cached")
+    print(f"  Baselines: {bp} plan baseline(s) -- {bq} queries cached")
     print()
 
     axes = inv["axes"]
@@ -1640,6 +1640,59 @@ def load_task_description(path: str | None) -> str:
     return text
 
 
+def _display_scan_advisory(advisory: dict) -> None:
+    """Print the scan advisor results (priority axes, budget, warnings)."""
+    print(f"{'-' * 70}")
+    print("PRIORITY AXES (ranked by importance)")
+    print(f"{'-' * 70}")
+    for i, ax in enumerate(advisory.get("priority_axes", []), 1):
+        imp = ax.get("importance", "?").upper()
+        src = ax.get("source", "?")
+        label = f"[{imp}] {ax.get('axis', '?')} ({src})"
+        if ax.get("step"):
+            label += f" -- step: {ax['step']}"
+        print(f"  {i}. {label}")
+        print(f"     {ax.get('rationale', '')}")
+        if ax.get("suggested_values"):
+            print(f"     Values: {ax['suggested_values']}")
+
+    skipped = advisory.get("axes_to_skip", [])
+    if skipped:
+        print(f"\n{'-' * 70}")
+        print("AXES TO SKIP")
+        print(f"{'-' * 70}")
+        for ax in skipped:
+            print(f"  - {ax.get('axis', '?')}: {ax.get('reason', '?')}")
+
+    budget = advisory.get("budget_breakdown", {})
+    if budget:
+        print(f"\n{'-' * 70}")
+        print("BUDGET BREAKDOWN")
+        print(f"{'-' * 70}")
+        for k, v in budget.items():
+            print(f"  {k}: {v}")
+
+    n_diag = advisory.get("suggested_n_diagnostic", 6)
+    print(f"\n  Suggested n_diagnostic: {n_diag}")
+
+    reasoning = advisory.get("reasoning", "")
+    if reasoning:
+        print(f"\n{'-' * 70}")
+        print("REASONING")
+        print(f"{'-' * 70}")
+        print(f"  {reasoning}")
+
+    warnings = advisory.get("validation_warnings", [])
+    if warnings:
+        print(f"\n{'-' * 70}")
+        print("VALIDATION WARNINGS")
+        print(f"{'-' * 70}")
+        for w in warnings:
+            print(f"  [!] {w}")
+
+    print("=" * 70)
+
+
 async def scan_advisor(
     pipeline_schema,
     variant_library: dict,
@@ -1662,7 +1715,7 @@ async def scan_advisor(
         axes_to_skip, budget_breakdown, and reasoning.
     """
     print("=" * 70)
-    print("SCAN ADVISOR — pipeline-aware sensitivity setup")
+    print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
     print("=" * 70)
     print(f"  Pipeline: {pipeline_schema.name} ({pipeline_schema.version})")
     print(f"  Steps: {[s.name for s in pipeline_schema.steps]}")
@@ -1688,56 +1741,7 @@ async def scan_advisor(
         task_description=task_description,
     )
 
-    # Display results
-    print(f"{'─' * 70}")
-    print("PRIORITY AXES (ranked by importance)")
-    print(f"{'─' * 70}")
-    for i, ax in enumerate(advisory.get("priority_axes", []), 1):
-        imp = ax.get("importance", "?").upper()
-        src = ax.get("source", "?")
-        label = f"[{imp}] {ax.get('axis', '?')} ({src})"
-        if ax.get("step"):
-            label += f" — step: {ax['step']}"
-        print(f"  {i}. {label}")
-        print(f"     {ax.get('rationale', '')}")
-        if ax.get("suggested_values"):
-            print(f"     Values: {ax['suggested_values']}")
-
-    skipped = advisory.get("axes_to_skip", [])
-    if skipped:
-        print(f"\n{'─' * 70}")
-        print("AXES TO SKIP")
-        print(f"{'─' * 70}")
-        for ax in skipped:
-            print(f"  - {ax.get('axis', '?')}: {ax.get('reason', '?')}")
-
-    budget = advisory.get("budget_breakdown", {})
-    if budget:
-        print(f"\n{'─' * 70}")
-        print("BUDGET BREAKDOWN")
-        print(f"{'─' * 70}")
-        for k, v in budget.items():
-            print(f"  {k}: {v}")
-
-    n_diag = advisory.get("suggested_n_diagnostic", 6)
-    print(f"\n  Suggested n_diagnostic: {n_diag}")
-
-    reasoning = advisory.get("reasoning", "")
-    if reasoning:
-        print(f"\n{'─' * 70}")
-        print("REASONING")
-        print(f"{'─' * 70}")
-        print(f"  {reasoning}")
-
-    warnings = advisory.get("validation_warnings", [])
-    if warnings:
-        print(f"\n{'─' * 70}")
-        print("VALIDATION WARNINGS")
-        print(f"{'─' * 70}")
-        for w in warnings:
-            print(f"  ⚠ {w}")
-
-    print("=" * 70)
+    _display_scan_advisory(advisory)
 
     return advisory
 
@@ -1775,7 +1779,7 @@ def advisory_to_scan_variants(
 
         # Schema axis detection: ends with _schema AND is a pipeline_param
         if axis_name.endswith("_schema") and pipeline_schema is not None:
-            # Map axis → step name via FLAT_TO_NODE_OVERRIDE
+            # Map axis -> step name via FLAT_TO_NODE_OVERRIDE
             override_info = FLAT_TO_NODE_OVERRIDE.get(axis_name)
             step_name = override_info[0] if override_info else None
             step = pipeline_schema.get_step(step_name) if step_name else None
@@ -2210,7 +2214,7 @@ def select_scan_winner_notebook(
                     f"acc={best_row['accuracy']:.1%}"
                 )
     else:
-        print("No axes improved over baseline — using baseline as-is.")
+        print("No axes improved over baseline -- using baseline as-is.")
 
     if best_ps.id != search_baseline.id:
         print(f"\nComposed PromptState: {best_ps.id[:12]} "
@@ -2279,6 +2283,110 @@ async def run_manual_round(
 # ---------------------------------------------------------------------------
 
 
+def _extract_campaign_baseline(campaign_rounds: list) -> dict:
+    """Extract baseline prompt state, accuracy, and results from campaign rounds.
+
+    Searches reversed rounds for the last with actual eval ``results``,
+    then overrides the prompt_state with the tip (most recent round).
+
+    Returns dict with keys: baseline_ps, baseline_acc, baseline_results, instruction.
+    """
+    baseline_ps = None
+    baseline_acc = 0.0
+    baseline_results = None
+    instruction = ""
+    if campaign_rounds:
+        last = campaign_rounds[-1]
+        for rd in reversed(campaign_rounds):
+            if rd.get("results"):
+                last = rd
+                break
+        ps = last["prompt_state"]
+        baseline_ps = ps.model_dump() if hasattr(ps, "model_dump") else ps
+        baseline_acc = last.get("accuracy", 0.0)
+        baseline_results = last.get("results", [])
+        instruction = ps.instruction if hasattr(ps, "instruction") else ""
+        # Use prompt_state from the most recent round (may differ from
+        # the round with results -- e.g. search winner with derived prompt)
+        tip_ps = campaign_rounds[-1]["prompt_state"]
+        baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
+        instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else instruction
+    return {
+        "baseline_ps": baseline_ps,
+        "baseline_acc": baseline_acc,
+        "baseline_results": baseline_results,
+        "instruction": instruction,
+    }
+
+
+def show_feedback_preflight(
+    campaign_rounds: list,
+    eval_data: list,
+    campaign_config: dict,
+    *,
+    pipeline_params: "dict | None" = None,
+) -> None:
+    """Display a pre-flight summary box for the feedback cycle.
+
+    Call this in a separate notebook cell before ``run_feedback_cycle_notebook()``
+    so the user can review config before committing to a run.
+    """
+    from api.services.campaign.feedback_cycle import CycleConfig
+
+    config = CycleConfig.from_campaign_config(
+        campaign_config, pipeline_params=pipeline_params,
+    )
+
+    bl = _extract_campaign_baseline(campaign_rounds)
+
+    _print_preflight_box(
+        config, bl["baseline_acc"], bl["instruction"], eval_data, pipeline_params,
+    )
+
+
+def _print_preflight_box(config, baseline_acc, instruction, eval_data, pipeline_params):
+    """Print the pre-flight summary box (shared by preflight + cycle)."""
+    _instr_preview = (instruction[:80] + "...") if len(instruction) > 80 else instruction
+    _instr_preview = _instr_preview or "(empty)"
+    _eff_queries = config.queries_per_eval if config.queries_per_eval else len(eval_data)
+    if config.queries_per_eval:
+        _queries_label = f"{config.queries_per_eval} of {len(eval_data)}"
+    else:
+        _queries_label = f"all {len(eval_data)}"
+    _steps = pipeline_params.get("steps", []) if pipeline_params else []
+    _steps_label = ", ".join(_steps) if _steps else "(default pipeline)"
+    _est_calls = config.max_rounds * config.n_variants * _eff_queries
+
+    _l2_label = (f"enabled, patience={config.l2_patience}"
+                 if config.enable_l2 else "disabled")
+    _l3_label = (f"enabled, patience={config.l3_patience}"
+                 if config.enable_l3 else "disabled")
+
+    print()
+    print("=" * 70)
+    print("  FEEDBACK CYCLE - PRE-FLIGHT")
+    print("=" * 70)
+    print(f"  Baseline accuracy      : {baseline_acc:.1%}")
+    print(f"  Baseline prompt        : {_instr_preview}")
+    print("  " + "-" * 66)
+    print(f"  Max rounds             : {config.max_rounds}")
+    print(f"  Candidates per round   : {config.n_variants}")
+    print(f"  Queries per eval       : {_queries_label}")
+    print(f"  Improvement threshold  : {config.improvement_threshold:.1%}")
+    print(f"  Patience (L1)          : {config.patience} rounds")
+    print(f"  L2 (refine context)    : {_l2_label}")
+    print(f"  L3 (modify plan)       : {_l3_label}")
+    print("  " + "-" * 66)
+    print(f"  Candidate model        : {config.model or '(default)'}")
+    print(f"  Creativity             : {config.creativity}")
+    print(f"  Active steps           : {_steps_label}")
+    print("  " + "-" * 66)
+    print(f"  Est. backend calls     : {_est_calls}"
+          f"  ({config.max_rounds} rounds x {config.n_variants} cands"
+          f" x {_eff_queries} queries)")
+    print("=" * 70)
+
+
 async def run_feedback_cycle_notebook(
     campaign_rounds: list,
     eval_data: list,
@@ -2296,7 +2404,7 @@ async def run_feedback_cycle_notebook(
     Accepts and returns the ``campaign_rounds`` list format for downstream
     notebook sections.
 
-    Internally uses InitNode → GrowFilterNode → AnalysisEvalNode with Langfuse
+    Internally uses InitNode -> GrowFilterNode -> AnalysisEvalNode with Langfuse
     tracing and ``next_action`` routing.
 
     Returns:
@@ -2304,55 +2412,23 @@ async def run_feedback_cycle_notebook(
     """
     from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
 
-    opt = campaign_config.get("optimization", {})
-    eval_llm = campaign_config.get("eval_llm", {})
-
-    config = CycleConfig(
-        max_rounds=opt.get("max_rounds", 10),
-        patience=opt.get("patience", 3),
-        n_variants=opt.get("n_variants", 5),
-        creativity=opt.get("creativity", 0.7),
-        improvement_threshold=opt.get("improvement_threshold", 0.01),
-        model=eval_llm.get("model"),
-        provider=None,
+    config = CycleConfig.from_campaign_config(
+        campaign_config,
         backend_url=backend_url,
         backend_id=backend_id,
         project_root=str(store.base_dir) if store else "",
-        generate_suggestions=False,
         pipeline_params=pipeline_params,
         session_terms=session_terms,
-        temperature=eval_llm.get("temperature", 0.0),
-        queries_per_eval=campaign_config.get("queries_per_eval", 0),
-        seed=42,
     )
 
-    # Extract baseline from existing campaign_rounds.
-    # Use the last round that has real eval results; skip rounds seeded
-    # with carry-forward accuracy (e.g. "search" round from 4.5c).
-    baseline_ps = None
-    baseline_acc = 0.0
-    baseline_results = None
-    instruction = ""
-    if campaign_rounds:
-        # Prefer the last round that has actual eval results
-        last = campaign_rounds[-1]
-        for rd in reversed(campaign_rounds):
-            if rd.get("results"):
-                last = rd
-                break
-        ps = last["prompt_state"]
-        baseline_ps = ps.model_dump() if hasattr(ps, "model_dump") else ps
-        baseline_acc = last.get("accuracy", 0.0)
-        baseline_results = last.get("results", [])
-        instruction = ps.instruction if hasattr(ps, "instruction") else ""
-        # Use the prompt_state from the most recent round (may differ from
-        # the round with results — e.g. search winner with derived prompt)
-        tip_ps = campaign_rounds[-1]["prompt_state"]
-        baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
-        instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else instruction
+    bl = _extract_campaign_baseline(campaign_rounds)
+    baseline_ps = bl["baseline_ps"]
+    baseline_acc = bl["baseline_acc"]
+    baseline_results = bl["baseline_results"]
+    instruction = bl["instruction"]
 
-    print(f"Feedback cycle: baseline acc={baseline_acc:.1%}, "
-          f"max_rounds={config.max_rounds}, patience={config.patience}")
+    # --- Pre-flight summary ---
+    _print_preflight_box(config, baseline_acc, instruction, eval_data, pipeline_params)
 
     _query_counter = [0]  # mutable counter for closure
 
@@ -2529,11 +2605,11 @@ def sync_langfuse(
     if reset:
         from api.services.obs.langfuse_push import _fresh_state, _save_state
         _save_state(store, backend_id, _fresh_state())
-        print("Langfuse push state reset — will re-push all runs.")
+        print("Langfuse push state reset -- will re-push all runs.")
 
     n_runs = len(store.dataset_runs.list_all(backend_id))
     if n_runs == 0:
-        print("No completed dataset runs yet — skipping Langfuse backfill (run after eval).")
+        print("No completed dataset runs yet -- skipping Langfuse backfill (run after eval).")
         return None
 
     return push_langfuse(store, backend_id)
@@ -2543,7 +2619,7 @@ def push_langfuse(store: "ProjectStore", backend_id: str) -> dict:
     """Push all historical dataset_runs to cloud Langfuse (dataset-first).
 
     Creates dataset items with ground truth, then one trace per run linked
-    to dataset items. Re-running is safe — already-pushed runs are skipped.
+    to dataset items. Re-running is safe -- already-pushed runs are skipped.
     Old-format state is automatically reset.
 
     Returns:
@@ -2595,6 +2671,3 @@ def push_langfuse(store: "ProjectStore", backend_id: str) -> dict:
 
     return stats
 
-
-# Backward-compatible alias
-backfill_langfuse = push_langfuse
