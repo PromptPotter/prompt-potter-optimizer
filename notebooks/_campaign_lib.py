@@ -61,6 +61,7 @@ from api.services.search import (
     load_grid_plan_results as _load_grid_plan_results,
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
     advise_scan_config as _advise_scan_config,
+    filter_variant_library as _filter_variant_library,
 )
 
 # ANSI foreground colors
@@ -105,6 +106,7 @@ __all__ = [
     "advisory_to_scan_variants",
     "select_scan_winner_notebook", "build_historical_index", "load_task_description",
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
+    "audit_historical_data",
     # Campaign
     "run_feedback_cycle_notebook", "save_campaign_winner",
     "display_progress", "run_manual_round",
@@ -1351,26 +1353,40 @@ async def resume_or_build_diagnostic(
     campaign_config: dict,
     baseline: PromptState,
     baseline_results: list,
-    llm_client: "LLMClientBase",
-    model: str,
-    store: "ProjectStore",
-    backend_id: str,
+    svc: dict,
     eval_data: list,
-    improvement_areas: str = "",
-    variant_library: dict | None = None,
-) -> tuple[str, PromptState, list, dict, list]:
+    scan_variants: dict | None = None,
+) -> tuple[str, PromptState, list, list, dict]:
     """Resume or build smart search diagnostic set.
 
+    Prepares LLM client and variant library internally, then delegates to the
+    service-layer ``_resume_or_build_diagnostic()``.
+
     Returns:
-        (plan_id, search_baseline, diagnostic, diag_summary, axis_profiles_or_empty)
+        (plan_id, search_baseline, diagnostic, cached_profiles, variant_library)
     """
+    # Prepare variant library: base + scan_variants merge
+    variant_library = load_variant_library()
+    pipeline_params = campaign_config.get("pipeline_params")
+    pipeline_schema = svc.get("pipeline_schema")
+    if pipeline_params and pipeline_schema:
+        variant_library = _filter_variant_library(
+            variant_library, pipeline_params, schema=pipeline_schema,
+        )
+    if scan_variants:
+        variant_library["pipeline_params"] = scan_variants
+
+    # Prepare LLM client
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    llm_client, llm_model = setup_llm(campaign_config, api_key)
+
     result = await _resume_or_build_diagnostic(
-        campaign_config, baseline, baseline_results, llm_client, model,
-        store, backend_id, eval_data,
-        improvement_areas=improvement_areas,
+        campaign_config, baseline, baseline_results, llm_client, llm_model,
+        svc["store"], svc["backend_id"], eval_data,
+        improvement_areas=campaign_config.get("improvement_areas", ""),
         variant_library=variant_library,
     )
-    plan_id, search_baseline, diagnostic, diag_summary, axis_profiles = result
+    plan_id, search_baseline, diagnostic, _diag_summary, axis_profiles = result
 
     if axis_profiles:
         print(f"[RESUME] Plan {plan_id}: {len(axis_profiles)} axis profiles available")
@@ -1378,7 +1394,7 @@ async def resume_or_build_diagnostic(
         print(f"  search_baseline: {search_baseline.id[:12]} "
               f"(render: {len(search_baseline.render())} chars)")
 
-    return plan_id, search_baseline, diagnostic, diag_summary, axis_profiles
+    return plan_id, search_baseline, diagnostic, axis_profiles, variant_library
 
 
 def show_scan_coverage(
@@ -1523,6 +1539,81 @@ def show_data_inventory(
     print("=" * 70)
 
     return inv
+
+
+def audit_historical_data(
+    store: "ProjectStore",
+    backend_id: str,
+    diagnostic: list,
+    cached_profiles: list,
+) -> tuple[dict, list]:
+    """Build historical index, try sensitivity synthesis, and display inventory.
+
+    Combines the historical-data audit and data-inventory display into one call.
+
+    Returns:
+        (prompt_index, cached_profiles) — profiles may be updated from synthesis.
+    """
+    prompt_index = build_historical_index(store, backend_id)
+
+    # Try to synthesize sensitivity from grid data
+    if not cached_profiles:
+        synth = synthesize_sensitivity(
+            store, backend_id, prompt_index, diagnostic,
+        )
+        if synth:
+            _scan_df, axis_profiles = synth
+            cached_profiles = axis_profiles
+            print("Sensitivity derived from grid data — scan may be skippable.")
+
+    # Display data inventory
+    inv = _build_data_inventory(prompt_index, store, backend_id)
+
+    tp = inv["total_prompts"]
+    tr = inv["total_results"]
+    print("=" * 70)
+    print(f"  DATA INVENTORY  ({tp} prompts, {tr} query results)")
+    print("=" * 70)
+
+    bp = inv["baseline_prompts"]
+    bq = inv["baseline_queries"]
+    print(f"  Baselines: {bp} plan baseline(s) — {bq} queries cached")
+    print()
+
+    axes = inv["axes"]
+    if axes:
+        print(f"  {'Axis':<22s} {'Prompts':>8s} {'Queries':>8s} {'Distinct values':>16s}")
+        for axis_name, info in axes.items():
+            print(f"  {axis_name:<22s} {info['n_prompts']:>8d} "
+                  f"{info['n_queries']:>8d} {info['distinct_values']:>16d}")
+        print()
+    else:
+        print("  No axis variations found in stored plans.")
+        print()
+
+    pp = inv.get("pipeline_params", {})
+    if pp:
+        print("  Pipeline parameters (from sensitivity scans):")
+        for pname, info in pp.items():
+            card = info["cardinality"]
+            sens = info["sensitivity_range"]
+            budget = info["exploration_budget"]
+            print(f"    {pname:<24s} {card} values scanned  "
+                  f"sensitivity: {sens:.3f}  [{budget}]")
+        print()
+    else:
+        print("  Pipeline parameters: not yet scanned")
+        print()
+
+    mp = inv["matched_prompts"]
+    mr = inv["matched_results"]
+    up = inv["unmatched_prompts"]
+    ur = inv["unmatched_results"]
+    print(f"  Identified: {mp}/{tp} prompts ({mr}/{tr} queries) via stored plans")
+    print(f"  Unmatched:  {up} prompts ({ur} queries)")
+    print("=" * 70)
+
+    return prompt_index, cached_profiles
 
 
 def load_task_description(path: str | None) -> str:
