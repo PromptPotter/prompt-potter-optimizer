@@ -3,7 +3,7 @@
 **Version:** 1.0.0
 **Date:** 2026-02-28
 **Status:** Research complete (M6). Implementation deferred to M8.
-**Depends on:** [M6 spec](m6-workflow-migration.md) (PipelineSchema model), [M7 spec](m7-multi-connector.md) (ConnectorProtocol)
+**Depends on:** [M6 spec](m6-pipeline-composability.md) (PipelineSchema model), [M7 spec](m7-multi-connector.md) (ConnectorProtocol)
 
 ---
 

@@ -17,7 +17,7 @@
 | M3 | Optimization Infrastructure | Complete |
 | M4 | Integration and Polish (reclassified — absorbed into M3-M5) | Complete |
 | M5 | Observability Layer | Complete |
-| M6 | PipelineSchema + Workflow Migration | Waves 0-3 complete, Wave 4 in progress |
+| M6 | PipelineSchema + Pipeline Composability | Waves 0-3 complete, Wave 4 deferred to M7, Waves 5-6 active |
 | M7 | Multi-Connector Architecture | Future |
 
 ---
@@ -40,7 +40,7 @@ File-based observability (Langfuse traces, MLflow experiments, prompt versioning
 
 ---
 
-## M6: PipelineSchema + Workflow Migration -- In Progress
+## M6: PipelineSchema + Pipeline Composability -- In Progress
 
 | Wave | Scope | Status |
 |------|-------|--------|
@@ -48,11 +48,13 @@ File-based observability (Langfuse traces, MLflow experiments, prompt versioning
 | 1 | `GET /pipeline` endpoint (6-step config) | Complete |
 | 2 | PipelineSchema model + schema derivation (6 chokepoints resolved) | Complete |
 | 3 | Unified tracing (one trace per query) | Complete |
-| 4 | Workflow nodes (runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode) | Planned |
+| 4 | Workflow nodes (runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode) | Deferred to M7 |
+| 5 | Composite scoring + rank display (hardcoded stepping stone) | Active |
+| 6 | Node-role-driven intermediate metrics (auto-wired) | Planned |
 
-**Exit gate (reframed):** MVP performance validation — TermNorm accuracy from ~15% to >90%. `optimization_campaign.yaml` executes end-to-end via `WorkflowRunner`. No hardcoded pipeline step names in service layer.
+**Exit gate (reframed):** MVP performance validation — TermNorm accuracy from ~15% to >90%. Composite scoring (accuracy + intermediate metrics) used as optimization target. No hardcoded pipeline step names in service layer.
 
-Full spec: [`docs/specs/m6-workflow-migration.md`](m6-workflow-migration.md)
+Full spec: [`docs/specs/m6-pipeline-composability.md`](m6-pipeline-composability.md)
 
 ---
 
@@ -65,9 +67,10 @@ Generalize beyond TermNorm to support arbitrary LLM application backends. Resolv
 - **Backend-agnostic evaluation** — `evaluate_prompt_cached()` works with any connector
 - **Query parser registry** — replace `parse_bom_material()` with connector-specific parsers
 - **Generic eval config** — replace hardcoded hit@1 exact match with `schema.eval_config`
-- **Notebook migration + Docker** (absorbed from M6 Wave 5)
+- **Notebook migration + Docker** (absorbed from former M6 Wave 5)
+- **Workflow nodes** (absorbed from M6 Wave 4: runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode)
 
-**Entry criteria:** M6 exit gate passed (PipelineSchema + workflow engine active).
+**Entry criteria:** M6 exit gate passed (PipelineSchema + composite scoring active).
 
 **Exit gate:** A second backend connector exists and runs through the same optimization workflow.
 

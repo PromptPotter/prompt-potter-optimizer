@@ -53,7 +53,7 @@ Cleanup absorbed into M3-M5. Remaining items: SC5 → backlog, Streamlit → bac
 
 ## Phase 6: PipelineSchema + Cross-Repo Pipeline Composability (M6) -- In Progress
 
-See [M6 spec](m6-workflow-migration.md) for full details. Cross-repo: TermNorm task doc at [`TermNorm: docs/pipeline-composability.md`](../../../OfficeAdminApps/TermNorm-excel/docs/pipeline-composability.md). n8n research: [n8n mapper spec](m6-n8n-mapper.md) (implementation deferred to M8).
+See [M6 spec](m6-pipeline-composability.md) for full details. Cross-repo: TermNorm task doc at [`TermNorm: docs/pipeline-composability.md`](../../../OfficeAdminApps/TermNorm-excel/docs/pipeline-composability.md). n8n research: [n8n mapper spec](m6-n8n-mapper.md) (implementation deferred to M8).
 
 **Waves 0-3: Complete**
 
@@ -67,20 +67,27 @@ See [M6 spec](m6-workflow-migration.md) for full details. Cross-repo: TermNorm t
 | 6.2 | Replace hardcoded dicts with schema derivation | Complete |
 | 6.0c | Unified tracing (TermNorm) | Complete |
 
-**Wave 4: Workflow Nodes** (PromptPotter repo)
+**Wave 4: Workflow Nodes** — Deferred to M7 (WP 6.3-6.6 move to M7 alongside notebook migration).
+
+**Wave 5: Composite Scoring + Rank Display**
 
 | ID | Work Package | Sessions | PRD Ref | Depends | Status |
 |----|-------------|:--------:|---------|---------|--------|
-| 6.3 | runtime_config injection in WorkflowRunner | 1 | P1.12 | 6.2 | Planned |
-| 6.4 | DatasetLoadNode | 1 | P1.12 | 6.3 | Planned |
-| 6.5 | FeedbackCycleNode | 1 | P1.12 | 6.3 | Planned |
-| 6.6 | ScanNode + YAML workflows | 1 | P1.12 | 6.4, 6.5 | Planned |
+| 6.7 | `compute_composite_score()` + rank display + integration | 1 | P1.14 | 6.2 | Planned |
+
+**Wave 6: Node-Role-Driven Intermediate Metrics**
+
+| ID | Work Package | Sessions | PRD Ref | Depends | Status |
+|----|-------------|:--------:|---------|---------|--------|
+| 6.8 | IntermediateMetric model + PipelineStep.node_role | 1 | P1.14 | 6.7 | Planned |
+| 6.9 | `derive_metrics()` + composite scoring | 1 | P1.14 | 6.8 | Planned |
+| 6.10 | Wire through eval/search/feedback paths | 1 | P1.14 | 6.9 | Planned |
 
 ---
 
 ## Phase 7: Multi-Connector Architecture (M7) -- Planned
 
-See [M7 spec](m7-multi-connector.md) for full details. Absorbs M6 Wave 5 (notebook migration + Docker Compose).
+See [M7 spec](m7-multi-connector.md) for full details. Absorbs former M6 Wave 5 (notebook migration + Docker Compose) and M6 Wave 4 (workflow nodes).
 
 | ID | Work Package | Sessions | PRD Ref | Status |
 |----|-------------|:--------:|---------|--------|
@@ -89,7 +96,8 @@ See [M7 spec](m7-multi-connector.md) for full details. Absorbs M6 Wave 5 (notebo
 | 7.2 | ConnectorRegistry | 1 | P1.13 | Planned |
 | 7.3 | Service migration (type annotation swap) | 1 | P1.13 | Planned |
 | 7.4 | Docs + integration test | 1 | P1.13 | Planned |
-| 7.5 | Notebook migration + Docker Compose (from M6 Wave 5) | 1 | P1.12 | Planned |
+| 7.5 | Notebook migration + Docker Compose (from former M6 Wave 5) | 1 | P1.12 | Planned |
+| 7.6 | Workflow nodes: runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode (from M6 Wave 4) | 2 | P1.12 | 7.3 | Planned |
 
 ---
 
@@ -116,7 +124,7 @@ See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depe
 | M3: Optimization Infrastructure | 11 | 14 | Complete |
 | M4: Integration and Polish | -- | -- | Complete (reclassified) |
 | M5: Observability Layer | 7 | 7 | Complete |
-| M6: PipelineSchema + Pipeline Composability | 11 | 11 | In Progress (Waves 0-3 complete) |
+| M6: PipelineSchema + Pipeline Composability | 14 | 14 | In Progress (Waves 0-3 complete, Wave 4 → M7, Waves 5-6 active) |
 | M7: Multi-Connector | 6 | 6 | Planned |
 | M8: n8n Connector | 4 | 4 | Planned |
 | **Total** | **63** | **~67** | |

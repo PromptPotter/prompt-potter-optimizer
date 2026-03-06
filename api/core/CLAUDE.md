@@ -34,4 +34,4 @@ Registered but zero callers today. Building blocks for the workflow server visio
 
 ## Migration intent
 
-M6 Wave 2 added PipelineSchema (derivation methods now wired through services). Remaining waves wrap service-layer functions into workflow nodes. The notebook will drive optimization via `WorkflowRunner` instead of direct service calls. See [`docs/specs/m6-workflow-migration.md`](../../docs/specs/m6-workflow-migration.md).
+M6 Wave 2 added PipelineSchema (derivation methods now wired through services). Workflow node migration (Wave 4) deferred to M7. M6 now focuses on composite scoring (Wave 5) and node-role-driven metrics (Wave 6). See [`docs/specs/m6-pipeline-composability.md`](../../docs/specs/m6-pipeline-composability.md).

@@ -3,7 +3,7 @@
 **Version:** 0.9.0
 **Date:** 2026-02-27
 **Status:** Planned
-**Depends on:** [Roadmap M7](roadmap.md), [ADD v0.9.0](add.md), [M6 Workflow Migration](m6-workflow-migration.md), [PRD P1.13](prd.md)
+**Depends on:** [Roadmap M7](roadmap.md), [ADD v0.9.0](add.md), [M6 Pipeline Composability](m6-pipeline-composability.md), [PRD P1.13](prd.md)
 
 ---
 

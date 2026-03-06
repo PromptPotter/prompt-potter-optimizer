@@ -13,5 +13,5 @@ Each milestone has an executable spec in `docs/specs/`. One Claude Code session 
 | Milestone | Spec file | Pre-reading hint |
 |-----------|-----------|-----------------|
 | M5: Observability | Complete | See [`docs/obs-guide.md`](../obs-guide.md) for data exploration. |
-| M6: PipelineSchema + Workflow Migration | Waves 0-3 complete. [`m6-workflow-migration.md`](m6-workflow-migration.md) | Wave 4: read `api/core/workflow_runner.py` and `workflows/optimizer_single_pass.yaml` |
+| M6: PipelineSchema + Pipeline Composability | Waves 0-3 complete, Wave 4 → M7. [`m6-pipeline-composability.md`](m6-pipeline-composability.md) | Waves 5-6 (active): read `api/services/prompt_eval.py` (compute_accuracy) and `api/models/pipeline_schema.py` |
 | M7: Multi-Connector | [`m7-multi-connector.md`](m7-multi-connector.md) | Read `docs/connectors/termnorm.md` and `api/services/backend_client.py` |

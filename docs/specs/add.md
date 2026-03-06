@@ -103,7 +103,7 @@ See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full servic
 | **Optimizer nodes as thin wrappers** | Nodes wrap existing service functions. Service logic is independently testable. |
 | **Notebook-first HITL** | Campaign config as editable JSON, manual round control, LLM suggestions -- natural fit for HITL. Feedback cycle is also callable from any Python context. |
 
-> **Cross-reference:** [Observability guide](../obs-guide.md) covers M5 data exploration. Milestone specs [M6](m6-workflow-migration.md) (workflow migration) and [M7](m7-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
+> **Cross-reference:** [Observability guide](../obs-guide.md) covers M5 data exploration. Milestone specs [M6](m6-pipeline-composability.md) (pipeline composability) and [M7](m7-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
 
 ---
 
@@ -117,6 +117,6 @@ See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full servic
 | ProjectStore | JSON files in `.promptpotter/projects/` | Implemented |
 | Evaluator framework | Python API (ExactMatchEvaluator) | Scaffold (no consumers) |
 | File-based observability | Langfuse trace JSON + MLflow FileStore YAML in `obs/` | Implemented |
-| PipelineSchema | Backend-agnostic pipeline description, derivation methods | Implemented ([M6](m6-workflow-migration.md) WP 6.1) |
-| CWL workflow engine | `WorkflowRunner` with `runtime_config`, YAML workflow definitions | Planned ([M6](m6-workflow-migration.md)) |
+| PipelineSchema | Backend-agnostic pipeline description, derivation methods | Implemented ([M6](m6-pipeline-composability.md) WP 6.1) |
+| CWL workflow engine | `WorkflowRunner` with `runtime_config`, YAML workflow definitions | Planned ([M6](m6-pipeline-composability.md)) |
 | ConnectorProtocol | `typing.Protocol` abstraction over backend connectors | Planned ([M7](m7-multi-connector.md)) |
