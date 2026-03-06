@@ -93,6 +93,15 @@ def _step_tag(step_name: str | None) -> str:
     return f"[{_STEP_SHORT_TAGS.get(step_name, step_name[:5])}]"
 
 
+def _infer_terminated_step(step_timings: dict) -> str | None:
+    """Infer last executed step from timing dict (insertion-order fallback)."""
+    last = None
+    for name, t in step_timings.items():
+        if t is not None:
+            last = name
+    return last
+
+
 # Public API — every name the notebook imports.
 __all__ = [
     # Constants
@@ -1909,7 +1918,12 @@ def _fmt_query_result(r: dict, cached: bool = False) -> str:
     pred = (r.get("predicted") or "")[:35]
     err = r.get("error")
     pd = r.get("pipeline_data") or {}
-    step = _step_tag(pd.get("terminated_at"))
+    step_name = pd.get("terminated_at")
+    if step_name is None:
+        st = pd.get("step_timings")
+        if st:
+            step_name = _infer_terminated_step(st)
+    step = _step_tag(step_name)
 
     if cached:
         time_str = " \u26a1"  # cached marker

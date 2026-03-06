@@ -327,6 +327,12 @@ def _load_completed_campaign(
     """Return CycleResult if campaign is completed, else None."""
     if campaign_data.get("status") != "completed":
         return None
+    if not campaign_data.get("trials"):
+        logger.info(
+            "Cycle %s marked completed but has no trials — will restart",
+            cycle_id,
+        )
+        return None
     logger.info("Cycle %s already completed — returning cached result", cycle_id)
     return _restore_completed_result(campaign_data, campaign_store, backend_id, cycle_id)
 

@@ -184,6 +184,9 @@ PromptPotter controls backend pipeline behavior through **`node_overrides`** —
 | `total_time` | `float` | Wall-clock seconds for the full pipeline. |
 | `web_search_status` | `string` | `"success"` or `"failed"` for the web research step. |
 | `web_search_error` | `string\|null` | Error message if web search failed, else `null`. |
+| `step_timings` | `dict[str, float\|null]` | Per-step wall-clock seconds in pipeline execution order. `null` for skipped steps. |
+| `terminated_at` | `string\|null` | Name of the last pipeline step that produced the final result (e.g. `"llm_ranking"`, `"token_matching"`). |
+| `pipeline_params` | `dict` | Effective parameter snapshot for the pipeline run (merged defaults + overrides). |
 
 When `steps` omits `"llm_ranking"`, the pipeline stops after token matching. `ranked_candidates` contains raw token-match results formatted as:
 ```json
