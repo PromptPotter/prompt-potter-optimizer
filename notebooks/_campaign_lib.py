@@ -6,6 +6,7 @@ interactive notebook use.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -81,11 +82,13 @@ __all__ = [
     "init_services", "setup_llm", "load_variant_library",
     # Backend status & datasets
     "show_backend_status", "show_dataset_summary", "build_all_session_terms",
-    "load_or_create_datasets", "load_stored_dataset",
+    "load_or_create_datasets", "load_stored_dataset", "prepare_datasets",
+    "prepare_eval_context",
     "SHEET_COLUMN_MAP",
     # Baseline & eval
     "load_baseline_prompt", "run_baseline_eval",
     "analyze_candidate_coverage", "load_eval_dataset",
+    "run_coverage_diagnostic",
     # Candidates & suggestions
     "generate_candidates", "generate_suggestions", "display_suggestions",
     # Grid search
@@ -100,7 +103,7 @@ __all__ = [
     "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
     "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
     "advisory_to_scan_variants",
-    "select_scan_winner_notebook", "build_historical_index",
+    "select_scan_winner_notebook", "build_historical_index", "load_task_description",
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
     # Campaign
     "run_feedback_cycle_notebook", "save_campaign_winner",
@@ -109,7 +112,7 @@ __all__ = [
     # Notebook-facing wrappers
     "show_entity_profiles", "show_grid_overview", "smoke_test_override",
     # Langfuse
-    "push_langfuse", "backfill_langfuse", "configure_langfuse",
+    "push_langfuse", "backfill_langfuse", "configure_langfuse", "sync_langfuse",
 ]
 
 
@@ -385,6 +388,24 @@ async def show_backend_status(client) -> dict:
     return status
 
 
+async def prepare_eval_context(
+    svc: dict,
+    train_data: list[dict] | None,
+) -> tuple[PromptState, list[dict], str, dict]:
+    """Load baseline prompt, set eval_data, read API key, check backend.
+
+    Returns:
+        (baseline, eval_data, groq_api_key, backend_status)
+    """
+    baseline = load_baseline_prompt(svc["exp_data"])
+    eval_data = train_data or []
+    groq_api_key = os.environ.get("GROQ_API_KEY", "")
+    backend_status = await show_backend_status(svc["backend_client"])
+
+    print(f"\nEvaluation data: {len(eval_data)} queries")
+    return baseline, eval_data, groq_api_key, backend_status
+
+
 def build_all_session_terms(
     store: "ProjectStore",
     backend_id: str,
@@ -441,6 +462,64 @@ def show_dataset_summary(store: "ProjectStore", backend_id: str) -> dict:
         "all_session_terms": session_terms,
         "total_queries": len(all_queries),
     }
+
+
+def prepare_datasets(
+    store: "ProjectStore",
+    backend_id: str,
+    excel_path: str | Path | None = None,
+    *,
+    force: bool = False,
+) -> tuple[list[dict] | None, list[str]]:
+    """Load/create datasets, build session terms, and display summary.
+
+    Single entry point that replaces the separate show_dataset_summary +
+    load_or_create_datasets + build_all_session_terms calls.
+
+    Returns:
+        (train_data, session_terms)
+    """
+    if excel_path:
+        excel_path = Path(excel_path)
+        col_map = SHEET_COLUMN_MAP
+        existing = store.datasets.load(backend_id, "train")
+        needs_create = force or not (existing and existing.get("items"))
+
+        if needs_create:
+            print(f"Loading ground truth from {excel_path.name} ...")
+            all_rows = _load_excel_gt(excel_path, col_map)
+            train, test_sets = _train_test_split(all_rows)
+            store.datasets.save(backend_id, "train", train, source_file=excel_path.name)
+            for name, items in test_sets.items():
+                store.datasets.save(backend_id, name, items, source_file=excel_path.name)
+
+    # Load all splits from store (whether just created or pre-existing)
+    splits: dict[str, list[dict]] = {}
+    for name in ("train", "test_processes", "test_material"):
+        ds = store.datasets.load(backend_id, name)
+        splits[name] = ds["items"] if ds and ds.get("items") else []
+
+    train_data = splits["train"] or None
+    session_terms = build_all_session_terms(store, backend_id)
+
+    # Combined summary
+    all_queries: set[str] = set()
+    for items in splits.values():
+        for item in items:
+            q = item.get("query", "").strip()
+            if q:
+                all_queries.add(q)
+
+    print(f"\n{'='*50}")
+    print(f"  Train              : {len(splits['train'])} queries")
+    print(f"  Test (processes)   : {len(splits['test_processes'])} queries")
+    print(f"  Test (material)    : {len(splits['test_material'])} queries")
+    print(f"  {'─' * 48}")
+    print(f"  Combined queries   : {len(all_queries)} (deduplicated)")
+    print(f"  Session identifiers: {len(session_terms)} unique targets")
+    print(f"{'='*50}")
+
+    return train_data, session_terms
 
 
 def load_or_create_datasets(
@@ -580,6 +659,38 @@ def analyze_candidate_coverage(replay_results: list) -> pd.DataFrame:
             "Consider improving token matching first."
         )
 
+    return cov_df
+
+
+def run_coverage_diagnostic(
+    baseline_results: list,
+    store: "ProjectStore",
+    backend_id: str,
+    experiment_id: str,
+) -> pd.DataFrame | None:
+    """Load coverage data and run candidate coverage + entity profile analysis.
+
+    Uses baseline_results if available, otherwise falls back to stored
+    eval dataset filtered for token_matched_candidates.
+
+    Returns:
+        Coverage DataFrame, or None if no data available.
+    """
+    if baseline_results:
+        cov_data = baseline_results
+    else:
+        cov_data = load_eval_dataset(store, backend_id, experiment_id)
+        cov_data = [
+            r for r in cov_data
+            if r.get("pipeline_data", {}).get("token_matched_candidates")
+        ]
+
+    if not cov_data:
+        print("No coverage data — run baseline eval or sync traces first.")
+        return None
+
+    cov_df = analyze_candidate_coverage(cov_data)
+    show_entity_profiles(cov_data)
     return cov_df
 
 
@@ -1414,6 +1525,23 @@ def show_data_inventory(
     return inv
 
 
+def load_task_description(path: str | None) -> str:
+    """Load task description from a file path.
+
+    Returns the file content, or empty string if path is None/empty or
+    the file doesn't exist.
+    """
+    if not path:
+        return ""
+    p = Path(path)
+    if not p.exists():
+        print(f"Warning: {path} not found")
+        return ""
+    text = p.read_text(encoding="utf-8")
+    print(f"Loaded task description: {len(text)} chars from {p.name}")
+    return text
+
+
 async def scan_advisor(
     pipeline_schema,
     variant_library: dict,
@@ -2181,6 +2309,42 @@ def configure_langfuse(
         lf = LangfuseLogger.get_instance()
         status = "enabled" if lf.enabled else "disabled"
         print(f"Langfuse reconfigured: {status}")
+
+
+def sync_langfuse(
+    store: "ProjectStore",
+    backend_id: str,
+    *,
+    dataset_name: str = "termnorm_ground_truth",
+    backfill: bool = True,
+    reset: bool = False,
+) -> dict | None:
+    """Configure Langfuse dataset name and optionally push all runs.
+
+    Combines dataset name configuration, state reset, and backfill push
+    into a single call.
+
+    Returns:
+        Push stats dict, or None if backfill was skipped.
+    """
+    import api.services.obs.langfuse_push as _lfp
+    _lfp.DATASET_NAME = dataset_name
+
+    if not backfill:
+        print(f"Langfuse dataset: {dataset_name} (backfill disabled)")
+        return None
+
+    if reset:
+        from api.services.obs.langfuse_push import _fresh_state, _save_state
+        _save_state(store, backend_id, _fresh_state())
+        print("Langfuse push state reset — will re-push all runs.")
+
+    n_runs = len(store.dataset_runs.list_all(backend_id))
+    if n_runs == 0:
+        print("No completed dataset runs yet — skipping Langfuse backfill (run after eval).")
+        return None
+
+    return push_langfuse(store, backend_id)
 
 
 def push_langfuse(store: "ProjectStore", backend_id: str) -> dict:
