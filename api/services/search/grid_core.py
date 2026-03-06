@@ -4,6 +4,7 @@ Builds cartesian products of prompt field variants, evaluates each
 grid point, and analyzes results to find optimal configurations.
 """
 
+import asyncio
 import itertools
 import json
 import logging
@@ -486,25 +487,33 @@ async def run_grid_search(
         await backend_client.init_session(session_terms)
 
     rows = []
-    for info in eval_plan:
-        acc, was_cached = await _load_or_compute_point(
-            info, state_lookup, backend_client, request_delay,
-            store, backend_id, pipeline_params, on_query_done,
-            pipeline_schema=pipeline_schema,
+    try:
+        for info in eval_plan:
+            acc, was_cached = await _load_or_compute_point(
+                info, state_lookup, backend_client, request_delay,
+                store, backend_id, pipeline_params, on_query_done,
+                pipeline_schema=pipeline_schema,
+            )
+
+            row = dict(info.coord_dict)
+            row["prompt_state_id"] = info.ps_id
+            row["hits"] = acc["hits"]
+            row["total"] = acc["total"]
+            row["accuracy"] = acc["accuracy"]
+            row["errors"] = acc["errors"]
+            rows.append(row)
+
+            if was_cached and on_point_reused is not None:
+                on_point_reused(info.point_idx, row)
+            if on_point_done is not None:
+                on_point_done(info.point_idx, row)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.warning(
+            "Grid search interrupted at point %d/%d. "
+            "Completed points are saved via evaluate_prompt_cached.",
+            len(rows), len(eval_plan),
         )
-
-        row = dict(info.coord_dict)
-        row["prompt_state_id"] = info.ps_id
-        row["hits"] = acc["hits"]
-        row["total"] = acc["total"]
-        row["accuracy"] = acc["accuracy"]
-        row["errors"] = acc["errors"]
-        rows.append(row)
-
-        if was_cached and on_point_reused is not None:
-            on_point_reused(info.point_idx, row)
-        if on_point_done is not None:
-            on_point_done(info.point_idx, row)
+        raise
 
     df = pd.DataFrame(rows)
     df = df.sort_values("accuracy", ascending=False).reset_index(drop=True)

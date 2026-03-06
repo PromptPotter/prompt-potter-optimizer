@@ -77,6 +77,22 @@ BLUE    = "\033[34m"
 MAGENTA = "\033[35m"
 CYAN    = "\033[36m"
 
+_STEP_SHORT_TAGS: dict[str, str] = {
+    "cache_lookup": "cache",
+    "fuzzy_matching": "fuzzy",
+    "web_search": "web",
+    "entity_profiling": "prof",
+    "token_matching": "token",
+    "llm_ranking": "llm",
+}
+
+
+def _step_tag(step_name: str | None) -> str:
+    if step_name is None:
+        return ""
+    return f"[{_STEP_SHORT_TAGS.get(step_name, step_name[:5])}]"
+
+
 # Public API — every name the notebook imports.
 __all__ = [
     # Constants
@@ -723,17 +739,8 @@ async def run_baseline_eval(
 
     def _on_result(result, index, total):
         pbar.total = total
-        if result.get("cached"):
-            tag = "HIT+" if result["hit"] else "MISS+"
-        else:
-            tag = "HIT " if result["hit"] else "MISS"
-        pred = result["predicted"][:35]
-        if result.get("error"):
-            pred = f"ERROR: {result['error'][:50]}"
-        tqdm.write(
-            f"[{index + 1}/{total}] {tag}  {result['query'][:50]:<50s} "
-            f"| {pred:<55s}"
-        )
+        is_cached = result.get("cached", False)
+        tqdm.write(_fmt_query_result(result, cached=is_cached))
         pbar.update(1)
 
     from api.services.obs.observability_logger import ObsLogger
@@ -1035,20 +1042,8 @@ async def run_grid_search(
     _point_counter = [0]
 
     def on_query_done(point_idx, qi, total_q, result):
-        hit = result.get("hit")
-        err = result.get("error")
-        if err:
-            print(
-                f"    [{qi + 1}/{total_q}] ERROR  {result['query'][:50]:<50s} "
-                f"| {err}"
-            )
-        else:
-            tag = "HIT " if hit else "MISS"
-            print(
-                f"    [{qi + 1}/{total_q}] {tag}  {result['query'][:50]:<50s} "
-                f"| pred: {result['predicted'][:35]:<35s} "
-                f"| gt: {result['ground_truth'][:35]}"
-            )
+        is_cached = result.get("cached", False)
+        print(_fmt_query_result(result, cached=is_cached), flush=True)
 
     def on_point_done(idx, row):
         _point_counter[0] += 1
@@ -1913,20 +1908,20 @@ def _fmt_query_result(r: dict, cached: bool = False) -> str:
     tag = "HIT " if r.get("hit") else "MISS"
     pred = (r.get("predicted") or "")[:35]
     err = r.get("error")
+    pd = r.get("pipeline_data") or {}
+    step = _step_tag(pd.get("terminated_at"))
 
     if cached:
         time_str = " \u26a1"  # cached marker
     else:
-        pd = r.get("pipeline_data") or {}
         tt = pd.get("total_time")
         time_str = f" {tt:.1f}s" if tt is not None else ""
 
     if err:
-        return f"        {tag}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
+        return f"        {tag} {step:>8s}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
 
     rank_str = ""
     if not r.get("hit"):
-        pd = r.get("pipeline_data") or {}
         ranked = pd.get("ranked_candidates", [])
         n_cand = len(ranked)
         gt_rank = _find_gt_rank(r)
@@ -1935,7 +1930,7 @@ def _fmt_query_result(r: dict, cached: bool = False) -> str:
         elif n_cand:
             rank_str = f"  (not in {n_cand} candidates)"
 
-    return f"        {tag}  {q:<45s}  -> {pred}{rank_str}{time_str}"
+    return f"        {tag} {step:>8s}  {q:<45s}  -> {pred}{rank_str}{time_str}"
 
 
 def _make_scan_progress_cb():
@@ -2124,10 +2119,7 @@ def _make_search_progress_cb():
 
             results = event.get("results", [])
             for r in results:
-                hit_str = "HIT " if r.get("hit") else "MISS"
-                q = (r.get("query") or "")[:35]
-                pred = (r.get("predicted") or "")[:30]
-                print(f"      {hit_str}  {q:<35s}  -> {pred}")
+                print(_fmt_query_result(r, cached=cached))
 
         elif t == "axis_resolved":
             action = event["action"]
@@ -2349,13 +2341,10 @@ async def run_feedback_cycle_notebook(
 
     def _on_query(cand_idx, n_cands, query_idx, n_queries, result):
         _query_counter[0] += 1
-        tag = "HIT " if result.get("hit") else "MISS"
-        cached = " (cached)" if result.get("cached") else ""
-        print(
-            f"  [{_query_counter[0]}] C{cand_idx + 1}/{n_cands} "
-            f"Q{query_idx + 1}/{n_queries} {tag}{cached} "
-            f"{result.get('query', '')[:50]}"
-        )
+        is_cached = result.get("cached", False)
+        prefix = (f"  [{_query_counter[0]}] C{cand_idx + 1}/{n_cands} "
+                  f"Q{query_idx + 1}/{n_queries}")
+        print(f"{prefix}\n{_fmt_query_result(result, cached=is_cached)}", flush=True)
 
     def _on_candidate(idx, total, scores):
         tag = "cached" if scores.get("cached") else f"{scores['accuracy']:.1%}"

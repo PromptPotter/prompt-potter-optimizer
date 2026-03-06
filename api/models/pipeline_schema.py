@@ -130,6 +130,18 @@ class PipelineSchema(BaseModel):
                 return step
         return None
 
+    def infer_terminating_step(self, step_timings: dict[str, float | None]) -> str | None:
+        """Infer which pipeline step produced the final result.
+
+        Walks steps in pipeline order. The last step with a non-None timing
+        is the one that produced the result.
+        """
+        last_executed: str | None = None
+        for step in self.steps:
+            if step_timings.get(step.name) is not None:
+                last_executed = step.name
+        return last_executed
+
     # -------------------------------------------------------------------
     # Derivation methods
     # -------------------------------------------------------------------

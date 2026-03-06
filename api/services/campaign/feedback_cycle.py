@@ -12,6 +12,7 @@ Stopping conditions:
 - ``winner_accuracy >= 1.0`` (perfect score)
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -912,89 +913,97 @@ async def run_feedback_cycle(
     stop_reason = "max_rounds"
 
     # -- Step 5: Round loop --
-    for round_num in range(resumed_from_round, config.max_rounds):
-        logger.info(
-            "Feedback cycle round %d (acc=%.3f, stall=%d/%d)",
-            round_num, state.current_accuracy, state.stall_count, config.patience,
-        )
+    try:
+        for round_num in range(resumed_from_round, config.max_rounds):
+            logger.info(
+                "Feedback cycle round %d (acc=%.3f, stall=%d/%d)",
+                round_num, state.current_accuracy, state.stall_count, config.patience,
+            )
 
-        round_result = await _execute_round(
-            round_num, state, round_eval_data, config,
-            obs, obs_campaign_id, dataset_name, dataset_item_map,
-            campaign_store, cycle_id,
-            on_candidate_eval, on_query_eval,
-        )
+            round_result = await _execute_round(
+                round_num, state, round_eval_data, config,
+                obs, obs_campaign_id, dataset_name, dataset_item_map,
+                campaign_store, cycle_id,
+                on_candidate_eval, on_query_eval,
+            )
 
-        # Update loop state
-        state.rounds.append(round_result)
-        state.current_ps = round_result.prompt_state
-        state.current_accuracy = round_result.accuracy
-        state.current_results = round_result.results
+            # Update loop state
+            state.rounds.append(round_result)
+            state.current_ps = round_result.prompt_state
+            state.current_accuracy = round_result.accuracy
+            state.current_results = round_result.results
 
-        if state.current_accuracy > state.best_accuracy:
-            state.best_accuracy = state.current_accuracy
-            state.best_round = round_num
-            state.best_ps = state.current_ps
+            if state.current_accuracy > state.best_accuracy:
+                state.best_accuracy = state.current_accuracy
+                state.best_round = round_num
+                state.best_ps = state.current_ps
 
-        state.stall_count = 0 if round_result.improved else state.stall_count + 1
+            state.stall_count = 0 if round_result.improved else state.stall_count + 1
 
-        if on_round_complete:
-            on_round_complete(round_result, state.stall_count)
+            if on_round_complete:
+                on_round_complete(round_result, state.stall_count)
 
-        # Checkpoint round to disk
-        if campaign_store and cycle_id:
-            try:
-                campaign_store.add_trial(config.backend_id, cycle_id, {
-                    "trial_id": f"round_{round_num}",
-                    "round": round_num,
-                    "label": round_result.label,
-                    "accuracy": round_result.accuracy,
-                    "hits": round_result.hits,
-                    "total": round_result.total,
-                    "improved": round_result.improved,
-                    "next_action": round_result.next_action,
-                    "prompt_state": round_result.prompt_state,
-                    "results": round_result.results,
-                    "candidates_evaluated": round_result.candidates_evaluated,
-                    "candidate_scores": [
-                        s if isinstance(s, dict) else s
-                        for s in round_result.candidate_scores
-                    ],
-                    "stall_count": state.stall_count,
-                    "l2_stall_count": state.l2_stall_count,
-                    "l3_stall_count": state.l3_stall_count,
-                    "l2_round": state.l2_round,
-                    "l3_round": state.l3_round,
-                })
-            except Exception:
-                logger.warning("Round checkpoint failed", exc_info=True)
+            # Checkpoint round to disk
+            if campaign_store and cycle_id:
+                try:
+                    campaign_store.add_trial(config.backend_id, cycle_id, {
+                        "trial_id": f"round_{round_num}",
+                        "round": round_num,
+                        "label": round_result.label,
+                        "accuracy": round_result.accuracy,
+                        "hits": round_result.hits,
+                        "total": round_result.total,
+                        "improved": round_result.improved,
+                        "next_action": round_result.next_action,
+                        "prompt_state": round_result.prompt_state,
+                        "results": round_result.results,
+                        "candidates_evaluated": round_result.candidates_evaluated,
+                        "candidate_scores": [
+                            s if isinstance(s, dict) else s
+                            for s in round_result.candidate_scores
+                        ],
+                        "stall_count": state.stall_count,
+                        "l2_stall_count": state.l2_stall_count,
+                        "l3_stall_count": state.l3_stall_count,
+                        "l2_round": state.l2_round,
+                        "l3_round": state.l3_round,
+                    })
+                except Exception:
+                    logger.warning("Round checkpoint failed", exc_info=True)
 
-        # Check stopping conditions
-        if state.current_accuracy >= 1.0:
-            stop_reason = "perfect_score"
-            logger.info("Perfect score reached at round %d", round_num)
-            break
-        if round_result.next_action == "stop":
-            stop_reason = "next_action_stop"
-            logger.info("Analysis node signaled stop at round %d", round_num)
-            break
-
-        # Hierarchical patience escalation
-        if state.stall_count >= config.patience:
-            if config.enable_l2:
-                # L1 stalled → escalate to L2
-                stop_reason = await _escalate_l2(
-                    state, config, round_num, round_eval_data,
-                )
-                if stop_reason:
-                    break
-            else:
-                stop_reason = "patience_exhausted"
-                logger.info(
-                    "Patience exhausted after %d stalls at round %d",
-                    state.stall_count, round_num,
-                )
+            # Check stopping conditions
+            if state.current_accuracy >= 1.0:
+                stop_reason = "perfect_score"
+                logger.info("Perfect score reached at round %d", round_num)
                 break
+            if round_result.next_action == "stop":
+                stop_reason = "next_action_stop"
+                logger.info("Analysis node signaled stop at round %d", round_num)
+                break
+
+            # Hierarchical patience escalation
+            if state.stall_count >= config.patience:
+                if config.enable_l2:
+                    # L1 stalled → escalate to L2
+                    stop_reason = await _escalate_l2(
+                        state, config, round_num, round_eval_data,
+                    )
+                    if stop_reason:
+                        break
+                else:
+                    stop_reason = "patience_exhausted"
+                    logger.info(
+                        "Patience exhausted after %d stalls at round %d",
+                        state.stall_count, round_num,
+                    )
+                    break
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        stop_reason = "interrupted"
+        logger.warning(
+            "Feedback cycle interrupted at round %d. "
+            "Completed rounds are checkpointed.",
+            len(state.rounds),
+        )
 
     # -- Step 6: Finalize --
     finished_at = datetime.now(timezone.utc).isoformat()

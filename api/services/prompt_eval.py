@@ -6,6 +6,7 @@ and evaluates reranker prompts via the TermNorm backend's /matches endpoint.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -250,6 +251,16 @@ def _extract_pipeline_data(
         val = backend_data.get(key)
         if val is not None:
             pd[key] = val
+
+    # Determine terminating step: explicit from backend takes priority
+    terminated_at = backend_data.get("terminated_at")
+    if terminated_at is None:
+        st = pd.get("step_timings")
+        if st:
+            terminated_at = pipeline_schema.infer_terminating_step(st)
+    if terminated_at is not None:
+        pd["terminated_at"] = terminated_at
+
     return pd
 
 
@@ -341,38 +352,46 @@ async def evaluate_prompt_batch(
     consecutive_errors = 0
     max_consecutive_errors = 3
 
-    for i, qd in enumerate(eval_data):
-        result = await backend_reranker_eval(
-            qd, backend_client, rendered,
-            pipeline_params=search_point.pipeline_params,
-            pipeline_schema=pipeline_schema,
+    try:
+        for i, qd in enumerate(eval_data):
+            result = await backend_reranker_eval(
+                qd, backend_client, rendered,
+                pipeline_params=search_point.pipeline_params,
+                pipeline_schema=pipeline_schema,
+            )
+            results.append(result)
+
+            if result.get("error"):
+                consecutive_errors += 1
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.warning(
+                        "Aborting eval: %d consecutive errors. "
+                        "Marking remaining %d queries as errors.",
+                        consecutive_errors, len(eval_data) - i - 1,
+                    )
+                    for remaining_qd in eval_data[i + 1:]:
+                        results.append({
+                            "query": remaining_qd["query"],
+                            "predicted": "ERROR",
+                            "ground_truth": remaining_qd.get("ground_truth", ""),
+                            "hit": False,
+                            "score": 0.0,
+                            "error": "skipped_after_consecutive_errors",
+                            "pipeline_data": None,
+                        })
+                    break
+            else:
+                consecutive_errors = 0
+
+            if on_result is not None:
+                on_result(result, i, len(eval_data))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.warning(
+            "Eval batch interrupted at query %d/%d. "
+            "Partial results saved via incremental writer.",
+            len(results), len(eval_data),
         )
-        results.append(result)
-
-        if result.get("error"):
-            consecutive_errors += 1
-            if consecutive_errors >= max_consecutive_errors:
-                logger.warning(
-                    "Aborting eval: %d consecutive errors. "
-                    "Marking remaining %d queries as errors.",
-                    consecutive_errors, len(eval_data) - i - 1,
-                )
-                for remaining_qd in eval_data[i + 1:]:
-                    results.append({
-                        "query": remaining_qd["query"],
-                        "predicted": "ERROR",
-                        "ground_truth": remaining_qd.get("ground_truth", ""),
-                        "hit": False,
-                        "score": 0.0,
-                        "error": "skipped_after_consecutive_errors",
-                        "pipeline_data": None,
-                    })
-                break
-        else:
-            consecutive_errors = 0
-
-        if on_result is not None:
-            on_result(result, i, len(eval_data))
+        raise
 
     return results
 
@@ -645,11 +664,19 @@ async def evaluate_prompt_cached(
         if on_result is not None:
             on_result(result, _cb_offset + index, len(eval_data))
 
-    new_results = await evaluate_prompt_batch(
-        search_point, remaining_data, backend_client,
-        on_result=_on_result,
-        pipeline_schema=pipeline_schema,
-    )
+    try:
+        new_results = await evaluate_prompt_batch(
+            search_point, remaining_data, backend_client,
+            on_result=_on_result,
+            pipeline_schema=pipeline_schema,
+        )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.warning(
+            "evaluate_prompt_cached interrupted for %s. "
+            "Partial results saved to %s.partial.jsonl — will resume on next run.",
+            run_id, run_id,
+        )
+        raise
 
     results = historical_results + partial_results + new_results
     scores = compute_accuracy(results)

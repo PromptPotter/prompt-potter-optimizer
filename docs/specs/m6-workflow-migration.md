@@ -306,6 +306,35 @@ Wave 4 (workflow nodes) ← only remaining M6 work
 - Existing workflow scaffold passes its tests
 - All existing tests pass (`pytest -v --tb=short`)
 
+## Unified Query Result Output Format
+
+All evaluation paths (baseline eval, sensitivity scan, grid search, adaptive search, feedback cycle) use `_fmt_query_result()` in `notebooks/_campaign_lib.py` as the single formatting function. Every query result line shows:
+
+1. **HIT/MISS** — whether the prediction matched ground truth
+2. **Pipeline termination step** — which step resolved the query (e.g. `[fuzzy]`, `[llm]`, `[token]`), via `_step_tag()`. Critical signal: shows whether a query was resolved by cache, fuzzy match, or went all the way to LLM ranking.
+3. **Candidate rank info** (MISS only) — ground truth position among candidates, e.g. `(#4 of 20)` if ground truth was ranked 4th out of 20, or `(not in 15 candidates)` if absent. Uses `_find_gt_rank()` to search `ranked_candidates` then `token_matched_candidates`.
+4. **Timing** — backend response time per query, or cached marker
+
+```
+        HIT   [fuzzy]  Polyethylen Rohr 50mm                     -> PE Pipe 50mm   0.1s
+        MISS   [llm]   Edelstahl Blech 2mm                       -> Stainless Sheet 2mm  (#3 of 15)   12.1s
+        MISS   [llm]   Aluminiumlegierung 6061                   -> Al Alloy 6082  (not in 15 candidates)   11.3s
+        HIT  [token]   Kupferrohr DN15                           -> Copper Tube DN15   0.4s
+        HIT   [fuzzy]  PVC Rohr 110mm                            -> PVC Pipe 110mm ⚡
+```
+
+**Real-time output:** Results print one-by-one as each backend call returns (not batched at variant completion). Achieved by threading `on_result` callback from the notebook layer through `sensitivity_scan()` → `_make_eval_fn()` → `evaluate_prompt_cached()`.
+
+### Implementation files
+
+| File | What |
+|------|------|
+| `notebooks/_campaign_lib.py` | `_fmt_query_result()`, `_step_tag()`, `_find_gt_rank()`, `_STEP_SHORT_TAGS` |
+| `api/services/search/smart_search.py` | `on_result` param on `sensitivity_scan()` and `_make_eval_fn()` |
+| `api/services/prompt_eval.py` | `on_result` callback on `evaluate_prompt_cached()` (fires per-query) |
+
+---
+
 ## Exit Criteria
 
 - **MVP performance validation:** TermNorm accuracy from ~15% to >90% using PipelineSchema-driven evaluation

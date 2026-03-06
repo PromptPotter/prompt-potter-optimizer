@@ -6,6 +6,7 @@ coordinate descent over prompt-field and pipeline-param axes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 from collections import defaultdict
@@ -502,65 +503,81 @@ async def sensitivity_scan(
             "axis_index": ai, "total_axes": len(axes),
         })
 
-        for vi, value in enumerate(values):
-            # Skip the baseline value for each axis
-            if axis_type == "prompt_field":
-                current_val = getattr(baseline_ps, axis_name, "")
-            else:
-                current_val = base_params.get(axis_name)
+        try:
+            for vi, value in enumerate(values):
+                # Skip the baseline value for each axis
+                if axis_type == "prompt_field":
+                    current_val = getattr(baseline_ps, axis_name, "")
+                else:
+                    current_val = base_params.get(axis_name)
 
-            if value == current_val:
+                if value == current_val:
+                    rows.append({
+                        "axis": axis_name, "axis_type": axis_type,
+                        "value_idx": vi,
+                        "value_preview": _preview(value),
+                        "hits": baseline_scores["hits"],
+                        "total": baseline_scores["total"],
+                        "accuracy": baseline_acc, "delta": 0.0,
+                        "errors": 0,
+                    })
+                    axis_stats[axis_name].append(0.0)
+                    _cb({
+                        "type": "variant_done",
+                        "axis": axis_name, "value_idx": vi,
+                        "value_preview": _preview(value),
+                        "is_baseline_value": True,
+                        "accuracy": baseline_acc, "delta": 0.0,
+                        "hits": baseline_scores["hits"],
+                        "total": baseline_scores["total"],
+                        "results": [], "cached": False,
+                    })
+                    continue
+
+                if axis_type == "prompt_field":
+                    perturbed = baseline_ps.derive(**{axis_name: value})
+                    scores = await _eval_ps(perturbed)
+                else:
+                    perturbed_params = {**base_params, axis_name: value}
+                    scores = await _eval_ps(baseline_ps, perturbed_params)
+
+                acc = scores["accuracy"]
+                delta = acc - baseline_acc
                 rows.append({
                     "axis": axis_name, "axis_type": axis_type,
                     "value_idx": vi,
                     "value_preview": _preview(value),
-                    "hits": baseline_scores["hits"],
-                    "total": baseline_scores["total"],
-                    "accuracy": baseline_acc, "delta": 0.0,
-                    "errors": 0,
+                    "hits": scores["hits"],
+                    "total": scores["total"],
+                    "accuracy": acc, "delta": delta,
+                    "errors": scores.get("errors", 0),
                 })
-                axis_stats[axis_name].append(0.0)
+                axis_stats[axis_name].append(delta)
                 _cb({
                     "type": "variant_done",
                     "axis": axis_name, "value_idx": vi,
                     "value_preview": _preview(value),
-                    "is_baseline_value": True,
-                    "accuracy": baseline_acc, "delta": 0.0,
-                    "hits": baseline_scores["hits"],
-                    "total": baseline_scores["total"],
-                    "results": [], "cached": False,
+                    "is_baseline_value": False,
+                    "accuracy": acc, "delta": delta,
+                    "hits": scores["hits"], "total": scores["total"],
+                    "results": scores.get("results", []),
+                    "cached": scores.get("cached", False),
                 })
-                continue
-
-            if axis_type == "prompt_field":
-                perturbed = baseline_ps.derive(**{axis_name: value})
-                scores = await _eval_ps(perturbed)
-            else:
-                perturbed_params = {**base_params, axis_name: value}
-                scores = await _eval_ps(baseline_ps, perturbed_params)
-
-            acc = scores["accuracy"]
-            delta = acc - baseline_acc
-            rows.append({
-                "axis": axis_name, "axis_type": axis_type,
-                "value_idx": vi,
-                "value_preview": _preview(value),
-                "hits": scores["hits"],
-                "total": scores["total"],
-                "accuracy": acc, "delta": delta,
-                "errors": scores.get("errors", 0),
-            })
-            axis_stats[axis_name].append(delta)
-            _cb({
-                "type": "variant_done",
-                "axis": axis_name, "value_idx": vi,
-                "value_preview": _preview(value),
-                "is_baseline_value": False,
-                "accuracy": acc, "delta": delta,
-                "hits": scores["hits"], "total": scores["total"],
-                "results": scores.get("results", []),
-                "cached": scores.get("cached", False),
-            })
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            logger.warning(
+                "Scan interrupted during axis '%s'. "
+                "Checkpointing %d completed axes.",
+                axis_name, len(completed_axes),
+            )
+            if store and backend_id and plan_id:
+                store.smart_search.update(backend_id, plan_id, {
+                    "status": "scan_partial",
+                    "scan_results": {
+                        "rows": rows,
+                        "completed_axes": list(completed_axes),
+                    },
+                })
+            raise
 
         # Check: did any non-baseline variant succeed?
         axis_variants = [

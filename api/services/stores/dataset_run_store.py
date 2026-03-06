@@ -40,7 +40,11 @@ class DatasetRunStore:
 
     @staticmethod
     def _acquire_lock(lock_path: Path) -> None:
-        """Acquire an exclusive lock file, retrying on contention."""
+        """Acquire an exclusive lock file, retrying on contention.
+
+        Uses short non-blocking retries so KeyboardInterrupt (Jupyter cell
+        interrupt) is never swallowed by a blocking sleep.
+        """
         deadline = time.monotonic() + _LOCK_TIMEOUT
         while True:
             try:
@@ -48,11 +52,15 @@ class DatasetRunStore:
                 os.close(fd)
                 return
             except FileExistsError:
-                # Check for stale lock (older than timeout)
+                # Check for stale lock (file mtime older than timeout)
                 try:
-                    age = time.monotonic() - os.path.getmtime(lock_path)
+                    mtime = os.path.getmtime(lock_path)
+                    age = time.time() - mtime
                     if age > _LOCK_TIMEOUT:
-                        logger.warning("Removing stale lock file: %s (age=%.1fs)", lock_path, age)
+                        logger.warning(
+                            "Removing stale lock file: %s (age=%.1fs)",
+                            lock_path, age,
+                        )
                         try:
                             os.unlink(lock_path)
                         except OSError:
@@ -61,7 +69,9 @@ class DatasetRunStore:
                 except OSError:
                     pass
                 if time.monotonic() >= deadline:
-                    logger.warning("Lock timeout on %s — breaking stale lock", lock_path)
+                    logger.warning(
+                        "Lock timeout on %s — breaking stale lock", lock_path,
+                    )
                     try:
                         os.unlink(lock_path)
                     except OSError:
