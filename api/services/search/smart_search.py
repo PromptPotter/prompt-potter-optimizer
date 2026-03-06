@@ -150,6 +150,7 @@ def _make_eval_fn(
     get_params: Callable[[], dict],
     prompt_result_index: dict | None = None,
     pipeline_schema: "PipelineSchema | None" = None,
+    on_result: Callable | None = None,
 ) -> Callable:
     """Factory for the ``_eval_ps`` closure used by scan and adaptive search."""
     from api.models.search_point import SearchPoint
@@ -166,6 +167,7 @@ def _make_eval_fn(
             prompt_result_index=prompt_result_index,
             source="sensitivity_scan",
             pipeline_schema=pipeline_schema,
+            on_result=on_result,
         )
         return {**scores, "results": results, "cached": cached}
     return _eval_ps
@@ -379,6 +381,7 @@ async def sensitivity_scan(
     plan_id: str = "",
     partial_scan: dict | None = None,
     pipeline_schema: "PipelineSchema | None" = None,
+    on_result: Callable | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -425,6 +428,7 @@ async def sensitivity_scan(
         get_params=lambda: base_params,
         prompt_result_index=prompt_result_index,
         pipeline_schema=pipeline_schema,
+        on_result=on_result,
     )
 
     # Evaluate baseline

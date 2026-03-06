@@ -1848,7 +1848,7 @@ async def sensitivity_scan(
     )
     print(f"  Estimated configs: ~{n_configs} x {len(eval_data)} queries")
 
-    cb = _make_scan_progress_cb()
+    cb, on_result_cb = _make_scan_progress_cb()
 
     _httpx_log = logging.getLogger("httpx")
     _httpcore_log = logging.getLogger("httpcore")
@@ -1875,6 +1875,7 @@ async def sensitivity_scan(
             plan_id=plan_id,
             partial_scan=partial_scan,
             pipeline_schema=pipeline_schema,
+            on_result=on_result_cb,
         )
     finally:
         _httpx_log.setLevel(_prev_httpx)
@@ -1884,6 +1885,26 @@ async def sensitivity_scan(
     display_axis_profiles(profiles)
 
     return df, profiles
+
+
+def _find_gt_rank(r: dict) -> int | None:
+    """Find ground truth rank in candidates. Returns 1-indexed rank or None."""
+    gt = r.get("ground_truth", "")
+    if not gt:
+        return None
+    pd = r.get("pipeline_data") or {}
+    ranked = pd.get("ranked_candidates", [])
+    for i, c in enumerate(ranked):
+        name = c.get("candidate", "") if isinstance(c, dict) else str(c)
+        if name == gt:
+            return i + 1
+    # Fallback: token_matched_candidates (tuple/list format)
+    token = pd.get("token_matched_candidates", [])
+    for i, c in enumerate(token):
+        name = c[0] if isinstance(c, (list, tuple)) else str(c)
+        if name == gt:
+            return i + 1
+    return None
 
 
 def _fmt_query_result(r: dict, cached: bool = False) -> str:
@@ -1902,12 +1923,33 @@ def _fmt_query_result(r: dict, cached: bool = False) -> str:
 
     if err:
         return f"        {tag}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
-    return f"        {tag}  {q:<45s}  -> {pred}{time_str}"
+
+    rank_str = ""
+    if not r.get("hit"):
+        pd = r.get("pipeline_data") or {}
+        ranked = pd.get("ranked_candidates", [])
+        n_cand = len(ranked)
+        gt_rank = _find_gt_rank(r)
+        if gt_rank is not None:
+            rank_str = f"  (#{gt_rank} of {n_cand})"
+        elif n_cand:
+            rank_str = f"  (not in {n_cand} candidates)"
+
+    return f"        {tag}  {q:<45s}  -> {pred}{rank_str}{time_str}"
 
 
 def _make_scan_progress_cb():
-    """Build a progress callback for sensitivity_scan with flip tracking."""
+    """Build a progress callback for sensitivity_scan with flip tracking.
+
+    Returns:
+        Tuple of (progress_cb, on_result_cb).
+    """
     baseline_results: list = []
+
+    def _on_result(result: dict, index: int, total: int) -> None:
+        """Print each query result as it arrives from the backend."""
+        is_cached = result.get("cached", False)
+        print(_fmt_query_result(result, cached=is_cached), flush=True)
 
     def _cb(event: dict) -> None:
         t = event["type"]
@@ -1919,8 +1961,7 @@ def _make_scan_progress_cb():
             cached = " [cached]" if is_cached else ""
             print(f"  Baseline: {event['hits']}/{event['total']} "
                   f"({event['accuracy']:.1%}){cached}")
-            for r in baseline_results:
-                print(_fmt_query_result(r, cached=is_cached))
+            # Per-query lines already printed by _on_result in real-time
 
         elif t == "axis_start":
             ai = event["axis_index"] + 1
@@ -1957,10 +1998,7 @@ def _make_scan_progress_cb():
             cache_str = " [cached]" if cached else ""
             print(f"  [{vi}] {preview:<42s} {hits}/{total}  "
                   f"{acc:.1%}  {delta_str}{marker}{cache_str}")
-
-            results = event.get("results", [])
-            for vr in results:
-                print(_fmt_query_result(vr, cached=cached))
+            # Per-query lines already printed by _on_result in real-time
 
         elif t == "axis_done":
             budget = event["exploration_budget"]
@@ -1970,7 +2008,7 @@ def _make_scan_progress_cb():
             print(f"  >> {event['axis']}: range={sr:.1%}, "
                   f"best={bd:+.1%}, worst={wd:+.1%}, budget={budget}")
 
-    return _cb
+    return _cb, _on_result
 
 
 async def adaptive_search(
