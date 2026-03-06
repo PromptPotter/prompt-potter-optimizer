@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 from tqdm.auto import tqdm
 
+from api.models.pipeline_schema import PipelineSchema
 from api.models.prompt_state import PromptState
 from api.services.backend_client import (
     build_pipeline_params,
@@ -63,6 +64,8 @@ from api.services.search import (
     advise_scan_config as _advise_scan_config,
     filter_variant_library as _filter_variant_library,
 )
+
+logger = logging.getLogger(__name__)
 
 # ANSI foreground colors
 RESET   = "\033[0m"
@@ -1735,18 +1738,66 @@ async def scan_advisor(
     return advisory
 
 
-def advisory_to_scan_variants(advisory: dict) -> dict:
+def advisory_to_scan_variants(
+    advisory: dict,
+    pipeline_schema: PipelineSchema | None = None,
+) -> tuple[dict, dict[str, list[str]]]:
     """Convert scan advisory into editable pipeline_params dict.
 
     Extracts ``priority_axes`` entries whose ``source`` is ``"pipeline_param"``
-    and that carry ``suggested_values``.  Returns a dict the user can edit
-    before passing to the sensitivity scan as ``variant_library["pipeline_params"]``.
+    and that carry ``suggested_values``.
+
+    For schema axes (name ends with ``_schema``), parses mutation tuples,
+    resolves against the baseline JSON Schema, and returns concrete dicts.
+
+    Returns ``(scan_variants, schema_labels)`` where ``schema_labels`` maps
+    schema axis names to human-readable labels (``"(baseline)"`` at index 0).
     """
+    from api.services.backend_client import FLAT_TO_NODE_OVERRIDE
+    from api.models.schema_mutation import (
+        baseline_schema_from_step,
+        parse_mutation_tuples,
+        resolve_schema_variants,
+    )
+
     params: dict[str, list] = {}
+    schema_labels: dict[str, list[str]] = {}
+
     for ax in advisory.get("priority_axes", []):
-        if ax.get("source") == "pipeline_param" and ax.get("suggested_values"):
-            params[ax["axis"]] = ax["suggested_values"]
-    return params
+        if ax.get("source") != "pipeline_param" or not ax.get("suggested_values"):
+            continue
+        axis_name = ax["axis"]
+        suggested = ax["suggested_values"]
+
+        # Schema axis detection: ends with _schema AND is a pipeline_param
+        if axis_name.endswith("_schema") and pipeline_schema is not None:
+            # Map axis → step name via FLAT_TO_NODE_OVERRIDE
+            override_info = FLAT_TO_NODE_OVERRIDE.get(axis_name)
+            step_name = override_info[0] if override_info else None
+            step = pipeline_schema.get_step(step_name) if step_name else None
+
+            if step and step.output_schema:
+                # Check if suggested_values are lists (mutation tuples) or dicts (old format)
+                if suggested and isinstance(suggested[0], list):
+                    try:
+                        variants = [parse_mutation_tuples(sv) for sv in suggested]
+                        baseline = baseline_schema_from_step(step.output_schema)
+                        resolved = resolve_schema_variants(baseline, variants)
+                        params[axis_name] = resolved
+                        schema_labels[axis_name] = (
+                            ["(baseline)"] + [v.render_label() for v in variants]
+                        )
+                        continue
+                    except (ValueError, KeyError) as e:
+                        logger.warning(
+                            "Schema axis '%s' mutation parse failed, "
+                            "falling through to raw values: %s",
+                            axis_name, e,
+                        )
+
+        params[axis_name] = suggested
+
+    return params, schema_labels
 
 
 async def sensitivity_scan(

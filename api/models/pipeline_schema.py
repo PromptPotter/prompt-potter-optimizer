@@ -56,6 +56,7 @@ class StepOutputSchema(BaseModel):
     version: int | None = None
     fields: list[str] = Field(default_factory=list)
     field_descriptions: dict[str, str] = Field(default_factory=dict)
+    json_schema: dict = Field(default_factory=dict)
 
 
 class StepPromptMeta(BaseModel):
@@ -117,6 +118,17 @@ class PipelineSchema(BaseModel):
     required_step: str | None = None
     template_variables: set[str] = Field(default_factory=set)
     dataset_name: str = ""
+
+    # -------------------------------------------------------------------
+    # Lookup helpers
+    # -------------------------------------------------------------------
+
+    def get_step(self, name: str) -> PipelineStep | None:
+        """Find a step by name, or None if not found."""
+        for step in self.steps:
+            if step.name == name:
+                return step
+        return None
 
     # -------------------------------------------------------------------
     # Derivation methods

@@ -189,11 +189,23 @@ Rules:
 - Prioritize axes with the highest expected impact
 - Never recommend "ranking_prompt" or "profiling_prompt" as pipeline_param scan axes — \
 these are prompt template overrides managed via prompt_field optimization, not numeric knobs
-- "profiling_schema" and "ranking_schema" are output schema overrides (JSON schema dicts) that \
-define the structured output each LLM step produces. These are HIGH-LEVERAGE axes: the schema \
-fields directly determine what information downstream steps receive. Suggest concrete field \
-additions or removals based on the current output_schema shown in the anatomy. For example, \
-adding a classification field or removing a low-value field can reshape pipeline behavior
+- "profiling_schema" and "ranking_schema" are output schema overrides. Suggest MUTATIONS \
+relative to the current output_schema shown in the anatomy. Each suggested_value is a JSON \
+array of mutation arrays applied together as one variant. IMPORTANT: use JSON arrays [...], \
+NOT Python tuples (...). Mutation formats:
+    ["-", "field_path"]                                              remove a field
+    ["+", "field_path", "type", required, "description"]             add a field
+    ["~", "old_field_path", "new_name", "type", required, "desc"]    replace (sibling swap)
+  Use dot notation for nested fields: "parent.child".
+  Types: "string", "array" (of strings), "integer", "number", "boolean", "object".
+  required: true if the field must always be present in the LLM output, false if optional.
+  Always include type, required, and description for add/replace — they drive LLM output quality.
+  Example suggested_values: [
+    [["-", "notes"], ["-", "material_classification"]],
+    [["+", "significance", "string", true, "Domain relevance of this entity"]],
+    [["~", "notes", "industry_sector", "string", true, "Industry sector classification"]]
+  ]
+  The baseline (current schema unchanged) is automatically included — do NOT include it
 - "profiling_model" and "ranking_model" override the LLM model per-step. Model switching \
 is LOW priority — the default model is well-tuned for this pipeline. Only recommend model \
 axes when the budget is large enough AND other higher-impact axes are already covered. \
@@ -220,6 +232,8 @@ def _validate_advisory(
 
     Returns list of warning strings (empty = valid).
     """
+    from api.models.schema_mutation import parse_mutation_tuples
+
     warnings: list[str] = []
 
     # Build step-to-params mapping for excluded-step checks
@@ -235,6 +249,9 @@ def _validate_advisory(
         all_param_keys.update(step.param_keys)
 
     prompt_fields = set(_extract_prompt_field_axes(variant_library))
+
+    # Schema axes: names ending with _schema that are pipeline_params
+    _schema_axes = {k for k in all_param_keys if k.endswith("_schema")}
 
     for ax in advisory.get("priority_axes", []):
         axis_name = ax.get("axis", "")
@@ -252,6 +269,30 @@ def _validate_advisory(
                     f"pipeline_param axis '{axis_name}' belongs to excluded "
                     f"step '{step_name}' — will have no effect"
                 )
+
+            # Validate schema axis mutation tuples
+            if axis_name in _schema_axes and ax.get("suggested_values"):
+                for i, sv in enumerate(ax["suggested_values"]):
+                    if not isinstance(sv, list):
+                        continue
+                    try:
+                        variant = parse_mutation_tuples(sv)
+                        for m in variant.mutations:
+                            if m.op in ("add", "replace") and not m.description:
+                                warnings.append(
+                                    f"Schema axis '{axis_name}' variant {i}: "
+                                    f"empty description for '{m.path}'"
+                                )
+                            if not isinstance(m.required, bool):
+                                warnings.append(
+                                    f"Schema axis '{axis_name}' variant {i}: "
+                                    f"required is not bool for '{m.path}'"
+                                )
+                    except ValueError as e:
+                        warnings.append(
+                            f"Schema axis '{axis_name}' variant {i}: parse error: {e}"
+                        )
+
         elif source == "prompt_field":
             if axis_name not in prompt_fields:
                 warnings.append(

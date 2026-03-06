@@ -151,6 +151,7 @@ def _parse_resolved_schema(resolved: dict[str, Any]) -> StepOutputSchema:
         version=resolved.get("version"),
         fields=fields,
         field_descriptions=field_descriptions,
+        json_schema=json_schema,
     )
 
 
