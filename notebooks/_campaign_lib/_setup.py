@@ -30,6 +30,8 @@ __all__ = [
     "SHEET_COLUMN_MAP",
     # Pipeline config
     "configure_pipeline", "load_pipeline_config", "build_pipeline_params",
+    # Pipeline snapshot
+    "show_pipeline_snapshot",
     # Notebook-facing wrappers
     "smoke_test_override",
     # Re-exports
@@ -173,6 +175,36 @@ def save_campaign_winner(
         "filename": filename,
         "backend_id": backend_id,
     }
+
+
+async def show_pipeline_snapshot(svc: dict) -> dict:
+    """Fetch and display full pipeline config from backend.
+
+    Prints: pipeline name/version, node list, resolved schemas/prompts,
+    full JSON config. Returns raw pipeline config dict.
+    """
+    import json
+
+    pipeline_raw = await svc["backend_client"].fetch_pipeline()
+    config = pipeline_raw.get("data", pipeline_raw)
+
+    name = config.get("name", "?")
+    version = config.get("version", "?")
+    nodes = list(config.get("nodes", {}).keys())
+    schemas = list(config.get("resolved_schemas", {}).keys())
+    prompts = list(config.get("resolved_prompts", {}).keys())
+
+    print("=" * 70)
+    print(f"  PIPELINE SNAPSHOT: {name} {version}")
+    print("=" * 70)
+    print(f"  Nodes:   {nodes}")
+    print(f"  Schemas: {schemas}")
+    print(f"  Prompts: {prompts}")
+    print()
+    print(json.dumps(config, indent=2))
+    print("=" * 70)
+
+    return config
 
 
 def configure_pipeline(svc: dict, campaign_config: dict) -> dict:

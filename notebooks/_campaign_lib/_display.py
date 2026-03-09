@@ -7,6 +7,8 @@ __all__ = [
     "RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
     # Display functions
     "display_progress", "display_suggestions", "display_axis_profiles",
+    # Campaign results display
+    "show_campaign_summary", "show_flip_tracking", "show_lineage_chain",
 ]
 
 # ANSI foreground colors
@@ -188,3 +190,97 @@ def display_axis_profiles(profiles: list[dict]) -> None:
             f"{p['cardinality']:<5d} {p['sensitivity_range']:<8.3f} "
             f"{p['exploration_budget']:<8s}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Campaign results display
+# ---------------------------------------------------------------------------
+
+
+def show_campaign_summary(campaign_rounds: list) -> None:
+    """Display campaign comparison table as DataFrame."""
+    if not campaign_rounds:
+        print("No campaign rounds to display.")
+        return
+
+    import pandas as pd
+    from IPython.display import display as ipy_display
+
+    rows = []
+    for rd in campaign_rounds:
+        rows.append({
+            "round": rd["round"],
+            "label": rd["label"][:40],
+            "hit@1": rd["hits"],
+            "total": rd["total"],
+            "accuracy": f"{rd['accuracy']:.1%}",
+            "prompt_id": rd["prompt_state"].id[:12],
+        })
+
+    print(f"CAMPAIGN SUMMARY ({len(campaign_rounds)} rounds)")
+    print(f"{'=' * 70}")
+    ipy_display(pd.DataFrame(rows))
+
+
+def show_flip_tracking(campaign_rounds: list) -> None:
+    """Compare first vs last round, display per-query flip table."""
+    if len(campaign_rounds) < 2:
+        print("Need at least 2 rounds for flip tracking.")
+        return
+
+    base_r = campaign_rounds[0]["results"]
+    final_r = campaign_rounds[-1]["results"]
+
+    if not base_r or not final_r:
+        print("Skipping flip tracking — baseline or final results are empty.")
+        return
+
+    import pandas as pd
+    from IPython.display import display as ipy_display
+
+    flips = []
+    for br, fr in zip(base_r, final_r):
+        b_hit = br["hit"]
+        f_hit = fr["hit"]
+        if b_hit != f_hit:
+            flips.append({
+                "query": br["query"][:50],
+                "flip": "MISS->HIT" if f_hit else "HIT->MISS",
+                "base_pred": br["predicted"][:35],
+                "final_pred": fr["predicted"][:35],
+                "ground_truth": br["ground_truth"][:35],
+            })
+
+    gained = sum(1 for f in flips if f["flip"] == "MISS->HIT")
+    lost = sum(1 for f in flips if f["flip"] == "HIT->MISS")
+
+    print(f"FLIP TRACKING (baseline -> round {campaign_rounds[-1]['round']})")
+    print(f"  Queries gained (MISS->HIT): {gained}")
+    print(f"  Queries lost (HIT->MISS):   {lost}")
+    print(f"  Net change:                 {gained - lost:+d}")
+    print()
+    if flips:
+        ipy_display(pd.DataFrame(flips))
+
+
+def show_lineage_chain(campaign_rounds: list) -> None:
+    """Display PromptState lineage chain across rounds."""
+    if not campaign_rounds:
+        print("No campaign rounds to display.")
+        return
+
+    print("LINEAGE CHAIN")
+    print("=" * 50)
+    for i, rd in enumerate(campaign_rounds):
+        ps = rd["prompt_state"]
+        parent = ps.parent_id[:12] if ps.parent_id else "root"
+        arrow = "  " if i == 0 else "  -> "
+        print(
+            f"{arrow}[{ps.id[:12]}] Round {rd['round']}: "
+            f"{rd['label'][:40]} ({rd['accuracy']:.1%})"
+        )
+        if ps.parent_id:
+            print(
+                f"       parent: {parent}  |  "
+                f"changes: {ps.changes_description or 'none'}"
+            )

@@ -46,13 +46,17 @@ __all__ = [  # noqa: F405
     "advisory_to_scan_variants", "resolve_scan_variants",
     "select_scan_winner_notebook", "build_historical_index", "load_task_description",
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
-    "audit_historical_data",
+    "audit_historical_data", "run_scan_advisor", "seed_campaign_from_scan",
     # Campaign
     "show_feedback_preflight", "run_feedback_cycle_notebook", "save_campaign_winner",
     "display_progress", "run_manual_round",
     "select_and_seed_grid_winner",
     # Notebook-facing wrappers
     "show_grid_overview", "smoke_test_override",
+    # Pipeline snapshot
+    "show_pipeline_snapshot",
+    # Campaign results display
+    "show_campaign_summary", "show_flip_tracking", "show_lineage_chain",
     # Langfuse
     "push_langfuse", "sync_langfuse",
     # Entity profiles

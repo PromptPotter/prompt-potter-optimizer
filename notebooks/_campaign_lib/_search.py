@@ -22,7 +22,7 @@ from api.services.search import (
     filter_variant_library as _filter_variant_library,
 )
 
-from ._display import _fmt_query_result, display_axis_profiles
+from ._display import _fmt_query_result, display_axis_profiles, display_progress
 from ._setup import setup_llm
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,8 @@ __all__ = [
     "select_scan_winner_notebook", "build_historical_index", "load_task_description",
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
     "audit_historical_data",
+    # Notebook-facing wrappers
+    "run_scan_advisor", "seed_campaign_from_scan",
 ]
 
 
@@ -99,6 +101,7 @@ def show_scan_coverage(
     pipeline_params: dict | None = None,
     min_queries: int = 6,
     axis_requirements: dict[str, int] | None = None,
+    pipeline_schema=None,
 ) -> dict:
     """Print a formatted coverage report and return the raw dict."""
     result = _assess_scan_coverage(
@@ -106,6 +109,7 @@ def show_scan_coverage(
         pipeline_params=pipeline_params,
         min_queries=min_queries,
         axis_requirements=axis_requirements,
+        pipeline_schema=pipeline_schema,
     )
 
     bl = result["baseline_coverage"]
@@ -148,12 +152,18 @@ def show_scan_coverage(
         print()
 
     if pp_axes:
-        print("  Pipeline params (always need backend):")
+        print("  Pipeline params:")
         n_diag = result["n_diagnostic"]
         for a in pp_axes:
+            n_hist = a.get("n_cached_historical", 0)
+            n_compat = a.get("n_step_compatible", 0)
             n_calls = a["n_values"] * n_diag
-            print(f"    {a['axis']:<22s} {a['n_values']} variants "
-                  f"x {n_diag} queries = {n_calls} calls")
+            if n_hist:
+                print(f"    {a['axis']:<22s} {a['n_values']} variants "
+                      f"| {n_hist} cached ({n_compat} step-compatible)")
+            else:
+                print(f"    {a['axis']:<22s} {a['n_values']} variants "
+                      f"x {n_diag} queries = {n_calls} calls (no historical data)")
         print()
 
     saved = summary["backend_calls_saved"]
@@ -401,11 +411,11 @@ async def scan_advisor(
         axes_to_skip, budget_breakdown, and reasoning.
     """
     from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
-    from api.services.search.scan_advisor import _excluded_from_schema
 
     # --- Internalized prep (matches resume_or_build_diagnostic pattern) ---
     pipeline_schema = svc.get("pipeline_schema") or TERMNORM_DEFAULT_SCHEMA
     pipeline_params = campaign_config.get("pipeline_params")
+    user_excluded = campaign_config.get("exclude_steps", [])
 
     variant_library = load_variant_library()
     if pipeline_params and pipeline_schema:
@@ -419,15 +429,13 @@ async def scan_advisor(
     eval_data_size = len(eval_data)
 
     # --- Display ---
-    excluded_steps = _excluded_from_schema(pipeline_schema, pipeline_params)
-
     print("=" * 70)
     print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
     print("=" * 70)
     print(f"  Pipeline: {pipeline_schema.name} ({pipeline_schema.version})")
     print(f"  Steps: {[s.name for s in pipeline_schema.steps]}")
-    if excluded_steps:
-        print(f"  Excluded: {sorted(excluded_steps)}")
+    if user_excluded:
+        print(f"  Excluded: {user_excluded}")
     print(f"  Eval data size: {eval_data_size} queries")
     print(f"  Query budget: {query_budget}")
     if task_description:
@@ -446,6 +454,7 @@ async def scan_advisor(
         coverage_stats=coverage_stats,
         pipeline_params=pipeline_params,
         task_description=task_description,
+        exclude_steps=user_excluded or None,
     )
 
     _display_scan_advisory(advisory)
@@ -526,6 +535,55 @@ def advisory_to_scan_variants(
         raw[ax["axis"]] = ax["suggested_values"]
 
     return _resolve_schema_axes(raw, pipeline_schema)
+
+
+async def run_scan_advisor(
+    campaign_config: dict,
+    svc: dict,
+    baseline_results: list,
+    eval_data: list,
+    *,
+    query_budget: int = 120,
+    task_description: str = "",
+    coverage_df=None,
+) -> tuple[dict, dict, dict]:
+    """Run scan advisor + extract/display proposed variants.
+
+    Builds coverage_stats from *coverage_df* (handles empty gracefully),
+    calls scan_advisor(), then advisory_to_scan_variants(), prints summary.
+    Returns (advisory, scan_variants, schema_labels).
+    """
+    cov_stats = None
+    if coverage_df is not None and hasattr(coverage_df, "empty") and not coverage_df.empty:
+        covered = int(coverage_df["in_candidates"].sum())
+        total = len(coverage_df)
+        cov_stats = {
+            "covered": covered,
+            "total": total,
+            "coverage_pct": covered / total * 100 if total else 0,
+        }
+
+    advisory = await scan_advisor(
+        campaign_config, svc, baseline_results, eval_data,
+        query_budget=query_budget,
+        coverage_stats=cov_stats,
+        task_description=task_description,
+    )
+
+    proposed, schema_labels = advisory_to_scan_variants(
+        advisory, pipeline_schema=svc.get("pipeline_schema"),
+    )
+
+    print("\n--- PROPOSED SCAN VARIANTS (edit in next cell) ---")
+    for axis, values in proposed.items():
+        if axis in schema_labels:
+            print(f"  {axis}: (baseline + {len(values) - 1} mutations)")
+            for i, label in enumerate(schema_labels[axis]):
+                print(f"    [{i}] {label}")
+        else:
+            print(f"  {axis}: {values}")
+
+    return advisory, proposed if proposed else {}, schema_labels
 
 
 def resolve_scan_variants(
@@ -942,5 +1000,48 @@ def select_scan_winner_notebook(
               f"(parent: {best_ps.parent_id[:12] if best_ps.parent_id else 'root'})")
     if best_params != dict(pipeline_params or {}):
         print(f"Pipeline params updated: {best_params}")
+
+    return best_ps, best_params
+
+
+def seed_campaign_from_scan(
+    scan_df,
+    axis_profiles: list,
+    search_baseline,
+    variant_library: dict,
+    campaign_rounds: list,
+    campaign_config: dict,
+    *,
+    store=None,
+    backend_id: str = "",
+    plan_id: str = "",
+) -> tuple:
+    """Select scan winner, update pipeline_params, seed campaign_rounds.
+
+    Calls select_scan_winner_notebook(), updates campaign_config["pipeline_params"],
+    appends round entry, displays progress.
+    Returns (best_ps, best_params).
+    """
+    best_ps, best_params = select_scan_winner_notebook(
+        scan_df, axis_profiles, search_baseline, variant_library,
+        pipeline_params=campaign_config.get("pipeline_params"),
+        store=store, backend_id=backend_id, plan_id=plan_id,
+    )
+
+    if best_params:
+        campaign_config["pipeline_params"] = best_params
+        print(f"Updated pipeline_params: {best_params}")
+
+    bl = campaign_rounds[0] if campaign_rounds else {}
+    campaign_rounds.append({
+        "round": "search",
+        "label": f"smart_search ({best_ps.changes_description or best_ps.id[:12]})",
+        "prompt_state": best_ps,
+        "accuracy": bl.get("accuracy", 0.0),
+        "hits": bl.get("hits", 0),
+        "total": bl.get("total", 0),
+        "results": bl.get("results", []),
+    })
+    display_progress(campaign_rounds)
 
     return best_ps, best_params

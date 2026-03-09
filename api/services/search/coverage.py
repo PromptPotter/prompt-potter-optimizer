@@ -8,6 +8,7 @@ build_prompt_result_index builds the cross-run query lookup.
 import hashlib
 import logging
 from collections import defaultdict
+from api.models.pipeline_schema import PipelineSchema, is_result_step_compatible
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
 from api.services.search.plan_persistence import (
@@ -72,6 +73,7 @@ def assess_scan_coverage(
     pipeline_params: dict | None = None,
     min_queries: int = DEFAULT_DIAGNOSTIC_QUERIES,
     axis_requirements: dict[str, int] | None = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Check whether the historical index already covers the OAT scan needs.
 
@@ -154,15 +156,33 @@ def assess_scan_coverage(
             "variants": variants_detail,
         })
 
-    # --- Pipeline-param axes ---
+    # --- Pipeline-param axes: discover historical data instead of blanket reject ---
     pp_calls_needed = 0
     base_params = dict(pipeline_params or {})
+    target_steps = set(base_params.get("steps", []))
+    baseline_rp_hash = hashlib.sha256(
+        baseline_ps.render().encode(),
+    ).hexdigest()[:16]
     for axis_name, values in pipeline_param_defs.items():
         current_val = base_params.get(axis_name)
         non_baseline = [v for v in values if v != current_val]
         if not non_baseline:
             continue
+
         n_calls = len(non_baseline) * n_diagnostic
+        # Check historical index for cached data (permissive discovery)
+        n_cached_total = 0
+        n_step_compatible = 0
+        if prompt_result_index:
+            cached = prompt_result_index.get(baseline_rp_hash, {})
+            for q in diag_query_strings:
+                if q in cached:
+                    n_cached_total += 1
+                    if target_steps and is_result_step_compatible(
+                        cached[q], target_steps,
+                    ):
+                        n_step_compatible += 1
+
         pp_calls_needed += n_calls
         total_calls_needed += n_calls
         required = axis_requirements.get(axis_name, len(non_baseline))
@@ -173,7 +193,14 @@ def assess_scan_coverage(
             "n_usable": 0,
             "n_required": required,
             "sufficient": False,
-            "note": "Pipeline params require fresh backend calls",
+            "n_cached_historical": n_cached_total,
+            "n_step_compatible": n_step_compatible,
+            "note": (
+                f"{n_cached_total} historical results found"
+                f" ({n_step_compatible} step-compatible)"
+                if n_cached_total
+                else "No historical data — needs fresh backend calls"
+            ),
         })
 
     # --- Summary ---

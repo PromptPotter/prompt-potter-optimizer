@@ -21,15 +21,23 @@ logger = logging.getLogger(__name__)
 def _build_pipeline_anatomy(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
+    active_steps: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Extract structured pipeline anatomy from PipelineSchema.steps.
 
     Includes output schema fields and prompt metadata when available,
     giving the advisor LLM visibility into what each step produces.
     Steps in ``excluded_steps`` are annotated with ``"excluded": True``.
+    When ``active_steps`` is provided, steps that are neither active nor
+    excluded are skipped entirely (ghost steps from the default schema
+    that don't exist in the experiment data).
     """
     anatomy = []
     for step in schema.steps:
+        if active_steps is not None:
+            relevant = active_steps | (excluded_steps or set())
+            if step.name not in relevant:
+                continue
         entry: dict[str, Any] = {
             "name": step.name,
             "type": step.type,
@@ -330,6 +338,7 @@ async def advise_scan_config(
     coverage_stats: dict | None = None,
     pipeline_params: dict | None = None,
     task_description: str = "",
+    exclude_steps: list[str] | None = None,
 ) -> dict:
     """Generate LLM-powered scan configuration advice.
 
@@ -347,13 +356,18 @@ async def advise_scan_config(
             steps are derived by diffing schema steps vs active steps.
         task_description: Domain context for the advisor LLM (e.g. input patterns,
             matching challenges). Helps generate domain-specific value suggestions.
+        exclude_steps: Explicit list of steps to exclude. When provided,
+            overrides the automatic schema-vs-pipeline_params diff.
 
     Returns:
         Advisory dict with ``priority_axes``, ``suggested_n_diagnostic``,
         ``axes_to_skip``, ``budget_breakdown``, ``reasoning``, and
         ``validation_warnings``.
     """
-    excluded_steps = _excluded_from_schema(pipeline_schema, pipeline_params)
+    if exclude_steps is not None:
+        excluded_steps = set(exclude_steps) if exclude_steps else None
+    else:
+        excluded_steps = _excluded_from_schema(pipeline_schema, pipeline_params)
 
     # Compute baseline accuracy
     if baseline_results:
@@ -362,7 +376,14 @@ async def advise_scan_config(
     else:
         baseline_accuracy = 0.0
 
-    pipeline_anatomy = _build_pipeline_anatomy(pipeline_schema, excluded_steps=excluded_steps)
+    active = (
+        set(pipeline_params["steps"])
+        if pipeline_params and "steps" in pipeline_params
+        else None
+    )
+    pipeline_anatomy = _build_pipeline_anatomy(
+        pipeline_schema, excluded_steps=excluded_steps, active_steps=active,
+    )
     prompt_field_axes = _extract_prompt_field_axes(variant_library)
 
     prompt = _build_advisor_prompt(

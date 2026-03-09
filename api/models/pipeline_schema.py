@@ -331,6 +331,24 @@ class PipelineSchema(BaseModel):
         return 0.0
 
 
+def is_result_step_compatible(
+    result: dict,
+    target_steps: set[str] | list[str],
+) -> bool:
+    """Tag whether a historical result's prediction matches what target config would produce.
+
+    True when terminated_at is in target_steps (the result never reached
+    a step absent from the target config). False when terminated_at is
+    missing or outside target_steps. Used for annotation, not filtering.
+    """
+    pd = result.get("pipeline_data") or {}
+    terminated_at = pd.get("terminated_at")
+    if terminated_at is None:
+        return False
+    target = target_steps if isinstance(target_steps, set) else set(target_steps)
+    return terminated_at in target
+
+
 def _compute_source_recall(step: PipelineStep, results: list[dict]) -> float:
     """Fraction of queries where GT appears in the candidate source output."""
     scoped = [r for r in results if _step_ran(step.name, r) and not r.get("error")]
