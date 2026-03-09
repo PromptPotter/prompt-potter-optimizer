@@ -12,7 +12,8 @@ import random
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
@@ -411,6 +412,8 @@ async def sensitivity_scan(
     Returns:
         Tuple of (per_variant_df, axis_profiles).
     """
+    import pandas as pd
+
     _cb = progress_cb or (lambda _e: None)
 
     if session_terms:
@@ -761,6 +764,8 @@ async def adaptive_search(
     Returns:
         Tuple of (best_ps, best_pipeline_params, search_log_df).
     """
+    import pandas as pd
+
     _cb = progress_cb or (lambda _e: None)
 
     if session_terms:
@@ -954,6 +959,7 @@ def load_scan_results_from_plan(
 
     Returns ``None`` if no plan or no scan rows found.
     """
+    import pandas as pd
     from api.services.search.plan_persistence import deserialize_smart_search_plan
 
     plan_data = store.smart_search.load(backend_id, plan_id)

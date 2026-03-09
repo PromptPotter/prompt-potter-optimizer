@@ -1,10 +1,14 @@
 """Synthesize sensitivity profiles from grid search data."""
 
+from __future__ import annotations
+
 import hashlib
 import logging
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from api.services.project_store import ProjectStore
 from api.services.prompt_eval import HASH_TRUNCATE, compute_composite_score
@@ -30,6 +34,8 @@ def synthesize_sensitivity_from_grid(
     Returns ``(per_variant_df, axis_profiles)`` in the same format as
     ``sensitivity_scan()``, or ``None`` if insufficient coverage.
     """
+    import pandas as pd
+
     plan_summaries = store.grid_plans.list_all(backend_id)
     if not plan_summaries:
         logger.info("synthesize_sensitivity: no grid plans found")

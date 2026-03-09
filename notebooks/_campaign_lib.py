@@ -5,12 +5,17 @@ and adds tqdm progress bars, print statements, and IPython display for
 interactive notebook use.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pandas as pd
 from tqdm.auto import tqdm
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from api.models.pipeline_schema import PipelineSchema
 from api.models.prompt_state import PromptState
@@ -635,6 +640,8 @@ def load_stored_dataset(
 
 def analyze_candidate_coverage(replay_results: list) -> pd.DataFrame:
     """Analyze candidate coverage and print diagnostic summary."""
+    import pandas as pd
+
     result = _analyze_candidate_coverage(replay_results)
     rows = result["rows"]
     covered = result["covered"]

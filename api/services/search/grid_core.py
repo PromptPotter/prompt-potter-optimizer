@@ -4,6 +4,8 @@ Builds cartesian products of prompt field variants, evaluates each
 grid point, and analyzes results to find optimal configurations.
 """
 
+from __future__ import annotations
+
 import asyncio
 import itertools
 import json
@@ -13,7 +15,8 @@ import random
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from api.models.prompt_state import LAYER1_STRING_FIELDS, PromptState
 from api.services.llm_client import LLMClientBase
@@ -440,6 +443,7 @@ async def run_grid_search(
         DataFrame with columns: axis indices, prompt_state_id,
         hits, total, accuracy, errors. Sorted by accuracy desc.
     """
+    import pandas as pd
     eval_plan = resolve_point_evals(
         grid_points, state_lookup, eval_data,
         eval_queries_per_point, shared_queries, seed,
@@ -502,6 +506,8 @@ async def run_grid_search(
 
 def merge_grid_results(*dataframes: pd.DataFrame) -> pd.DataFrame:
     """Merge multiple grid result DataFrames, keeping best accuracy per prompt_state_id."""
+    import pandas as pd
+
     combined = pd.concat(dataframes, ignore_index=True)
     return (
         combined.sort_values("accuracy", ascending=False)
@@ -744,6 +750,7 @@ def load_grid_plan_results(
     Must receive the same eval sampling params as the grid search that
     produced the runs, so that content hashes match.
     """
+    import pandas as pd
     from api.services.search.plan_persistence import deserialize_grid_plan
 
     plan_data = store.grid_plans.load(backend_id, plan_id)
