@@ -55,6 +55,8 @@ def _build_pipeline_anatomy(
             }
             if step.output_schema.field_descriptions:
                 schema_entry["field_descriptions"] = step.output_schema.field_descriptions
+            if step.output_schema.json_schema:
+                schema_entry["json_schema"] = step.output_schema.json_schema
             entry["output_schema"] = schema_entry
         if step.prompt_meta:
             entry["prompt_meta"] = {
@@ -62,6 +64,8 @@ def _build_pipeline_anatomy(
                 "template_variables": step.prompt_meta.template_variables,
                 "description": step.prompt_meta.description,
             }
+            if step.prompt_meta.template:
+                entry["prompt_meta"]["template"] = step.prompt_meta.template
         if step.current_config:
             entry["current_values"] = step.current_config
         anatomy.append(entry)
@@ -222,6 +226,31 @@ Always include the current/default model as the first value. If no Available Mod
 section is present, skip model axes entirely
 
 Return ONLY the JSON object, no markdown fences or extra text."""
+
+
+def preview_advisor_prompt() -> str:
+    """Return the advisor prompt template with placeholder markers.
+
+    Builds the full prompt using representative placeholders so all
+    conditional sections are visible.  Useful for inspecting the exact
+    structure the LLM receives without running a live call.
+    """
+    return _build_advisor_prompt(
+        pipeline_anatomy=[{"<_build_pipeline_anatomy(svc['pipeline_schema'])>": "..."}],
+        prompt_field_axes=["<variant_library['prompt_fields'].keys()>"],
+        baseline_accuracy=0.0,
+        eval_data_size=0,
+        query_budget=0,
+        pipeline_description="<svc['pipeline_schema'].description>",
+        coverage_stats={
+            "covered": "<coverage_df['in_candidates'].sum()>",
+            "total": "<len(coverage_df)>",
+            "coverage_pct": 0.0,
+        },
+        excluded_steps={"<campaign_config['exclude_steps']>"},
+        task_description="<task_description>",
+        available_models=["<svc['pipeline_schema'].available_models>"],
+    )
 
 
 def _extract_prompt_field_axes(variant_library: dict) -> list[str]:

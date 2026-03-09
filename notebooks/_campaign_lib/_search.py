@@ -20,6 +20,7 @@ from api.services.search import (
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
     advise_scan_config as _advise_scan_config,
     filter_variant_library as _filter_variant_library,
+    preview_advisor_prompt as _preview_advisor_prompt,
 )
 
 from ._display import _fmt_query_result, display_axis_profiles, display_progress
@@ -34,10 +35,19 @@ __all__ = [
     "advisory_to_scan_variants", "resolve_scan_variants",
     "select_scan_winner_notebook", "build_historical_index", "load_task_description",
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
-    "audit_historical_data",
+    "audit_historical_data", "preview_advisor_prompt",
     # Notebook-facing wrappers
     "run_scan_advisor", "seed_campaign_from_scan",
 ]
+
+
+def preview_advisor_prompt() -> None:
+    """Display the scan advisor prompt template with placeholder markers.
+
+    Renders as Markdown in Jupyter notebooks for readable inspection.
+    """
+    from IPython.display import display as ipy_display, Markdown
+    ipy_display(Markdown(_preview_advisor_prompt()))
 
 
 # ---------------------------------------------------------------------------

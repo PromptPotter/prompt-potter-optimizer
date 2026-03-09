@@ -40,6 +40,7 @@ _SUBMODULE_MAP: dict[str, str] = {
     "restructure_context": "api.services.search.context",
     # scan_advisor
     "advise_scan_config": "api.services.search.scan_advisor",
+    "preview_advisor_prompt": "api.services.search.scan_advisor",
     # synthesis
     "synthesize_sensitivity_from_grid": "api.services.search.synthesis",
 }
