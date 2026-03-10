@@ -90,7 +90,9 @@ class PipelineStep(BaseModel):
     runtime: str = "backend"  # "backend" | "frontend"
     short_circuit: bool = False
     node_role: str = ""  # "candidate_source" | "ranker" | "enricher" | "cache" | ""
+    description: str = ""
     param_keys: set[str] = Field(default_factory=set)
+    param_descriptions: dict[str, str] = Field(default_factory=dict)
     override_map: dict[str, str] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
@@ -98,6 +100,8 @@ class PipelineStep(BaseModel):
     output_schema: StepOutputSchema | None = None
     prompt_meta: StepPromptMeta | None = None
     current_config: dict[str, Any] = Field(default_factory=dict)
+    default_config: dict[str, Any] = Field(default_factory=dict)
+    input_keys: set[str] = Field(default_factory=set)
 
 
 # ---------------------------------------------------------------------------

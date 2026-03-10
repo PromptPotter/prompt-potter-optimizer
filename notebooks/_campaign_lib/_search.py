@@ -52,10 +52,13 @@ def preview_advisor_prompt(
     svc: dict | None = None,
     *,
     task_description: str = "",
+    raw: bool = False,
 ) -> None:
     """Display the scan advisor prompt — with real data when svc is provided.
 
-    Renders as Markdown in Jupyter notebooks for readable inspection.
+    Args:
+        raw: When True, print the exact prompt string instead of
+            rendering as Markdown. Useful for debugging.
     """
     from IPython.display import display as ipy_display, Markdown
 
@@ -80,7 +83,10 @@ def preview_advisor_prompt(
     else:
         prompt = _preview_advisor_prompt()
 
-    ipy_display(Markdown(prompt))
+    if raw:
+        print(prompt)
+    else:
+        ipy_display(Markdown(prompt))
 
 
 # ---------------------------------------------------------------------------

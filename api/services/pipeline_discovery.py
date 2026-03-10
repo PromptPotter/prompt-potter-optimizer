@@ -47,6 +47,10 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             runtime="frontend",
             short_circuit=True,
             node_role="cache",
+            description=(
+                "Checks the cache for previously resolved queries. "
+                "Short-circuits the pipeline on hit."
+            ),
             langfuse_type="span",
         ),
         PipelineStep(
@@ -55,7 +59,18 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             runtime="frontend",
             short_circuit=True,
             node_role="candidate_source",
+            description=(
+                "Fuzzy string matching against the database index. "
+                "Short-circuits the pipeline on high-confidence matches, "
+                "bypassing web search and LLM profiling entirely."
+            ),
             param_keys={"fuzzy_threshold", "fuzzy_scorer"},
+            param_descriptions={
+                "fuzzy_threshold": (
+                    "Minimum similarity score (0-100) to accept a fuzzy match"
+                ),
+                "fuzzy_scorer": "Scoring algorithm for fuzzy string comparison",
+            },
             override_map={
                 "fuzzy_threshold": "threshold",
                 "fuzzy_scorer": "scorer",
@@ -67,9 +82,34 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             type="tool",
             runtime="backend",
             node_role="enricher",
+            description=(
+                "Searches the web for contextual information about the input "
+                "query. Retrieved content provides the primary raw context that "
+                "entity_profiling uses to generate structured profiles — the "
+                "quality of web results directly determines profiling quality."
+            ),
             param_keys={
                 "max_sites", "num_results", "content_char_limit",
                 "query_prefix", "query_suffix",
+            },
+            param_descriptions={
+                "query_prefix": (
+                    "Text prepended to the input query before web search — "
+                    "controls search focus, domain targeting, and terminology "
+                    "framing (e.g. 'LCA database' narrows to domain)"
+                ),
+                "query_suffix": (
+                    "Text appended to the input query before web search — "
+                    "adds qualifiers, constraints, or context keywords "
+                    "(e.g. 'material composition' adds specificity)"
+                ),
+                "num_results": "Number of search engine results to request",
+                "max_sites": (
+                    "Maximum number of web pages to fetch and extract content from"
+                ),
+                "content_char_limit": (
+                    "Maximum characters of content to extract per web page"
+                ),
             },
             override_map={
                 "max_sites": "max_sites",
@@ -77,6 +117,13 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "content_char_limit": "content_char_limit",
                 "query_prefix": "query_prefix",
                 "query_suffix": "query_suffix",
+            },
+            default_config={
+                "query_prefix": "",
+                "query_suffix": "",
+                "num_results": 20,
+                "max_sites": 7,
+                "content_char_limit": 800,
             },
             observation_name="web_search",
             observation_mappings=[
@@ -90,9 +137,29 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             type="generation",
             runtime="backend",
             node_role="enricher",
+            description=(
+                "LLM-driven step that generates a structured entity profile "
+                "from the input query and web-sourced raw content. Produces "
+                "the required pipeline output (entity_profile). Profile "
+                "quality depends on both the LLM configuration and the "
+                "quality of upstream web_search results."
+            ),
             param_keys={
                 "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
                 "profiling_prompt", "profiling_schema", "profiling_model",
+            },
+            param_descriptions={
+                "raw_content_limit": (
+                    "Maximum characters of web-sourced raw content passed "
+                    "as context to the profiling LLM — bounds how much of "
+                    "web_search output is visible to the model"
+                ),
+                "profiling_temperature": (
+                    "LLM sampling temperature for profile generation"
+                ),
+                "profiling_max_tokens": (
+                    "Maximum tokens in the LLM profile generation response"
+                ),
             },
             override_map={
                 "raw_content_limit": "raw_content_limit",
@@ -102,6 +169,8 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "profiling_schema": "output_schema",
                 "profiling_model": "model",
             },
+            default_config={"raw_content_limit": 5000},
+            input_keys={"web_sources"},
             observation_name="entity_profiling",
             observation_mappings=[
                 ObservationMapping(
@@ -115,10 +184,21 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             type="retriever",
             runtime="backend",
             node_role="candidate_source",
+            description=(
+                "Token-level retrieval matching entity profile fields against "
+                "database entries. Candidate pool quality depends on the "
+                "entity profile generated upstream."
+            ),
             param_keys={"max_token_candidates"},
+            param_descriptions={
+                "max_token_candidates": (
+                    "Maximum number of candidates to return from token matching"
+                ),
+            },
             override_map={
                 "max_token_candidates": "max_token_candidates",
             },
+            input_keys={"entity_profile"},
             observation_name="token_matching",
             observation_mappings=[
                 ObservationMapping(
@@ -132,11 +212,27 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             type="generation",
             runtime="backend",
             node_role="ranker",
+            description=(
+                "LLM-driven re-ranking of token-matched candidates using "
+                "a ranking prompt. Selects the best match from the candidate pool."
+            ),
             param_keys={
                 "ranking_temperature", "ranking_max_tokens",
                 "ranking_sample_size", "ranking_prompt",
                 "ranking_schema", "ranking_model",
                 "relevance_weight_core",
+            },
+            param_descriptions={
+                "ranking_temperature": "LLM sampling temperature for ranking",
+                "ranking_max_tokens": (
+                    "Maximum tokens in the LLM ranking response"
+                ),
+                "ranking_sample_size": (
+                    "Number of candidates sampled from the pool for LLM ranking"
+                ),
+                "relevance_weight_core": (
+                    "Weight given to core-concept relevance in ranking score"
+                ),
             },
             override_map={
                 "ranking_temperature": "temperature",
@@ -147,6 +243,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "ranking_model": "model",
                 "relevance_weight_core": "relevance_weight_core",
             },
+            input_keys={"token_matched_candidates", "entity_profile"},
             observation_name="llm_ranking",
             observation_mappings=[
                 ObservationMapping(

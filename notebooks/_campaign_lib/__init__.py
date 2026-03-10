@@ -48,7 +48,6 @@ __all__ = [  # noqa: F405
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
     "audit_historical_data", "run_scan_advisor", "seed_campaign_from_scan",
     "preview_advisor_prompt",
-    "build_pipeline_overview", "build_tunable_params", "build_llm_context",
     # Campaign
     "show_feedback_preflight", "run_feedback_cycle_notebook", "save_campaign_winner",
     "display_progress", "run_manual_round",

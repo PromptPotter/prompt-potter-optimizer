@@ -25,36 +25,24 @@ STRUCTURAL_OVERRIDES = {"prompt", "output_schema", "model"}
 def _relevant_steps(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
-    active_steps: set[str] | None = None,
 ) -> list[tuple[PipelineStep, bool]]:
-    """Yield (step, is_excluded) pairs, skipping ghost steps.
-
-    When ``active_steps`` is provided, steps that are neither active nor
-    excluded are skipped (ghost steps from the default schema that don't
-    exist in the experiment data).
-    """
-    result: list[tuple[PipelineStep, bool]] = []
-    for step in schema.steps:
-        if active_steps is not None:
-            relevant = active_steps | (excluded_steps or set())
-            if step.name not in relevant:
-                continue
-        excluded = bool(excluded_steps and step.name in excluded_steps)
-        result.append((step, excluded))
-    return result
+    """Return (step, is_excluded) pairs for all schema steps."""
+    return [
+        (step, bool(excluded_steps and step.name in excluded_steps))
+        for step in schema.steps
+    ]
 
 
 def build_pipeline_overview(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
-    active_steps: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Layer 1 — high-level pipeline structure.
 
     Step name, type, runtime, role, excluded flag. No config details.
     """
     overview = []
-    for step, excluded in _relevant_steps(schema, excluded_steps, active_steps):
+    for step, excluded in _relevant_steps(schema, excluded_steps):
         entry: dict[str, Any] = {
             "name": step.name,
             "type": step.type,
@@ -73,7 +61,6 @@ def build_pipeline_overview(
 def build_tunable_params(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
-    active_steps: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Layer 2 — tunable knobs per step.
 
@@ -81,7 +68,7 @@ def build_tunable_params(
     (prompt, output_schema, model) which are not numeric/string "knobs".
     """
     tunable = []
-    for step, _excluded in _relevant_steps(schema, excluded_steps, active_steps):
+    for step, _excluded in _relevant_steps(schema, excluded_steps):
         if not step.param_keys:
             continue
         # Identify structural keys via override_map
@@ -109,7 +96,6 @@ def build_tunable_params(
 def build_llm_context(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
-    active_steps: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Layer 3 — LLM node details (output schemas, prompt templates).
 
@@ -117,7 +103,7 @@ def build_llm_context(
     Presented as reference context, not primary optimization targets.
     """
     context = []
-    for step, _excluded in _relevant_steps(schema, excluded_steps, active_steps):
+    for step, _excluded in _relevant_steps(schema, excluded_steps):
         if not step.output_schema and not step.prompt_meta:
             continue
         entry: dict[str, Any] = {"name": step.name}
@@ -284,14 +270,7 @@ def preview_advisor_prompt(
         else:
             excluded_steps = _excluded_from_schema(pipeline_schema, pipeline_params)
 
-        active = (
-            set(pipeline_params["steps"])
-            if pipeline_params and "steps" in pipeline_params
-            else None
-        )
-        layer_args = dict(
-            schema=pipeline_schema, excluded_steps=excluded_steps, active_steps=active,
-        )
+        layer_args = dict(schema=pipeline_schema, excluded_steps=excluded_steps)
         return _build_advisor_prompt(
             pipeline_overview=build_pipeline_overview(**layer_args),
             tunable_params=build_tunable_params(**layer_args),
@@ -452,14 +431,7 @@ async def advise_scan_config(
     else:
         excluded_steps = _excluded_from_schema(pipeline_schema, pipeline_params)
 
-    active = (
-        set(pipeline_params["steps"])
-        if pipeline_params and "steps" in pipeline_params
-        else None
-    )
-    layer_args = dict(
-        schema=pipeline_schema, excluded_steps=excluded_steps, active_steps=active,
-    )
+    layer_args = dict(schema=pipeline_schema, excluded_steps=excluded_steps)
     pipeline_overview = build_pipeline_overview(**layer_args)
     tunable_params = build_tunable_params(**layer_args)
     llm_context = build_llm_context(**layer_args)
