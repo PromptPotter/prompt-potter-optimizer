@@ -57,13 +57,20 @@ async def test_advise_exclude_steps_explicit(monkeypatch):
         ],
     )
 
-    # Capture the excluded_steps that _build_advisor_prompt receives
+    # Capture the excluded_steps that layer builders receive
     captured = {}
 
     import api.services.search.scan_advisor as _advisor_mod
 
+    _orig_overview = _advisor_mod.build_pipeline_overview
+
+    def _spy_overview(schema, excluded_steps=None):
+        captured["excluded_steps"] = excluded_steps
+        return _orig_overview(schema, excluded_steps)
+
+    monkeypatch.setattr(_advisor_mod, "build_pipeline_overview", _spy_overview)
+
     def _mock_build_prompt(*args, **kwargs):
-        captured["excluded_steps"] = kwargs.get("excluded_steps")
         return "Return {}"
 
     monkeypatch.setattr(_advisor_mod, "_build_advisor_prompt", _mock_build_prompt)
@@ -113,8 +120,15 @@ async def test_advise_exclude_steps_none_falls_back_to_schema_diff(monkeypatch):
 
     import api.services.search.scan_advisor as _advisor_mod
 
+    _orig_overview = _advisor_mod.build_pipeline_overview
+
+    def _spy_overview(schema, excluded_steps=None):
+        captured["excluded_steps"] = excluded_steps
+        return _orig_overview(schema, excluded_steps)
+
+    monkeypatch.setattr(_advisor_mod, "build_pipeline_overview", _spy_overview)
+
     def _mock_build_prompt(*args, **kwargs):
-        captured["excluded_steps"] = kwargs.get("excluded_steps")
         return "Return {}"
 
     monkeypatch.setattr(_advisor_mod, "_build_advisor_prompt", _mock_build_prompt)

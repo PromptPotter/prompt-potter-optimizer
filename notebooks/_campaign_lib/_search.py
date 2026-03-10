@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from api.models.pipeline_schema import PipelineSchema
@@ -571,7 +572,19 @@ def advisory_to_scan_variants(
     for ax in advisory.get("priority_axes", []):
         if ax.get("source") != "pipeline_param" or not ax.get("suggested_values"):
             continue
-        raw[ax["axis"]] = ax["suggested_values"]
+        vals = ax["suggested_values"]
+        # LLMs sometimes return mutation arrays as JSON strings — parse them
+        if ax["axis"].endswith("_schema"):
+            parsed = []
+            for v in vals:
+                if isinstance(v, str):
+                    try:
+                        v = json.loads(v)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                parsed.append(v)
+            vals = parsed
+        raw[ax["axis"]] = vals
 
     return _resolve_schema_axes(raw, pipeline_schema)
 
@@ -601,15 +614,21 @@ async def run_scan_advisor(
     print("scan_variants = {")
     for axis, values in proposed.items():
         if axis in schema_labels:
-            # Schema axis: print raw mutation tuples from advisory
+            # Schema axis: print raw mutation tuples from advisory (one variant per line)
             raw_mutations = []
             for ax in advisory.get("priority_axes", []):
                 if ax.get("axis") == axis:
                     raw_mutations = ax.get("suggested_values", [])
                     break
             print(f"    {axis!r}: [")
-            for mutation in raw_mutations:
-                print(f"        {mutation!r},")
+            for variant in raw_mutations:
+                # LLMs sometimes return mutation arrays as JSON strings — parse them
+                if isinstance(variant, str):
+                    try:
+                        variant = json.loads(variant)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                print(f"        {variant!r},")
             print("    ],")
         else:
             print(f"    {axis!r}: {values!r},")

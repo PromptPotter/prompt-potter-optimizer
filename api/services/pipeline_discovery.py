@@ -297,7 +297,6 @@ def _parse_resolved_prompt(resolved: dict[str, Any]) -> StepPromptMeta:
         version=resolved.get("version"),
         template_variables=resolved.get("template_variables", []),
         description=resolved.get("description", ""),
-        template=resolved.get("template", ""),
     )
 
 

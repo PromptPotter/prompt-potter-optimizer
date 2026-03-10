@@ -73,7 +73,6 @@ class StepPromptMeta(BaseModel):
     version: int | None = None
     template_variables: list[str] = Field(default_factory=list)
     description: str = ""
-    template: str = ""
 
 
 # ---------------------------------------------------------------------------
