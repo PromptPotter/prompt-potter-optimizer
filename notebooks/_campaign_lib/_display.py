@@ -9,6 +9,8 @@ __all__ = [
     "display_progress", "display_suggestions", "display_axis_profiles",
     # Campaign results display
     "show_campaign_summary", "show_flip_tracking", "show_lineage_chain",
+    # Interrupt handling
+    "_print_interrupt_banner",
 ]
 
 # ANSI foreground colors
@@ -20,6 +22,25 @@ YELLOW  = "\033[33m"
 BLUE    = "\033[34m"
 MAGENTA = "\033[35m"
 CYAN    = "\033[36m"
+
+def _print_interrupt_banner(
+    operation: str,
+    *,
+    completed: str = "",
+    saved: str = "",
+    resume_hint: str = "",
+) -> None:
+    """Print a consistent [INTERRUPTED] banner for notebook cell interrupts."""
+    print(f"\n{'=' * 70}")
+    print(f"  {YELLOW}{BOLD}[INTERRUPTED]{RESET} {operation}")
+    if completed:
+        print(f"  Completed: {completed}")
+    if saved:
+        print(f"  Saved: {saved}")
+    if resume_hint:
+        print(f"  Resume: {resume_hint}")
+    print(f"{'=' * 70}")
+
 
 _STEP_SHORT_TAGS: dict[str, str] = {
     "cache_lookup": "cache",

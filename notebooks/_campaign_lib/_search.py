@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
 from pathlib import Path
 from api.models.pipeline_schema import PipelineSchema
 
@@ -23,7 +23,9 @@ from api.services.search import (
     preview_advisor_prompt as _preview_advisor_prompt,
 )
 
-from ._display import _fmt_query_result, display_axis_profiles, display_progress
+from ._display import (
+    _fmt_query_result, _print_interrupt_banner, display_axis_profiles, display_progress,
+)
 from ._setup import setup_llm
 
 logger = logging.getLogger(__name__)
@@ -83,8 +85,7 @@ async def resume_or_build_diagnostic(
         variant_library["pipeline_params"] = scan_variants
 
     # Prepare LLM client
-    api_key = os.environ.get("GROQ_API_KEY", "")
-    llm_client, llm_model = setup_llm(campaign_config, api_key)
+    llm_client, llm_model = setup_llm(campaign_config)
 
     result = await _resume_or_build_diagnostic(
         campaign_config, baseline, baseline_results, llm_client, llm_model,
@@ -433,8 +434,7 @@ async def scan_advisor(
             variant_library, pipeline_params, schema=pipeline_schema,
         )
 
-    api_key = os.environ.get("GROQ_API_KEY", "")
-    llm_client, model = setup_llm(campaign_config, api_key)
+    llm_client, model = setup_llm(campaign_config)
 
     eval_data_size = len(eval_data)
 
@@ -453,6 +453,9 @@ async def scan_advisor(
     print(f"  Calling {model or '?'} ...")
     print()
 
+    eval_llm = campaign_config.get("eval_llm", {})
+    max_tokens = eval_llm.get("max_tokens", 2000)
+
     advisory = await _advise_scan_config(
         pipeline_schema=pipeline_schema,
         variant_library=variant_library,
@@ -460,6 +463,7 @@ async def scan_advisor(
         eval_data_size=eval_data_size,
         llm_client=llm_client,
         model=model,
+        max_tokens=max_tokens,
         query_budget=query_budget,
         coverage_stats=coverage_stats,
         pipeline_params=pipeline_params,
@@ -733,6 +737,13 @@ async def sensitivity_scan(
             pipeline_schema=pipeline_schema,
             on_result=on_result_cb,
         )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        _print_interrupt_banner(
+            "Sensitivity scan",
+            saved="completed axes checkpointed to disk (scan_partial status)",
+            resume_hint="re-run this cell -- partial scan auto-detected from checkpoint",
+        )
+        return None, []
     finally:
         _httpx_log.setLevel(_prev_httpx)
         _httpcore_log.setLevel(_prev_httpcore)
@@ -864,6 +875,14 @@ async def adaptive_search(
             prompt_result_index=prompt_result_index,
             plan_id=plan_id,
         )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        import pandas as _pd
+        _print_interrupt_banner(
+            "Adaptive search",
+            saved="completed evaluations saved via evaluate_prompt_cached",
+            resume_hint="re-run this cell to restart (cached evals will be reused)",
+        )
+        return baseline_ps, dict(pipeline_params or {}), _pd.DataFrame()
     finally:
         _httpx_log.setLevel(_prev_httpx)
         _httpcore_log.setLevel(_prev_httpcore)

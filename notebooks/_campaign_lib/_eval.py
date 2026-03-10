@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from tqdm.auto import tqdm
@@ -25,7 +26,7 @@ from api.services.search import (
     load_eval_dataset as _load_eval_dataset,
 )
 
-from ._display import _fmt_query_result, display_progress
+from ._display import _fmt_query_result, _print_interrupt_banner, display_progress
 
 __all__ = [
     # Baseline & eval
@@ -198,17 +199,27 @@ async def run_baseline_eval(
     from api.services.obs.observability_logger import ObsLogger
     _obs = ObsLogger(svc["store"].base_dir, svc.get("backend_id", ""), langfuse=None)
 
-    campaign_rounds, baseline_results = await _run_baseline_eval(
-        baseline, eval_data, svc.get("backend_client"),
-        pipeline_params=campaign_config.get("pipeline_params"),
-        store=svc.get("store"), backend_id=svc.get("backend_id", ""),
-        experiment_id=svc.get("experiment_id", ""),
-        model=model, temperature=temperature,
-        on_result=_on_result,
-        session_terms=svc.get("session_terms"),
-        obs=_obs,
-    )
-    pbar.close()
+    try:
+        campaign_rounds, baseline_results = await _run_baseline_eval(
+            baseline, eval_data, svc.get("backend_client"),
+            pipeline_params=campaign_config.get("pipeline_params"),
+            store=svc.get("store"), backend_id=svc.get("backend_id", ""),
+            experiment_id=svc.get("experiment_id", ""),
+            model=model, temperature=temperature,
+            on_result=_on_result,
+            session_terms=svc.get("session_terms"),
+            obs=_obs,
+        )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        _print_interrupt_banner(
+            "Baseline eval",
+            completed=f"{pbar.n}/{pbar.total} queries",
+            saved="partial results written to disk (auto-resumes on next run)",
+            resume_hint="re-run this cell to continue from checkpoint",
+        )
+        return [], []
+    finally:
+        pbar.close()
 
     display_progress(campaign_rounds)
 

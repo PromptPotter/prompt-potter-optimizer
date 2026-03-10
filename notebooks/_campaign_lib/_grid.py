@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ from api.services.search import (
     load_grid_plan_results as _load_grid_plan_results,
 )
 
-from ._display import _fmt_query_result, display_progress
+from ._display import _fmt_query_result, _print_interrupt_banner, display_progress
 from ._eval import load_eval_dataset
 
 __all__ = [
@@ -294,21 +295,33 @@ async def run_grid_search(
     def on_point_reused(idx, row):
         pass
 
-    df = await _run_grid_search(
-        grid_points, state_lookup, eval_data, backend_client,
-        on_point_done=on_point_done,
-        on_query_done=on_query_done,
-        on_point_reused=on_point_reused,
-        request_delay=eval_llm.get("request_delay", 1.0),
-        store=store,
-        backend_id=backend_id,
-        session_terms=session_terms,
-        pipeline_params=pipeline_params,
-        eval_queries_per_point=eval_queries_per_point,
-        shared_queries=shared_queries,
-        seed=grid_seed,
-        plan_id=plan_id,
-    )
+    try:
+        df = await _run_grid_search(
+            grid_points, state_lookup, eval_data, backend_client,
+            on_point_done=on_point_done,
+            on_query_done=on_query_done,
+            on_point_reused=on_point_reused,
+            request_delay=eval_llm.get("request_delay", 1.0),
+            store=store,
+            backend_id=backend_id,
+            session_terms=session_terms,
+            pipeline_params=pipeline_params,
+            eval_queries_per_point=eval_queries_per_point,
+            shared_queries=shared_queries,
+            seed=grid_seed,
+            plan_id=plan_id,
+        )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        import pandas as _pd
+        _print_interrupt_banner(
+            "Grid search",
+            completed=f"{_point_counter[0]}/{n_total} grid points",
+            saved="completed points saved via evaluate_prompt_cached (content-hash dedup)",
+            resume_hint="re-run this cell -- stored points will be skipped automatically",
+        )
+        return _pd.DataFrame(columns=[
+            "prompt_state_id", "hits", "total", "accuracy", "errors",
+        ])
 
     if plan_id:
         print(f"Grid plan {plan_id} marked as completed.")

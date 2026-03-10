@@ -10,7 +10,9 @@ if TYPE_CHECKING:
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
 
-from ._display import _fmt_query_result, display_progress
+from ._display import (
+    BOLD, RESET, YELLOW, _fmt_query_result, display_progress,
+)
 
 __all__ = [
     # Campaign
@@ -31,16 +33,19 @@ async def run_manual_round(
     eval_data: list,
     campaign_config: dict,
     svc: dict,
-) -> dict:
+) -> dict | None:
     """Run a single manual optimization round via feedback cycle.
 
     Returns:
-        The round entry dict (also appended to campaign_rounds).
+        The round entry dict (also appended to campaign_rounds), or None
+        if interrupted before any round completed.
     """
     # Override max_rounds=1 for single-round behaviour
     override = dict(campaign_config)
     override.setdefault("optimization", {})
     override["optimization"] = {**override["optimization"], "max_rounds": 1, "patience": 1}
+
+    initial_len = len(campaign_rounds)
 
     await run_feedback_cycle_notebook(
         campaign_rounds, eval_data, override,
@@ -53,7 +58,10 @@ async def run_manual_round(
     )
 
     display_progress(campaign_rounds)
-    return campaign_rounds[-1]
+
+    if len(campaign_rounds) > initial_len:
+        return campaign_rounds[-1]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -295,12 +303,24 @@ async def run_feedback_cycle_notebook(
         )
 
     # Final summary
+    if not campaign_rounds:
+        print(f"\n{YELLOW}{BOLD}[INTERRUPTED]{RESET} Feedback cycle "
+              f"stopped before any rounds completed.")
+        print("  Resume: re-run this cell to restart.")
+        return campaign_rounds
+
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
     print(f"\n{'=' * 70}")
-    print("OPTIMIZATION COMPLETE (feedback cycle)")
+    if result.stop_reason == "interrupted":
+        print(f"  {YELLOW}{BOLD}[INTERRUPTED]{RESET} Feedback cycle stopped by user")
+    else:
+        print("OPTIMIZATION COMPLETE (feedback cycle)")
     print(f"  Rounds run: {result.n_rounds}")
     print(f"  Best accuracy: {best['accuracy']:.1%} (round {best['round']})")
     print(f"  Stop reason: {result.stop_reason}")
+    if result.stop_reason == "interrupted":
+        print("  Saved: all completed rounds checkpointed to campaign store")
+        print("  Resume: re-run this cell -- completed rounds auto-restore")
     if result.cycle_id:
         print(f"  Cycle ID: {result.cycle_id}")
     if result.langfuse_trace_id:
