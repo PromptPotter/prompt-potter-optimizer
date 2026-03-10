@@ -115,10 +115,9 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             type="retriever",
             runtime="backend",
             node_role="candidate_source",
-            param_keys={"max_token_candidates", "relevance_weight_core"},
+            param_keys={"max_token_candidates"},
             override_map={
                 "max_token_candidates": "max_token_candidates",
-                "relevance_weight_core": "relevance_weight_core",
             },
             observation_name="token_matching",
             observation_mappings=[
@@ -137,6 +136,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "ranking_temperature", "ranking_max_tokens",
                 "ranking_sample_size", "ranking_prompt",
                 "ranking_schema", "ranking_model",
+                "relevance_weight_core",
             },
             override_map={
                 "ranking_temperature": "temperature",
@@ -145,6 +145,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "ranking_prompt": "prompt",
                 "ranking_schema": "output_schema",
                 "ranking_model": "model",
+                "relevance_weight_core": "relevance_weight_core",
             },
             observation_name="llm_ranking",
             observation_mappings=[

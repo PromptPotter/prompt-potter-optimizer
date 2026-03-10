@@ -21,6 +21,9 @@ from api.services.search import (
     advise_scan_config as _advise_scan_config,
     filter_variant_library as _filter_variant_library,
     preview_advisor_prompt as _preview_advisor_prompt,
+    build_pipeline_overview,
+    build_tunable_params,
+    build_llm_context,
 )
 
 from ._display import (
@@ -40,16 +43,44 @@ __all__ = [
     "audit_historical_data", "preview_advisor_prompt",
     # Notebook-facing wrappers
     "run_scan_advisor", "seed_campaign_from_scan",
+    "build_pipeline_overview", "build_tunable_params", "build_llm_context",
 ]
 
 
-def preview_advisor_prompt() -> None:
-    """Display the scan advisor prompt template with placeholder markers.
+def preview_advisor_prompt(
+    campaign_config: dict | None = None,
+    svc: dict | None = None,
+    *,
+    task_description: str = "",
+) -> None:
+    """Display the scan advisor prompt — with real data when svc is provided.
 
     Renders as Markdown in Jupyter notebooks for readable inspection.
     """
     from IPython.display import display as ipy_display, Markdown
-    ipy_display(Markdown(_preview_advisor_prompt()))
+
+    if svc is not None:
+        pipeline_schema = svc.get("pipeline_schema")
+        pipeline_params = campaign_config.get("pipeline_params") if campaign_config else None
+        exclude_steps = campaign_config.get("exclude_steps") if campaign_config else None
+
+        variant_library = load_variant_library()
+        if pipeline_params and pipeline_schema:
+            variant_library = _filter_variant_library(
+                variant_library, pipeline_params, schema=pipeline_schema,
+            )
+
+        prompt = _preview_advisor_prompt(
+            pipeline_schema=pipeline_schema,
+            variant_library=variant_library,
+            pipeline_params=pipeline_params,
+            task_description=task_description,
+            exclude_steps=exclude_steps,
+        )
+    else:
+        prompt = _preview_advisor_prompt()
+
+    ipy_display(Markdown(prompt))
 
 
 # ---------------------------------------------------------------------------

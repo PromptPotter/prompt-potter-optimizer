@@ -108,12 +108,13 @@ def test_full_pipeline_extraction():
         "profiling_max_tokens": 512,
     }
     assert nodes[2].metadata["pipeline_params"] == {
-        "max_token_candidates": 20, "relevance_weight_core": 0.7,
+        "max_token_candidates": 20,
     }
     assert nodes[3].metadata["pipeline_params"] == {
         "ranking_temperature": 0.0,
         "ranking_max_tokens": 1024,
         "ranking_sample_size": 10,
+        "relevance_weight_core": 0.7,
     }
 
 

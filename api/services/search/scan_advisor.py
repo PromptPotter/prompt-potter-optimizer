@@ -44,7 +44,7 @@ def _relevant_steps(
     return result
 
 
-def _build_pipeline_overview(
+def build_pipeline_overview(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
     active_steps: set[str] | None = None,
@@ -70,7 +70,7 @@ def _build_pipeline_overview(
     return overview
 
 
-def _build_tunable_params(
+def build_tunable_params(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
     active_steps: set[str] | None = None,
@@ -106,7 +106,7 @@ def _build_tunable_params(
     return tunable
 
 
-def _build_llm_context(
+def build_llm_context(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
     active_steps: set[str] | None = None,
@@ -150,7 +150,6 @@ def _build_advisor_prompt(
     pipeline_description: str,
     excluded_steps: set[str] | None = None,
     task_description: str = "",
-    available_models: list[str] | None = None,
 ) -> str:
     """Build the LLM prompt for scan configuration advice.
 
@@ -169,14 +168,6 @@ Do NOT recommend any axes belonging to these steps — they are inactive.
         task_context_section = f"""
 ## Task Context
 {task_description}
-"""
-
-    available_models_section = ""
-    if available_models:
-        available_models_section = f"""
-## Available Models
-Models supported by the backend: {json.dumps(available_models)}
-For *_model axes, only suggest models from this list.
 """
 
     llm_context_section = ""
@@ -202,7 +193,7 @@ and recommend which axes (parameters and prompt fields) to focus a sensitivity s
 ## Prompt Field Axes
 Prompt template fields that can be varied (variant library has pre-defined values):
 {json.dumps(prompt_field_axes, indent=2)}
-{llm_context_section}{available_models_section}\
+{llm_context_section}\
 ## Your Task
 Recommend which axes to scan in priority order. For pipeline_param axes, \
 suggest concrete values to try. Use the current_values shown above as your \
@@ -244,8 +235,17 @@ Rules:
 - source: "pipeline_param" or "prompt_field"
 - For pipeline_param axes: include "step" and "suggested_values"
 - For prompt_field axes: omit "step" and "suggested_values"
+- Do NOT recommend *_model axes. Model selection is a user decision driven by \
+cost, latency, and capability tradeoffs — not an optimization target. Place them \
+in axes_to_skip.
 - Skip axes unlikely to affect accuracy (explain why)
 - Prioritize axes with the highest expected impact
+- Consider DATA FLOW between steps. Steps form a sequential pipeline where each \
+step's output feeds the next. Parameters on UPSTREAM steps have multiplier effects: \
+if an upstream step produces poor-quality data, downstream tuning cannot compensate. \
+Pay special attention to upstream string parameters (prefixes, suffixes, query \
+modifiers) that shape what data enters the pipeline — especially when their current \
+values are empty or generic.
 - *_schema axes are output schema overrides. Suggest MUTATIONS relative to the \
 current output_schema shown in the LLM Node Details. Each suggested_value is a JSON \
 array of mutation arrays applied together as one variant. Use JSON arrays, NOT tuples. \
@@ -260,22 +260,57 @@ Mutation formats:
 Return ONLY the JSON object, no markdown fences or extra text."""
 
 
-def preview_advisor_prompt() -> str:
-    """Return the advisor prompt template with placeholder markers.
+def preview_advisor_prompt(
+    pipeline_schema: PipelineSchema | None = None,
+    variant_library: dict | None = None,
+    pipeline_params: dict | None = None,
+    task_description: str = "",
+    exclude_steps: list[str] | None = None,
+) -> str:
+    """Return the advisor prompt — with real data when available, else placeholders.
 
-    Builds the full prompt using representative placeholders so all
-    conditional sections are visible.  Useful for inspecting the exact
-    structure the LLM receives without running a live call.
+    When *pipeline_schema* is provided, calls the actual layer builders to
+    produce the exact prompt the LLM would receive.  When ``None``, falls
+    back to representative placeholders so all conditional sections are visible.
     """
+    if pipeline_schema is not None:
+        from api.config.settings import load_variant_library as _load_vl
+
+        if variant_library is None:
+            variant_library = _load_vl()
+
+        if exclude_steps is not None:
+            excluded_steps = set(exclude_steps) if exclude_steps else None
+        else:
+            excluded_steps = _excluded_from_schema(pipeline_schema, pipeline_params)
+
+        active = (
+            set(pipeline_params["steps"])
+            if pipeline_params and "steps" in pipeline_params
+            else None
+        )
+        layer_args = dict(
+            schema=pipeline_schema, excluded_steps=excluded_steps, active_steps=active,
+        )
+        return _build_advisor_prompt(
+            pipeline_overview=build_pipeline_overview(**layer_args),
+            tunable_params=build_tunable_params(**layer_args),
+            llm_context=build_llm_context(**layer_args),
+            prompt_field_axes=_extract_prompt_field_axes(variant_library),
+            pipeline_description=pipeline_schema.description,
+            excluded_steps=excluded_steps,
+            task_description=task_description,
+        )
+
+    # Fallback: placeholder mode
     return _build_advisor_prompt(
-        pipeline_overview=[{"<_build_pipeline_overview(schema)>": "..."}],
-        tunable_params=[{"<_build_tunable_params(schema)>": "..."}],
-        llm_context=[{"<_build_llm_context(schema)>": "..."}],
+        pipeline_overview=[{"<build_pipeline_overview(schema=svc['pipeline_schema'])>": "..."}],
+        tunable_params=[{"<build_tunable_params(schema=svc['pipeline_schema'])>": "..."}],
+        llm_context=[{"<build_llm_context(schema=svc['pipeline_schema'])>": "..."}],
         prompt_field_axes=["<load_variant_library()['prompt_fields'].keys()>"],
         pipeline_description="<svc['pipeline_schema'].description>",
         excluded_steps={"<campaign_config['exclude_steps']>"},
         task_description="<TASK_DESCRIPTION>",
-        available_models=["<svc['pipeline_schema'].available_models>"],
     )
 
 
@@ -425,9 +460,9 @@ async def advise_scan_config(
     layer_args = dict(
         schema=pipeline_schema, excluded_steps=excluded_steps, active_steps=active,
     )
-    pipeline_overview = _build_pipeline_overview(**layer_args)
-    tunable_params = _build_tunable_params(**layer_args)
-    llm_context = _build_llm_context(**layer_args)
+    pipeline_overview = build_pipeline_overview(**layer_args)
+    tunable_params = build_tunable_params(**layer_args)
+    llm_context = build_llm_context(**layer_args)
     prompt_field_axes = _extract_prompt_field_axes(variant_library)
 
     prompt = _build_advisor_prompt(
@@ -438,7 +473,6 @@ async def advise_scan_config(
         pipeline_description=pipeline_schema.description,
         excluded_steps=excluded_steps,
         task_description=task_description,
-        available_models=pipeline_schema.available_models or None,
     )
 
     response = await llm_client.chat(
