@@ -9,7 +9,7 @@ from api.services.backend_client import (
     build_pipeline_params,
     load_pipeline_config,
 )
-from api.services.llm_client import GroqClient, LLMClientBase, OpenAIClient
+from api.services.llm_client import AnthropicClient, GroqClient, LLMClientBase, OpenAIClient
 from api.services.project_store import ProjectStore
 
 from api.services.campaign.campaign_init import init_services as _init_services
@@ -117,23 +117,41 @@ async def smoke_test_override(
 # ---------------------------------------------------------------------------
 
 
+def _infer_api_key(provider_url: str) -> str:
+    """Return the appropriate API key env-var value for a provider URL."""
+    if "anthropic.com" in provider_url:
+        return os.environ.get("ANTHROPIC_API_KEY", "")
+    if "openai.com" in provider_url:
+        return os.environ.get("OPENAI_API_KEY", "")
+    return os.environ.get("GROQ_API_KEY", "")
+
+
 def _make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase:
     """Create an LLM client from a provider URL or key."""
+    if "anthropic.com" in provider_url:
+        return AnthropicClient(api_key=api_key)
     if "groq.com" in provider_url:
         return GroqClient(api_key=api_key)
-    elif "openai.com" in provider_url:
+    if "openai.com" in provider_url:
         return OpenAIClient(api_key=api_key)
     return GroqClient(api_key=api_key)
 
 
-def setup_llm(campaign_config: dict, api_key: str) -> tuple[LLMClientBase, str]:
+def setup_llm(
+    campaign_config: dict, api_key: str = "",
+) -> tuple[LLMClientBase, str]:
     """Create LLM client + model from campaign_config['eval_llm'].
+
+    When *api_key* is empty, auto-detects the correct environment variable
+    based on the provider URL (ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY).
 
     Returns:
         (llm_client, model) tuple for passing to service functions.
     """
     eval_llm = campaign_config["eval_llm"]
-    client = _make_llm_client(eval_llm.get("provider_url", ""), api_key)
+    provider_url = eval_llm.get("provider_url", "")
+    key = api_key or _infer_api_key(provider_url)
+    client = _make_llm_client(provider_url, key)
     return client, eval_llm.get("model", "")
 
 
@@ -342,20 +360,19 @@ async def show_backend_status(client) -> dict:
 async def prepare_eval_context(
     svc: dict,
     train_data: list[dict] | None,
-) -> tuple[PromptState, list[dict], str, dict]:
-    """Load baseline prompt, set eval_data, read API key, check backend.
+) -> tuple[PromptState, list[dict], dict]:
+    """Load baseline prompt, set eval_data, check backend.
 
     Returns:
-        (baseline, eval_data, groq_api_key, backend_status)
+        (baseline, eval_data, backend_status)
     """
     from api.services.prompt_eval import extract_baseline_prompt as load_baseline_prompt
     baseline = load_baseline_prompt(svc["exp_data"])
     eval_data = train_data or []
-    groq_api_key = os.environ.get("GROQ_API_KEY", "")
     backend_status = await show_backend_status(svc["backend_client"])
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
-    return baseline, eval_data, groq_api_key, backend_status
+    return baseline, eval_data, backend_status
 
 
 def build_all_session_terms(

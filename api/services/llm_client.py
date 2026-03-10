@@ -85,8 +85,17 @@ class LLMClientBase(ABC):
 
 def _try_parse_json(content: str, provider: str) -> Any | None:
     """Parse JSON from response content, return None on failure."""
+    text = content.strip()
+    # Strip markdown code fences (e.g. ```json ... ```)
+    if text.startswith("```"):
+        first_nl = text.find("\n")
+        if first_nl != -1:
+            text = text[first_nl + 1:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
     try:
-        return json.loads(content)
+        return json.loads(text)
     except json.JSONDecodeError:
         logger.debug("%s response not valid JSON: %s", provider, content[:200])
         return None

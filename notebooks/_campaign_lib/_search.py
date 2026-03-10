@@ -404,11 +404,7 @@ def _display_scan_advisory(advisory: dict) -> None:
 async def scan_advisor(
     campaign_config: dict,
     svc: dict,
-    baseline_results: list,
-    eval_data: list,
     *,
-    query_budget: int = 120,
-    coverage_stats: dict | None = None,
     task_description: str = "",
 ) -> dict:
     """LLM-powered scan configuration advice.
@@ -436,8 +432,6 @@ async def scan_advisor(
 
     llm_client, model = setup_llm(campaign_config)
 
-    eval_data_size = len(eval_data)
-
     # --- Display ---
     print("=" * 70)
     print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
@@ -446,8 +440,6 @@ async def scan_advisor(
     print(f"  Steps: {[s.name for s in pipeline_schema.steps]}")
     if user_excluded:
         print(f"  Excluded: {user_excluded}")
-    print(f"  Eval data size: {eval_data_size} queries")
-    print(f"  Query budget: {query_budget}")
     if task_description:
         print(f"  Task context: {task_description[:80].strip()}...")
     print(f"  Calling {model or '?'} ...")
@@ -459,13 +451,9 @@ async def scan_advisor(
     advisory = await _advise_scan_config(
         pipeline_schema=pipeline_schema,
         variant_library=variant_library,
-        baseline_results=baseline_results,
-        eval_data_size=eval_data_size,
         llm_client=llm_client,
         model=model,
         max_tokens=max_tokens,
-        query_budget=query_budget,
-        coverage_stats=coverage_stats,
         pipeline_params=pipeline_params,
         task_description=task_description,
         exclude_steps=user_excluded or None,
@@ -554,33 +542,16 @@ def advisory_to_scan_variants(
 async def run_scan_advisor(
     campaign_config: dict,
     svc: dict,
-    baseline_results: list,
-    eval_data: list,
     *,
-    query_budget: int = 120,
     task_description: str = "",
-    coverage_df=None,
 ) -> tuple[dict, dict, dict]:
     """Run scan advisor + extract/display proposed variants.
 
-    Builds coverage_stats from *coverage_df* (handles empty gracefully),
-    calls scan_advisor(), then advisory_to_scan_variants(), prints summary.
+    Calls scan_advisor(), then advisory_to_scan_variants(), prints summary.
     Returns (advisory, scan_variants, schema_labels).
     """
-    cov_stats = None
-    if coverage_df is not None and hasattr(coverage_df, "empty") and not coverage_df.empty:
-        covered = int(coverage_df["in_candidates"].sum())
-        total = len(coverage_df)
-        cov_stats = {
-            "covered": covered,
-            "total": total,
-            "coverage_pct": covered / total * 100 if total else 0,
-        }
-
     advisory = await scan_advisor(
-        campaign_config, svc, baseline_results, eval_data,
-        query_budget=query_budget,
-        coverage_stats=cov_stats,
+        campaign_config, svc,
         task_description=task_description,
     )
 
@@ -588,14 +559,24 @@ async def run_scan_advisor(
         advisory, pipeline_schema=svc.get("pipeline_schema"),
     )
 
-    print("\n--- PROPOSED SCAN VARIANTS (edit in next cell) ---")
+    # Print copy-pasteable Python dict
+    print("\n--- PROPOSED SCAN VARIANTS (copy-paste into next cell) ---")
+    print("scan_variants = {")
     for axis, values in proposed.items():
         if axis in schema_labels:
-            print(f"  {axis}: (baseline + {len(values) - 1} mutations)")
-            for i, label in enumerate(schema_labels[axis]):
-                print(f"    [{i}] {label}")
+            # Schema axis: print raw mutation tuples from advisory
+            raw_mutations = []
+            for ax in advisory.get("priority_axes", []):
+                if ax.get("axis") == axis:
+                    raw_mutations = ax.get("suggested_values", [])
+                    break
+            print(f"    {axis!r}: [")
+            for mutation in raw_mutations:
+                print(f"        {mutation!r},")
+            print("    ],")
         else:
-            print(f"  {axis}: {values}")
+            print(f"    {axis!r}: {values!r},")
+    print("}")
 
     return advisory, proposed if proposed else {}, schema_labels
 

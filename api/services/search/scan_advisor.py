@@ -13,42 +13,114 @@ import json
 import logging
 from typing import Any
 
-from api.models.pipeline_schema import PipelineSchema
+from api.models.pipeline_schema import PipelineSchema, PipelineStep
 
 logger = logging.getLogger(__name__)
 
 
-def _build_pipeline_anatomy(
+# Keys that map to structural LLM config (not tunable knobs)
+STRUCTURAL_OVERRIDES = {"prompt", "output_schema", "model"}
+
+
+def _relevant_steps(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
     active_steps: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Extract structured pipeline anatomy from PipelineSchema.steps.
+) -> list[tuple[PipelineStep, bool]]:
+    """Yield (step, is_excluded) pairs, skipping ghost steps.
 
-    Includes output schema fields and prompt metadata when available,
-    giving the advisor LLM visibility into what each step produces.
-    Steps in ``excluded_steps`` are annotated with ``"excluded": True``.
     When ``active_steps`` is provided, steps that are neither active nor
-    excluded are skipped entirely (ghost steps from the default schema
-    that don't exist in the experiment data).
+    excluded are skipped (ghost steps from the default schema that don't
+    exist in the experiment data).
     """
-    anatomy = []
+    result: list[tuple[PipelineStep, bool]] = []
     for step in schema.steps:
         if active_steps is not None:
             relevant = active_steps | (excluded_steps or set())
             if step.name not in relevant:
                 continue
+        excluded = bool(excluded_steps and step.name in excluded_steps)
+        result.append((step, excluded))
+    return result
+
+
+def _build_pipeline_overview(
+    schema: PipelineSchema,
+    excluded_steps: set[str] | None = None,
+    active_steps: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Layer 1 — high-level pipeline structure.
+
+    Step name, type, runtime, role, excluded flag. No config details.
+    """
+    overview = []
+    for step, excluded in _relevant_steps(schema, excluded_steps, active_steps):
         entry: dict[str, Any] = {
             "name": step.name,
             "type": step.type,
             "runtime": step.runtime,
         }
-        if excluded_steps and step.name in excluded_steps:
-            entry["excluded"] = True
-        if step.param_keys:
-            entry["param_keys"] = sorted(step.param_keys)
+        if step.node_role:
+            entry["node_role"] = step.node_role
         if step.short_circuit:
             entry["short_circuit"] = True
+        if excluded:
+            entry["excluded"] = True
+        overview.append(entry)
+    return overview
+
+
+def _build_tunable_params(
+    schema: PipelineSchema,
+    excluded_steps: set[str] | None = None,
+    active_steps: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Layer 2 — tunable knobs per step.
+
+    Shows param_keys and current_values, stripping structural overrides
+    (prompt, output_schema, model) which are not numeric/string "knobs".
+    """
+    tunable = []
+    for step, _excluded in _relevant_steps(schema, excluded_steps, active_steps):
+        if not step.param_keys:
+            continue
+        # Identify structural keys via override_map
+        structural_keys: set[str] = set()
+        if step.override_map:
+            for flat_key, wire_key in step.override_map.items():
+                if wire_key in STRUCTURAL_OVERRIDES:
+                    structural_keys.add(flat_key)
+
+        tunable_config = {
+            k: v for k, v in step.current_config.items()
+            if k not in structural_keys
+        } if step.current_config else {}
+
+        entry: dict[str, Any] = {
+            "name": step.name,
+            "param_keys": sorted(step.param_keys),
+        }
+        if tunable_config:
+            entry["current_values"] = tunable_config
+        tunable.append(entry)
+    return tunable
+
+
+def _build_llm_context(
+    schema: PipelineSchema,
+    excluded_steps: set[str] | None = None,
+    active_steps: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Layer 3 — LLM node details (output schemas, prompt templates).
+
+    Only includes steps that have output_schema or prompt_meta.
+    Presented as reference context, not primary optimization targets.
+    """
+    context = []
+    for step, _excluded in _relevant_steps(schema, excluded_steps, active_steps):
+        if not step.output_schema and not step.prompt_meta:
+            continue
+        entry: dict[str, Any] = {"name": step.name}
         if step.output_schema:
             schema_entry: dict[str, Any] = {
                 "fields": step.output_schema.fields,
@@ -66,48 +138,30 @@ def _build_pipeline_anatomy(
             }
             if step.prompt_meta.template:
                 entry["prompt_meta"]["template"] = step.prompt_meta.template
-        if step.current_config:
-            entry["current_values"] = step.current_config
-        anatomy.append(entry)
-    return anatomy
-
-
-def _format_coverage_section(coverage_stats: dict | None) -> str:
-    """Format candidate coverage stats for the advisor LLM prompt."""
-    if not coverage_stats or not coverage_stats.get("total"):
-        return ""
-    covered = coverage_stats["covered"]
-    total = coverage_stats["total"]
-    pct = coverage_stats["coverage_pct"]
-    return f"""
-## Candidate Coverage (from baseline eval)
-- Ground truth found in candidates: {covered}/{total} ({pct:.1f}%)
-- If coverage is low, reranking prompt changes have limited value —
-  focus on earlier pipeline steps (entity profiling, token matching).
-"""
+        context.append(entry)
+    return context
 
 
 def _build_advisor_prompt(
-    pipeline_anatomy: list[dict],
+    pipeline_overview: list[dict],
+    tunable_params: list[dict],
+    llm_context: list[dict],
     prompt_field_axes: list[str],
-    baseline_accuracy: float,
-    eval_data_size: int,
-    query_budget: int,
     pipeline_description: str,
-    coverage_stats: dict | None = None,
     excluded_steps: set[str] | None = None,
     task_description: str = "",
     available_models: list[str] | None = None,
 ) -> str:
-    """Build the LLM prompt for scan configuration advice."""
+    """Build the LLM prompt for scan configuration advice.
+
+    Uses progressive pipeline disclosure: overview → tunable params → LLM details.
+    """
     excluded_section = ""
     if excluded_steps:
         excluded_section = f"""
 ## Excluded Steps
-The following steps are EXCLUDED from the current evaluation configuration: \
-{sorted(excluded_steps)}.
-Do NOT recommend any axes (parameters or prompt fields) belonging to these steps — \
-they are inactive and will have no effect on accuracy.
+The following steps are EXCLUDED: {sorted(excluded_steps)}.
+Do NOT recommend any axes belonging to these steps — they are inactive.
 """
 
     task_context_section = ""
@@ -121,47 +175,41 @@ they are inactive and will have no effect on accuracy.
     if available_models:
         available_models_section = f"""
 ## Available Models
-The backend supports the following models for LLM steps: {json.dumps(available_models)}
-When recommending "profiling_model" or "ranking_model" axes, you MUST only suggest \
-models from this list. If no models are listed, do NOT recommend model axes.
+Models supported by the backend: {json.dumps(available_models)}
+For *_model axes, only suggest models from this list.
 """
 
-    return f"""You are an expert prompt optimization advisor. Analyze this LLM pipeline \
+    llm_context_section = ""
+    if llm_context:
+        llm_context_section = f"""
+## LLM Node Details (for reference)
+Output schemas and prompt templates used by LLM-driven steps:
+{json.dumps(llm_context, indent=2)}
+"""
+
+    return f"""You are an expert prompt optimization advisor. Analyze this pipeline \
 and recommend which axes (parameters and prompt fields) to focus a sensitivity scan on.
 
-## Pipeline Description
+## Pipeline
 {pipeline_description or "No description available."}
-{excluded_section}{task_context_section}{available_models_section}\
-## Pipeline Anatomy (steps, types, tunable parameters)
-{json.dumps(pipeline_anatomy, indent=2)}
 
-## Step Output Schemas
-Some steps produce structured JSON outputs that feed downstream steps.
-The ``output_schema`` in the Pipeline Anatomy shows what each step produces.
-Consider which output fields are most impactful for downstream accuracy —
-e.g. if entity profiling produces fields that token matching uses for scoring,
-changes to profiling quality directly affect candidate retrieval.
+## Pipeline Steps
+{json.dumps(pipeline_overview, indent=2)}
+{excluded_section}{task_context_section}\
+## Tunable Parameters (per step)
+{json.dumps(tunable_params, indent=2)}
 
-## Available Prompt Field Axes
-These are the prompt template fields that can be varied during optimization:
+## Prompt Field Axes
+Prompt template fields that can be varied (variant library has pre-defined values):
 {json.dumps(prompt_field_axes, indent=2)}
-
-## Current Performance
-- Baseline accuracy: {baseline_accuracy:.1%}
-- Evaluation dataset size: {eval_data_size} queries
-{_format_coverage_section(coverage_stats)}
-## Budget Constraint
-Total backend evaluation calls available: {query_budget}
-Each axis needs N diagnostic queries × M values to scan. Plan the budget carefully.
-A small diagnostic set (e.g. 6 queries) per axis value is typical.
-
+{llm_context_section}{available_models_section}\
 ## Your Task
-Recommend which axes to scan and in what priority order. For pipeline_param axes, \
-suggest concrete values to try. Use the current_values shown in the anatomy as your \
+Recommend which axes to scan in priority order. For pipeline_param axes, \
+suggest concrete values to try. Use the current_values shown above as your \
 reference point — suggest values that meaningfully differ from the current setting. \
 For prompt_field axes, just flag them — the variant library already has values.
 
-Return a JSON object with this exact structure:
+Return a JSON object with this structure:
 {{
   "priority_axes": [
     {{
@@ -184,46 +232,30 @@ Return a JSON object with this exact structure:
     {{"axis": "<name>", "reason": "..."}}
   ],
   "budget_breakdown": {{
-    "baseline": 6,
-    "axes": 114,
-    "total": 120
+    "<axis_name>": <n_queries>,
+    "total": <sum>
   }},
   "reasoning": "Overall strategy explanation..."
 }}
 
 Rules:
-- importance must be "high", "medium", or "low"
-- source must be "pipeline_param" or "prompt_field"
-- For pipeline_param axes, always include "step" and "suggested_values"
-- For prompt_field axes, omit "step" and "suggested_values"
-- Budget total must not exceed {query_budget}
-- Skip axes that are unlikely to affect accuracy (explain why)
+- Keep rationales to 1-2 sentences
+- importance: "high", "medium", or "low"
+- source: "pipeline_param" or "prompt_field"
+- For pipeline_param axes: include "step" and "suggested_values"
+- For prompt_field axes: omit "step" and "suggested_values"
+- Skip axes unlikely to affect accuracy (explain why)
 - Prioritize axes with the highest expected impact
-- Never recommend "ranking_prompt" or "profiling_prompt" as pipeline_param scan axes — \
-these are prompt template overrides managed via prompt_field optimization, not numeric knobs
-- "profiling_schema" and "ranking_schema" are output schema overrides. Suggest MUTATIONS \
-relative to the current output_schema shown in the anatomy. Each suggested_value is a JSON \
-array of mutation arrays applied together as one variant. IMPORTANT: use JSON arrays [...], \
-NOT Python tuples (...). Mutation formats:
-    ["-", "field_path"]                                              remove a field
-    ["+", "field_path", "type", required, "description"]             add a field
-    ["~", "old_field_path", "new_name", "type", required, "desc"]    replace (sibling swap)
-  Use dot notation for nested fields: "parent.child".
-  Types: "string", "array" (of strings), "integer", "number", "boolean", "object".
-  required: true if the field must always be present in the LLM output, false if optional.
-  Always include type, required, and description for add/replace — they drive LLM output quality.
-  Example suggested_values: [
-    [["-", "notes"], ["-", "material_classification"]],
-    [["+", "significance", "string", true, "Domain relevance of this entity"]],
-    [["~", "notes", "industry_sector", "string", true, "Industry sector classification"]]
-  ]
-  The baseline (current schema unchanged) is automatically included — do NOT include it
-- "profiling_model" and "ranking_model" override the LLM model per-step. Model switching \
-is LOW priority — the default model is well-tuned for this pipeline. Only recommend model \
-axes when the budget is large enough AND other higher-impact axes are already covered. \
-If you do suggest model axes, ONLY use models from the Available Models list. \
-Always include the current/default model as the first value. If no Available Models \
-section is present, skip model axes entirely
+- *_schema axes are output schema overrides. Suggest MUTATIONS relative to the \
+current output_schema shown in the LLM Node Details. Each suggested_value is a JSON \
+array of mutation arrays applied together as one variant. Use JSON arrays, NOT tuples. \
+Mutation formats:
+    ["-", "field_path"]                                  remove a field
+    ["+", "field_path", "type", required, "description"] add a field
+    ["~", "old_path", "new_name", "type", required, "description"]  replace
+  Types: "string", "array", "integer", "number", "boolean", "object".
+  required: true/false. Always include type, required, description for add/replace.
+  The baseline (unchanged schema) is automatically included — do NOT include it
 
 Return ONLY the JSON object, no markdown fences or extra text."""
 
@@ -236,19 +268,13 @@ def preview_advisor_prompt() -> str:
     structure the LLM receives without running a live call.
     """
     return _build_advisor_prompt(
-        pipeline_anatomy=[{"<_build_pipeline_anatomy(svc['pipeline_schema'])>": "..."}],
-        prompt_field_axes=["<variant_library['prompt_fields'].keys()>"],
-        baseline_accuracy=0.0,
-        eval_data_size=0,
-        query_budget=0,
+        pipeline_overview=[{"<_build_pipeline_overview(schema)>": "..."}],
+        tunable_params=[{"<_build_tunable_params(schema)>": "..."}],
+        llm_context=[{"<_build_llm_context(schema)>": "..."}],
+        prompt_field_axes=["<load_variant_library()['prompt_fields'].keys()>"],
         pipeline_description="<svc['pipeline_schema'].description>",
-        coverage_stats={
-            "covered": "<coverage_df['in_candidates'].sum()>",
-            "total": "<len(coverage_df)>",
-            "coverage_pct": 0.0,
-        },
         excluded_steps={"<campaign_config['exclude_steps']>"},
-        task_description="<task_description>",
+        task_description="<TASK_DESCRIPTION>",
         available_models=["<svc['pipeline_schema'].available_models>"],
     )
 
@@ -359,12 +385,9 @@ def _excluded_from_schema(
 async def advise_scan_config(
     pipeline_schema: PipelineSchema,
     variant_library: dict,
-    baseline_results: list[dict],
-    eval_data_size: int,
     llm_client: Any,
     model: str = "",
-    query_budget: int = 120,
-    coverage_stats: dict | None = None,
+    max_tokens: int = 2000,
     pipeline_params: dict | None = None,
     task_description: str = "",
     exclude_steps: list[str] | None = None,
@@ -374,13 +397,9 @@ async def advise_scan_config(
     Args:
         pipeline_schema: PipelineSchema describing the connected backend.
         variant_library: Variant library dict (with ``prompt_fields`` key).
-        baseline_results: List of baseline eval result dicts (with ``hit`` key).
-        eval_data_size: Total number of queries in eval dataset.
         llm_client: LLM client instance (GroqClient, OpenAIClient, etc.).
         model: Model identifier for the LLM call.
-        query_budget: Maximum number of backend eval calls to budget.
-        coverage_stats: Optional dict from ``analyze_candidate_coverage()``
-            with keys ``covered``, ``total``, ``coverage_pct``, ``viable``.
+        max_tokens: Maximum response tokens for the LLM call.
         pipeline_params: Pipeline params dict with ``steps`` key. Excluded
             steps are derived by diffing schema steps vs active steps.
         task_description: Domain context for the advisor LLM (e.g. input patterns,
@@ -398,31 +417,25 @@ async def advise_scan_config(
     else:
         excluded_steps = _excluded_from_schema(pipeline_schema, pipeline_params)
 
-    # Compute baseline accuracy
-    if baseline_results:
-        hits = sum(1 for r in baseline_results if r.get("hit"))
-        baseline_accuracy = hits / len(baseline_results)
-    else:
-        baseline_accuracy = 0.0
-
     active = (
         set(pipeline_params["steps"])
         if pipeline_params and "steps" in pipeline_params
         else None
     )
-    pipeline_anatomy = _build_pipeline_anatomy(
-        pipeline_schema, excluded_steps=excluded_steps, active_steps=active,
+    layer_args = dict(
+        schema=pipeline_schema, excluded_steps=excluded_steps, active_steps=active,
     )
+    pipeline_overview = _build_pipeline_overview(**layer_args)
+    tunable_params = _build_tunable_params(**layer_args)
+    llm_context = _build_llm_context(**layer_args)
     prompt_field_axes = _extract_prompt_field_axes(variant_library)
 
     prompt = _build_advisor_prompt(
-        pipeline_anatomy=pipeline_anatomy,
+        pipeline_overview=pipeline_overview,
+        tunable_params=tunable_params,
+        llm_context=llm_context,
         prompt_field_axes=prompt_field_axes,
-        baseline_accuracy=baseline_accuracy,
-        eval_data_size=eval_data_size,
-        query_budget=query_budget,
         pipeline_description=pipeline_schema.description,
-        coverage_stats=coverage_stats,
         excluded_steps=excluded_steps,
         task_description=task_description,
         available_models=pipeline_schema.available_models or None,
@@ -432,20 +445,34 @@ async def advise_scan_config(
         messages=[{"role": "user", "content": prompt}],
         model=model,
         temperature=0.3,
-        max_tokens=2000,
+        max_tokens=max_tokens,
         output_format="json",
     )
 
+    truncated = response.finish_reason in ("max_tokens", "length")
+    if truncated:
+        logger.warning(
+            "Scan advisor response truncated (finish_reason=%s, max_tokens=%d). "
+            "Increase max_tokens in eval_llm config.",
+            response.finish_reason, max_tokens,
+        )
+
     advisory = response.parsed
     if advisory is None:
-        logger.warning("Scan advisor LLM response was not valid JSON: %s", response.content[:300])
+        reason = (
+            f"Response truncated at {max_tokens} tokens — "
+            "increase max_tokens in eval_llm config."
+            if truncated
+            else "LLM response was not valid JSON"
+        )
+        logger.warning("Scan advisor: %s: %s", reason, response.content[:300])
         return {
             "priority_axes": [],
             "suggested_n_diagnostic": 6,
             "axes_to_skip": [],
             "budget_breakdown": {},
-            "reasoning": f"LLM response parsing failed. Raw: {response.content[:500]}",
-            "validation_warnings": ["LLM response was not valid JSON"],
+            "reasoning": f"{reason}. Raw: {response.content[:500]}",
+            "validation_warnings": [reason],
             "raw_response": response.content,
         }
 

@@ -76,6 +76,7 @@ async def test_advise_exclude_steps_explicit(monkeypatch):
     class _MockResponse:
         content = "{}"
         parsed = _mock_parsed
+        finish_reason = "end_turn"
 
     class _MockClient:
         async def chat(self, **kwargs):
@@ -84,8 +85,6 @@ async def test_advise_exclude_steps_explicit(monkeypatch):
     result = await advise_scan_config(
         pipeline_schema=schema,
         variant_library={"prompt_fields": {}, "pipeline_params": {}},
-        baseline_results=[],
-        eval_data_size=10,
         llm_client=_MockClient(),
         exclude_steps=["llm_ranking"],
     )
@@ -128,6 +127,7 @@ async def test_advise_exclude_steps_none_falls_back_to_schema_diff(monkeypatch):
     class _MockResponse:
         content = "{}"
         parsed = _mock_parsed
+        finish_reason = "end_turn"
 
     class _MockClient:
         async def chat(self, **kwargs):
@@ -137,8 +137,6 @@ async def test_advise_exclude_steps_none_falls_back_to_schema_diff(monkeypatch):
     await advise_scan_config(
         pipeline_schema=schema,
         variant_library={"prompt_fields": {}, "pipeline_params": {}},
-        baseline_results=[],
-        eval_data_size=10,
         llm_client=_MockClient(),
         pipeline_params={"steps": ["token_matching", "llm_ranking"]},
         # exclude_steps not passed → None → fallback
