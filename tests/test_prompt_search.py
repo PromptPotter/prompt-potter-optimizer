@@ -153,81 +153,6 @@ def test_profiles_from_rows():
 
 
 # ---------------------------------------------------------------------------
-# sensitivity_scan partial resume
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_sensitivity_scan_partial_resume():
-    """Partial scan resumes: completed axis is skipped, rows are preserved."""
-    from api.models.prompt_state import PromptState
-
-    baseline = PromptState(
-        instruction="test",
-        persona="default_persona",
-        task_intent="default_intent",
-    )
-
-    variant_library = {
-        "prompt_fields": {
-            "persona": ["default_persona", "expert"],
-            "task_intent": ["default_intent", "classify"],
-        },
-        "pipeline_params": {},
-    }
-    eval_data = _make_eval_data(4)
-
-    evaluated_axes: set[str] = set()
-
-    async def _mock_eval(search_point, data, client, **kw):
-        return (
-            [{"hit": True, "query": d["query"]} for d in data],
-            {"accuracy": 0.75, "hits": 3, "total": 4},
-            False,
-        )
-
-    import api.services.search.smart_search as _ss
-    _orig = _ss.evaluate_prompt_cached
-
-    async def _patched_eval(search_point, data, client, **kw):
-        ps = search_point.prompt_state
-        if ps.persona != baseline.persona:
-            evaluated_axes.add("persona")
-        if ps.task_intent != baseline.task_intent:
-            evaluated_axes.add("task_intent")
-        return await _mock_eval(search_point, data, client, **kw)
-
-    _ss.evaluate_prompt_cached = _patched_eval
-
-    try:
-        partial_scan = {
-            "rows": [
-                {"axis": "persona", "axis_type": "prompt_field",
-                 "value_idx": 0, "value_preview": "default_persona",
-                 "hits": 3, "total": 4, "accuracy": 0.75, "delta": 0.0},
-                {"axis": "persona", "axis_type": "prompt_field",
-                 "value_idx": 1, "value_preview": "expert",
-                 "hits": 2, "total": 4, "accuracy": 0.5, "delta": -0.25},
-            ],
-            "completed_axes": ["persona"],
-        }
-
-        df, profiles = await sensitivity_scan(
-            baseline, variant_library, eval_data,
-            backend_client=None,
-            pipeline_params={"steps": ["llm_ranking"]},
-            partial_scan=partial_scan,
-        )
-
-        assert "persona" not in evaluated_axes
-        assert "task_intent" in evaluated_axes
-        assert set(df["axis"].unique()) == {"persona", "task_intent"}
-        assert {p["axis"] for p in profiles} == {"persona", "task_intent"}
-
-    finally:
-        _ss.evaluate_prompt_cached = _orig
-
-
-# ---------------------------------------------------------------------------
 # scan rows include errors field
 # ---------------------------------------------------------------------------
 
@@ -235,18 +160,18 @@ async def test_sensitivity_scan_partial_resume():
 async def test_scan_rows_include_errors():
     """Scan rows include 'errors' field for both baseline and perturbed variants."""
     from api.models.prompt_state import PromptState
+    from api.models.search_point import SearchPoint
 
     baseline = PromptState(
         instruction="test",
         persona="default_persona",
     )
+    sp = SearchPoint(
+        prompt_state=baseline,
+        pipeline_params={"steps": ["llm_ranking"]},
+    )
 
-    variant_library = {
-        "prompt_fields": {
-            "persona": ["default_persona", "expert"],
-        },
-        "pipeline_params": {},
-    }
+    scan_variants = {"persona": ["default_persona", "expert"]}
     eval_data = _make_eval_data(4)
 
     import api.services.search.smart_search as _ss
@@ -270,9 +195,7 @@ async def test_scan_rows_include_errors():
 
     try:
         df, profiles = await sensitivity_scan(
-            baseline, variant_library, eval_data,
-            backend_client=None,
-            pipeline_params={"steps": ["llm_ranking"]},
+            sp, scan_variants, eval_data, backend_client=None,
         )
 
         # Both baseline and perturbed rows should have 'errors' field
@@ -291,22 +214,24 @@ async def test_scan_rows_include_errors():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_scan_skips_all_error_axis(caplog):
-    """Scan does not mark axis completed when all non-baseline variants errored."""
+async def test_scan_skips_all_error_axis():
+    """All-error axis rows still appear in results."""
     from api.models.prompt_state import PromptState
+    from api.models.search_point import SearchPoint
 
     baseline = PromptState(
         instruction="test",
         persona="default_persona",
         task_intent="default_intent",
     )
+    sp = SearchPoint(
+        prompt_state=baseline,
+        pipeline_params={"steps": ["llm_ranking"]},
+    )
 
-    variant_library = {
-        "prompt_fields": {
-            "persona": ["default_persona", "expert", "analyst"],
-            "task_intent": ["default_intent", "classify"],
-        },
-        "pipeline_params": {},
+    scan_variants = {
+        "persona": ["default_persona", "expert"],
+        "task_intent": ["default_intent", "classify"],
     }
     eval_data = _make_eval_data(4)
 
@@ -338,18 +263,155 @@ async def test_scan_skips_all_error_axis(caplog):
     _ss.evaluate_prompt_cached = _mock_eval
 
     try:
-        with caplog.at_level(logging.WARNING, logger="api.services.search.smart_search"):
-            df, profiles = await sensitivity_scan(
-                baseline, variant_library, eval_data,
-                backend_client=None,
-                pipeline_params={"steps": ["llm_ranking"]},
-            )
+        df, profiles = await sensitivity_scan(
+            sp, scan_variants, eval_data, backend_client=None,
+        )
 
-        # persona axis should NOT be marked completed (all errored)
-        assert any("all variants errored" in r.message for r in caplog.records)
         # Both axes should still be in the results (rows are preserved)
         assert set(df["axis"].unique()) == {"persona", "task_intent"}
 
+    finally:
+        _ss.evaluate_prompt_cached = _orig
+
+
+# ---------------------------------------------------------------------------
+# scan circuit breaker: baseline all-errors
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_scan_aborts_on_baseline_all_errors():
+    """Scan aborts immediately when baseline eval returns all errors."""
+    from api.models.prompt_state import PromptState
+    from api.models.search_point import SearchPoint
+
+    baseline = PromptState(instruction="test", persona="default_persona")
+    sp = SearchPoint(
+        prompt_state=baseline,
+        pipeline_params={"steps": ["llm_ranking"]},
+    )
+    scan_variants = {"persona": ["default_persona", "expert", "analyst"]}
+    eval_data = _make_eval_data(4)
+
+    call_count = 0
+    import api.services.search.smart_search as _ss
+    _orig = _ss.evaluate_prompt_cached
+
+    async def _mock_eval(search_point, data, client, **kw):
+        nonlocal call_count
+        call_count += 1
+        return (
+            [{"hit": False, "query": d["query"]} for d in data],
+            {"accuracy": 0.0, "hits": 0, "total": 4, "errors": 4},
+            False,
+        )
+
+    _ss.evaluate_prompt_cached = _mock_eval
+    try:
+        df, profiles = await sensitivity_scan(
+            sp, scan_variants, eval_data, backend_client=None,
+        )
+        assert df.empty
+        assert profiles == []
+        assert call_count == 1  # only baseline eval, no variants
+    finally:
+        _ss.evaluate_prompt_cached = _orig
+
+
+# ---------------------------------------------------------------------------
+# scan circuit breaker: consecutive all-error variants
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_scan_aborts_after_consecutive_all_error_variants():
+    """Scan aborts after 2 consecutive non-cached all-error variant evals."""
+    from api.models.prompt_state import PromptState
+    from api.models.search_point import SearchPoint
+
+    baseline = PromptState(instruction="test", persona="default_persona")
+    sp = SearchPoint(
+        prompt_state=baseline,
+        pipeline_params={"steps": ["llm_ranking"]},
+    )
+    scan_variants = {"persona": ["default_persona", "expert", "analyst", "reviewer"]}
+    eval_data = _make_eval_data(4)
+
+    call_count = 0
+    import api.services.search.smart_search as _ss
+    _orig = _ss.evaluate_prompt_cached
+
+    async def _mock_eval(search_point, data, client, **kw):
+        nonlocal call_count
+        call_count += 1
+        ps = search_point.prompt_state
+        if ps.persona == baseline.persona:
+            # Baseline succeeds
+            return (
+                [{"hit": True, "query": d["query"]} for d in data],
+                {"accuracy": 1.0, "hits": 4, "total": 4, "errors": 0},
+                False,
+            )
+        # All variants error out
+        return (
+            [{"hit": False, "query": d["query"]} for d in data],
+            {"accuracy": 0.0, "hits": 0, "total": 4, "errors": 4},
+            False,
+        )
+
+    _ss.evaluate_prompt_cached = _mock_eval
+    try:
+        df, profiles = await sensitivity_scan(
+            sp, scan_variants, eval_data, backend_client=None,
+        )
+        # 1 baseline + 2 variants (circuit breaker fires on 2nd all-error)
+        assert call_count == 3
+        # Partial results still present
+        assert len(df) > 0
+    finally:
+        _ss.evaluate_prompt_cached = _orig
+
+
+# ---------------------------------------------------------------------------
+# scan baseline row reflects actual errors
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_scan_baseline_row_reflects_actual_errors():
+    """Baseline-value rows carry actual error count, not hardcoded 0."""
+    from api.models.prompt_state import PromptState
+    from api.models.search_point import SearchPoint
+
+    baseline = PromptState(instruction="test", persona="default_persona")
+    sp = SearchPoint(
+        prompt_state=baseline,
+        pipeline_params={"steps": ["llm_ranking"]},
+    )
+    scan_variants = {"persona": ["default_persona", "expert"]}
+    eval_data = _make_eval_data(4)
+
+    import api.services.search.smart_search as _ss
+    _orig = _ss.evaluate_prompt_cached
+
+    async def _mock_eval(search_point, data, client, **kw):
+        ps = search_point.prompt_state
+        if ps.persona == baseline.persona:
+            return (
+                [{"hit": True, "query": d["query"]} for d in data],
+                {"accuracy": 0.75, "hits": 3, "total": 4, "errors": 1},
+                False,
+            )
+        return (
+            [{"hit": True, "query": d["query"]} for d in data],
+            {"accuracy": 1.0, "hits": 4, "total": 4, "errors": 0},
+            False,
+        )
+
+    _ss.evaluate_prompt_cached = _mock_eval
+    try:
+        df, profiles = await sensitivity_scan(
+            sp, scan_variants, eval_data, backend_client=None,
+        )
+        baseline_row = df[df["value_preview"] == "default_persona"].iloc[0]
+        assert baseline_row["errors"] == 1
     finally:
         _ss.evaluate_prompt_cached = _orig
 

@@ -6,7 +6,6 @@ coordinate descent over prompt-field and pipeline-param axes.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import random
 from collections import defaultdict
@@ -16,6 +15,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 from api.models.prompt_state import PromptState
+from api.models.search_point import SearchPoint, _PROMPT_STATE_FIELDS
 from api.services.project_store import ProjectStore
 from api.services.prompt_eval import evaluate_prompt_cached
 from api.services.search.utils import preview as _preview
@@ -57,6 +57,7 @@ class ScanEvent(TypedDict, total=False):
         "axis_resolved",
         "round_start",
         "round_done",
+        "scan_aborted",
     ]
     # common
     axis: str
@@ -67,6 +68,7 @@ class ScanEvent(TypedDict, total=False):
     total: int
     cached: bool
     results: list
+    reason: str
     # axis_start
     cardinality: int
     axis_index: int
@@ -369,20 +371,17 @@ def filter_variant_library(
 
 
 async def sensitivity_scan(
-    baseline_ps: PromptState,
-    variant_library: dict,
+    baseline: SearchPoint,
+    scan_variants: dict[str, list],
     eval_data: list,
     backend_client: Any,
-    user_focus: str = "",
+    *,
+    max_queries: int = 0,
     store: ProjectStore | None = None,
     backend_id: str = "",
-    pipeline_params: dict | None = None,
-    session_terms: list | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
     prompt_result_index: dict | None = None,
-    plan_id: str = "",
-    partial_scan: dict | None = None,
-    pipeline_schema: "PipelineSchema | None" = None,
     on_result: Callable | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
@@ -392,22 +391,20 @@ async def sensitivity_scan(
     and an axis profile sorted by sensitivity.
 
     Args:
-        baseline_ps: Baseline PromptState.
-        variant_library: Full library dict with ``prompt_fields`` and
-            ``pipeline_params`` sections.
-        eval_data: Diagnostic query set.
+        baseline: Baseline SearchPoint (prompt_state + pipeline_params).
+        scan_variants: Flat dict mapping axis names to value lists.
+            Prompt fields (in ``_PROMPT_STATE_FIELDS``) and pipeline
+            params are auto-detected.
+        eval_data: Full evaluation dataset.
         backend_client: Backend client for evaluation.
-        user_focus: Optional hint string (e.g. "entity profiling").
+        max_queries: If >0, subsample eval_data to this many queries
+            (deterministic seed=42). 0 means use all.
         store: Optional ProjectStore for caching.
         backend_id: Backend identifier.
-        pipeline_params: Base pipeline parameters.
-        session_terms: Optional session terms for backend init.
-        progress_cb: Optional callback ``(event: dict) -> None`` for
-            progress reporting. Event types: ``baseline_done``,
-            ``axis_start``, ``variant_done``, ``axis_done``.
-        partial_scan: Optional dict with ``rows`` and ``completed_axes``
-            from a previously interrupted scan. Completed axes are
-            skipped and their rows are included in the output.
+        pipeline_schema: Optional PipelineSchema for composite scoring.
+        progress_cb: Optional callback for progress events.
+        prompt_result_index: Optional pre-built prompt result index.
+        on_result: Optional per-result callback.
 
     Returns:
         Tuple of (per_variant_df, axis_profiles).
@@ -416,27 +413,28 @@ async def sensitivity_scan(
 
     _cb = progress_cb or (lambda _e: None)
 
-    if session_terms:
-        await backend_client.init_session(session_terms)
+    # Subsample eval_data if requested
+    if max_queries > 0 and max_queries < len(eval_data):
+        eval_data = random.Random(42).sample(eval_data, max_queries)
 
-    base_params = dict(pipeline_params or {})
+    # Classify axes: prompt_field vs pipeline_param
+    axes: list[tuple[str, str, list]] = []
+    for name, values in scan_variants.items():
+        if len(values) <= 1:
+            continue
+        axis_type = "prompt_field" if name in _PROMPT_STATE_FIELDS else "pipeline_param"
+        axes.append((name, axis_type, values))
 
-    # Filter axes to only those relevant for the active pipeline
-    if pipeline_schema is not None:
-        variant_library = filter_variant_library(
-            variant_library, pipeline_params, schema=pipeline_schema,
-        )
-
-    _eval_ps = _make_eval_fn(
-        eval_data, backend_client, store, backend_id,
-        get_params=lambda: base_params,
+    # Evaluate baseline
+    baseline_results, baseline_scores, baseline_cached = await evaluate_prompt_cached(
+        baseline, eval_data, backend_client,
+        store=store, backend_id=backend_id,
+        label="scan",
         prompt_result_index=prompt_result_index,
+        source="sensitivity_scan",
         pipeline_schema=pipeline_schema,
         on_result=on_result,
     )
-
-    # Evaluate baseline
-    baseline_scores = await _eval_ps(baseline_ps)
     baseline_acc = baseline_scores["accuracy"]
     baseline_composite = baseline_scores.get("composite", baseline_acc)
     _cb({
@@ -444,62 +442,25 @@ async def sensitivity_scan(
         "accuracy": baseline_acc,
         "hits": baseline_scores["hits"],
         "total": baseline_scores["total"],
-        "results": baseline_scores.get("results", []),
-        "cached": baseline_scores.get("cached", False),
+        "results": baseline_results,
+        "cached": baseline_cached,
     })
 
-    # Collect all axes (prompt_fields + pipeline_params)
-    axes: list[tuple[str, str, list]] = []  # (axis_name, axis_type, values)
-    for name, values in variant_library.get("prompt_fields", {}).items():
-        if len(values) > 1:
-            axes.append((name, "prompt_field", values))
-    for name, values in variant_library.get("pipeline_params", {}).items():
-        if len(values) > 1:
-            axes.append((name, "pipeline_param", values))
-
-    # Priority sort: user_focus axes first
-    if user_focus:
-        focus_lower = user_focus.lower()
-        axes.sort(
-            key=lambda a: (0 if a[0].lower() in focus_lower else 1, a[0]),
+    # Circuit breaker: abort if baseline eval is all-errors
+    baseline_errors = baseline_scores.get("errors", 0)
+    if baseline_errors == baseline_scores["total"] > 0:
+        reason = (
+            f"Baseline eval failed: all {baseline_scores['total']} queries errored. "
+            "Backend may be down."
         )
-
-    # Prune partial scan: drop axes no longer in the filtered axes set
-    if partial_scan:
-        active_axis_names = {a[0] for a in axes}
-        stale = set(partial_scan.get("completed_axes", [])) - active_axis_names
-        if stale:
-            logger.warning(
-                "Pruning %d stale axes from partial scan: %s", len(stale), stale,
-            )
-            partial_scan["completed_axes"] = [
-                a for a in partial_scan["completed_axes"] if a in active_axis_names
-            ]
-            partial_scan["rows"] = [
-                r for r in partial_scan.get("rows", [])
-                if r["axis"] in active_axis_names
-            ]
+        logger.error("Aborting scan: %s", reason)
+        _cb({"type": "scan_aborted", "reason": reason})
+        return pd.DataFrame(), []
 
     rows: list[dict] = []
-    axis_stats: dict[str, list[float]] = defaultdict(list)
-    completed_axes: set[str] = set()
-
-    # Restore partial state from a previously interrupted scan
-    if partial_scan:
-        for row in partial_scan.get("rows", []):
-            rows.append(row)
-            axis_stats[row["axis"]].append(row["delta"])
-        completed_axes = set(partial_scan.get("completed_axes", []))
-        logger.info(
-            "Resuming scan: %d rows, %d/%d axes completed",
-            len(rows), len(completed_axes), len(axes),
-        )
+    _consecutive_all_error = 0
 
     for ai, (axis_name, axis_type, values) in enumerate(axes):
-        if axis_name in completed_axes:
-            logger.info("Skipping completed axis: %s", axis_name)
-            continue
-
         _cb({
             "type": "axis_start",
             "axis": axis_name, "axis_type": axis_type,
@@ -507,134 +468,100 @@ async def sensitivity_scan(
             "axis_index": ai, "total_axes": len(axes),
         })
 
-        try:
-            for vi, value in enumerate(values):
-                # Skip the baseline value for each axis
-                if axis_type == "prompt_field":
-                    current_val = getattr(baseline_ps, axis_name, "")
-                else:
-                    current_val = base_params.get(axis_name)
+        for vi, value in enumerate(values):
+            # Detect baseline value for this axis
+            if axis_type == "prompt_field":
+                current_val = getattr(baseline.prompt_state, axis_name, "")
+            else:
+                current_val = (baseline.pipeline_params or {}).get(axis_name)
 
-                if value == current_val:
-                    rows.append({
-                        "axis": axis_name, "axis_type": axis_type,
-                        "value_idx": vi,
-                        "value_preview": _preview(value),
-                        "hits": baseline_scores["hits"],
-                        "total": baseline_scores["total"],
-                        "accuracy": baseline_acc, "delta": 0.0,
-                        "errors": 0,
-                    })
-                    axis_stats[axis_name].append(0.0)
-                    _cb({
-                        "type": "variant_done",
-                        "axis": axis_name, "value_idx": vi,
-                        "value_preview": _preview(value),
-                        "is_baseline_value": True,
-                        "accuracy": baseline_acc, "delta": 0.0,
-                        "hits": baseline_scores["hits"],
-                        "total": baseline_scores["total"],
-                        "results": [], "cached": False,
-                    })
-                    continue
-
-                if axis_type == "prompt_field":
-                    perturbed = baseline_ps.derive(**{axis_name: value})
-                    scores = await _eval_ps(perturbed)
-                else:
-                    perturbed_params = {**base_params, axis_name: value}
-                    scores = await _eval_ps(baseline_ps, perturbed_params)
-
-                acc = scores["accuracy"]
-                composite = scores.get("composite", acc)
-                delta = composite - baseline_composite
+            if value == current_val:
                 rows.append({
                     "axis": axis_name, "axis_type": axis_type,
                     "value_idx": vi,
                     "value_preview": _preview(value),
-                    "hits": scores["hits"],
-                    "total": scores["total"],
-                    "accuracy": acc, "delta": delta,
-                    "composite": composite,
-                    "errors": scores.get("errors", 0),
+                    "hits": baseline_scores["hits"],
+                    "total": baseline_scores["total"],
+                    "accuracy": baseline_acc, "delta": 0.0,
+                    "errors": baseline_errors,
                 })
-                axis_stats[axis_name].append(delta)
                 _cb({
                     "type": "variant_done",
                     "axis": axis_name, "value_idx": vi,
                     "value_preview": _preview(value),
-                    "is_baseline_value": False,
-                    "accuracy": acc, "delta": delta,
-                    "composite": composite,
-                    "hits": scores["hits"], "total": scores["total"],
-                    "results": scores.get("results", []),
-                    "cached": scores.get("cached", False),
+                    "is_baseline_value": True,
+                    "accuracy": baseline_acc, "delta": 0.0,
+                    "hits": baseline_scores["hits"],
+                    "total": baseline_scores["total"],
+                    "results": [], "cached": False,
                 })
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            logger.warning(
-                "Scan interrupted during axis '%s'. "
-                "Checkpointing %d completed axes.",
-                axis_name, len(completed_axes),
-            )
-            if store and backend_id and plan_id:
-                store.smart_search.update(backend_id, plan_id, {
-                    "status": "scan_partial",
-                    "scan_results": {
-                        "rows": rows,
-                        "completed_axes": list(completed_axes),
-                    },
-                })
-            raise
+                continue
 
-        # Check: did any non-baseline variant succeed?
-        axis_variants = [
-            r for r in rows
-            if r["axis"] == axis_name and r.get("delta") != 0.0
-        ]
-        all_errored = (
-            all(
-                r.get("errors", 0) > 0 and r.get("errors", 0) == r.get("total", 0)
-                for r in axis_variants
-            )
-            if axis_variants
-            else False
-        )
+            # Derive perturbed SearchPoint
+            if axis_type == "prompt_field":
+                perturbed = baseline.derive(**{axis_name: value})
+            else:
+                perturbed = baseline.derive(
+                    pipeline_params={**(baseline.pipeline_params or {}), axis_name: value},
+                )
 
-        if all_errored:
-            logger.warning(
-                "Axis '%s': all variants errored — not marking completed",
-                axis_name,
+            results, scores, cached = await evaluate_prompt_cached(
+                perturbed, eval_data, backend_client,
+                store=store, backend_id=backend_id,
+                label="scan",
+                prompt_result_index=prompt_result_index,
+                source="sensitivity_scan",
+                pipeline_schema=pipeline_schema,
+                on_result=on_result,
             )
-        else:
-            completed_axes.add(axis_name)
-        if store and backend_id and plan_id:
-            store.smart_search.update(backend_id, plan_id, {
-                "status": "scan_partial",
-                "scan_results": {
-                    "rows": rows,
-                    "completed_axes": list(completed_axes),
-                },
+
+            acc = scores["accuracy"]
+            composite = scores.get("composite", acc)
+            delta = composite - baseline_composite
+            variant_errors = scores.get("errors", 0)
+            rows.append({
+                "axis": axis_name, "axis_type": axis_type,
+                "value_idx": vi,
+                "value_preview": _preview(value),
+                "hits": scores["hits"],
+                "total": scores["total"],
+                "accuracy": acc, "delta": delta,
+                "composite": composite,
+                "errors": variant_errors,
             })
-            logger.info("Checkpoint: axis '%s' complete (%d/%d)", axis_name,
-                        len(completed_axes), len(axes))
+            _cb({
+                "type": "variant_done",
+                "axis": axis_name, "value_idx": vi,
+                "value_preview": _preview(value),
+                "is_baseline_value": False,
+                "accuracy": acc, "delta": delta,
+                "composite": composite,
+                "hits": scores["hits"], "total": scores["total"],
+                "results": results,
+                "cached": cached,
+            })
+
+            # Circuit breaker: track consecutive non-cached all-error evals
+            if not cached and variant_errors == scores["total"] > 0:
+                _consecutive_all_error += 1
+                if _consecutive_all_error >= 2:
+                    reason = (
+                        f"Aborting scan: {_consecutive_all_error} consecutive "
+                        "variant evals returned all errors. Backend may be down."
+                    )
+                    logger.error(reason)
+                    profiles = _profiles_from_rows(rows, axes, len(eval_data))
+                    for profile in profiles:
+                        _cb({"type": "axis_done", **profile})
+                    _cb({"type": "scan_aborted", "reason": reason})
+                    return pd.DataFrame(rows), profiles
+            else:
+                _consecutive_all_error = 0
 
     # Build axis profiles
     profiles = _profiles_from_rows(rows, axes, len(eval_data))
     for profile in profiles:
         _cb({"type": "axis_done", **profile})
-
-    # Persist scan results to plan
-    if store and backend_id and plan_id:
-        df = pd.DataFrame(rows)
-        store.smart_search.update(backend_id, plan_id, {
-            "status": "scan_complete",
-            "scan_results": {
-                "rows": df.to_dict(orient="records"),
-                "axis_profiles": profiles,
-            },
-        })
-        logger.info("Saved scan results to plan: %s", plan_id)
-        return df, profiles
 
     return pd.DataFrame(rows), profiles
 
@@ -647,20 +574,18 @@ async def sensitivity_scan(
 def select_scan_winner(
     scan_df: pd.DataFrame,
     axis_profiles: list[dict],
-    baseline_ps: PromptState,
-    variant_library: dict,
-    pipeline_params: dict | None = None,
-) -> tuple[PromptState, dict]:
+    baseline: SearchPoint,
+    scan_variants: dict[str, list],
+) -> SearchPoint:
     """Pick best variant per sensitive axis from OAT scan results.
 
     Composes the best-performing value for each axis that showed positive
-    improvement (best_delta > 0) into a single PromptState. No backend
+    improvement (best_delta > 0) into a single SearchPoint. No backend
     calls required — purely offline composition from existing scan data.
 
     Returns:
-        (best_ps, best_params) — ready for evaluate_prompt() or feedback cycle.
+        SearchPoint with best values composed in.
     """
-    base_params = dict(pipeline_params or {})
     prompt_changes: dict[str, Any] = {}
     param_changes: dict[str, Any] = {}
 
@@ -671,7 +596,6 @@ def select_scan_winner(
 
     for profile in improving:
         axis_name = profile["axis"]
-        axis_type = profile["axis_type"]
 
         axis_rows = scan_df[scan_df["axis"] == axis_name]
         if axis_rows.empty:
@@ -680,11 +604,7 @@ def select_scan_winner(
         best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
         value_idx = int(best_row["value_idx"])
 
-        if axis_type == "prompt_field":
-            values = variant_library.get("prompt_fields", {}).get(axis_name, [])
-        else:
-            values = variant_library.get("pipeline_params", {}).get(axis_name, [])
-
+        values = scan_variants.get(axis_name, [])
         if value_idx >= len(values):
             logger.warning(
                 "select_scan_winner: value_idx %d out of range for %s (len=%d)",
@@ -694,26 +614,28 @@ def select_scan_winner(
 
         value = values[value_idx]
 
-        if axis_type == "prompt_field":
+        if axis_name in _PROMPT_STATE_FIELDS:
             prompt_changes[axis_name] = value
         else:
             param_changes[axis_name] = value
 
-    best_ps = baseline_ps
+    best = baseline
     if prompt_changes:
-        best_ps = baseline_ps.derive(
+        best = best.derive(
             **prompt_changes,
             changes_description="scan_winner",
         )
-
-    best_params = {**base_params, **param_changes}
+    if param_changes:
+        best = best.derive(
+            pipeline_params={**(best.pipeline_params or {}), **param_changes},
+        )
 
     logger.info(
         "select_scan_winner: %d prompt changes, %d param changes from %d improving axes",
         len(prompt_changes), len(param_changes), len(improving),
     )
 
-    return best_ps, best_params
+    return best
 
 
 # ---------------------------------------------------------------------------

@@ -44,6 +44,12 @@ All evaluation paths converge here — grid search, smart search, and feedback c
 - **Smart search**: One-at-a-time axis perturbations against baseline. Coverage advisor checks historical index before backend calls. `filter_variant_library()` in `smart_search.py` drops axes not owned by active pipeline steps before evaluation (e.g. drops `prompt_fields` when `llm_ranking` is inactive).
 - **Feedback cycle**: `GrowFilterNode` generates candidates via LLM, `AnalysisEvalNode` evaluates each via `evaluate_prompt_cached()`.
 
+## Scan baseline restructure
+
+The sensitivity scan baseline is created by LLM restructure (`restructure_context()` in `search/context.py`) because PromptPotter internally decomposes prompts into specific elements (persona, task_intent, problem_description, instruction, thinking_style, answer_format). The backend prompt may be a monolithic string, but PromptPotter needs these fields separated to perturb them independently during sensitivity scanning. The restructure is semantically equivalent — it doesn't change what the prompt says, just how it's organized for optimization. The notebook's `prepare_scan_baseline()` wraps this into a `SearchPoint` with pipeline_params.
+
+`sensitivity_scan()` takes a `SearchPoint` baseline + flat `scan_variants: dict[str, list]` (axis names mapped to value lists). Axis type is auto-detected: names in `_PROMPT_STATE_FIELDS` → prompt field, otherwise → pipeline param. `select_scan_winner()` composes the best value per improving axis into a single `SearchPoint`.
+
 ## Pipeline discovery and registry metadata
 
 `pipeline_discovery.py` is the bridge between TermNorm's live `GET /pipeline` response and PromptPotter's `PipelineSchema` model.

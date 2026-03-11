@@ -336,32 +336,30 @@ class TestSelectScanWinner:
     """Tests for select_scan_winner greedy composition."""
 
     @pytest.fixture
-    def baseline_ps(self):
-        return PromptState(
+    def baseline_sp(self):
+        from api.models.search_point import SearchPoint
+        ps = PromptState(
             instruction="Rank candidates",
             thinking_style="baseline_style",
             task_intent="baseline_intent",
         )
+        return SearchPoint(prompt_state=ps)
 
     @pytest.fixture
-    def variant_library(self):
+    def scan_variants(self):
         return {
-            "prompt_fields": {
-                "thinking_style": [
-                    "baseline_style",
-                    "step by step",
-                    "analytical reasoning",
-                    "comparative analysis",
-                ],
-                "task_intent": [
-                    "baseline_intent",
-                    "match materials",
-                    "rank by relevance",
-                ],
-            },
-            "pipeline_params": {
-                "ranking_temperature": [0.0, 0.3, 0.7],
-            },
+            "thinking_style": [
+                "baseline_style",
+                "step by step",
+                "analytical reasoning",
+                "comparative analysis",
+            ],
+            "task_intent": [
+                "baseline_intent",
+                "match materials",
+                "rank by relevance",
+            ],
+            "ranking_temperature": [0.0, 0.3, 0.7],
         }
 
     @pytest.fixture
@@ -407,19 +405,19 @@ class TestSelectScanWinner:
         ]
 
     def test_picks_best_per_improving_axis(
-        self, scan_df, axis_profiles, baseline_ps, variant_library,
+        self, scan_df, axis_profiles, baseline_sp, scan_variants,
     ):
-        best_ps, best_params = select_scan_winner(
-            scan_df, axis_profiles, baseline_ps, variant_library,
+        best_sp = select_scan_winner(
+            scan_df, axis_profiles, baseline_sp, scan_variants,
         )
         # thinking_style should be "analytical reasoning" (idx 2)
-        assert best_ps.thinking_style == "analytical reasoning"
+        assert best_sp.prompt_state.thinking_style == "analytical reasoning"
         # task_intent unchanged (best_delta=0)
-        assert best_ps.task_intent == "baseline_intent"
+        assert best_sp.prompt_state.task_intent == "baseline_intent"
         # ranking_temperature should be 0.3 (idx 1)
-        assert best_params["ranking_temperature"] == 0.3
+        assert best_sp.pipeline_params["ranking_temperature"] == 0.3
 
-    def test_no_improving_axes(self, baseline_ps, variant_library):
+    def test_no_improving_axes(self, baseline_sp, scan_variants):
         """When no axes improve, returns baseline unchanged."""
         scan_df = pd.DataFrame([
             {"axis": "thinking_style", "axis_type": "prompt_field",
@@ -430,14 +428,14 @@ class TestSelectScanWinner:
              "cardinality": 1, "sensitivity_range": 0.0,
              "best_delta": 0.0, "exploration_budget": "skip"},
         ]
-        best_ps, best_params = select_scan_winner(
-            scan_df, profiles, baseline_ps, variant_library,
+        best_sp = select_scan_winner(
+            scan_df, profiles, baseline_sp, scan_variants,
         )
-        assert best_ps.id == baseline_ps.id
-        assert best_params == {}
+        assert best_sp.prompt_state.id == baseline_sp.prompt_state.id
+        assert best_sp.pipeline_params is None
 
     def test_skipped_axes_excluded(
-        self, scan_df, baseline_ps, variant_library,
+        self, scan_df, baseline_sp, scan_variants,
     ):
         """Axes with exploration_budget='skip' are excluded even if best_delta > 0."""
         profiles = [
@@ -445,18 +443,27 @@ class TestSelectScanWinner:
              "cardinality": 4, "sensitivity_range": 0.15,
              "best_delta": 0.10, "exploration_budget": "skip"},
         ]
-        best_ps, best_params = select_scan_winner(
-            scan_df, profiles, baseline_ps, variant_library,
+        best_sp = select_scan_winner(
+            scan_df, profiles, baseline_sp, scan_variants,
         )
-        assert best_ps.id == baseline_ps.id
+        assert best_sp.prompt_state.id == baseline_sp.prompt_state.id
 
     def test_pipeline_params_merged(
-        self, scan_df, axis_profiles, baseline_ps, variant_library,
+        self, scan_df, axis_profiles, scan_variants,
     ):
         """Existing pipeline params are preserved and new ones merged in."""
-        best_ps, best_params = select_scan_winner(
-            scan_df, axis_profiles, baseline_ps, variant_library,
+        from api.models.search_point import SearchPoint
+        ps = PromptState(
+            instruction="Rank candidates",
+            thinking_style="baseline_style",
+            task_intent="baseline_intent",
+        )
+        sp = SearchPoint(
+            prompt_state=ps,
             pipeline_params={"existing_key": "keep_me"},
         )
-        assert best_params["existing_key"] == "keep_me"
-        assert best_params["ranking_temperature"] == 0.3
+        best_sp = select_scan_winner(
+            scan_df, axis_profiles, sp, scan_variants,
+        )
+        assert best_sp.pipeline_params["existing_key"] == "keep_me"
+        assert best_sp.pipeline_params["ranking_temperature"] == 0.3

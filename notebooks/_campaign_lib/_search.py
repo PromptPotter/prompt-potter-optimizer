@@ -25,6 +25,7 @@ from api.services.search import (
     build_pipeline_overview,
     build_tunable_params,
     build_llm_context,
+    restructure_context as _restructure_context,
 )
 
 from ._display import (
@@ -43,7 +44,7 @@ __all__ = [
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
     "audit_historical_data", "preview_advisor_prompt",
     # Notebook-facing wrappers
-    "run_scan_advisor", "seed_campaign_from_scan",
+    "prepare_scan_baseline", "run_scan_advisor", "seed_campaign_from_scan",
     "build_pipeline_overview", "build_tunable_params", "build_llm_context",
 ]
 
@@ -93,6 +94,52 @@ def preview_advisor_prompt(
 # ---------------------------------------------------------------------------
 # Smart Prompt Search wrappers
 # ---------------------------------------------------------------------------
+
+
+async def prepare_scan_baseline(
+    baseline,
+    campaign_config: dict,
+    pipeline_params: dict | None = None,
+):
+    """Restructure baseline instruction into PromptPotter's internal fields.
+
+    Calls ``restructure_context()`` via LLM to decompose a monolithic
+    instruction into persona, task_intent, problem_description, etc.
+    Creates a SearchPoint from the restructured PromptState + pipeline_params.
+
+    Returns:
+        SearchPoint ready for scanning.
+    """
+    from api.models.search_point import SearchPoint
+
+    llm_client, llm_model = setup_llm(campaign_config)
+
+    layer1_fields = await _restructure_context(
+        baseline.instruction, llm_client,
+        model=llm_model,
+        improvement_areas=campaign_config.get("improvement_areas", ""),
+    )
+    search_baseline = baseline.derive(
+        **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
+        changes_description="search_baseline (decomposed)",
+    )
+
+    # Print decomposed fields
+    print("  Restructured baseline fields:")
+    for field in ("persona", "task_intent", "problem_description",
+                  "instruction", "thinking_style", "answer_format"):
+        val = getattr(search_baseline, field, "")
+        if val:
+            print(f"    {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
+        else:
+            print(f"    {field}: (empty)")
+    print(f"  Search baseline: {search_baseline.id[:12]} "
+          f"(render: {len(search_baseline.render())} chars)")
+
+    return SearchPoint(
+        prompt_state=search_baseline,
+        pipeline_params=pipeline_params,
+    )
 
 
 async def resume_or_build_diagnostic(
@@ -675,75 +722,58 @@ def resolve_scan_variants(
 # ---------------------------------------------------------------------------
 
 
-def _load_partial_scan(store, backend_id: str, plan_id: str) -> dict | None:
-    """Load partial scan checkpoint if scan was interrupted."""
-    plan_data = store.smart_search.load(backend_id, plan_id)
-    status = plan_data.get("status", "") if plan_data else ""
-    if status == "scan_partial":
-        sr = plan_data.get("scan_results", {})
-        return {
-            "rows": sr.get("rows", []),
-            "completed_axes": sr.get("completed_axes", []),
-        }
-    return None
-
-
 async def sensitivity_scan(
-    baseline_ps,
-    variant_library: dict,
+    baseline,
+    scan_variants: dict[str, list],
     eval_data: list,
     backend_client,
-    user_focus: str = "",
+    *,
+    max_queries: int = 0,
     store=None,
     backend_id: str = "",
-    pipeline_params: dict | None = None,
-    session_terms: list | None = None,
-    plan_id: str = "",
-    prompt_result_index: dict | None = None,
-    partial_scan: dict | None = None,
     pipeline_schema=None,
 ) -> tuple:
-    """Run a sensitivity scan over all axes with progress output.
+    """Run a sensitivity scan with progress output.
+
+    Builds prompt_result_index internally, prints scan overview,
+    runs the OAT scan, and displays profiles on completion.
 
     Returns (per_variant_df, axis_profiles).
     """
-    # Auto-detect partial checkpoint when no explicit partial_scan provided
-    if partial_scan is None and store and backend_id and plan_id:
-        partial_scan = _load_partial_scan(store, backend_id, plan_id)
-        if partial_scan:
-            print(
-                f"[RESUME] Found partial scan: "
-                f"{len(partial_scan['completed_axes'])} axes done"
-            )
+    # Build prompt_result_index internally
+    prompt_result_index = None
+    if store and backend_id:
+        from api.services.search.coverage import build_prompt_result_index
+        prompt_result_index = build_prompt_result_index(store, backend_id)
 
-    if partial_scan:
-        n_done = len(partial_scan.get("completed_axes", []))
-        print(f"Resuming sensitivity scan ({n_done} axes already done)...")
-    else:
-        print("Running sensitivity scan...")
-    if user_focus:
-        print(f"  User focus: {user_focus}")
-
+    # Print scan overview
+    print("Running sensitivity scan...")
     print("\n  Baseline field values:")
     for field in ("persona", "task_intent", "problem_description",
                   "instruction", "thinking_style", "answer_format"):
-        val = getattr(baseline_ps, field, "")
+        val = getattr(baseline.prompt_state, field, "")
         if val:
             print(f"    {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
         else:
             print(f"    {field}: (empty)")
     print()
 
-    n_configs = sum(
-        len(v)
-        for v in variant_library.get("prompt_fields", {}).values()
-        if len(v) > 1
-    ) + sum(
-        len(v)
-        for v in variant_library.get("pipeline_params", {}).values()
-        if len(v) > 1
+    n_axes = sum(1 for v in scan_variants.values() if len(v) > 1)
+    n_configs = sum(len(v) for v in scan_variants.values() if len(v) > 1)
+    n_eval = max_queries if max_queries > 0 else len(eval_data)
+    n_cached = (
+        sum(len(v) for v in prompt_result_index.values())
+        if prompt_result_index else 0
     )
-    print(f"  Estimated configs: ~{n_configs} x {len(eval_data)} queries")
+    print(f"  Axes: {n_axes}, variants: {n_configs}, "
+          f"queries/variant: {n_eval}, historical results: {n_cached}")
+    print(f"  Estimated calls: ~{n_configs * n_eval}")
+
+    # Ensure backend session is initialized (required for /matches)
+    if backend_client is not None:
+        terms = sorted({d["ground_truth"] for d in eval_data if d.get("ground_truth")})
+        if terms:
+            await backend_client.init_session(terms)
 
     cb, on_result_cb = _make_scan_progress_cb()
 
@@ -754,36 +784,32 @@ async def sensitivity_scan(
     _httpx_log.setLevel(logging.WARNING)
     _httpcore_log.setLevel(logging.WARNING)
 
-    # Rebuild prompt_result_index from current disk state to avoid ghost cache hits
-    if store and backend_id:
-        from api.services.search.coverage import build_prompt_result_index
-        prompt_result_index = build_prompt_result_index(store, backend_id)
-
     try:
         print("  Evaluating baseline...")
         df, profiles = await _sensitivity_scan(
-            baseline_ps, variant_library, eval_data, backend_client,
-            user_focus=user_focus,
+            baseline, scan_variants, eval_data, backend_client,
+            max_queries=max_queries,
             store=store, backend_id=backend_id,
-            pipeline_params=pipeline_params,
-            session_terms=session_terms,
+            pipeline_schema=pipeline_schema,
             progress_cb=cb,
             prompt_result_index=prompt_result_index,
-            plan_id=plan_id,
-            partial_scan=partial_scan,
-            pipeline_schema=pipeline_schema,
             on_result=on_result_cb,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         _print_interrupt_banner(
             "Sensitivity scan",
-            saved="completed axes checkpointed to disk (scan_partial status)",
-            resume_hint="re-run this cell -- partial scan auto-detected from checkpoint",
+            saved="completed evaluations saved via evaluate_prompt_cached",
+            resume_hint="re-run this cell -- cached evals will be reused",
         )
         return None, []
     finally:
         _httpx_log.setLevel(_prev_httpx)
         _httpcore_log.setLevel(_prev_httpcore)
+
+    if df is None or (hasattr(df, "empty") and df.empty):
+        print("\n  [ABORT] Scan returned no results -- backend may be down.")
+        print("  Check backend status and model configuration, then re-run.")
+        return None, []
 
     print(f"\nSensitivity scan complete: {len(df)} variants evaluated")
     display_axis_profiles(profiles)
@@ -860,6 +886,12 @@ def _make_scan_progress_cb():
             wd = event["worst_delta"]
             print(f"  >> {event['axis']}: range={sr:.1%}, "
                   f"best={bd:+.1%}, worst={wd:+.1%}, budget={budget}")
+
+        elif t == "scan_aborted":
+            reason = event.get("reason", "unknown")
+            print(f"\n{'!' * 70}")
+            print(f"  SCAN ABORTED: {reason}")
+            print(f"{'!' * 70}")
 
     return _cb, _on_result
 
@@ -1013,33 +1045,20 @@ def _make_search_progress_cb():
 def select_scan_winner_notebook(
     scan_df,
     axis_profiles: list[dict],
-    search_baseline,
-    variant_library: dict,
-    pipeline_params: dict | None = None,
-    store=None,
-    backend_id: str = "",
-    plan_id: str = "",
-) -> tuple:
+    baseline,
+    scan_variants: dict[str, list],
+):
     """Pick best from scan and print summary. No backend needed.
 
-    If *scan_df* is ``None`` (resumed from cache), loads scan rows from the
-    plan store automatically.
-
     Returns:
-        (best_ps, best_params).
+        SearchPoint with best values composed in.
     """
-    # Load scan rows from plan if scan_df not in memory
-    if scan_df is None and store and backend_id and plan_id:
-        from api.services.search.smart_search import load_scan_results_from_plan
-        scan_df = load_scan_results_from_plan(store, backend_id, plan_id)
-
     if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
-        print("No scan data available. Run sensitivity scan (4.5b) first.")
-        return search_baseline, dict(pipeline_params or {})
+        print("No scan data available. Run sensitivity scan first.")
+        return baseline
 
-    best_ps, best_params = _select_scan_winner(
-        scan_df, axis_profiles, search_baseline, variant_library,
-        pipeline_params=pipeline_params,
+    best_sp = _select_scan_winner(
+        scan_df, axis_profiles, baseline, scan_variants,
     )
 
     # Print summary
@@ -1061,48 +1080,43 @@ def select_scan_winner_notebook(
     else:
         print("No axes improved over baseline -- using baseline as-is.")
 
-    if best_ps.id != search_baseline.id:
-        print(f"\nComposed PromptState: {best_ps.id[:12]} "
-              f"(parent: {best_ps.parent_id[:12] if best_ps.parent_id else 'root'})")
-    if best_params != dict(pipeline_params or {}):
-        print(f"Pipeline params updated: {best_params}")
+    ps = best_sp.prompt_state
+    if ps.id != baseline.prompt_state.id:
+        print(f"\nComposed PromptState: {ps.id[:12]} "
+              f"(parent: {ps.parent_id[:12] if ps.parent_id else 'root'})")
+    if best_sp.pipeline_params != baseline.pipeline_params:
+        print(f"Pipeline params updated: {best_sp.pipeline_params}")
 
-    return best_ps, best_params
+    return best_sp
 
 
 def seed_campaign_from_scan(
     scan_df,
     axis_profiles: list,
-    search_baseline,
-    variant_library: dict,
+    baseline,
+    scan_variants: dict[str, list],
     campaign_rounds: list,
     campaign_config: dict,
-    *,
-    store=None,
-    backend_id: str = "",
-    plan_id: str = "",
-) -> tuple:
+):
     """Select scan winner, update pipeline_params, seed campaign_rounds.
 
-    Calls select_scan_winner_notebook(), updates campaign_config["pipeline_params"],
-    appends round entry, displays progress.
-    Returns (best_ps, best_params).
+    Returns:
+        SearchPoint with best values composed in.
     """
-    best_ps, best_params = select_scan_winner_notebook(
-        scan_df, axis_profiles, search_baseline, variant_library,
-        pipeline_params=campaign_config.get("pipeline_params"),
-        store=store, backend_id=backend_id, plan_id=plan_id,
+    best_sp = select_scan_winner_notebook(
+        scan_df, axis_profiles, baseline, scan_variants,
     )
 
-    if best_params:
-        campaign_config["pipeline_params"] = best_params
-        print(f"Updated pipeline_params: {best_params}")
+    if best_sp.pipeline_params:
+        campaign_config["pipeline_params"] = best_sp.pipeline_params
+        print(f"Updated pipeline_params: {best_sp.pipeline_params}")
 
     bl = campaign_rounds[0] if campaign_rounds else {}
+    ps = best_sp.prompt_state
     campaign_rounds.append({
         "round": "search",
-        "label": f"smart_search ({best_ps.changes_description or best_ps.id[:12]})",
-        "prompt_state": best_ps,
+        "label": f"smart_search ({ps.changes_description or ps.id[:12]})",
+        "prompt_state": ps,
         "accuracy": bl.get("accuracy", 0.0),
         "hits": bl.get("hits", 0),
         "total": bl.get("total", 0),
@@ -1110,4 +1124,4 @@ def seed_campaign_from_scan(
     })
     display_progress(campaign_rounds)
 
-    return best_ps, best_params
+    return best_sp

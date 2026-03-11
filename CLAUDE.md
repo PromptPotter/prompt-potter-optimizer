@@ -61,7 +61,7 @@ The human workflow is a repeatable loop:
 
 0. **Pipeline snapshot** — call `backend_client.fetch_pipeline()` and display the full JSON. This ensures every experiment run has its pipeline parameters recorded inline in the notebook output.
 1. **Generate data** — sync from backend, build eval dataset, run baseline eval
-2. **Explore** — sensitivity scan and/or grid search map the accuracy landscape; results are persisted as `dataset_runs` keyed by content hash
+2. **Explore** — sensitivity scan (5 cells: scan advisor → edit variants → prepare scan baseline → sensitivity scan → select winner) and/or grid search map the accuracy landscape; results are persisted as `dataset_runs` keyed by content hash. The scan baseline is created via LLM restructure to decompose the backend's monolithic prompt into PromptPotter's internal fields (persona, task_intent, etc.) for independent perturbation. `sensitivity_scan()` takes a `SearchPoint` + flat `scan_variants` dict and runs OAT over all eval_data.
 3. **Optimize** — feedback cycle (LLM candidate generation → backend evaluation → winner selection) runs iteratively until the human stops it
 4. **Harvest** — the human reviews results. All eval data is already stored in `dataset_runs` via `evaluate_prompt_cached`
 5. **Reuse** — coverage advisor discovers all stored `dataset_runs` regardless of source. Fresh optimization starts from higher ground.

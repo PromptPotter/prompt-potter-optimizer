@@ -150,6 +150,7 @@ class BackendClient:
     def __init__(self, base_url: str, timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._session_terms: list[str] | None = None
 
     # -- status check -------------------------------------------------------
 
@@ -226,13 +227,18 @@ class BackendClient:
     # -- replay operations ------------------------------------------------
 
     async def init_session(self, terms: list[str]) -> dict[str, Any]:
-        """POST /sessions with terms array."""
+        """POST /sessions with terms array.
+
+        Stores ``terms`` internally so that ``run_match()`` can
+        auto-reinitialize the session if the backend restarts.
+        """
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(
                 f"{self.base_url}/sessions",
                 json={"terms": terms},
             )
             resp.raise_for_status()
+            self._session_terms = terms
             return resp.json()
 
     async def run_match(
@@ -265,6 +271,16 @@ class BackendClient:
                 f"{self.base_url}/matches",
                 json=payload,
             )
+
+            # Auto-reinitialize session on 400 (lost after backend restart)
+            if resp.status_code == 400 and self._session_terms:
+                logger.warning("Got 400 from /matches — re-initializing session")
+                await self.init_session(self._session_terms)
+                resp = await client.post(
+                    f"{self.base_url}/matches",
+                    json=payload,
+                )
+
             resp.raise_for_status()
             return resp.json()
 
