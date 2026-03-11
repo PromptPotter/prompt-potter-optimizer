@@ -312,10 +312,10 @@ def load_eval_dataset(
     store: ProjectStore,
     backend_id: str,
     experiment_id: str,
-    query_limit: int = 0,
+    sample_size: int = 0,
 ) -> list:
     """Load per-query evaluation data from synced experiments or stored replays."""
-    eval_data = _load_eval_dataset(store, backend_id, experiment_id, query_limit)
+    eval_data = _load_eval_dataset(store, backend_id, experiment_id, sample_size)
 
     if eval_data:
         print(f"Loaded {len(eval_data)} eval queries")

@@ -54,7 +54,7 @@ class CycleConfig(BaseModel):
     pipeline_params: dict | None = Field(None, description="Pipeline parameter overrides")
     session_terms: list[str] | None = Field(None, description="Backend session terms")
     temperature: float = Field(0.0, description="Temperature for content hash")
-    queries_per_eval: int = Field(0, description="Subsample size (0 = use all)")
+    sample_size: int = Field(0, description="Subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
 
     pipeline_schema: PipelineSchema | None = Field(None, description="Pipeline schema for eval")
@@ -95,7 +95,7 @@ class CycleConfig(BaseModel):
             pipeline_params=pipeline_params,
             session_terms=session_terms,
             temperature=eval_llm.get("temperature", 0.0),
-            queries_per_eval=campaign_config.get("queries_per_eval", 0),
+            sample_size=campaign_config.get("sample_size", 0),
             seed=42,
             pipeline_schema=pipeline_schema,
             enable_l2=opt.get("enable_l2", False),
@@ -188,7 +188,7 @@ def cycle_config_identity(
             "model": config.model,
             "provider": config.provider,
             "temperature": config.temperature,
-            "queries_per_eval": config.queries_per_eval,
+            "sample_size": config.sample_size,
             "seed": config.seed,
             "baseline_rendered": baseline_rendered,
             "eval_data_pairs": sorted(
@@ -917,7 +917,7 @@ async def run_feedback_cycle(
         bc = BackendClient(config.backend_url)
         await bc.init_session(config.session_terms)
 
-    round_eval_data = subsample_queries(eval_data, config.queries_per_eval, config.seed)
+    round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
 
     # -- Step 1: Initialize baseline --
     if baseline_prompt_state is not None:

@@ -376,7 +376,7 @@ async def sensitivity_scan(
     eval_data: list,
     backend_client: Any,
     *,
-    max_queries: int = 0,
+    sample_size: int = 0,
     store: ProjectStore | None = None,
     backend_id: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
@@ -397,7 +397,7 @@ async def sensitivity_scan(
             params are auto-detected.
         eval_data: Full evaluation dataset.
         backend_client: Backend client for evaluation.
-        max_queries: If >0, subsample eval_data to this many queries
+        sample_size: If >0, subsample eval_data to this many queries
             (deterministic seed=42). 0 means use all.
         store: Optional ProjectStore for caching.
         backend_id: Backend identifier.
@@ -414,8 +414,8 @@ async def sensitivity_scan(
     _cb = progress_cb or (lambda _e: None)
 
     # Subsample eval_data if requested
-    if max_queries > 0 and max_queries < len(eval_data):
-        eval_data = random.Random(42).sample(eval_data, max_queries)
+    if sample_size > 0 and sample_size < len(eval_data):
+        eval_data = random.Random(42).sample(eval_data, sample_size)
 
     # Classify axes: prompt_field vs pipeline_param
     axes: list[tuple[str, str, list]] = []

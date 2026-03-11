@@ -837,7 +837,7 @@ async def sensitivity_scan(
     eval_data: list,
     backend_client,
     *,
-    max_queries: int = 0,
+    sample_size: int = 0,
     store=None,
     backend_id: str = "",
     pipeline_schema=None,
@@ -869,7 +869,7 @@ async def sensitivity_scan(
 
     n_axes = sum(1 for v in scan_variants.values() if len(v) > 1)
     n_configs = sum(len(v) for v in scan_variants.values() if len(v) > 1)
-    n_eval = max_queries if max_queries > 0 else len(eval_data)
+    n_eval = sample_size if sample_size > 0 else len(eval_data)
     n_cached = (
         sum(len(v) for v in prompt_result_index.values())
         if prompt_result_index else 0
@@ -897,7 +897,7 @@ async def sensitivity_scan(
         print("  Evaluating baseline...")
         df, profiles = await _sensitivity_scan(
             baseline, scan_variants, eval_data, backend_client,
-            max_queries=max_queries,
+            sample_size=sample_size,
             store=store, backend_id=backend_id,
             pipeline_schema=pipeline_schema,
             progress_cb=cb,

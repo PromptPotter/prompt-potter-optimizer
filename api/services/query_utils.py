@@ -23,19 +23,19 @@ def parse_bom_material(query: str) -> tuple[str, str]:
 
 def subsample_queries(
     eval_data: list[dict],
-    n_queries: int,
+    sample_size: int,
     seed: int = 42,
 ) -> list[dict]:
     """Deterministic subsample of eval queries.
 
-    Returns the full list unchanged if ``n_queries <= 0`` or the dataset
+    Returns the full list unchanged if ``sample_size <= 0`` or the dataset
     is already small enough.
 
     Args:
         eval_data: Full evaluation dataset.
-        n_queries: Maximum number of queries to keep (0 = use all).
+        sample_size: Maximum number of queries to keep (0 = use all).
         seed: Random seed for reproducibility.
     """
-    if n_queries > 0 and len(eval_data) > n_queries:
-        return random.Random(seed).sample(eval_data, n_queries)
+    if sample_size > 0 and len(eval_data) > sample_size:
+        return random.Random(seed).sample(eval_data, sample_size)
     return eval_data

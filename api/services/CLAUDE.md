@@ -40,7 +40,7 @@ All evaluation paths converge here — grid search, smart search, and feedback c
 ### Evaluation details
 
 - **Backend eval**: `backend_reranker_eval()` calls `POST /matches` with rendered ranking prompt override, checks top-ranked candidate against ground truth (exact string match = hit@1)
-- **Grid search**: Cartesian product of Layer 1 field variants. `eval_queries_per_point` + `shared_queries` control sampling. Results deduplicated by content hash.
+- **Grid search**: Cartesian product of Layer 1 field variants. `sample_size` + `shared_queries` control sampling. Results deduplicated by content hash.
 - **Smart search**: One-at-a-time axis perturbations against baseline. Coverage advisor checks historical index before backend calls. `filter_variant_library()` in `smart_search.py` drops axes not owned by active pipeline steps before evaluation (e.g. drops `prompt_fields` when `llm_ranking` is inactive).
 - **Feedback cycle**: `GrowFilterNode` generates candidates via LLM, `AnalysisEvalNode` evaluates each via `evaluate_prompt_cached()`.
 

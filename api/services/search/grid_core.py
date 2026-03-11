@@ -263,7 +263,7 @@ def resolve_point_evals(
     grid_points: list,
     state_lookup: dict,
     eval_data: list,
-    eval_queries_per_point: int = 0,
+    sample_size: int = 0,
     shared_queries: bool = True,
     seed: int = 42,
     pipeline_params: dict | None = None,
@@ -277,7 +277,7 @@ def resolve_point_evals(
         grid_points: List of ``(coord_dict, ps_id)`` tuples.
         state_lookup: Dict mapping ``ps_id`` to ``PromptState``.
         eval_data: Full evaluation dataset (list of query dicts).
-        eval_queries_per_point: If >0, sample this many queries per point.
+        sample_size: If >0, sample this many queries per point.
         shared_queries: If True, all points share the same query sample.
         seed: Random seed for reproducible sampling.
         pipeline_params: Optional pipeline parameter overrides included in
@@ -289,10 +289,10 @@ def resolve_point_evals(
     """
     from api.models.search_point import SearchPoint
 
-    if eval_queries_per_point > 0 and shared_queries:
+    if sample_size > 0 and shared_queries:
         rng = random.Random(seed)
         shared_eval = rng.sample(
-            eval_data, min(eval_queries_per_point, len(eval_data)),
+            eval_data, min(sample_size, len(eval_data)),
         )
     else:
         shared_eval = None
@@ -301,10 +301,10 @@ def resolve_point_evals(
     for point_idx, (coord_dict, ps_id) in enumerate(grid_points):
         ps = state_lookup[ps_id]
 
-        if eval_queries_per_point > 0 and not shared_queries:
+        if sample_size > 0 and not shared_queries:
             rng = random.Random(seed + point_idx)
             point_eval = rng.sample(
-                eval_data, min(eval_queries_per_point, len(eval_data)),
+                eval_data, min(sample_size, len(eval_data)),
             )
         elif shared_eval is not None:
             point_eval = shared_eval
@@ -431,7 +431,7 @@ async def run_grid_search(
     backend_id: str = "",
     session_terms: list | None = None,
     pipeline_params: dict | None = None,
-    eval_queries_per_point: int = 0,
+    sample_size: int = 0,
     shared_queries: bool = True,
     seed: int = 42,
     plan_id: str = "",
@@ -446,7 +446,7 @@ async def run_grid_search(
     import pandas as pd
     eval_plan = resolve_point_evals(
         grid_points, state_lookup, eval_data,
-        eval_queries_per_point, shared_queries, seed,
+        sample_size, shared_queries, seed,
         pipeline_params=pipeline_params,
     )
 
@@ -736,7 +736,7 @@ def load_grid_plan_results(
     backend_id: str,
     plan_id: str,
     eval_data: list,
-    eval_queries_per_point: int = 0,
+    sample_size: int = 0,
     shared_queries: bool = True,
     seed: int = 42,
     pipeline_params: dict | None = None,
@@ -761,7 +761,7 @@ def load_grid_plan_results(
 
     eval_plan = resolve_point_evals(
         grid_points, state_lookup, eval_data,
-        eval_queries_per_point, shared_queries, seed,
+        sample_size, shared_queries, seed,
         pipeline_params=pipeline_params,
     )
     rows = []

@@ -143,7 +143,7 @@ def load_eval_dataset(
     store: ProjectStore,
     backend_id: str,
     experiment_id: str,
-    query_limit: int = 0,
+    sample_size: int = 0,
     schema: PipelineSchema | None = None,
 ) -> list:
     """Load per-query evaluation data from synced experiments or stored replays.
@@ -163,9 +163,9 @@ def load_eval_dataset(
             schema = TERMNORM_DEFAULT_SCHEMA
         eval_data = _extract_eval_from_traces(exp_data, schema=schema)
         if eval_data:
-            if query_limit > 0 and len(eval_data) > query_limit:
+            if sample_size > 0 and len(eval_data) > sample_size:
                 rng = random.Random(42)
-                eval_data = rng.sample(eval_data, query_limit)
+                eval_data = rng.sample(eval_data, sample_size)
             return eval_data
 
     executions = store.executions.list_all(backend_id)
@@ -182,9 +182,9 @@ def load_eval_dataset(
                     and r.pipeline_data.get("entity_profile")
                 ]
                 if eval_data:
-                    if query_limit > 0 and len(eval_data) > query_limit:
+                    if sample_size > 0 and len(eval_data) > sample_size:
                         rng = random.Random(42)
-                        eval_data = rng.sample(eval_data, query_limit)
+                        eval_data = rng.sample(eval_data, sample_size)
                     return eval_data
 
     return []

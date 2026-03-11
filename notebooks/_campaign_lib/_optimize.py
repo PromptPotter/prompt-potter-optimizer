@@ -134,9 +134,9 @@ def _print_preflight_box(config, baseline_acc, instruction, eval_data, pipeline_
     """Print the pre-flight summary box (shared by preflight + cycle)."""
     _instr_preview = (instruction[:80] + "...") if len(instruction) > 80 else instruction
     _instr_preview = _instr_preview or "(empty)"
-    _eff_queries = config.queries_per_eval if config.queries_per_eval else len(eval_data)
-    if config.queries_per_eval:
-        _queries_label = f"{config.queries_per_eval} of {len(eval_data)}"
+    _eff_queries = config.sample_size if config.sample_size else len(eval_data)
+    if config.sample_size:
+        _queries_label = f"{config.sample_size} of {len(eval_data)}"
     else:
         _queries_label = f"all {len(eval_data)}"
     _steps = pipeline_params.get("steps", []) if pipeline_params else []

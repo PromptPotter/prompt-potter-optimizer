@@ -76,7 +76,7 @@ def load_grid_plan_results(
     backend_id: str,
     plan_id: str,
     eval_data: list,
-    eval_queries_per_point: int = 0,
+    sample_size: int = 0,
     shared_queries: bool = True,
     seed: int = 42,
     pipeline_params: dict | None = None,
@@ -84,7 +84,7 @@ def load_grid_plan_results(
     """Load stored eval results for a grid plan and return a results DataFrame."""
     df = _load_grid_plan_results(
         store, backend_id, plan_id, eval_data,
-        eval_queries_per_point, shared_queries, seed,
+        sample_size, shared_queries, seed,
         pipeline_params=pipeline_params,
     )
     if df is not None:
@@ -117,7 +117,7 @@ def show_grid_overview(
     plans = list_grid_plans(store, backend_id)
 
     gs = campaign_config["grid_search"]
-    eval_queries_per_point = gs.get("eval_queries_per_point", 0)
+    _sample_size = gs.get("sample_size", 0)
     shared_queries_flag = gs.get("shared_queries", True)
     seed = gs.get("seed", 42)
     _pp = campaign_config.get("pipeline_params")
@@ -130,7 +130,7 @@ def show_grid_overview(
         for p in plans:
             df = load_grid_plan_results(
                 store, backend_id, p["plan_id"], eval_data,
-                eval_queries_per_point=eval_queries_per_point,
+                sample_size=_sample_size,
                 shared_queries=shared_queries_flag,
                 seed=seed,
                 pipeline_params=_pp,
@@ -241,7 +241,7 @@ async def run_grid_search(
     backend_client=None,
     session_terms: "list | None" = None,
     pipeline_params: "dict | None" = None,
-    eval_queries_per_point: int = 0,
+    sample_size: int = 0,
     shared_queries: bool = True,
     grid_seed: int = 42,
 ) -> pd.DataFrame:
@@ -255,7 +255,7 @@ async def run_grid_search(
     # Count stored results for resume display
     eval_plan = _resolve_point_evals(
         grid_points, state_lookup, eval_data,
-        eval_queries_per_point, shared_queries, grid_seed,
+        sample_size, shared_queries, grid_seed,
         pipeline_params=pipeline_params,
     )
     n_stored = 0
@@ -267,8 +267,8 @@ async def run_grid_search(
     n_total = len(grid_points)
     n_remaining = n_total - n_stored
     q_label = (
-        f"{eval_queries_per_point} quer{'y' if eval_queries_per_point == 1 else 'ies'}"
-        if eval_queries_per_point > 0
+        f"{sample_size} quer{'y' if sample_size == 1 else 'ies'}"
+        if sample_size > 0
         else f"{len(eval_data)} queries"
     )
     if n_stored > 0:
@@ -306,7 +306,7 @@ async def run_grid_search(
             backend_id=backend_id,
             session_terms=session_terms,
             pipeline_params=pipeline_params,
-            eval_queries_per_point=eval_queries_per_point,
+            sample_size=sample_size,
             shared_queries=shared_queries,
             seed=grid_seed,
             plan_id=plan_id,
