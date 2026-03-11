@@ -103,7 +103,7 @@ See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full servic
 | **Optimizer nodes as thin wrappers** | Nodes wrap existing service functions. Service logic is independently testable. |
 | **Notebook-first HITL** | Campaign config as editable JSON, manual round control, LLM suggestions -- natural fit for HITL. Feedback cycle is also callable from any Python context. |
 
-> **Cross-reference:** [Observability guide](../obs-guide.md) covers M5 data exploration. Milestone specs [M6](m6-pipeline-composability.md) (pipeline composability) and [M7](m7-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
+> **Cross-reference:** [Observability](../observability.md) covers M5 data exploration. Milestone specs [M6](m6-pipeline-composability.md) (pipeline composability) and [M7](m7-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
 
 ---
 

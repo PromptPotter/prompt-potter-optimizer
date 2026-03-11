@@ -1,6 +1,8 @@
-# Observability Data Exploration Guide
+# Observability
 
-This guide covers how to navigate the accumulated research data that PromptPotter writes to `obs/` during optimization campaigns.
+This guide covers Langfuse integration and how to navigate the accumulated research data that PromptPotter writes to `obs/` during optimization campaigns.
+
+All evaluation data is stored locally first (file-based traces in `.promptpotter/projects/{backend_id}/obs/`). Cloud Langfuse is optional — you can run optimization campaigns without it and push data later.
 
 ---
 
@@ -59,11 +61,60 @@ This pattern is proven in production by TermNorm-excel (reference: `backend-api/
 
 ## Langfuse Cloud Integration
 
-In addition to file-based traces, PromptPotter can push eval runs to Langfuse cloud via `obs/langfuse_push.py`:
+In addition to file-based traces, PromptPotter can push eval runs to Langfuse cloud via `obs/langfuse_push.py`.
 
-- `push_all_runs()` — batch push all stored dataset_runs to Langfuse cloud (called from the notebook's `push_langfuse()` cell, always with dataset-item linking)
+### Setup
 
-Cloud push is optional; all data is always available on disk first.
+Add to `.env`:
+
+```
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com
+```
+
+### Live tracing (during optimization)
+
+When credentials are set **before** running a feedback cycle, traces are pushed to Langfuse in real-time. Each campaign creates a trace with:
+- A root `chain` observation (triggers the pipeline graph visualization)
+- Per-round `span` observations with real start/end times
+- Per-evaluation `tool` observations nested under their round
+- Accuracy scores attached to each round
+
+### Retroactive push
+
+If you ran an optimization campaign without Langfuse credentials, all evaluation data is still on disk. Push it after the fact:
+
+```python
+from _campaign_lib import configure_langfuse, push_langfuse
+
+# 1. Enable Langfuse (if not already in .env)
+configure_langfuse(
+    enabled=True,
+    public_key="pk-lf-...",
+    secret_key="sk-lf-...",
+)
+
+# 2. Push all accumulated data
+stats = push_langfuse(svc["store"], svc["backend_id"])
+```
+
+This creates one trace per dataset run, registers a ground-truth dataset with all queries, and links each evaluation to its dataset item. Re-running is safe — already-pushed runs are skipped.
+
+### Re-pushing after clearing Langfuse
+
+If you delete traces/datasets in the Langfuse UI and want to re-push everything, delete the local state file first:
+
+```python
+import os
+state_path = os.path.join(
+    svc["store"].base_dir, svc["backend_id"],
+    "obs", "langfuse", "backfill_state.json",
+)
+os.remove(state_path)
+stats = push_langfuse(svc["store"], svc["backend_id"])
+```
 
 ---
 

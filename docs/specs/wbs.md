@@ -47,7 +47,7 @@ Cleanup absorbed into M3-M5. Remaining items: SC5 → backlog, Streamlit → bac
 
 ## Phase 5: Observability Layer (M5) -- Complete
 
-7 packages, all Complete (5.0-5.6). ObsLogger, prompt registry, LLM retry, service wiring, integration test, pipeline observation extraction. See [`docs/obs-guide.md`](../obs-guide.md).
+7 packages, all Complete (5.0-5.6). ObsLogger, prompt registry, LLM retry, service wiring, integration test, pipeline observation extraction. See [`docs/observability.md`](../observability.md).
 
 ---
 

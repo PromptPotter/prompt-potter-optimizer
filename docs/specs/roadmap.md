@@ -36,7 +36,7 @@ Cleanup absorbed into M3-M5. SC5 variant comparison → backlog (needs Connector
 
 ## M5: Observability Layer -- Complete
 
-File-based observability (Langfuse traces, MLflow experiments, prompt versioning), LLM retry, pipeline observation extraction. See [`docs/obs-guide.md`](../obs-guide.md).
+File-based observability (Langfuse traces, MLflow experiments, prompt versioning), LLM retry, pipeline observation extraction. See [`docs/observability.md`](../observability.md).
 
 ---
 

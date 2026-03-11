@@ -33,9 +33,9 @@ cd docker && docker-compose up --build
 ### Two entry points, shared core
 
 1. **FastAPI API** (`api/main.py`) — REST endpoints at `/api/v1/`. Routers: `backends`, `campaigns`, `health`, `workflows`.
-2. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` is the **primary working interface** at this stage. Uses `notebooks/_campaign_lib.py`, a thin wrapper that delegates to `api/services/` and adds tqdm progress bars + IPython display.
+2. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` is the **primary working interface** at this stage. Uses `notebooks/_campaign_lib/`, a package of 6 submodules (`_setup`, `_eval`, `_grid`, `_search`, `_optimize`, `_display`) that wraps services with tqdm progress bars + IPython display.
 
-All core logic lives in `api/services/`. The notebook library (`_campaign_lib.py`) never implements business logic — it only wraps service functions with UI output. `tests/test_e2e_optimization.py` is the testable E2E proxy for the notebook workflow.
+All core logic lives in `api/services/`. The notebook library (`_campaign_lib/`) never implements business logic — it only wraps service functions with UI output. `tests/test_e2e_optimization.py` is the testable E2E proxy for the notebook workflow.
 
 ### Service layer (`api/services/`)
 
@@ -44,6 +44,13 @@ See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for the full service cata
 ### Data model
 
 **SearchPoint** bundles `PromptState` + `model` + `temperature` + `pipeline_params` — the four dimensions that fully specify one evaluation point. **PipelineSchema** defines the backend pipeline being targeted. Together they parameterize every optimization service: `f(SearchPoint, PipelineSchema, eval_data) → scores`. See [`api/models/CLAUDE.md`](api/models/CLAUDE.md) for field details and API.
+
+### Prompt decomposition & alias groups
+
+Two core mechanisms that work together (both actively evolving):
+
+- **Prompt decomposition** — PromptPotter decomposes a backend's monolithic prompt into internal fields (`persona`, `task_intent`, `thinking_style`, `answer_format`, `problem_description`) via LLM restructure. A default variant library (`api/config/prompt_variants.json`) provides per-field alternatives for scan and grid search. This turns one opaque prompt into a combinatorial search space.
+- **Prompt alias groups** — `register_alias` / `resolve_aliases` link semantically equivalent prompt hashes (e.g. original monolithic ↔ restructured decomposed form) so historical evaluations are discoverable across forms. Resolution is transitive. Used by coverage advisor, scan diagnostics, and `evaluate_prompt_cached()`.
 
 ### Pipeline discovery
 
@@ -61,7 +68,7 @@ The human workflow is a repeatable loop:
 
 0. **Pipeline snapshot** — call `backend_client.fetch_pipeline()` and display the full JSON. This ensures every experiment run has its pipeline parameters recorded inline in the notebook output.
 1. **Generate data** — sync from backend, build eval dataset, run baseline eval
-2. **Explore** — sensitivity scan (5 cells: scan advisor → edit variants → prepare scan baseline → sensitivity scan → select winner) and/or grid search map the accuracy landscape; results are persisted as `dataset_runs` keyed by content hash. The scan baseline is created via LLM restructure to decompose the backend's monolithic prompt into PromptPotter's internal fields (persona, task_intent, etc.) for independent perturbation. `sensitivity_scan()` takes a `SearchPoint` + flat `scan_variants` dict and runs OAT over all eval_data.
+2. **Explore** — sensitivity scan (5 cells: scan advisor → edit variants → prepare scan baseline → sensitivity scan → select winner) and/or grid search map the accuracy landscape; results are persisted as `dataset_runs` keyed by content hash. The scan baseline is created via LLM restructure to decompose the backend's monolithic prompt into PromptPotter's internal fields (persona, task_intent, etc.) for independent perturbation. `sensitivity_scan()` takes a `SearchPoint` + flat `scan_variants` dict and runs OAT over all eval_data. Scan variant coverage diagnostic (`diagnose_scan_variants()`) checks historical data via prompt alias groups before evaluation to report per-axis coverage.
 3. **Optimize** — feedback cycle (LLM candidate generation → backend evaluation → winner selection) runs iteratively until the human stops it
 4. **Harvest** — the human reviews results. All eval data is already stored in `dataset_runs` via `evaluate_prompt_cached`
 5. **Reuse** — coverage advisor discovers all stored `dataset_runs` regardless of source. Fresh optimization starts from higher ground.
@@ -70,7 +77,7 @@ The human workflow is a repeatable loop:
 
 ### Evaluation flow
 
-All evaluation paths (grid search, smart search, feedback cycle) converge on `evaluate_prompt_cached()` — the single gateway for eval persistence with content-addressed deduplication. See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for details.
+All evaluation paths (grid search, smart search, feedback cycle) converge on `evaluate_prompt_cached()` — the single gateway for eval persistence with content-addressed deduplication. Prompt alias groups link semantically equivalent prompts (original vs restructured) so historical data is discoverable across forms. See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for details.
 
 ### Workflow engine scaffold
 
@@ -86,12 +93,17 @@ The TermNorm repo lives at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\`. See
 
 ## Project Conventions
 
-- **No backward compatibility** — freely break signatures, rename, restructure. No compat shims.
+- **No backward compatibility** — freely break signatures, rename, restructure. No compat shims, no dual-format readers.
 - **Python**: 3.13, ruff for linting (line-length 100, select E/F rules)
 - **Type hints**: PEP 604 (`X | None`, not `Optional[X]`), lowercase generics (`list[str]`, not `List[str]`)
 - **Logging**: `logging` module (no `print()` in non-notebook code). Setup in `api/config/logging.py`.
-- **Default LLM**: `meta-llama/llama-4-maverick-17b-128e-instruct` via Groq
 - **Config**: Pydantic `BaseSettings` loading from `.env` (see `api/config/settings.py`)
 - **Version**: Centralized in `api/config/settings.py` as `APP_VERSION`
 - **API versioning**: all endpoints under `/api/v1/`
+- **`sample_size`**: Universal eval sampling parameter across all services (0 = use all). No synonyms (`max_queries`, `eval_queries_per_point`, etc.).
+- **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields. Surfaces schema violations immediately.
+- **Circuit breaker**: Scan evaluation aborts on baseline all-errors or 2 consecutive all-error variants.
+- **Session resilience**: `BackendClient` auto-reinits on 400 (backend restart recovery).
 - **Pipeline reproducibility**: The notebook MUST display the full pipeline configuration (all node configs, models, temperatures, schemas) via `GET /pipeline` before any evaluation. This is the experiment's parameter manifest — never strip it to just step names. The scan advisor also reads this config to make informed recommendations.
+
+See [`docs/design-principles.md`](docs/design-principles.md) for the full principles catalog with rationale.
