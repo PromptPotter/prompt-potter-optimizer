@@ -112,6 +112,8 @@ class DatasetRunStore:
             "item_count": data["item_count"],
             "scores": data["scores"],
             "content_hash": data["content_hash"],
+            "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
+            "pipeline_params": data.get("pipeline_params"),
             "source": data.get("source", ""),
             "created_at": data["created_at"],
         }
@@ -206,6 +208,54 @@ class DatasetRunStore:
                         count += 1
             results.append({"run_id": run_id, "items": count, "path": str(p)})
         return results
+
+    # -- prompt alias groups ---------------------------------------------------
+
+    def _alias_path(self, backend_id: str) -> Path:
+        validate_path_component(backend_id)
+        return self._base_dir / backend_id / "prompt_aliases.json"
+
+    def register_alias(self, backend_id: str, *hashes: str) -> None:
+        """Link rendered_prompt_hashes as semantically equivalent.
+
+        Merges into existing groups: if any hash is already grouped,
+        the new hashes join that group.
+        """
+        hashes_set = {h for h in hashes if h}
+        if len(hashes_set) < 2:
+            return
+
+        path = self._alias_path(backend_id)
+        data = read_json_optional(path) or {"groups": []}
+        groups: list[list[str]] = data["groups"]
+
+        # Find all existing groups that overlap with the new hashes
+        merged: set[str] = set(hashes_set)
+        remaining: list[list[str]] = []
+        for group in groups:
+            if merged & set(group):
+                merged |= set(group)
+            else:
+                remaining.append(group)
+
+        remaining.append(sorted(merged))
+        data["groups"] = remaining
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(path, data)
+
+    def resolve_aliases(self, backend_id: str, rp_hash: str) -> set[str]:
+        """Return all hashes equivalent to *rp_hash* (including itself)."""
+        if not rp_hash:
+            return set()
+        data = read_json_optional(self._alias_path(backend_id))
+        if not data:
+            return {rp_hash}
+        for group in data.get("groups", []):
+            if rp_hash in group:
+                return set(group)
+        return {rp_hash}
+
+    # -- finalization ----------------------------------------------------------
 
     def finalize_eval_run(
         self, backend_id: str, run_id: str, run_data: dict,
