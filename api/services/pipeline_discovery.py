@@ -305,9 +305,9 @@ def _extract_resolved_metadata(
 ) -> dict[str, dict[str, Any]]:
     """Extract per-node resolved metadata from the pipeline response.
 
-    Prefers top-level ``resolved_schemas``/``resolved_prompts`` dicts (new
-    format). Falls back to inline ``_resolved_schema``/``_resolved_prompt``
-    keys inside each node's config (legacy format).
+    Uses top-level ``resolved_schemas``/``resolved_prompts`` dicts keyed by
+    ``"{family}/{version}"``.  Each node references its schema/prompt via
+    ``schema_family``/``prompt_family`` config keys.
 
     Returns mapping of ``node_name -> {"output_schema": ..., "prompt_meta": ...}``.
     """
@@ -322,23 +322,19 @@ def _extract_resolved_metadata(
         nc = node_data.get("config", {})
         entry: dict[str, Any] = {}
 
-        # Schema: try top-level lookup first, then inline fallback
+        # Schema: top-level lookup
         if sf := nc.get("schema_family"):
             sv = nc.get("schema_version")
             key = f"{sf}/{sv}" if sv is not None else sf
             if key in schemas_raw:
                 entry["output_schema"] = _parse_resolved_schema(schemas_raw[key])
-            elif "_resolved_schema" in nc:
-                entry["output_schema"] = _parse_resolved_schema(nc["_resolved_schema"])
 
-        # Prompt: try top-level lookup first, then inline fallback
+        # Prompt: top-level lookup
         if pf := nc.get("prompt_family"):
             pv = nc.get("prompt_version")
             key = f"{pf}/{pv}" if pv is not None else pf
             if key in prompts_raw:
                 entry["prompt_meta"] = _parse_resolved_prompt(prompts_raw[key])
-            elif "_resolved_prompt" in nc:
-                entry["prompt_meta"] = _parse_resolved_prompt(nc["_resolved_prompt"])
 
         if entry:
             metadata[node_name] = entry
@@ -349,14 +345,8 @@ def _extract_resolved_metadata(
 def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     """Parse a ``GET /pipeline`` JSON response into a PipelineSchema.
 
-    Handles three response formats:
-
-    1. **New** (top-level ``resolved_schemas``/``resolved_prompts`` dicts):
-       Nodes reference by ``schema_family``/``prompt_family``; resolved
-       objects live in separate top-level sections.
-    2. **Legacy enriched** (inline ``_resolved_schema``/``_resolved_prompt``
-       in each node's config): Falls back to this if top-level dicts missing.
-    3. **Legacy steps list**: Extracts step names and config keys.
+    Expects a ``nodes`` dict with per-node config.  Resolved metadata uses
+    top-level ``resolved_schemas``/``resolved_prompts`` dicts.
 
     If the pipeline name matches a known default, enriches with observation
     mappings, langfuse types, and other metadata that the raw response
@@ -419,60 +409,44 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "available_models": config.get("available_models", []),
         })
 
-    # Unknown pipeline — build from nodes dict or steps list
-    if nodes:
-        steps: list[PipelineStep] = []
-        for node_name, node_data in nodes.items():
-            nc = node_data.get("config", {})
-            # Filter out internal keys when building param_keys
-            param_keys = {
-                k for k in nc
-                if not k.startswith("_")
-            } if nc else set()
-            config_values = {
-                k: v for k, v in nc.items()
-                if not k.startswith("_")
-            }
-            step_kwargs: dict[str, Any] = {
-                "name": node_name,
-                "type": node_data.get("type", "tool"),
-                "short_circuit": node_data.get("short_circuit", False),
-                "param_keys": param_keys,
-                "current_config": config_values,
-            }
-            rm = resolved_metadata.get(node_name, {})
-            if "output_schema" in rm:
-                step_kwargs["output_schema"] = rm["output_schema"]
-            if "prompt_meta" in rm:
-                step_kwargs["prompt_meta"] = rm["prompt_meta"]
-            steps.append(PipelineStep(**step_kwargs))
-
-        logger.info(
-            "Unknown pipeline '%s'; built schema from nodes dict with %d steps",
-            pipeline_name, len(steps),
+    # Unknown pipeline — build from nodes dict
+    if not nodes:
+        logger.warning(
+            "Unknown pipeline '%s' with no nodes dict; returning empty schema",
+            pipeline_name,
         )
         return PipelineSchema(
-            name=pipeline_name,
-            version=version,
-            description=description,
-            steps=steps,
-            available_models=config.get("available_models", []),
+            name=pipeline_name, version=version, description=description,
         )
 
-    # Fallback: legacy steps list format
-    steps_data = config.get("steps", [])
-    steps = []
-    for step_data in steps_data:
-        step_name = step_data.get("name", "")
-        step_config = step_data.get("config", {})
-        param_keys = set(step_config.keys()) if step_config else set()
-        steps.append(PipelineStep(
-            name=step_name,
-            param_keys=param_keys,
-        ))
+    steps: list[PipelineStep] = []
+    for node_name, node_data in nodes.items():
+        nc = node_data.get("config", {})
+        # Filter out internal keys when building param_keys
+        param_keys = {
+            k for k in nc
+            if not k.startswith("_")
+        } if nc else set()
+        config_values = {
+            k: v for k, v in nc.items()
+            if not k.startswith("_")
+        }
+        step_kwargs: dict[str, Any] = {
+            "name": node_name,
+            "type": node_data.get("type", "tool"),
+            "short_circuit": node_data.get("short_circuit", False),
+            "param_keys": param_keys,
+            "current_config": config_values,
+        }
+        rm = resolved_metadata.get(node_name, {})
+        if "output_schema" in rm:
+            step_kwargs["output_schema"] = rm["output_schema"]
+        if "prompt_meta" in rm:
+            step_kwargs["prompt_meta"] = rm["prompt_meta"]
+        steps.append(PipelineStep(**step_kwargs))
 
     logger.info(
-        "Unknown pipeline '%s'; built minimal schema with %d steps",
+        "Unknown pipeline '%s'; built schema from nodes dict with %d steps",
         pipeline_name, len(steps),
     )
     return PipelineSchema(

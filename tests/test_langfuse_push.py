@@ -122,19 +122,15 @@ def _make_pipeline_items():
 
 class TestClassifyRunOrigin:
     @pytest.mark.parametrize("run_id,source,expected", [
-        ("baseline_816203b2", None, "baseline"),
-        ("grid_00230b37", None, "grid_search"),
-        ("scan_05bb3a11", None, "sensitivity_scan"),
-        ("candidate_0_4101eac4", None, "feedback_cycle"),
-        ("smart_search_winner_8a33a6ef", None, "smart_search_winner"),
-        ("unknown_run_xyz", None, "other"),
-        ("", None, "other"),
+        ("unknown_run_xyz", "", "other"),
+        ("", "", "other"),
         ("grid_00230b37", "baseline", "baseline"),
-        ("grid_00230b37", "", "grid_search"),
+        ("grid_00230b37", "grid_search", "grid_search"),
+        ("any_id", "sensitivity_scan", "sensitivity_scan"),
+        ("any_id", "feedback_cycle", "feedback_cycle"),
     ])
     def test_classify(self, run_id, source, expected):
-        kwargs = {"source": source} if source is not None else {}
-        assert classify_run_origin(run_id, **kwargs) == expected
+        assert classify_run_origin(run_id, source=source) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -276,8 +272,8 @@ def test_push_all_idempotent_and_incremental(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_state_persisted_v3(tmp_path, monkeypatch):
-    """backfill_state.json format_version=3 with per-run trace ID lists."""
+def test_state_persisted(tmp_path, monkeypatch):
+    """backfill_state.json with per-run trace ID lists."""
     store = ProjectStore(tmp_path)
     backend_id = "test-backend"
 
@@ -294,33 +290,9 @@ def test_state_persisted_v3(tmp_path, monkeypatch):
     assert state_path.exists()
 
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert state["format_version"] == 3
     assert set(state["backfilled_run_ids"]) == {"baseline_001", "scan_001"}
     assert isinstance(state["langfuse_trace_ids"]["baseline_001"], list)
     assert len(state["dataset_items"]) > 0
-
-
-def test_old_state_format_reset(tmp_path, monkeypatch):
-    """Old state format (format_version != 3) gets reset — run re-pushed."""
-    store = ProjectStore(tmp_path)
-    backend_id = "test-backend"
-
-    state_path = tmp_path / backend_id / "obs" / "langfuse" / "backfill_state.json"
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps({
-        "format_version": 2,
-        "backfilled_run_ids": ["baseline_001"],
-        "last_backfill_at": "2026-01-01T00:00:00Z",
-        "langfuse_trace_ids": {"baseline_001": "old_trace_id"},
-    }), encoding="utf-8")
-
-    _seed_runs(store, backend_id, [_make_run("baseline_001", 0.5)])
-
-    mock = MockLangfuseLogger()
-    monkeypatch.setattr(LangfuseLogger, "get_instance", classmethod(lambda cls: mock))
-
-    stats = push_all_runs(store, backend_id)
-    assert stats["new_runs"] == 1  # re-pushed after format reset
 
 
 # ---------------------------------------------------------------------------

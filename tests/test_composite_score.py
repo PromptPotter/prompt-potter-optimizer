@@ -1,11 +1,8 @@
-"""Tests for compute_composite_score() and _ensure_composite()."""
+"""Tests for compute_composite_score()."""
 
 import pytest
 
-from api.services.prompt_eval import (
-    _ensure_composite,
-    compute_composite_score,
-)
+from api.services.prompt_eval import compute_composite_score
 
 
 def _make_results(hits, total, *, terminated_at="llm_ranking", gt_in_candidates=True):
@@ -79,20 +76,3 @@ class TestComputeCompositeScore:
         assert scores["composite"] > 0
 
 
-class TestEnsureComposite:
-    def test_already_has_composite(self):
-        scores = {"accuracy": 0.5, "composite": 0.6}
-        assert _ensure_composite(scores) is scores
-
-    def test_missing_composite_no_results(self):
-        scores = {"accuracy": 0.5, "hits": 2, "total": 4, "errors": 0}
-        result = _ensure_composite(scores)
-        assert result["composite"] == 0.5
-        assert result["token_recall"] == 0.0
-
-    def test_missing_composite_with_results(self):
-        results = _make_results(3, 5)
-        scores = {"accuracy": 0.6, "hits": 3, "total": 5, "errors": 0}
-        result = _ensure_composite(scores, results)
-        assert "composite" in result
-        assert result["composite"] > 0

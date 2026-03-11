@@ -468,18 +468,6 @@ def compute_composite_score(
     }
 
 
-def _ensure_composite(
-    scores: dict,
-    results: list | None = None,
-    pipeline_schema: "PipelineSchema | None" = None,
-) -> dict:
-    """Ensure scores dict has a ``composite`` key (backward-compat for old data)."""
-    if "composite" in scores:
-        return scores
-    if results is not None:
-        return compute_composite_score(results, pipeline_schema)
-    return {**scores, "token_recall": 0.0, "composite": scores.get("accuracy", 0.0)}
-
 
 def _resolve_historical_and_partial(
     rendered: str,
@@ -678,10 +666,7 @@ async def evaluate_prompt_cached(
         existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
         if existing:
             results = existing["dataset_run_items"]
-            scores = _ensure_composite(
-                existing.get("scores", compute_accuracy(results)),
-                results, pipeline_schema,
-            )
+            scores = compute_composite_score(results, pipeline_schema)
             if on_result is not None:
                 for i, r in enumerate(results):
                     on_result({**r, "cached": True}, i, len(results))

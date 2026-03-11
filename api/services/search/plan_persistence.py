@@ -85,16 +85,14 @@ def deserialize_grid_plan(
     baseline_ps = PromptState(**plan_data["baseline_ps"])
     state_lookup = {
         ps_id: PromptState(**ps_data)
-        for ps_id, ps_data in plan_data.get(
-            "state_lookup", plan_data.get("ps_lookup", {})
-        ).items()
+        for ps_id, ps_data in plan_data["state_lookup"].items()
     }
     return (
-        plan_data.get("grid_points", plan_data.get("combinations", [])),
+        plan_data["grid_points"],
         state_lookup,
         plan_data["sampling_meta"],
         plan_data["grid_axes"],
-        plan_data.get("layer1_fields", plan_data.get("structured_fields", {})),
+        plan_data["layer1_fields"],
         baseline_ps,
     )
 

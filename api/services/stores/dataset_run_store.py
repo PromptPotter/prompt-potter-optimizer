@@ -106,14 +106,14 @@ class DatasetRunStore:
             "run_id": data["run_id"],
             "name": data.get("name", run_id),
             "experiment_id": data.get("experiment_id", ""),
-            "prompt_state_id": data.get("prompt_state_id", ""),
-            "model": data.get("model", ""),
-            "temperature": data.get("temperature", 0),
-            "item_count": data.get("item_count", 0),
-            "scores": data.get("scores", {}),
-            "content_hash": data.get("content_hash", ""),
+            "prompt_state_id": data["prompt_state_id"],
+            "model": data["model"],
+            "temperature": data["temperature"],
+            "item_count": data["item_count"],
+            "scores": data["scores"],
+            "content_hash": data["content_hash"],
             "source": data.get("source", ""),
-            "created_at": data.get("created_at", ""),
+            "created_at": data["created_at"],
         }
 
         index_path = self._index_path(backend_id)

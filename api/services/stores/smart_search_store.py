@@ -19,8 +19,8 @@ class SmartSearchStore(_BasePlanStore):
             config = data.get("config", {})
             scan = data.get("scan_results", {})
             results.append({
-                "plan_id": data.get("plan_id", ""),
-                "status": data.get("status", "unknown"),
+                "plan_id": data["plan_id"],
+                "status": data["status"],
                 "n_diagnostic": config.get("n_diagnostic", "?"),
                 "max_rounds": config.get("max_rounds", "?"),
                 "n_axis_profiles": len(scan.get("axis_profiles", [])),

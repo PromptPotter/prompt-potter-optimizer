@@ -42,32 +42,12 @@ ORIGIN_ORDER = [
     "other",
 ]
 
-_PREFIX_MAP = [
-    ("baseline_", "baseline"),
-    ("grid_", "grid_search"),
-    ("scan_", "sensitivity_scan"),
-    ("candidate_", "feedback_cycle"),
-    ("smart_search_winner_", "smart_search_winner"),
-]
-
-_STATE_FORMAT_VERSION = 3
-
-
 def classify_run_origin(run_id: str, source: str = "") -> str:
-    """Classify a dataset run's origin protocol.
+    """Classify a dataset run's origin from its ``source`` field.
 
-    Uses the explicit ``source`` field when available, falls back to
-    run_id prefix matching for legacy runs without a source field.
-
-    Returns one of: baseline, grid_search, sensitivity_scan,
-    feedback_cycle, smart_search_winner, other.
+    Returns one of the ORIGIN_ORDER values, defaulting to ``"other"``.
     """
-    if source:
-        return source
-    for prefix, origin in _PREFIX_MAP:
-        if run_id.startswith(prefix):
-            return origin
-    return "other"
+    return source or "other"
 
 
 def _state_path(store: ProjectStore, backend_id: str) -> Path:
@@ -78,17 +58,12 @@ def _load_state(store: ProjectStore, backend_id: str) -> dict[str, Any]:
     path = _state_path(store, backend_id)
     if path.exists():
         with open(path, encoding="utf-8") as f:
-            state = json.load(f)
-        if state.get("format_version") != _STATE_FORMAT_VERSION:
-            logger.info("Resetting stale backfill state (old format)")
-            return _fresh_state()
-        return state
+            return json.load(f)
     return _fresh_state()
 
 
 def _fresh_state() -> dict[str, Any]:
     return {
-        "format_version": _STATE_FORMAT_VERSION,
         "backfilled_run_ids": [],
         "last_backfill_at": None,
         "langfuse_trace_ids": {},   # {run_id: [trace_id, ...]}

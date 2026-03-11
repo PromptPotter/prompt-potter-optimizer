@@ -100,20 +100,17 @@ class CampaignStore:
         if not campaigns_dir.exists():
             return []
         results = []
-        for path in sorted(
-            p for pattern in ("campaign_*.json", "cycle_*.json")
-            for p in campaigns_dir.glob(pattern)
-        ):
+        for path in sorted(campaigns_dir.glob("campaign_*.json")):
             data = read_json(path)
             results.append({
-                "campaign_id": data.get("campaign_id", path.stem),
+                "campaign_id": data["campaign_id"],
                 "name": data.get("name", ""),
-                "status": data.get("status", "unknown"),
-                "n_trials": data.get("n_trials", 0),
-                "best_accuracy": data.get("best_accuracy", 0.0),
-                "baseline_accuracy": data.get("baseline_accuracy", 0.0),
-                "created_at": data.get("created_at", ""),
-                "updated_at": data.get("updated_at", ""),
+                "status": data["status"],
+                "n_trials": data["n_trials"],
+                "best_accuracy": data["best_accuracy"],
+                "baseline_accuracy": data["baseline_accuracy"],
+                "created_at": data["created_at"],
+                "updated_at": data["updated_at"],
             })
         return results
 
@@ -292,7 +289,7 @@ class CampaignStore:
         trial_ids = []
         for rd in campaign_rounds:
             ps = rd["prompt_state"]
-            ps_dict = ps.model_dump() if hasattr(ps, "model_dump") else dict(ps)
+            ps_dict = ps.model_dump()
 
             trial = self.record_trial(
                 backend_id, campaign_id,

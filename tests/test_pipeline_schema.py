@@ -169,16 +169,20 @@ class TestParsePipelineResponse:
             "config": {
                 "name": "CustomPipeline",
                 "version": "0.1",
-                "steps": [
-                    {"name": "step_a", "config": {"param1": 10, "param2": "x"}},
-                    {"name": "step_b", "config": {}},
-                ],
+                "nodes": {
+                    "step_a": {
+                        "type": "tool",
+                        "config": {"param1": 10, "param2": "x"},
+                    },
+                    "step_b": {"type": "tool", "config": {}},
+                },
             }
         }
         schema = parse_pipeline_response(data)
         assert schema.name == "custompipeline"
         assert len(schema.steps) == 2
-        assert schema.steps[0].param_keys == {"param1", "param2"}
+        step_a = next(s for s in schema.steps if s.name == "step_a")
+        assert step_a.param_keys == {"param1", "param2"}
 
     def test_top_level_resolved_unknown(self):
         """New format: top-level resolved_schemas/resolved_prompts dicts."""

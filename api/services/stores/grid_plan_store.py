@@ -24,7 +24,7 @@ class GridPlanStore(_BasePlanStore):
         for data in super().list_all(backend_id):
             sm = data.get("sampling_meta", {})
             axes = data.get("grid_axes", {})
-            points = data.get("grid_points", data.get("combinations", []))
+            points = data.get("grid_points", [])
             results.append({
                 "plan_id": data.get("plan_id", ""),
                 "status": data.get("status", "unknown"),
