@@ -56,6 +56,8 @@ __all__ = [  # noqa: F405
     "show_grid_overview", "smoke_test_override",
     # Pipeline snapshot
     "show_pipeline_snapshot",
+    # Scan analytics
+    "show_scan_leaderboard", "show_scan_query_difficulty",
     # Campaign results display
     "show_campaign_summary", "show_flip_tracking", "show_lineage_chain",
     # Langfuse
