@@ -60,6 +60,8 @@ include = ["api*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["tests"]
+addopts = "-q --tb=short"
+markers = ["slow: orchestrator integration tests (>1s each)"]
 
 [tool.ruff]
 target-version = "py313"

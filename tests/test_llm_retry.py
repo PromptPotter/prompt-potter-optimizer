@@ -12,6 +12,14 @@ from api.services.llm_client import _MAX_APP_RETRIES, _OpenAICompatibleClient
 from _helpers import MockCompletion, make_http_error
 
 
+@pytest.fixture(autouse=True)
+def _instant_sleep(monkeypatch):
+    """Eliminate real asyncio.sleep — we test retry logic, not delays."""
+    async def _noop(seconds):
+        pass
+    monkeypatch.setattr("asyncio.sleep", _noop)
+
+
 @pytest.fixture
 def llm_client():
     """Create a fresh _OpenAICompatibleClient with a mocked async client."""
@@ -27,49 +35,40 @@ def llm_client():
 
 
 @pytest.mark.asyncio
-async def test_llm_retry_503(llm_client):
-    """Retry on 503 twice, then succeed on third attempt."""
+@pytest.mark.parametrize("status_code,n_failures,expected_calls,succeeds", [
+    (503, 2, 3, True),
+    (429, 1, 2, True),
+    (503, _MAX_APP_RETRIES + 1, _MAX_APP_RETRIES + 1, False),
+])
+async def test_llm_retry_transient(
+    llm_client, status_code, n_failures, expected_calls, succeeds,
+):
+    """Retryable status codes are retried; exhaustion raises."""
     client, mock_async = llm_client
     call_count = [0]
 
     async def mock_create(**kwargs):
         call_count[0] += 1
-        if call_count[0] <= 2:
-            raise make_http_error(503, "Service unavailable")
+        if call_count[0] <= n_failures:
+            raise make_http_error(status_code, f"Error {status_code}")
         return MockCompletion()
 
     mock_async.chat.completions.create = mock_create
 
-    response = await client.chat(
-        messages=[{"role": "user", "content": "test"}],
-        model="test-model",
-    )
+    if succeeds:
+        response = await client.chat(
+            messages=[{"role": "user", "content": "test"}],
+            model="test-model",
+        )
+        assert response.content == '{"result": "ok"}'
+    else:
+        with pytest.raises(Exception):
+            await client.chat(
+                messages=[{"role": "user", "content": "test"}],
+                model="test-model",
+            )
 
-    assert response.content == '{"result": "ok"}'
-    assert call_count[0] == 3  # 2 failures + 1 success
-
-
-@pytest.mark.asyncio
-async def test_llm_retry_429(llm_client):
-    """Retry on 429 once, then succeed."""
-    client, mock_async = llm_client
-    call_count = [0]
-
-    async def mock_create(**kwargs):
-        call_count[0] += 1
-        if call_count[0] <= 1:
-            raise make_http_error(429, "Rate limited")
-        return MockCompletion()
-
-    mock_async.chat.completions.create = mock_create
-
-    response = await client.chat(
-        messages=[{"role": "user", "content": "test"}],
-        model="test-model",
-    )
-
-    assert response.content == '{"result": "ok"}'
-    assert call_count[0] == 2
+    assert call_count[0] == expected_calls
 
 
 @pytest.mark.asyncio
@@ -91,24 +90,3 @@ async def test_llm_no_retry_400(llm_client):
         )
 
     assert call_count[0] == 1  # No retry
-
-
-@pytest.mark.asyncio
-async def test_llm_retry_exhausted(llm_client):
-    """503 on every attempt raises after max retries."""
-    client, mock_async = llm_client
-    call_count = [0]
-
-    async def mock_create(**kwargs):
-        call_count[0] += 1
-        raise make_http_error(503, "Service unavailable")
-
-    mock_async.chat.completions.create = mock_create
-
-    with pytest.raises(Exception, match="Service unavailable"):
-        await client.chat(
-            messages=[{"role": "user", "content": "test"}],
-            model="test-model",
-        )
-
-    assert call_count[0] == _MAX_APP_RETRIES + 1
