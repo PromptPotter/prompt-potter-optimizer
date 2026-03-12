@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import re
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def _visible_len(text: str) -> int:
+    """Length of text after stripping ANSI escape codes."""
+    return len(_ANSI_RE.sub("", text))
+
 __all__ = [
     # Constants
     "RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
+    # Box-drawing helpers
+    "_box_top", "_box_bottom", "_box_line",
+    "_dbox_top", "_dbox_bottom", "_dbox_line", "_dbox_sep",
+    "_dotted_line", "_fmt_delta", "_scoreboard",
     # Display functions
     "display_progress", "display_suggestions", "display_axis_profiles",
     # Scan analytics
@@ -24,6 +37,134 @@ YELLOW  = "\033[33m"
 BLUE    = "\033[34m"
 MAGENTA = "\033[35m"
 CYAN    = "\033[36m"
+
+# ---------------------------------------------------------------------------
+# Box-drawing helpers (pure formatting, no business logic)
+# ---------------------------------------------------------------------------
+
+_W = 70  # standard box width
+
+
+def _box_top(label: str = "", label_right: str = "", width: int = _W) -> str:
+    """Single-line top: ``┌─ label ───── label_right ─┐``."""
+    inner = width - 4  # minus ┌─ prefix and ─┐ suffix
+    if label:
+        left = f" {label} "
+    else:
+        left = ""
+    if label_right:
+        right = f" {label_right} "
+    else:
+        right = ""
+    fill = inner - len(left) - len(right)
+    return f"\u250c\u2500{left}{'─' * max(fill, 1)}{right}\u2500\u2510"
+
+
+def _box_bottom(width: int = _W) -> str:
+    """Single-line bottom: ``└───...───┘``."""
+    return f"\u2514{'─' * (width - 2)}\u2518"
+
+
+def _box_line(text: str, width: int = _W) -> str:
+    """Single-line content: ``│  text ...  │``."""
+    inner = width - 4  # minus │ + 2 spaces each side
+    pad = max(inner - _visible_len(text), 0)
+    return f"\u2502  {text}{' ' * pad}\u2502"
+
+
+def _dbox_top(width: int = _W) -> str:
+    """Double-line top: ``╔═══...═══╗``."""
+    return f"\u2554{'═' * (width - 2)}\u2557"
+
+
+def _dbox_bottom(width: int = _W) -> str:
+    """Double-line bottom: ``╚═══...═══╝``."""
+    return f"\u255a{'═' * (width - 2)}\u255d"
+
+
+def _dbox_sep(width: int = _W) -> str:
+    """Double-line separator: ``╠═══...═══╣``."""
+    return f"\u2560{'═' * (width - 2)}\u2563"
+
+
+def _dbox_line(text: str, width: int = _W) -> str:
+    """Double-line content: ``║  text ...  ║``."""
+    inner = width - 4
+    pad = max(inner - _visible_len(text), 0)
+    return f"\u2551  {text}{' ' * pad}\u2551"
+
+
+def _dotted_line(label: str = "", width: int = _W) -> str:
+    """Dotted separator: ``┄┄┄ label ┄┄┄...┄┄┄``."""
+    if label:
+        pad = width - len(label) - 2  # 2 spaces around label
+        left = pad // 2
+        right = pad - left
+        return f"{'┄' * left} {label} {'┄' * right}"
+    return "┄" * width
+
+
+def _fmt_delta(val: float) -> str:
+    """Format accuracy delta with color: green positive, red negative, yellow zero."""
+    if abs(val) < 0.001:
+        return f"{YELLOW}+0.0%{RESET}"
+    if val > 0:
+        return f"{GREEN}{val:+.1%}{RESET}"
+    return f"{RED}{val:+.1%}{RESET}"
+
+
+def _scoreboard(
+    candidate_scores: list[dict],
+    winner_label: str,
+    baseline_accuracy: float,
+) -> str:
+    """Format ranked candidate scoreboard as a box.
+
+    ``candidate_scores`` items: {label, accuracy, composite?}.
+    Returns multi-line string ready to print.
+    """
+    if not candidate_scores:
+        return ""
+
+    # Sort by composite (if present) then accuracy
+    def _sort_key(s):
+        return (s.get("composite", s["accuracy"]), s["accuracy"])
+
+    ranked = sorted(candidate_scores, key=_sort_key, reverse=True)
+
+    lines = []
+    lines.append(f"  {_box_top('SCOREBOARD', width=66)}")
+
+    # Header
+    has_composite = any(
+        s.get("composite") is not None and s.get("composite") != s["accuracy"]
+        for s in ranked
+    )
+    if has_composite:
+        hdr = f"{'#':<4s}{'Label':<14s}{'Accuracy':>9s}  {'Composite':>9s}  {'Delta':>7s}"
+    else:
+        hdr = f"{'#':<4s}{'Label':<14s}{'Accuracy':>9s}  {'Delta':>7s}"
+    lines.append(f"  {_box_line(hdr, width=66)}")
+
+    for i, s in enumerate(ranked, 1):
+        label = str(s.get("label", f"C{i}"))[:12]
+        acc = s["accuracy"]
+        delta = acc - baseline_accuracy
+        delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
+        winner_mark = f"  {GREEN}{BOLD}* WINNER{RESET}" if label == winner_label else ""
+
+        if has_composite:
+            comp = s.get("composite", acc)
+            row = (f"{i:<4d}{label:<14s}{acc:>8.1%}   {comp:>8.4f}   "
+                   f"{delta_str:>7s}{winner_mark}")
+        else:
+            row = f"{i:<4d}{label:<14s}{acc:>8.1%}   {delta_str:>7s}{winner_mark}"
+
+        lines.append(f"  {_box_line(row, width=66)}")
+
+    lines.append(f"  {_box_bottom(width=66)}")
+    return "\n".join(lines)
+
 
 def _print_interrupt_banner(
     operation: str,

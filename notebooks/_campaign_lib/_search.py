@@ -1317,13 +1317,19 @@ def seed_campaign_from_scan(
         campaign_config["pipeline_params"] = merged
         print(f"Updated pipeline_params: {merged}")
 
+    # Get scan baseline accuracy as fallback when campaign_rounds is empty
+    scan_baseline_acc = 0.0
+    baseline_rows = scan_df[scan_df["delta"] == 0.0]
+    if not baseline_rows.empty:
+        scan_baseline_acc = baseline_rows.iloc[0]["accuracy"]
+
     bl = campaign_rounds[0] if campaign_rounds else {}
     ps = best_sp.prompt_state
     campaign_rounds.append({
         "round": "search",
         "label": f"smart_search ({ps.changes_description or ps.id[:12]})",
         "prompt_state": ps,
-        "accuracy": bl.get("accuracy", 0.0),
+        "accuracy": bl.get("accuracy", scan_baseline_acc),
         "hits": bl.get("hits", 0),
         "total": bl.get("total", 0),
         "results": bl.get("results", []),
