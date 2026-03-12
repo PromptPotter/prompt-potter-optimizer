@@ -248,7 +248,7 @@ def _extract_pipeline_data(
         for m in mappings:
             keys.add(m.pipeline_key)
     # Always include infrastructure keys
-    keys |= {"step_timings", "llm_provider", "total_time", "pipeline_params"}
+    keys |= {"step_timings", "llm_provider", "total_time", "pipeline_params", "diagnostics"}
     for key in keys:
         val = backend_data.get(key)
         if val is not None:
@@ -463,10 +463,17 @@ def compute_composite_score(
     recall_weight = 1.0 - accuracy_weight
     composite = accuracy_weight * accuracy + recall_weight * token_recall
 
+    # Count queries with pipeline degradation warnings
+    degraded = sum(
+        1 for r in results
+        if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
+    )
+
     return {
         **base,
         "token_recall": token_recall,
         "composite": round(composite, 6),
+        "degraded_queries": degraded,
     }
 
 

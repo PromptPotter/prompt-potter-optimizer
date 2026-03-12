@@ -266,7 +266,19 @@ def _fmt_query_result(r: dict, cached: bool = False) -> str:
     if err:
         return f"        {tag} {step:>8s}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
 
-    return f"        {tag} {step:>8s}  {q:<45s}  -> {pred}{time_str}"
+    line = f"        {tag} {step:>8s}  {q:<45s}  -> {pred}{time_str}"
+
+    # Append pipeline degradation warnings from diagnostics
+    diag = pd.get("diagnostics", {})
+    warnings = diag.get("warnings", [])
+    if warnings:
+        first = warnings[0]
+        warn_text = f"\u26a0 {first['step']}: {first['message']}"
+        if len(warnings) > 1:
+            warn_text += f" (+{len(warnings) - 1} more)"
+        line += f"\n                    {YELLOW}{warn_text}{RESET}"
+
+    return line
 
 
 def display_progress(campaign_rounds: list, window: int = 8) -> None:
