@@ -152,7 +152,6 @@ def _make_eval_fn(
     store: ProjectStore | None,
     backend_id: str,
     get_params: Callable[[], dict],
-    prompt_result_index: dict | None = None,
     pipeline_schema: "PipelineSchema | None" = None,
     on_result: Callable | None = None,
 ) -> Callable:
@@ -168,7 +167,6 @@ def _make_eval_fn(
             sp, eval_data, backend_client,
             store=store, backend_id=backend_id,
             label="scan",
-            prompt_result_index=prompt_result_index,
             source="sensitivity_scan",
             pipeline_schema=pipeline_schema,
             on_result=on_result,
@@ -381,7 +379,6 @@ async def sensitivity_scan(
     backend_id: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
-    prompt_result_index: dict | None = None,
     on_result: Callable | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
@@ -403,7 +400,6 @@ async def sensitivity_scan(
         backend_id: Backend identifier.
         pipeline_schema: Optional PipelineSchema for composite scoring.
         progress_cb: Optional callback for progress events.
-        prompt_result_index: Optional pre-built prompt result index.
         on_result: Optional per-result callback.
 
     Returns:
@@ -430,7 +426,6 @@ async def sensitivity_scan(
         baseline, eval_data, backend_client,
         store=store, backend_id=backend_id,
         label="scan",
-        prompt_result_index=prompt_result_index,
         source="sensitivity_scan",
         pipeline_schema=pipeline_schema,
         on_result=on_result,
@@ -509,7 +504,6 @@ async def sensitivity_scan(
                 perturbed, eval_data, backend_client,
                 store=store, backend_id=backend_id,
                 label="scan",
-                prompt_result_index=prompt_result_index,
                 source="sensitivity_scan",
                 pipeline_schema=pipeline_schema,
                 on_result=on_result,
@@ -656,7 +650,6 @@ async def adaptive_search(
     pipeline_params: dict | None = None,
     session_terms: list | None = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
-    prompt_result_index: dict | None = None,
     plan_id: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
 ) -> tuple[PromptState, dict, pd.DataFrame]:
@@ -707,7 +700,6 @@ async def adaptive_search(
     _eval_ps = _make_eval_fn(
         eval_data, backend_client, store, backend_id,
         get_params=lambda: current_params,
-        prompt_result_index=prompt_result_index,
         pipeline_schema=pipeline_schema,
     )
 

@@ -25,7 +25,7 @@ from api.services.search import (
     build_pipeline_overview,
     build_tunable_params,
     build_llm_context,
-    restructure_context as _restructure_context,
+    restructure_context_cached as _restructure_context_cached,
 )
 
 from ._display import (
@@ -104,12 +104,12 @@ async def prepare_scan_baseline(
     store=None,
     backend_id: str = "",
     scan_variants: dict | None = None,
+    force_restructure: bool = False,
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
-    Calls ``restructure_context()`` via LLM to decompose a monolithic
-    instruction into persona, task_intent, problem_description, etc.
-    Creates a SearchPoint from the restructured PromptState + pipeline_params.
+    Uses alias-aware disk caching so repeated runs reuse the same
+    decomposition (stable content hashes → scan cache hits).
 
     If *store* and *backend_id* are provided, prints a historical data
     diagnostic with scan variant coverage via prompt alias groups.
@@ -122,18 +122,36 @@ async def prepare_scan_baseline(
 
     llm_client, llm_model = setup_llm(campaign_config)
 
-    layer1_fields = await _restructure_context(
+    # Resolve alias group for cache lookup
+    can_cache = bool(store and backend_id)
+    alias_hashes: set[str] | None = None
+    if can_cache:
+        original_hash = hashlib.sha256(
+            baseline.render().encode(),
+        ).hexdigest()[:16]
+        alias_hashes = store.dataset_runs.resolve_aliases(
+            backend_id, original_hash,
+        )
+
+    layer1_fields, was_cached = await _restructure_context_cached(
         baseline.instruction, llm_client,
         model=llm_model,
         improvement_areas=campaign_config.get("improvement_areas", ""),
+        store_base_dir=store.base_dir if can_cache else None,
+        backend_id=backend_id,
+        alias_hashes=alias_hashes,
+        rp_hash=original_hash if can_cache else "",
+        force=force_restructure,
     )
+
     search_baseline = baseline.derive(
         **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
         changes_description="search_baseline (decomposed)",
     )
 
     # Print decomposed fields
-    print("  Restructured baseline fields:")
+    cache_tag = " (cached)" if was_cached else ""
+    print(f"  Restructured baseline fields{cache_tag}:")
     for field in ("persona", "task_intent", "problem_description",
                   "instruction", "thinking_style", "answer_format"):
         val = getattr(search_baseline, field, "")
@@ -145,15 +163,12 @@ async def prepare_scan_baseline(
           f"(render: {len(search_baseline.render())} chars)")
 
     # Historical data diagnostic with alias groups
-    if store and backend_id:
+    if can_cache:
         from api.services.search.coverage import (
             build_prompt_result_index,
             diagnose_scan_variants,
         )
 
-        original_hash = hashlib.sha256(
-            baseline.render().encode(),
-        ).hexdigest()[:16]
         restructured_hash = hashlib.sha256(
             search_baseline.render().encode(),
         ).hexdigest()[:16]
@@ -849,12 +864,6 @@ async def sensitivity_scan(
 
     Returns (per_variant_df, axis_profiles).
     """
-    # Build prompt_result_index internally
-    prompt_result_index = None
-    if store and backend_id:
-        from api.services.search.coverage import build_prompt_result_index
-        prompt_result_index = build_prompt_result_index(store, backend_id)
-
     # Print scan overview
     print("Running sensitivity scan...")
     print("\n  Baseline field values:")
@@ -870,12 +879,12 @@ async def sensitivity_scan(
     n_axes = sum(1 for v in scan_variants.values() if len(v) > 1)
     n_configs = sum(len(v) for v in scan_variants.values() if len(v) > 1)
     n_eval = sample_size if sample_size > 0 else len(eval_data)
-    n_cached = (
-        sum(len(v) for v in prompt_result_index.values())
-        if prompt_result_index else 0
-    )
+    n_cached = sum(
+        e.get("item_count", 0)
+        for e in store.dataset_runs.list_all(backend_id)
+    ) if store and backend_id else 0
     print(f"  Axes: {n_axes}, variants: {n_configs}, "
-          f"queries/variant: {n_eval}, historical results: {n_cached}")
+          f"queries/variant: {n_eval}, cached results: {n_cached}")
     print(f"  Estimated calls: ~{n_configs * n_eval}")
 
     # Ensure backend session is initialized (required for /matches)
@@ -901,7 +910,6 @@ async def sensitivity_scan(
             store=store, backend_id=backend_id,
             pipeline_schema=pipeline_schema,
             progress_cb=cb,
-            prompt_result_index=prompt_result_index,
             on_result=on_result_cb,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -1018,7 +1026,6 @@ async def adaptive_search(
     pipeline_params: dict | None = None,
     session_terms: list | None = None,
     plan_id: str = "",
-    prompt_result_index: dict | None = None,
 ) -> tuple:
     """Run adaptive coordinate descent search with progress output.
 
@@ -1050,7 +1057,6 @@ async def adaptive_search(
             pipeline_params=pipeline_params,
             session_terms=session_terms,
             progress_cb=cb,
-            prompt_result_index=prompt_result_index,
             plan_id=plan_id,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):

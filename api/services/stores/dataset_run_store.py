@@ -175,6 +175,45 @@ class DatasetRunStore:
             return []
         return index.get("dataset_runs", [])
 
+    def load_by_alias(
+        self,
+        backend_id: str,
+        rp_hash: str,
+        model: str,
+        temperature: float,
+        pipeline_params: dict | None,
+        item_count: int,
+    ) -> dict[str, Any] | None:
+        """Find a cached run via prompt alias groups.
+
+        Resolves ``rp_hash`` to its alias set, then scans the index for an
+        entry whose ``rendered_prompt_hash``, ``model``, ``temperature``,
+        ``pipeline_params``, and ``item_count`` all match.  Returns the
+        detail file for the first match, or ``None``.
+        """
+        alias_set = self.resolve_aliases(backend_id, rp_hash)
+        index = read_json_optional(self._index_path(backend_id))
+        if index is None:
+            return None
+
+        norm_pp = pipeline_params or None
+
+        for entry in index.get("dataset_runs", []):
+            if entry.get("rendered_prompt_hash", "") not in alias_set:
+                continue
+            if entry.get("model") != model:
+                continue
+            if entry.get("temperature") != temperature:
+                continue
+            if (entry.get("pipeline_params") or None) != norm_pp:
+                continue
+            if entry.get("item_count") != item_count:
+                continue
+            return read_json_optional(
+                self._runs_dir(backend_id) / f"{entry['run_id']}.json",
+            )
+        return None
+
     # -- incremental eval writes ----------------------------------------------
 
     def append_eval_item(

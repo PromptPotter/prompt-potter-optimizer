@@ -469,104 +469,67 @@ def compute_composite_score(
 
 
 
-def _resolve_historical_and_partial(
-    rendered: str,
+def _resolve_partial_resume(
     eval_data: list,
     run_id: str,
     *,
-    force: bool,
-    prompt_result_index: dict | None,
     store: "ProjectStore | None",
     backend_id: str,
-) -> tuple[list[dict], list, list, str | None]:
-    """Resolve cached layers: cross-run historical index + partial resume.
+) -> tuple[list, list]:
+    """Check for .partial.jsonl crash-recovery file.
 
-    Returns:
-        ``(historical_results, partial_results, remaining_data, full_cache_signal)``
-        When ``full_cache_signal`` is ``"full"``, all queries are satisfied
-        from the historical index (caller should short-circuit).
+    Returns (partial_results, remaining_data).
     """
-    historical_results: list[dict] = []
-    remaining_after_history = eval_data
-
-    if prompt_result_index and eval_data and not force:
-        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
-        cached_by_query = prompt_result_index.get(rp_hash, {})
-        if cached_by_query:
-            n_matched = sum(
-                1 for qd in eval_data if qd.get("query", "") in cached_by_query
-            )
-            coverage = n_matched / len(eval_data)
-            if coverage >= 1.0:
-                logger.info(
-                    "evaluate_prompt_cached [historical] full coverage "
-                    "(%d/%d queries)", n_matched, len(eval_data),
-                )
-                matched = [cached_by_query[qd["query"]] for qd in eval_data]
-                return matched, [], [], "full"
-            if coverage > 0:
-                logger.info(
-                    "evaluate_prompt_cached [historical] partial coverage: "
-                    "%.0f%% (%d/%d queries)",
-                    coverage * 100, n_matched, len(eval_data),
-                )
-                remaining_after_history = []
-                for qd in eval_data:
-                    q = qd.get("query", "")
-                    if q in cached_by_query:
-                        historical_results.append(cached_by_query[q])
-                    else:
-                        remaining_after_history.append(qd)
-
-    # --- check for partial results (resume after crash) ---
     partial_results: list = []
-    remaining_data = remaining_after_history
-    if store and backend_id:
-        partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
-        if partial_results:
-            # Detect stale partials: if the first N results are all errors,
-            # the partial was written during a broken session and is unreliable.
-            leading_errors = 0
-            for pr in partial_results:
-                if pr.get("error"):
-                    leading_errors += 1
-                else:
-                    break
-            if leading_errors >= 5:
-                logger.warning(
-                    "Partial eval %s: %d leading consecutive errors "
-                    "— discarding stale partial file",
-                    run_id, leading_errors,
-                )
-                partial_path = (
-                    store.dataset_runs._runs_dir(backend_id)
-                    / f"{run_id}.partial.jsonl"
-                )
-                if partial_path.exists():
-                    partial_path.unlink()
-                partial_results = []
+    remaining_data = eval_data
+    if not (store and backend_id):
+        return partial_results, remaining_data
 
-        if partial_results:
-            valid = True
-            for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
-                if pr.get("query") != ed.get("query"):
-                    logger.warning(
-                        "Partial eval %s: query mismatch at index %d "
-                        "(%r != %r) — discarding stale partials",
-                        run_id, i, pr.get("query", "")[:40], ed.get("query", "")[:40],
-                    )
-                    valid = False
-                    break
-
-            if not valid:
-                partial_results = []
-            elif len(partial_results) >= len(remaining_data):
-                partial_results = partial_results[:len(remaining_data)]
-                remaining_data = []
+    partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
+    if partial_results:
+        # Detect stale partials: if the first N results are all errors,
+        # the partial was written during a broken session and is unreliable.
+        leading_errors = 0
+        for pr in partial_results:
+            if pr.get("error"):
+                leading_errors += 1
             else:
-                remaining_data = remaining_data[len(partial_results):]
+                break
+        if leading_errors >= 5:
+            logger.warning(
+                "Partial eval %s: %d leading consecutive errors "
+                "— discarding stale partial file",
+                run_id, leading_errors,
+            )
+            partial_path = (
+                store.dataset_runs._runs_dir(backend_id)
+                / f"{run_id}.partial.jsonl"
+            )
+            if partial_path.exists():
+                partial_path.unlink()
+            partial_results = []
 
-    return historical_results, partial_results, remaining_data, None
+    if partial_results:
+        valid = True
+        for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
+            if pr.get("query") != ed.get("query"):
+                logger.warning(
+                    "Partial eval %s: query mismatch at index %d "
+                    "(%r != %r) — discarding stale partials",
+                    run_id, i, pr.get("query", "")[:40], ed.get("query", "")[:40],
+                )
+                valid = False
+                break
+
+        if not valid:
+            partial_results = []
+        elif len(partial_results) >= len(remaining_data):
+            partial_results = partial_results[:len(remaining_data)]
+            remaining_data = []
+        else:
+            remaining_data = remaining_data[len(partial_results):]
+
+    return partial_results, remaining_data
 
 
 def _finalize_observability(
@@ -615,7 +578,6 @@ async def evaluate_prompt_cached(
     label: str = "Eval",
     on_result: Callable | None = None,
     obs: "ObsLogger | None" = None,
-    prompt_result_index: dict | None = None,
     source: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
     dataset_name: str | None = None,
@@ -626,7 +588,7 @@ async def evaluate_prompt_cached(
 
     Core evaluation logic without UI output. Handles:
     - Content-hash deduplication via ProjectStore
-    - Cross-run historical query lookups via prompt_result_index
+    - Alias-aware fallback via prompt alias groups
     - Partial result resume after crash
     - Incremental writes for crash protection
     - Final run storage
@@ -672,25 +634,27 @@ async def evaluate_prompt_cached(
                     on_result({**r, "cached": True}, i, len(results))
             return results, scores, True
 
-    # --- resolve cached layers (historical index + partial resume) ---
+        # --- alias fallback (find cached run via prompt alias groups) ---
+        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
+        alias_match = store.dataset_runs.load_by_alias(
+            backend_id, rp_hash, model, temperature,
+            search_point.pipeline_params, len(eval_data),
+        )
+        if alias_match:
+            results = alias_match["dataset_run_items"]
+            scores = compute_composite_score(results, pipeline_schema)
+            if on_result is not None:
+                for i, r in enumerate(results):
+                    on_result({**r, "cached": True}, i, len(results))
+            return results, scores, True
+
+    # --- resolve partial resume (crash recovery) ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    historical_results, partial_results, remaining_data, full_signal = (
-        _resolve_historical_and_partial(
-            rendered, eval_data, run_id,
-            force=force,
-            prompt_result_index=prompt_result_index,
-            store=store,
-            backend_id=backend_id,
-        )
+    partial_results, remaining_data = _resolve_partial_resume(
+        eval_data, run_id, store=store, backend_id=backend_id,
     )
-    if full_signal == "full":
-        acc = compute_composite_score(historical_results, pipeline_schema)
-        if on_result is not None:
-            for i, r in enumerate(historical_results):
-                on_result({**r, "cached": True}, i, len(historical_results))
-        return historical_results, acc, True
 
     if partial_results:
         logger.info(
@@ -698,12 +662,8 @@ async def evaluate_prompt_cached(
             run_id, len(partial_results), len(remaining_data),
         )
 
-    # --- replay cached partial/historical results to callback ---
+    # --- replay cached partial results to callback ---
     callback_offset = 0
-    if on_result is not None and historical_results:
-        for i, r in enumerate(historical_results):
-            on_result({**r, "cached": True}, i, len(eval_data))
-        callback_offset = len(historical_results)
     if on_result is not None and partial_results:
         for i, r in enumerate(partial_results):
             on_result({**r, "cached": True}, callback_offset + i, len(eval_data))
@@ -735,7 +695,7 @@ async def evaluate_prompt_cached(
         )
         raise
 
-    results = historical_results + partial_results + new_results
+    results = partial_results + new_results
     scores = compute_composite_score(results, pipeline_schema)
 
     # --- finalize: save complete run + observability ---

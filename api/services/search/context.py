@@ -1,9 +1,16 @@
 """LLM-assisted context restructuring into Layer 1 fields."""
 
+import hashlib
 import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from api.services.llm_client import LLMClientBase
+from api.services.stores.base import read_json_optional, validate_path_component, write_json
+
+logger = logging.getLogger(__name__)
 
 
 async def restructure_context(
@@ -100,3 +107,106 @@ async def restructure_context(
         result.setdefault("consultation", "")
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Restructure cache — alias-aware disk cache for LLM decomposition results
+# ---------------------------------------------------------------------------
+
+HASH_TRUNCATE = 16
+
+
+def _restructure_cache_path(base_dir: Path, backend_id: str) -> Path:
+    validate_path_component(backend_id)
+    return base_dir / backend_id / "restructure_cache.json"
+
+
+def load_cached_restructure(
+    base_dir: Path,
+    backend_id: str,
+    alias_hashes: set[str],
+    improvement_areas: str,
+) -> dict | None:
+    """Scan *alias_hashes* for a cached restructure matching *improvement_areas*."""
+    cache = read_json_optional(_restructure_cache_path(base_dir, backend_id))
+    if not cache:
+        return None
+    for h in alias_hashes:
+        entry = cache.get(h)
+        if entry and entry.get("improvement_areas", "") == improvement_areas:
+            return entry["layer1_fields"]
+    return None
+
+
+def save_restructure_cache(
+    base_dir: Path,
+    backend_id: str,
+    rp_hash: str,
+    improvement_areas: str,
+    layer1_fields: dict,
+) -> None:
+    """Persist restructure output keyed by *rp_hash*."""
+    path = _restructure_cache_path(base_dir, backend_id)
+    cache = read_json_optional(path) or {}
+    cache[rp_hash] = {
+        "improvement_areas": improvement_areas,
+        "layer1_fields": layer1_fields,
+        "cached_at": datetime.now(timezone.utc).isoformat(),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, cache)
+
+
+async def restructure_context_cached(
+    context_input: Any,
+    llm_client: LLMClientBase,
+    *,
+    model: str | None = None,
+    improvement_areas: str = "",
+    store_base_dir: Path | None = None,
+    backend_id: str = "",
+    alias_hashes: set[str] | None = None,
+    rp_hash: str = "",
+    force: bool = False,
+) -> tuple[dict, bool]:
+    """LLM restructure with alias-aware disk caching.
+
+    Checks *alias_hashes* against the restructure cache before calling the LLM.
+    On miss, saves under *rp_hash* (caller-provided) so the key is guaranteed
+    to be in the alias set on subsequent lookups.
+
+    Returns:
+        ``(layer1_fields, was_cached)`` tuple.
+    """
+    can_cache = bool(store_base_dir and backend_id)
+
+    # --- cache lookup ---
+    if can_cache and not force and alias_hashes:
+        cached = load_cached_restructure(
+            store_base_dir, backend_id, alias_hashes, improvement_areas,
+        )
+        if cached is not None:
+            logger.info("restructure_context_cached: hit (alias group)")
+            return cached, True
+
+    # --- cache miss: call LLM ---
+    layer1_fields = await restructure_context(
+        context_input, llm_client,
+        model=model,
+        improvement_areas=improvement_areas,
+    )
+
+    # --- save to cache ---
+    if can_cache:
+        save_key = rp_hash
+        if not save_key:
+            instruction = (
+                context_input if isinstance(context_input, str)
+                else json.dumps(context_input, sort_keys=True)
+            )
+            save_key = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
+        save_restructure_cache(
+            store_base_dir, backend_id, save_key, improvement_areas, layer1_fields,
+        )
+
+    return layer1_fields, False

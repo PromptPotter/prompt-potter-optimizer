@@ -40,6 +40,7 @@ _SUBMODULE_MAP: dict[str, str] = {
     "load_eval_dataset": "api.services.search.eval_dataset",
     # context
     "restructure_context": "api.services.search.context",
+    "restructure_context_cached": "api.services.search.context",
     # scan_advisor
     "advise_scan_config": "api.services.search.scan_advisor",
     "build_llm_context": "api.services.search.scan_advisor",
