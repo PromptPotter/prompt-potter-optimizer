@@ -70,12 +70,26 @@ This means the feedback cycle can optimize **pipeline parameters** (not just pro
     "n_variants": 5,
     "creativity": 0.7,       # meta-prompt temperature
     "max_rounds": 10,
-    "enable_l2": True,        # refine context on diminishing returns
+    "enable_l2": False,       # opt-in: refine context on L1 stall
     "l2_patience": 2,         # L1 stalls before L2 escalation
-    "enable_l3": True,        # modify plan on L2 stall
+    "enable_l3": False,       # opt-in: modify plan on L2 stall
     "l3_patience": 1,         # L2 stalls before L3 escalation
 }
 ```
+
+### Phase Events
+
+The feedback cycle emits structured `PhaseEvent` objects at phase boundaries via the `on_phase` callback. The notebook renders these as ANSI-colored banners (`>>>` enter, `<<<` exit).
+
+| Phase | Trigger | Key enter data | Key exit data |
+|-------|---------|----------------|---------------|
+| `init` | Cycle start | `max_rounds`, `patience`, `n_variants`, `model`, `sample_size`, `enable_l2`, `enable_l3`, `eval_data_count`, `baseline_accuracy`, `has_scan_context` | `cycle_id`, `resumed_from_round`, `baseline_accuracy`, `obs_enabled`, `sample_count` |
+| `growth` | Candidate generation | `current_accuracy`, `prompt_preview`, `n_variants`, `creativity`, `model`, `has_scan_context` | `n_candidates`, `n_eval_queries`, `loaded_from_disk`, candidates list |
+| `analysis_eval` | Evaluation & winner selection | `n_candidates`, `n_queries`, `current_best_accuracy`, `improvement_threshold` | `winner_label`, `winner_accuracy`, `winner_composite`, `improved`, `next_action` |
+| `refine_context` | L2 escalation (when `enable_l2=True`) | `l2_round`, `stall_count`, `current_accuracy`, `best_accuracy` | `param_changes_count`, `context_changed`, `changes_description` |
+| `modify_plan` | L3 escalation (when `enable_l3=True`) | `l3_round`, `l2_stall_count` | `new_plan_preview`, `changes_description` |
+
+Each event: `phase` (str), `event` ("enter"/"exit"), `round` (int or None), `data` (dict), `timestamp` (ISO 8601).
 
 ---
 
@@ -104,9 +118,9 @@ campaign_config = {
         "improvement_threshold": 0.01,
         "patience": 3,
         "max_rounds": 10,
-        "enable_l2": True,          # refine context on L1 stall
+        "enable_l2": False,         # opt-in: refine context on L1 stall
         "l2_patience": 2,
-        "enable_l3": True,          # modify plan on L2 stall
+        "enable_l3": False,         # opt-in: modify plan on L2 stall
         "l3_patience": 1,
     },
     "eval_llm": { ... },

@@ -591,7 +591,7 @@ async def test_resume_from_interrupted_cycle(
     from api.services.stores.campaign_store import CampaignStore
     store = CampaignStore(tmp_path)
     cycle_id = result1.cycle_id
-    store.update("test_backend", cycle_id, {"status": "active"})
+    store.update("test_backend", cycle_id, {"status": "interrupted"})
 
     result2 = await run_feedback_cycle(
         instruction="Rank candidates.",
@@ -602,6 +602,66 @@ async def test_resume_from_interrupted_cycle(
     assert result2.resumed_from_round == 1
     assert result2.cycle_id == cycle_id
     assert call_count[0] == evals_after_r1
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_interrupt_writes_interrupted_status(
+    monkeypatch, eval_data, tmp_path,
+):
+    """KeyboardInterrupt during eval writes status='interrupted', not 'completed'."""
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
+
+    call_count = [0]
+
+    async def mock_eval_interrupt(search_point, data, **kwargs):
+        call_count[0] += 1
+        # Round 0: all candidates return 1/3 hits → round completes
+        # Round 1: interrupt on first candidate
+        if call_count[0] <= 1:
+            results = [
+                {"query": d["query"],
+                 "predicted": d["ground_truth"] if i == 0 else "WRONG",
+                 "ground_truth": d["ground_truth"],
+                 "hit": i == 0, "score": 1.0 if i == 0 else 0.0, "error": None}
+                for i, d in enumerate(data)
+            ]
+            scores = {"hits": 1, "total": len(data),
+                      "accuracy": 1 / len(data),
+                      "errors": 0, "token_recall": 0.0,
+                      "composite": 1 / len(data)}
+            return results, scores, False
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        "api.services.prompt_eval.evaluate_prompt_cached", mock_eval_interrupt,
+    )
+
+    config = CycleConfig(
+        max_rounds=3,
+        patience=10,
+        n_variants=1,
+        creativity=0.5,
+        improvement_threshold=0.01,
+        backend_url="http://mock:8000",
+        generate_suggestions=False,
+        project_root=str(tmp_path),
+        backend_id="test_backend",
+    )
+
+    result = await run_feedback_cycle(
+        instruction="Rank candidates.",
+        eval_data=eval_data,
+        config=config,
+    )
+    assert result.stop_reason == "interrupted"
+
+    from api.services.stores.campaign_store import CampaignStore
+    store = CampaignStore(tmp_path)
+    campaign = store.load("test_backend", result.cycle_id)
+    assert campaign["status"] == "interrupted"
 
 
 @pytest.mark.slow
@@ -685,3 +745,78 @@ async def test_no_store_no_persistence(monkeypatch, eval_data, cycle_config):
 
     assert result.cycle_id is None
     assert result.resumed_from_round == 0
+
+
+# ---------------------------------------------------------------------------
+# on_phase callback test
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
+    """on_phase is called with init, growth, and analysis_eval enter/exit events."""
+    apply_init_mock(monkeypatch)
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
+    apply_eval_mock(monkeypatch, round_hits=[0])
+
+    events = []
+
+    def on_phase(event):
+        events.append(event)
+
+    result = await run_feedback_cycle(
+        instruction="Test.", eval_data=eval_data, config=cycle_config,
+        on_phase=on_phase,
+    )
+
+    # Collect (phase, event) pairs
+    pairs = [(e.phase, e.event) for e in events]
+
+    # init enter/exit always present
+    assert ("init", "enter") in pairs
+    assert ("init", "exit") in pairs
+
+    # Each round should have growth + analysis_eval enter/exit
+    for round_num in range(result.n_rounds):
+        growth_enters = [e for e in events
+                         if e.phase == "growth" and e.event == "enter"
+                         and e.round == round_num]
+        growth_exits = [e for e in events
+                        if e.phase == "growth" and e.event == "exit"
+                        and e.round == round_num]
+        eval_enters = [e for e in events
+                       if e.phase == "analysis_eval" and e.event == "enter"
+                       and e.round == round_num]
+        eval_exits = [e for e in events
+                      if e.phase == "analysis_eval" and e.event == "exit"
+                      and e.round == round_num]
+        assert len(growth_enters) == 1, f"round {round_num}: missing growth enter"
+        assert len(growth_exits) == 1, f"round {round_num}: missing growth exit"
+        assert len(eval_enters) == 1, f"round {round_num}: missing analysis_eval enter"
+        assert len(eval_exits) == 1, f"round {round_num}: missing analysis_eval exit"
+
+    # Verify init enter has expected data keys
+    init_enter = next(e for e in events if e.phase == "init" and e.event == "enter")
+    assert "max_rounds" in init_enter.data
+    assert "eval_data_count" in init_enter.data
+    assert init_enter.data["eval_data_count"] == len(eval_data)
+
+    # Verify growth exit has rich candidate info
+    growth_exit = next(e for e in events if e.phase == "growth" and e.event == "exit")
+    assert "n_candidates" in growth_exit.data
+    assert "n_eval_queries" in growth_exit.data
+    assert growth_exit.data["n_eval_queries"] == len(eval_data)
+    assert "candidates" in growth_exit.data
+    candidates = growth_exit.data["candidates"]
+    assert isinstance(candidates, list)
+    assert len(candidates) > 0
+    assert "changed_fields" in candidates[0]
+    assert "changes_description" in candidates[0]
+
+    # Verify analysis_eval exit has winner info
+    eval_exit = next(e for e in events
+                     if e.phase == "analysis_eval" and e.event == "exit")
+    assert "winner_accuracy" in eval_exit.data
+    assert "improved" in eval_exit.data

@@ -11,8 +11,11 @@ from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
 
 from ._display import (
-    BOLD, RESET, YELLOW, _fmt_query_result, display_progress,
+    BOLD, CYAN, RESET, YELLOW, _fmt_query_result, display_progress,
 )
+
+# Phase event printer for feedback cycle observability
+from api.models.phase_event import PhaseEvent
 
 __all__ = [
     # Campaign
@@ -111,30 +114,69 @@ def show_feedback_preflight(
     campaign_config: dict,
     *,
     pipeline_params: "dict | None" = None,
-) -> None:
-    """Display a pre-flight summary box for the feedback cycle.
+    scan_df=None,
+    axis_profiles=None,
+    scan_variants=None,
+    difficulty_df=None,
+) -> "dict | None":
+    """Display a rich pre-flight walkthrough for the feedback cycle.
+
+    Builds scan context from raw DataFrames when available, then prints
+    three sections: configuration summary, round pipeline walkthrough,
+    and scan context preview.
 
     Call this in a separate notebook cell before ``run_feedback_cycle_notebook()``
     so the user can review config before committing to a run.
+
+    Returns:
+        scan_context dict (or None) for passing to the run cell.
     """
     from api.services.campaign.feedback_cycle import CycleConfig
 
+    # Build scan context from scan data when available
+    scan_context = None
+    if scan_df is not None and axis_profiles is not None and scan_variants is not None:
+        from api.services.search import prepare_scan_context
+
+        baseline_acc = 0.0
+        if campaign_rounds:
+            baseline_acc = campaign_rounds[-1].get("accuracy", 0.0)
+
+        difficulty_summary = None
+        if difficulty_df is not None and len(difficulty_df) > 0:
+            difficulty_summary = difficulty_df["classification"].value_counts().to_dict()
+            difficulty_summary["total"] = len(difficulty_df)
+
+        scan_context = prepare_scan_context(
+            scan_df, axis_profiles, scan_variants, baseline_acc,
+            difficulty_summary=difficulty_summary,
+        )
+
     config = CycleConfig.from_campaign_config(
         campaign_config, pipeline_params=pipeline_params,
+        scan_context=scan_context,
     )
 
     bl = _extract_campaign_baseline(campaign_rounds)
 
-    _print_preflight_box(
-        config, bl["baseline_acc"], bl["instruction"], eval_data,
+    _print_preflight_sections(
+        config, bl, eval_data,
         campaign_config=campaign_config,
-        scan_context=config.scan_context,
+        scan_context=scan_context,
     )
 
+    return scan_context
 
-def _print_preflight_box(config, baseline_acc, instruction, eval_data,
-                         *, campaign_config=None, scan_context=None):
-    """Print the pre-flight summary box (shared by preflight + cycle)."""
+
+def _print_preflight_sections(config, bl, eval_data,
+                              *, campaign_config=None, scan_context=None):
+    """Print three-section preflight walkthrough."""
+    from api.services.prompt_optimizer import MAX_FAILURES_GENERATE
+
+    baseline_acc = bl["baseline_acc"]
+    instruction = bl["instruction"]
+    baseline_results = bl["baseline_results"]
+
     _instr_preview = (instruction[:80] + "...") if len(instruction) > 80 else instruction
     _instr_preview = _instr_preview or "(empty)"
     _eff_queries = config.sample_size if config.sample_size else len(eval_data)
@@ -161,16 +203,12 @@ def _print_preflight_box(config, baseline_acc, instruction, eval_data,
     _l3_label = (f"enabled, patience={config.l3_patience}"
                  if config.enable_l3 else "disabled")
 
-    # Scan-aware display
-    if scan_context:
-        improving = scan_context.get("improving_axes", [])
-        _scan_label = f"YES ({len(improving)} improving axes)"
-    else:
-        _scan_label = None
+    _strategy = "SCAN-AWARE" if scan_context else "FREEFORM"
 
+    # ── Section 1: Configuration Summary ──
     print()
     print("=" * 70)
-    print("  FEEDBACK CYCLE - PRE-FLIGHT - PROMPT POTTER OPTIMIZER MAIN HITL CYCLE")
+    print(f"  {BOLD}FEEDBACK CYCLE PRE-FLIGHT{RESET}")
     print("=" * 70)
     print(f"  Baseline accuracy      : {baseline_acc:.1%}")
     print(f"  Baseline prompt        : {_instr_preview}")
@@ -190,13 +228,159 @@ def _print_preflight_box(config, baseline_acc, instruction, eval_data,
         print(f"    Steps                : {_steps_detail}")
     if exclude:
         print(f"    Excluded             : {', '.join(exclude)}")
-    if _scan_label:
-        print(f"  Scan-aware generation  : {_scan_label}")
+    print(f"  Strategy               : {_strategy}")
+
+    # ── Section 2: Round Pipeline ──
+    print()
+    print(f"  {BOLD}ROUND PIPELINE{RESET} (what happens each round)")
+    print("  " + "-" * 66)
+
+    # Step 1: Baseline input
+    n_prior = len(baseline_results) if baseline_results else 0
+    print(f"  {CYAN}1. BASELINE INPUT{RESET}")
+    print(f"     Prompt: {_instr_preview}")
+    print(f"     Accuracy: {baseline_acc:.1%}  |  Prior results: {n_prior}")
+
+    # Step 2: Failure analysis
+    n_failures = 0
+    if baseline_results:
+        n_failures = sum(1 for r in baseline_results if not r.get("hit"))
+    print(f"  {CYAN}2. FAILURE ANALYSIS{RESET}")
+    print(f"     Up to {MAX_FAILURES_GENERATE} failures extracted"
+          f" (currently {n_failures} available)")
+
+    # Step 3: Context assembly
+    print(f"  {CYAN}3. CONTEXT ASSEMBLY{RESET}")
+    print(f"     Strategy: {_strategy}")
+    if scan_context:
+        improving = scan_context.get("improving_axes", [])
+        leaderboard = scan_context.get("leaderboard_text", "")
+        n_leaderboard = leaderboard.count("\n") + 1 if leaderboard.strip() else 0
+        tested = scan_context.get("tested_values", "")
+        n_tested = sum(1 for line in tested.split("\n")
+                       if line.strip() and "values tested" in line) if tested else 0
+        sensitivity = scan_context.get("sensitivity_text", "")
+        n_axes = sensitivity.count("\n") + 1 if sensitivity.strip() else 0
+        difficulty = scan_context.get("difficulty_text", "")
+
+        print(f"     Scan leaderboard: {n_leaderboard} entries")
+        if n_leaderboard > 0:
+            # Show top performer from leaderboard
+            first_line = leaderboard.strip().split("\n")[0].strip()
+            print(f"     Top performer: {first_line}")
+        print(f"     Sensitivity axes: {n_axes}")
+        print(f"     Difficulty: {difficulty.strip()}")
+        print(f"     Improving axes: {len(improving)} ({', '.join(improving)})")
+        print(f"     Tested values: {n_tested} axes with per-value data")
+    else:
+        print("     (no scan data — LLM generates from failures only)")
+
+    # Step 4: LLM candidate generation
+    print(f"  {CYAN}4. LLM CANDIDATE GENERATION{RESET}")
+    print(f"     Model: {config.model or '(default)'}  |  "
+          f"Temperature: {config.creativity}")
+    print(f"     Candidates: {config.n_variants}")
+    if scan_context:
+        print("     Output: prompt + pipeline_params_override per candidate")
+    else:
+        print("     Output: prompt variants")
+
+    # Step 5: Backend evaluation
+    print(f"  {CYAN}5. BACKEND EVALUATION{RESET}")
+    print(f"     Queries per candidate: {_queries_label}")
+    scoring = "composite (pipeline-aware)" if config.pipeline_schema else "accuracy"
+    print(f"     Scoring: {scoring}")
+
+    # Step 6: Winner selection
+    print(f"  {CYAN}6. WINNER SELECTION{RESET}")
+    print(f"     Criterion: best accuracy >= baseline + "
+          f"{config.improvement_threshold:.1%}")
+
+    # Step 7: Loop control
+    print(f"  {CYAN}7. LOOP CONTROL{RESET}")
+    print(f"     Patience: {config.patience} stalls → stop  |  "
+          f"L2: {_l2_label}  |  L3: {_l3_label}")
+
     print("  " + "-" * 66)
     print(f"  Est. backend calls     : {_est_calls}"
-          f"  ({config.max_rounds} rounds x {config.n_variants} cands"
-          f" x {_eff_queries} queries)")
+          f"  ({config.max_rounds}r x {config.n_variants}c"
+          f" x {_eff_queries}q)")
+
+    # ── Section 3: Scan Context Preview ──
+    if scan_context:
+        print()
+        print(f"  {BOLD}SCAN CONTEXT PREVIEW{RESET}"
+              " (injected into LLM meta-prompt)")
+        print("  " + "-" * 66)
+
+        # Leaderboard (top 10)
+        leaderboard = scan_context.get("leaderboard_text", "")
+        if leaderboard.strip():
+            lines = leaderboard.strip().split("\n")
+            print(f"  {CYAN}Leaderboard:{RESET}")
+            for line in lines[:10]:
+                print(f"  {line}")
+            if len(lines) > 10:
+                print(f"    ... {len(lines) - 10} more")
+
+        # Axis sensitivity
+        sensitivity = scan_context.get("sensitivity_text", "")
+        if sensitivity.strip():
+            print(f"  {CYAN}Axis sensitivity:{RESET}")
+            for line in sensitivity.strip().split("\n"):
+                print(f"  {line}")
+
+        # Difficulty
+        difficulty = scan_context.get("difficulty_text", "")
+        if difficulty.strip():
+            print(f"  {CYAN}Query difficulty:{RESET}")
+            print(f"  {difficulty.strip()}")
+
+        # Improving axes
+        improving = scan_context.get("improving_axes", [])
+        if improving:
+            print(f"  {CYAN}Improving axes:{RESET} {', '.join(improving)}")
+
+        # Tested values
+        tested = scan_context.get("tested_values", "")
+        if tested.strip():
+            lines = tested.strip().split("\n")
+            print(f"  {CYAN}Tested values:{RESET}")
+            for line in lines[:15]:
+                print(f"  {line}")
+            if len(lines) > 15:
+                print(f"    ... {len(lines) - 15} more lines")
+
     print("=" * 70)
+
+
+def _print_phase(event: PhaseEvent) -> None:
+    """Print a phase boundary banner with ANSI colors."""
+    if event.event == "enter":
+        arrow = f"{CYAN}{BOLD}>>>{RESET}"
+    else:
+        arrow = f"{YELLOW}{BOLD}<<<{RESET}"
+
+    round_tag = f" R{event.round}" if event.round is not None else ""
+    print(f"  {arrow} {BOLD}{event.phase.upper()}{RESET}"
+          f" {event.event}{round_tag}")
+
+    for key, val in event.data.items():
+        # Special rendering for growth exit candidates list
+        if key == "candidates" and isinstance(val, list):
+            for c in val:
+                idx = c.get("idx", "?")
+                desc = c.get("changes_description", "") or "(no description)"
+                fields = c.get("changed_fields", [])
+                fields_tag = f" [{', '.join(fields)}]" if fields else ""
+                pp = c.get("pipeline_params_override")
+                pp_tag = f" pp={pp}" if pp else ""
+                print(f"      C{int(idx) + 1}: {desc}{fields_tag}{pp_tag}")
+            continue
+        s = str(val)
+        if len(s) > 120:
+            s = s[:117] + "..."
+        print(f"      {key}: {s}")
 
 
 async def run_feedback_cycle_notebook(
@@ -210,44 +394,20 @@ async def run_feedback_cycle_notebook(
     pipeline_params: "dict | None" = None,
     session_terms: "list[str] | None" = None,
     langfuse_session_id: str | None = None,
-    scan_df=None,
-    axis_profiles=None,
-    scan_variants=None,
-    difficulty_df=None,
+    scan_context: "dict | None" = None,
 ) -> list:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
     Accepts and returns the ``campaign_rounds`` list format for downstream
     notebook sections.
 
-    When scan data (scan_df, axis_profiles, scan_variants) is provided,
-    builds scan context for scan-aware candidate generation with per-candidate
-    pipeline_params overrides.
+    When ``scan_context`` is provided (from ``show_feedback_preflight()``),
+    runs in scan-aware mode with per-candidate pipeline_params overrides.
 
     Returns:
         Updated campaign_rounds list.
     """
     from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
-
-    # Build scan context from scan data when available
-    scan_context = None
-    if scan_df is not None and axis_profiles is not None and scan_variants is not None:
-        from api.services.search import prepare_scan_context
-
-        baseline_acc = 0.0
-        if campaign_rounds:
-            baseline_acc = campaign_rounds[-1].get("accuracy", 0.0)
-
-        difficulty_summary = None
-        if difficulty_df is not None and len(difficulty_df) > 0:
-            difficulty_summary = difficulty_df["classification"].value_counts().to_dict()
-            difficulty_summary["total"] = len(difficulty_df)
-
-        scan_context = prepare_scan_context(
-            scan_df, axis_profiles, scan_variants, baseline_acc,
-            difficulty_summary=difficulty_summary,
-        )
-        print(f"  Scan context: {len(scan_context['improving_axes'])} improving axes")
 
     config = CycleConfig.from_campaign_config(
         campaign_config,
@@ -265,9 +425,15 @@ async def run_feedback_cycle_notebook(
     baseline_results = bl["baseline_results"]
     instruction = bl["instruction"]
 
-    # --- Pre-flight summary ---
-    _print_preflight_box(config, baseline_acc, instruction, eval_data,
-                         campaign_config=campaign_config, scan_context=scan_context)
+    # --- Compact running banner ---
+    _eff_queries = config.sample_size if config.sample_size else len(eval_data)
+    _scan_tag = "YES" if scan_context else "NO"
+    print()
+    print("=" * 70)
+    print(f"  FEEDBACK CYCLE RUNNING  |  baseline={baseline_acc:.1%}"
+          f"  |  {config.max_rounds} rounds"
+          f"  |  {config.n_variants} candidates  |  scan={_scan_tag}")
+    print("=" * 70)
 
     _query_counter = [0]  # mutable counter for closure
 
@@ -328,6 +494,7 @@ async def run_feedback_cycle_notebook(
         on_round_complete=_on_round,
         on_candidate_eval=_on_candidate,
         on_query_eval=_on_query,
+        on_phase=_print_phase,
         langfuse_session_id=langfuse_session_id,
     )
 

@@ -626,10 +626,20 @@ class ObsLogger:
                 _write_json(ds_dir / f"{item_id}.json", item_data)
                 query_to_item_id[query] = item_id
 
+            n_skipped = len(eval_data) - len(query_to_item_id)
+            if n_skipped > 0:
+                logger.info(
+                    "Dataset '%s': %d items registered, %d duplicates/empty "
+                    "skipped (from %d input)",
+                    dataset_name, len(query_to_item_id), n_skipped, len(eval_data),
+                )
+
             self._log_event({
                 "event": "dataset_registered",
                 "dataset_name": dataset_name,
                 "n_items": len(query_to_item_id),
+                "n_input": len(eval_data),
+                "n_skipped": n_skipped,
             })
 
             if self._cloud:

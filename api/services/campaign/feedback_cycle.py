@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from api.models.phase_event import PhaseEvent
 from api.models.pipeline_schema import PipelineSchema
 from api.services.constants import DATASET_NAME
 
@@ -33,6 +34,55 @@ if TYPE_CHECKING:
     from api.services.stores.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
+
+
+def _emit_phase(
+    on_phase: Callable | None,
+    phase: str,
+    event: str,
+    *,
+    round: int | None = None,
+    **data: Any,
+) -> None:
+    """Construct a PhaseEvent and call the callback if set."""
+    if on_phase is None:
+        return
+    pe = PhaseEvent(phase=phase, event=event, round=round, data=data)
+    on_phase(pe)
+
+
+def _candidate_summaries(
+    candidates: list[dict],
+    current_ps_dict: dict,
+) -> list[dict]:
+    """Build compact per-candidate summary dicts for phase event data."""
+    from api.models.prompt_state import PromptState, diff
+
+    current_ps = PromptState(**current_ps_dict)
+    summaries = []
+    for i, c in enumerate(candidates):
+        # Non-destructive read of pipeline override
+        pp_override = c.get("__pipeline_params_override__")
+
+        # Diff to find changed fields
+        # Strip the dunder key before constructing PromptState
+        c_clean = {k: v for k, v in c.items() if k != "__pipeline_params_override__"}
+        try:
+            candidate_ps = PromptState(**c_clean)
+            delta = diff(current_ps, candidate_ps)
+            changed_fields = [fc.field for fc in delta.field_changes]
+        except Exception:
+            changed_fields = []
+
+        summary: dict = {
+            "idx": i,
+            "changes_description": c.get("changes_description", ""),
+            "changed_fields": changed_fields,
+        }
+        if pp_override:
+            summary["pipeline_params_override"] = pp_override
+        summaries.append(summary)
+    return summaries
 
 
 class CycleConfig(BaseModel):
@@ -497,11 +547,24 @@ async def _generate_or_load_candidates(
     config: CycleConfig,
     campaign_store: "CampaignStore | None",
     cycle_id: str | None,
+    on_phase: Callable | None = None,
+    n_eval_queries: int = 0,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
     from api.models.prompt_state import PromptState
     from api.services.llm_client import get_llm_client
     from api.services.prompt_optimizer import generate_candidates
+
+    current_ps = PromptState(**state.current_ps)
+    prompt_preview = current_ps.render()[:120]
+
+    _emit_phase(on_phase, "growth", "enter", round=round_num,
+                current_accuracy=state.current_accuracy,
+                prompt_preview=prompt_preview,
+                n_variants=config.n_variants,
+                creativity=config.creativity,
+                model=config.model or "(default)",
+                has_scan_context=config.scan_context is not None)
 
     if campaign_store and cycle_id:
         persisted = campaign_store.load_round_candidates(
@@ -512,11 +575,16 @@ async def _generate_or_load_candidates(
                 "Loaded %d persisted candidates for round %d",
                 len(persisted), round_num,
             )
+            _emit_phase(on_phase, "growth", "exit", round=round_num,
+                        n_candidates=len(persisted),
+                        n_eval_queries=n_eval_queries,
+                        loaded_from_disk=True,
+                        candidates=_candidate_summaries(
+                            persisted, state.current_ps))
             return persisted
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
     llm_client = get_llm_client(config.provider)
-    current_ps = PromptState(**state.current_ps)
 
     # L2 meta-param overrides from PromptState.parameters
     n_variants = current_ps.parameters.get("n_variants", config.n_variants)
@@ -539,6 +607,13 @@ async def _generate_or_load_candidates(
             config.backend_id, cycle_id, round_num, candidates,
         )
 
+    _emit_phase(on_phase, "growth", "exit", round=round_num,
+                n_candidates=len(candidates),
+                n_eval_queries=n_eval_queries,
+                loaded_from_disk=False,
+                candidates=_candidate_summaries(
+                    candidates, state.current_ps))
+
     return candidates
 
 
@@ -553,6 +628,7 @@ async def _evaluate_candidates(
     dataset_item_map: dict[str, str] | None,
     on_candidate_eval: Callable | None,
     on_query_eval: Callable | None,
+    on_phase: Callable | None = None,
 ) -> dict:
     """Evaluate candidates, select winner, optionally generate suggestions."""
     from api.models.prompt_state import PromptState
@@ -563,6 +639,12 @@ async def _evaluate_candidates(
         evaluate_and_select_winner,
         generate_suggestions,
     )
+
+    _emit_phase(on_phase, "analysis_eval", "enter", round=round_num,
+                n_candidates=len(candidates),
+                n_queries=len(round_eval_data),
+                current_best_accuracy=state.current_accuracy,
+                improvement_threshold=config.improvement_threshold)
 
     baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
@@ -623,6 +705,15 @@ async def _evaluate_candidates(
             eval_out["suggestions"] = suggestions
         except Exception:
             logger.warning("Suggestion generation failed", exc_info=True)
+
+    _emit_phase(on_phase, "analysis_eval", "exit", round=round_num,
+                winner_label=eval_out["winner"].get("label", ""),
+                winner_accuracy=eval_out["winner_accuracy"],
+                winner_composite=eval_out.get("winner_composite",
+                                              eval_out["winner_accuracy"]),
+                improved=eval_out["improved"],
+                next_action=eval_out["next_action"],
+                candidate_scores=eval_out["candidate_scores"])
 
     return eval_out
 
@@ -686,6 +777,7 @@ async def _execute_round(
     cycle_id: str | None,
     on_candidate_eval: Callable | None,
     on_query_eval: Callable | None,
+    on_phase: Callable | None = None,
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     if obs:
@@ -695,13 +787,14 @@ async def _execute_round(
             logger.warning("ObsLogger.log_round_start failed", exc_info=True)
 
     candidates = await _generate_or_load_candidates(
-        round_num, state, config, campaign_store, cycle_id,
+        round_num, state, config, campaign_store, cycle_id, on_phase,
+        n_eval_queries=len(round_eval_data),
     )
 
     eval_out = await _evaluate_candidates(
         candidates, round_num, state, round_eval_data, config,
         obs, dataset_name, dataset_item_map,
-        on_candidate_eval, on_query_eval,
+        on_candidate_eval, on_query_eval, on_phase,
     )
 
     round_result = CycleRoundResult(
@@ -734,8 +827,10 @@ def _finalize_campaign(
     finished_at: str,
     obs: "ObsLogger | None",
     obs_campaign_id: str,
+    *,
+    status: str = "completed",
 ) -> str | None:
-    """Mark campaign complete on disk and finalize observability.
+    """Mark campaign on disk and finalize observability.
 
     Returns:
         Cloud Langfuse trace ID (or None).
@@ -743,7 +838,7 @@ def _finalize_campaign(
     if campaign_store and cycle_id:
         try:
             campaign_store.update(config.backend_id, cycle_id, {
-                "status": "completed",
+                "status": status,
                 "stop_reason": stop_reason,
                 "best_accuracy": state.best_accuracy,
                 "best_round": state.best_round,
@@ -781,6 +876,7 @@ async def _escalate_l2(
     config: CycleConfig,
     round_num: int,
     eval_data: list[dict],
+    on_phase: Callable | None = None,
 ) -> str | None:
     """Handle L1→L2 escalation and optionally L2→L3.
 
@@ -823,6 +919,10 @@ async def _escalate_l2(
                 "parameters": current_ps.parameters,
                 "accuracy_change": state.best_composite - state.best_composite_at_l3_entry,
             }]
+            _emit_phase(on_phase, "modify_plan", "enter", round=round_num,
+                        l3_round=state.l3_round,
+                        l2_stall_count=state.l2_stall_count,
+                        current_plan_preview=str(current_ps.plan)[:120])
             new_ps = await modify_plan(
                 current_ps, l2_history, eval_data, llm_client, model=config.model,
             )
@@ -835,6 +935,10 @@ async def _escalate_l2(
             state.stall_count = 0
             state.best_accuracy_at_l2_entry = state.best_accuracy
             state.best_composite_at_l2_entry = state.best_composite
+            _emit_phase(on_phase, "modify_plan", "exit", round=round_num,
+                        l3_round=state.l3_round,
+                        new_plan_preview=str(new_ps.plan)[:120],
+                        changes_description=new_ps.changes_description or "")
             logger.info(
                 "L3 modify_plan at round %d (l3_round=%d)",
                 round_num, state.l3_round,
@@ -856,6 +960,12 @@ async def _escalate_l2(
         }
         for r in state.rounds[-config.patience:]
     ]
+    _emit_phase(on_phase, "refine_context", "enter", round=round_num,
+                l2_round=state.l2_round,
+                stall_count=state.stall_count,
+                current_params=current_ps.parameters,
+                current_accuracy=state.current_accuracy,
+                best_accuracy=state.best_accuracy)
     new_ps = await refine_context(
         current_ps, stalled_rounds, eval_data, llm_client, model=config.model,
     )
@@ -864,6 +974,11 @@ async def _escalate_l2(
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
     state.stall_count = 0  # reset L1 patience
+    _emit_phase(on_phase, "refine_context", "exit", round=round_num,
+                l2_round=state.l2_round,
+                param_changes_count=len(new_ps.parameters),
+                context_changed=new_ps.context != current_ps.context,
+                changes_description=new_ps.changes_description or "")
     logger.info(
         "L2 refine_context at round %d (l2_round=%d)",
         round_num, state.l2_round,
@@ -888,6 +1003,7 @@ async def run_feedback_cycle(
     on_round_complete: Callable | None = None,
     on_candidate_eval: Callable | None = None,
     on_query_eval: Callable | None = None,
+    on_phase: Callable | None = None,
     langfuse_session_id: str | None = None,
     scan_context: dict | None = None,
 ) -> CycleResult:
@@ -926,6 +1042,18 @@ async def run_feedback_cycle(
     from api.services.query_utils import subsample_queries
 
     started_at = datetime.now(timezone.utc).isoformat()
+
+    _emit_phase(on_phase, "init", "enter",
+                max_rounds=config.max_rounds,
+                patience=config.patience,
+                n_variants=config.n_variants,
+                model=config.model or "(default)",
+                sample_size=config.sample_size,
+                enable_l2=config.enable_l2,
+                enable_l3=config.enable_l3,
+                eval_data_count=len(eval_data),
+                baseline_accuracy=baseline_accuracy,
+                has_scan_context=config.scan_context is not None)
 
     # Initialize backend session (required before /matches calls)
     if config.session_terms:
@@ -973,15 +1101,28 @@ async def run_feedback_cycle(
     if restored_state is not None:
         state = restored_state
     else:
+        if current_results:
+            from api.services.prompt_eval import compute_composite_score
+            _bl_scores = compute_composite_score(current_results, config.pipeline_schema)
+            _bl_composite = _bl_scores["composite"]
+        else:
+            _bl_composite = current_accuracy
         state = _LoopState(
             current_ps=current_ps,
             current_accuracy=current_accuracy,
-            current_composite=current_accuracy,
+            current_composite=_bl_composite,
             current_results=current_results,
             best_accuracy=current_accuracy,
-            best_composite=current_accuracy,
+            best_composite=_bl_composite,
             best_ps=current_ps,
         )
+
+    _emit_phase(on_phase, "init", "exit",
+                cycle_id=cycle_id,
+                resumed_from_round=resumed_from_round,
+                baseline_accuracy=state.current_accuracy,
+                obs_enabled=obs is not None,
+                sample_count=len(round_eval_data))
 
     # Build shared clients once (reused across all rounds)
     state.backend_client = BackendClient(config.backend_url)
@@ -1003,7 +1144,7 @@ async def run_feedback_cycle(
                 round_num, state, round_eval_data, config,
                 obs, obs_campaign_id, dataset_name, dataset_item_map,
                 campaign_store, cycle_id,
-                on_candidate_eval, on_query_eval,
+                on_candidate_eval, on_query_eval, on_phase,
             )
 
             # Update loop state
@@ -1068,7 +1209,7 @@ async def run_feedback_cycle(
                 if config.enable_l2:
                     # L1 stalled → escalate to L2
                     stop_reason = await _escalate_l2(
-                        state, config, round_num, round_eval_data,
+                        state, config, round_num, round_eval_data, on_phase,
                     )
                     if stop_reason:
                         break
@@ -1089,9 +1230,10 @@ async def run_feedback_cycle(
 
     # -- Step 6: Finalize --
     finished_at = datetime.now(timezone.utc).isoformat()
+    campaign_status = "interrupted" if stop_reason == "interrupted" else "completed"
     cloud_trace_id = _finalize_campaign(
         campaign_store, cycle_id, config, state, stop_reason, finished_at,
-        obs, obs_campaign_id,
+        obs, obs_campaign_id, status=campaign_status,
     )
 
     return CycleResult(
