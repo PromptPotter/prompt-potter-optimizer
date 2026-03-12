@@ -577,7 +577,10 @@ async def evaluate_and_select_winner(
             def _on_result(result, qi, qt, _ci=idx, _ct=len(ps_candidates)):
                 on_query_eval(_ci, _ct, qi, qt, result)
 
-        pp = candidate_pp[idx] or _sp_pipeline_params
+        if candidate_pp[idx]:
+            pp = {**(_sp_pipeline_params or {}), **candidate_pp[idx]}
+        else:
+            pp = _sp_pipeline_params
         sp = SearchPoint(
             prompt_state=c,
             model=_sp_model,
