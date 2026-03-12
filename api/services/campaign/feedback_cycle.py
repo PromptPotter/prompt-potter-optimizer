@@ -59,6 +59,9 @@ class CycleConfig(BaseModel):
 
     pipeline_schema: PipelineSchema | None = Field(None, description="Pipeline schema for eval")
 
+    # Scan-aware optimization
+    scan_context: dict | None = Field(None, description="Scan analytics context for candidate gen")
+
     # L2/L3 escalation
     enable_l2: bool = Field(False, description="Enable L2 refine_context loop")
     enable_l3: bool = Field(False, description="Enable L3 modify_plan loop")
@@ -76,6 +79,7 @@ class CycleConfig(BaseModel):
         pipeline_params: dict | None = None,
         session_terms: list[str] | None = None,
         pipeline_schema: PipelineSchema | None = None,
+        scan_context: dict | None = None,
     ) -> "CycleConfig":
         """Build from the notebook's ``campaign_config`` dict."""
         opt = campaign_config.get("optimization", {})
@@ -98,6 +102,7 @@ class CycleConfig(BaseModel):
             sample_size=campaign_config.get("sample_size", 0),
             seed=42,
             pipeline_schema=pipeline_schema,
+            scan_context=scan_context,
             enable_l2=opt.get("enable_l2", False),
             enable_l3=opt.get("enable_l3", False),
             l2_patience=opt.get("l2_patience", 2),
@@ -521,8 +526,13 @@ async def _generate_or_load_candidates(
         current_ps, state.current_accuracy, state.current_results,
         n_variants, creativity, llm_client,
         model=config.model,
+        scan_context=config.scan_context,
     )
-    candidates = [c.model_dump() for c in raw_candidates]
+    # Normalize to dicts (generate_candidates returns dicts, but mocks may return PromptState)
+    candidates = [
+        c if isinstance(c, dict) else c.model_dump()
+        for c in raw_candidates
+    ]
 
     if campaign_store and cycle_id:
         campaign_store.save_round_candidates(
@@ -879,6 +889,7 @@ async def run_feedback_cycle(
     on_candidate_eval: Callable | None = None,
     on_query_eval: Callable | None = None,
     langfuse_session_id: str | None = None,
+    scan_context: dict | None = None,
 ) -> CycleResult:
     """Run iterative optimization with feedback cycling.
 
@@ -902,10 +913,14 @@ async def run_feedback_cycle(
         on_candidate_eval: Optional callback after each candidate evaluation:
             ``(candidate_idx: int, n_candidates: int, scores: dict)``
         langfuse_session_id: Optional session ID for grouping Langfuse traces.
+        scan_context: Scan analytics context for scan-aware candidate generation.
+            When provided, overrides config.scan_context for this run.
 
     Returns:
         CycleResult with all rounds and final winner.
     """
+    if scan_context is not None:
+        config = config.model_copy(update={"scan_context": scan_context})
     from api.nodes.optimizer_nodes import InitNode
     from api.services.backend_client import BackendClient
     from api.services.query_utils import subsample_queries

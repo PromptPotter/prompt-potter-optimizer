@@ -1308,8 +1308,14 @@ def seed_campaign_from_scan(
     )
 
     if best_sp.pipeline_params:
-        campaign_config["pipeline_params"] = best_sp.pipeline_params
-        print(f"Updated pipeline_params: {best_sp.pipeline_params}")
+        existing_pp = campaign_config.get("pipeline_params", {})
+        # Merge scan winner's params into existing pipeline_params, preserving
+        # the steps list set by configure_pipeline()
+        merged = {**existing_pp, **best_sp.pipeline_params}
+        if "steps" in existing_pp:
+            merged["steps"] = existing_pp["steps"]
+        campaign_config["pipeline_params"] = merged
+        print(f"Updated pipeline_params: {merged}")
 
     bl = campaign_rounds[0] if campaign_rounds else {}
     ps = best_sp.prompt_state

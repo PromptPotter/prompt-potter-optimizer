@@ -120,6 +120,51 @@ def _build_freeform_meta_prompt(
     )
 
 
+def _build_scan_aware_meta_prompt(
+    n_variants: int,
+    rendered_prompt: str,
+    current_accuracy: float,
+    current_results: list,
+    failure_examples: str,
+    scan_context: dict,
+) -> str:
+    """Build meta-prompt enriched with scan analytics for pipeline_param optimization."""
+    return (
+        f"You are a pipeline optimization expert. Generate {n_variants} "
+        "candidate configurations\nfor a terminology normalization pipeline.\n\n"
+        f"CURRENT STATE ({current_accuracy:.1%} accuracy on "
+        f"{len(current_results)} queries):\n"
+        f"---\n{rendered_prompt}\n---\n\n"
+        f"FAILURE EXAMPLES:\n{failure_examples}\n\n"
+        "## SCAN ANALYTICS (sensitivity scan results)\n\n"
+        "### Variant leaderboard (ranked by accuracy)\n"
+        f"{scan_context['leaderboard_text']}\n\n"
+        "### Axis sensitivity (most impactful parameters)\n"
+        f"{scan_context['sensitivity_text']}\n\n"
+        "### Query difficulty\n"
+        f"{scan_context['difficulty_text']}\n\n"
+        "### Tested values per axis\n"
+        f"{scan_context['tested_values']}\n\n"
+        "## INSTRUCTIONS\n"
+        f"Generate {n_variants} candidate configurations. For each candidate:\n"
+        "1. Choose a pipeline_params combination informed by the scan data above\n"
+        "2. Optionally propose NEW values for sensitive axes (values not yet tested)\n"
+        "3. Explain your reasoning\n\n"
+        "Prioritize axes with high sensitivity and positive best_delta.\n"
+        "Avoid re-testing exact value combinations from the leaderboard.\n"
+        "For numeric params: explore between or beyond tested ranges.\n"
+        "For string params: try semantic variations.\n\n"
+        "Return a JSON object with key \"variants\" containing an array of "
+        f"{n_variants} objects, each with:\n"
+        "  - \"variant_name\": short identifier\n"
+        "  - \"changes_description\": 1-2 sentence description\n"
+        "  - \"instruction\": full prompt template text (keep template variables)\n"
+        "  - \"pipeline_params_override\": dict of param_name -> value "
+        "(only include params you want to change)\n"
+        "  - \"reasoning\": why this combination is promising\n"
+    )
+
+
 async def generate_candidates(
     current_ps: PromptState,
     current_accuracy: float,
@@ -129,7 +174,8 @@ async def generate_candidates(
     llm_client: LLMClientBase,
     model: str | None = None,
     variant_library: dict | None = None,
-) -> list[PromptState]:
+    scan_context: dict | None = None,
+) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
     Args:
@@ -143,9 +189,15 @@ async def generate_candidates(
         variant_library: When provided, constrains non-instruction fields
             to the library values. The LLM selects by index for those
             fields and writes ``instruction`` freely.
+        scan_context: When provided, enriches the meta-prompt with scan
+            analytics (leaderboard, axis sensitivity, tested values) and
+            enables per-candidate ``pipeline_params_override`` in the
+            response. Built by ``prepare_scan_context()``.
 
     Returns:
-        List of derived PromptState candidates.
+        List of candidate dicts. Each dict contains serialized PromptState
+        fields, plus an optional ``__pipeline_params_override__`` key when
+        scan_context is provided.
     """
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
@@ -160,7 +212,12 @@ async def generate_candidates(
 
     rendered_prompt = current_ps.render()
 
-    if variant_library:
+    if scan_context:
+        meta_prompt = _build_scan_aware_meta_prompt(
+            n_variants, rendered_prompt, current_accuracy,
+            current_results, failure_examples, scan_context,
+        )
+    elif variant_library:
         meta_prompt = _build_constrained_meta_prompt(
             n_variants, rendered_prompt, current_accuracy,
             current_results, failure_examples, variant_library,
@@ -192,9 +249,9 @@ async def generate_candidates(
     else:
         variants_list = generated
 
-    candidates = []
+    candidates: list[dict] = []
     for v in variants_list[:n_variants]:
-        if variant_library:
+        if variant_library and not scan_context:
             changes: dict[str, Any] = {
                 "instruction": v.get("instruction", v.get("prompt_text", "")),
             }
@@ -215,13 +272,23 @@ async def generate_candidates(
                 ),
             )
         else:
+            instr = v.get("instruction", v.get("prompt_text", ""))
             ps = current_ps.derive(
-                instruction=v["prompt_text"],
+                **({"instruction": instr} if instr else {}),
                 changes_description=v.get(
                     "changes_description", v.get("variant_name", ""),
                 ),
             )
-        candidates.append(ps)
+
+        c_dict = ps.model_dump()
+
+        # Attach per-candidate pipeline_params override when scan-aware
+        if scan_context:
+            pp_override = v.get("pipeline_params_override")
+            if pp_override and isinstance(pp_override, dict):
+                c_dict["__pipeline_params_override__"] = pp_override
+
+        candidates.append(c_dict)
 
     return candidates
 
@@ -470,6 +537,15 @@ async def evaluate_and_select_winner(
     _sp_temperature = ctx.search_point.temperature
     _sp_pipeline_params = ctx.search_point.pipeline_params
 
+    # Pop per-candidate pipeline_params overrides before PromptState construction
+    candidate_pp: list[dict | None] = []
+    for i, c in enumerate(candidates):
+        if isinstance(c, dict):
+            candidate_pp.append(c.pop("__pipeline_params_override__", None))
+        else:
+            candidate_pp.append(None)
+            candidates[i] = c.model_dump() if hasattr(c, "model_dump") else c
+
     ps_candidates = [PromptState(**c) for c in candidates]
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []
@@ -480,11 +556,12 @@ async def evaluate_and_select_winner(
             def _on_result(result, qi, qt, _ci=idx, _ct=len(ps_candidates)):
                 on_query_eval(_ci, _ct, qi, qt, result)
 
+        pp = candidate_pp[idx] or _sp_pipeline_params
         sp = SearchPoint(
             prompt_state=c,
             model=_sp_model,
             temperature=_sp_temperature,
-            pipeline_params=_sp_pipeline_params,
+            pipeline_params=pp,
         )
         results, scores, cached = await evaluate_prompt_cached(
             sp, eval_data,

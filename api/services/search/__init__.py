@@ -49,6 +49,8 @@ _SUBMODULE_MAP: dict[str, str] = {
     "preview_advisor_prompt": "api.services.search.scan_advisor",
     # synthesis
     "synthesize_sensitivity_from_grid": "api.services.search.synthesis",
+    # scan_seeding
+    "prepare_scan_context": "api.services.search.scan_seeding",
 }
 
 __all__ = list(_SUBMODULE_MAP)
