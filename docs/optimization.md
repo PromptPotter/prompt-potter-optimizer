@@ -50,6 +50,17 @@ Automated optimization with 3-layer escalation:
 2. If Layer 1 stalls, escalates to Layer 2 (context refinement), then Layer 3 (strategy)
 3. Stops on: `patience` consecutive non-improving rounds, `max_rounds`, or perfect accuracy
 
+### Scan-Aware Generation
+
+When scan data is available (from sensitivity scan), the feedback cycle operates in **scan-aware mode**:
+
+- `prepare_scan_context()` formats scan analytics (leaderboard, axis sensitivity, query difficulty, tested values) into structured text
+- The LLM meta-prompt is enriched with this context so it can reason about which pipeline_param combinations to try
+- Each candidate can include a `pipeline_params_override` — individual pipeline params per candidate instead of one shared config
+- The notebook's optimize cell automatically detects scan variables (`scan_df`, `axis_profiles`, `scan_variants`, `difficulty_df`) and passes them through
+
+This means the feedback cycle can optimize **pipeline parameters** (not just prompt text), which is critical when `exclude_steps: ["llm_ranking"]` makes all optimization axes pipeline params.
+
 ### Configuration
 
 ```python
@@ -59,6 +70,10 @@ Automated optimization with 3-layer escalation:
     "n_variants": 5,
     "creativity": 0.7,       # meta-prompt temperature
     "max_rounds": 10,
+    "enable_l2": True,        # refine context on diminishing returns
+    "l2_patience": 2,         # L1 stalls before L2 escalation
+    "enable_l3": True,        # modify plan on L2 stall
+    "l3_patience": 1,         # L2 stalls before L3 escalation
 }
 ```
 
@@ -82,12 +97,17 @@ Round  Accuracy  Rolling Avg (8)  Trend
 campaign_config = {
     "sample_size": 35,              # queries per eval step (0 = all)
     "exploration_rate": 0.5,        # grid search: 0.0=conservative, 1.0=aggressive
+    "exclude_steps": ["llm_ranking"],  # pipeline steps to skip
     "optimization": {
         "n_variants": 5,
         "creativity": 0.7,
         "improvement_threshold": 0.01,
         "patience": 3,
         "max_rounds": 10,
+        "enable_l2": True,          # refine context on L1 stall
+        "l2_patience": 2,
+        "enable_l3": True,          # modify plan on L2 stall
+        "l3_patience": 1,
     },
     "eval_llm": { ... },
     "grid_search": {

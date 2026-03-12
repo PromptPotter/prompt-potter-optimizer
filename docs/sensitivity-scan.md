@@ -10,13 +10,15 @@ Perturbs one axis at a time (OAT) and measures accuracy deltas against your base
 
 **When to use:** Before optimization (identify which axes matter), after optimization (find remaining room), or after backend changes (verify which sensitivities shifted).
 
-### Workflow (5 Cells)
+### Workflow (7 Cells)
 
 1. **Scan advisor** — LLM recommends axes and variant values from pipeline config
 2. **Edit variants** — review and adjust the `scan_variants` dict
 3. **Prepare scan baseline** — restructure backend prompt into internal fields for independent perturbation
 4. **Sensitivity scan** — evaluate each axis independently against `sample_size` queries
-5. **Select winner** — pick the best starting point
+5. **Variant leaderboard** — display all scan combos ranked by accuracy with per-axis statistics
+6. **Query difficulty** — classify queries as easy/discriminating/hard/error from historical scan runs
+7. **Select winner & seed** — pick the best starting point for the feedback cycle
 
 ### Scan Variants
 

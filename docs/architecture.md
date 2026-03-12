@@ -14,25 +14,26 @@ All core logic in `api/services/`. See [`api/services/CLAUDE.md`](../api/service
 ```
   HUMAN LOOP                           AI LOOP (Potter)
   ──────────                           ────────────────
-  Sensitivity Scan                     Feedback Cycle
+  Sensitivity Scan                     Feedback Cycle (scan-aware)
   ┌──────────────────┐                 ┌──────────────────┐
   │ Measure axes     │  select best    │ Generate         │
   │ Classify by      │───starting──────►  candidates      │
-  │  sensitivity     │  point          │ Evaluate via     │
-  │ Show coverage    │                 │  backend         │
+  │  sensitivity     │  point          │  (with scan      │
+  │ Show leaderboard │                 │   analytics)     │
+  │ Query difficulty  │  scan context  │ Evaluate via     │
+  │ Show coverage    │─────────────────►  backend         │
   └──────┬───────────┘                 │ Select winner    │
-         │                             │ Iterate until    │
-         │  all eval data              │  patience runs   │
-         │  feeds back                 │  out             │
-         │                             └────────┬─────────┘
+         │                             │ L1→L2→L3        │
+         │  all eval data              │  escalation      │
+         │  feeds back                 └────────┬─────────┘
          │                                      │
          └──────────────◄───────────────────────┘
               richer landscape → better starting point → repeat
 ```
 
-**Human Loop** — OAT perturbation scan measures which axes matter. You pick the best starting point.
+**Human Loop** — OAT perturbation scan measures which axes matter. Variant leaderboard and query difficulty analytics provide visibility. You pick the best starting point.
 
-**AI Loop** — Feedback cycle generates candidates, evaluates, selects winners. 3-layer escalation (Layer 1 → Layer 2 → Layer 3).
+**AI Loop** — Feedback cycle generates candidates, evaluates, selects winners. When scan data is available, each round uses scan analytics (leaderboard, sensitivity, difficulty, tested values) to generate informed pipeline_param combinations with per-candidate overrides. 3-layer escalation (L1 generate → L2 refine_context → L3 modify_plan) on diminishing returns.
 
 ## Data Model
 
