@@ -129,6 +129,26 @@ def _build_scan_aware_meta_prompt(
     scan_context: dict,
 ) -> str:
     """Build meta-prompt enriched with scan analytics for pipeline_param optimization."""
+    prompt_relevant = scan_context.get("has_prompt_axes", True)
+
+    if prompt_relevant:
+        instruction_spec = (
+            "  - \"instruction\": full prompt template text "
+            "(keep template variables)\n"
+        )
+        focus_note = ""
+    else:
+        instruction_spec = (
+            "  - \"instruction\": null  (keep unchanged — the ranking prompt "
+            "is NOT active in this pipeline)\n"
+        )
+        focus_note = (
+            "IMPORTANT: The ranking prompt is NOT active in this pipeline "
+            "configuration. All improving axes are pipeline parameters. "
+            "Focus entirely on pipeline_params_override — do NOT modify "
+            "the instruction.\n\n"
+        )
+
     return (
         f"You are a pipeline optimization expert. Generate {n_variants} "
         "candidate configurations\nfor a terminology normalization pipeline.\n\n"
@@ -146,6 +166,7 @@ def _build_scan_aware_meta_prompt(
         "### Tested values per axis\n"
         f"{scan_context['tested_values']}\n\n"
         "## INSTRUCTIONS\n"
+        f"{focus_note}"
         f"Generate {n_variants} candidate configurations. For each candidate:\n"
         "1. Choose a pipeline_params combination informed by the scan data above\n"
         "2. Optionally propose NEW values for sensitive axes (values not yet tested)\n"
@@ -158,7 +179,7 @@ def _build_scan_aware_meta_prompt(
         f"{n_variants} objects, each with:\n"
         "  - \"variant_name\": short identifier\n"
         "  - \"changes_description\": 1-2 sentence description\n"
-        "  - \"instruction\": full prompt template text (keep template variables)\n"
+        f"{instruction_spec}"
         "  - \"pipeline_params_override\": dict of param_name -> value "
         "(only include params you want to change)\n"
         "  - \"reasoning\": why this combination is promising\n"

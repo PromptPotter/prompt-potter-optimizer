@@ -80,10 +80,12 @@ def prepare_scan_context(
         difficulty_text = "  (not available)"
 
     # --- Improving axes ---
-    improving_axes = [
-        p["axis"] for p in axis_profiles
+    _improving = [
+        p for p in axis_profiles
         if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
     ]
+    improving_axes = [p["axis"] for p in _improving]
+    has_prompt_axes = any(p["axis_type"] == "prompt_field" for p in _improving)
 
     # --- Tested values per axis ---
     tested_lines = []
@@ -105,6 +107,7 @@ def prepare_scan_context(
         "sensitivity_text": sensitivity_text,
         "difficulty_text": difficulty_text,
         "improving_axes": improving_axes,
+        "has_prompt_axes": has_prompt_axes,
         "tested_values": tested_values,
         "baseline_accuracy": baseline_accuracy,
     }
