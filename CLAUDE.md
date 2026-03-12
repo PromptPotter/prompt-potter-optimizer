@@ -49,7 +49,7 @@ See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for the full service cata
 
 Two core mechanisms that work together (both actively evolving):
 
-- **Prompt decomposition** — PromptPotter decomposes a backend's monolithic prompt into internal fields (`persona`, `task_intent`, `thinking_style`, `answer_format`, `problem_description`) via LLM restructure. A default variant library (`api/config/prompt_variants.json`) provides per-field alternatives for scan and grid search. This turns one opaque prompt into a combinatorial search space.
+- **Prompt decomposition** — PromptPotter decomposes a backend's monolithic prompt into internal fields (`persona`, `task_intent`, `thinking_style`, `answer_format`, `problem_description`) via LLM restructure. A variant library (`api/config/prompt_variants.json`) provides per-field alternatives for scan and grid search, including building blocks from published research (e.g. PromptWizard's thinking styles). Each variant is an object with `text` + provenance metadata (`source`, `year`); `load_variant_library()` extracts flat strings for consumers, `load_variant_library_rich()` preserves metadata.
 - **Prompt alias groups** — `register_alias` / `resolve_aliases` link semantically equivalent prompt hashes (e.g. original monolithic ↔ restructured decomposed form) so historical evaluations are discoverable across forms. Resolution is transitive. Used by coverage advisor, scan diagnostics, and `evaluate_prompt_cached()`.
 
 ### Pipeline discovery

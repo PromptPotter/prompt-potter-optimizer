@@ -27,7 +27,7 @@ Future: non-parametric significance tests and confidence intervals on accuracy d
 
 **The AI Loop (Potter)** — From that starting point, an automated feedback cycle generates candidate prompts via LLM, evaluates each against the backend, selects winners, and iterates. This is the 3-layer PromptState optimization: Layer 1 (prompt fields) changes every round, Layer 2 (context) adjusts when Layer 1 stalls, Layer 3 (strategy) rarely changes.
 
-**Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [default variant library](api/config/prompt_variants.json). This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
+**Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [variant library](api/config/prompt_variants.json) that includes building blocks from published research (e.g. PromptWizard's 40 thinking styles). Each variant carries provenance metadata (source, year) for traceability. This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
 
 Every evaluation point is a **SearchPoint** — an immutable bundle of prompt + model + temperature + pipeline params. All mutations via `.derive()`. Content-hashable, so every evaluation is stored once and discoverable by any workflow.
 
