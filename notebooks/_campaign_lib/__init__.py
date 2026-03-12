@@ -39,7 +39,7 @@ __all__ = [  # noqa: F405
     # Grid plan discovery
     "list_grid_plans", "load_grid_plan_results",
     # Pipeline config
-    "configure_pipeline", "load_pipeline_config", "build_pipeline_params",
+    "configure_pipeline",
     # Smart search
     "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
     "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",

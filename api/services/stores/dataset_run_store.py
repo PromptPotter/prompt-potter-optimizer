@@ -196,7 +196,13 @@ class DatasetRunStore:
         if index is None:
             return None
 
-        norm_pp = pipeline_params or None
+        def _strip_steps(pp):
+            if not pp:
+                return None
+            stripped = {k: v for k, v in pp.items() if k != "steps"}
+            return stripped or None
+
+        norm_pp = _strip_steps(pipeline_params)
 
         for entry in index.get("dataset_runs", []):
             if entry.get("rendered_prompt_hash", "") not in alias_set:
@@ -205,7 +211,7 @@ class DatasetRunStore:
                 continue
             if entry.get("temperature") != temperature:
                 continue
-            if (entry.get("pipeline_params") or None) != norm_pp:
+            if _strip_steps(entry.get("pipeline_params")) != norm_pp:
                 continue
             if entry.get("item_count") != item_count:
                 continue
