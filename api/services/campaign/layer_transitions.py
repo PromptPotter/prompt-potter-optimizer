@@ -29,6 +29,7 @@ async def refine_context(
     eval_data: list[dict],
     llm_client: LLMClientBase,
     model: str | None = None,
+    temperature: float = 0.3,
 ) -> PromptState:
     """LLM-driven L2 adjustment: tune parameters and context.
 
@@ -74,7 +75,7 @@ async def refine_context(
     response = await llm_client.chat(
         messages=[{"role": "user", "content": prompt}],
         model=model,
-        temperature=0.3,
+        temperature=temperature,
         max_tokens=2048,
         output_format="json",
     )
@@ -105,6 +106,7 @@ async def modify_plan(
     eval_data: list[dict],
     llm_client: LLMClientBase,
     model: str | None = None,
+    temperature: float = 0.5,
 ) -> PromptState:
     """LLM-driven L3 adjustment: suggest a new strategic plan.
 
@@ -140,7 +142,7 @@ async def modify_plan(
     response = await llm_client.chat(
         messages=[{"role": "user", "content": prompt}],
         model=model,
-        temperature=0.5,
+        temperature=temperature,
         max_tokens=2048,
         output_format="json",
     )

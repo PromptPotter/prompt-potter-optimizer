@@ -14,8 +14,8 @@ import pytest
 import pandas as pd
 
 from api.models.prompt_state import PromptState
+from api.services.campaign.models import CycleConfig
 from api.services.campaign.feedback_cycle import (
-    CycleConfig,
     cycle_config_identity,
     run_feedback_cycle,
 )

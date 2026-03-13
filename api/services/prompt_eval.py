@@ -33,14 +33,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EvalContext:
-    """Groups infrastructure parameters shared across evaluation calls.
+    """Infrastructure bundle shared across evaluation calls.
 
-    The ``search_point`` field bundles prompt_state + model + temperature +
-    pipeline_params (the search-space dimensions).  Infrastructure fields
-    (backend_client, store, obs, …) stay at this level.
+    Pure infrastructure — does NOT carry a SearchPoint.  The search-space
+    dimensions (model, temperature, pipeline_params) live here so that
+    ``evaluate_and_select_winner`` can build per-candidate SearchPoints.
     """
 
-    search_point: SearchPoint
     backend_client: BackendClient
     store: ProjectStore | None = None
     backend_id: str = ""
@@ -49,6 +48,9 @@ class EvalContext:
     dataset_name: str | None = None
     dataset_item_map: dict[str, str] | None = field(default=None)
     source: str = ""
+    model: str = ""
+    temperature: float = 0.0
+    pipeline_params: dict | None = None
 
 
 def build_dataset_run_data(

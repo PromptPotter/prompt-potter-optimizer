@@ -410,12 +410,14 @@ async def sensitivity_scan(
 
     # Build EvalContext once for all scan evaluations
     scan_ctx = EvalContext(
-        search_point=baseline,
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,
         pipeline_schema=pipeline_schema,
         source="sensitivity_scan",
+        model=baseline.model,
+        temperature=baseline.temperature,
+        pipeline_params=baseline.pipeline_params,
     )
 
     # Classify axes: prompt_field vs pipeline_param
@@ -564,73 +566,6 @@ async def sensitivity_scan(
 # ---------------------------------------------------------------------------
 
 
-def select_scan_winner(
-    scan_df: pd.DataFrame,
-    axis_profiles: list[dict],
-    baseline: SearchPoint,
-    scan_variants: dict[str, list],
-) -> SearchPoint:
-    """Pick best variant per sensitive axis from OAT scan results.
-
-    Composes the best-performing value for each axis that showed positive
-    improvement (best_delta > 0) into a single SearchPoint. No backend
-    calls required — purely offline composition from existing scan data.
-
-    Returns:
-        SearchPoint with best values composed in.
-    """
-    prompt_changes: dict[str, Any] = {}
-    param_changes: dict[str, Any] = {}
-
-    improving = [
-        p for p in axis_profiles
-        if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
-    ]
-
-    for profile in improving:
-        axis_name = profile["axis"]
-
-        axis_rows = scan_df[scan_df["axis"] == axis_name]
-        if axis_rows.empty:
-            continue
-
-        best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
-        value_idx = int(best_row["value_idx"])
-
-        values = scan_variants.get(axis_name, [])
-        if value_idx >= len(values):
-            logger.warning(
-                "select_scan_winner: value_idx %d out of range for %s (len=%d)",
-                value_idx, axis_name, len(values),
-            )
-            continue
-
-        value = values[value_idx]
-
-        if axis_name in _PROMPT_STATE_FIELDS:
-            prompt_changes[axis_name] = value
-        else:
-            param_changes[axis_name] = value
-
-    best = baseline
-    if prompt_changes:
-        best = best.derive(
-            **prompt_changes,
-            changes_description="scan_winner",
-        )
-    if param_changes:
-        best = best.derive(
-            pipeline_params={**(best.pipeline_params or {}), **param_changes},
-        )
-
-    logger.info(
-        "select_scan_winner: %d prompt changes, %d param changes from %d improving axes",
-        len(prompt_changes), len(param_changes), len(improving),
-    )
-
-    return best
-
-
 # ---------------------------------------------------------------------------
 # Adaptive search (importance-weighted coordinate descent)
 # ---------------------------------------------------------------------------
@@ -696,15 +631,13 @@ async def adaptive_search(
     resolved_axes: set[str] = set()
     log_rows: list[dict] = []
 
-    from api.models.search_point import SearchPoint as _SP
-
     _scan_ctx = EvalContext(
-        search_point=_SP(prompt_state=baseline_ps, pipeline_params=pipeline_params),
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,
         pipeline_schema=pipeline_schema,
         source="adaptive_search",
+        pipeline_params=pipeline_params,
     )
     _eval_ps = _make_eval_fn(
         eval_data, _scan_ctx,

@@ -395,6 +395,7 @@ async def generate_suggestions(
     campaign_config: dict[str, Any],
     llm_client: LLMClientBase,
     model: str | None = None,
+    suggestion_temperature: float = 0.0,
 ) -> dict:
     """Generate improvement suggestions via LLM analysis.
 
@@ -486,7 +487,7 @@ async def generate_suggestions(
     response = await llm_client.chat(
         messages=[{"role": "user", "content": suggestion_prompt}],
         model=model,
-        temperature=0,
+        temperature=suggestion_temperature,
         max_tokens=8000,
         output_format="json",
     )
@@ -515,10 +516,10 @@ async def evaluate_and_select_winner(
     from api.models.search_point import SearchPoint
     from api.services.prompt_eval import evaluate_prompt_cached
 
-    # Extract model/temp/pp from ctx's search_point for per-candidate SearchPoints
-    _sp_model = ctx.search_point.model
-    _sp_temperature = ctx.search_point.temperature
-    _sp_pipeline_params = ctx.search_point.pipeline_params
+    # Extract model/temp/pp from ctx for per-candidate SearchPoints
+    _sp_model = ctx.model
+    _sp_temperature = ctx.temperature
+    _sp_pipeline_params = ctx.pipeline_params
 
     # Extract per-candidate pipeline_params overrides without mutating caller's dicts
     candidate_pp: list[dict | None] = []

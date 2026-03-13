@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from api.models.prompt_state import PromptState
 from api.services.backend_client import load_pipeline_config
-from api.services.llm_client import (
-    AnthropicClient, LLMClientBase, OpenAICompatibleClient,
-    GROQ_BASE_URL, GROQ_MAX_RETRIES, GROQ_TIMEOUT, OPENAI_MAX_RETRIES,
-)
+from api.services.llm_client import LLMClientBase, get_llm_client
 from api.services.project_store import ProjectStore
 
 from api.services.campaign.campaign_init import init_services as _init_services
@@ -117,53 +113,20 @@ async def smoke_test_override(
 # ---------------------------------------------------------------------------
 
 
-def _infer_api_key(provider_url: str) -> str:
-    """Return the appropriate API key env-var value for a provider URL."""
-    if "anthropic.com" in provider_url:
-        return os.environ.get("ANTHROPIC_API_KEY", "")
-    if "openai.com" in provider_url:
-        return os.environ.get("OPENAI_API_KEY", "")
-    return os.environ.get("GROQ_API_KEY", "")
+def _url_to_provider(url: str) -> str:
+    """Map a provider base URL to a provider name for get_llm_client()."""
+    if "anthropic.com" in url:
+        return "anthropic"
+    if "openai.com" in url:
+        return "openai"
+    return "groq"
 
 
-def _make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase:
-    """Create an LLM client from a provider URL or key."""
-    if "anthropic.com" in provider_url:
-        return AnthropicClient(api_key=api_key)
-    if "groq.com" in provider_url:
-        return OpenAICompatibleClient(
-            api_key=api_key, base_url=GROQ_BASE_URL,
-            max_retries=GROQ_MAX_RETRIES, timeout=GROQ_TIMEOUT,
-            provider_name="Groq",
-        )
-    if "openai.com" in provider_url:
-        return OpenAICompatibleClient(
-            api_key=api_key, max_retries=OPENAI_MAX_RETRIES,
-            provider_name="OpenAI",
-        )
-    return OpenAICompatibleClient(
-        api_key=api_key, base_url=GROQ_BASE_URL,
-        max_retries=GROQ_MAX_RETRIES, timeout=GROQ_TIMEOUT,
-        provider_name="Groq",
-    )
-
-
-def setup_llm(
-    campaign_config: dict, api_key: str = "",
-) -> tuple[LLMClientBase, str]:
-    """Create LLM client + model from campaign_config['eval_llm'].
-
-    When *api_key* is empty, auto-detects the correct environment variable
-    based on the provider URL (ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY).
-
-    Returns:
-        (llm_client, model) tuple for passing to service functions.
-    """
+def setup_llm(campaign_config: dict) -> tuple[LLMClientBase, str]:
+    """Create LLM client + model from campaign_config['eval_llm']."""
     eval_llm = campaign_config["eval_llm"]
-    provider_url = eval_llm.get("provider_url", "")
-    key = api_key or _infer_api_key(provider_url)
-    client = _make_llm_client(provider_url, key)
-    return client, eval_llm.get("model", "")
+    provider = _url_to_provider(eval_llm.get("provider_url", ""))
+    return get_llm_client(provider), eval_llm.get("model", "")
 
 
 def save_campaign_winner(

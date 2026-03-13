@@ -6,7 +6,8 @@ campaign trace, per-round spans/scores, final score, trace update + flush.
 
 import pytest
 
-from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
+from api.services.campaign.models import CycleConfig
+from api.services.campaign.feedback_cycle import run_feedback_cycle
 from api.services.obs.langfuse_client import LangfuseLogger
 
 from _helpers import (

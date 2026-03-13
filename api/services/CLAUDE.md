@@ -24,9 +24,8 @@ This is where 90% of implementation work happens. All core logic lives here.
 | `obs/langfuse_client.py` | Langfuse v2 cloud integration (singleton). |
 | `obs/langfuse_push.py` | Push eval runs to Langfuse cloud. Single path via `push_all_runs()` (batch, with dataset-item linking). |
 | `stores/` | Focused store modules: `BackendStore`, `ExecutionStore`, `DatasetRunStore`, `DatasetStore`, `GridPlanStore`, `SmartSearchStore`, `CampaignStore`. Shared I/O in `stores/base.py`. `DatasetRunStore` also provides `register_alias()`/`resolve_aliases()` for prompt equivalence groups. |
-| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI; Anthropic available but not wired as default) with `_OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. Exponential backoff for transient 503/429 errors. |
+| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI; Anthropic available but not wired as default) with `OpenAICompatibleClient` base. Global singleton via `get_llm_client()`. Exponential backoff for transient 503/429 errors. |
 | `query_utils.py` | Shared query-parsing utilities (e.g. `parse_bom_material()`). |
-| `comparison.py` | Statistical comparison (hit@k, McNemar, Wilcoxon). |
 
 ## Evaluation gateway
 

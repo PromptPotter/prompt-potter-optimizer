@@ -17,21 +17,19 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
-
 from api.models.phase_event import PhaseEvent
-from api.models.pipeline_schema import PipelineSchema
 from api.models.prompt_state import PromptState, diff as prompt_diff
-from api.models.search_point import SearchPoint
 from api.nodes.optimizer_nodes import InitNode
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
 from api.services.constants import DATASET_NAME
+from api.services.campaign.models import (
+    CycleConfig, CycleResult, CycleRoundResult, _LoopState,
+)
 from api.services.prompt_eval import EvalContext, compute_composite_score
 from api.services.query_utils import subsample_queries
 
@@ -93,142 +91,6 @@ def _candidate_summaries(
             summary["pipeline_params_override"] = pp_override
         summaries.append(summary)
     return summaries
-
-
-class CycleConfig(BaseModel):
-    """Configuration for feedback cycling."""
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    max_rounds: int = Field(10, description="Maximum optimization rounds")
-    patience: int = Field(3, description="Stop after N consecutive non-improvements")
-    n_variants: int = Field(5, description="Candidates per round")
-    creativity: float = Field(0.7, description="Temperature for candidate generation")
-    improvement_threshold: float = Field(0.01, description="Min accuracy delta")
-    model: str | None = Field(None, description="LLM model identifier")
-    provider: str | None = Field(None, description="LLM provider")
-    backend_url: str = Field(..., description="Backend URL for evaluation")
-    backend_id: str = Field("", description="Backend identifier for caching")
-    project_root: str = Field("", description="Project root for store")
-    generate_suggestions: bool = Field(False, description="LLM suggestions each round")
-    pipeline_params: dict | None = Field(None, description="Pipeline parameter overrides")
-    session_terms: list[str] | None = Field(None, description="Backend session terms")
-    temperature: float = Field(0.0, description="Temperature for content hash")
-    sample_size: int = Field(0, description="Subsample size (0 = use all)")
-    seed: int = Field(42, description="Random seed for subsampling")
-
-    pipeline_schema: PipelineSchema | None = Field(None, description="Pipeline schema for eval")
-
-    # Scan-aware optimization
-    scan_context: dict | None = Field(None, description="Scan analytics context for candidate gen")
-
-    # L2/L3 escalation
-    enable_l2: bool = Field(False, description="Enable L2 refine_context loop")
-    enable_l3: bool = Field(False, description="Enable L3 modify_plan loop")
-    l2_patience: int = Field(2, description="L2 stalls before escalating to L3")
-    l3_patience: int = Field(1, description="L3 stalls before stopping")
-
-    @classmethod
-    def from_campaign_config(
-        cls,
-        campaign_config: dict,
-        *,
-        backend_url: str = "",
-        backend_id: str = "",
-        project_root: str = "",
-        pipeline_params: dict | None = None,
-        session_terms: list[str] | None = None,
-        pipeline_schema: PipelineSchema | None = None,
-        scan_context: dict | None = None,
-    ) -> "CycleConfig":
-        """Build from the notebook's ``campaign_config`` dict."""
-        opt = campaign_config.get("optimization", {})
-        eval_llm = campaign_config.get("eval_llm", {})
-        return cls(
-            max_rounds=opt.get("max_rounds", 10),
-            patience=opt.get("patience", 3),
-            n_variants=opt.get("n_variants", 5),
-            creativity=opt.get("creativity", 0.7),
-            improvement_threshold=opt.get("improvement_threshold", 0.01),
-            model=eval_llm.get("model"),
-            provider=None,
-            backend_url=backend_url,
-            backend_id=backend_id,
-            project_root=project_root,
-            generate_suggestions=False,
-            pipeline_params=pipeline_params,
-            session_terms=session_terms,
-            temperature=eval_llm.get("temperature", 0.0),
-            sample_size=campaign_config.get("sample_size", 0),
-            seed=42,
-            pipeline_schema=pipeline_schema,
-            scan_context=scan_context,
-            enable_l2=opt.get("enable_l2", False),
-            enable_l3=opt.get("enable_l3", False),
-            l2_patience=opt.get("l2_patience", 2),
-            l3_patience=opt.get("l3_patience", 1),
-        )
-
-
-class CycleRoundResult(BaseModel):
-    """Result of a single feedback cycle round."""
-
-    round: int
-    label: str
-    accuracy: float
-    composite: float = 0.0
-    hits: int
-    total: int
-    improved: bool
-    next_action: str
-    prompt_state: dict
-    results: list[dict] = Field(default_factory=list)
-    candidates_evaluated: int
-    candidate_scores: list[dict] = Field(default_factory=list)
-
-
-class CycleResult(BaseModel):
-    """Final result of the feedback cycling process."""
-
-    rounds: list[CycleRoundResult]
-    n_rounds: int
-    best_accuracy: float
-    best_round: int
-    baseline_accuracy: float
-    winner_prompt_state: dict
-    stop_reason: str
-    started_at: str
-    finished_at: str
-    langfuse_trace_id: str | None = None
-    cycle_id: str | None = None
-    resumed_from_round: int = 0
-
-
-@dataclass
-class _LoopState:
-    """Mutable state threaded through the feedback cycle round loop."""
-
-    rounds: list[CycleRoundResult] = field(default_factory=list)
-    current_ps: dict = field(default_factory=dict)  # PromptState as dict
-    current_accuracy: float = 0.0
-    current_composite: float = 0.0
-    current_results: list[dict] = field(default_factory=list)
-    best_accuracy: float = 0.0
-    best_composite: float = 0.0
-    best_round: int = -1
-    best_ps: dict = field(default_factory=dict)  # PromptState as dict
-    stall_count: int = 0
-    eval_ctx: "EvalContext | None" = None
-
-    # L2/L3 state
-    l2_stall_count: int = 0
-    l3_stall_count: int = 0
-    l2_round: int = 0
-    l3_round: int = 0
-    best_accuracy_at_l2_entry: float = 0.0
-    best_accuracy_at_l3_entry: float = 0.0
-    best_composite_at_l2_entry: float = 0.0
-    best_composite_at_l3_entry: float = 0.0
 
 
 def cycle_config_identity(
@@ -330,7 +192,7 @@ def _restore_round_state(
         rr = _round_result_from_detail(detail)
         state.rounds.append(rr)
 
-        state.current_ps = dict(rr.prompt_state)
+        state.current_ps = PromptState(**rr.prompt_state)
         state.current_accuracy = rr.accuracy
         state.current_composite = rr.composite
         state.current_results = list(rr.results)
@@ -339,7 +201,7 @@ def _restore_round_state(
             state.best_composite = rr.composite
             state.best_accuracy = rr.accuracy
             state.best_round = rr.round
-            state.best_ps = dict(rr.prompt_state)
+            state.best_ps = PromptState(**rr.prompt_state)
 
         # Reconstruct stall_count from trial detail (preferred) or improved flag
         if "stall_count" in detail:
@@ -515,7 +377,7 @@ async def _generate_or_load_candidates(
     n_eval_queries: int = 0,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
-    current_ps = PromptState(**state.current_ps)
+    current_ps = state.current_ps
     prompt_preview = current_ps.render()[:120]
 
     _emit_phase(on_phase, "growth", "enter", round=round_num,
@@ -540,7 +402,7 @@ async def _generate_or_load_candidates(
                         n_eval_queries=n_eval_queries,
                         loaded_from_disk=True,
                         candidates=_candidate_summaries(
-                            persisted, state.current_ps))
+                            persisted, state.current_ps.model_dump()))
             return persisted
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
@@ -572,7 +434,7 @@ async def _generate_or_load_candidates(
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=False,
                 candidates=_candidate_summaries(
-                    candidates, state.current_ps))
+                    candidates, state.current_ps.model_dump()))
 
     return candidates
 
@@ -599,7 +461,7 @@ async def _evaluate_candidates(
     baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
         "accuracy": state.current_accuracy,
-        "prompt_state": state.current_ps,
+        "prompt_state": state.current_ps.model_dump(),
         "results": state.current_results,
         "label": baseline_label,
     }
@@ -629,6 +491,7 @@ async def _evaluate_candidates(
             suggestions = await generate_suggestions(
                 rounds_for_suggestions, round_eval_data, {},
                 llm_client, model=config.model,
+                suggestion_temperature=config.suggestion_temperature,
             )
             next_action = suggestions.get("next_action", "generate")
             if next_action in ("generate", "stop", "refine_context", "modify_plan"):
@@ -809,7 +672,7 @@ async def _escalate_l2(
     Returns a stop_reason string if the cycle should stop, or None to continue.
     """
     llm_client = _llm_client.get_llm_client(config.provider)
-    current_ps = PromptState(**state.current_ps)
+    current_ps = state.current_ps
 
     # Check if L2 itself has stalled (no improvement since last L2 entry)
     l2_improved = state.best_composite > state.best_composite_at_l2_entry
@@ -846,9 +709,10 @@ async def _escalate_l2(
                         l2_stall_count=state.l2_stall_count,
                         current_plan_preview=str(current_ps.plan)[:120])
             new_ps = await layer_transitions.modify_plan(
-                current_ps, l2_history, eval_data, llm_client, model=config.model,
+                current_ps, l2_history, eval_data, llm_client,
+                model=config.model, temperature=config.l3_temperature,
             )
-            state.current_ps = new_ps.model_dump()
+            state.current_ps = new_ps
             state.l3_round += 1
             state.best_accuracy_at_l3_entry = state.best_accuracy
             state.best_composite_at_l3_entry = state.best_composite
@@ -889,9 +753,10 @@ async def _escalate_l2(
                 current_accuracy=state.current_accuracy,
                 best_accuracy=state.best_accuracy)
     new_ps = await layer_transitions.refine_context(
-        current_ps, stalled_rounds, eval_data, llm_client, model=config.model,
+        current_ps, stalled_rounds, eval_data, llm_client,
+        model=config.model, temperature=config.l2_temperature,
     )
-    state.current_ps = new_ps.model_dump()
+    state.current_ps = new_ps
     state.l2_round += 1
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
@@ -1022,14 +887,15 @@ async def run_feedback_cycle(
         _bl_composite = _bl_scores["composite"]
     else:
         _bl_composite = current_accuracy
+    _ps = PromptState(**current_ps) if isinstance(current_ps, dict) else current_ps
     state = _LoopState(
-        current_ps=current_ps,
+        current_ps=_ps,
         current_accuracy=current_accuracy,
         current_composite=_bl_composite,
         current_results=current_results,
         best_accuracy=current_accuracy,
         best_composite=_bl_composite,
-        best_ps=current_ps,
+        best_ps=_ps,
     )
 
     _emit_phase(on_phase, "init", "exit",
@@ -1045,14 +911,7 @@ async def run_feedback_cycle(
     if config.project_root:
         from api.services.project_store import ProjectStore
         _store = ProjectStore(config.project_root)
-    _base_sp = SearchPoint(
-        prompt_state=PromptState(**current_ps),
-        model=config.model or "",
-        temperature=config.temperature,
-        pipeline_params=config.pipeline_params,
-    )
     state.eval_ctx = EvalContext(
-        search_point=_base_sp,
         backend_client=_bc,
         store=_store,
         backend_id=config.backend_id,
@@ -1061,6 +920,9 @@ async def run_feedback_cycle(
         dataset_name=dataset_name if dataset_name and dataset_item_map else None,
         dataset_item_map=dataset_item_map if dataset_name and dataset_item_map else None,
         source="feedback_cycle",
+        model=config.model or "",
+        temperature=config.temperature,
+        pipeline_params=config.pipeline_params,
     )
 
     stop_reason = "max_rounds"
@@ -1082,7 +944,7 @@ async def run_feedback_cycle(
 
             # Update loop state
             state.rounds.append(round_result)
-            state.current_ps = dict(round_result.prompt_state)
+            state.current_ps = PromptState(**round_result.prompt_state)
             state.current_accuracy = round_result.accuracy
             state.current_composite = round_result.composite
             state.current_results = list(round_result.results)
@@ -1091,7 +953,7 @@ async def run_feedback_cycle(
                 state.best_composite = state.current_composite
                 state.best_accuracy = state.current_accuracy
                 state.best_round = round_num
-                state.best_ps = dict(round_result.prompt_state)
+                state.best_ps = PromptState(**round_result.prompt_state)
 
             state.stall_count = 0 if round_result.improved else state.stall_count + 1
 
@@ -1177,7 +1039,7 @@ async def run_feedback_cycle(
         baseline_accuracy=(
             state.rounds[0].accuracy if state.rounds else state.current_accuracy
         ),
-        winner_prompt_state=state.best_ps,
+        winner_prompt_state=state.best_ps.model_dump() if state.best_ps else {},
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,

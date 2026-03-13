@@ -319,12 +319,14 @@ async def run_baseline_eval(
         pipeline_params=pipeline_params,
     )
     ctx = EvalContext(
-        search_point=sp,
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,
         obs=obs,
         source="baseline",
+        model=model,
+        temperature=temperature,
+        pipeline_params=pipeline_params,
     )
     baseline_results, scores, _cached = await evaluate_prompt_cached(
         sp, eval_data, ctx,

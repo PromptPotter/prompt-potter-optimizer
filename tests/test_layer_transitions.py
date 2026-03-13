@@ -14,7 +14,8 @@ import json
 import pytest
 
 from api.models.prompt_state import PromptState
-from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
+from api.services.campaign.models import CycleConfig
+from api.services.campaign.feedback_cycle import run_feedback_cycle
 from api.services.campaign.layer_transitions import modify_plan, refine_context
 from api.services.llm_client import MockLLMClient
 

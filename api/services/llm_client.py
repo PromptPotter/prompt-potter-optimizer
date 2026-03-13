@@ -1,8 +1,10 @@
 """
 LLM client abstraction layer.
 
-Provides a unified interface for Groq (default), OpenAI, and Anthropic APIs,
-with support for chat completions, JSON mode, and token tracking.
+Provides a unified interface via ``OpenAICompatibleClient`` (Groq default,
+OpenAI, Anthropic). Chat completions, JSON mode, token tracking, and
+exponential backoff for transient 503/429 errors. ``get_llm_client(provider)``
+returns a configured singleton.
 """
 import asyncio
 import json

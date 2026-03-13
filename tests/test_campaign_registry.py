@@ -346,7 +346,8 @@ async def test_e2e_feedback_cycle_with_registry(
     """Feedback cycle results persist to campaign store."""
     _apply_e2e_mocks(monkeypatch)
 
-    from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
+    from api.services.campaign.models import CycleConfig
+    from api.services.campaign.feedback_cycle import run_feedback_cycle
 
     config = CycleConfig(
         max_rounds=3,

@@ -160,7 +160,7 @@ def show_feedback_preflight(
     Returns:
         scan_context dict (or None) for passing to the run cell.
     """
-    from api.services.campaign.feedback_cycle import CycleConfig
+    from api.services.campaign.models import CycleConfig
 
     # Build scan context from scan data when available
     scan_context = None
@@ -692,7 +692,8 @@ async def run_feedback_cycle_notebook(
     Returns:
         Updated campaign_rounds list.
     """
-    from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
+    from api.services.campaign.models import CycleConfig
+    from api.services.campaign.feedback_cycle import run_feedback_cycle
 
     config = CycleConfig.from_campaign_config(
         campaign_config,
