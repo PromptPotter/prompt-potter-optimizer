@@ -780,10 +780,13 @@ async def run_feedback_cycle_notebook(
         if desc:
             print(f"  {_box_line(desc, width=w)}")
 
-        # Line 2: hits/total + composite + delta
+        # Line 2: hits/total + composite + delta + degraded
         stats = f"{hits}/{n} hits"
         if comp is not None and comp != acc:
             stats += f"  composite={comp:.4f}"
+        degraded = scores.get("degraded_queries", 0)
+        if degraded:
+            stats += f"  {YELLOW}\u26a0 {degraded}/{n} degraded{RESET}"
         stats += f"  vs baseline: {_fmt_delta(delta)}"
         print(f"  {_box_line(stats, width=w)}")
 

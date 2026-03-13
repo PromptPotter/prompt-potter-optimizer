@@ -289,12 +289,9 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     diag = pd.get("diagnostics", {})
     warnings = diag.get("warnings", [])
     if warnings:
-        first = warnings[0]
-        warn_text = f"\u26a0 {first['step']}: {first['message']}"
-        if len(warnings) > 1:
-            warn_text += f" (+{len(warnings) - 1} more)"
-        warn_indent = " " * len(indent) + "          "
-        line += f"\n{warn_indent}{YELLOW}{warn_text}{RESET}"
+        warn_indent = " " * len(indent) + " " * (sw + 2)
+        for w in warnings:
+            line += f"\n{warn_indent}{YELLOW}\u26a0 {w['step']}: {w['message']}{RESET}"
 
     return line
 
