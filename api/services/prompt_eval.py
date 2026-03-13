@@ -95,7 +95,7 @@ def make_incremental_writer(
     return writer
 
 
-def extract_baseline_prompt(exp_data: dict) -> PromptState:
+def load_baseline_prompt(exp_data: dict) -> PromptState:
     """Extract the llm_ranking prompt from experiment data, wrap in PromptState.
 
     Args:

@@ -380,7 +380,7 @@ async def prepare_eval_context(
     Returns:
         (baseline, eval_data, backend_status)
     """
-    from api.services.prompt_eval import extract_baseline_prompt as load_baseline_prompt
+    from api.services.prompt_eval import load_baseline_prompt
     baseline = load_baseline_prompt(svc["exp_data"])
     eval_data = train_data or []
     backend_status = await show_backend_status(svc["backend_client"])

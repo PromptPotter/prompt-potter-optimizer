@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 
 def _emit_phase(
-    on_phase: Callable | None,
+    on_phase: Callable[[PhaseEvent], None] | None,
     phase: str,
     event: str,
     *,
@@ -556,7 +556,7 @@ async def _generate_or_load_candidates(
     config: CycleConfig,
     campaign_store: "CampaignStore | None",
     cycle_id: str | None,
-    on_phase: Callable | None = None,
+    on_phase: Callable[[PhaseEvent], None] | None = None,
     n_eval_queries: int = 0,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
@@ -631,9 +631,9 @@ async def _evaluate_candidates(
     obs: "ObsLogger | None",
     dataset_name: str | None,
     dataset_item_map: dict[str, str] | None,
-    on_candidate_eval: Callable | None,
-    on_query_eval: Callable | None,
-    on_phase: Callable | None = None,
+    on_candidate_eval: Callable[[int, int, dict], None] | None,
+    on_query_eval: Callable[[int, int, int, int, dict], None] | None,
+    on_phase: Callable[[PhaseEvent], None] | None = None,
 ) -> dict:
     """Evaluate candidates, select winner, optionally generate suggestions."""
     from api.services.prompt_optimizer import generate_suggestions  # lazy: rarely used
@@ -771,9 +771,9 @@ async def _execute_round(
     dataset_item_map: dict[str, str] | None,
     campaign_store: "CampaignStore | None",
     cycle_id: str | None,
-    on_candidate_eval: Callable | None,
-    on_query_eval: Callable | None,
-    on_phase: Callable | None = None,
+    on_candidate_eval: Callable[[int, int, dict], None] | None,
+    on_query_eval: Callable[[int, int, int, int, dict], None] | None,
+    on_phase: Callable[[PhaseEvent], None] | None = None,
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     if obs:
@@ -872,7 +872,7 @@ async def _escalate_l2(
     config: CycleConfig,
     round_num: int,
     eval_data: list[dict],
-    on_phase: Callable | None = None,
+    on_phase: Callable[[PhaseEvent], None] | None = None,
 ) -> str | None:
     """Handle L1→L2 escalation and optionally L2→L3.
 
@@ -992,10 +992,10 @@ async def run_feedback_cycle(
     baseline_prompt_state: dict | None = None,
     baseline_accuracy: float = 0.0,
     baseline_results: list | None = None,
-    on_round_complete: Callable | None = None,
-    on_candidate_eval: Callable | None = None,
-    on_query_eval: Callable | None = None,
-    on_phase: Callable | None = None,
+    on_round_complete: Callable[[CycleRoundResult, int], None] | None = None,
+    on_candidate_eval: Callable[[int, int, dict], None] | None = None,
+    on_query_eval: Callable[[int, int, int, int, dict], None] | None = None,
+    on_phase: Callable[[PhaseEvent], None] | None = None,
     langfuse_session_id: str | None = None,
     scan_context: dict | None = None,
 ) -> CycleResult:

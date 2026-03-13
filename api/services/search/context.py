@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from api.models.hashing import HASH_TRUNCATE
 from api.services.llm_client import LLMClientBase
 from api.services.stores.base import read_json_optional, validate_path_component, write_json
 
@@ -113,7 +114,6 @@ async def restructure_context(
 # Restructure cache — alias-aware disk cache for LLM decomposition results
 # ---------------------------------------------------------------------------
 
-HASH_TRUNCATE = 16
 
 
 def _restructure_cache_path(base_dir: Path, backend_id: str) -> Path:

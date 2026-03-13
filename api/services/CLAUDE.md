@@ -122,5 +122,5 @@ File-first + cloud-optional. `ObsLogger` writes to disk, delegates to `CloudObsB
 
 ## Future / Scaffold
 
-- **`api/evaluators/`** — Pluggable evaluator framework (EvaluatorBase ABC + ExactMatchEvaluator). No consumers yet.
+- **`api/evaluators/`** — Evaluator framework: `ExactMatchEvaluator` used by `prompt_eval.py` for hit@1 scoring. ABC base supports future evaluator types.
 - **AnthropicClient** — in `llm_client.py`. Available via `get_llm_client("anthropic")`. Not yet wired as default.

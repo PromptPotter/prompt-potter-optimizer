@@ -22,6 +22,7 @@ from api.services.search.utils import preview as _preview
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
+    from api.services.backend_client import BackendClient
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ def _profiles_from_rows(
 
 def _make_eval_fn(
     eval_data: list,
-    backend_client: Any,
+    backend_client: BackendClient,
     store: ProjectStore | None,
     backend_id: str,
     get_params: Callable[[], dict],
@@ -372,7 +373,7 @@ async def sensitivity_scan(
     baseline: SearchPoint,
     scan_variants: dict[str, list],
     eval_data: list,
-    backend_client: Any,
+    backend_client: BackendClient,
     *,
     sample_size: int = 0,
     store: ProjectStore | None = None,
@@ -641,7 +642,7 @@ async def adaptive_search(
     baseline_ps: PromptState,
     variant_library: dict,
     eval_data: list,
-    backend_client: Any,
+    backend_client: BackendClient,
     axis_profiles: list[dict],
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
