@@ -1097,30 +1097,28 @@ async def run_feedback_cycle(
         config, obs_campaign_id, baseline_accuracy, eval_data, langfuse_session_id,
     )
 
-    # -- Step 4: Initialize loop state --
-    if restored_state is not None:
-        state = restored_state
+    # -- Step 4: Initialize loop state (always fresh from baseline) --
+    # Even on resume, start fresh — cached rounds replay from disk/cache.
+    if current_results:
+        from api.services.prompt_eval import compute_composite_score
+        _bl_scores = compute_composite_score(current_results, config.pipeline_schema)
+        _bl_composite = _bl_scores["composite"]
     else:
-        if current_results:
-            from api.services.prompt_eval import compute_composite_score
-            _bl_scores = compute_composite_score(current_results, config.pipeline_schema)
-            _bl_composite = _bl_scores["composite"]
-        else:
-            _bl_composite = current_accuracy
-        state = _LoopState(
-            current_ps=current_ps,
-            current_accuracy=current_accuracy,
-            current_composite=_bl_composite,
-            current_results=current_results,
-            best_accuracy=current_accuracy,
-            best_composite=_bl_composite,
-            best_ps=current_ps,
-        )
+        _bl_composite = current_accuracy
+    state = _LoopState(
+        current_ps=current_ps,
+        current_accuracy=current_accuracy,
+        current_composite=_bl_composite,
+        current_results=current_results,
+        best_accuracy=current_accuracy,
+        best_composite=_bl_composite,
+        best_ps=current_ps,
+    )
 
     _emit_phase(on_phase, "init", "exit",
                 cycle_id=cycle_id,
                 resumed_from_round=resumed_from_round,
-                baseline_accuracy=state.current_accuracy,
+                baseline_accuracy=current_accuracy,
                 obs_enabled=obs is not None,
                 sample_count=len(round_eval_data))
 
@@ -1134,7 +1132,7 @@ async def run_feedback_cycle(
 
     # -- Step 5: Round loop --
     try:
-        for round_num in range(resumed_from_round, config.max_rounds):
+        for round_num in range(config.max_rounds):
             logger.info(
                 "Feedback cycle round %d (acc=%.3f, stall=%d/%d)",
                 round_num, state.current_accuracy, state.stall_count, config.patience,

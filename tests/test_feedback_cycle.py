@@ -601,7 +601,8 @@ async def test_resume_from_interrupted_cycle(
 
     assert result2.resumed_from_round == 1
     assert result2.cycle_id == cycle_id
-    assert call_count[0] == evals_after_r1
+    # Replayed rounds re-evaluate from cache (for full display), so evals double
+    assert call_count[0] == 2 * evals_after_r1
 
 
 @pytest.mark.slow

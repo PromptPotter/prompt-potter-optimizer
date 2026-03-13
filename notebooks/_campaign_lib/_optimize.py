@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -17,6 +17,9 @@ from ._display import (
     _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
     _dotted_line, _fmt_delta, _fmt_query_result, _scoreboard,
     display_progress,
+)
+from ._stats import (
+    fmt_ci, fmt_pvalue, min_detectable_effect, proportion_test, wilson_ci,
 )
 
 # Phase event printer for feedback cycle observability
@@ -38,8 +41,10 @@ class _CycleDisplayState:
     stall_count: int = 0
     round_num: int = 0
     baseline_accuracy: float = 0.0
+    baseline_total: int = 0  # sample count for significance tests
     best_in_round: tuple[str, float] | None = None  # (label, accuracy)
     scan_context: dict | None = None  # cached for scan reasoning display
+    candidates_meta: list = field(default_factory=list)  # from growth_exit
 
 __all__ = [
     # Campaign
@@ -406,8 +411,13 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
         f"Candidates     {d.get('n_variants', 0)}"))
     sample = d.get("sample_size", 0)
     total = d.get("eval_data_count", 0)
+    eff_n = sample if sample else total
+    state.baseline_total = eff_n
     sample_label = f"{sample} of {total}" if sample else f"all {total}"
+    mde = min_detectable_effect(eff_n)
     print(_dbox_line(f"Sample size    {sample_label}"))
+    print(_dbox_line(
+        f"Min detectable {YELLOW}\u00b1{mde:.1%}{RESET} (\u03b1=0.05, 80% power)"))
     print(_dbox_line(f"Model          {model}"))
     print(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
     print(_dbox_line(f"Scan context   {scan}"))
@@ -430,8 +440,8 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
 def _print_growth_enter(d: dict, state: _CycleDisplayState) -> None:
     acc = d.get("current_accuracy", 0.0)
     preview = d.get("prompt_preview", "").replace("\n", " ").strip()
-    if len(preview) > 55:
-        preview = preview[:52] + "..."
+    if len(preview) > 50:
+        preview = preview[:47] + "..."
     if not preview:
         preview = "(no baseline -- seed from scan or provide instruction)"
     n = d.get("n_variants", 0)
@@ -467,6 +477,7 @@ def _print_growth_exit(d: dict, state: _CycleDisplayState) -> None:
     n = d.get("n_candidates", 0)
     source = "loaded from disk" if d.get("loaded_from_disk") else "from LLM"
     n_eval = d.get("n_eval_queries", 0)
+    state.candidates_meta = d.get("candidates", [])
 
     print(f"  {GREEN}✓{RESET} {n} candidates generated ({source})")
 
@@ -480,7 +491,10 @@ def _print_growth_exit(d: dict, state: _CycleDisplayState) -> None:
         pp = c.get("pipeline_params_override")
         if pp:
             keys = list(pp.keys())
-            pp_tag = f" pp=[{', '.join(keys)}]"
+            if len(keys) > 3:
+                pp_tag = f" pp=[{', '.join(keys[:3])}, +{len(keys) - 3}]"
+            else:
+                pp_tag = f" pp=[{', '.join(keys)}]"
         else:
             pp_tag = ""
         print(f"    C{int(idx) + 1}: {desc}{fields_tag}{pp_tag}")
@@ -498,27 +512,48 @@ def _print_eval_enter(d: dict, state: _CycleDisplayState) -> None:
 
 
 def _print_eval_exit(d: dict, state: _CycleDisplayState) -> None:
-    winner = d.get("winner_label", "?")
     w_acc = d.get("winner_accuracy", 0.0)
+    w_comp = d.get("winner_composite")
     improved = d.get("improved", False)
     action = d.get("next_action", "?")
     scores = d.get("candidate_scores", [])
 
-    # Scoreboard
+    # Normalize labels to C{i+1} for display (service uses candidate_id)
+    for i, s in enumerate(scores):
+        s["label"] = f"C{i + 1}"
+    best_s = max(scores, key=lambda s: (
+        s.get("composite", s["accuracy"]), s["accuracy"]
+    )) if scores else {}
+    winner = best_s.get("label", "?")
+
+    # Scoreboard (with CI column)
     board = _scoreboard(scores, winner, state.baseline_accuracy)
     if board:
         print(board)
 
+    # Composite suffix (only when it differs from accuracy)
+    comp_tag = ""
+    if w_comp is not None and w_comp != w_acc:
+        comp_tag = f"  composite={w_comp:.4f}"
+
+    # Significance test
+    winner_hits = best_s.get("hits", 0)
+    winner_total = best_s.get("total", 0)
+
     # Result line
     if improved:
         delta = w_acc - state.baseline_accuracy
+        bl_hits = round(state.baseline_accuracy * winner_total)
+        p = proportion_test(winner_hits, winner_total, bl_hits, winner_total)
+        sig_tag = f"  {fmt_pvalue(p)}"
         print(f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {w_acc:.1%}"
               f" (was {state.baseline_accuracy:.1%},"
-              f" {_fmt_delta(delta)})  ->  next: {action}")
+              f" {_fmt_delta(delta)}){comp_tag}{sig_tag}"
+              f"  ->  next: {action}")
         state.baseline_accuracy = w_acc
     else:
         print(f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}"
-              f"  best candidate {w_acc:.1%}"
+              f"  best candidate {w_acc:.1%}{comp_tag}"
               f"  ->  patience {state.stall_count + 1}/{state.patience}")
 
 
@@ -527,9 +562,24 @@ def _print_refine_enter(d: dict, state: _CycleDisplayState) -> None:
     stalls = d.get("stall_count", "?")
     acc = d.get("current_accuracy", 0.0)
     best = d.get("best_accuracy", 0.0)
+    params = d.get("current_params", {})
     print(f"\n  {MAGENTA}{_dotted_line('L2 REFINE CONTEXT')}{RESET}")
     print(f"  L2 round {l2r}  |  L1 stalled {stalls} rounds"
           f"  |  acc={acc:.1%}  best={best:.1%}")
+    if params:
+        parts = []
+        for k, v in list(params.items())[:5]:
+            vs = str(v)
+            if len(vs) > 30:
+                vs = vs[:27] + "..."
+            parts.append(f"{k}={vs}")
+        extra = len(params) - 5
+        params_str = ", ".join(parts)
+        if extra > 0:
+            params_str += f", +{extra} more"
+        print(f"  Current params: {params_str}")
+    else:
+        print("  Current params: (none)")
     print("  LLM analyzing failure patterns for context refinement...")
 
 
@@ -595,6 +645,29 @@ def _dispatch_phase(event: PhaseEvent, state: _CycleDisplayState) -> None:
               f" {event.data}")
 
 
+def _round_result_to_dict(rr, round_idx: int) -> dict:
+    """Convert CycleRoundResult (or its model_dump dict) to campaign_rounds entry."""
+    if hasattr(rr, "model_dump"):
+        d = rr.model_dump()
+    elif hasattr(rr, "prompt_state"):
+        # CycleRoundResult accessed by attribute
+        d = {
+            "label": rr.label, "accuracy": rr.accuracy,
+            "composite": rr.composite, "next_action": rr.next_action,
+            "hits": rr.hits, "total": rr.total,
+            "results": rr.results,
+            "candidates_evaluated": rr.candidates_evaluated,
+            "improved": rr.improved, "prompt_state": rr.prompt_state,
+            "candidate_scores": getattr(rr, "candidate_scores", []),
+        }
+    else:
+        d = dict(rr)
+    ps_raw = d.get("prompt_state", {})
+    d["prompt_state"] = PromptState(**ps_raw) if isinstance(ps_raw, dict) else ps_raw
+    d["round"] = round_idx
+    return d
+
+
 async def run_feedback_cycle_notebook(
     campaign_rounds: list,
     eval_data: list,
@@ -651,59 +724,91 @@ async def run_feedback_cycle_notebook(
 
     def _on_phase(event: PhaseEvent) -> None:
         _dispatch_phase(event, _ds)
+        # On resume: clear stale optimization rounds before replay re-appends them
+        if event.phase == "init" and event.event == "exit":
+            resumed = event.data.get("resumed_from_round", 0)
+            if resumed > 0:
+                del campaign_rounds[initial_len:]
 
     def _on_query(cand_idx, n_cands, query_idx, n_queries, result):
         _query_counter[0] += 1
         is_cached = result.get("cached", False)
-        prefix = (f"  [{_query_counter[0]}] C{cand_idx + 1}/{n_cands} "
-                  f"Q{query_idx + 1}/{n_queries}")
-        print(f"{prefix}\n{_fmt_query_result(result, cached=is_cached)}", flush=True)
+        prefix = f"  [{_query_counter[0]:>3d}] "
+        print(
+            _fmt_query_result(result, cached=is_cached, prefix=prefix),
+            flush=True,
+        )
 
     def _on_candidate(idx, total, scores):
         label = f"C{idx + 1}"
-        if scores.get("cached"):
-            tag = "cached"
-        else:
-            acc = scores["accuracy"]
-            comp = scores.get("composite")
-            tag = f"{acc:.1%}"
-            if comp is not None and comp != acc:
-                tag += f" (c={comp:.4f})"
-            # Track running best
-            if (_ds.best_in_round is None
-                    or acc > _ds.best_in_round[1]):
-                _ds.best_in_round = (label, acc)
+        w = 66
 
-        best_tag = ""
+        if scores.get("cached"):
+            print(f"\n  {_box_top(f'{label}/{total}', 'cached', width=w)}")
+            print(f"  {_box_bottom(width=w)}")
+            return
+
+        acc = scores["accuracy"]
+        hits = scores.get("hits", 0)
+        n = scores.get("total", 0)
+        comp = scores.get("composite")
+        ci_lo, ci_hi = wilson_ci(hits, n)
+        delta = acc - _ds.baseline_accuracy
+
+        if (_ds.best_in_round is None or acc > _ds.best_in_round[1]):
+            _ds.best_in_round = (label, acc)
+
+        # Header: label + accuracy with CI
+        acc_tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
+        print(f"\n  {_box_top(f'{label}/{total}', acc_tag, width=w)}")
+
+        # Line 1: description + pp from growth_exit metadata
+        meta = {}
+        if idx < len(_ds.candidates_meta):
+            meta = _ds.candidates_meta[idx]
+        desc = (meta.get("changes_description") or "")
+        if len(desc) > 45:
+            desc = desc[:42] + "..."
+        pp = meta.get("pipeline_params_override")
+        if pp:
+            keys = list(pp.keys())
+            if len(keys) > 2:
+                pp_str = f"pp=[{', '.join(keys[:2])}, +{len(keys) - 2}]"
+            else:
+                pp_str = f"pp=[{', '.join(keys)}]"
+            desc = f"{desc}  {pp_str}" if desc else pp_str
+        if desc:
+            print(f"  {_box_line(desc, width=w)}")
+
+        # Line 2: hits/total + composite + delta
+        stats = f"{hits}/{n} hits"
+        if comp is not None and comp != acc:
+            stats += f"  composite={comp:.4f}"
+        stats += f"  vs baseline: {_fmt_delta(delta)}"
+        print(f"  {_box_line(stats, width=w)}")
+
+        # Line 3: running best
         if _ds.best_in_round:
             bl, ba = _ds.best_in_round
-            best_tag = f"  |  running best: {bl} {ba:.1%}"
-        print(f"  {CYAN}──{RESET} {label}/{total} done: {tag}{best_tag}")
+            best_str = f"best so far: {bl} {ba:.1%}"
+            print(f"  {_box_line(best_str, width=w)}")
+
+        print(f"  {_box_bottom(width=w)}")
 
     def _on_round(round_result, stall_count):
         _query_counter[0] = 0
         _ds.stall_count = stall_count
         _ds.best_in_round = None
 
-        # Convert to campaign_rounds-compatible format and append
-        ps = PromptState(**round_result.prompt_state)
-        round_entry = {
-            "round": len(campaign_rounds),
-            "label": round_result.label,
-            "prompt_state": ps,
-            "accuracy": round_result.accuracy,
-            "hits": round_result.hits,
-            "total": round_result.total,
-            "results": round_result.results,
-            "candidates_evaluated": round_result.candidates_evaluated,
-            "improved": round_result.improved,
-        }
+        round_entry = _round_result_to_dict(round_result, len(campaign_rounds))
         campaign_rounds.append(round_entry)
 
         rn = _ds.round_num + 1
         print(f"\n├─ Round {rn} complete "
               f"{'─' * (70 - 20 - len(str(rn)))}┤")
         display_progress(campaign_rounds)
+        print(f"  hits: {round_result.hits}/{round_result.total}"
+              f"  |  evaluated: {round_result.candidates_evaluated} candidates")
 
         if round_result.improved:
             print(f"  {GREEN}✓ Improvement detected, auto-continuing...{RESET}")
@@ -730,27 +835,13 @@ async def run_feedback_cycle_notebook(
         langfuse_session_id=langfuse_session_id,
     )
 
-    # If fully cached (no new on_round_complete callbacks fired), populate
-    # campaign_rounds from the restored result so downstream cells work.
-    if len(campaign_rounds) == initial_len and result.rounds:
-        for rr in result.rounds:
-            ps = PromptState(**rr.prompt_state)
-            campaign_rounds.append({
-                "round": len(campaign_rounds),
-                "label": rr.label,
-                "prompt_state": ps,
-                "accuracy": rr.accuracy,
-                "hits": rr.hits,
-                "total": rr.total,
-                "results": rr.results,
-                "candidates_evaluated": rr.candidates_evaluated,
-                "improved": rr.improved,
-            })
-
-    # Print resume info
-    if result.resumed_from_round > 0:
-        print(f"\n  Resumed from round {result.resumed_from_round}"
-              f" ({result.resumed_from_round} rounds cached)")
+    # Safety net: insert any rounds not already in campaign_rounds
+    # (e.g. completed cycle re-run where _on_round callbacks didn't fire)
+    existing_labels = {r.get("label") for r in campaign_rounds}
+    for rr in result.rounds:
+        if rr.label in existing_labels:
+            continue
+        campaign_rounds.append(_round_result_to_dict(rr, len(campaign_rounds)))
 
     # --- Final summary ---
     if not campaign_rounds:
@@ -760,40 +851,26 @@ async def run_feedback_cycle_notebook(
         return campaign_rounds
 
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
+    interrupted = result.stop_reason == "interrupted"
+    title = (f"{YELLOW}{BOLD}INTERRUPTED{RESET} — stopped by user"
+             if interrupted
+             else f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}")
 
     print()
-    if result.stop_reason == "interrupted":
-        print(_dbox_top())
-        print(_dbox_line(
-            f"{YELLOW}{BOLD}INTERRUPTED{RESET} — Feedback cycle stopped by user"))
-        print(_dbox_sep())
-        print(_dbox_line(f"Rounds       {result.n_rounds:<15d}"
-                         f"Best         {best['accuracy']:.1%}"
-                         f" (round {best['round']})"))
-        print(_dbox_line("Stop reason  interrupted"))
-        print(_dbox_line(
-            "Saved: all completed rounds checkpointed to campaign store"))
-        print(_dbox_line(
-            "Resume: re-run this cell -- completed rounds auto-restore"))
-        if result.cycle_id:
-            print(_dbox_line(f"Cycle ID     {result.cycle_id}"))
-        if result.langfuse_trace_id:
-            print(_dbox_line(f"Langfuse     {result.langfuse_trace_id}"))
-        print(_dbox_bottom())
-    else:
-        print(_dbox_top())
-        print(_dbox_line(
-            f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}"))
-        print(_dbox_sep())
-        print(_dbox_line(f"Rounds       {result.n_rounds:<15d}"
-                         f"Best         {best['accuracy']:.1%}"
-                         f" (round {best['round']})"))
-        print(_dbox_line(f"Stop reason  {result.stop_reason}"))
-        if result.cycle_id:
-            print(_dbox_line(f"Cycle ID     {result.cycle_id}"))
-        if result.langfuse_trace_id:
-            print(_dbox_line(f"Langfuse     {result.langfuse_trace_id}"))
-        print(_dbox_bottom())
+    print(_dbox_top())
+    print(_dbox_line(title))
+    print(_dbox_sep())
+    print(_dbox_line(f"Rounds       {result.n_rounds:<15d}"
+                     f"Best         {best['accuracy']:.1%}"
+                     f" (round {best['round']})"))
+    print(_dbox_line(f"Stop reason  {result.stop_reason}"))
+    if interrupted:
+        print(_dbox_line("Resume: re-run this cell -- rounds auto-restore"))
+    if result.cycle_id:
+        print(_dbox_line(f"Cycle ID     {result.cycle_id}"))
+    if result.langfuse_trace_id:
+        print(_dbox_line(f"Langfuse     {result.langfuse_trace_id}"))
+    print(_dbox_bottom())
 
     return campaign_rounds
 

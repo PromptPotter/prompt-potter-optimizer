@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from ._stats import fmt_ci, wilson_ci
+
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 
@@ -118,9 +120,9 @@ def _scoreboard(
     winner_label: str,
     baseline_accuracy: float,
 ) -> str:
-    """Format ranked candidate scoreboard as a box.
+    """Format ranked candidate scoreboard as a box with 95% CI.
 
-    ``candidate_scores`` items: {label, accuracy, composite?}.
+    ``candidate_scores`` items: {candidate_id, accuracy, composite?, hits, total}.
     Returns multi-line string ready to print.
     """
     if not candidate_scores:
@@ -131,38 +133,46 @@ def _scoreboard(
         return (s.get("composite", s["accuracy"]), s["accuracy"])
 
     ranked = sorted(candidate_scores, key=_sort_key, reverse=True)
+    w = 78
 
     lines = []
-    lines.append(f"  {_box_top('SCOREBOARD', width=66)}")
+    lines.append(f"  {_box_top('SCOREBOARD', width=w)}")
 
-    # Header
     has_composite = any(
         s.get("composite") is not None and s.get("composite") != s["accuracy"]
         for s in ranked
     )
     if has_composite:
-        hdr = f"{'#':<4s}{'Label':<14s}{'Accuracy':>9s}  {'Composite':>9s}  {'Delta':>7s}"
+        hdr = (f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}"
+               f"  {'Composite':>9s}  {'Delta':>7s}")
     else:
-        hdr = f"{'#':<4s}{'Label':<14s}{'Accuracy':>9s}  {'Delta':>7s}"
-    lines.append(f"  {_box_line(hdr, width=66)}")
+        hdr = (f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}"
+               f"  {'Delta':>7s}")
+    lines.append(f"  {_box_line(hdr, width=w)}")
 
     for i, s in enumerate(ranked, 1):
-        label = str(s.get("label", f"C{i}"))[:12]
+        label = s.get("label", f"C{i}")[:8]
         acc = s["accuracy"]
+        hits = s.get("hits", 0)
+        total = s.get("total", 0)
+        ci_lo, ci_hi = wilson_ci(hits, total)
+        ci_str = fmt_ci(ci_lo, ci_hi)
         delta = acc - baseline_accuracy
         delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
-        winner_mark = f"  {GREEN}{BOLD}* WINNER{RESET}" if label == winner_label else ""
+        is_winner = label == winner_label
+        winner_mark = f"  {GREEN}{BOLD}*{RESET}" if is_winner else ""
 
         if has_composite:
             comp = s.get("composite", acc)
-            row = (f"{i:<4d}{label:<14s}{acc:>8.1%}   {comp:>8.4f}   "
-                   f"{delta_str:>7s}{winner_mark}")
+            row = (f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}"
+                   f"   {comp:>8.4f}   {delta_str:>7s}{winner_mark}")
         else:
-            row = f"{i:<4d}{label:<14s}{acc:>8.1%}   {delta_str:>7s}{winner_mark}"
+            row = (f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}"
+                   f"   {delta_str:>7s}{winner_mark}")
 
-        lines.append(f"  {_box_line(row, width=66)}")
+        lines.append(f"  {_box_line(row, width=w)}")
 
-    lines.append(f"  {_box_bottom(width=66)}")
+    lines.append(f"  {_box_bottom(width=w)}")
     return "\n".join(lines)
 
 
@@ -230,8 +240,12 @@ def _find_gt_rank(r: dict) -> int | None:
     return None
 
 
-def _fmt_query_result(r: dict, cached: bool = False) -> str:
-    """Format a single query result as a HIT/MISS line with timing."""
+def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str:
+    """Format a single query result as a HIT/MISS line with timing.
+
+    When *prefix* is given it replaces the default 8-space indent so the
+    caller can merge a counter into the same line.
+    """
     q = (r.get("query") or "")[:45]
     pred = (r.get("predicted") or "")[:35]
     err = r.get("error")
@@ -243,11 +257,8 @@ def _fmt_query_result(r: dict, cached: bool = False) -> str:
             step_name = _infer_terminated_step(st)
     step = _step_tag(step_name)
 
-    if cached:
-        time_str = " \u26a1"  # cached marker
-    else:
-        tt = pd.get("total_time")
-        time_str = f" {tt:.1f}s" if tt is not None else ""
+    tt = pd.get("total_time")
+    time_str = f" {tt:.1f}s" if tt is not None else ""
 
     # Build tag: "HIT " or "MISS 3/20" with rank info inline
     if r.get("hit"):
@@ -263,10 +274,16 @@ def _fmt_query_result(r: dict, cached: bool = False) -> str:
         else:
             tag = "MISS"
 
-    if err:
-        return f"        {tag} {step:>8s}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
+    cache_marker = " \u26a1" if cached else ""
+    step = f"{step}{cache_marker}"
 
-    line = f"        {tag} {step:>8s}  {q:<45s}  -> {pred}{time_str}"
+    indent = prefix if prefix else "        "
+
+    sw = 10 if cached else 8
+    if err:
+        return f"{indent}{tag} {step:>{sw}s}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
+
+    line = f"{indent}{tag} {step:>{sw}s}  {q:<45s}  -> {pred}{time_str}"
 
     # Append pipeline degradation warnings from diagnostics
     diag = pd.get("diagnostics", {})
@@ -276,7 +293,8 @@ def _fmt_query_result(r: dict, cached: bool = False) -> str:
         warn_text = f"\u26a0 {first['step']}: {first['message']}"
         if len(warnings) > 1:
             warn_text += f" (+{len(warnings) - 1} more)"
-        line += f"\n                    {YELLOW}{warn_text}{RESET}"
+        warn_indent = " " * len(indent) + "          "
+        line += f"\n{warn_indent}{YELLOW}{warn_text}{RESET}"
 
     return line
 
@@ -287,7 +305,17 @@ def display_progress(campaign_rounds: list, window: int = 8) -> None:
         print("No rounds to display.")
         return
 
-    print(f"\n{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>8s}")
+    has_composite = any(
+        rd.get("composite") is not None and rd.get("composite") != rd["accuracy"]
+        for rd in campaign_rounds
+    )
+
+    if has_composite:
+        print(f"\n{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
+              f" {'Rolling Avg':>13s} {'Trend':>8s}")
+    else:
+        print(f"\n{'Round':<7s} {'Accuracy':>9s}"
+              f" {'Rolling Avg':>13s} {'Trend':>8s}")
     accuracies = []
 
     for rd in campaign_rounds:
@@ -313,9 +341,25 @@ def display_progress(campaign_rounds: list, window: int = 8) -> None:
         if rd.get("round") == "grid":
             round_label = "G"
 
-        print(
-            f"  {round_label:<5s} {acc:>8.1%} {rolling_avg:>12.1%}  {trend_str}"
-        )
+        if has_composite:
+            comp = rd.get("composite", acc)
+            print(
+                f"  {round_label:<5s} {acc:>8.1%} {comp:>9.4f}"
+                f" {rolling_avg:>12.1%}  {trend_str}"
+            )
+        else:
+            print(
+                f"  {round_label:<5s} {acc:>8.1%}"
+                f" {rolling_avg:>12.1%}  {trend_str}"
+            )
+
+    # Plateau detection
+    if len(accuracies) >= 3:
+        recent = accuracies[-3:]
+        recent_avg = sum(recent) / len(recent)
+        if all(abs(a - recent_avg) < 0.005 for a in recent):
+            print(f"  {YELLOW}-- Plateau: rolling avg stable at"
+                  f" {recent_avg:.1%} for 3 rounds{RESET}")
 
 
 def display_suggestions(suggestions: dict, round_num: int) -> None:

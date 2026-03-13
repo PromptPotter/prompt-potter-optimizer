@@ -149,6 +149,10 @@ class CampaignStore:
             "improved": trial.get("improved", False),
             "created_at": trial.get("created_at", ""),
         }
+        # Replace existing trial for same round (idempotent on replay)
+        data["trials"] = [
+            t for t in data["trials"] if t.get("round") != round_num
+        ]
         data["trials"].append(summary)
         data["n_trials"] = len(data["trials"])
 
