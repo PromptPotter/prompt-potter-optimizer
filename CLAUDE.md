@@ -35,7 +35,7 @@ cd docker && docker-compose up --build
 1. **FastAPI API** (`api/main.py`) — REST endpoints at `/api/v1/`. Routers: `backends`, `campaigns`, `health`, `workflows`.
 2. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` is the **primary working interface** at this stage. Uses `notebooks/_campaign_lib/`, a package of 6 submodules (`_setup`, `_eval`, `_grid`, `_search`, `_optimize`, `_display`) that wraps services with tqdm progress bars + IPython display.
 
-All core logic lives in `api/services/`. The notebook library (`_campaign_lib/`) never implements business logic — it only wraps service functions with UI output. `tests/test_e2e_optimization.py` is the testable E2E proxy for the notebook workflow.
+All core logic lives in `api/services/`. The notebook library (`_campaign_lib/`) never implements business logic — it only wraps service functions with UI output. `tests/test_campaign_registry.py` is the testable E2E proxy for the notebook workflow.
 
 ### Service layer (`api/services/`)
 

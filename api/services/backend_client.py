@@ -101,6 +101,16 @@ def build_pipeline_params(
     return params
 
 
+# TermNorm-specific query fields extracted from query_data.
+# M7: replace with ConnectorProtocol.extract_query_fields()
+_TERMNORM_QUERY_FIELDS = ("bom_material", "process")
+_TERMNORM_VARIANT_B_FIELDS = {
+    "variant_b_predicted": ("original_predicted", ""),
+    "variant_b_latency_ms": ("original_latency_ms", 0),
+    "variant_b_confidence": ("original_confidence", 0),
+}
+
+
 def _build_result_dict(
     query_data: dict[str, Any],
     *,
@@ -119,12 +129,6 @@ def _build_result_dict(
     """
     result: dict[str, Any] = {
         "query": query_data["query"],
-        "bom_material": query_data["bom_material"],
-        "process": query_data["process"],
-        "query_fields": {
-            "bom_material": query_data["bom_material"],
-            "process": query_data["process"],
-        },
         "ground_truth": query_data["ground_truth"],
         "predicted": predicted,
         "confidence": confidence,
@@ -132,10 +136,13 @@ def _build_result_dict(
         "latency_ms": latency_ms,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "status": status,
-        "variant_b_predicted": query_data.get("original_predicted", ""),
-        "variant_b_latency_ms": query_data.get("original_latency_ms", 0),
-        "variant_b_confidence": query_data.get("original_confidence", 0),
     }
+    # TermNorm-specific fields (M7: move to connector)
+    for f in _TERMNORM_QUERY_FIELDS:
+        result[f] = query_data[f]
+    result["query_fields"] = {f: query_data[f] for f in _TERMNORM_QUERY_FIELDS}
+    for dest, (src, default) in _TERMNORM_VARIANT_B_FIELDS.items():
+        result[dest] = query_data.get(src, default)
     if pipeline_data is not None:
         result["pipeline_data"] = pipeline_data
         result["web_search_status"] = pipeline_data.get("web_search_status")

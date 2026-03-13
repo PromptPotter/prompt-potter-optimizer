@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 from api.models.pipeline_schema import PipelineSchema
+from api.models.prompt_state import LAYER1_STRING_FIELDS
 
 from api.config.settings import load_variant_library, load_variant_library_rich
 from api.services.search import (
@@ -48,6 +49,9 @@ __all__ = [
     "build_pipeline_overview", "build_tunable_params", "build_llm_context",
     "display_variant_library",
 ]
+
+
+# ── Variant library & advisor prompt ──────────────────────────────────────
 
 
 def preview_advisor_prompt(
@@ -178,7 +182,7 @@ def display_variant_library(
 
 # ---------------------------------------------------------------------------
 # Smart Prompt Search wrappers
-# ---------------------------------------------------------------------------
+# ── Scan baseline preparation ────────────────────────────────────────────
 
 
 async def prepare_scan_baseline(
@@ -237,8 +241,7 @@ async def prepare_scan_baseline(
     # Print decomposed fields
     cache_tag = " (cached)" if was_cached else ""
     print(f"  Restructured baseline fields{cache_tag}:")
-    for field in ("persona", "task_intent", "problem_description",
-                  "instruction", "thinking_style", "answer_format"):
+    for field in LAYER1_STRING_FIELDS:
         val = getattr(search_baseline, field, "")
         if val:
             print(f"    {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
@@ -284,6 +287,9 @@ async def prepare_scan_baseline(
         prompt_state=search_baseline,
         pipeline_params=pipeline_params,
     )
+
+
+# ── Coverage & data inventory ────────────────────────────────────────────
 
 
 def _print_historical_diagnostic(
@@ -625,6 +631,9 @@ def audit_historical_data(
     return prompt_index, cached_profiles
 
 
+# ── Scan advisor (LLM-driven recommendations) ───────────────────────────
+
+
 def load_task_description(path: str | None) -> str:
     """Load task description from a file path.
 
@@ -926,8 +935,7 @@ def resolve_scan_variants(
     return resolved, schema_labels
 
 
-# ---------------------------------------------------------------------------
-# Scan resume + execution
+# ── Sensitivity scan & adaptive search ───────────────────────────────────
 # ---------------------------------------------------------------------------
 
 
@@ -952,8 +960,7 @@ async def sensitivity_scan(
     # Print scan overview
     print("Running sensitivity scan...")
     print("\n  Baseline field values:")
-    for field in ("persona", "task_intent", "problem_description",
-                  "instruction", "thinking_style", "answer_format"):
+    for field in LAYER1_STRING_FIELDS:
         val = getattr(baseline.prompt_state, field, "")
         if val:
             print(f"    {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
@@ -1240,6 +1247,9 @@ def _make_search_progress_cb():
                 print(f"\n  Round {r}: no improvement, stopping.")
 
     return _cb
+
+
+# ── Winner selection & composition ──────────────────────────────────────────
 
 
 def select_scan_winner_notebook(

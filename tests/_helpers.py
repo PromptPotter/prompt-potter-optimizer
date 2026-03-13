@@ -8,7 +8,7 @@ import hashlib
 
 from api.models.prompt_state import PromptState
 from api.services.llm_client import MockLLMClient
-from api.services.prompt_eval import HASH_TRUNCATE
+from api.models.hashing import HASH_TRUNCATE
 
 
 # ---------------------------------------------------------------------------

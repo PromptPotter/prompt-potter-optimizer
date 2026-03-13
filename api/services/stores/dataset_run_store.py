@@ -238,6 +238,60 @@ class DatasetRunStore:
             self._runs_dir(backend_id) / f"{run_id}.partial.jsonl",
         )
 
+    def resolve_partial_resume(
+        self, backend_id: str, run_id: str, eval_data: list,
+    ) -> tuple[list, list]:
+        """Check for .partial.jsonl crash-recovery file.
+
+        Returns (partial_results, remaining_data).  Validates query alignment
+        and discards stale partials (5+ leading errors).
+        """
+        partial_results = self.load_partial_eval(backend_id, run_id)
+        remaining_data = eval_data
+        if not partial_results:
+            return [], eval_data
+
+        # Detect stale partials: if the first N results are all errors,
+        # the partial was written during a broken session and is unreliable.
+        leading_errors = 0
+        for pr in partial_results:
+            if pr.get("error"):
+                leading_errors += 1
+            else:
+                break
+        if leading_errors >= 5:
+            logger.warning(
+                "Partial eval %s: %d leading consecutive errors "
+                "— discarding stale partial file",
+                run_id, leading_errors,
+            )
+            partial_path = self._runs_dir(backend_id) / f"{run_id}.partial.jsonl"
+            if partial_path.exists():
+                partial_path.unlink()
+            partial_results = []
+
+        if partial_results:
+            valid = True
+            for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
+                if pr.get("query") != ed.get("query"):
+                    logger.warning(
+                        "Partial eval %s: query mismatch at index %d "
+                        "(%r != %r) — discarding stale partials",
+                        run_id, i, pr.get("query", "")[:40], ed.get("query", "")[:40],
+                    )
+                    valid = False
+                    break
+
+            if not valid:
+                partial_results = []
+            elif len(partial_results) >= len(remaining_data):
+                partial_results = partial_results[:len(remaining_data)]
+                remaining_data = []
+            else:
+                remaining_data = remaining_data[len(partial_results):]
+
+        return partial_results, remaining_data
+
     def list_partial_evals(self, backend_id: str) -> list[dict]:
         """List in-progress .partial.jsonl files with line counts."""
         d = self._runs_dir(backend_id)

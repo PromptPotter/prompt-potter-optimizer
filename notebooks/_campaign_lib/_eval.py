@@ -14,9 +14,9 @@ from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
 
 from api.services.campaign.campaign_init import run_baseline_eval as _run_baseline_eval
-from api.services.prompt_eval import (
+from api.services.prompt_eval import extract_baseline_prompt as load_baseline_prompt
+from api.services.search.coverage import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
-    extract_baseline_prompt as load_baseline_prompt,
 )
 from api.services.prompt_optimizer import (
     generate_candidates,

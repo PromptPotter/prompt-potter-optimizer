@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
-import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
 from api.evaluators.base import EvalResult
 from api.evaluators.exact_match import ExactMatchEvaluator
+from api.models.hashing import HASH_TRUNCATE
 from api.models.prompt_state import PromptState
 from api.services.constants import NO_RESULT
 
@@ -30,11 +29,6 @@ if TYPE_CHECKING:
 _evaluator = ExactMatchEvaluator({"strip": True})
 
 logger = logging.getLogger(__name__)
-
-# SHA256 truncated to 16 hex chars (64 bits) — sufficient for content-addressed
-# deduplication within a single project.  Collision probability stays negligible
-# for the expected dataset sizes (<100k eval runs).
-HASH_TRUNCATE = 16
 
 
 @dataclass
@@ -55,37 +49,6 @@ class EvalContext:
     dataset_name: str | None = None
     dataset_item_map: dict[str, str] | None = field(default=None)
     source: str = ""
-
-
-def eval_content_hash(
-    rendered_prompt: str,
-    eval_data: list,
-    model: str,
-    temperature: float,
-    pipeline_params: dict | None = None,
-) -> str:
-    """Content-addressed hash for evaluation deduplication.
-
-    ``sha256(rendered_prompt + sorted_query_gt_pairs + model + temperature
-    + pipeline_params)[:16]``
-
-    Order of eval_data queries does not affect the hash.
-    ``pipeline_params`` is included when non-empty so that different
-    pipeline configurations produce distinct hashes.
-    """
-    pairs = sorted(
-        (d.get("query", ""), d.get("ground_truth", "")) for d in eval_data
-    )
-    blob_dict: dict = {
-        "prompt": rendered_prompt, "pairs": pairs,
-        "model": model, "temperature": temperature,
-    }
-    if pipeline_params:
-        pp = {k: v for k, v in pipeline_params.items() if k != "steps"}
-        if pp:
-            blob_dict["pipeline_params"] = pp
-    blob = json.dumps(blob_dict, sort_keys=True)
-    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
 
 
 def build_dataset_run_data(
@@ -130,69 +93,6 @@ def make_incremental_writer(
         store.dataset_runs.append_eval_item(backend_id, run_id, result)
 
     return writer
-
-
-def analyze_candidate_coverage(replay_results: list) -> dict:
-    """Analyze ground truth presence in candidate lists.
-
-    Returns dict with keys: rows (list of dicts), covered, total, coverage_pct,
-    rank_distribution (dict), viable (bool).
-    """
-    rows = []
-    for r in replay_results:
-        if r.get("error"):
-            continue
-        pd_data = r.get("pipeline_data", {})
-        candidates = pd_data.get("token_matched_candidates", [])
-        gt = r["ground_truth"]
-
-        candidate_names = []
-        for c in candidates:
-            if isinstance(c, (list, tuple)):
-                candidate_names.append(c[0])
-            else:
-                candidate_names.append(str(c))
-
-        gt_rank = None
-        for i, name in enumerate(candidate_names):
-            if name == gt:
-                gt_rank = i + 1
-                break
-
-        rows.append({
-            "query": r["query"][:50],
-            "ground_truth": gt[:40],
-            "in_candidates": gt_rank is not None,
-            "gt_rank": gt_rank,
-            "num_candidates": len(candidate_names),
-        })
-
-    total = len(rows)
-    covered = sum(1 for r in rows if r["in_candidates"])
-    coverage_pct = covered / total * 100 if total else 0
-
-    # Rank distribution
-    found_ranks = [r["gt_rank"] for r in rows if r["gt_rank"] is not None]
-    rank_distribution = {}
-    if found_ranks:
-        rank_distribution = {
-            "rank_1": sum(1 for r in found_ranks if r == 1),
-            "rank_2_5": sum(1 for r in found_ranks if 2 <= r <= 5),
-            "rank_6_10": sum(1 for r in found_ranks if 6 <= r <= 10),
-            "rank_11_20": sum(1 for r in found_ranks if 11 <= r <= 20),
-            "rank_gt_20": sum(1 for r in found_ranks if r > 20),
-            "mean_rank": sum(found_ranks) / len(found_ranks),
-            "median_rank": statistics.median(found_ranks),
-        }
-
-    return {
-        "rows": rows,
-        "covered": covered,
-        "total": total,
-        "coverage_pct": coverage_pct,
-        "rank_distribution": rank_distribution,
-        "viable": coverage_pct > 50,
-    }
 
 
 def extract_baseline_prompt(exp_data: dict) -> PromptState:
@@ -478,69 +378,6 @@ def compute_composite_score(
 
 
 
-def _resolve_partial_resume(
-    eval_data: list,
-    run_id: str,
-    *,
-    store: "ProjectStore | None",
-    backend_id: str,
-) -> tuple[list, list]:
-    """Check for .partial.jsonl crash-recovery file.
-
-    Returns (partial_results, remaining_data).
-    """
-    partial_results: list = []
-    remaining_data = eval_data
-    if not (store and backend_id):
-        return partial_results, remaining_data
-
-    partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
-    if partial_results:
-        # Detect stale partials: if the first N results are all errors,
-        # the partial was written during a broken session and is unreliable.
-        leading_errors = 0
-        for pr in partial_results:
-            if pr.get("error"):
-                leading_errors += 1
-            else:
-                break
-        if leading_errors >= 5:
-            logger.warning(
-                "Partial eval %s: %d leading consecutive errors "
-                "— discarding stale partial file",
-                run_id, leading_errors,
-            )
-            partial_path = (
-                store.dataset_runs._runs_dir(backend_id)
-                / f"{run_id}.partial.jsonl"
-            )
-            if partial_path.exists():
-                partial_path.unlink()
-            partial_results = []
-
-    if partial_results:
-        valid = True
-        for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
-            if pr.get("query") != ed.get("query"):
-                logger.warning(
-                    "Partial eval %s: query mismatch at index %d "
-                    "(%r != %r) — discarding stale partials",
-                    run_id, i, pr.get("query", "")[:40], ed.get("query", "")[:40],
-                )
-                valid = False
-                break
-
-        if not valid:
-            partial_results = []
-        elif len(partial_results) >= len(remaining_data):
-            partial_results = partial_results[:len(remaining_data)]
-            remaining_data = []
-        else:
-            remaining_data = remaining_data[len(partial_results):]
-
-    return partial_results, remaining_data
-
-
 def _finalize_observability(
     store: "ProjectStore",
     backend_id: str,
@@ -661,9 +498,12 @@ async def evaluate_prompt_cached(
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    partial_results, remaining_data = _resolve_partial_resume(
-        eval_data, run_id, store=store, backend_id=backend_id,
-    )
+    if store and backend_id:
+        partial_results, remaining_data = store.dataset_runs.resolve_partial_resume(
+            backend_id, run_id, eval_data,
+        )
+    else:
+        partial_results, remaining_data = [], eval_data
 
     if partial_results:
         logger.info(

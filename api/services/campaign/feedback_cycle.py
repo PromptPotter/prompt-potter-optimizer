@@ -26,7 +26,19 @@ from pydantic import BaseModel, Field
 
 from api.models.phase_event import PhaseEvent
 from api.models.pipeline_schema import PipelineSchema
+from api.models.prompt_state import PromptState, diff as prompt_diff
+from api.models.search_point import SearchPoint
+from api.nodes.optimizer_nodes import InitNode
+from api.services.backend_client import BackendClient
+from api.services.campaign import layer_transitions
 from api.services.constants import DATASET_NAME
+from api.services.prompt_eval import EvalContext, compute_composite_score
+from api.services.query_utils import subsample_queries
+
+# Module-level imports for functions that tests mock via monkeypatch.
+# Using module references ensures patching at the source module works.
+from api.services import llm_client as _llm_client
+from api.services import prompt_optimizer as _prompt_optimizer
 
 if TYPE_CHECKING:
     from api.services.obs.observability_logger import ObsLogger
@@ -56,8 +68,6 @@ def _candidate_summaries(
     current_ps_dict: dict,
 ) -> list[dict]:
     """Build compact per-candidate summary dicts for phase event data."""
-    from api.models.prompt_state import PromptState, diff
-
     current_ps = PromptState(**current_ps_dict)
     summaries = []
     for i, c in enumerate(candidates):
@@ -69,7 +79,7 @@ def _candidate_summaries(
         c_clean = {k: v for k, v in c.items() if k != "__pipeline_params_override__"}
         try:
             candidate_ps = PromptState(**c_clean)
-            delta = diff(current_ps, candidate_ps)
+            delta = prompt_diff(current_ps, candidate_ps)
             changed_fields = [fc.field for fc in delta.field_changes]
         except Exception:
             changed_fields = []
@@ -199,16 +209,16 @@ class _LoopState:
     """Mutable state threaded through the feedback cycle round loop."""
 
     rounds: list[CycleRoundResult] = field(default_factory=list)
-    current_ps: dict = field(default_factory=dict)
+    current_ps: dict = field(default_factory=dict)  # PromptState as dict
     current_accuracy: float = 0.0
     current_composite: float = 0.0
-    current_results: list = field(default_factory=list)
+    current_results: list[dict] = field(default_factory=list)
     best_accuracy: float = 0.0
     best_composite: float = 0.0
     best_round: int = -1
-    best_ps: dict = field(default_factory=dict)
+    best_ps: dict = field(default_factory=dict)  # PromptState as dict
     stall_count: int = 0
-    backend_client: Any = None   # BackendClient (future: ConnectorProtocol)
+    backend_client: "BackendClient | None" = None
     store: "ProjectStore | None" = None
 
     # L2/L3 state
@@ -384,7 +394,7 @@ def _init_obs(
     Returns:
         (obs, dataset_name, dataset_item_map)
     """
-    from api.services.obs.observability_logger import ObsLogger
+    from api.services.obs.observability_logger import ObsLogger  # lazy: heavy dep
 
     obs: ObsLogger | None = None
     if config.project_root and config.backend_id:
@@ -504,14 +514,13 @@ def _resume_or_create_campaign(
         return None, None, 0, None, None
 
     try:
-        from api.models.prompt_state import PromptState as _PS
-        from api.services.stores.campaign_store import CampaignStore
+        from api.services.stores.campaign_store import CampaignStore  # lazy: heavy dep
 
         store_base = Path(config.project_root)
         campaign_store = CampaignStore(store_base)
 
         bl_ps = baseline_prompt_state if baseline_prompt_state is not None else current_ps
-        cycle_id = cycle_config_identity(config, _PS(**bl_ps).render(), eval_data)
+        cycle_id = cycle_config_identity(config, PromptState(**bl_ps).render(), eval_data)
         logger.info("Cycle identity: %s", cycle_id)
 
         existing = campaign_store.load(config.backend_id, cycle_id)
@@ -551,10 +560,6 @@ async def _generate_or_load_candidates(
     n_eval_queries: int = 0,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
-    from api.models.prompt_state import PromptState
-    from api.services.llm_client import get_llm_client
-    from api.services.prompt_optimizer import generate_candidates
-
     current_ps = PromptState(**state.current_ps)
     prompt_preview = current_ps.render()[:120]
 
@@ -584,13 +589,13 @@ async def _generate_or_load_candidates(
             return persisted
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
-    llm_client = get_llm_client(config.provider)
+    llm_client = _llm_client.get_llm_client(config.provider)
 
     # L2 meta-param overrides from PromptState.parameters
     n_variants = current_ps.parameters.get("n_variants", config.n_variants)
     creativity = current_ps.parameters.get("creativity", config.creativity)
 
-    raw_candidates = await generate_candidates(
+    raw_candidates = await _prompt_optimizer.generate_candidates(
         current_ps, state.current_accuracy, state.current_results,
         n_variants, creativity, llm_client,
         model=config.model,
@@ -631,14 +636,7 @@ async def _evaluate_candidates(
     on_phase: Callable | None = None,
 ) -> dict:
     """Evaluate candidates, select winner, optionally generate suggestions."""
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
-    from api.services.llm_client import get_llm_client
-    from api.services.prompt_eval import EvalContext
-    from api.services.prompt_optimizer import (
-        evaluate_and_select_winner,
-        generate_suggestions,
-    )
+    from api.services.prompt_optimizer import generate_suggestions  # lazy: rarely used
 
     _emit_phase(on_phase, "analysis_eval", "enter", round=round_num,
                 n_candidates=len(candidates),
@@ -672,7 +670,7 @@ async def _evaluate_candidates(
         source="feedback_cycle",
     )
 
-    eval_out = await evaluate_and_select_winner(
+    eval_out = await _prompt_optimizer.evaluate_and_select_winner(
         candidates, round_eval_data, current_best,
         improvement_threshold=config.improvement_threshold,
         on_candidate_eval=on_candidate_eval,
@@ -682,7 +680,7 @@ async def _evaluate_candidates(
 
     if config.generate_suggestions:
         try:
-            llm_client = get_llm_client(config.provider)
+            llm_client = _llm_client.get_llm_client(config.provider)
             rounds_for_suggestions = [
                 {"round": r.round, "label": r.label, "accuracy": r.accuracy,
                  "prompt_state": PromptState(**r.prompt_state),
@@ -726,8 +724,6 @@ def _log_round_obs(
     obs_campaign_id: str,
 ) -> None:
     """Log round-end metrics and prompt version to observability."""
-    from api.models.prompt_state import PromptState
-
     try:
         obs.log_round_end(
             campaign_id=obs_campaign_id,
@@ -882,11 +878,7 @@ async def _escalate_l2(
 
     Returns a stop_reason string if the cycle should stop, or None to continue.
     """
-    from api.models.prompt_state import PromptState
-    from api.services.campaign.layer_transitions import modify_plan, refine_context
-    from api.services.llm_client import get_llm_client
-
-    llm_client = get_llm_client(config.provider)
+    llm_client = _llm_client.get_llm_client(config.provider)
     current_ps = PromptState(**state.current_ps)
 
     # Check if L2 itself has stalled (no improvement since last L2 entry)
@@ -923,7 +915,7 @@ async def _escalate_l2(
                         l3_round=state.l3_round,
                         l2_stall_count=state.l2_stall_count,
                         current_plan_preview=str(current_ps.plan)[:120])
-            new_ps = await modify_plan(
+            new_ps = await layer_transitions.modify_plan(
                 current_ps, l2_history, eval_data, llm_client, model=config.model,
             )
             state.current_ps = new_ps.model_dump()
@@ -966,7 +958,7 @@ async def _escalate_l2(
                 current_params=current_ps.parameters,
                 current_accuracy=state.current_accuracy,
                 best_accuracy=state.best_accuracy)
-    new_ps = await refine_context(
+    new_ps = await layer_transitions.refine_context(
         current_ps, stalled_rounds, eval_data, llm_client, model=config.model,
     )
     state.current_ps = new_ps.model_dump()
@@ -1037,10 +1029,6 @@ async def run_feedback_cycle(
     """
     if scan_context is not None:
         config = config.model_copy(update={"scan_context": scan_context})
-    from api.nodes.optimizer_nodes import InitNode
-    from api.services.backend_client import BackendClient
-    from api.services.query_utils import subsample_queries
-
     started_at = datetime.now(timezone.utc).isoformat()
 
     _emit_phase(on_phase, "init", "enter",
@@ -1100,7 +1088,6 @@ async def run_feedback_cycle(
     # -- Step 4: Initialize loop state (always fresh from baseline) --
     # Even on resume, start fresh — cached rounds replay from disk/cache.
     if current_results:
-        from api.services.prompt_eval import compute_composite_score
         _bl_scores = compute_composite_score(current_results, config.pipeline_schema)
         _bl_composite = _bl_scores["composite"]
     else:

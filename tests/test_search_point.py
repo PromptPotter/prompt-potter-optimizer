@@ -3,7 +3,7 @@ import pytest
 
 from api.models.prompt_state import PromptState
 from api.models.search_point import SearchPoint
-from api.services.prompt_eval import eval_content_hash
+from api.models.hashing import eval_content_hash
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from api.models.prompt_state import LAYER_FIELDS, PromptState
-from api.services.prompt_eval import eval_content_hash
+from api.models.hashing import eval_content_hash
 
 
 # All PromptState field names (used by derive to route kwargs)
