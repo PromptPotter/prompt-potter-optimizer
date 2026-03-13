@@ -86,17 +86,6 @@ def build_dataset_run_data(
     return data
 
 
-def make_incremental_writer(
-    store: ProjectStore, backend_id: str, run_id: str,
-) -> Callable[[dict, int, int], None]:
-    """Return an on_result callback that appends each eval item to a .partial.jsonl."""
-
-    def writer(result: dict, index: int, total: int) -> None:
-        store.dataset_runs.append_eval_item(backend_id, run_id, result)
-
-    return writer
-
-
 def load_baseline_prompt(exp_data: dict) -> PromptState:
     """Extract the llm_ranking prompt from experiment data, wrap in PromptState.
 
@@ -292,7 +281,7 @@ async def evaluate_prompt_batch(
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.warning(
             "Eval batch interrupted at query %d/%d. "
-            "Partial results saved via incremental writer.",
+            "Results so far are lost — re-run to restart.",
             len(results), len(eval_data),
         )
         raise
@@ -466,13 +455,11 @@ async def evaluate_prompt_cached(
     on_result: Callable | None = None,
     source: str = "",
 ) -> tuple[list, dict, bool]:
-    """Evaluate a prompt with deduplication, partial resume, and finalization.
+    """Evaluate a prompt with deduplication and finalization.
 
     Core evaluation logic without UI output. Handles:
     - Content-hash deduplication via ProjectStore
     - Alias-aware fallback via prompt alias groups
-    - Partial result resume after crash
-    - Incremental writes for crash protection
     - Final run storage
 
     The ``search_point`` bundles the search-space dimensions
@@ -507,57 +494,19 @@ async def evaluate_prompt_cached(
         if cached is not None:
             return cached
 
-    # --- resolve partial resume (crash recovery) ---
+    # --- evaluate via backend ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    if store and backend_id:
-        partial_results, remaining_data = store.dataset_runs.resolve_partial_resume(
-            backend_id, run_id, eval_data,
-        )
-    else:
-        partial_results, remaining_data = [], eval_data
-
-    if partial_results:
-        logger.info(
-            "Resuming %s: %d cached results, %d remaining",
-            run_id, len(partial_results), len(remaining_data),
-        )
-
-    # --- replay cached partial results to callback ---
-    callback_offset = 0
-    if on_result is not None and partial_results:
-        for i, r in enumerate(partial_results):
-            on_result({**r, "cached": True}, callback_offset + i, len(eval_data))
-
-    # --- evaluate remaining via backend ---
-    _incremental_writer = None
-    if store and backend_id:
-        _incremental_writer = make_incremental_writer(store, backend_id, run_id)
-
-    _cb_offset = callback_offset + len(partial_results)
-
     def _on_result(result: dict, index: int, total: int) -> None:
-        if _incremental_writer is not None:
-            _incremental_writer(result, index, total)
         if on_result is not None:
-            on_result(result, _cb_offset + index, len(eval_data))
+            on_result(result, index, len(eval_data))
 
-    try:
-        new_results = await evaluate_prompt_batch(
-            search_point, remaining_data, backend_client,
-            on_result=_on_result,
-            pipeline_schema=pipeline_schema,
-        )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        logger.warning(
-            "evaluate_prompt_cached interrupted for %s. "
-            "Partial results saved to %s.partial.jsonl — will resume on next run.",
-            run_id, run_id,
-        )
-        raise
-
-    results = partial_results + new_results
+    results = await evaluate_prompt_batch(
+        search_point, eval_data, backend_client,
+        on_result=_on_result,
+        pipeline_schema=pipeline_schema,
+    )
     scores = compute_composite_score(results, pipeline_schema)
 
     # --- finalize: save complete run + observability ---
@@ -566,7 +515,7 @@ async def evaluate_prompt_cached(
             run_id, label, content_hash, search_point,
             scores, results, source=source,
         )
-        store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
+        store.dataset_runs.save(backend_id, run_id, run_data)
 
         _finalize_observability(
             store, backend_id, run_id, content_hash, scores,

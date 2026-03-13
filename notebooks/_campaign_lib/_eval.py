@@ -214,7 +214,7 @@ async def run_baseline_eval(
         _print_interrupt_banner(
             "Baseline eval",
             completed=f"{pbar.n}/{pbar.total} queries",
-            saved="partial results written to disk (auto-resumes on next run)",
+            saved="completed results are cached (re-run to restart)",
             resume_hint="re-run this cell to continue from checkpoint",
         )
         return [], []
@@ -234,25 +234,15 @@ async def run_baseline_eval(
 
 
 def _print_eval_summary(store: ProjectStore, backend_id: str) -> None:
-    """Print a summary table of completed and in-progress eval runs."""
+    """Print a summary table of completed eval runs."""
     completed = store.dataset_runs.list_all(backend_id)
-    partials = store.dataset_runs.list_partial_evals(backend_id)
 
-    completed_ids = {r["run_id"] for r in completed}
-    partials = [p for p in partials if p["run_id"] not in completed_ids]
-
-    if not completed and not partials:
+    if not completed:
         print("Eval runs: none")
         return
 
     n_completed = len(completed)
-    n_partial = len(partials)
-    parts = []
-    if n_completed:
-        parts.append(f"{n_completed} completed run{'s' if n_completed != 1 else ''}")
-    if n_partial:
-        parts.append(f"{n_partial} in-progress")
-    print(f"Eval runs: {', '.join(parts)}")
+    print(f"Eval runs: {n_completed} completed run{'s' if n_completed != 1 else ''}")
 
     rows = []
     for r in completed:
@@ -269,15 +259,6 @@ def _print_eval_summary(store: ProjectStore, backend_id: str) -> None:
             "temp": r.get("temperature", ""),
             "accuracy": acc_str,
             "queries": str(r.get("item_count", "?")),
-        })
-    for p in partials:
-        rows.append({
-            "run_id": p["run_id"],
-            "name": "(in-progress)",
-            "model": "",
-            "temp": "--",
-            "accuracy": "--",
-            "queries": f"{p['items']}/?",
         })
 
     if not rows:

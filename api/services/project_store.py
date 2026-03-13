@@ -17,7 +17,6 @@ Layout on disk::
         datasets/test_processes.json
         datasets/test_material.json
         dataset_runs/{run_id}.json
-        dataset_runs/{run_id}.partial.jsonl
         dataset_runs.json
         grid_plans/{plan_id}.json
         smart_search_plans/{plan_id}.json

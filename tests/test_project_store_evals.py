@@ -85,63 +85,6 @@ def test_upsert_replaces_same_hash(tmp_store):
 # ---------------------------------------------------------------------------
 
 
-def test_append_and_load_partial_eval(tmp_store):
-    """append_eval_item writes items that load_partial_eval reads back."""
-    items = [
-        {"query": "q1", "hit": True, "error": None},
-        {"query": "q2", "hit": False, "error": None},
-        {"query": "q3", "hit": True, "error": None},
-    ]
-    for item in items:
-        tmp_store.dataset_runs.append_eval_item("b1", "run_abc", item)
-
-    loaded = tmp_store.dataset_runs.load_partial_eval("b1", "run_abc")
-    assert len(loaded) == 3
-    assert loaded[0]["query"] == "q1"
-    assert loaded[2]["hit"] is True
-
-
-def test_finalize_eval_run_removes_partial(tmp_store):
-    """finalize_eval_run saves detail file and deletes .partial.jsonl."""
-    tmp_store.dataset_runs.append_eval_item(
-        "b1", "run_xyz", {"query": "q1", "hit": True, "error": None},
-    )
-    tmp_store.dataset_runs.append_eval_item(
-        "b1", "run_xyz", {"query": "q2", "hit": False, "error": None},
-    )
-
-    partial_path = tmp_store.base_dir / "b1" / "dataset_runs" / "run_xyz.partial.jsonl"
-    assert partial_path.exists()
-
-    run_data = _make_run_data("run_xyz", "hash_xyz")
-    detail_path = tmp_store.dataset_runs.finalize_eval_run("b1", "run_xyz", run_data)
-
-    assert not partial_path.exists()
-    assert detail_path.exists()
-    entries = tmp_store.dataset_runs.list_all("b1")
-    assert any(e["run_id"] == "run_xyz" for e in entries)
-
-
-def test_list_partial_evals(tmp_store):
-    """list_partial_evals returns metadata, finalized runs disappear."""
-    tmp_store.dataset_runs.append_eval_item("b1", "alpha_run", {"query": "q1", "hit": True})
-    tmp_store.dataset_runs.append_eval_item("b1", "beta_run", {"query": "q1", "hit": True})
-    tmp_store.dataset_runs.append_eval_item("b1", "beta_run", {"query": "q2", "hit": False})
-    tmp_store.dataset_runs.append_eval_item("b1", "beta_run", {"query": "q3", "hit": True})
-
-    partials = tmp_store.dataset_runs.list_partial_evals("b1")
-    assert len(partials) == 2
-    assert partials[0]["run_id"] == "alpha_run"
-    assert partials[0]["items"] == 1
-    assert partials[1]["run_id"] == "beta_run"
-    assert partials[1]["items"] == 3
-
-    # Finalized runs disappear
-    run_data = _make_run_data("beta_run", "hash_beta")
-    tmp_store.dataset_runs.finalize_eval_run("b1", "beta_run", run_data)
-    assert len(tmp_store.dataset_runs.list_partial_evals("b1")) == 1
-
-
 # ---------------------------------------------------------------------------
 # Provenance — source field in dataset_runs
 # ---------------------------------------------------------------------------

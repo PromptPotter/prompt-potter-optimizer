@@ -25,7 +25,6 @@ from api.services.prompt_eval import (
     backend_reranker_eval,
     build_dataset_run_data,
     compute_composite_score,
-    make_incremental_writer,
 )
 from api.services.search.smart_search import MIN_DIAGNOSTIC_QUERIES
 
@@ -338,10 +337,9 @@ async def _load_or_compute_point(
 ) -> tuple[dict[str, Any], bool]:
     """Evaluate (or load from cache) a single grid point.
 
-    Handles three cases in order:
+    Handles two cases in order:
     1. Full cache hit — return stored scores immediately.
-    2. Partial resume — continue from the last written item.
-    3. Fresh evaluation — run all queries through the backend.
+    2. Fresh evaluation — run all queries through the backend.
 
     Returns:
         Tuple of (scores dict, was_cached bool).
@@ -362,58 +360,32 @@ async def _load_or_compute_point(
         if existing_run:
             return existing_run["scores"], True
 
-    # Determine resume state
+    # Case 2: evaluate all queries
     run_id = f"{GRID_PREFIX}{info.content_hash[:8]}"
-    partial: list = []
-    if store and backend_id:
-        partial = store.dataset_runs.load_partial_eval(backend_id, run_id)
-
-    if partial and len(partial) >= len(info.point_eval):
-        # All queries already evaluated in partial; just need to finalize
-        remaining = []
-    elif partial:
-        remaining = info.point_eval[len(partial):]
-    else:
-        partial = []
-        remaining = info.point_eval
-
-    writer = (
-        make_incremental_writer(store, backend_id, run_id)
-        if store and backend_id
-        else None
-    )
-
-    # Case 2/3: evaluate remaining queries
-    new_results = []
-    for qi, qd in enumerate(remaining):
+    results = []
+    for qi, qd in enumerate(info.point_eval):
         result = await backend_reranker_eval(
             qd, backend_client, rendered,
             pipeline_params=pipeline_params,
             pipeline_schema=pipeline_schema,
         )
-        new_results.append(result)
+        results.append(result)
 
-        if writer:
-            writer(result, qi, len(remaining))
         if on_query_done is not None:
-            on_query_done(
-                info.point_idx, len(partial) + qi,
-                len(info.point_eval), result,
-            )
+            on_query_done(info.point_idx, qi, len(info.point_eval), result)
 
         if request_delay > 0:
             await asyncio.sleep(request_delay)
 
-    results = partial + new_results
     acc = compute_composite_score(results, pipeline_schema)
 
-    # Finalize: save complete run, delete .partial.jsonl
+    # Finalize: save complete run
     if store and backend_id:
         run_data = build_dataset_run_data(
             run_id, f"grid_point_{info.point_idx}", info.content_hash,
             sp, acc, results, source="grid_search",
         )
-        store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
+        store.dataset_runs.save(backend_id, run_id, run_data)
 
     return acc, False
 

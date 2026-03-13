@@ -8,10 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from api.services.stores.base import (
-    append_jsonl,
     read_json,
     read_json_optional,
-    read_jsonl,
     validate_path_component,
     write_json,
 )
@@ -220,94 +218,6 @@ class DatasetRunStore:
             )
         return None
 
-    # -- incremental eval writes ----------------------------------------------
-
-    def append_eval_item(
-        self, backend_id: str, run_id: str, item: dict,
-    ) -> Path:
-        """Append one eval result to an in-progress .partial.jsonl file."""
-        return append_jsonl(
-            self._runs_dir(backend_id) / f"{run_id}.partial.jsonl", item,
-        )
-
-    def load_partial_eval(
-        self, backend_id: str, run_id: str,
-    ) -> list[dict[str, Any]]:
-        """Read all items from an in-progress .partial.jsonl file."""
-        return read_jsonl(
-            self._runs_dir(backend_id) / f"{run_id}.partial.jsonl",
-        )
-
-    def resolve_partial_resume(
-        self, backend_id: str, run_id: str, eval_data: list,
-    ) -> tuple[list, list]:
-        """Check for .partial.jsonl crash-recovery file.
-
-        Returns (partial_results, remaining_data).  Validates query alignment
-        and discards stale partials (5+ leading errors).
-        """
-        partial_results = self.load_partial_eval(backend_id, run_id)
-        remaining_data = eval_data
-        if not partial_results:
-            return [], eval_data
-
-        # Detect stale partials: if the first N results are all errors,
-        # the partial was written during a broken session and is unreliable.
-        leading_errors = 0
-        for pr in partial_results:
-            if pr.get("error"):
-                leading_errors += 1
-            else:
-                break
-        if leading_errors >= 5:
-            logger.warning(
-                "Partial eval %s: %d leading consecutive errors "
-                "— discarding stale partial file",
-                run_id, leading_errors,
-            )
-            partial_path = self._runs_dir(backend_id) / f"{run_id}.partial.jsonl"
-            if partial_path.exists():
-                partial_path.unlink()
-            partial_results = []
-
-        if partial_results:
-            valid = True
-            for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
-                if pr.get("query") != ed.get("query"):
-                    logger.warning(
-                        "Partial eval %s: query mismatch at index %d "
-                        "(%r != %r) — discarding stale partials",
-                        run_id, i, pr.get("query", "")[:40], ed.get("query", "")[:40],
-                    )
-                    valid = False
-                    break
-
-            if not valid:
-                partial_results = []
-            elif len(partial_results) >= len(remaining_data):
-                partial_results = partial_results[:len(remaining_data)]
-                remaining_data = []
-            else:
-                remaining_data = remaining_data[len(partial_results):]
-
-        return partial_results, remaining_data
-
-    def list_partial_evals(self, backend_id: str) -> list[dict]:
-        """List in-progress .partial.jsonl files with line counts."""
-        d = self._runs_dir(backend_id)
-        if not d.exists():
-            return []
-        results = []
-        for p in sorted(d.glob("*.partial.jsonl")):
-            run_id = p.name.removesuffix(".partial.jsonl")
-            count = 0
-            with open(p, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        count += 1
-            results.append({"run_id": run_id, "items": count, "path": str(p)})
-        return results
-
     # -- prompt alias groups ---------------------------------------------------
 
     def _alias_path(self, backend_id: str) -> Path:
@@ -354,14 +264,3 @@ class DatasetRunStore:
                 return set(group)
         return {rp_hash}
 
-    # -- finalization ----------------------------------------------------------
-
-    def finalize_eval_run(
-        self, backend_id: str, run_id: str, run_data: dict,
-    ) -> Path:
-        """Save the complete dataset run and remove the .partial.jsonl file."""
-        detail_path = self.save(backend_id, run_id, run_data)
-        partial_path = self._runs_dir(backend_id) / f"{run_id}.partial.jsonl"
-        if partial_path.exists():
-            partial_path.unlink()
-        return detail_path
