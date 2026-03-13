@@ -326,10 +326,10 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
             input_data.candidates,
             input_data.eval_data,
             current_best,
+            ctx,
             improvement_threshold=self.config.get("improvement_threshold", 0.01),
             on_candidate_eval=self.config.get("on_candidate_eval"),
             on_query_eval=self.config.get("on_query_eval"),
-            ctx=ctx,
         )
 
         # Generate suggestions separately if requested

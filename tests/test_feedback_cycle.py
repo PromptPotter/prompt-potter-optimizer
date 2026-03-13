@@ -617,7 +617,7 @@ async def test_interrupt_writes_interrupted_status(
 
     call_count = [0]
 
-    async def mock_eval_interrupt(search_point, data, **kwargs):
+    async def mock_eval_interrupt(search_point, data, ctx=None, **kwargs):
         call_count[0] += 1
         # Round 0: all candidates return 1/3 hits → round completes
         # Round 1: interrupt on first candidate

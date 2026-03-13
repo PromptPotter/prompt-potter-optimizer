@@ -287,7 +287,7 @@ async def run_baseline_eval(
         RuntimeError: If no evaluation data is available.
     """
     from api.models.search_point import SearchPoint
-    from api.services.prompt_eval import evaluate_prompt_cached
+    from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
 
     if not eval_data and store and experiment_id:
         from api.services.search.eval_dataset import load_eval_dataset
@@ -318,13 +318,18 @@ async def run_baseline_eval(
         temperature=temperature,
         pipeline_params=pipeline_params,
     )
-    baseline_results, scores, _cached = await evaluate_prompt_cached(
-        sp, eval_data, backend_client,
-        store=store, backend_id=backend_id,
-        label="Baseline",
-        on_result=on_result,
+    ctx = EvalContext(
+        search_point=sp,
+        backend_client=backend_client,
+        store=store,
+        backend_id=backend_id,
         obs=obs,
         source="baseline",
+    )
+    baseline_results, scores, _cached = await evaluate_prompt_cached(
+        sp, eval_data, ctx,
+        label="Baseline",
+        on_result=on_result,
     )
 
     campaign_rounds = [{

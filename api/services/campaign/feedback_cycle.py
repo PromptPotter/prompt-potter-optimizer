@@ -42,7 +42,6 @@ from api.services import prompt_optimizer as _prompt_optimizer
 
 if TYPE_CHECKING:
     from api.services.obs.observability_logger import ObsLogger
-    from api.services.project_store import ProjectStore
     from api.services.stores.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
@@ -82,6 +81,7 @@ def _candidate_summaries(
             delta = prompt_diff(current_ps, candidate_ps)
             changed_fields = [fc.field for fc in delta.field_changes]
         except Exception:
+            logger.debug("Failed to diff candidate %d", i, exc_info=True)
             changed_fields = []
 
         summary: dict = {
@@ -218,8 +218,7 @@ class _LoopState:
     best_round: int = -1
     best_ps: dict = field(default_factory=dict)  # PromptState as dict
     stall_count: int = 0
-    backend_client: "BackendClient | None" = None
-    store: "ProjectStore | None" = None
+    eval_ctx: "EvalContext | None" = None
 
     # L2/L3 state
     l2_stall_count: int = 0
@@ -320,66 +319,43 @@ def _restore_round_state(
     store: "CampaignStore",
     backend_id: str,
     cycle_id: str,
-    threshold: float,
-) -> tuple:
-    """Restore in-progress round state from persisted trials.
-
-    Returns:
-        (rounds, current_ps, current_accuracy, current_results,
-         best_accuracy, best_round, best_ps, stall_count)
-    """
-    rounds: list[CycleRoundResult] = []
-    current_ps: dict = {}
-    current_accuracy = 0.0
-    current_composite = 0.0
-    current_results: list = []
-    best_accuracy = 0.0
-    best_composite = 0.0
-    best_round = -1
-    best_ps: dict = {}
-    stall_count = 0
-    l2_stall_count = 0
-    l3_stall_count = 0
-    l2_round = 0
-    l3_round = 0
+) -> _LoopState:
+    """Restore in-progress round state from persisted trials into a _LoopState."""
+    state = _LoopState()
 
     for trial_summary in campaign_data.get("trials", []):
         detail = store.load_trial(backend_id, cycle_id, trial_summary["round"])
         if detail is None:
             continue
         rr = _round_result_from_detail(detail)
-        rounds.append(rr)
+        state.rounds.append(rr)
 
-        current_ps = rr.prompt_state
-        current_accuracy = rr.accuracy
-        current_composite = rr.composite
-        current_results = rr.results
+        state.current_ps = dict(rr.prompt_state)
+        state.current_accuracy = rr.accuracy
+        state.current_composite = rr.composite
+        state.current_results = list(rr.results)
 
-        if rr.composite > best_composite:
-            best_composite = rr.composite
-            best_accuracy = rr.accuracy
-            best_round = rr.round
-            best_ps = rr.prompt_state
+        if rr.composite > state.best_composite:
+            state.best_composite = rr.composite
+            state.best_accuracy = rr.accuracy
+            state.best_round = rr.round
+            state.best_ps = dict(rr.prompt_state)
 
         # Reconstruct stall_count from trial detail (preferred) or improved flag
         if "stall_count" in detail:
-            stall_count = detail["stall_count"]
+            state.stall_count = detail["stall_count"]
         elif rr.improved:
-            stall_count = 0
+            state.stall_count = 0
         else:
-            stall_count += 1
+            state.stall_count += 1
 
         # L2/L3 state
-        l2_stall_count = detail.get("l2_stall_count", l2_stall_count)
-        l3_stall_count = detail.get("l3_stall_count", l3_stall_count)
-        l2_round = detail.get("l2_round", l2_round)
-        l3_round = detail.get("l3_round", l3_round)
+        state.l2_stall_count = detail.get("l2_stall_count", state.l2_stall_count)
+        state.l3_stall_count = detail.get("l3_stall_count", state.l3_stall_count)
+        state.l2_round = detail.get("l2_round", state.l2_round)
+        state.l3_round = detail.get("l3_round", state.l3_round)
 
-    return (
-        rounds, current_ps, current_accuracy, current_composite, current_results,
-        best_accuracy, best_composite, best_round, best_ps, stall_count,
-        l2_stall_count, l3_stall_count, l2_round, l3_round,
-    )
+    return state
 
 
 def _init_obs(
@@ -466,34 +442,13 @@ def _restore_in_progress_campaign(
         )
         return None
 
-    (
-        rounds, cur_ps, cur_acc, cur_composite, cur_results,
-        best_acc, best_composite, best_rnd, best_ps, stall,
-        l2_stall, l3_stall, l2_rnd, l3_rnd,
-    ) = _restore_round_state(
-        campaign_data, campaign_store, config.backend_id,
-        cycle_id, config.improvement_threshold,
+    restored = _restore_round_state(
+        campaign_data, campaign_store, config.backend_id, cycle_id,
     )
-    resumed_from = len(rounds)
+    resumed_from = len(restored.rounds)
     logger.info(
         "Resuming cycle %s from round %d (best_acc=%.3f)",
-        cycle_id, resumed_from, best_acc,
-    )
-    restored = _LoopState(
-        rounds=rounds,
-        current_ps=cur_ps,
-        current_accuracy=cur_acc,
-        current_composite=cur_composite,
-        current_results=cur_results,
-        best_accuracy=best_acc,
-        best_composite=best_composite,
-        best_round=best_rnd,
-        best_ps=best_ps,
-        stall_count=stall,
-        l2_stall_count=l2_stall,
-        l3_stall_count=l3_stall,
-        l2_round=l2_rnd,
-        l3_round=l3_rnd,
+        cycle_id, resumed_from, restored.best_accuracy,
     )
     return resumed_from, restored
 
@@ -628,9 +583,6 @@ async def _evaluate_candidates(
     state: _LoopState,
     round_eval_data: list[dict],
     config: CycleConfig,
-    obs: "ObsLogger | None",
-    dataset_name: str | None,
-    dataset_item_map: dict[str, str] | None,
     on_candidate_eval: Callable[[int, int, dict], None] | None,
     on_query_eval: Callable[[int, int, int, int, dict], None] | None,
     on_phase: Callable[[PhaseEvent], None] | None = None,
@@ -652,30 +604,11 @@ async def _evaluate_candidates(
         "label": baseline_label,
     }
 
-    base_sp = SearchPoint(
-        prompt_state=PromptState(**state.current_ps),
-        model=config.model or "",
-        temperature=config.temperature,
-        pipeline_params=config.pipeline_params,
-    )
-    ctx = EvalContext(
-        search_point=base_sp,
-        backend_client=state.backend_client,
-        store=state.store,
-        backend_id=config.backend_id,
-        pipeline_schema=config.pipeline_schema,
-        obs=obs,
-        dataset_name=dataset_name if dataset_name and dataset_item_map else None,
-        dataset_item_map=dataset_item_map if dataset_name and dataset_item_map else None,
-        source="feedback_cycle",
-    )
-
     eval_out = await _prompt_optimizer.evaluate_and_select_winner(
-        candidates, round_eval_data, current_best,
+        candidates, round_eval_data, current_best, state.eval_ctx,
         improvement_threshold=config.improvement_threshold,
         on_candidate_eval=on_candidate_eval,
         on_query_eval=on_query_eval,
-        ctx=ctx,
     )
 
     if config.generate_suggestions:
@@ -765,10 +698,7 @@ async def _execute_round(
     state: _LoopState,
     round_eval_data: list[dict],
     config: CycleConfig,
-    obs: "ObsLogger | None",
     obs_campaign_id: str,
-    dataset_name: str | None,
-    dataset_item_map: dict[str, str] | None,
     campaign_store: "CampaignStore | None",
     cycle_id: str | None,
     on_candidate_eval: Callable[[int, int, dict], None] | None,
@@ -776,6 +706,7 @@ async def _execute_round(
     on_phase: Callable[[PhaseEvent], None] | None = None,
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
+    obs = state.eval_ctx.obs if state.eval_ctx else None
     if obs:
         try:
             obs.log_round_start(obs_campaign_id, round_num)
@@ -789,7 +720,6 @@ async def _execute_round(
 
     eval_out = await _evaluate_candidates(
         candidates, round_num, state, round_eval_data, config,
-        obs, dataset_name, dataset_item_map,
         on_candidate_eval, on_query_eval, on_phase,
     )
 
@@ -1109,11 +1039,29 @@ async def run_feedback_cycle(
                 obs_enabled=obs is not None,
                 sample_count=len(round_eval_data))
 
-    # Build shared clients once (reused across all rounds)
-    state.backend_client = BackendClient(config.backend_url)
+    # Build shared EvalContext once (reused across all rounds)
+    _bc = BackendClient(config.backend_url)
+    _store = None
     if config.project_root:
         from api.services.project_store import ProjectStore
-        state.store = ProjectStore(config.project_root)
+        _store = ProjectStore(config.project_root)
+    _base_sp = SearchPoint(
+        prompt_state=PromptState(**current_ps),
+        model=config.model or "",
+        temperature=config.temperature,
+        pipeline_params=config.pipeline_params,
+    )
+    state.eval_ctx = EvalContext(
+        search_point=_base_sp,
+        backend_client=_bc,
+        store=_store,
+        backend_id=config.backend_id,
+        pipeline_schema=config.pipeline_schema,
+        obs=obs,
+        dataset_name=dataset_name if dataset_name and dataset_item_map else None,
+        dataset_item_map=dataset_item_map if dataset_name and dataset_item_map else None,
+        source="feedback_cycle",
+    )
 
     stop_reason = "max_rounds"
 
@@ -1127,23 +1075,23 @@ async def run_feedback_cycle(
 
             round_result = await _execute_round(
                 round_num, state, round_eval_data, config,
-                obs, obs_campaign_id, dataset_name, dataset_item_map,
+                obs_campaign_id,
                 campaign_store, cycle_id,
                 on_candidate_eval, on_query_eval, on_phase,
             )
 
             # Update loop state
             state.rounds.append(round_result)
-            state.current_ps = round_result.prompt_state
+            state.current_ps = dict(round_result.prompt_state)
             state.current_accuracy = round_result.accuracy
             state.current_composite = round_result.composite
-            state.current_results = round_result.results
+            state.current_results = list(round_result.results)
 
             if state.current_composite > state.best_composite:
                 state.best_composite = state.current_composite
                 state.best_accuracy = state.current_accuracy
                 state.best_round = round_num
-                state.best_ps = state.current_ps
+                state.best_ps = dict(round_result.prompt_state)
 
             state.stall_count = 0 if round_result.improved else state.stall_count + 1
 

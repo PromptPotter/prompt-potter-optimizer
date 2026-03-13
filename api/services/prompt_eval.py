@@ -413,22 +413,56 @@ def _finalize_observability(
         logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
 
 
+def _try_cached_lookup(
+    store: "ProjectStore",
+    backend_id: str,
+    content_hash: str,
+    rendered: str,
+    search_point: "SearchPoint",
+    eval_data: list,
+    pipeline_schema: "PipelineSchema | None",
+    on_result: Callable | None,
+) -> tuple[list, dict, bool] | None:
+    """Check hash dedup and alias groups for a cached result.
+
+    Returns (results, scores, True) on cache hit, or None on miss.
+    """
+    # Direct content-hash lookup
+    existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
+    if existing:
+        results = existing["dataset_run_items"]
+        scores = compute_composite_score(results, pipeline_schema)
+        if on_result is not None:
+            for i, r in enumerate(results):
+                on_result({**r, "cached": True}, i, len(results))
+        return results, scores, True
+
+    # Alias-group fallback (semantically equivalent prompt forms)
+    rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
+    alias_match = store.dataset_runs.load_by_alias(
+        backend_id, rp_hash, search_point.model, search_point.temperature,
+        search_point.pipeline_params, len(eval_data),
+    )
+    if alias_match:
+        results = alias_match["dataset_run_items"]
+        scores = compute_composite_score(results, pipeline_schema)
+        if on_result is not None:
+            for i, r in enumerate(results):
+                on_result({**r, "cached": True}, i, len(results))
+        return results, scores, True
+
+    return None
+
+
 async def evaluate_prompt_cached(
     search_point: "SearchPoint",
     eval_data: list,
-    backend_client: "BackendClient | None" = None,
+    ctx: EvalContext,
     *,
-    store: "ProjectStore | None" = None,
-    backend_id: str = "",
     force: bool = False,
     label: str = "Eval",
     on_result: Callable | None = None,
-    obs: "ObsLogger | None" = None,
     source: str = "",
-    pipeline_schema: "PipelineSchema | None" = None,
-    dataset_name: str | None = None,
-    dataset_item_map: dict[str, str] | None = None,
-    ctx: EvalContext | None = None,
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt with deduplication, partial resume, and finalization.
 
@@ -441,8 +475,7 @@ async def evaluate_prompt_cached(
 
     The ``search_point`` bundles the search-space dimensions
     (prompt_state, model, temperature, pipeline_params).  Infrastructure
-    params can be passed individually **or** grouped in an ``EvalContext``
-    via the ``ctx`` keyword.
+    params (backend_client, store, obs, …) live on ``ctx``.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
@@ -452,47 +485,25 @@ async def evaluate_prompt_cached(
     model = search_point.model
     temperature = search_point.temperature
 
-    # Resolve infrastructure from EvalContext when provided
-    if ctx is not None:
-        backend_client = backend_client or ctx.backend_client
-        store = store or ctx.store
-        backend_id = backend_id or ctx.backend_id
-        pipeline_schema = pipeline_schema or ctx.pipeline_schema
-        obs = obs or ctx.obs
-        dataset_name = dataset_name or ctx.dataset_name
-        dataset_item_map = dataset_item_map or ctx.dataset_item_map
-        source = source or ctx.source
-
-    if backend_client is None:
-        raise ValueError("backend_client is required (pass directly or via ctx)")
+    # Unpack infrastructure from ctx
+    backend_client = ctx.backend_client
+    store = ctx.store
+    backend_id = ctx.backend_id
+    pipeline_schema = ctx.pipeline_schema
+    obs = ctx.obs
+    source = source or ctx.source
 
     rendered = prompt_state.render()
     content_hash = search_point.content_hash(eval_data)
 
-    # --- dedup lookup ---
+    # --- dedup lookup (content hash + alias group fallback) ---
     if store and backend_id and not force:
-        existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
-        if existing:
-            results = existing["dataset_run_items"]
-            scores = compute_composite_score(results, pipeline_schema)
-            if on_result is not None:
-                for i, r in enumerate(results):
-                    on_result({**r, "cached": True}, i, len(results))
-            return results, scores, True
-
-        # --- alias fallback (find cached run via prompt alias groups) ---
-        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
-        alias_match = store.dataset_runs.load_by_alias(
-            backend_id, rp_hash, model, temperature,
-            search_point.pipeline_params, len(eval_data),
+        cached = _try_cached_lookup(
+            store, backend_id, content_hash, rendered,
+            search_point, eval_data, pipeline_schema, on_result,
         )
-        if alias_match:
-            results = alias_match["dataset_run_items"]
-            scores = compute_composite_score(results, pipeline_schema)
-            if on_result is not None:
-                for i, r in enumerate(results):
-                    on_result({**r, "cached": True}, i, len(results))
-            return results, scores, True
+        if cached is not None:
+            return cached
 
     # --- resolve partial resume (crash recovery) ---
     safe_label = label.lower().replace(" ", "_")

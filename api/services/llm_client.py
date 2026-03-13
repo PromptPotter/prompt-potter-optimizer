@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -106,8 +107,8 @@ def _try_parse_json(content: str, provider: str) -> Any | None:
 # ---------------------------------------------------------------------------
 
 
-class _OpenAICompatibleClient(LLMClientBase):
-    """Base for clients that use the OpenAI SDK (OpenAI, Groq, etc.)."""
+class OpenAICompatibleClient(LLMClientBase):
+    """Client for any OpenAI-compatible API (OpenAI, Groq, etc.)."""
 
     def __init__(
         self,
@@ -210,30 +211,6 @@ class _OpenAICompatibleClient(LLMClientBase):
             },
             finish_reason=response.choices[0].finish_reason,
             parsed=parsed,
-        )
-
-
-class OpenAIClient(_OpenAICompatibleClient):
-    """OpenAI API client."""
-
-    def __init__(self, api_key: str | None = None):
-        super().__init__(
-            api_key=api_key or settings.OPENAI_API_KEY,
-            max_retries=OPENAI_MAX_RETRIES,
-            provider_name="OpenAI",
-        )
-
-
-class GroqClient(_OpenAICompatibleClient):
-    """Groq API client (OpenAI-compatible)."""
-
-    def __init__(self, api_key: str | None = None):
-        super().__init__(
-            api_key=api_key or settings.GROQ_API_KEY,
-            base_url=GROQ_BASE_URL,
-            max_retries=GROQ_MAX_RETRIES,
-            timeout=GROQ_TIMEOUT,
-            provider_name="Groq",
         )
 
 
@@ -376,6 +353,24 @@ _PLACEHOLDER_KEYS = {
 }
 
 
+def _make_groq_client() -> OpenAICompatibleClient:
+    return OpenAICompatibleClient(
+        api_key=settings.GROQ_API_KEY,
+        base_url=GROQ_BASE_URL,
+        max_retries=GROQ_MAX_RETRIES,
+        timeout=GROQ_TIMEOUT,
+        provider_name="Groq",
+    )
+
+
+def _make_openai_client() -> OpenAICompatibleClient:
+    return OpenAICompatibleClient(
+        api_key=settings.OPENAI_API_KEY,
+        max_retries=OPENAI_MAX_RETRIES,
+        provider_name="OpenAI",
+    )
+
+
 def get_llm_client(provider: str | None = None) -> LLMClientBase:
     """Get the configured LLM client.
 
@@ -389,10 +384,10 @@ def get_llm_client(provider: str | None = None) -> LLMClientBase:
     global _llm_client
 
     if provider:
-        _providers = {
-            "openai": OpenAIClient,
+        _providers: dict[str, Callable[[], LLMClientBase]] = {
+            "openai": _make_openai_client,
             "anthropic": AnthropicClient,
-            "groq": GroqClient,
+            "groq": _make_groq_client,
             "mock": MockLLMClient,
         }
         factory = _providers.get(provider)
@@ -408,21 +403,21 @@ def get_llm_client(provider: str | None = None) -> LLMClientBase:
             and settings.GROQ_API_KEY
             and settings.GROQ_API_KEY not in _PLACEHOLDER_KEYS
         ):
-            _llm_client = GroqClient()
+            _llm_client = _make_groq_client()
         elif configured == "anthropic" and settings.ANTHROPIC_API_KEY:
             _llm_client = AnthropicClient()
         elif configured == "openai" and settings.OPENAI_API_KEY:
-            _llm_client = OpenAIClient()
+            _llm_client = _make_openai_client()
         elif (
             settings.GROQ_API_KEY
             and settings.GROQ_API_KEY not in _PLACEHOLDER_KEYS
         ):
-            _llm_client = GroqClient()
+            _llm_client = _make_groq_client()
         elif (
             settings.OPENAI_API_KEY
             and settings.OPENAI_API_KEY not in _PLACEHOLDER_KEYS
         ):
-            _llm_client = OpenAIClient()
+            _llm_client = _make_openai_client()
         elif (
             settings.ANTHROPIC_API_KEY
             and settings.ANTHROPIC_API_KEY not in _PLACEHOLDER_KEYS

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from api.models.prompt_state import PromptState
 from api.models.search_point import SearchPoint, _PROMPT_STATE_FIELDS
 from api.services.project_store import ProjectStore
-from api.services.prompt_eval import evaluate_prompt_cached
+from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
 from api.services.search.utils import preview as _preview
 
 if TYPE_CHECKING:
@@ -149,11 +149,8 @@ def _profiles_from_rows(
 
 def _make_eval_fn(
     eval_data: list,
-    backend_client: BackendClient,
-    store: ProjectStore | None,
-    backend_id: str,
+    ctx: "EvalContext",
     get_params: Callable[[], dict],
-    pipeline_schema: "PipelineSchema | None" = None,
     on_result: Callable | None = None,
 ) -> Callable:
     """Factory for the ``_eval_ps`` closure used by scan and adaptive search."""
@@ -165,11 +162,8 @@ def _make_eval_fn(
             pipeline_params=pp or get_params(),
         )
         results, scores, cached = await evaluate_prompt_cached(
-            sp, eval_data, backend_client,
-            store=store, backend_id=backend_id,
+            sp, eval_data, ctx,
             label="scan",
-            source="sensitivity_scan",
-            pipeline_schema=pipeline_schema,
             on_result=on_result,
         )
         return {**scores, "results": results, "cached": cached}
@@ -414,6 +408,16 @@ async def sensitivity_scan(
     if sample_size > 0 and sample_size < len(eval_data):
         eval_data = random.Random(42).sample(eval_data, sample_size)
 
+    # Build EvalContext once for all scan evaluations
+    scan_ctx = EvalContext(
+        search_point=baseline,
+        backend_client=backend_client,
+        store=store,
+        backend_id=backend_id,
+        pipeline_schema=pipeline_schema,
+        source="sensitivity_scan",
+    )
+
     # Classify axes: prompt_field vs pipeline_param
     axes: list[tuple[str, str, list]] = []
     for name, values in scan_variants.items():
@@ -424,11 +428,8 @@ async def sensitivity_scan(
 
     # Evaluate baseline
     baseline_results, baseline_scores, baseline_cached = await evaluate_prompt_cached(
-        baseline, eval_data, backend_client,
-        store=store, backend_id=backend_id,
+        baseline, eval_data, scan_ctx,
         label="scan",
-        source="sensitivity_scan",
-        pipeline_schema=pipeline_schema,
         on_result=on_result,
     )
     baseline_acc = baseline_scores["accuracy"]
@@ -502,11 +503,8 @@ async def sensitivity_scan(
                 )
 
             results, scores, cached = await evaluate_prompt_cached(
-                perturbed, eval_data, backend_client,
-                store=store, backend_id=backend_id,
+                perturbed, eval_data, scan_ctx,
                 label="scan",
-                source="sensitivity_scan",
-                pipeline_schema=pipeline_schema,
                 on_result=on_result,
             )
 
@@ -698,10 +696,19 @@ async def adaptive_search(
     resolved_axes: set[str] = set()
     log_rows: list[dict] = []
 
-    _eval_ps = _make_eval_fn(
-        eval_data, backend_client, store, backend_id,
-        get_params=lambda: current_params,
+    from api.models.search_point import SearchPoint as _SP
+
+    _scan_ctx = EvalContext(
+        search_point=_SP(prompt_state=baseline_ps, pipeline_params=pipeline_params),
+        backend_client=backend_client,
+        store=store,
+        backend_id=backend_id,
         pipeline_schema=pipeline_schema,
+        source="adaptive_search",
+    )
+    _eval_ps = _make_eval_fn(
+        eval_data, _scan_ctx,
+        get_params=lambda: current_params,
     )
 
     # Get baseline accuracy

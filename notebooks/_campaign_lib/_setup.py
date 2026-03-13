@@ -6,7 +6,10 @@ import os
 from pathlib import Path
 from api.models.prompt_state import PromptState
 from api.services.backend_client import load_pipeline_config
-from api.services.llm_client import AnthropicClient, GroqClient, LLMClientBase, OpenAIClient
+from api.services.llm_client import (
+    AnthropicClient, LLMClientBase, OpenAICompatibleClient,
+    GROQ_BASE_URL, GROQ_MAX_RETRIES, GROQ_TIMEOUT, OPENAI_MAX_RETRIES,
+)
 from api.services.project_store import ProjectStore
 
 from api.services.campaign.campaign_init import init_services as _init_services
@@ -128,10 +131,21 @@ def _make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase
     if "anthropic.com" in provider_url:
         return AnthropicClient(api_key=api_key)
     if "groq.com" in provider_url:
-        return GroqClient(api_key=api_key)
+        return OpenAICompatibleClient(
+            api_key=api_key, base_url=GROQ_BASE_URL,
+            max_retries=GROQ_MAX_RETRIES, timeout=GROQ_TIMEOUT,
+            provider_name="Groq",
+        )
     if "openai.com" in provider_url:
-        return OpenAIClient(api_key=api_key)
-    return GroqClient(api_key=api_key)
+        return OpenAICompatibleClient(
+            api_key=api_key, max_retries=OPENAI_MAX_RETRIES,
+            provider_name="OpenAI",
+        )
+    return OpenAICompatibleClient(
+        api_key=api_key, base_url=GROQ_BASE_URL,
+        max_retries=GROQ_MAX_RETRIES, timeout=GROQ_TIMEOUT,
+        provider_name="Groq",
+    )
 
 
 def setup_llm(

@@ -1,14 +1,14 @@
 """Tests for LLM client retry logic.
 
 Covers retry behavior for transient errors (503, 429) and
-non-retryable errors (400) in _OpenAICompatibleClient.
+non-retryable errors (400) in OpenAICompatibleClient.
 """
 
 from unittest.mock import AsyncMock
 
 import pytest
 
-from api.services.llm_client import _MAX_APP_RETRIES, _OpenAICompatibleClient
+from api.services.llm_client import _MAX_APP_RETRIES, OpenAICompatibleClient
 from _helpers import MockCompletion, make_http_error
 
 
@@ -22,8 +22,8 @@ def _instant_sleep(monkeypatch):
 
 @pytest.fixture
 def llm_client():
-    """Create a fresh _OpenAICompatibleClient with a mocked async client."""
-    client = _OpenAICompatibleClient(
+    """Create a fresh OpenAICompatibleClient with a mocked async client."""
+    client = OpenAICompatibleClient(
         api_key="test-key",
         base_url="http://localhost:1234",
         default_model="test-model",

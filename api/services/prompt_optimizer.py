@@ -15,10 +15,7 @@ from api.services.llm_client import LLMClientBase
 from api.services.prompt_eval import compute_composite_score
 
 if TYPE_CHECKING:
-    from api.services.backend_client import BackendClient
-    from api.services.obs.observability_logger import ObsLogger
     from api.services.prompt_eval import EvalContext
-    from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -500,74 +497,43 @@ async def evaluate_and_select_winner(
     candidates: list[dict],
     eval_data: list,
     current_best: dict[str, Any],
+    ctx: "EvalContext",
     *,
-    backend_client: "BackendClient | None" = None,
-    backend_id: str = "",
-    store: "ProjectStore | None" = None,
     improvement_threshold: float = 0.01,
-    pipeline_params: dict | None = None,
-    model: str | None = None,
-    temperature: float = 0.0,
     on_candidate_eval: Callable[[int, int, dict], None] | None = None,
     on_query_eval: Callable[[int, int, int, int, dict], None] | None = None,
-    obs: "ObsLogger | None" = None,
-    dataset_name: str | None = None,
-    dataset_item_map: dict[str, str] | None = None,
-    ctx: "EvalContext | None" = None,
 ) -> dict[str, Any]:
     """Evaluate candidates and select the round winner.
 
     This is the core eval+select logic extracted from AnalysisEvalNode so it
     can be called directly by the feedback cycle without node overhead.
 
-    Infrastructure params can be passed individually **or** grouped in an
-    ``EvalContext`` via the ``ctx`` keyword.
-
     Returns:
         Dict with keys: winner, winner_prompt_state, winner_accuracy,
         improved, next_action, suggestions, candidate_scores, winner_results.
     """
     from api.models.search_point import SearchPoint
-    from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
-
-    # Build or merge EvalContext
-    _sp_model = model or ""
-    _sp_temperature = temperature
-    _sp_pipeline_params = pipeline_params
-    if ctx is None and backend_client is not None:
-        _base_sp = SearchPoint(
-            prompt_state=PromptState(),
-            model=_sp_model,
-            temperature=_sp_temperature,
-            pipeline_params=_sp_pipeline_params,
-        )
-        ctx = EvalContext(
-            search_point=_base_sp,
-            backend_client=backend_client,
-            store=store,
-            backend_id=backend_id,
-            obs=obs,
-            dataset_name=dataset_name,
-            dataset_item_map=dataset_item_map,
-        )
-    elif ctx is None:
-        raise ValueError("backend_client or ctx is required")
+    from api.services.prompt_eval import evaluate_prompt_cached
 
     # Extract model/temp/pp from ctx's search_point for per-candidate SearchPoints
     _sp_model = ctx.search_point.model
     _sp_temperature = ctx.search_point.temperature
     _sp_pipeline_params = ctx.search_point.pipeline_params
 
-    # Pop per-candidate pipeline_params overrides before PromptState construction
+    # Extract per-candidate pipeline_params overrides without mutating caller's dicts
     candidate_pp: list[dict | None] = []
-    for i, c in enumerate(candidates):
+    clean_candidates: list[dict] = []
+    for c in candidates:
         if isinstance(c, dict):
-            candidate_pp.append(c.pop("__pipeline_params_override__", None))
+            candidate_pp.append(c.get("__pipeline_params_override__"))
+            clean_candidates.append(
+                {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
+            )
         else:
             candidate_pp.append(None)
-            candidates[i] = c.model_dump() if hasattr(c, "model_dump") else c
+            clean_candidates.append(c.model_dump() if hasattr(c, "model_dump") else c)
 
-    ps_candidates = [PromptState(**c) for c in candidates]
+    ps_candidates = [PromptState(**c) for c in clean_candidates]
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []
 
@@ -588,10 +554,9 @@ async def evaluate_and_select_winner(
             pipeline_params=pp,
         )
         results, scores, cached = await evaluate_prompt_cached(
-            sp, eval_data,
+            sp, eval_data, ctx,
             label=f"candidate_{idx}",
             on_result=_on_result,
-            ctx=ctx,
         )
         all_candidate_results[c.id] = results
         candidate_scores.append({

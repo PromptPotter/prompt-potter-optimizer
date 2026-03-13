@@ -440,7 +440,7 @@ async def advise_scan_config(
     Args:
         pipeline_schema: PipelineSchema describing the connected backend.
         variant_library: Variant library dict (with ``prompt_fields`` key).
-        llm_client: LLM client instance (GroqClient, OpenAIClient, etc.).
+        llm_client: LLM client instance.
         model: Model identifier for the LLM call.
         max_tokens: Maximum response tokens for the LLM call.
         pipeline_params: Pipeline params dict with ``steps`` key. Excluded
