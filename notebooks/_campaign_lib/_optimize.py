@@ -114,21 +114,19 @@ def _extract_campaign_baseline(campaign_rounds: list) -> dict:
     baseline_results = None
     instruction = ""
     if campaign_rounds:
+        # Find the last round with actual eval results (for accuracy + results)
         last = campaign_rounds[-1]
         for rd in reversed(campaign_rounds):
             if rd.get("results"):
                 last = rd
                 break
-        ps = last["prompt_state"]
-        baseline_ps = ps.model_dump() if hasattr(ps, "model_dump") else ps
         baseline_acc = last.get("accuracy", 0.0)
         baseline_results = last.get("results", [])
-        instruction = ps.instruction if hasattr(ps, "instruction") else ""
-        # Use prompt_state from the most recent round (may differ from
-        # the round with results -- e.g. search winner with derived prompt)
+        # Use prompt_state from the tip (most recent round) — may differ from
+        # the round with results (e.g. search winner with derived prompt)
         tip_ps = campaign_rounds[-1]["prompt_state"]
         baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
-        instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else instruction
+        instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else ""
     return {
         "baseline_ps": baseline_ps,
         "baseline_acc": baseline_acc,
@@ -646,22 +644,8 @@ def _dispatch_phase(event: PhaseEvent, state: _CycleDisplayState) -> None:
 
 
 def _round_result_to_dict(rr, round_idx: int) -> dict:
-    """Convert CycleRoundResult (or its model_dump dict) to campaign_rounds entry."""
-    if hasattr(rr, "model_dump"):
-        d = rr.model_dump()
-    elif hasattr(rr, "prompt_state"):
-        # CycleRoundResult accessed by attribute
-        d = {
-            "label": rr.label, "accuracy": rr.accuracy,
-            "composite": rr.composite, "next_action": rr.next_action,
-            "hits": rr.hits, "total": rr.total,
-            "results": rr.results,
-            "candidates_evaluated": rr.candidates_evaluated,
-            "improved": rr.improved, "prompt_state": rr.prompt_state,
-            "candidate_scores": getattr(rr, "candidate_scores", []),
-        }
-    else:
-        d = dict(rr)
+    """Convert CycleRoundResult to campaign_rounds entry."""
+    d = rr.model_dump()
     ps_raw = d.get("prompt_state", {})
     d["prompt_state"] = PromptState(**ps_raw) if isinstance(ps_raw, dict) else ps_raw
     d["round"] = round_idx
@@ -719,6 +703,7 @@ async def run_feedback_cycle_notebook(
         print("    Run the preflight cell to rebuild scan_context from scan variables.")
 
     # --- Display state (shared across closures) ---
+    initial_len = len(campaign_rounds)
     _ds = _CycleDisplayState(baseline_accuracy=baseline_acc)
     _ds.scan_context = scan_context
     _query_counter = [0]
@@ -743,11 +728,6 @@ async def run_feedback_cycle_notebook(
     def _on_candidate(idx, total, scores):
         label = f"C{idx + 1}"
         w = 66
-
-        if scores.get("cached"):
-            print(f"\n  {_box_top(f'{label}/{total}', 'cached', width=w)}")
-            print(f"  {_box_bottom(width=w)}")
-            return
 
         acc = scores["accuracy"]
         hits = scores.get("hits", 0)
@@ -823,8 +803,6 @@ async def run_feedback_cycle_notebook(
                 print(f"  {RED}Stopping: patience exhausted"
                       f" ({config.patience} consecutive stalls){RESET}")
 
-    initial_len = len(campaign_rounds)
-
     result = await run_feedback_cycle(
         instruction=instruction,
         eval_data=eval_data,
@@ -838,14 +816,6 @@ async def run_feedback_cycle_notebook(
         on_phase=_on_phase,
         langfuse_session_id=langfuse_session_id,
     )
-
-    # Safety net: insert any rounds not already in campaign_rounds
-    # (e.g. completed cycle re-run where _on_round callbacks didn't fire)
-    existing_labels = {r.get("label") for r in campaign_rounds}
-    for rr in result.rounds:
-        if rr.label in existing_labels:
-            continue
-        campaign_rounds.append(_round_result_to_dict(rr, len(campaign_rounds)))
 
     # --- Final summary ---
     if not campaign_rounds:

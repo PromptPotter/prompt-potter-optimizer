@@ -128,98 +128,6 @@ def cycle_config_identity(
     return f"cycle_{digest}"
 
 
-def _round_result_from_detail(detail: dict) -> CycleRoundResult:
-    """Build a CycleRoundResult from a persisted trial detail dict."""
-    acc = detail.get("accuracy", 0.0)
-    return CycleRoundResult(
-        round=detail["round"],
-        label=detail.get("label", ""),
-        accuracy=acc,
-        composite=detail.get("composite", acc),
-        hits=detail.get("hits", 0),
-        total=detail.get("total", 0),
-        improved=detail.get("improved", False),
-        next_action=detail.get("next_action", "generate"),
-        prompt_state=detail.get("prompt_state", {}),
-        results=detail.get("results", []),
-        candidates_evaluated=detail.get("candidates_evaluated", 0),
-        candidate_scores=detail.get("candidate_scores", []),
-    )
-
-
-def _restore_completed_result(
-    campaign_data: dict,
-    store: "CampaignStore",
-    backend_id: str,
-    cycle_id: str,
-) -> CycleResult:
-    """Reconstruct a CycleResult from a completed campaign on disk."""
-    rounds: list[CycleRoundResult] = []
-    for trial_summary in campaign_data.get("trials", []):
-        detail = store.load_trial(backend_id, cycle_id, trial_summary["round"])
-        if detail is None:
-            continue
-        rounds.append(_round_result_from_detail(detail))
-
-    return CycleResult(
-        rounds=rounds,
-        n_rounds=campaign_data.get("n_rounds", len(rounds)),
-        best_accuracy=campaign_data.get("best_accuracy", 0.0),
-        best_round=campaign_data.get("best_round", -1),
-        baseline_accuracy=campaign_data.get("baseline_accuracy", 0.0),
-        winner_prompt_state=rounds[-1].prompt_state if rounds else {},
-        stop_reason=campaign_data.get("stop_reason", "completed"),
-        started_at=campaign_data.get("created_at", ""),
-        finished_at=campaign_data.get("finished_at", ""),
-        cycle_id=cycle_id,
-        resumed_from_round=0,
-    )
-
-
-def _restore_round_state(
-    campaign_data: dict,
-    store: "CampaignStore",
-    backend_id: str,
-    cycle_id: str,
-) -> _LoopState:
-    """Restore in-progress round state from persisted trials into a _LoopState."""
-    state = _LoopState()
-
-    for trial_summary in campaign_data.get("trials", []):
-        detail = store.load_trial(backend_id, cycle_id, trial_summary["round"])
-        if detail is None:
-            continue
-        rr = _round_result_from_detail(detail)
-        state.rounds.append(rr)
-
-        state.current_ps = PromptState(**rr.prompt_state)
-        state.current_accuracy = rr.accuracy
-        state.current_composite = rr.composite
-        state.current_results = list(rr.results)
-
-        if rr.composite > state.best_composite:
-            state.best_composite = rr.composite
-            state.best_accuracy = rr.accuracy
-            state.best_round = rr.round
-            state.best_ps = PromptState(**rr.prompt_state)
-
-        # Reconstruct stall_count from trial detail (preferred) or improved flag
-        if "stall_count" in detail:
-            state.stall_count = detail["stall_count"]
-        elif rr.improved:
-            state.stall_count = 0
-        else:
-            state.stall_count += 1
-
-        # L2/L3 state
-        state.l2_stall_count = detail.get("l2_stall_count", state.l2_stall_count)
-        state.l3_stall_count = detail.get("l3_stall_count", state.l3_stall_count)
-        state.l2_round = detail.get("l2_round", state.l2_round)
-        state.l3_round = detail.get("l3_round", state.l3_round)
-
-    return state
-
-
 def _init_obs(
     config: CycleConfig,
     obs_campaign_id: str,
@@ -271,64 +179,20 @@ def _init_obs(
     return obs, dataset_name, dataset_item_map
 
 
-def _load_completed_campaign(
-    campaign_data: dict,
-    campaign_store: "CampaignStore",
-    backend_id: str,
-    cycle_id: str,
-) -> CycleResult | None:
-    """Return CycleResult if campaign is completed, else None."""
-    if campaign_data.get("status") != "completed":
-        return None
-    if not campaign_data.get("trials"):
-        logger.info(
-            "Cycle %s marked completed but has no trials — will restart",
-            cycle_id,
-        )
-        return None
-    logger.info("Cycle %s already completed — returning cached result", cycle_id)
-    return _restore_completed_result(campaign_data, campaign_store, backend_id, cycle_id)
-
-
-def _restore_in_progress_campaign(
-    campaign_data: dict,
-    campaign_store: "CampaignStore",
-    config: CycleConfig,
-    cycle_id: str,
-) -> tuple[int, _LoopState] | None:
-    """Restore loop state from an in-progress campaign, or None if no trials."""
-    if not campaign_data.get("trials"):
-        logger.info(
-            "Cycle %s exists but has no completed rounds — starting fresh",
-            cycle_id,
-        )
-        return None
-
-    restored = _restore_round_state(
-        campaign_data, campaign_store, config.backend_id, cycle_id,
-    )
-    resumed_from = len(restored.rounds)
-    logger.info(
-        "Resuming cycle %s from round %d (best_acc=%.3f)",
-        cycle_id, resumed_from, restored.best_accuracy,
-    )
-    return resumed_from, restored
-
-
 def _resume_or_create_campaign(
     config: CycleConfig,
     eval_data: list[dict],
     current_ps: dict,
     baseline_prompt_state: dict | None,
     baseline_accuracy: float,
-) -> tuple[Any | None, str | None, int, _LoopState | None, CycleResult | None]:
+) -> tuple[Any | None, str | None, int]:
     """Handle campaign resume detection.
 
     Returns:
-        (campaign_store, cycle_id, resumed_from_round, restored_state, completed_result)
+        (campaign_store, cycle_id, resumed_from_round)
     """
     if not (config.project_root and config.backend_id):
-        return None, None, 0, None, None
+        return None, None, 0
 
     try:
         from api.services.stores.campaign_store import CampaignStore  # lazy: heavy dep
@@ -342,29 +206,24 @@ def _resume_or_create_campaign(
 
         existing = campaign_store.load(config.backend_id, cycle_id)
         if existing is not None:
-            completed = _load_completed_campaign(
-                existing, campaign_store, config.backend_id, cycle_id,
-            )
-            if completed is not None:
-                return campaign_store, cycle_id, 0, None, completed
-
-            restored = _restore_in_progress_campaign(
-                existing, campaign_store, config, cycle_id,
-            )
-            if restored is not None:
-                resumed_from, state = restored
-                return campaign_store, cycle_id, resumed_from, state, None
+            resumed_from = len(existing.get("trials", []))
+            if resumed_from:
+                logger.info(
+                    "Resuming cycle %s — %d prior round(s) on disk",
+                    cycle_id, resumed_from,
+                )
         else:
+            resumed_from = 0
             campaign_store.create(config.backend_id, cycle_id, {
                 "type": "feedback_cycle",
                 "config": config.model_dump(),
                 "baseline_accuracy": baseline_accuracy,
             })
 
-        return campaign_store, cycle_id, 0, None, None
+        return campaign_store, cycle_id, resumed_from
     except Exception:
         logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
-        return None, None, 0, None, None
+        return None, None, 0
 
 
 async def _generate_or_load_candidates(
@@ -847,7 +706,9 @@ async def run_feedback_cycle(
 
     # -- Step 1: Initialize baseline --
     if baseline_prompt_state is not None:
-        current_ps = baseline_prompt_state
+        current_ps = PromptState(**baseline_prompt_state) if isinstance(
+            baseline_prompt_state, dict,
+        ) else baseline_prompt_state
         current_accuracy = baseline_accuracy
         current_results: list = baseline_results or []
         logger.info("Using provided baseline (acc=%.3f)", current_accuracy)
@@ -860,20 +721,17 @@ async def run_feedback_cycle(
             "instruction": instruction,
             "improvement_areas": improvement_areas,
         })
-        current_ps = init_out.prompt_state
+        current_ps = PromptState(**init_out.prompt_state) if isinstance(
+            init_out.prompt_state, dict,
+        ) else init_out.prompt_state
         current_accuracy = 0.0
         current_results = []
 
     # -- Step 2: Resume detection --
-    (
-        campaign_store, cycle_id, resumed_from_round,
-        restored_state, completed_result,
-    ) = _resume_or_create_campaign(
-        config, eval_data, current_ps, baseline_prompt_state, baseline_accuracy,
+    campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
+        config, eval_data, current_ps.model_dump(),
+        baseline_prompt_state, baseline_accuracy,
     )
-    if completed_result is not None:
-        return completed_result
-
     # -- Step 3: Observability setup --
     obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
     obs, dataset_name, dataset_item_map = _init_obs(
@@ -887,15 +745,14 @@ async def run_feedback_cycle(
         _bl_composite = _bl_scores["composite"]
     else:
         _bl_composite = current_accuracy
-    _ps = PromptState(**current_ps) if isinstance(current_ps, dict) else current_ps
     state = _LoopState(
-        current_ps=_ps,
+        current_ps=current_ps,
         current_accuracy=current_accuracy,
         current_composite=_bl_composite,
         current_results=current_results,
         best_accuracy=current_accuracy,
         best_composite=_bl_composite,
-        best_ps=_ps,
+        best_ps=current_ps,
     )
 
     _emit_phase(on_phase, "init", "exit",

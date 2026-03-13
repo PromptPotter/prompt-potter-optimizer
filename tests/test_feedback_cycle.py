@@ -527,7 +527,7 @@ class TestCycleConfigIdentity:
 async def test_completed_cycle_returns_cached(
     monkeypatch, eval_data, cycle_config, tmp_path,
 ):
-    """Re-running a completed cycle returns the cached result with 0 new evals."""
+    """Re-running a completed cycle replays from cache (callbacks fire)."""
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
@@ -554,7 +554,8 @@ async def test_completed_cycle_returns_cached(
 
     assert result2.cycle_id == result1.cycle_id
     assert result2.best_accuracy == result1.best_accuracy
-    assert call_count[0] == evals_after_first
+    # Replay re-enters the loop: round 0 evals from cache, hits perfect_score
+    assert call_count[0] > evals_after_first
 
 
 @pytest.mark.slow
