@@ -358,8 +358,9 @@ def _select_round_winner(
     best_ps = current_ps
     best_results = current_results
     best_label = current_best["label"]
+    winner_idx: int | None = None  # None = current_best is still the winner
 
-    for candidate in candidates:
+    for idx, candidate in enumerate(candidates):
         c_results = all_candidate_results[candidate.id]
         c_scores = compute_composite_score(c_results)
         c_composite = c_scores["composite"]
@@ -369,6 +370,7 @@ def _select_round_winner(
             best_ps = candidate
             best_results = c_results
             best_label = candidate.changes_description or candidate.id[:12]
+            winner_idx = idx
 
     rows = [
         {
@@ -405,6 +407,7 @@ def _select_round_winner(
         "candidates_evaluated": len(candidates),
         "comparison_rows": rows,
         "improved": improved,
+        "winner_idx": winner_idx,
     }
 
 
@@ -599,6 +602,14 @@ async def evaluate_and_select_winner(
         ps_candidates, all_candidate_results, cb, improvement_threshold,
     )
 
+    # Resolve the winner's pipeline_params: if a candidate won, merge its
+    # override with the base; if current_best won, keep the base as-is.
+    w_idx = winner_entry["winner_idx"]
+    if w_idx is not None and candidate_pp[w_idx]:
+        winner_pp = {**(_sp_pipeline_params or {}), **candidate_pp[w_idx]}
+    else:
+        winner_pp = _sp_pipeline_params
+
     winner_ps = winner_entry["prompt_state"]
     return {
         "winner": {
@@ -611,6 +622,7 @@ async def evaluate_and_select_winner(
             "candidates_evaluated": winner_entry["candidates_evaluated"],
         },
         "winner_prompt_state": winner_ps.model_dump(),
+        "winner_pipeline_params": winner_pp,
         "winner_accuracy": winner_entry["accuracy"],
         "winner_composite": winner_entry.get("composite", winner_entry["accuracy"]),
         "improved": winner_entry["improved"],

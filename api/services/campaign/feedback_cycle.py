@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.models.phase_event import PhaseEvent
 from api.models.prompt_state import PromptState, diff as prompt_diff
+from api.models.search_point import SearchPoint
 from api.nodes.optimizer_nodes import InitNode
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
@@ -237,7 +238,7 @@ async def _generate_or_load_candidates(
     n_eval_queries: int = 0,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
-    current_ps = state.current_ps
+    current_ps = state.current_sp.prompt_state
     prompt_preview = current_ps.render()[:120]
 
     _emit_phase(on_phase, "growth", "enter", round=round_num,
@@ -263,7 +264,7 @@ async def _generate_or_load_candidates(
                         n_eval_queries=n_eval_queries,
                         loaded_from_disk=True,
                         candidates=_candidate_summaries(
-                            persisted, state.current_ps.model_dump()))
+                            persisted, state.current_sp.prompt_state.model_dump()))
             return persisted
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
@@ -297,7 +298,7 @@ async def _generate_or_load_candidates(
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=False,
                 candidates=_candidate_summaries(
-                    candidates, state.current_ps.model_dump()))
+                    candidates, state.current_sp.prompt_state.model_dump()))
 
     return candidates
 
@@ -324,7 +325,8 @@ async def _evaluate_candidates(
     baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
         "accuracy": state.current_accuracy,
-        "prompt_state": state.current_ps.model_dump(),
+        "composite": state.current_composite,
+        "prompt_state": state.current_sp.prompt_state.model_dump(),
         "results": state.current_results,
         "label": baseline_label,
     }
@@ -478,6 +480,7 @@ async def _execute_round(
         improved=eval_out["improved"],
         next_action=eval_out["next_action"],
         prompt_state=eval_out["winner_prompt_state"],
+        pipeline_params=eval_out.get("winner_pipeline_params"),
         results=eval_out["winner_results"],
         candidates_evaluated=eval_out["winner"].get("candidates_evaluated", 0),
         candidate_scores=eval_out["candidate_scores"],
@@ -554,7 +557,8 @@ async def _escalate_l2(
     Returns a stop_reason string if the cycle should stop, or None to continue.
     """
     llm_client = _llm_client.get_llm_client(config.provider)
-    current_ps = state.current_ps
+    current_ps = state.current_sp.prompt_state
+    current_pp = state.current_sp.pipeline_params
 
     # Check if L2 itself has stalled (no improvement since last L2 entry)
     l2_improved = state.best_composite > state.best_composite_at_l2_entry
@@ -590,11 +594,16 @@ async def _escalate_l2(
                         l3_round=state.l3_round,
                         l2_stall_count=state.l2_stall_count,
                         current_plan_preview=str(current_ps.plan)[:120])
-            new_ps = await layer_transitions.modify_plan(
+            tr = await layer_transitions.modify_plan(
                 current_ps, l2_history, eval_data, llm_client,
                 model=config.model, temperature=config.l3_temperature,
+                pipeline_params=current_pp,
+                pipeline_schema=config.pipeline_schema,
             )
-            state.current_ps = new_ps
+            state.current_sp = state.current_sp.derive(
+                prompt_state=tr.prompt_state,
+                **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),
+            )
             state.l3_round += 1
             state.best_accuracy_at_l3_entry = state.best_accuracy
             state.best_composite_at_l3_entry = state.best_composite
@@ -605,8 +614,9 @@ async def _escalate_l2(
             state.best_composite_at_l2_entry = state.best_composite
             _emit_phase(on_phase, "modify_plan", "exit", round=round_num,
                         l3_round=state.l3_round,
-                        new_plan_preview=str(new_ps.plan)[:120],
-                        changes_description=new_ps.changes_description or "")
+                        new_plan_preview=str(tr.prompt_state.plan)[:120],
+                        changes_description=tr.prompt_state.changes_description or "",
+                        pipeline_params_changed=tr.pipeline_params is not None)
             logger.info(
                 "L3 modify_plan at round %d (l3_round=%d)",
                 round_num, state.l3_round,
@@ -634,20 +644,26 @@ async def _escalate_l2(
                 current_params=current_ps.parameters,
                 current_accuracy=state.current_accuracy,
                 best_accuracy=state.best_accuracy)
-    new_ps = await layer_transitions.refine_context(
+    tr = await layer_transitions.refine_context(
         current_ps, stalled_rounds, eval_data, llm_client,
         model=config.model, temperature=config.l2_temperature,
+        pipeline_params=current_pp,
+        pipeline_schema=config.pipeline_schema,
     )
-    state.current_ps = new_ps
+    state.current_sp = state.current_sp.derive(
+        prompt_state=tr.prompt_state,
+        **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),
+    )
     state.l2_round += 1
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
     state.stall_count = 0  # reset L1 patience
     _emit_phase(on_phase, "refine_context", "exit", round=round_num,
                 l2_round=state.l2_round,
-                param_changes_count=len(new_ps.parameters),
-                context_changed=new_ps.context != current_ps.context,
-                changes_description=new_ps.changes_description or "")
+                param_changes_count=len(tr.prompt_state.parameters),
+                context_changed=tr.prompt_state.context != current_ps.context,
+                changes_description=tr.prompt_state.changes_description or "",
+                pipeline_params_changed=tr.pipeline_params is not None)
     logger.info(
         "L2 refine_context at round %d (l2_round=%d)",
         round_num, state.l2_round,
@@ -769,14 +785,20 @@ async def run_feedback_cycle(
         _bl_composite = _bl_scores["composite"]
     else:
         _bl_composite = current_accuracy
+    baseline_sp = SearchPoint(
+        prompt_state=current_ps,
+        model=config.model or "",
+        temperature=config.temperature,
+        pipeline_params=config.pipeline_params,
+    )
     state = _LoopState(
-        current_ps=current_ps,
+        current_sp=baseline_sp,
         current_accuracy=current_accuracy,
         current_composite=_bl_composite,
         current_results=current_results,
         best_accuracy=current_accuracy,
         best_composite=_bl_composite,
-        best_ps=current_ps,
+        best_sp=baseline_sp,
     )
 
     # -- Step 4b: Bootstrap critique + thinking styles --
@@ -829,6 +851,9 @@ async def run_feedback_cycle(
     # -- Step 5: Round loop --
     try:
         for round_num in range(config.max_rounds):
+            # Sync eval_ctx pipeline_params from current search point
+            state.eval_ctx.pipeline_params = state.current_sp.pipeline_params
+
             logger.info(
                 "Feedback cycle round %d (acc=%.3f, stall=%d/%d)",
                 round_num, state.current_accuracy, state.stall_count, config.patience,
@@ -841,9 +866,13 @@ async def run_feedback_cycle(
                 on_candidate_eval, on_query_eval, on_phase,
             )
 
-            # Update loop state
+            # Update loop state — derive new SearchPoint with winner's prompt + pipeline_params
             state.rounds.append(round_result)
-            state.current_ps = PromptState(**round_result.prompt_state)
+            winner_ps = PromptState(**round_result.prompt_state)
+            derive_kwargs: dict = {"prompt_state": winner_ps}
+            if round_result.pipeline_params is not None:
+                derive_kwargs["pipeline_params"] = round_result.pipeline_params
+            state.current_sp = state.current_sp.derive(**derive_kwargs)
             state.current_accuracy = round_result.accuracy
             state.current_composite = round_result.composite
             state.current_results = list(round_result.results)
@@ -852,7 +881,7 @@ async def run_feedback_cycle(
                 state.best_composite = state.current_composite
                 state.best_accuracy = state.current_accuracy
                 state.best_round = round_num
-                state.best_ps = PromptState(**round_result.prompt_state)
+                state.best_sp = state.current_sp
 
             state.stall_count = 0 if round_result.improved else state.stall_count + 1
 
@@ -938,7 +967,8 @@ async def run_feedback_cycle(
         baseline_accuracy=(
             state.rounds[0].accuracy if state.rounds else state.current_accuracy
         ),
-        winner_prompt_state=state.best_ps.model_dump() if state.best_ps else {},
+        winner_prompt_state=state.best_sp.prompt_state.model_dump() if state.best_sp else {},
+        winner_pipeline_params=state.best_sp.pipeline_params if state.best_sp else None,
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,

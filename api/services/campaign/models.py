@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from api.models.pipeline_schema import PipelineSchema
-from api.models.prompt_state import PromptState
+from api.models.search_point import SearchPoint
 
 if TYPE_CHECKING:
     from api.services.prompt_eval import EvalContext
@@ -121,6 +121,7 @@ class CycleRoundResult(BaseModel):
     improved: bool
     next_action: str
     prompt_state: dict
+    pipeline_params: dict | None = None
     results: list[dict] = Field(default_factory=list)
     candidates_evaluated: int
     candidate_scores: list[dict] = Field(default_factory=list)
@@ -135,6 +136,7 @@ class CycleResult(BaseModel):
     best_round: int
     baseline_accuracy: float
     winner_prompt_state: dict
+    winner_pipeline_params: dict | None = None
     stop_reason: str
     started_at: str
     finished_at: str
@@ -148,14 +150,14 @@ class _LoopState:
     """Mutable state threaded through the feedback cycle round loop."""
 
     rounds: list[CycleRoundResult] = field(default_factory=list)
-    current_ps: PromptState | None = None
+    current_sp: SearchPoint | None = None
     current_accuracy: float = 0.0
     current_composite: float = 0.0
     current_results: list[dict] = field(default_factory=list)
     best_accuracy: float = 0.0
     best_composite: float = 0.0
     best_round: int = -1
-    best_ps: PromptState | None = None
+    best_sp: SearchPoint | None = None
     stall_count: int = 0
     eval_ctx: EvalContext | None = None
 

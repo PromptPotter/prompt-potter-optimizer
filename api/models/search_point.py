@@ -11,10 +11,11 @@ Bundles the four dimensions that fully specify an evaluation:
   - pipeline_params — backend pipeline overrides (node_config)
 
 Related objects:
-  - ``EvalContext`` bundles a SearchPoint with infrastructure
-    (backend_client, store, obs) for running evaluations.
-  - ``CycleConfig`` configures the feedback loop that evolves
-    SearchPoints across rounds.
+  - ``EvalContext`` carries infrastructure (backend_client, store, obs,
+    model, temperature, pipeline_params) for running evaluations.
+  - ``_LoopState`` tracks ``current_sp`` and ``best_sp`` SearchPoints
+    as the feedback cycle evolves through optimization rounds.
+  - ``CycleConfig`` configures the feedback loop parameters.
 """
 from __future__ import annotations
 

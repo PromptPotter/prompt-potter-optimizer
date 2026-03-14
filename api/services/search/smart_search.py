@@ -620,6 +620,11 @@ async def adaptive_search(
     if session_terms:
         await backend_client.init_session(session_terms)
 
+    # Filter variant library to active pipeline steps
+    variant_library = filter_variant_library(
+        variant_library, pipeline_params, schema=pipeline_schema,
+    )
+
     # Filter and sort axes by sensitivity
     active_axes = [
         p for p in axis_profiles if p["exploration_budget"] != "skip"

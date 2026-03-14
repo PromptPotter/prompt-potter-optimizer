@@ -610,6 +610,7 @@ async def resume_or_build_grid(
     backend_id: str,
     improvement_areas: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_params: dict | None = None,
 ) -> tuple:
     """Resume an existing grid plan or build a new one.
 
@@ -638,7 +639,9 @@ async def resume_or_build_grid(
     # Build grid axes from variant library prompt_fields
     if gs.get("use_defaults", True):
         from api.config.settings import load_variant_library
+        from api.services.search.smart_search import filter_variant_library
         vl = load_variant_library()
+        vl = filter_variant_library(vl, pipeline_params, schema=pipeline_schema)
         grid_axes = dict(vl.get("prompt_fields", {}))
     else:
         grid_axes = {}
