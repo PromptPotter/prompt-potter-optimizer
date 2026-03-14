@@ -419,6 +419,8 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_dbox_line(f"Model          {model}"))
     print(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
     print(_dbox_line(f"Scan context   {scan}"))
+    critique = "enabled" if d.get("enable_critique") else "disabled"
+    print(_dbox_line(f"Critique       {critique}"))
     print(_dbox_bottom())
 
 
@@ -428,6 +430,12 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
     obs = "ON" if d.get("obs_enabled") else "OFF"
     print(f"  {GREEN}✓{RESET} Initialized  cycle={cycle_id}"
           f"  samples={samples}  obs={obs}")
+    crit = d.get("critique_text", "")
+    if crit:
+        preview = crit.replace("\n", " ").strip()
+        if len(preview) > 80:
+            preview = preview[:77] + "..."
+        print(f"    {CYAN}Bootstrap critique:{RESET} {preview}")
     resumed = d.get("resumed_from_round", 0)
     if resumed > 0:
         print(f"    Resumed from round {resumed} ({resumed} rounds cached)")
@@ -455,8 +463,10 @@ def _print_growth_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_box_line(f"{CYAN}{BOLD}GENERATING CANDIDATES{RESET}"))
     print(_box_line(f"Current best    {acc:.1%}"))
     print(_box_line(f"Prompt          {preview}"))
+    crit = "YES" if d.get("has_critique") else "NO"
     print(_box_line(
-        f"Candidates      {n}   Creativity: {creativity}   Scan: {scan}"))
+        f"Candidates      {n}   Creativity: {creativity}   Scan: {scan}"
+        f"   Critique: {crit}"))
     print(_box_line(f"Model           {model}"))
     print(_box_bottom())
 
@@ -553,6 +563,14 @@ def _print_eval_exit(d: dict, state: _CycleDisplayState) -> None:
         print(f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}"
               f"  best candidate {w_acc:.1%}{comp_tag}"
               f"  ->  patience {state.stall_count + 1}/{state.patience}")
+
+    # Critique preview (fed forward to next round's growth)
+    crit = d.get("critique_text", "")
+    if crit:
+        preview = crit.replace("\n", " ").strip()
+        if len(preview) > 90:
+            preview = preview[:87] + "..."
+        print(f"  {CYAN}Critique:{RESET} {preview}")
 
 
 def _print_refine_enter(d: dict, state: _CycleDisplayState) -> None:

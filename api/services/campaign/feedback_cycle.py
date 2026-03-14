@@ -30,6 +30,7 @@ from api.services.constants import DATASET_NAME
 from api.services.campaign.models import (
     CycleConfig, CycleResult, CycleRoundResult, _LoopState,
 )
+from api.services.campaign.critique import CritiqueAgent, sample_thinking_styles
 from api.services.prompt_eval import EvalContext, compute_composite_score
 from api.services.query_utils import subsample_queries
 
@@ -245,7 +246,8 @@ async def _generate_or_load_candidates(
                 n_variants=config.n_variants,
                 creativity=config.creativity,
                 model=config.model or "(default)",
-                has_scan_context=config.scan_context is not None)
+                has_scan_context=config.scan_context is not None,
+                has_critique=bool(state.critique_text))
 
     if campaign_store and cycle_id:
         persisted = campaign_store.load_round_candidates(
@@ -276,6 +278,8 @@ async def _generate_or_load_candidates(
         n_variants, creativity, llm_client,
         model=config.model,
         scan_context=config.scan_context,
+        critique_text=state.critique_text,
+        thinking_styles=state.thinking_styles,
     )
     # Normalize to dicts (generate_candidates returns dicts, but mocks may return PromptState)
     candidates = [
@@ -359,6 +363,24 @@ async def _evaluate_candidates(
         except Exception:
             logger.warning("Suggestion generation failed", exc_info=True)
 
+    # Run critique on winner results for next round's growth phase
+    critique_text = ""
+    if config.enable_critique:
+        try:
+            llm_crit = _llm_client.get_llm_client(config.provider)
+            agent = CritiqueAgent(llm_crit, model=config.model)
+            critique_text = await agent.run(
+                eval_out["winner_results"],
+                eval_out["winner_accuracy"],
+                threshold=config.critique_positive_threshold,
+            )
+            state.critique_text = critique_text
+        except Exception:
+            logger.warning("Round %d critique failed", round_num, exc_info=True)
+
+    # Resample thinking styles for next round
+    state.thinking_styles = sample_thinking_styles(n=3, seed=config.seed + round_num + 1)
+
     _emit_phase(on_phase, "analysis_eval", "exit", round=round_num,
                 winner_label=eval_out["winner"].get("label", ""),
                 winner_accuracy=eval_out["winner_accuracy"],
@@ -366,7 +388,8 @@ async def _evaluate_candidates(
                                               eval_out["winner_accuracy"]),
                 improved=eval_out["improved"],
                 next_action=eval_out["next_action"],
-                candidate_scores=eval_out["candidate_scores"])
+                candidate_scores=eval_out["candidate_scores"],
+                critique_text=critique_text)
 
     return eval_out
 
@@ -695,7 +718,8 @@ async def run_feedback_cycle(
                 enable_l3=config.enable_l3,
                 eval_data_count=len(eval_data),
                 baseline_accuracy=baseline_accuracy,
-                has_scan_context=config.scan_context is not None)
+                has_scan_context=config.scan_context is not None,
+                enable_critique=config.enable_critique)
 
     # Initialize backend session (required before /matches calls)
     if config.session_terms:
@@ -755,12 +779,30 @@ async def run_feedback_cycle(
         best_ps=current_ps,
     )
 
+    # -- Step 4b: Bootstrap critique + thinking styles --
+    bootstrap_critique = ""
+    if config.enable_critique and current_results:
+        try:
+            _crit_llm = _llm_client.get_llm_client(config.provider)
+            agent = CritiqueAgent(_crit_llm, model=config.model)
+            bootstrap_critique = await agent.run(
+                current_results, current_accuracy,
+                threshold=config.critique_positive_threshold,
+            )
+            state.critique_text = bootstrap_critique
+            logger.info("Bootstrap critique: %s", bootstrap_critique[:100])
+        except Exception:
+            logger.warning("Bootstrap critique failed", exc_info=True)
+    state.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
+
     _emit_phase(on_phase, "init", "exit",
                 cycle_id=cycle_id,
                 resumed_from_round=resumed_from_round,
                 baseline_accuracy=current_accuracy,
                 obs_enabled=obs is not None,
-                sample_count=len(round_eval_data))
+                sample_count=len(round_eval_data),
+                enable_critique=config.enable_critique,
+                critique_text=bootstrap_critique)
 
     # Build shared EvalContext once (reused across all rounds)
     _bc = BackendClient(config.backend_url)

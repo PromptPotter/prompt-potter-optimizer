@@ -42,6 +42,12 @@ class CycleConfig(BaseModel):
 
     pipeline_schema: PipelineSchema | None = Field(None, description="Pipeline schema for eval")
 
+    # Critique-guided generation
+    enable_critique: bool = Field(True, description="Enable critique agent between rounds")
+    critique_positive_threshold: float = Field(
+        0.7, description="Accuracy threshold for positive vs negative critique",
+    )
+
     # Scan-aware optimization
     scan_context: dict | None = Field(None, description="Scan analytics context for candidate gen")
 
@@ -98,6 +104,8 @@ class CycleConfig(BaseModel):
             l2_temperature=opt.get("l2_temperature", 0.3),
             l3_temperature=opt.get("l3_temperature", 0.5),
             suggestion_temperature=opt.get("suggestion_temperature", 0.0),
+            enable_critique=opt.get("enable_critique", True),
+            critique_positive_threshold=opt.get("critique_positive_threshold", 0.7),
         )
 
 
@@ -150,6 +158,10 @@ class _LoopState:
     best_ps: PromptState | None = None
     stall_count: int = 0
     eval_ctx: EvalContext | None = None
+
+    # Critique + thinking styles (meta-level, fed forward between rounds)
+    critique_text: str = ""
+    thinking_styles: list[str] = field(default_factory=list)
 
     # L2/L3 state
     l2_stall_count: int = 0

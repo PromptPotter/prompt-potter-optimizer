@@ -193,6 +193,8 @@ async def generate_candidates(
     model: str | None = None,
     variant_library: dict | None = None,
     scan_context: dict | None = None,
+    critique_text: str = "",
+    thinking_styles: list[str] | None = None,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -211,6 +213,8 @@ async def generate_candidates(
             analytics (leaderboard, axis sensitivity, tested values) and
             enables per-candidate ``pipeline_params_override`` in the
             response. Built by ``prepare_scan_context()``.
+        critique_text: Structured critique from previous round's evaluation.
+        thinking_styles: Sampled thinking styles for mutation guidance.
 
     Returns:
         List of candidate dicts. Each dict contains serialized PromptState
@@ -244,6 +248,21 @@ async def generate_candidates(
         meta_prompt = _build_freeform_meta_prompt(
             n_variants, rendered_prompt, current_accuracy,
             current_results, failure_examples,
+        )
+
+    # Append critique from previous round's evaluation
+    if critique_text:
+        meta_prompt += (
+            f"\n\nCRITIQUE (from previous evaluation — use this to guide your changes):\n"
+            f"{critique_text}\n"
+        )
+
+    # Append thinking style guidance
+    if thinking_styles:
+        styles_text = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(thinking_styles))
+        meta_prompt += (
+            f"\n\nTHINKING STYLES (consider these approaches when generating variants):\n"
+            f"{styles_text}\n"
         )
 
     # Append strategic plan guidance when available

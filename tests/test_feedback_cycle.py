@@ -22,6 +22,7 @@ from api.services.campaign.feedback_cycle import (
 from api.services.search import select_scan_winner
 
 from _helpers import (
+    apply_critique_mock,
     apply_eval_mock,
     apply_grow_mock,
     apply_init_mock,
@@ -41,6 +42,7 @@ async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
+    apply_critique_mock(monkeypatch)
 
     # Hits improve each round: 1/3 → 2/3 → 3/3 (perfect, stops early)
     apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
@@ -73,6 +75,7 @@ async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
+    apply_critique_mock(monkeypatch)
 
     # All candidates return 0% — never beats baseline (which is also 0%)
     apply_eval_mock(monkeypatch, round_hits=[0])
@@ -101,6 +104,7 @@ async def test_max_rounds(monkeypatch, eval_data):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
+    apply_critique_mock(monkeypatch)
 
     # Slow steady improvement: 1/3, 1/3, 2/3 hits — never reaches perfect or stalls
     apply_eval_mock(monkeypatch, round_hits=[1, 1, 2])
@@ -136,6 +140,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
+    apply_critique_mock(monkeypatch)
 
     # First candidate gets 33%, analysis suggestions say stop
     apply_eval_mock(monkeypatch, round_hits=[1])

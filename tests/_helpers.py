@@ -57,6 +57,18 @@ def apply_grow_mock(monkeypatch):
     )
 
 
+def apply_critique_mock(monkeypatch):
+    """Mock CritiqueAgent.run to return deterministic critique text."""
+    async def mock_run(self, results, accuracy, threshold=0.7):
+        path = "positive" if accuracy >= threshold else "negative"
+        return f"Mock {path} critique: accuracy={accuracy:.1%}"
+
+    monkeypatch.setattr(
+        "api.services.campaign.critique.CritiqueAgent.run",
+        mock_run,
+    )
+
+
 def apply_eval_mock(monkeypatch, round_hits=None):
     """Mock evaluate_prompt_cached with configurable per-round hit counts.
 
