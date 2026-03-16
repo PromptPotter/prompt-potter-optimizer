@@ -8,7 +8,7 @@ import hashlib
 
 from api.models.prompt_state import PromptState
 from api.services.llm_client import MockLLMClient
-from api.services.prompt_eval import HASH_TRUNCATE
+from api.models.hashing import HASH_TRUNCATE
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +57,18 @@ def apply_grow_mock(monkeypatch):
     )
 
 
+def apply_critique_mock(monkeypatch):
+    """Mock CritiqueAgent.run to return deterministic critique text."""
+    async def mock_run(self, results, accuracy, threshold=0.7):
+        path = "positive" if accuracy >= threshold else "negative"
+        return f"Mock {path} critique: accuracy={accuracy:.1%}"
+
+    monkeypatch.setattr(
+        "api.services.campaign.critique.CritiqueAgent.run",
+        mock_run,
+    )
+
+
 def apply_eval_mock(monkeypatch, round_hits=None):
     """Mock evaluate_prompt_cached with configurable per-round hit counts.
 
@@ -67,7 +79,7 @@ def apply_eval_mock(monkeypatch, round_hits=None):
         round_hits = [1, 2, 3]
     call_count = [0]
 
-    async def mock_eval(search_point, data, **kwargs):
+    async def mock_eval(search_point, data, ctx=None, **kwargs):
         idx = min(call_count[0], len(round_hits) - 1)
         target_hits = round_hits[idx]
         label = kwargs.get("label", "")

@@ -236,7 +236,7 @@ async def backend_reranker_eval(
 | 7.1 | `api/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
 | 7.2 | `api/services/llm_client.py` (singleton pattern reference: `get_llm_client()`), `api/core/workflow_runner.py` (runtime_config from M6) |
 | 7.3 | `api/services/prompt_eval.py` (backend_reranker_eval, evaluate_prompt_cached), `api/services/feedback_cycle.py` (BackendClient usage), `api/nodes/optimizer_nodes.py` (AnalysisEvalNode BackendClient instantiation) |
-| 7.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_e2e_optimization.py` (E2E test pattern) |
+| 7.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_campaign_registry.py` (E2E test pattern) |
 
 ---
 

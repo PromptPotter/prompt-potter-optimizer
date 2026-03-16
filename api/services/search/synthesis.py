@@ -11,7 +11,8 @@ if TYPE_CHECKING:
     import pandas as pd
 
 from api.services.project_store import ProjectStore
-from api.services.prompt_eval import HASH_TRUNCATE, compute_composite_score
+from api.models.hashing import HASH_TRUNCATE
+from api.services.prompt_eval import compute_composite_score
 from api.services.search.plan_persistence import deserialize_grid_plan
 from api.services.search.smart_search import classify_axis
 from api.services.search.utils import preview as _preview

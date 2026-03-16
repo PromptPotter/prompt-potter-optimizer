@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pandas as pd
+    from api.models.pipeline_schema import PipelineSchema
 
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
@@ -203,6 +204,8 @@ async def resume_or_build_grid(
     store: ProjectStore,
     backend_id: str,
     improvement_areas: str = "",
+    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_params: dict | None = None,
 ) -> tuple:
     """Resume an existing grid plan or build a new one.
 
@@ -213,6 +216,7 @@ async def resume_or_build_grid(
     result = await _resume_or_build_grid(
         campaign_config, baseline, llm_client, model,
         store, backend_id, improvement_areas=improvement_areas,
+        pipeline_schema=pipeline_schema, pipeline_params=pipeline_params,
     )
     # Service returns 7-tuple (plan_id, points, lookup, axes, fields, baseline, resumed)
     (plan_id, grid_points, grid_state_lookup,

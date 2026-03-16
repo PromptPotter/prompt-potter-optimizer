@@ -8,10 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from api.services.stores.base import (
-    append_jsonl,
     read_json,
     read_json_optional,
-    read_jsonl,
     validate_path_component,
     write_json,
 )
@@ -196,7 +194,13 @@ class DatasetRunStore:
         if index is None:
             return None
 
-        norm_pp = pipeline_params or None
+        def _strip_steps(pp):
+            if not pp:
+                return None
+            stripped = {k: v for k, v in pp.items() if k != "steps"}
+            return stripped or None
+
+        norm_pp = _strip_steps(pipeline_params)
 
         for entry in index.get("dataset_runs", []):
             if entry.get("rendered_prompt_hash", "") not in alias_set:
@@ -205,7 +209,7 @@ class DatasetRunStore:
                 continue
             if entry.get("temperature") != temperature:
                 continue
-            if (entry.get("pipeline_params") or None) != norm_pp:
+            if _strip_steps(entry.get("pipeline_params")) != norm_pp:
                 continue
             if entry.get("item_count") != item_count:
                 continue
@@ -213,40 +217,6 @@ class DatasetRunStore:
                 self._runs_dir(backend_id) / f"{entry['run_id']}.json",
             )
         return None
-
-    # -- incremental eval writes ----------------------------------------------
-
-    def append_eval_item(
-        self, backend_id: str, run_id: str, item: dict,
-    ) -> Path:
-        """Append one eval result to an in-progress .partial.jsonl file."""
-        return append_jsonl(
-            self._runs_dir(backend_id) / f"{run_id}.partial.jsonl", item,
-        )
-
-    def load_partial_eval(
-        self, backend_id: str, run_id: str,
-    ) -> list[dict[str, Any]]:
-        """Read all items from an in-progress .partial.jsonl file."""
-        return read_jsonl(
-            self._runs_dir(backend_id) / f"{run_id}.partial.jsonl",
-        )
-
-    def list_partial_evals(self, backend_id: str) -> list[dict]:
-        """List in-progress .partial.jsonl files with line counts."""
-        d = self._runs_dir(backend_id)
-        if not d.exists():
-            return []
-        results = []
-        for p in sorted(d.glob("*.partial.jsonl")):
-            run_id = p.name.removesuffix(".partial.jsonl")
-            count = 0
-            with open(p, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        count += 1
-            results.append({"run_id": run_id, "items": count, "path": str(p)})
-        return results
 
     # -- prompt alias groups ---------------------------------------------------
 
@@ -294,14 +264,3 @@ class DatasetRunStore:
                 return set(group)
         return {rp_hash}
 
-    # -- finalization ----------------------------------------------------------
-
-    def finalize_eval_run(
-        self, backend_id: str, run_id: str, run_data: dict,
-    ) -> Path:
-        """Save the complete dataset run and remove the .partial.jsonl file."""
-        detail_path = self.save(backend_id, run_id, run_data)
-        partial_path = self._runs_dir(backend_id) / f"{run_id}.partial.jsonl"
-        if partial_path.exists():
-            partial_path.unlink()
-        return detail_path

@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
-import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
 from api.evaluators.base import EvalResult
 from api.evaluators.exact_match import ExactMatchEvaluator
+from api.models.hashing import HASH_TRUNCATE
 from api.models.prompt_state import PromptState
 from api.services.constants import NO_RESULT
 
@@ -31,22 +30,16 @@ _evaluator = ExactMatchEvaluator({"strip": True})
 
 logger = logging.getLogger(__name__)
 
-# SHA256 truncated to 16 hex chars (64 bits) — sufficient for content-addressed
-# deduplication within a single project.  Collision probability stays negligible
-# for the expected dataset sizes (<100k eval runs).
-HASH_TRUNCATE = 16
-
 
 @dataclass
 class EvalContext:
-    """Groups infrastructure parameters shared across evaluation calls.
+    """Infrastructure bundle shared across evaluation calls.
 
-    The ``search_point`` field bundles prompt_state + model + temperature +
-    pipeline_params (the search-space dimensions).  Infrastructure fields
-    (backend_client, store, obs, …) stay at this level.
+    Pure infrastructure — does NOT carry a SearchPoint.  The search-space
+    dimensions (model, temperature, pipeline_params) live here so that
+    ``evaluate_and_select_winner`` can build per-candidate SearchPoints.
     """
 
-    search_point: SearchPoint
     backend_client: BackendClient
     store: ProjectStore | None = None
     backend_id: str = ""
@@ -55,35 +48,9 @@ class EvalContext:
     dataset_name: str | None = None
     dataset_item_map: dict[str, str] | None = field(default=None)
     source: str = ""
-
-
-def eval_content_hash(
-    rendered_prompt: str,
-    eval_data: list,
-    model: str,
-    temperature: float,
-    pipeline_params: dict | None = None,
-) -> str:
-    """Content-addressed hash for evaluation deduplication.
-
-    ``sha256(rendered_prompt + sorted_query_gt_pairs + model + temperature
-    + pipeline_params)[:16]``
-
-    Order of eval_data queries does not affect the hash.
-    ``pipeline_params`` is included when non-empty so that different
-    pipeline configurations produce distinct hashes.
-    """
-    pairs = sorted(
-        (d.get("query", ""), d.get("ground_truth", "")) for d in eval_data
-    )
-    blob_dict: dict = {
-        "prompt": rendered_prompt, "pairs": pairs,
-        "model": model, "temperature": temperature,
-    }
-    if pipeline_params:
-        blob_dict["pipeline_params"] = pipeline_params
-    blob = json.dumps(blob_dict, sort_keys=True)
-    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
+    model: str = ""
+    temperature: float = 0.0
+    pipeline_params: dict | None = None
 
 
 def build_dataset_run_data(
@@ -119,81 +86,7 @@ def build_dataset_run_data(
     return data
 
 
-def make_incremental_writer(
-    store: ProjectStore, backend_id: str, run_id: str,
-) -> Callable[[dict, int, int], None]:
-    """Return an on_result callback that appends each eval item to a .partial.jsonl."""
-
-    def writer(result: dict, index: int, total: int) -> None:
-        store.dataset_runs.append_eval_item(backend_id, run_id, result)
-
-    return writer
-
-
-def analyze_candidate_coverage(replay_results: list) -> dict:
-    """Analyze ground truth presence in candidate lists.
-
-    Returns dict with keys: rows (list of dicts), covered, total, coverage_pct,
-    rank_distribution (dict), viable (bool).
-    """
-    rows = []
-    for r in replay_results:
-        if r.get("error"):
-            continue
-        pd_data = r.get("pipeline_data", {})
-        candidates = pd_data.get("token_matched_candidates", [])
-        gt = r["ground_truth"]
-
-        candidate_names = []
-        for c in candidates:
-            if isinstance(c, (list, tuple)):
-                candidate_names.append(c[0])
-            else:
-                candidate_names.append(str(c))
-
-        gt_rank = None
-        for i, name in enumerate(candidate_names):
-            if name == gt:
-                gt_rank = i + 1
-                break
-
-        rows.append({
-            "query": r["query"][:50],
-            "ground_truth": gt[:40],
-            "in_candidates": gt_rank is not None,
-            "gt_rank": gt_rank,
-            "num_candidates": len(candidate_names),
-        })
-
-    total = len(rows)
-    covered = sum(1 for r in rows if r["in_candidates"])
-    coverage_pct = covered / total * 100 if total else 0
-
-    # Rank distribution
-    found_ranks = [r["gt_rank"] for r in rows if r["gt_rank"] is not None]
-    rank_distribution = {}
-    if found_ranks:
-        rank_distribution = {
-            "rank_1": sum(1 for r in found_ranks if r == 1),
-            "rank_2_5": sum(1 for r in found_ranks if 2 <= r <= 5),
-            "rank_6_10": sum(1 for r in found_ranks if 6 <= r <= 10),
-            "rank_11_20": sum(1 for r in found_ranks if 11 <= r <= 20),
-            "rank_gt_20": sum(1 for r in found_ranks if r > 20),
-            "mean_rank": sum(found_ranks) / len(found_ranks),
-            "median_rank": statistics.median(found_ranks),
-        }
-
-    return {
-        "rows": rows,
-        "covered": covered,
-        "total": total,
-        "coverage_pct": coverage_pct,
-        "rank_distribution": rank_distribution,
-        "viable": coverage_pct > 50,
-    }
-
-
-def extract_baseline_prompt(exp_data: dict) -> PromptState:
+def load_baseline_prompt(exp_data: dict) -> PromptState:
     """Extract the llm_ranking prompt from experiment data, wrap in PromptState.
 
     Args:
@@ -246,7 +139,7 @@ def _extract_pipeline_data(
         for m in mappings:
             keys.add(m.pipeline_key)
     # Always include infrastructure keys
-    keys |= {"step_timings", "llm_provider", "total_time", "pipeline_params"}
+    keys |= {"step_timings", "llm_provider", "total_time", "pipeline_params", "diagnostics"}
     for key in keys:
         val = backend_data.get(key)
         if val is not None:
@@ -388,7 +281,7 @@ async def evaluate_prompt_batch(
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.warning(
             "Eval batch interrupted at query %d/%d. "
-            "Partial results saved via incremental writer.",
+            "Results so far are lost — re-run to restart.",
             len(results), len(eval_data),
         )
         raise
@@ -461,75 +354,19 @@ def compute_composite_score(
     recall_weight = 1.0 - accuracy_weight
     composite = accuracy_weight * accuracy + recall_weight * token_recall
 
+    # Count queries with pipeline degradation warnings
+    degraded = sum(
+        1 for r in results
+        if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
+    )
+
     return {
         **base,
         "token_recall": token_recall,
         "composite": round(composite, 6),
+        "degraded_queries": degraded,
     }
 
-
-
-def _resolve_partial_resume(
-    eval_data: list,
-    run_id: str,
-    *,
-    store: "ProjectStore | None",
-    backend_id: str,
-) -> tuple[list, list]:
-    """Check for .partial.jsonl crash-recovery file.
-
-    Returns (partial_results, remaining_data).
-    """
-    partial_results: list = []
-    remaining_data = eval_data
-    if not (store and backend_id):
-        return partial_results, remaining_data
-
-    partial_results = store.dataset_runs.load_partial_eval(backend_id, run_id)
-    if partial_results:
-        # Detect stale partials: if the first N results are all errors,
-        # the partial was written during a broken session and is unreliable.
-        leading_errors = 0
-        for pr in partial_results:
-            if pr.get("error"):
-                leading_errors += 1
-            else:
-                break
-        if leading_errors >= 5:
-            logger.warning(
-                "Partial eval %s: %d leading consecutive errors "
-                "— discarding stale partial file",
-                run_id, leading_errors,
-            )
-            partial_path = (
-                store.dataset_runs._runs_dir(backend_id)
-                / f"{run_id}.partial.jsonl"
-            )
-            if partial_path.exists():
-                partial_path.unlink()
-            partial_results = []
-
-    if partial_results:
-        valid = True
-        for i, (pr, ed) in enumerate(zip(partial_results, remaining_data)):
-            if pr.get("query") != ed.get("query"):
-                logger.warning(
-                    "Partial eval %s: query mismatch at index %d "
-                    "(%r != %r) — discarding stale partials",
-                    run_id, i, pr.get("query", "")[:40], ed.get("query", "")[:40],
-                )
-                valid = False
-                break
-
-        if not valid:
-            partial_results = []
-        elif len(partial_results) >= len(remaining_data):
-            partial_results = partial_results[:len(remaining_data)]
-            remaining_data = []
-        else:
-            remaining_data = remaining_data[len(partial_results):]
-
-    return partial_results, remaining_data
 
 
 def _finalize_observability(
@@ -567,36 +404,67 @@ def _finalize_observability(
         logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
 
 
+def _try_cached_lookup(
+    store: "ProjectStore",
+    backend_id: str,
+    content_hash: str,
+    rendered: str,
+    search_point: "SearchPoint",
+    eval_data: list,
+    pipeline_schema: "PipelineSchema | None",
+    on_result: Callable | None,
+) -> tuple[list, dict, bool] | None:
+    """Check hash dedup and alias groups for a cached result.
+
+    Returns (results, scores, True) on cache hit, or None on miss.
+    """
+    # Direct content-hash lookup
+    existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
+    if existing:
+        results = existing["dataset_run_items"]
+        scores = compute_composite_score(results, pipeline_schema)
+        if on_result is not None:
+            for i, r in enumerate(results):
+                on_result({**r, "cached": True}, i, len(results))
+        return results, scores, True
+
+    # Alias-group fallback (semantically equivalent prompt forms)
+    rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
+    alias_match = store.dataset_runs.load_by_alias(
+        backend_id, rp_hash, search_point.model, search_point.temperature,
+        search_point.pipeline_params, len(eval_data),
+    )
+    if alias_match:
+        results = alias_match["dataset_run_items"]
+        scores = compute_composite_score(results, pipeline_schema)
+        if on_result is not None:
+            for i, r in enumerate(results):
+                on_result({**r, "cached": True}, i, len(results))
+        return results, scores, True
+
+    return None
+
+
 async def evaluate_prompt_cached(
     search_point: "SearchPoint",
     eval_data: list,
-    backend_client: "BackendClient | None" = None,
+    ctx: EvalContext,
     *,
-    store: "ProjectStore | None" = None,
-    backend_id: str = "",
     force: bool = False,
     label: str = "Eval",
     on_result: Callable | None = None,
-    obs: "ObsLogger | None" = None,
     source: str = "",
-    pipeline_schema: "PipelineSchema | None" = None,
-    dataset_name: str | None = None,
-    dataset_item_map: dict[str, str] | None = None,
-    ctx: EvalContext | None = None,
 ) -> tuple[list, dict, bool]:
-    """Evaluate a prompt with deduplication, partial resume, and finalization.
+    """Evaluate a prompt with deduplication and finalization.
 
     Core evaluation logic without UI output. Handles:
     - Content-hash deduplication via ProjectStore
     - Alias-aware fallback via prompt alias groups
-    - Partial result resume after crash
-    - Incremental writes for crash protection
     - Final run storage
 
     The ``search_point`` bundles the search-space dimensions
     (prompt_state, model, temperature, pipeline_params).  Infrastructure
-    params can be passed individually **or** grouped in an ``EvalContext``
-    via the ``ctx`` keyword.
+    params (backend_client, store, obs, …) live on ``ctx``.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
@@ -606,96 +474,39 @@ async def evaluate_prompt_cached(
     model = search_point.model
     temperature = search_point.temperature
 
-    # Resolve infrastructure from EvalContext when provided
-    if ctx is not None:
-        backend_client = backend_client or ctx.backend_client
-        store = store or ctx.store
-        backend_id = backend_id or ctx.backend_id
-        pipeline_schema = pipeline_schema or ctx.pipeline_schema
-        obs = obs or ctx.obs
-        dataset_name = dataset_name or ctx.dataset_name
-        dataset_item_map = dataset_item_map or ctx.dataset_item_map
-        source = source or ctx.source
-
-    if backend_client is None:
-        raise ValueError("backend_client is required (pass directly or via ctx)")
+    # Unpack infrastructure from ctx
+    backend_client = ctx.backend_client
+    store = ctx.store
+    backend_id = ctx.backend_id
+    pipeline_schema = ctx.pipeline_schema
+    obs = ctx.obs
+    source = source or ctx.source
 
     rendered = prompt_state.render()
     content_hash = search_point.content_hash(eval_data)
 
-    # --- dedup lookup ---
+    # --- dedup lookup (content hash + alias group fallback) ---
     if store and backend_id and not force:
-        existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
-        if existing:
-            results = existing["dataset_run_items"]
-            scores = compute_composite_score(results, pipeline_schema)
-            if on_result is not None:
-                for i, r in enumerate(results):
-                    on_result({**r, "cached": True}, i, len(results))
-            return results, scores, True
-
-        # --- alias fallback (find cached run via prompt alias groups) ---
-        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
-        alias_match = store.dataset_runs.load_by_alias(
-            backend_id, rp_hash, model, temperature,
-            search_point.pipeline_params, len(eval_data),
+        cached = _try_cached_lookup(
+            store, backend_id, content_hash, rendered,
+            search_point, eval_data, pipeline_schema, on_result,
         )
-        if alias_match:
-            results = alias_match["dataset_run_items"]
-            scores = compute_composite_score(results, pipeline_schema)
-            if on_result is not None:
-                for i, r in enumerate(results):
-                    on_result({**r, "cached": True}, i, len(results))
-            return results, scores, True
+        if cached is not None:
+            return cached
 
-    # --- resolve partial resume (crash recovery) ---
+    # --- evaluate via backend ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    partial_results, remaining_data = _resolve_partial_resume(
-        eval_data, run_id, store=store, backend_id=backend_id,
-    )
-
-    if partial_results:
-        logger.info(
-            "Resuming %s: %d cached results, %d remaining",
-            run_id, len(partial_results), len(remaining_data),
-        )
-
-    # --- replay cached partial results to callback ---
-    callback_offset = 0
-    if on_result is not None and partial_results:
-        for i, r in enumerate(partial_results):
-            on_result({**r, "cached": True}, callback_offset + i, len(eval_data))
-
-    # --- evaluate remaining via backend ---
-    _incremental_writer = None
-    if store and backend_id:
-        _incremental_writer = make_incremental_writer(store, backend_id, run_id)
-
-    _cb_offset = callback_offset + len(partial_results)
-
     def _on_result(result: dict, index: int, total: int) -> None:
-        if _incremental_writer is not None:
-            _incremental_writer(result, index, total)
         if on_result is not None:
-            on_result(result, _cb_offset + index, len(eval_data))
+            on_result(result, index, len(eval_data))
 
-    try:
-        new_results = await evaluate_prompt_batch(
-            search_point, remaining_data, backend_client,
-            on_result=_on_result,
-            pipeline_schema=pipeline_schema,
-        )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        logger.warning(
-            "evaluate_prompt_cached interrupted for %s. "
-            "Partial results saved to %s.partial.jsonl — will resume on next run.",
-            run_id, run_id,
-        )
-        raise
-
-    results = partial_results + new_results
+    results = await evaluate_prompt_batch(
+        search_point, eval_data, backend_client,
+        on_result=_on_result,
+        pipeline_schema=pipeline_schema,
+    )
     scores = compute_composite_score(results, pipeline_schema)
 
     # --- finalize: save complete run + observability ---
@@ -704,7 +515,7 @@ async def evaluate_prompt_cached(
             run_id, label, content_hash, search_point,
             scores, results, source=source,
         )
-        store.dataset_runs.finalize_eval_run(backend_id, run_id, run_data)
+        store.dataset_runs.save(backend_id, run_id, run_data)
 
         _finalize_observability(
             store, backend_id, run_id, content_hash, scores,

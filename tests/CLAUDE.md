@@ -3,10 +3,19 @@
 ## Running tests
 
 ```bash
-pytest -v --tb=short              # all tests
-pytest tests/test_prompt_state.py -v   # single file
-pytest tests/test_prompt_state.py::test_create_and_derive -v  # single function
+pytest                              # all tests, quiet output (default: -q --tb=short)
+pytest -m "not slow"                # skip orchestrator integration tests (~4s)
+pytest tests/test_prompt_state.py   # single file
+pytest tests/test_prompt_state.py::test_create_and_derive  # single function
+pytest -v                           # verbose override when debugging a failure
 ```
+
+## Markers
+
+| Marker | Meaning |
+|--------|---------|
+| `slow` | Full orchestrator integration tests (feedback cycle, e2e, cycle resume). ~1-2s each. |
+| `asyncio` | Async tests (auto-configured via `asyncio_mode = "auto"`) |
 
 ## pytest config (pyproject.toml)
 

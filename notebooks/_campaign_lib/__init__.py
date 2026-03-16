@@ -14,6 +14,7 @@ from ._optimize import *   # noqa: F403
 
 # Private names used by tests (not exported by *)
 from ._display import _step_tag, _fmt_query_result, _infer_terminated_step  # noqa: F401
+from ._stats import wilson_ci, proportion_test, min_detectable_effect  # noqa: F401
 
 # Public API -- every name the notebook imports.
 __all__ = [  # noqa: F405
@@ -39,7 +40,7 @@ __all__ = [  # noqa: F405
     # Grid plan discovery
     "list_grid_plans", "load_grid_plan_results",
     # Pipeline config
-    "configure_pipeline", "load_pipeline_config", "build_pipeline_params",
+    "configure_pipeline",
     # Smart search
     "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
     "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
@@ -47,7 +48,7 @@ __all__ = [  # noqa: F405
     "select_scan_winner_notebook", "build_historical_index", "load_task_description",
     "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
     "audit_historical_data", "run_scan_advisor", "seed_campaign_from_scan",
-    "prepare_scan_baseline", "preview_advisor_prompt",
+    "prepare_scan_baseline", "preview_advisor_prompt", "display_variant_library",
     # Campaign
     "show_feedback_preflight", "run_feedback_cycle_notebook", "save_campaign_winner",
     "display_progress", "run_manual_round",
@@ -56,6 +57,8 @@ __all__ = [  # noqa: F405
     "show_grid_overview", "smoke_test_override",
     # Pipeline snapshot
     "show_pipeline_snapshot",
+    # Scan analytics
+    "show_scan_leaderboard", "show_scan_query_difficulty",
     # Campaign results display
     "show_campaign_summary", "show_flip_tracking", "show_lineage_chain",
     # Langfuse

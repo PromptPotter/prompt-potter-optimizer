@@ -25,9 +25,9 @@ Future: non-parametric significance tests and confidence intervals on accuracy d
 
 **The Human Loop (Sensitivity Scan)** — You analyze the prompt landscape. A one-at-a-time perturbation scan measures which prompt axes actually matter (persona, thinking style, pipeline temperature, etc.) and how sensitive accuracy is to each. The coverage advisor shows what's already been measured and what still needs exploration. You pick the best starting point.
 
-**The AI Loop (Potter)** — From that starting point, an automated feedback cycle generates candidate prompts via LLM, evaluates each against the backend, selects winners, and iterates. This is the 3-layer PromptState optimization: Layer 1 (prompt fields) changes every round, Layer 2 (context) adjusts when Layer 1 stalls, Layer 3 (strategy) rarely changes.
+**The AI Loop (Potter)** — From that starting point, a **critique-guided** feedback cycle iterates: each evaluation produces a structured **critique** of failures (or successes), which feeds forward into the next round's candidate generation alongside sampled **thinking styles** as mutation guidance. This separates failure analysis from candidate generation (inspired by [PromptWizard](https://arxiv.org/abs/2405.18369)'s critique-and-refine pattern). Candidates are evaluated against the backend and winners selected by composite score. 3-layer PromptState escalation: Layer 1 (prompt fields) changes every round, Layer 2 (context) adjusts when Layer 1 stalls, Layer 3 (strategy) rarely changes. The critique and thinking styles operate at the **optimizer agent** level (guiding the eval LLM that generates candidates) — they are not injected into the pipeline prompt being optimized.
 
-**Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [default variant library](api/config/prompt_variants.json). This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
+**Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [variant library](api/config/prompt_variants.json) that includes building blocks from published research (e.g. PromptWizard's 40 thinking styles). Each variant carries provenance metadata (source, year) for traceability. This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
 
 Every evaluation point is a **SearchPoint** — an immutable bundle of prompt + model + temperature + pipeline params. All mutations via `.derive()`. Content-hashable, so every evaluation is stored once and discoverable by any workflow.
 
@@ -38,22 +38,20 @@ Every evaluation point is a **SearchPoint** — an immutable bundle of prompt + 
 ```
   HUMAN LOOP                           AI LOOP (Potter)
   ──────────                           ────────────────
-  Sensitivity Scan                     Feedback Cycle
-  ┌──────────────────┐                 ┌──────────────────┐
-  │ Measure axes     │  select best    │ Generate         │
-  │ Classify by      │───starting──────►  candidates      │
-  │  sensitivity     │  point          │ Evaluate via     │
-  │ Show coverage    │                 │  backend         │
-  └──────┬───────────┘                 │ Select winner    │
-         │                             │ Iterate until    │
-         │  all eval data              │  patience runs   │
-         │  feeds back                 │  out             │
-         │                             └────────┬─────────┘
+  Sensitivity Scan                     Critique-Guided Feedback Cycle
+  ┌──────────────────┐                 ┌───────────────────────────┐
+  │ Measure axes     │  select best    │ Growth: generate          │
+  │ Classify by      │───starting──────►  candidates using         │
+  │  sensitivity     │  point          │  critique + thinking      │
+  │ Show coverage    │                 │  styles                   │
+  └──────┬───────────┘                 │ Eval: evaluate via        │
+         │                             │  backend, select winner   │
+         │  all eval data              │ Critique: analyze         │
+         │  feeds back                 │  failures → next round    │
+         │                             └────────┬──────────────────┘
          │                                      │
          └──────────────◄───────────────────────┘
-              richer landscape
-              → better starting point
-              → repeat
+              richer landscape → better starting point → repeat
 ```
 
 ```

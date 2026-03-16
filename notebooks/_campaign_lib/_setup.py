@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from api.models.prompt_state import PromptState
-from api.services.backend_client import (
-    build_pipeline_params,
-    load_pipeline_config,
-)
-from api.services.llm_client import AnthropicClient, GroqClient, LLMClientBase, OpenAIClient
+from api.services.backend_client import load_pipeline_config
+from api.services.llm_client import LLMClientBase, get_llm_client
 from api.services.project_store import ProjectStore
 
 from api.services.campaign.campaign_init import init_services as _init_services
@@ -29,7 +25,7 @@ __all__ = [
     "prepare_eval_context",
     "SHEET_COLUMN_MAP",
     # Pipeline config
-    "configure_pipeline", "load_pipeline_config", "build_pipeline_params",
+    "configure_pipeline",
     # Pipeline snapshot
     "show_pipeline_snapshot",
     # Notebook-facing wrappers
@@ -117,42 +113,20 @@ async def smoke_test_override(
 # ---------------------------------------------------------------------------
 
 
-def _infer_api_key(provider_url: str) -> str:
-    """Return the appropriate API key env-var value for a provider URL."""
-    if "anthropic.com" in provider_url:
-        return os.environ.get("ANTHROPIC_API_KEY", "")
-    if "openai.com" in provider_url:
-        return os.environ.get("OPENAI_API_KEY", "")
-    return os.environ.get("GROQ_API_KEY", "")
+def _url_to_provider(url: str) -> str:
+    """Map a provider base URL to a provider name for get_llm_client()."""
+    if "anthropic.com" in url:
+        return "anthropic"
+    if "openai.com" in url:
+        return "openai"
+    return "groq"
 
 
-def _make_llm_client(provider_url: str = "", api_key: str = "") -> LLMClientBase:
-    """Create an LLM client from a provider URL or key."""
-    if "anthropic.com" in provider_url:
-        return AnthropicClient(api_key=api_key)
-    if "groq.com" in provider_url:
-        return GroqClient(api_key=api_key)
-    if "openai.com" in provider_url:
-        return OpenAIClient(api_key=api_key)
-    return GroqClient(api_key=api_key)
-
-
-def setup_llm(
-    campaign_config: dict, api_key: str = "",
-) -> tuple[LLMClientBase, str]:
-    """Create LLM client + model from campaign_config['eval_llm'].
-
-    When *api_key* is empty, auto-detects the correct environment variable
-    based on the provider URL (ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY).
-
-    Returns:
-        (llm_client, model) tuple for passing to service functions.
-    """
+def setup_llm(campaign_config: dict) -> tuple[LLMClientBase, str]:
+    """Create LLM client + model from campaign_config['eval_llm']."""
     eval_llm = campaign_config["eval_llm"]
-    provider_url = eval_llm.get("provider_url", "")
-    key = api_key or _infer_api_key(provider_url)
-    client = _make_llm_client(provider_url, key)
-    return client, eval_llm.get("model", "")
+    provider = _url_to_provider(eval_llm.get("provider_url", ""))
+    return get_llm_client(provider), eval_llm.get("model", "")
 
 
 def save_campaign_winner(
@@ -226,24 +200,41 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
 
 
 def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
-    """Build pipeline_params from experiment data and campaign_config.
+    """Build pipeline_params from live pipeline schema and campaign_config.
 
-    Reads ``exclude_steps`` and ``pipeline_overrides`` from *campaign_config*,
-    builds the active-step params, stores the result back into
+    Uses ``svc["pipeline_schema"]`` (from ``GET /pipeline``) as the source of
+    truth for step names, falling back to experiment data only when the schema
+    is unavailable.  Reads ``exclude_steps`` and ``pipeline_overrides`` from
+    *campaign_config*, stores the result back into
     ``campaign_config["pipeline_params"]``, and returns the params dict.
     """
-    pipeline_config = load_pipeline_config(svc["exp_data"])
+    pipeline_schema = svc.get("pipeline_schema")
     exclude = campaign_config.get("exclude_steps", [])
     overrides = campaign_config.get("pipeline_overrides")
 
-    pipeline_params = build_pipeline_params(
-        pipeline_config,
-        overrides=overrides,
-        exclude_steps=exclude,
-    )
+    if pipeline_schema:
+        all_steps = [s.name for s in pipeline_schema.steps]
+    else:
+        pipeline_config = load_pipeline_config(svc["exp_data"])
+        all_steps = [s["name"] for s in pipeline_config["steps"]]
+
+    active_steps = [s for s in all_steps if s not in (exclude or [])]
+    pipeline_params: dict = {"steps": active_steps}
+
+    # Apply overrides via schema if available
+    if overrides and pipeline_schema:
+        for flat_name, value in overrides.items():
+            node_config = pipeline_schema.resolve_flat_param(flat_name)
+            if node_config:
+                pipeline_params.update(node_config)
+            else:
+                pipeline_params[flat_name] = value
+    elif overrides:
+        pipeline_params.update(overrides)
+
     campaign_config["pipeline_params"] = pipeline_params
 
-    print(f"Active steps: {pipeline_params['steps']}")
+    print(f"Active steps: {active_steps}")
     if exclude:
         print(f"  Excluded: {exclude}")
 
@@ -274,6 +265,7 @@ async def init_services(
         experiment_id=experiment_id,
         project_root=project_root,
         dataset_name=dataset_name,
+        on_status=print,
     )
 
     exp_data = svc.get("exp_data", {})
@@ -366,7 +358,7 @@ async def prepare_eval_context(
     Returns:
         (baseline, eval_data, backend_status)
     """
-    from api.services.prompt_eval import extract_baseline_prompt as load_baseline_prompt
+    from api.services.prompt_eval import load_baseline_prompt
     baseline = load_baseline_prompt(svc["exp_data"])
     eval_data = train_data or []
     backend_status = await show_backend_status(svc["backend_client"])

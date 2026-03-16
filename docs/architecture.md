@@ -14,25 +14,26 @@ All core logic in `api/services/`. See [`api/services/CLAUDE.md`](../api/service
 ```
   HUMAN LOOP                           AI LOOP (Potter)
   ──────────                           ────────────────
-  Sensitivity Scan                     Feedback Cycle
-  ┌──────────────────┐                 ┌──────────────────┐
-  │ Measure axes     │  select best    │ Generate         │
-  │ Classify by      │───starting──────►  candidates      │
-  │  sensitivity     │  point          │ Evaluate via     │
-  │ Show coverage    │                 │  backend         │
-  └──────┬───────────┘                 │ Select winner    │
-         │                             │ Iterate until    │
-         │  all eval data              │  patience runs   │
-         │  feeds back                 │  out             │
-         │                             └────────┬─────────┘
+  Sensitivity Scan                     Critique-Guided Feedback Cycle
+  ┌──────────────────┐                 ┌───────────────────────────┐
+  │ Measure axes     │  select best    │ Growth: generate          │
+  │ Classify by      │───starting──────►  candidates using         │
+  │  sensitivity     │  point          │  critique + thinking      │
+  │ Show leaderboard │                 │  styles + scan analytics  │
+  │ Query difficulty  │  scan context  │ Eval: evaluate via        │
+  │ Show coverage    │─────────────────►  backend, select winner   │
+  └──────┬───────────┘                 │ Critique: analyze         │
+         │                             │  failures → next round    │
+         │  all eval data              │ L1→L2→L3 escalation      │
+         │  feeds back                 └────────┬──────────────────┘
          │                                      │
          └──────────────◄───────────────────────┘
               richer landscape → better starting point → repeat
 ```
 
-**Human Loop** — OAT perturbation scan measures which axes matter. You pick the best starting point.
+**Human Loop** — OAT perturbation scan measures which axes matter. Variant leaderboard and query difficulty analytics provide visibility. You pick the best starting point.
 
-**AI Loop** — Feedback cycle generates candidates, evaluates, selects winners. 3-layer escalation (Layer 1 → Layer 2 → Layer 3).
+**AI Loop** — Critique-guided feedback cycle. Each evaluation produces a **critique** (structured failure/success analysis) that feeds forward into the next round's candidate generation alongside sampled **thinking styles** as mutation guidance (PromptWizard-inspired). Critique and styles operate at the **optimizer agent level** — they guide the eval LLM, not the pipeline prompt. When scan data is available, each round also uses scan analytics (leaderboard, sensitivity, difficulty, tested values) to generate informed pipeline_param combinations with per-candidate overrides. 3-layer escalation (L1 generate → L2 refine_context → L3 modify_plan) on diminishing returns.
 
 ## Data Model
 

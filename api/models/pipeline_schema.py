@@ -312,10 +312,17 @@ class PipelineSchema(BaseModel):
                 weighted_sum += w * m_val
         composite = weighted_sum
 
+        # Count queries with pipeline degradation warnings
+        degraded = sum(
+            1 for r in results
+            if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
+        )
+
         return {
             **base,
             **metric_values,
             "composite": round(composite, 6),
+            "degraded_queries": degraded,
         }
 
     @staticmethod

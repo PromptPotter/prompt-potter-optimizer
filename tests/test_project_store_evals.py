@@ -1,7 +1,12 @@
 """Tests for ProjectStore dataset_runs (eval result caching)."""
 import json
 
-from _helpers import make_dataset_run
+import pytest
+
+from api.services.search import build_prompt_result_index
+from api.services.stores.dataset_run_store import DatasetRunStore
+
+from _helpers import make_dataset_run, rp_hash as _rp_hash
 
 
 def _make_run_data(run_id="baseline_aabbccdd", content_hash="aabbccdd11223344", name="Baseline"):
@@ -80,63 +85,6 @@ def test_upsert_replaces_same_hash(tmp_store):
 # ---------------------------------------------------------------------------
 
 
-def test_append_and_load_partial_eval(tmp_store):
-    """append_eval_item writes items that load_partial_eval reads back."""
-    items = [
-        {"query": "q1", "hit": True, "error": None},
-        {"query": "q2", "hit": False, "error": None},
-        {"query": "q3", "hit": True, "error": None},
-    ]
-    for item in items:
-        tmp_store.dataset_runs.append_eval_item("b1", "run_abc", item)
-
-    loaded = tmp_store.dataset_runs.load_partial_eval("b1", "run_abc")
-    assert len(loaded) == 3
-    assert loaded[0]["query"] == "q1"
-    assert loaded[2]["hit"] is True
-
-
-def test_finalize_eval_run_removes_partial(tmp_store):
-    """finalize_eval_run saves detail file and deletes .partial.jsonl."""
-    tmp_store.dataset_runs.append_eval_item(
-        "b1", "run_xyz", {"query": "q1", "hit": True, "error": None},
-    )
-    tmp_store.dataset_runs.append_eval_item(
-        "b1", "run_xyz", {"query": "q2", "hit": False, "error": None},
-    )
-
-    partial_path = tmp_store.base_dir / "b1" / "dataset_runs" / "run_xyz.partial.jsonl"
-    assert partial_path.exists()
-
-    run_data = _make_run_data("run_xyz", "hash_xyz")
-    detail_path = tmp_store.dataset_runs.finalize_eval_run("b1", "run_xyz", run_data)
-
-    assert not partial_path.exists()
-    assert detail_path.exists()
-    entries = tmp_store.dataset_runs.list_all("b1")
-    assert any(e["run_id"] == "run_xyz" for e in entries)
-
-
-def test_list_partial_evals(tmp_store):
-    """list_partial_evals returns metadata, finalized runs disappear."""
-    tmp_store.dataset_runs.append_eval_item("b1", "alpha_run", {"query": "q1", "hit": True})
-    tmp_store.dataset_runs.append_eval_item("b1", "beta_run", {"query": "q1", "hit": True})
-    tmp_store.dataset_runs.append_eval_item("b1", "beta_run", {"query": "q2", "hit": False})
-    tmp_store.dataset_runs.append_eval_item("b1", "beta_run", {"query": "q3", "hit": True})
-
-    partials = tmp_store.dataset_runs.list_partial_evals("b1")
-    assert len(partials) == 2
-    assert partials[0]["run_id"] == "alpha_run"
-    assert partials[0]["items"] == 1
-    assert partials[1]["run_id"] == "beta_run"
-    assert partials[1]["items"] == 3
-
-    # Finalized runs disappear
-    run_data = _make_run_data("beta_run", "hash_beta")
-    tmp_store.dataset_runs.finalize_eval_run("b1", "beta_run", run_data)
-    assert len(tmp_store.dataset_runs.list_partial_evals("b1")) == 1
-
-
 # ---------------------------------------------------------------------------
 # Provenance — source field in dataset_runs
 # ---------------------------------------------------------------------------
@@ -196,3 +144,165 @@ def test_source_persisted_in_index(tmp_store):
 
     entries = tmp_store.dataset_runs.list_all("b1")
     assert entries[0]["source"] == "grid_search"
+
+
+# ---------------------------------------------------------------------------
+# Alias-based lookup (moved from test_load_by_alias.py)
+# ---------------------------------------------------------------------------
+
+
+def _make_alias_run(run_id, rp_hash, model="m1", temperature=0.5,
+                    pipeline_params=None, item_count=3):
+    return {
+        "run_id": run_id,
+        "name": run_id,
+        "content_hash": f"ch_{run_id}",
+        "prompt_state_id": "ps1",
+        "rendered_prompt_hash": rp_hash,
+        "model": model,
+        "temperature": temperature,
+        "item_count": item_count,
+        "scores": {"accuracy": 0.8, "hits": 2, "total": item_count},
+        "source": "test",
+        "created_at": "2026-01-01T00:00:00Z",
+        "dataset_run_items": [{"query": f"q{i}"} for i in range(item_count)],
+        **({"pipeline_params": pipeline_params} if pipeline_params else {}),
+    }
+
+
+class TestLoadByAlias:
+    @pytest.fixture()
+    def drs(self, tmp_path):
+        return DatasetRunStore(tmp_path)
+
+    def test_load_exact_alias_match(self, drs):
+        """Save with rp_hash A, register alias(A, B), lookup via B -> hit."""
+        drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
+        drs.register_alias("b1", "hash_a", "hash_b")
+
+        result = drs.load_by_alias("b1", "hash_b", "m1", 0.5, None, 3)
+        assert result is not None
+        assert result["run_id"] == "r1"
+
+    def test_no_alias_returns_none(self, drs):
+        """No alias registered -> None."""
+        drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
+
+        result = drs.load_by_alias("b1", "hash_x", "m1", 0.5, None, 3)
+        assert result is None
+
+    def test_model_mismatch_returns_none(self, drs):
+        """Alias matches but model differs -> None."""
+        drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
+        drs.register_alias("b1", "hash_a", "hash_b")
+
+        result = drs.load_by_alias("b1", "hash_b", "wrong_model", 0.5, None, 3)
+        assert result is None
+
+    def test_steps_only_difference_matches(self, drs):
+        """Alias matches and only 'steps' differs -> hit (steps-blind)."""
+        drs.save("b1", "r1", _make_alias_run("r1", "hash_a", pipeline_params={"steps": ["a"]}))
+        drs.register_alias("b1", "hash_a", "hash_b")
+
+        result = drs.load_by_alias("b1", "hash_b", "m1", 0.5, {"steps": ["b"]}, 3)
+        assert result is not None
+        assert result["run_id"] == "r1"
+
+    def test_non_steps_pipeline_params_mismatch(self, drs):
+        """Alias matches but non-steps pipeline_params differ -> None."""
+        drs.save("b1", "r1", _make_alias_run(
+            "r1", "hash_a", pipeline_params={"steps": ["a"], "ranking_temperature": 0.5},
+        ))
+        drs.register_alias("b1", "hash_a", "hash_b")
+
+        result = drs.load_by_alias("b1", "hash_b", "m1", 0.5, {"ranking_temperature": 0.9}, 3)
+        assert result is None
+
+    def test_item_count_mismatch(self, drs):
+        """Alias matches but item_count differs -> None."""
+        drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
+        drs.register_alias("b1", "hash_a", "hash_b")
+
+        result = drs.load_by_alias("b1", "hash_b", "m1", 0.5, None, 99)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Prompt result index (moved from test_prompt_result_index.py)
+# ---------------------------------------------------------------------------
+
+
+def _make_index_run(run_id, rendered_prompt, queries):
+    items = [
+        {"query": q, "predicted": "pred" if hit else "wrong",
+         "ground_truth": "pred", "hit": hit,
+         "confidence": 0.9 if hit else 0.1, "error": None}
+        for q, hit in queries
+    ]
+    hits = sum(1 for _, h in queries if h)
+    total = len(queries)
+    return make_dataset_run(
+        run_id, accuracy=hits / total if total else 0.0,
+        items=items, content_hash=f"ch_{run_id}",
+        rendered_prompt=rendered_prompt,
+    )
+
+
+class TestPromptResultIndex:
+    def test_build_and_load_single_run(self, tmp_store):
+        """Single run: correct index + load_by_id works."""
+        run = _make_index_run("r1", "prompt A", [("q1", True), ("q2", False)])
+        tmp_store.dataset_runs.save("b1", run["run_id"], run)
+
+        index = build_prompt_result_index(tmp_store, "b1")
+        rp_hash = _rp_hash("prompt A")
+        assert rp_hash in index
+        assert index[rp_hash]["q1"]["hit"] is True
+        assert index[rp_hash]["q2"]["hit"] is False
+
+        loaded = tmp_store.dataset_runs.load_by_id("b1", "r1")
+        assert loaded is not None
+        assert loaded["run_id"] == "r1"
+
+    def test_build_index_multiple_runs_same_prompt(self, tmp_store):
+        """Multiple runs with same rendered prompt merge queries."""
+        run1 = _make_index_run("r1", "prompt A", [("q1", True), ("q2", False)])
+        run2 = _make_index_run("r2", "prompt A", [("q3", True), ("q4", True)])
+        tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
+        tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
+
+        index = build_prompt_result_index(tmp_store, "b1")
+        rp_hash = _rp_hash("prompt A")
+        assert len(index) == 1
+        assert len(index[rp_hash]) == 4
+
+    def test_build_index_different_prompts(self, tmp_store):
+        """Runs with different prompts produce separate index entries."""
+        run1 = _make_index_run("r1", "prompt A", [("q1", True)])
+        run2 = _make_index_run("r2", "prompt B", [("q1", False)])
+        tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
+        tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
+
+        index = build_prompt_result_index(tmp_store, "b1")
+        assert len(index) == 2
+
+    def test_build_index_later_run_overwrites_query(self, tmp_store):
+        """Same query in multiple runs for same prompt: last-write-wins."""
+        run1 = _make_index_run("r1", "prompt A", [("q1", True)])
+        run2 = _make_index_run("r2", "prompt A", [("q1", False)])
+        tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
+        tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
+
+        index = build_prompt_result_index(tmp_store, "b1")
+        rp_hash = _rp_hash("prompt A")
+        assert rp_hash in index
+        assert "q1" in index[rp_hash]
+
+    def test_index_ignores_runs_without_hash(self, tmp_store):
+        """Runs missing rendered_prompt_hash are skipped."""
+        run = _make_index_run("r1", "prompt A", [("q1", True)])
+        del run["rendered_prompt_hash"]
+        tmp_store.dataset_runs.save("b1", run["run_id"], run)
+
+        index = build_prompt_result_index(tmp_store, "b1")
+        assert index == {}

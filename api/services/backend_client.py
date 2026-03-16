@@ -101,6 +101,16 @@ def build_pipeline_params(
     return params
 
 
+# TermNorm-specific query fields extracted from query_data.
+# M7: replace with ConnectorProtocol.extract_query_fields()
+_TERMNORM_QUERY_FIELDS = ("bom_material", "process")
+_TERMNORM_VARIANT_B_FIELDS = {
+    "variant_b_predicted": ("original_predicted", ""),
+    "variant_b_latency_ms": ("original_latency_ms", 0),
+    "variant_b_confidence": ("original_confidence", 0),
+}
+
+
 def _build_result_dict(
     query_data: dict[str, Any],
     *,
@@ -119,12 +129,6 @@ def _build_result_dict(
     """
     result: dict[str, Any] = {
         "query": query_data["query"],
-        "bom_material": query_data["bom_material"],
-        "process": query_data["process"],
-        "query_fields": {
-            "bom_material": query_data["bom_material"],
-            "process": query_data["process"],
-        },
         "ground_truth": query_data["ground_truth"],
         "predicted": predicted,
         "confidence": confidence,
@@ -132,10 +136,13 @@ def _build_result_dict(
         "latency_ms": latency_ms,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "status": status,
-        "variant_b_predicted": query_data.get("original_predicted", ""),
-        "variant_b_latency_ms": query_data.get("original_latency_ms", 0),
-        "variant_b_confidence": query_data.get("original_confidence", 0),
     }
+    # TermNorm-specific fields (M7: move to connector)
+    for f in _TERMNORM_QUERY_FIELDS:
+        result[f] = query_data[f]
+    result["query_fields"] = {f: query_data[f] for f in _TERMNORM_QUERY_FIELDS}
+    for dest, (src, default) in _TERMNORM_VARIANT_B_FIELDS.items():
+        result[dest] = query_data.get(src, default)
     if pipeline_data is not None:
         result["pipeline_data"] = pipeline_data
         result["web_search_status"] = pipeline_data.get("web_search_status")
@@ -151,6 +158,19 @@ class BackendClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._session_terms: list[str] | None = None
+        self._http: httpx.AsyncClient | None = None
+
+    def _get_http(self) -> httpx.AsyncClient:
+        """Return a shared httpx client, creating lazily on first use."""
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(timeout=self.timeout)
+        return self._http
+
+    async def aclose(self) -> None:
+        """Close the shared HTTP client."""
+        if self._http and not self._http.is_closed:
+            await self._http.aclose()
+            self._http = None
 
     # -- status check -------------------------------------------------------
 
@@ -163,10 +183,9 @@ class BackendClient:
         - ``"status": "unreachable"`` for connection errors
         """
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.get(f"{self.base_url}/status")
-                resp.raise_for_status()
-                return resp.json()
+            resp = await self._get_http().get(f"{self.base_url}/status")
+            resp.raise_for_status()
+            return resp.json()
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 logger.info("Backend /status endpoint not found (404)")
@@ -191,19 +210,17 @@ class BackendClient:
         Includes node configs, models, temperatures, and resolved schema/prompt
         registry data (if the backend supports enrichment).
         """
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(f"{self.base_url}/pipeline")
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._get_http().get(f"{self.base_url}/pipeline")
+        resp.raise_for_status()
+        return resp.json()
 
     # -- sync operations (fetch verbatim API responses) -------------------
 
     async def fetch_experiments(self) -> dict[str, Any]:
         """GET /experiments — returns full response verbatim."""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(f"{self.base_url}/experiments")
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._get_http().get(f"{self.base_url}/experiments")
+        resp.raise_for_status()
+        return resp.json()
 
     async def fetch_experiment(
         self, experiment_id: str, include_traces: bool = True,
@@ -216,13 +233,12 @@ class BackendClient:
         params: dict[str, str] = {}
         if include_traces:
             params["include_traces"] = "true"
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(
-                f"{self.base_url}/experiments/{experiment_id}/mappings",
-                params=params,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._get_http().get(
+            f"{self.base_url}/experiments/{experiment_id}/mappings",
+            params=params,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     # -- replay operations ------------------------------------------------
 
@@ -232,14 +248,13 @@ class BackendClient:
         Stores ``terms`` internally so that ``run_match()`` can
         auto-reinitialize the session if the backend restarts.
         """
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{self.base_url}/sessions",
-                json={"terms": terms},
-            )
-            resp.raise_for_status()
-            self._session_terms = terms
-            return resp.json()
+        resp = await self._get_http().post(
+            f"{self.base_url}/sessions",
+            json={"terms": terms},
+        )
+        resp.raise_for_status()
+        self._session_terms = terms
+        return resp.json()
 
     async def run_match(
         self,
@@ -266,23 +281,25 @@ class BackendClient:
         if node_config:
             payload["node_config"] = node_config
 
-        async with httpx.AsyncClient(timeout=MATCH_TIMEOUT) as client:
+        client = self._get_http()
+        resp = await client.post(
+            f"{self.base_url}/matches",
+            json=payload,
+            timeout=MATCH_TIMEOUT,
+        )
+
+        # Auto-reinitialize session on 400 (lost after backend restart)
+        if resp.status_code == 400 and self._session_terms:
+            logger.warning("Got 400 from /matches — re-initializing session")
+            await self.init_session(self._session_terms)
             resp = await client.post(
                 f"{self.base_url}/matches",
                 json=payload,
+                timeout=MATCH_TIMEOUT,
             )
 
-            # Auto-reinitialize session on 400 (lost after backend restart)
-            if resp.status_code == 400 and self._session_terms:
-                logger.warning("Got 400 from /matches — re-initializing session")
-                await self.init_session(self._session_terms)
-                resp = await client.post(
-                    f"{self.base_url}/matches",
-                    json=payload,
-                )
-
-            resp.raise_for_status()
-            return resp.json()
+        resp.raise_for_status()
+        return resp.json()
 
     # -- high-level sync --------------------------------------------------
 

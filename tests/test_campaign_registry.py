@@ -277,3 +277,123 @@ def test_api_delete_removed(api_client, store):
     # Store-level delete still works
     assert store.campaigns.delete(BACKEND_ID, cid) is True
     assert store.campaigns.load(BACKEND_ID, cid) is None
+
+
+# ---------------------------------------------------------------------------
+# E2E test: feedback cycle + campaign store (moved from test_e2e_optimization)
+# ---------------------------------------------------------------------------
+
+
+def _apply_e2e_mocks(monkeypatch):
+    """Apply all service mocks for E2E feedback cycle testing."""
+    from _helpers import build_eval_results
+
+    async def mock_restructure(context_input, llm_client, **kwargs):
+        return {
+            "persona": "You are a pharmacology expert.",
+            "task_intent": "Match drug names to canonical terms.",
+            "problem_description": "Drug name normalization.",
+            "instruction": "Rank candidates by relevance to the query.",
+            "thinking_style": "Compare each candidate systematically.",
+            "answer_format": "Return the best match.",
+        }
+
+    monkeypatch.setattr(
+        "api.services.search.context.restructure_context",
+        mock_restructure,
+    )
+
+    async def mock_generate(current_ps, accuracy, results, n, creativity,
+                            llm_client, **kwargs):
+        return [
+            current_ps.derive(
+                instruction=f"Match query to canonical drug name (variant {i})",
+                changes_description=f"e2e_candidate_{i}",
+            )
+            for i in range(n)
+        ]
+
+    monkeypatch.setattr(
+        "api.services.prompt_optimizer.generate_candidates",
+        mock_generate,
+    )
+
+    async def mock_eval(search_point, data, ctx=None, **kwargs):
+        label = kwargs.get("label", "")
+        if label == "candidate_0":
+            results, scores = build_eval_results(data, hits=3)
+        else:
+            results, scores = build_eval_results(data, hits=0)
+        return results, scores, False
+
+    monkeypatch.setattr(
+        "api.services.prompt_eval.evaluate_prompt_cached",
+        mock_eval,
+    )
+
+    from api.services.llm_client import MockLLMClient
+    monkeypatch.setattr(
+        "api.services.llm_client.get_llm_client",
+        lambda provider=None: MockLLMClient(),
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_e2e_feedback_cycle_with_registry(
+    monkeypatch, store, eval_data,
+):
+    """Feedback cycle results persist to campaign store."""
+    _apply_e2e_mocks(monkeypatch)
+
+    from api.services.campaign.models import CycleConfig
+    from api.services.campaign.feedback_cycle import run_feedback_cycle
+
+    config = CycleConfig(
+        max_rounds=3,
+        patience=2,
+        n_variants=2,
+        backend_url="http://mock:8000",
+        generate_suggestions=False,
+    )
+
+    result = await run_feedback_cycle(
+        instruction="Normalize drug names.",
+        eval_data=eval_data,
+        config=config,
+    )
+
+    assert result.n_rounds > 0
+
+    # Record to campaign store
+    campaign = store.campaigns.create_campaign(
+        BACKEND_ID,
+        name="E2E Feedback Cycle",
+        config={"max_rounds": 3},
+    )
+    campaign_id = campaign["campaign_id"]
+
+    rounds_for_registry = []
+    for rd in result.rounds:
+        ps = PromptState(**rd.prompt_state)
+        rounds_for_registry.append({
+            "round": rd.round,
+            "label": rd.label,
+            "prompt_state": ps,
+            "accuracy": rd.accuracy,
+            "hits": rd.hits,
+            "total": rd.total,
+            "improved": rd.improved,
+            "candidates_evaluated": rd.candidates_evaluated,
+        })
+
+    trial_ids = store.campaigns.record_campaign_rounds(
+        BACKEND_ID, campaign_id, rounds_for_registry,
+    )
+    store.campaigns.complete(BACKEND_ID, campaign_id)
+
+    assert len(trial_ids) == result.n_rounds
+
+    loaded = store.campaigns.load(BACKEND_ID, campaign_id)
+    assert loaded["status"] == "completed"
+    assert loaded["n_trials"] == result.n_rounds

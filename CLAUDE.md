@@ -35,7 +35,7 @@ cd docker && docker-compose up --build
 1. **FastAPI API** (`api/main.py`) — REST endpoints at `/api/v1/`. Routers: `backends`, `campaigns`, `health`, `workflows`.
 2. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` is the **primary working interface** at this stage. Uses `notebooks/_campaign_lib/`, a package of 6 submodules (`_setup`, `_eval`, `_grid`, `_search`, `_optimize`, `_display`) that wraps services with tqdm progress bars + IPython display.
 
-All core logic lives in `api/services/`. The notebook library (`_campaign_lib/`) never implements business logic — it only wraps service functions with UI output. `tests/test_e2e_optimization.py` is the testable E2E proxy for the notebook workflow.
+All core logic lives in `api/services/`. The notebook library (`_campaign_lib/`) never implements business logic — it only wraps service functions with UI output. `tests/test_campaign_registry.py` is the testable E2E proxy for the notebook workflow.
 
 ### Service layer (`api/services/`)
 
@@ -49,7 +49,7 @@ See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for the full service cata
 
 Two core mechanisms that work together (both actively evolving):
 
-- **Prompt decomposition** — PromptPotter decomposes a backend's monolithic prompt into internal fields (`persona`, `task_intent`, `thinking_style`, `answer_format`, `problem_description`) via LLM restructure. A default variant library (`api/config/prompt_variants.json`) provides per-field alternatives for scan and grid search. This turns one opaque prompt into a combinatorial search space.
+- **Prompt decomposition** — PromptPotter decomposes a backend's monolithic prompt into internal fields (`persona`, `task_intent`, `thinking_style`, `answer_format`, `problem_description`) via LLM restructure. A variant library (`api/config/prompt_variants.json`) provides per-field alternatives for scan and grid search, including building blocks from published research (e.g. PromptWizard's thinking styles). Each variant is an object with `text` + provenance metadata (`source`, `year`); `load_variant_library()` extracts flat strings for consumers, `load_variant_library_rich()` preserves metadata.
 - **Prompt alias groups** — `register_alias` / `resolve_aliases` link semantically equivalent prompt hashes (e.g. original monolithic ↔ restructured decomposed form) so historical evaluations are discoverable across forms. Resolution is transitive. Used by coverage advisor, scan diagnostics, and `evaluate_prompt_cached()`.
 
 ### Pipeline discovery
@@ -68,8 +68,8 @@ The human workflow is a repeatable loop:
 
 0. **Pipeline snapshot** — call `backend_client.fetch_pipeline()` and display the full JSON. This ensures every experiment run has its pipeline parameters recorded inline in the notebook output.
 1. **Generate data** — sync from backend, build eval dataset, run baseline eval
-2. **Explore** — sensitivity scan (5 cells: scan advisor → edit variants → prepare scan baseline → sensitivity scan → select winner) and/or grid search map the accuracy landscape; results are persisted as `dataset_runs` keyed by content hash. The scan baseline is created via LLM restructure to decompose the backend's monolithic prompt into PromptPotter's internal fields (persona, task_intent, etc.) for independent perturbation. `sensitivity_scan()` takes a `SearchPoint` + flat `scan_variants` dict and runs OAT over all eval_data. Scan variant coverage diagnostic (`diagnose_scan_variants()`) checks historical data via prompt alias groups before evaluation to report per-axis coverage.
-3. **Optimize** — feedback cycle (LLM candidate generation → backend evaluation → winner selection) runs iteratively until the human stops it
+2. **Explore** — sensitivity scan (7 cells: scan advisor → edit variants → prepare scan baseline → sensitivity scan → variant leaderboard → query difficulty → select winner & seed) and/or grid search map the accuracy landscape; results are persisted as `dataset_runs` keyed by content hash. The scan baseline is created via LLM restructure to decompose the backend's monolithic prompt into PromptPotter's internal fields (persona, task_intent, etc.) for independent perturbation. `sensitivity_scan()` takes a `SearchPoint` + flat `scan_variants` dict and runs OAT over all eval_data. Scan variant coverage diagnostic (`diagnose_scan_variants()`) checks historical data via prompt alias groups before evaluation to report per-axis coverage. Scan analytics cells (`show_scan_leaderboard`, `show_scan_query_difficulty`) display ranked results and query classifications before winner selection.
+3. **Optimize** — critique-guided feedback cycle runs iteratively. Each evaluation produces a **critique** of failures/successes that feeds forward into the next round's candidate generation, alongside sampled **thinking styles** as mutation guidance (PromptWizard-inspired). The init phase bootstraps the first critique from baseline results. Critique and thinking styles operate at the **optimizer agent level** (guiding the eval LLM), not in the pipeline prompt. When scan data is available, operates in **scan-aware mode**: `prepare_scan_context()` formats scan analytics into the LLM meta-prompt, enabling per-candidate `pipeline_params_override` so each candidate can explore different pipeline_param combinations informed by sensitivity data.
 4. **Harvest** — the human reviews results. All eval data is already stored in `dataset_runs` via `evaluate_prompt_cached`
 5. **Reuse** — coverage advisor discovers all stored `dataset_runs` regardless of source. Fresh optimization starts from higher ground.
 

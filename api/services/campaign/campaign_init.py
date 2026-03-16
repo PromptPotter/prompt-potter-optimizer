@@ -30,6 +30,7 @@ async def init_services(
     experiment_id: str = "1_production_historical",
     project_root: Path | None = None,
     dataset_name: str | None = None,
+    on_status: Callable[[str], None] | None = None,
 ) -> dict:
     """Initialize store, client, and load experiment data.
 
@@ -57,12 +58,17 @@ async def init_services(
         backend_id, experiment_id, backend_client, session_terms,
         synced (bool indicating whether auto-sync was attempted).
     """
+    def _status(msg: str) -> None:
+        if on_status:
+            on_status(msg)
+
     if project_root is None:
         # Default: assume called from notebooks/ subdirectory
         project_root = Path(__file__).resolve().parent.parent
 
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
     client = BackendClient(backend_url)
+    _status(f"Backend: {backend_url}")
 
     if not store.backends.get(backend_id):
         store.backends.register(BackendConnection(
@@ -77,8 +83,10 @@ async def init_services(
         pipeline_resp = await client.fetch_pipeline()
         pipeline_schema = parse_pipeline_response(pipeline_resp)
         logger.info("Pipeline schema loaded: %s v%s", pipeline_schema.name, pipeline_schema.version)
+        _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.steps)} steps)")
     except Exception as exc:
         logger.info("Could not fetch pipeline schema: %s", exc)
+        _status("Pipeline: unavailable")
 
     base = {
         "store": store,
@@ -99,6 +107,7 @@ async def init_services(
                 "Loaded dataset %r from store: %d items, %d session terms",
                 dataset_name, len(items), len(session_terms),
             )
+            _status(f"Dataset: {dataset_name} ({len(items)} queries)")
             return {
                 **base,
                 "queries": _dataset_items_to_queries(items),
@@ -106,6 +115,7 @@ async def init_services(
                 "session_terms": session_terms,
             }
         logger.info("Dataset %r not found in store, falling back to experiment sync", dataset_name)
+        _status(f"Dataset '{dataset_name}' not found, falling back to experiment sync")
 
     # --- Experiment sync path (original) ---
     exp_data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
@@ -121,14 +131,16 @@ async def init_services(
     if not exp_data or not _has_traces:
         reason = "No stored experiment data" if not exp_data else "Stored data has no traces"
         logger.info("%s — syncing from %s ...", reason, backend_url)
+        _status(f"Syncing experiment {experiment_id} ...")
         try:
-            await client.sync_experiments(store, backend_id, include_traces=True)
-            exp_data = store.backends.load_sync(
-                backend_id, f"experiments/{experiment_id}.json",
+            exp_data = await client.sync_experiment(
+                store, backend_id, experiment_id, include_traces=True,
             )
             synced = True
+            _status("Sync complete")
         except Exception as exc:
             logger.warning("Auto-sync failed: %s", exc)
+            _status(f"Sync failed: {exc}")
 
     base["synced"] = synced
 
@@ -137,6 +149,7 @@ async def init_services(
             "No experiment data available. "
             "Downstream calls will fail until data is synced or datasets are loaded."
         )
+        _status("WARNING: No experiment data available")
         return {
             **base,
             "queries": [],
@@ -145,12 +158,16 @@ async def init_services(
         }
 
     queries = client.extract_replay_queries(exp_data)
+    session_terms = client.extract_session_terms(exp_data)
+    exp_name = exp_data.get("experiment", {}).get("name", experiment_id)
+    _status(f"Experiment: {exp_name} ({len(queries)} queries, "
+            f"{len(session_terms)} session terms)")
 
     return {
         **base,
         "queries": queries,
         "exp_data": exp_data,
-        "session_terms": client.extract_session_terms(exp_data),
+        "session_terms": session_terms,
     }
 
 
@@ -218,12 +235,7 @@ async def _verify_matches_liveness(
     """
     for attempt in range(1, max_attempts + 1):
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{backend_client.base_url}/matches",
-                    json={"query": probe_query},
-                )
-                resp.raise_for_status()
+            await backend_client.run_match(probe_query)
             logger.info(
                 "Matches liveness probe succeeded (attempt %d/%d)",
                 attempt, max_attempts,
@@ -287,7 +299,7 @@ async def run_baseline_eval(
         RuntimeError: If no evaluation data is available.
     """
     from api.models.search_point import SearchPoint
-    from api.services.prompt_eval import evaluate_prompt_cached
+    from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
 
     if not eval_data and store and experiment_id:
         from api.services.search.eval_dataset import load_eval_dataset
@@ -318,13 +330,20 @@ async def run_baseline_eval(
         temperature=temperature,
         pipeline_params=pipeline_params,
     )
-    baseline_results, scores, _cached = await evaluate_prompt_cached(
-        sp, eval_data, backend_client,
-        store=store, backend_id=backend_id,
-        label="Baseline",
-        on_result=on_result,
+    ctx = EvalContext(
+        backend_client=backend_client,
+        store=store,
+        backend_id=backend_id,
         obs=obs,
         source="baseline",
+        model=model,
+        temperature=temperature,
+        pipeline_params=pipeline_params,
+    )
+    baseline_results, scores, _cached = await evaluate_prompt_cached(
+        sp, eval_data, ctx,
+        label="Baseline",
+        on_result=on_result,
     )
 
     campaign_rounds = [{

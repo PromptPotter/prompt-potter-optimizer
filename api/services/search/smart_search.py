@@ -17,11 +17,12 @@ if TYPE_CHECKING:
 from api.models.prompt_state import PromptState
 from api.models.search_point import SearchPoint, _PROMPT_STATE_FIELDS
 from api.services.project_store import ProjectStore
-from api.services.prompt_eval import evaluate_prompt_cached
+from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
 from api.services.search.utils import preview as _preview
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
+    from api.services.backend_client import BackendClient
 
 logger = logging.getLogger(__name__)
 
@@ -148,11 +149,8 @@ def _profiles_from_rows(
 
 def _make_eval_fn(
     eval_data: list,
-    backend_client: Any,
-    store: ProjectStore | None,
-    backend_id: str,
+    ctx: "EvalContext",
     get_params: Callable[[], dict],
-    pipeline_schema: "PipelineSchema | None" = None,
     on_result: Callable | None = None,
 ) -> Callable:
     """Factory for the ``_eval_ps`` closure used by scan and adaptive search."""
@@ -164,11 +162,8 @@ def _make_eval_fn(
             pipeline_params=pp or get_params(),
         )
         results, scores, cached = await evaluate_prompt_cached(
-            sp, eval_data, backend_client,
-            store=store, backend_id=backend_id,
+            sp, eval_data, ctx,
             label="scan",
-            source="sensitivity_scan",
-            pipeline_schema=pipeline_schema,
             on_result=on_result,
         )
         return {**scores, "results": results, "cached": cached}
@@ -372,7 +367,7 @@ async def sensitivity_scan(
     baseline: SearchPoint,
     scan_variants: dict[str, list],
     eval_data: list,
-    backend_client: Any,
+    backend_client: BackendClient,
     *,
     sample_size: int = 0,
     store: ProjectStore | None = None,
@@ -413,6 +408,18 @@ async def sensitivity_scan(
     if sample_size > 0 and sample_size < len(eval_data):
         eval_data = random.Random(42).sample(eval_data, sample_size)
 
+    # Build EvalContext once for all scan evaluations
+    scan_ctx = EvalContext(
+        backend_client=backend_client,
+        store=store,
+        backend_id=backend_id,
+        pipeline_schema=pipeline_schema,
+        source="sensitivity_scan",
+        model=baseline.model,
+        temperature=baseline.temperature,
+        pipeline_params=baseline.pipeline_params,
+    )
+
     # Classify axes: prompt_field vs pipeline_param
     axes: list[tuple[str, str, list]] = []
     for name, values in scan_variants.items():
@@ -423,11 +430,8 @@ async def sensitivity_scan(
 
     # Evaluate baseline
     baseline_results, baseline_scores, baseline_cached = await evaluate_prompt_cached(
-        baseline, eval_data, backend_client,
-        store=store, backend_id=backend_id,
+        baseline, eval_data, scan_ctx,
         label="scan",
-        source="sensitivity_scan",
-        pipeline_schema=pipeline_schema,
         on_result=on_result,
     )
     baseline_acc = baseline_scores["accuracy"]
@@ -501,11 +505,8 @@ async def sensitivity_scan(
                 )
 
             results, scores, cached = await evaluate_prompt_cached(
-                perturbed, eval_data, backend_client,
-                store=store, backend_id=backend_id,
+                perturbed, eval_data, scan_ctx,
                 label="scan",
-                source="sensitivity_scan",
-                pipeline_schema=pipeline_schema,
                 on_result=on_result,
             )
 
@@ -565,73 +566,6 @@ async def sensitivity_scan(
 # ---------------------------------------------------------------------------
 
 
-def select_scan_winner(
-    scan_df: pd.DataFrame,
-    axis_profiles: list[dict],
-    baseline: SearchPoint,
-    scan_variants: dict[str, list],
-) -> SearchPoint:
-    """Pick best variant per sensitive axis from OAT scan results.
-
-    Composes the best-performing value for each axis that showed positive
-    improvement (best_delta > 0) into a single SearchPoint. No backend
-    calls required — purely offline composition from existing scan data.
-
-    Returns:
-        SearchPoint with best values composed in.
-    """
-    prompt_changes: dict[str, Any] = {}
-    param_changes: dict[str, Any] = {}
-
-    improving = [
-        p for p in axis_profiles
-        if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
-    ]
-
-    for profile in improving:
-        axis_name = profile["axis"]
-
-        axis_rows = scan_df[scan_df["axis"] == axis_name]
-        if axis_rows.empty:
-            continue
-
-        best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
-        value_idx = int(best_row["value_idx"])
-
-        values = scan_variants.get(axis_name, [])
-        if value_idx >= len(values):
-            logger.warning(
-                "select_scan_winner: value_idx %d out of range for %s (len=%d)",
-                value_idx, axis_name, len(values),
-            )
-            continue
-
-        value = values[value_idx]
-
-        if axis_name in _PROMPT_STATE_FIELDS:
-            prompt_changes[axis_name] = value
-        else:
-            param_changes[axis_name] = value
-
-    best = baseline
-    if prompt_changes:
-        best = best.derive(
-            **prompt_changes,
-            changes_description="scan_winner",
-        )
-    if param_changes:
-        best = best.derive(
-            pipeline_params={**(best.pipeline_params or {}), **param_changes},
-        )
-
-    logger.info(
-        "select_scan_winner: %d prompt changes, %d param changes from %d improving axes",
-        len(prompt_changes), len(param_changes), len(improving),
-    )
-
-    return best
-
-
 # ---------------------------------------------------------------------------
 # Adaptive search (importance-weighted coordinate descent)
 # ---------------------------------------------------------------------------
@@ -641,7 +575,7 @@ async def adaptive_search(
     baseline_ps: PromptState,
     variant_library: dict,
     eval_data: list,
-    backend_client: Any,
+    backend_client: BackendClient,
     axis_profiles: list[dict],
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
@@ -686,6 +620,11 @@ async def adaptive_search(
     if session_terms:
         await backend_client.init_session(session_terms)
 
+    # Filter variant library to active pipeline steps
+    variant_library = filter_variant_library(
+        variant_library, pipeline_params, schema=pipeline_schema,
+    )
+
     # Filter and sort axes by sensitivity
     active_axes = [
         p for p in axis_profiles if p["exploration_budget"] != "skip"
@@ -697,10 +636,17 @@ async def adaptive_search(
     resolved_axes: set[str] = set()
     log_rows: list[dict] = []
 
-    _eval_ps = _make_eval_fn(
-        eval_data, backend_client, store, backend_id,
-        get_params=lambda: current_params,
+    _scan_ctx = EvalContext(
+        backend_client=backend_client,
+        store=store,
+        backend_id=backend_id,
         pipeline_schema=pipeline_schema,
+        source="adaptive_search",
+        pipeline_params=pipeline_params,
+    )
+    _eval_ps = _make_eval_fn(
+        eval_data, _scan_ctx,
+        get_params=lambda: current_params,
     )
 
     # Get baseline accuracy

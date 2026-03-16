@@ -1,6 +1,7 @@
 """
 Application settings and configuration.
 """
+import functools
 import json
 from pathlib import Path
 
@@ -52,8 +53,26 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-def load_variant_library() -> dict:
-    """Load the prompt variant library from ``prompt_variants.json``."""
+@functools.lru_cache(maxsize=1)
+def _load_variant_library_raw() -> dict:
     path = Path(__file__).parent / "prompt_variants.json"
     with open(path) as f:
         return json.load(f)
+
+
+def _extract_text(variants: list) -> list[str]:
+    return [v["text"] if isinstance(v, dict) else v for v in variants]
+
+
+def load_variant_library() -> dict:
+    """Load the prompt variant library, returning flat ``{field: [str]}`` shape."""
+    raw = _load_variant_library_raw()
+    return {
+        section: {field: _extract_text(vals) for field, vals in axes.items()}
+        for section, axes in raw.items()
+    }
+
+
+def load_variant_library_rich() -> dict:
+    """Load the prompt variant library with provenance metadata intact."""
+    return _load_variant_library_raw()

@@ -15,10 +15,7 @@ from api.services.llm_client import LLMClientBase
 from api.services.prompt_eval import compute_composite_score
 
 if TYPE_CHECKING:
-    from api.services.backend_client import BackendClient
-    from api.services.obs.observability_logger import ObsLogger
     from api.services.prompt_eval import EvalContext
-    from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +117,72 @@ def _build_freeform_meta_prompt(
     )
 
 
+def _build_scan_aware_meta_prompt(
+    n_variants: int,
+    rendered_prompt: str,
+    current_accuracy: float,
+    current_results: list,
+    failure_examples: str,
+    scan_context: dict,
+) -> str:
+    """Build meta-prompt enriched with scan analytics for pipeline_param optimization."""
+    prompt_relevant = scan_context.get("has_prompt_axes", True)
+
+    if prompt_relevant:
+        instruction_spec = (
+            "  - \"instruction\": full prompt template text "
+            "(keep template variables)\n"
+        )
+        focus_note = ""
+    else:
+        instruction_spec = (
+            "  - \"instruction\": null  (keep unchanged — the ranking prompt "
+            "is NOT active in this pipeline)\n"
+        )
+        focus_note = (
+            "IMPORTANT: The ranking prompt is NOT active in this pipeline "
+            "configuration. All improving axes are pipeline parameters. "
+            "Focus entirely on pipeline_params_override — do NOT modify "
+            "the instruction.\n\n"
+        )
+
+    return (
+        f"You are a pipeline optimization expert. Generate {n_variants} "
+        "candidate configurations\nfor a terminology normalization pipeline.\n\n"
+        f"CURRENT STATE ({current_accuracy:.1%} accuracy on "
+        f"{len(current_results)} queries):\n"
+        f"---\n{rendered_prompt}\n---\n\n"
+        f"FAILURE EXAMPLES:\n{failure_examples}\n\n"
+        "## SCAN ANALYTICS (sensitivity scan results)\n\n"
+        "### Variant leaderboard (ranked by accuracy)\n"
+        f"{scan_context['leaderboard_text']}\n\n"
+        "### Axis sensitivity (most impactful parameters)\n"
+        f"{scan_context['sensitivity_text']}\n\n"
+        "### Query difficulty\n"
+        f"{scan_context['difficulty_text']}\n\n"
+        "### Tested values per axis\n"
+        f"{scan_context['tested_values']}\n\n"
+        "## INSTRUCTIONS\n"
+        f"{focus_note}"
+        f"Generate {n_variants} candidate configurations. For each candidate:\n"
+        "1. Choose a pipeline_params combination informed by the scan data above\n"
+        "2. Optionally propose NEW values for sensitive axes (values not yet tested)\n"
+        "3. Explain your reasoning\n\n"
+        "Prioritize axes with high sensitivity and positive best_delta.\n"
+        "Avoid re-testing exact value combinations from the leaderboard.\n"
+        "For numeric params: explore between or beyond tested ranges.\n"
+        "For string params: try semantic variations.\n\n"
+        "Return a JSON object with key \"variants\" containing an array of "
+        f"{n_variants} objects, each with:\n"
+        "  - \"variant_name\": short identifier\n"
+        "  - \"changes_description\": 1-2 sentence description\n"
+        f"{instruction_spec}"
+        "  - \"pipeline_params_override\": dict of param_name -> value "
+        "(only include params you want to change)\n"
+        "  - \"reasoning\": why this combination is promising\n"
+    )
+
+
 async def generate_candidates(
     current_ps: PromptState,
     current_accuracy: float,
@@ -129,7 +192,10 @@ async def generate_candidates(
     llm_client: LLMClientBase,
     model: str | None = None,
     variant_library: dict | None = None,
-) -> list[PromptState]:
+    scan_context: dict | None = None,
+    critique_text: str = "",
+    thinking_styles: list[str] | None = None,
+) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
     Args:
@@ -143,9 +209,17 @@ async def generate_candidates(
         variant_library: When provided, constrains non-instruction fields
             to the library values. The LLM selects by index for those
             fields and writes ``instruction`` freely.
+        scan_context: When provided, enriches the meta-prompt with scan
+            analytics (leaderboard, axis sensitivity, tested values) and
+            enables per-candidate ``pipeline_params_override`` in the
+            response. Built by ``prepare_scan_context()``.
+        critique_text: Structured critique from previous round's evaluation.
+        thinking_styles: Sampled thinking styles for mutation guidance.
 
     Returns:
-        List of derived PromptState candidates.
+        List of candidate dicts. Each dict contains serialized PromptState
+        fields, plus an optional ``__pipeline_params_override__`` key when
+        scan_context is provided.
     """
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
@@ -160,7 +234,12 @@ async def generate_candidates(
 
     rendered_prompt = current_ps.render()
 
-    if variant_library:
+    if scan_context:
+        meta_prompt = _build_scan_aware_meta_prompt(
+            n_variants, rendered_prompt, current_accuracy,
+            current_results, failure_examples, scan_context,
+        )
+    elif variant_library:
         meta_prompt = _build_constrained_meta_prompt(
             n_variants, rendered_prompt, current_accuracy,
             current_results, failure_examples, variant_library,
@@ -169,6 +248,21 @@ async def generate_candidates(
         meta_prompt = _build_freeform_meta_prompt(
             n_variants, rendered_prompt, current_accuracy,
             current_results, failure_examples,
+        )
+
+    # Append critique from previous round's evaluation
+    if critique_text:
+        meta_prompt += (
+            f"\n\nCRITIQUE (from previous evaluation — use this to guide your changes):\n"
+            f"{critique_text}\n"
+        )
+
+    # Append thinking style guidance
+    if thinking_styles:
+        styles_text = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(thinking_styles))
+        meta_prompt += (
+            f"\n\nTHINKING STYLES (consider these approaches when generating variants):\n"
+            f"{styles_text}\n"
         )
 
     # Append strategic plan guidance when available
@@ -192,9 +286,9 @@ async def generate_candidates(
     else:
         variants_list = generated
 
-    candidates = []
+    candidates: list[dict] = []
     for v in variants_list[:n_variants]:
-        if variant_library:
+        if variant_library and not scan_context:
             changes: dict[str, Any] = {
                 "instruction": v.get("instruction", v.get("prompt_text", "")),
             }
@@ -215,13 +309,23 @@ async def generate_candidates(
                 ),
             )
         else:
+            instr = v.get("instruction", v.get("prompt_text", ""))
             ps = current_ps.derive(
-                instruction=v["prompt_text"],
+                **({"instruction": instr} if instr else {}),
                 changes_description=v.get(
                     "changes_description", v.get("variant_name", ""),
                 ),
             )
-        candidates.append(ps)
+
+        c_dict = ps.model_dump()
+
+        # Attach per-candidate pipeline_params override when scan-aware
+        if scan_context:
+            pp_override = v.get("pipeline_params_override")
+            if pp_override and isinstance(pp_override, dict):
+                c_dict["__pipeline_params_override__"] = pp_override
+
+        candidates.append(c_dict)
 
     return candidates
 
@@ -254,8 +358,9 @@ def _select_round_winner(
     best_ps = current_ps
     best_results = current_results
     best_label = current_best["label"]
+    winner_idx: int | None = None  # None = current_best is still the winner
 
-    for candidate in candidates:
+    for idx, candidate in enumerate(candidates):
         c_results = all_candidate_results[candidate.id]
         c_scores = compute_composite_score(c_results)
         c_composite = c_scores["composite"]
@@ -265,6 +370,7 @@ def _select_round_winner(
             best_ps = candidate
             best_results = c_results
             best_label = candidate.changes_description or candidate.id[:12]
+            winner_idx = idx
 
     rows = [
         {
@@ -301,6 +407,7 @@ def _select_round_winner(
         "candidates_evaluated": len(candidates),
         "comparison_rows": rows,
         "improved": improved,
+        "winner_idx": winner_idx,
     }
 
 
@@ -310,6 +417,7 @@ async def generate_suggestions(
     campaign_config: dict[str, Any],
     llm_client: LLMClientBase,
     model: str | None = None,
+    suggestion_temperature: float = 0.0,
 ) -> dict:
     """Generate improvement suggestions via LLM analysis.
 
@@ -401,7 +509,7 @@ async def generate_suggestions(
     response = await llm_client.chat(
         messages=[{"role": "user", "content": suggestion_prompt}],
         model=model,
-        temperature=0,
+        temperature=suggestion_temperature,
         max_tokens=8000,
         output_format="json",
     )
@@ -412,65 +520,43 @@ async def evaluate_and_select_winner(
     candidates: list[dict],
     eval_data: list,
     current_best: dict[str, Any],
+    ctx: "EvalContext",
     *,
-    backend_client: "BackendClient | None" = None,
-    backend_id: str = "",
-    store: "ProjectStore | None" = None,
     improvement_threshold: float = 0.01,
-    pipeline_params: dict | None = None,
-    model: str | None = None,
-    temperature: float = 0.0,
-    on_candidate_eval: Callable | None = None,
-    on_query_eval: Callable | None = None,
-    obs: "ObsLogger | None" = None,
-    dataset_name: str | None = None,
-    dataset_item_map: dict[str, str] | None = None,
-    ctx: "EvalContext | None" = None,
+    on_candidate_eval: Callable[[int, int, dict], None] | None = None,
+    on_query_eval: Callable[[int, int, int, int, dict], None] | None = None,
 ) -> dict[str, Any]:
     """Evaluate candidates and select the round winner.
 
     This is the core eval+select logic extracted from AnalysisEvalNode so it
     can be called directly by the feedback cycle without node overhead.
 
-    Infrastructure params can be passed individually **or** grouped in an
-    ``EvalContext`` via the ``ctx`` keyword.
-
     Returns:
         Dict with keys: winner, winner_prompt_state, winner_accuracy,
         improved, next_action, suggestions, candidate_scores, winner_results.
     """
     from api.models.search_point import SearchPoint
-    from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
+    from api.services.prompt_eval import evaluate_prompt_cached
 
-    # Build or merge EvalContext
-    _sp_model = model or ""
-    _sp_temperature = temperature
-    _sp_pipeline_params = pipeline_params
-    if ctx is None and backend_client is not None:
-        _base_sp = SearchPoint(
-            prompt_state=PromptState(),
-            model=_sp_model,
-            temperature=_sp_temperature,
-            pipeline_params=_sp_pipeline_params,
-        )
-        ctx = EvalContext(
-            search_point=_base_sp,
-            backend_client=backend_client,
-            store=store,
-            backend_id=backend_id,
-            obs=obs,
-            dataset_name=dataset_name,
-            dataset_item_map=dataset_item_map,
-        )
-    elif ctx is None:
-        raise ValueError("backend_client or ctx is required")
+    # Extract model/temp/pp from ctx for per-candidate SearchPoints
+    _sp_model = ctx.model
+    _sp_temperature = ctx.temperature
+    _sp_pipeline_params = ctx.pipeline_params
 
-    # Extract model/temp/pp from ctx's search_point for per-candidate SearchPoints
-    _sp_model = ctx.search_point.model
-    _sp_temperature = ctx.search_point.temperature
-    _sp_pipeline_params = ctx.search_point.pipeline_params
+    # Extract per-candidate pipeline_params overrides without mutating caller's dicts
+    candidate_pp: list[dict | None] = []
+    clean_candidates: list[dict] = []
+    for c in candidates:
+        if isinstance(c, dict):
+            candidate_pp.append(c.get("__pipeline_params_override__"))
+            clean_candidates.append(
+                {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
+            )
+        else:
+            candidate_pp.append(None)
+            clean_candidates.append(c.model_dump() if hasattr(c, "model_dump") else c)
 
-    ps_candidates = [PromptState(**c) for c in candidates]
+    ps_candidates = [PromptState(**c) for c in clean_candidates]
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []
 
@@ -480,17 +566,20 @@ async def evaluate_and_select_winner(
             def _on_result(result, qi, qt, _ci=idx, _ct=len(ps_candidates)):
                 on_query_eval(_ci, _ct, qi, qt, result)
 
+        if candidate_pp[idx]:
+            pp = {**(_sp_pipeline_params or {}), **candidate_pp[idx]}
+        else:
+            pp = _sp_pipeline_params
         sp = SearchPoint(
             prompt_state=c,
             model=_sp_model,
             temperature=_sp_temperature,
-            pipeline_params=_sp_pipeline_params,
+            pipeline_params=pp,
         )
         results, scores, cached = await evaluate_prompt_cached(
-            sp, eval_data,
+            sp, eval_data, ctx,
             label=f"candidate_{idx}",
             on_result=_on_result,
-            ctx=ctx,
         )
         all_candidate_results[c.id] = results
         candidate_scores.append({
@@ -513,6 +602,14 @@ async def evaluate_and_select_winner(
         ps_candidates, all_candidate_results, cb, improvement_threshold,
     )
 
+    # Resolve the winner's pipeline_params: if a candidate won, merge its
+    # override with the base; if current_best won, keep the base as-is.
+    w_idx = winner_entry["winner_idx"]
+    if w_idx is not None and candidate_pp[w_idx]:
+        winner_pp = {**(_sp_pipeline_params or {}), **candidate_pp[w_idx]}
+    else:
+        winner_pp = _sp_pipeline_params
+
     winner_ps = winner_entry["prompt_state"]
     return {
         "winner": {
@@ -525,6 +622,7 @@ async def evaluate_and_select_winner(
             "candidates_evaluated": winner_entry["candidates_evaluated"],
         },
         "winner_prompt_state": winner_ps.model_dump(),
+        "winner_pipeline_params": winner_pp,
         "winner_accuracy": winner_entry["accuracy"],
         "winner_composite": winner_entry.get("composite", winner_entry["accuracy"]),
         "improved": winner_entry["improved"],

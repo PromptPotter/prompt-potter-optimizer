@@ -14,8 +14,11 @@ import json
 import pytest
 
 from api.models.prompt_state import PromptState
-from api.services.campaign.feedback_cycle import CycleConfig, run_feedback_cycle
-from api.services.campaign.layer_transitions import modify_plan, refine_context
+from api.services.campaign.models import CycleConfig
+from api.services.campaign.feedback_cycle import run_feedback_cycle
+from api.services.campaign.layer_transitions import (
+    TransitionResult, modify_plan, refine_context,
+)
 from api.services.llm_client import MockLLMClient
 
 from _helpers import (
@@ -55,10 +58,12 @@ async def test_refine_context_applies_parameters():
 
     result = await refine_context(ps, stalled_rounds, [], client)
 
-    assert result.parent_id == ps.id
-    assert result.parameters["creativity"] == 0.9
-    assert result.parameters["n_variants"] == 8
-    assert "L2:" in result.changes_description
+    assert isinstance(result, TransitionResult)
+    assert result.prompt_state.parent_id == ps.id
+    assert result.prompt_state.parameters["creativity"] == 0.9
+    assert result.prompt_state.parameters["n_variants"] == 8
+    assert "L2:" in result.prompt_state.changes_description
+    assert result.pipeline_params is None
 
 
 @pytest.mark.asyncio
@@ -74,8 +79,8 @@ async def test_refine_context_applies_context():
 
     result = await refine_context(ps, [{"round": 0, "accuracy": 0.3, "results": []}], [], client)
 
-    assert result.context == "Focus on pharmaceutical brand name matching."
-    assert result.parent_id == ps.id
+    assert result.prompt_state.context == "Focus on pharmaceutical brand name matching."
+    assert result.prompt_state.parent_id == ps.id
 
 
 @pytest.mark.asyncio
@@ -92,8 +97,8 @@ async def test_refine_context_no_changes_returns_same():
     result = await refine_context(ps, [{"round": 0, "accuracy": 0.5, "results": []}], [], client)
 
     # Still derives because changes_description is always added
-    assert result.parent_id == ps.id
-    assert "L2:" in result.changes_description
+    assert result.prompt_state.parent_id == ps.id
+    assert "L2:" in result.prompt_state.changes_description
 
 
 # ---------------------------------------------------------------------------
@@ -114,9 +119,12 @@ async def test_modify_plan_sets_new_plan():
 
     result = await modify_plan(ps, l2_history, [], client)
 
-    assert result.plan == "Use chain-of-thought reasoning with explicit comparison steps."
-    assert result.parent_id == ps.id
-    assert "L3:" in result.changes_description
+    assert isinstance(result, TransitionResult)
+    expected_plan = "Use chain-of-thought reasoning with explicit comparison steps."
+    assert result.prompt_state.plan == expected_plan
+    assert result.prompt_state.parent_id == ps.id
+    assert "L3:" in result.prompt_state.changes_description
+    assert result.pipeline_params is None
 
 
 @pytest.mark.asyncio
@@ -136,11 +144,11 @@ async def test_modify_plan_preserves_other_fields():
 
     result = await modify_plan(ps, [], [], client)
 
-    assert result.instruction == ps.instruction
-    assert result.persona == ps.persona
-    assert result.context == ps.context
-    assert result.parameters == ps.parameters
-    assert result.plan == "New strategy"
+    assert result.prompt_state.instruction == ps.instruction
+    assert result.prompt_state.persona == ps.persona
+    assert result.prompt_state.context == ps.context
+    assert result.prompt_state.parameters == ps.parameters
+    assert result.prompt_state.plan == "New strategy"
 
 
 # ---------------------------------------------------------------------------
@@ -164,10 +172,10 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
 
     async def mock_refine_context(current_ps, stalled_rounds, eval_d, llm_client, **kwargs):
         l2_calls.append({"ps_id": current_ps.id, "n_stalled": len(stalled_rounds)})
-        return current_ps.derive(
+        return TransitionResult(prompt_state=current_ps.derive(
             parameters={"creativity": 0.9},
             changes_description="L2: mock refine",
-        )
+        ))
 
     monkeypatch.setattr(
         "api.services.campaign.layer_transitions.refine_context",
@@ -214,17 +222,17 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
 
     async def mock_refine_context(current_ps, stalled_rounds, eval_d, llm_client, **kwargs):
         l2_calls.append(current_ps.id)
-        return current_ps.derive(
+        return TransitionResult(prompt_state=current_ps.derive(
             parameters={"creativity": 0.9},
             changes_description="L2: mock",
-        )
+        ))
 
     async def mock_modify_plan(current_ps, l2_history, eval_d, llm_client, **kwargs):
         l3_calls.append(current_ps.id)
-        return current_ps.derive(
+        return TransitionResult(prompt_state=current_ps.derive(
             plan="New strategy",
             changes_description="L3: mock",
-        )
+        ))
 
     monkeypatch.setattr(
         "api.services.campaign.layer_transitions.refine_context",
@@ -400,3 +408,48 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
 
     # The plan should be present on the PromptState passed to generate_candidates
     assert any("chain-of-thought" in (p or "") for p in captured_prompts)
+
+
+# ---------------------------------------------------------------------------
+# Pipeline params in TransitionResult
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_refine_context_with_pipeline_params():
+    """refine_context returns pipeline_params when LLM suggests them."""
+    client = _mock_client({
+        "parameters": {},
+        "context": "",
+        "pipeline_params": {"llm_ranking": {"temperature": 0.5}},
+        "rationale": "Lower temperature for more precise ranking",
+    })
+
+    ps = PromptState(instruction="Rank candidates")
+    result = await refine_context(
+        ps, [{"round": 0, "accuracy": 0.4, "results": []}], [], client,
+        pipeline_params={"llm_ranking": {"temperature": 0.3}},
+    )
+
+    assert result.pipeline_params is not None
+    assert result.pipeline_params["llm_ranking"]["temperature"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_modify_plan_with_pipeline_params():
+    """modify_plan returns pipeline_params when LLM suggests them."""
+    client = _mock_client({
+        "plan": "Focus on fuzzy matching",
+        "pipeline_params": {"fuzzy_matching": {"threshold": 0.6}},
+        "rationale": "Lower fuzzy threshold",
+    })
+
+    ps = PromptState(instruction="Rank candidates")
+    result = await modify_plan(
+        ps, [], [], client,
+        pipeline_params={"fuzzy_matching": {"threshold": 0.8}},
+    )
+
+    assert result.prompt_state.plan == "Focus on fuzzy matching"
+    assert result.pipeline_params is not None
+    assert result.pipeline_params["fuzzy_matching"]["threshold"] == 0.6

@@ -300,18 +300,9 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
                 "'baseline_prompt_state' flat field"
             )
 
-        from api.models.prompt_state import PromptState as _PS
-        from api.models.search_point import SearchPoint
         from api.services.prompt_eval import EvalContext
 
-        base_sp = SearchPoint(
-            prompt_state=_PS(),
-            model=self.config.get("model") or "",
-            temperature=self.config.get("temperature", 0.0),
-            pipeline_params=self.config.get("pipeline_params"),
-        )
         ctx = EvalContext(
-            search_point=base_sp,
             backend_client=backend_client,
             store=store,
             backend_id=self.config.get("backend_id", ""),
@@ -320,16 +311,19 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
             dataset_name=self.config.get("dataset_name"),
             dataset_item_map=self.config.get("dataset_item_map"),
             source="analysis_eval_node",
+            model=self.config.get("model") or "",
+            temperature=self.config.get("temperature", 0.0),
+            pipeline_params=self.config.get("pipeline_params"),
         )
 
         result = await evaluate_and_select_winner(
             input_data.candidates,
             input_data.eval_data,
             current_best,
+            ctx,
             improvement_threshold=self.config.get("improvement_threshold", 0.01),
             on_candidate_eval=self.config.get("on_candidate_eval"),
             on_query_eval=self.config.get("on_query_eval"),
-            ctx=ctx,
         )
 
         # Generate suggestions separately if requested
