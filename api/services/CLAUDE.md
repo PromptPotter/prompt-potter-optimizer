@@ -12,7 +12,7 @@ This is where 90% of implementation work happens. All core logic lives here.
 | `backend_client.py` | HTTP client for backend APIs (sync, replay, `fetch_pipeline()`) |
 | `pipeline_discovery.py` | Pipeline schema factory (`TERMNORM_DEFAULT_SCHEMA` + live metadata merging) |
 | `project_store.py` | Facade over focused store modules in `stores/` |
-| `campaign/feedback_cycle.py` | Iterative optimization: 3-loop escalation (L1→L2→L3) with patience-based stopping |
+| `campaign/feedback_cycle.py` | Iterative optimization: 3-loop escalation (L1→L2→L3) with patience-based stopping + pluggable escalation checks |
 | `campaign/layer_transitions.py` | L2/L3 LLM-driven transitions |
 | `dataset_builder.py` | Excel ground-truth loading and train/test splitting |
 | `campaign/campaign_init.py` | Campaign initialization: store setup, backend sync, baseline eval |

@@ -73,7 +73,7 @@ Each round:
 
 1. **Growth** — Generate N candidates. Meta-prompt includes **critique from previous round** + freshly sampled **thinking styles** as mutation guidance.
 2. **Eval + Critique** — Evaluate candidates via the backend, compare by composite score against the current best (previous winner). Generate a **critique** of remaining failures/successes, fed forward to next round.
-3. **Loop control** — Stall counter on no improvement. Patience exhausted → escalate L2 (context) → L3 (strategy). Stop on `max_rounds` or perfect accuracy.
+3. **Loop control** — Stall counter on no improvement. Patience exhausted → escalate L2 (context) → L3 (strategy). Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (e.g., `DegradationCheck` on pipeline regression). Stop on `max_rounds` or perfect accuracy.
 
 **Init** bootstraps the first critique from baseline results. When scan data is available (leaderboard, axis sensitivity, query difficulty), it feeds into both the bootstrap critique and subsequent rounds via `prepare_scan_context()`.
 
@@ -109,7 +109,7 @@ The feedback cycle is itself a 4-step pipeline, designed to be modeled using the
 | `l1_generate` | Candidate generation | `generate_candidates()` in `prompt_optimizer.py` | Scan context enrichment (optional) |
 | `l1_evaluate` | Eval + winner selection | `evaluate_and_select_winner()` in `prompt_optimizer.py` | `CritiqueAgent.run()`, `sample_thinking_styles()` |
 | `l2_refine_context` | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` | Pipeline param adjustment (with schema) |
-| `l3_modify_plan` | Strategic replanning on L2 stall | `modify_plan()` in `layer_transitions.py` | Pipeline param adjustment, degradation context |
+| `l3_modify_plan` | Strategic replanning on L2 stall or escalation | `modify_plan()` in `layer_transitions.py` | Pipeline param adjustment, escalation context |
 
 **Init is `l1_generate` in naked mode.** The init phase runs `restructure_context()` -- the same LLM decomposition used by candidate generation, but as a single-pass operation without critique feedback, thinking styles, or scan context. Same step, simpler mode.
 
@@ -130,6 +130,7 @@ The feedback cycle emits structured `PhaseEvent` objects at phase boundaries via
 | `analysis_eval` | Evaluation, winner selection & critique | `n_candidates`, `n_queries`, `current_best_accuracy`, `improvement_threshold` | `winner_label`, `winner_accuracy`, `winner_composite`, `improved`, `next_action`, `critique_text`, `critique_path` |
 | `refine_context` | L2 escalation (when `enable_l2=True`) | `l2_round`, `stall_count`, `current_accuracy`, `best_accuracy` | `param_changes_count`, `context_changed`, `changes_description` |
 | `modify_plan` | L3 escalation (when `enable_l3=True`) | `l3_round`, `l2_stall_count` | `new_plan_preview`, `changes_description` |
+| `escalation` | `EscalationCheck` fires mid-eval | `check_name`, `target`, `context`, `candidate_idx` | (routed to L2/L3/abort) |
 
 Each event: `phase` (str), `event` ("enter"/"exit"), `round` (int or None), `data` (dict), `timestamp` (ISO 8601).
 
@@ -154,6 +155,12 @@ campaign_config = {
         "l2_patience": 2,
         "enable_l3": False,         # opt-in: modify plan on L2 stall
         "l3_patience": 1,
+        "escalation_checks": [     # pluggable mid-eval checks
+            {"name": "degradation", "threshold": 0.3, "target": "l3"},
+        ],
+        "plan": None,              # override optimizer strategy (str)
+        "context": None,           # override domain context (str)
+        "critique": None,          # override bootstrap critique (str)
     },
     "eval_llm": { ... },
     "grid_search": {
