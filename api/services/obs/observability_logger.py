@@ -559,6 +559,7 @@ class ObsLogger:
         model: str = "",
         temperature: float = 0.0,
         n_variants: int = 0,
+        optimizer_templates: list[str] | None = None,
     ) -> Path | None:
         """Close a round: file observation + score + MLflow run + events.jsonl + cloud.
 
@@ -586,7 +587,11 @@ class ObsLogger:
                         "next_action": next_action,
                         "winner_prompt_state_id": winner_prompt_state_id,
                     },
-                    metadata={"candidate_scores": candidate_scores},
+                    metadata={
+                        "candidate_scores": candidate_scores,
+                        **({"optimizer_templates": optimizer_templates}
+                           if optimizer_templates else {}),
+                    },
                 )
                 self._write_score(trace_id, "accuracy", accuracy)
 
@@ -627,12 +632,15 @@ class ObsLogger:
                 "improved": improved,
                 "next_action": next_action,
                 "winner_prompt_state_id": winner_prompt_state_id,
+                **({"optimizer_templates": optimizer_templates}
+                   if optimizer_templates else {}),
             })
 
             if self._cloud:
                 self._cloud.on_round_end(
                     campaign_id, round_num, accuracy,
                     improved, next_action, candidate_scores,
+                    optimizer_templates=optimizer_templates,
                 )
 
             obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
@@ -655,6 +663,7 @@ class ObsLogger:
         model: str = "",
         temperature: float = 0.0,
         n_variants: int = 0,
+        optimizer_templates: list[str] | None = None,
     ) -> Path | None:
         """Fire-and-forget round log (start + end in one call).
 
@@ -666,6 +675,7 @@ class ObsLogger:
             campaign_id, round_num, accuracy, hits, total,
             improved, next_action, winner_prompt_state_id,
             candidate_scores, model, temperature, n_variants,
+            optimizer_templates=optimizer_templates,
         )
 
     def log_prompt_version(

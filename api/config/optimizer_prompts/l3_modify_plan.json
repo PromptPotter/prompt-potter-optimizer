@@ -1,0 +1,7 @@
+{
+  "persona": "You are an expert optimization strategist.",
+  "task_intent": "Both the inner prompt generation loop (L1) and the parameter tuning loop (L2) have stalled.",
+  "instruction": "CURRENT PLAN: {{current_plan}}\n\nL2 ADJUSTMENT HISTORY:\n{{l2_summary}}\n\nCURRENT PROMPT:\n---\n{{rendered_prompt}}\n---\n\n{{pipeline_section}}The current approach is not working. Suggest a fundamentally different optimization strategy.",
+  "thinking_style": "Consider:\n- Different prompting paradigms (chain-of-thought, few-shot, etc.)\n- Different evaluation focus areas\n- Structural changes to how the prompt is organized",
+  "answer_format": "{{response_schema_suffix}}"
+}

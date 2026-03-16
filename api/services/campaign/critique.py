@@ -16,6 +16,7 @@ import logging
 import random
 from typing import TYPE_CHECKING
 
+from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import load_variant_library
 
 if TYPE_CHECKING:
@@ -66,16 +67,11 @@ class CritiqueAgent:
             for r in failures[:MAX_EXAMPLES]
         )
 
-        prompt = (
-            "You are an expert prompt analyst. The current prompt achieves "
-            f"{accuracy:.1%} accuracy. Analyze the failures below.\n\n"
-            f"FAILURES ({len(failures)} total, showing up to {MAX_EXAMPLES}):\n"
-            f"{failure_lines}\n\n"
-            "Provide a structured critique as JSON with:\n"
-            '  "failure_categories": [{"category": str, "count": int, "description": str}]\n'
-            '  "root_cause": str (1-2 sentences on the underlying issue)\n'
-            '  "priority_fix": str (the single most impactful change to make)\n'
-            '  "summary": str (2-3 sentence critique for the prompt generator)'
+        prompt = load_optimizer_prompt("critique_negative").compile(
+            accuracy_pct=f"{accuracy:.1%}",
+            n_failures=len(failures),
+            max_examples=MAX_EXAMPLES,
+            failure_lines=failure_lines,
         )
 
         response = await self.llm_client.chat(
@@ -105,19 +101,13 @@ class CritiqueAgent:
             for r in failures[:5]
         )
 
-        prompt = (
-            "You are an expert prompt analyst. The current prompt achieves "
-            f"{accuracy:.1%} accuracy — it's working well. Analyze what makes "
-            "it succeed and how to extend those strengths to the remaining "
-            "failures.\n\n"
-            f"SUCCESSES ({len(successes)} total, showing up to {MAX_EXAMPLES}):\n"
-            f"{success_lines}\n\n"
-            f"REMAINING FAILURES ({len(failures)}):\n"
-            f"{failure_lines}\n\n"
-            "Provide a structured critique as JSON with:\n"
-            '  "success_patterns": [{"pattern": str, "description": str}]\n'
-            '  "extension_suggestion": str (how to apply success patterns to failures)\n'
-            '  "summary": str (2-3 sentence critique for the prompt generator)'
+        prompt = load_optimizer_prompt("critique_positive").compile(
+            accuracy_pct=f"{accuracy:.1%}",
+            n_successes=len(successes),
+            max_examples=MAX_EXAMPLES,
+            success_lines=success_lines,
+            n_failures=len(failures),
+            failure_lines=failure_lines,
         )
 
         response = await self.llm_client.chat(

@@ -10,6 +10,7 @@ Fields are organized into three optimization layers:
   Layer 3 (Modify Plan)     — optimization strategy, ideally left at defaults
 """
 import difflib
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -106,6 +107,21 @@ class PromptState(BaseModel):
             parts.append("\n".join(examples_lines))
 
         return "\n\n".join(parts)
+
+    def compile(self, **kwargs: str) -> str:
+        """Render and substitute ``{{variable}}`` placeholders with runtime values.
+
+        Uses Langfuse-compatible double-brace syntax: ``{{var}}`` is substituted,
+        single ``{braces}`` are literal.  Raises :class:`KeyError` if any
+        ``{{var}}`` remains unsubstituted after processing all *kwargs*.
+        """
+        text = self.render()
+        for key, value in kwargs.items():
+            text = text.replace("{{" + key + "}}", str(value))
+        remaining = re.findall(r"\{\{(\w+)\}\}", text)
+        if remaining:
+            raise KeyError(f"Unsubstituted template variables: {remaining}")
+        return text
 
     def derive(self, **changes: Any) -> "PromptState":
         """Create a child state with modifications.

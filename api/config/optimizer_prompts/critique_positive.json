@@ -1,0 +1,7 @@
+{
+  "persona": "You are an expert prompt analyst.",
+  "task_intent": "The current prompt achieves {{accuracy_pct}} accuracy \u2014 it's working well. Analyze what makes it succeed and how to extend those strengths to the remaining failures.",
+  "instruction": "SUCCESSES ({{n_successes}} total, showing up to {{max_examples}}):\n{{success_lines}}\n\nREMAINING FAILURES ({{n_failures}}):\n{{failure_lines}}",
+  "thinking_style": "",
+  "answer_format": "Provide a structured critique as JSON with:\n  \"success_patterns\": [{\"pattern\": str, \"description\": str}]\n  \"extension_suggestion\": str (how to apply success patterns to failures)\n  \"summary\": str (2-3 sentence critique for the prompt generator)"
+}

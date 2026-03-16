@@ -10,6 +10,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.prompt_state import PromptState
 from api.services.llm_client import LLMClientBase
 from api.services.prompt_eval import compute_composite_score
@@ -59,24 +60,14 @@ def _build_constrained_meta_prompt(
             f"  - \"{field_name}_idx\": integer index into the {field_name} options\n"
         )
 
-    return (
-        f"You are a prompt engineering expert. Generate {n_variants} "
-        "improved variants\nof a candidate-ranking prompt used in a "
-        "terminology normalization pipeline.\n\n"
-        f"CURRENT PROMPT ({current_accuracy:.1%} accuracy on "
-        f"{len(current_results)} queries):\n"
-        f"---\n{rendered_prompt}\n---\n\n"
-        f"FAILURE EXAMPLES (predicted != ground_truth):\n"
-        f"{failure_examples}\n\n"
-        f"{library_desc}\n"
-        "The prompt uses template variables (double-brace syntax):\n"
-        "  {{core_concept}} -- core concept from entity profile\n"
-        "  {{entity_profile_json}} -- full JSON entity profile\n"
-        "  {{matches}} -- newline-separated candidate list\n\n"
-        "RULES:\n"
-        "- Modify 'instruction' freely (keep template variables)\n"
-        "- For other fields, SELECT from the provided options by index\n\n"
-        f"{response_schema}"
+    return load_optimizer_prompt("meta_constrained").compile(
+        n_variants=n_variants,
+        accuracy_pct=f"{current_accuracy:.1%}",
+        n_queries=len(current_results),
+        rendered_prompt=rendered_prompt,
+        failure_examples=failure_examples,
+        library_desc=library_desc,
+        response_schema=response_schema,
     )
 
 
@@ -88,32 +79,12 @@ def _build_freeform_meta_prompt(
     failure_examples: str,
 ) -> str:
     """Build meta-prompt for open-form prompt generation."""
-    return (
-        f"You are a prompt engineering expert. Generate {n_variants} "
-        "improved variants\nof a candidate-ranking prompt used in a "
-        "terminology normalization pipeline.\n\n"
-        f"CURRENT PROMPT ({current_accuracy:.1%} accuracy on "
-        f"{len(current_results)} queries):\n"
-        f"---\n{rendered_prompt}\n---\n\n"
-        f"FAILURE EXAMPLES (predicted != ground_truth):\n"
-        f"{failure_examples}\n\n"
-        "The prompt uses template variables (double-brace syntax):\n"
-        "  {{core_concept}} -- core concept from entity profile\n"
-        "  {{entity_profile_json}} -- full JSON entity profile from web "
-        "research\n"
-        "  {{matches}} -- newline-separated list of \"- candidate_term\" "
-        "from token matching\n\n"
-        "For each variant:\n"
-        "1. Analyze WHY the current prompt fails on the examples above\n"
-        "2. Make targeted changes to improve ranking accuracy "
-        "(get correct candidate to rank #1)\n"
-        "3. Keep the same template variables and JSON output format\n\n"
-        "Return a JSON object with key \"variants\" containing an array "
-        "of objects:\n"
-        "  - \"variant_name\": short identifier\n"
-        "  - \"changes_description\": 1-2 sentence description of what "
-        "changed and why\n"
-        "  - \"prompt_text\": full prompt template text"
+    return load_optimizer_prompt("meta_freeform").compile(
+        n_variants=n_variants,
+        accuracy_pct=f"{current_accuracy:.1%}",
+        n_queries=len(current_results),
+        rendered_prompt=rendered_prompt,
+        failure_examples=failure_examples,
     )
 
 
@@ -146,40 +117,18 @@ def _build_scan_aware_meta_prompt(
             "the instruction.\n\n"
         )
 
-    return (
-        f"You are a pipeline optimization expert. Generate {n_variants} "
-        "candidate configurations\nfor a terminology normalization pipeline.\n\n"
-        f"CURRENT STATE ({current_accuracy:.1%} accuracy on "
-        f"{len(current_results)} queries):\n"
-        f"---\n{rendered_prompt}\n---\n\n"
-        f"FAILURE EXAMPLES:\n{failure_examples}\n\n"
-        "## SCAN ANALYTICS (sensitivity scan results)\n\n"
-        "### Variant leaderboard (ranked by accuracy)\n"
-        f"{scan_context['leaderboard_text']}\n\n"
-        "### Axis sensitivity (most impactful parameters)\n"
-        f"{scan_context['sensitivity_text']}\n\n"
-        "### Query difficulty\n"
-        f"{scan_context['difficulty_text']}\n\n"
-        "### Tested values per axis\n"
-        f"{scan_context['tested_values']}\n\n"
-        "## INSTRUCTIONS\n"
-        f"{focus_note}"
-        f"Generate {n_variants} candidate configurations. For each candidate:\n"
-        "1. Choose a pipeline_params combination informed by the scan data above\n"
-        "2. Optionally propose NEW values for sensitive axes (values not yet tested)\n"
-        "3. Explain your reasoning\n\n"
-        "Prioritize axes with high sensitivity and positive best_delta.\n"
-        "Avoid re-testing exact value combinations from the leaderboard.\n"
-        "For numeric params: explore between or beyond tested ranges.\n"
-        "For string params: try semantic variations.\n\n"
-        "Return a JSON object with key \"variants\" containing an array of "
-        f"{n_variants} objects, each with:\n"
-        "  - \"variant_name\": short identifier\n"
-        "  - \"changes_description\": 1-2 sentence description\n"
-        f"{instruction_spec}"
-        "  - \"pipeline_params_override\": dict of param_name -> value "
-        "(only include params you want to change)\n"
-        "  - \"reasoning\": why this combination is promising\n"
+    return load_optimizer_prompt("meta_scan_aware").compile(
+        n_variants=n_variants,
+        accuracy_pct=f"{current_accuracy:.1%}",
+        n_queries=len(current_results),
+        rendered_prompt=rendered_prompt,
+        failure_examples=failure_examples,
+        leaderboard_text=scan_context["leaderboard_text"],
+        sensitivity_text=scan_context["sensitivity_text"],
+        difficulty_text=scan_context["difficulty_text"],
+        tested_values=scan_context["tested_values"],
+        focus_note=focus_note,
+        instruction_spec=instruction_spec,
     )
 
 
@@ -469,39 +418,14 @@ async def generate_suggestions(
             f"  Round {rd['round']}: {rd['label'][:DISPLAY_TRUNCATE]} -> {rd['accuracy']:.1%}"
         )
 
-    suggestion_prompt = (
-        "You are an expert optimization advisor for a terminology "
-        "normalization pipeline.\n"
-        "Analyze the current campaign state and provide actionable "
-        "suggestions for the next round.\n\n"
-        f"CAMPAIGN HISTORY:\n{"\n".join(history_lines)}\n\n"
-        f"CURRENT BEST PROMPT ({current_acc:.1%} accuracy):\n"
-        f"---\n{current_ps.render()}\n---\n\n"
-        f"CURRENT CONFIG:\n{json.dumps(campaign_config, indent=2)}\n\n"
-        f"FAILURE DETAILS ({len(failures)} failures out of "
-        f"{len(current_results)} queries):\n"
-        f"{"\n".join(failure_detail)}\n\n"
-        "Provide your analysis as a JSON object with these keys:\n\n"
-        '1. "failure_patterns": array of objects, each with:\n'
-        '   - "category": failure type (e.g., "bad_profile", '
-        '"candidate_absent", "reranker_misjudged", "ambiguous_query")\n'
-        '   - "count": estimated count\n'
-        '   - "description": explanation\n'
-        '   - "examples": array of query strings\n\n'
-        '2. "parameter_suggestions": array of objects, each with:\n'
-        '   - "parameter": the pipeline_params key to change\n'
-        '   - "current_value": current value\n'
-        '   - "suggested_value": new value\n'
-        '   - "rationale": why this change helps\n\n'
-        '3. "prompt_phrase_fragments": array of objects, each with:\n'
-        '   - "action": one of "add_to_instruction", '
-        '"modify_thinking_style", "add_few_shot", '
-        '"modify_answer_format", "modify_persona"\n'
-        '   - "text": the exact text snippet to add or use\n'
-        '   - "rationale": why this helps with the observed failures\n\n'
-        '4. "suggested_config": a complete campaign_config JSON object '
-        "with your recommended changes applied\n\n"
-        '5. "summary": 2-3 sentence overview of what to try next'
+    suggestion_prompt = load_optimizer_prompt("suggestions").compile(
+        history_lines="\n".join(history_lines),
+        accuracy_pct=f"{current_acc:.1%}",
+        rendered_prompt=current_ps.render(),
+        campaign_config=json.dumps(campaign_config, indent=2),
+        n_failures=len(failures),
+        n_queries=len(current_results),
+        failure_detail="\n".join(failure_detail),
     )
 
     response = await llm_client.chat(

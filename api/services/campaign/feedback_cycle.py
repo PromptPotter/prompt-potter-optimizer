@@ -399,6 +399,12 @@ async def _evaluate_candidates(
     return eval_out
 
 
+def _infer_optimizer_templates(config: CycleConfig) -> list[str]:
+    """Infer which optimizer prompt templates were used in a round."""
+    gen = "meta_scan_aware" if config.scan_context else "meta_freeform"
+    return [gen, "critique_negative", "critique_positive"]
+
+
 def _log_round_obs(
     eval_out: dict,
     round_num: int,
@@ -421,6 +427,7 @@ def _log_round_obs(
             model=config.model or "",
             temperature=config.temperature,
             n_variants=config.n_variants,
+            optimizer_templates=_infer_optimizer_templates(config),
         )
     except Exception:
         logger.warning("ObsLogger.log_round_end failed", exc_info=True)

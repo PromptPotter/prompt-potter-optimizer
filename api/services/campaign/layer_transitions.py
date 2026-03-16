@@ -14,6 +14,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.prompt_state import PromptState
 
 if TYPE_CHECKING:
@@ -74,32 +75,33 @@ async def refine_context(
 
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
 
-    prompt = (
-        "You are a prompt optimization expert. The L1 inner optimization loop "
-        "has stalled — candidates are no longer improving.\n\n"
-        f"ROUND HISTORY (stalled):\n{round_summary}\n\n"
-        f"CURRENT PROMPT:\n---\n{current_ps.render()}\n---\n\n"
-        f"FAILURE EXAMPLES:\n{chr(10).join(failure_lines[:15])}\n\n"
-        f"CURRENT PARAMETERS: {json.dumps(current_ps.parameters)}\n"
-        f"CURRENT CONTEXT: {current_ps.context[:200] if current_ps.context else '(empty)'}\n\n"
-        f"{pipeline_section}"
-        "Analyze WHY L1 is stuck and recommend:\n"
-        "1. Parameter adjustments (creativity, n_variants, variant_strategy)\n"
-        "2. Context text changes (domain grounding, constraints)\n"
-    )
     if pipeline_section:
-        prompt += "3. Pipeline parameter adjustments (see available params above)\n"
-    prompt += (
-        "\nReturn a JSON object with:\n"
-        '  "parameters": dict of parameter changes to apply\n'
-        '  "context": new context string (or empty to keep current)\n'
-    )
-    if pipeline_section:
-        prompt += (
+        response_schema_suffix = (
+            "3. Pipeline parameter adjustments (see available params above)\n"
+            "\nReturn a JSON object with:\n"
+            '  "parameters": dict of parameter changes to apply\n'
+            '  "context": new context string (or empty to keep current)\n'
             '  "pipeline_params": dict of pipeline parameter changes '
             "(param_name -> new value)\n"
+            '  "rationale": 1-2 sentence explanation'
         )
-    prompt += '  "rationale": 1-2 sentence explanation'
+    else:
+        response_schema_suffix = (
+            "\nReturn a JSON object with:\n"
+            '  "parameters": dict of parameter changes to apply\n'
+            '  "context": new context string (or empty to keep current)\n'
+            '  "rationale": 1-2 sentence explanation'
+        )
+
+    prompt = load_optimizer_prompt("l2_refine_context").compile(
+        round_summary=round_summary,
+        rendered_prompt=current_ps.render(),
+        failure_lines=chr(10).join(failure_lines[:15]),
+        current_params=json.dumps(current_ps.parameters),
+        current_context=current_ps.context[:200] if current_ps.context else "(empty)",
+        pipeline_section=pipeline_section,
+        response_schema_suffix=response_schema_suffix,
+    )
 
     response = await llm_client.chat(
         messages=[{"role": "user", "content": prompt}],
@@ -164,31 +166,29 @@ async def modify_plan(
 
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
 
-    prompt = (
-        "You are an expert optimization strategist. Both the inner prompt "
-        "generation loop (L1) and the parameter tuning loop (L2) have stalled.\n\n"
-        f"CURRENT PLAN: {current_ps.plan or '(none — default strategy)'}\n\n"
-        f"L2 ADJUSTMENT HISTORY:\n{l2_summary}\n\n"
-        f"CURRENT PROMPT:\n---\n{current_ps.render()}\n---\n\n"
-        f"{pipeline_section}"
-        "The current approach is not working. Suggest a fundamentally different "
-        "optimization strategy. Consider:\n"
-        "- Different prompting paradigms (chain-of-thought, few-shot, etc.)\n"
-        "- Different evaluation focus areas\n"
-        "- Structural changes to how the prompt is organized\n"
-    )
     if pipeline_section:
-        prompt += "- Pipeline parameter changes (see available params above)\n"
-    prompt += (
-        "\nReturn a JSON object with:\n"
-        '  "plan": new strategy text for guiding future optimization\n'
-    )
-    if pipeline_section:
-        prompt += (
+        response_schema_suffix = (
+            "- Pipeline parameter changes (see available params above)\n"
+            "\nReturn a JSON object with:\n"
+            '  "plan": new strategy text for guiding future optimization\n'
             '  "pipeline_params": dict of pipeline parameter changes '
             "(param_name -> new value)\n"
+            '  "rationale": 1-2 sentence explanation of the strategic shift'
         )
-    prompt += '  "rationale": 1-2 sentence explanation of the strategic shift'
+    else:
+        response_schema_suffix = (
+            "\nReturn a JSON object with:\n"
+            '  "plan": new strategy text for guiding future optimization\n'
+            '  "rationale": 1-2 sentence explanation of the strategic shift'
+        )
+
+    prompt = load_optimizer_prompt("l3_modify_plan").compile(
+        current_plan=current_ps.plan or "(none — default strategy)",
+        l2_summary=l2_summary,
+        rendered_prompt=current_ps.render(),
+        pipeline_section=pipeline_section,
+        response_schema_suffix=response_schema_suffix,
+    )
 
     response = await llm_client.chat(
         messages=[{"role": "user", "content": prompt}],

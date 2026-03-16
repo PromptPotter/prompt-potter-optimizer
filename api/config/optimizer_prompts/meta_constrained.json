@@ -1,0 +1,7 @@
+{
+  "persona": "You are a prompt engineering expert.",
+  "task_intent": "Generate {{n_variants}} improved variants of a candidate-ranking prompt used in a terminology normalization pipeline.",
+  "instruction": "CURRENT PROMPT ({{accuracy_pct}} accuracy on {{n_queries}} queries):\n---\n{{rendered_prompt}}\n---\n\nFAILURE EXAMPLES (predicted != ground_truth):\n{{failure_examples}}\n\n{{library_desc}}\nThe prompt uses template variables (double-brace syntax):\n  {core_concept} -- core concept from entity profile\n  {entity_profile_json} -- full JSON entity profile\n  {matches} -- newline-separated candidate list\n\nRULES:\n- Modify 'instruction' freely (keep template variables)\n- For other fields, SELECT from the provided options by index",
+  "thinking_style": "",
+  "answer_format": "{{response_schema}}"
+}

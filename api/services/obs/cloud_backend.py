@@ -106,6 +106,8 @@ class CloudObsBackend:
         improved: bool,
         next_action: str,
         candidate_scores: list[dict],
+        *,
+        optimizer_templates: list[str] | None = None,
     ) -> None:
         """Close the round span, attach score."""
         cloud_trace_id = self._trace_ids.get(campaign_id)
@@ -114,6 +116,12 @@ class CloudObsBackend:
             return
         try:
             if self._active_round_obs_id:
+                meta: dict = {
+                    "round": round_num,
+                    "candidates_evaluated": len(candidate_scores),
+                }
+                if optimizer_templates:
+                    meta["optimizer_templates"] = optimizer_templates
                 self._lf.end_observation(
                     self._active_round_obs_id,
                     output={
@@ -122,10 +130,7 @@ class CloudObsBackend:
                         "next_action": next_action,
                         "candidates_evaluated": len(candidate_scores),
                     },
-                    metadata={
-                        "round": round_num,
-                        "candidates_evaluated": len(candidate_scores),
-                    },
+                    metadata=meta,
                 )
             self._lf.create_score(
                 trace_id=cloud_trace_id,

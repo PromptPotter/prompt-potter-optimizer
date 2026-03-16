@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.hashing import HASH_TRUNCATE
 from api.services.llm_client import LLMClientBase
 from api.services.stores.base import read_json_optional, validate_path_component, write_json
@@ -56,22 +57,8 @@ async def restructure_context(
             "and provide strategic advice in the consultation field."
         )
 
-    layer1_keys_description = (
-        "Layer 1 fields:\n"
-        "- persona: Who the LLM should act as (e.g., 'You are a domain expert...')\n"
-        "- task_intent: What the prompt needs to accomplish\n"
-        "- problem_description: Description of the problem domain\n"
-        "- instruction: Core instruction text (may contain template variables)\n"
-        "- thinking_style: How to reason (e.g., 'Think step by step')\n"
-        "- answer_format: Expected output format\n"
-    )
-
     if improvement_areas:
-        system_prompt = (
-            "You are a prompt engineering assistant. Your job is to structure "
-            "user-provided context into Layer 1 prompt fields for an optimization "
-            "campaign.\n\n"
-            f"{layer1_keys_description}\n"
+        consultation_instruction = (
             "Return a JSON object with these keys plus a \"consultation\" key. "
             "The consultation value should be a natural-language paragraph of "
             "strategic advice on how to approach optimization given the user's "
@@ -79,14 +66,14 @@ async def restructure_context(
             "that don't apply. Be concise and actionable."
         )
     else:
-        system_prompt = (
-            "You are a prompt engineering assistant. Your job is to structure "
-            "user-provided context into Layer 1 prompt fields for an optimization "
-            "campaign.\n\n"
-            f"{layer1_keys_description}\n"
+        consultation_instruction = (
             "Return a JSON object with exactly these keys. Use empty string for "
             "fields that don't apply. Be concise and actionable."
         )
+
+    system_prompt = load_optimizer_prompt("restructure").compile(
+        consultation_instruction=consultation_instruction,
+    )
 
     response = await llm_client.chat(
         messages=[
