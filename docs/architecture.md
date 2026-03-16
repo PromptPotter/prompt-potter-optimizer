@@ -63,6 +63,36 @@ All paths converge on `evaluate_prompt_cached()` — single gateway for eval per
 
 `GET /backends/{id}/pipeline` returns pipeline config with resolved registry metadata (30s TTL cache). Backend owns schema/prompt artifacts; PromptPotter consumes the live response.
 
+## The Optimizer Pipeline
+
+The optimizer itself is a 4-step pipeline, designed to be modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend (e.g., TermNorm).
+
+| Step | Purpose | Current function | Trigger |
+|------|---------|------------------|---------|
+| `l1_generate` | Candidate generation | `generate_candidates()` in `prompt_optimizer.py` | Every round (also init mode via `restructure_context()`) |
+| `l1_evaluate` | Eval + winner selection + critique | `evaluate_and_select_winner()` in `prompt_optimizer.py` | Every round |
+| `l2_refine_context` | Context/parameter tuning | `refine_context()` in `layer_transitions.py` | L1 patience exhausted |
+| `l3_modify_plan` | Strategic replanning | `modify_plan()` in `layer_transitions.py` | L2 patience exhausted |
+
+```
+  ┌────────────────────────────────────────────────────┐
+  │  l1_generate ──► l1_evaluate                       │
+  │       ▲               │                            │
+  │       │    critique +  │                            │
+  │       └── styles ◄────┘                            │
+  │                                                    │
+  │  stall? ──► l2_refine_context ──► resume L1        │
+  │  stall? ──► l3_modify_plan    ──► resume L2 + L1   │
+  └────────────────────────────────────────────────────┘
+```
+
+**Key design decisions:**
+- Init is `l1_generate` in naked mode (single decomposition pass, no critique/styles)
+- Critique and thinking style sampling are sub-tools of `l1_evaluate`, not separate steps
+- The schema describes step capabilities; loop control stays in `feedback_cycle.py`
+
+This model enables optimizer-level tracing (each step as a Langfuse observation), full reproducibility (every LLM call reconstructible from trial artifacts), and self-optimization (a meta-PromptPotter optimizing its own prompts). See the [M8 spec](specs/m8-optimizer-pipeline.md) for the full design.
+
 ## Further Reading
 
 - [Design Principles](design-principles.md) — Core patterns

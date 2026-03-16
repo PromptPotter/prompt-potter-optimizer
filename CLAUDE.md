@@ -83,6 +83,8 @@ All evaluation paths (grid search, smart search, feedback cycle) converge on `ev
 
 CWL-inspired workflow engine (`api/core/`, `api/nodes/`). The node base classes and optimizer nodes (InitNode, GrowFilterNode, AnalysisEvalNode) are actively used by the feedback cycle. The YAML-driven WorkflowRunner and REST endpoints are scaffold for future migration. See [`api/core/CLAUDE.md`](api/core/CLAUDE.md).
 
+**Optimizer-as-pipeline** -- The optimizer itself is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_context`, `l3_modify_plan`), designed to be modeled using the same `PipelineSchema` as the target backend. This enables step-level Langfuse tracing, full reproducibility of every meta-optimizer LLM call, and self-optimization (a meta-PromptPotter optimizing its own prompts). See M8 spec ([`docs/specs/m8-optimizer-pipeline.md`](docs/specs/m8-optimizer-pipeline.md)).
+
 ### Milestones
 
 Each milestone has an executable spec in `docs/specs/`. See [`docs/specs/CLAUDE.md`](docs/specs/CLAUDE.md) for the process and milestone table.

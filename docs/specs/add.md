@@ -62,15 +62,18 @@ See [CLAUDE.md](../../CLAUDE.md) for the canonical description of the Human Loop
 
 **Summary:** An outer Human Loop (explore -> optimize -> harvest -> reuse) wraps an inner AI Loop (generate -> evaluate -> select -> iterate). The **data loop** connects them: every evaluation writes to the shared `dataset_runs` store with content-addressed deduplication, making all prior work available to the coverage advisor.
 
-The AI Loop is implemented by `feedback_cycle.py` orchestrating three optimizer nodes:
+The AI Loop is itself a 4-step pipeline, implemented by `feedback_cycle.py`:
 
-| Node | Wraps |
-|------|-------|
-| **InitNode** | `search.context.restructure_context()` -> initial PromptState |
-| **GrowFilterNode** | `prompt_optimizer.generate_candidates()` -> N variant PromptStates |
-| **AnalysisEvalNode** | `prompt_eval.evaluate_prompt_cached()` + `_select_round_winner()` + `generate_suggestions()` -> scores + generate/stop routing |
+| Step | Purpose | Wraps |
+|------|---------|-------|
+| **l1_generate** | Candidate generation (also init mode) | `generate_candidates()` / `restructure_context()` |
+| **l1_evaluate** | Eval + winner selection + critique + styles | `evaluate_and_select_winner()` + `CritiqueAgent.run()` + `sample_thinking_styles()` |
+| **l2_refine_context** | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` |
+| **l3_modify_plan** | Strategic replanning on L2 stall | `modify_plan()` in `layer_transitions.py` |
 
-Each round generates Layer 1 variants. Stopping: `max_rounds`, `patience`, `next_action == "stop"` (from suggestion analysis), or perfect accuracy.
+These 4 steps are designed to be modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend, enabling step-level tracing, full reproducibility, and self-optimization. The existing scaffold nodes (`InitNode`, `GrowFilterNode`, `AnalysisEvalNode` in `api/nodes/optimizer_nodes.py`) are thin wrappers around the same service functions. See the [M8 spec](m8-optimizer-pipeline.md) for the full optimizer-as-pipeline design.
+
+Each round runs l1_generate then l1_evaluate. Stopping: `max_rounds`, `patience`, `next_action == "stop"`, or perfect accuracy. On L1 stall, escalates to l2_refine_context; on L2 stall, to l3_modify_plan.
 
 ---
 

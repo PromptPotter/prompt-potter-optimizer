@@ -19,6 +19,7 @@
 | M5 | Observability Layer | Complete |
 | M6 | PipelineSchema + Pipeline Composability | Waves 0-3 complete, Wave 4 deferred to M7, Waves 5-6 active |
 | M7 | Multi-Connector Architecture | Future |
+| M8 | Optimizer-as-Pipeline | Draft |
 
 ---
 
@@ -75,6 +76,20 @@ Generalize beyond TermNorm to support arbitrary LLM application backends. Resolv
 **Exit gate:** A second backend connector exists and runs through the same optimization workflow.
 
 Full spec: [`docs/specs/m7-multi-connector.md`](m7-multi-connector.md)
+
+---
+
+## M8: Optimizer-as-Pipeline -- Draft
+
+The optimizer itself is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_context`, `l3_modify_plan`), modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend. This solves three problems by design: tracing (optimizer steps get Langfuse observations), reproducibility (every meta-optimizer decision traced with full I/O), and self-optimization (a meta-PromptPotter optimizing its own prompts).
+
+Today, key artifacts are lost after each cycle: `critique_text`, `thinking_styles`, L2/L3 transition rationale and inputs, candidate generation meta-prompts. M8 captures all step-level artifacts, defines `OPTIMIZER_PIPELINE_SCHEMA`, and wires optimizer steps into the existing tracing infrastructure.
+
+**Entry criteria:** M6 exit gate passed (PipelineSchema + composite scoring active).
+
+**Exit gate:** Optimizer pipeline traced end-to-end with full reproducibility. Given a trial JSON, every LLM call in the optimization cycle can be reconstructed.
+
+Full spec: [`docs/specs/m8-optimizer-pipeline.md`](m8-optimizer-pipeline.md)
 
 ---
 

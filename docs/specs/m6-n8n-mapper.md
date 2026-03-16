@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0
 **Date:** 2026-02-28
-**Status:** Research complete (M6). Implementation deferred to M8.
+**Status:** Research complete (M6). Implementation deferred to M9.
 **Depends on:** [M6 spec](m6-pipeline-composability.md) (PipelineSchema model), [M7 spec](m7-multi-connector.md) (ConnectorProtocol)
 
 ---
@@ -27,7 +27,7 @@ A mapper bridges this gap, enabling PromptPotter to optimize n8n-hosted pipeline
 
 - **M6** (this document): Research, architecture decisions, gap analysis
 - **M7**: ConnectorProtocol — prerequisite for any non-TermNorm connector
-- **M8**: Implementation using this spec as guide
+- **M9**: Implementation using this spec as guide
 
 ### Real test case
 
@@ -634,7 +634,7 @@ class N8nWorkflow(BaseModel):
 
 ---
 
-## 12. M8 Deliverables
+## 12. M9 Deliverables
 
 ### Files to create
 

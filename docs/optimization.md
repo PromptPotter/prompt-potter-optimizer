@@ -52,6 +52,8 @@ Optimization strategy — rarely changed:
 
 `render()` assembles prompt fields into the final string. `derive()` creates child states forming a lineage chain.
 
+> **L4 (meta-optimization):** The escalation hierarchy extends naturally — when L3 stalls, L4 optimizes the optimizer itself (meta-prompts, critique templates, optimizer parameters). See [M8 spec](specs/m8-optimizer-pipeline.md#l4-meta-optimization).
+
 ---
 
 ## Feedback Cycle
@@ -97,6 +99,25 @@ Each round samples 2-3 styles from the variant library (`api/config/prompt_varia
 ### Scan-Aware Generation
 
 When scan data is available, `prepare_scan_context()` enriches the meta-prompt with scan analytics and each candidate can include a `pipeline_params_override` for per-candidate pipeline param exploration. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
+
+### Optimizer Pipeline Model
+
+The feedback cycle is itself a 4-step pipeline, designed to be modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend:
+
+| Step | Purpose | Function | Sub-tools |
+|------|---------|----------|-----------|
+| `l1_generate` | Candidate generation | `generate_candidates()` in `prompt_optimizer.py` | Scan context enrichment (optional) |
+| `l1_evaluate` | Eval + winner selection | `evaluate_and_select_winner()` in `prompt_optimizer.py` | `CritiqueAgent.run()`, `sample_thinking_styles()` |
+| `l2_refine_context` | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` | Pipeline param adjustment (with schema) |
+| `l3_modify_plan` | Strategic replanning on L2 stall | `modify_plan()` in `layer_transitions.py` | Pipeline param adjustment, degradation context |
+
+**Init is `l1_generate` in naked mode.** The init phase runs `restructure_context()` -- the same LLM decomposition used by candidate generation, but as a single-pass operation without critique feedback, thinking styles, or scan context. Same step, simpler mode.
+
+**Critique and thinking styles are tools of `l1_evaluate`, not separate steps.** The critique agent runs *within* the evaluation step -- its output (`critique_text`) feeds the *next* round's `l1_generate`. Similarly, `sample_thinking_styles()` runs at the end of evaluation to prepare mutation guidance for the next round. Neither has an independent parameter surface or routing decision that would warrant a separate pipeline step.
+
+**`suggestion_generation` is legacy/optional.** Controlled by `generate_suggestions=False` (default), superseded by critique-guided generation. If re-enabled, it operates as a tool of `l1_evaluate`.
+
+This pipeline model enables step-level tracing, full reproducibility, and self-optimization. See the [M8 spec](specs/m8-optimizer-pipeline.md) for the full design including `OPTIMIZER_PIPELINE_SCHEMA`, tracing design, and migration path.
 
 ### Phase Events
 

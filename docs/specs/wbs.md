@@ -53,7 +53,7 @@ Cleanup absorbed into M3-M5. Remaining items: SC5 → backlog, Streamlit → bac
 
 ## Phase 6: PipelineSchema + Cross-Repo Pipeline Composability (M6) -- In Progress
 
-See [M6 spec](m6-pipeline-composability.md) for full details. Cross-repo: TermNorm task doc at [`TermNorm: docs/pipeline-composability.md`](../../../OfficeAdminApps/TermNorm-excel/docs/pipeline-composability.md). n8n research: [n8n mapper spec](m6-n8n-mapper.md) (implementation deferred to M8).
+See [M6 spec](m6-pipeline-composability.md) for full details. Cross-repo: TermNorm task doc at [`TermNorm: docs/pipeline-composability.md`](../../../OfficeAdminApps/TermNorm-excel/docs/pipeline-composability.md). n8n research: [n8n mapper spec](m6-n8n-mapper.md) (implementation deferred to M9).
 
 **Waves 0-3: Complete**
 
@@ -101,16 +101,16 @@ See [M7 spec](m7-multi-connector.md) for full details. Absorbs former M6 Wave 5 
 
 ---
 
-## Phase 8: n8n Connector Implementation (M8) -- Planned
+## Phase 9: n8n Connector Implementation (M9) -- Planned
 
 See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depends on M7 ConnectorProtocol.
 
 | ID | Work Package | Sessions | PRD Ref | Depends | Status |
 |----|-------------|:--------:|---------|---------|--------|
-| 8.1 | Node.js bridge (`external/n8n-bridge/`) + bridge output Pydantic models | 1 | P1.13 | 7.1 | Planned |
-| 8.2 | n8n mapper (Phases A-E) + MappingReport + gap detection | 1 | P1.13 | 8.1 | Planned |
-| 8.3 | n8n ConnectorProtocol adapter + pipeline_discovery integration | 1 | P1.13 | 8.2, 7.3 | Planned |
-| 8.4 | Tests against real fixture + raw fallback path | 1 | P1.13 | 8.2 | Planned |
+| 9.1 | Node.js bridge (`external/n8n-bridge/`) + bridge output Pydantic models | 1 | P1.13 | 7.1 | Planned |
+| 9.2 | n8n mapper (Phases A-E) + MappingReport + gap detection | 1 | P1.13 | 9.1 | Planned |
+| 9.3 | n8n ConnectorProtocol adapter + pipeline_discovery integration | 1 | P1.13 | 9.2, 7.3 | Planned |
+| 9.4 | Tests against real fixture + raw fallback path | 1 | P1.13 | 9.2 | Planned |
 
 ---
 
@@ -126,7 +126,8 @@ See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depe
 | M5: Observability Layer | 7 | 7 | Complete |
 | M6: PipelineSchema + Pipeline Composability | 14 | 14 | In Progress (Waves 0-3 complete, Wave 4 → M7, Waves 5-6 active) |
 | M7: Multi-Connector | 6 | 6 | Planned |
-| M8: n8n Connector | 4 | 4 | Planned |
+| M8: Optimizer-as-Pipeline | 6 | 6 | Draft |
+| M9: n8n Connector | 4 | 4 | Planned |
 | **Total** | **63** | **~67** | |
 
 ---
@@ -153,7 +154,7 @@ See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depe
 | P1.10 File-Based Observability | 5.1-5.6 | M5 | Complete |
 | P1.11 LLM Retry Logic | 5.3 | M5 | Complete |
 | P1.12 Workflow-Driven Optimization | 6.3-6.6, 7.5 | M6, M7 | Planned |
-| P1.13 Multi-Connector Support | 7.1-7.4, 8.1-8.4 | M7, M8 | Planned |
+| P1.13 Multi-Connector Support | 7.1-7.4, 9.1-9.4 | M7, M9 | Planned |
 | P1.14 PipelineSchema | 6.1-6.2 | M6 | Complete |
 | P2.3 Streamlit Dashboard | -- | Backlog | Planned |
 | SC5 TermNorm Validation | -- | Backlog | Planned |
