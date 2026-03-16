@@ -1,13 +1,13 @@
-"""Tests for optimizer nodes (InitNode, GrowFilterNode, AnalysisEvalNode)."""
+"""Tests for optimizer nodes (InitNode, L1GenerateNode, L1EvaluateNode)."""
 
 import pytest
 
 from api.models.prompt_state import PromptState
 from api.nodes.optimizer_nodes import (
-    AnalysisEvalNode,
-    AnalysisEvalOutput,
-    GrowFilterNode,
-    GrowFilterOutput,
+    L1EvaluateNode,
+    L1EvaluateOutput,
+    L1GenerateNode,
+    L1GenerateOutput,
     InitNode,
     InitNodeOutput,
 )
@@ -51,8 +51,8 @@ def test_nodes_registered():
     from api.nodes import get_node_class
 
     assert get_node_class("InitNode") is InitNode
-    assert get_node_class("GrowFilterNode") is GrowFilterNode
-    assert get_node_class("AnalysisEvalNode") is AnalysisEvalNode
+    assert get_node_class("L1GenerateNode") is L1GenerateNode
+    assert get_node_class("L1EvaluateNode") is L1EvaluateNode
     assert get_node_class("nodes/InitNode") is InitNode
 
 
@@ -102,13 +102,13 @@ async def test_init_node(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# GrowFilterNode
+# L1GenerateNode
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_grow_filter_node(monkeypatch, baseline_ps, baseline_results):
-    """GrowFilterNode generates candidate PromptStates."""
+    """L1GenerateNode generates candidate PromptStates."""
     async def mock_generate(current_ps, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         return [
@@ -130,7 +130,7 @@ async def test_grow_filter_node(monkeypatch, baseline_ps, baseline_results):
         lambda provider=None: MockLLMClient(),
     )
 
-    node = GrowFilterNode(
+    node = L1GenerateNode(
         node_id="test_grow",
         config={"model": "test-model", "n_variants": 3, "creativity": 0.5},
     )
@@ -140,7 +140,7 @@ async def test_grow_filter_node(monkeypatch, baseline_ps, baseline_results):
         "results": baseline_results,
     })
 
-    assert isinstance(output, GrowFilterOutput)
+    assert isinstance(output, L1GenerateOutput)
     assert output.n_generated == 3
     assert len(output.candidates) == 3
     for c_dict in output.candidates:
@@ -149,7 +149,7 @@ async def test_grow_filter_node(monkeypatch, baseline_ps, baseline_results):
 
 
 # ---------------------------------------------------------------------------
-# AnalysisEvalNode
+# L1EvaluateNode
 # ---------------------------------------------------------------------------
 
 
@@ -157,7 +157,7 @@ async def test_grow_filter_node(monkeypatch, baseline_ps, baseline_results):
 async def test_l1_evaluate_node(
     monkeypatch, baseline_ps, eval_data, baseline_results,
 ):
-    """AnalysisEvalNode evaluates candidates and selects a winner."""
+    """L1EvaluateNode evaluates candidates and selects a winner."""
     candidate_a = baseline_ps.derive(
         instruction="variant_a", changes_description="better_a",
     )
@@ -197,7 +197,7 @@ async def test_l1_evaluate_node(
         mock_eval,
     )
 
-    node = AnalysisEvalNode(
+    node = L1EvaluateNode(
         node_id="test_eval",
         config={
             "backend_url": "http://localhost:8000",
@@ -217,7 +217,7 @@ async def test_l1_evaluate_node(
         },
     })
 
-    assert isinstance(output, AnalysisEvalOutput)
+    assert isinstance(output, L1EvaluateOutput)
     assert output.improved is True
     assert output.winner_accuracy == 1.0
     winner_ps = PromptState(**output.winner_prompt_state)

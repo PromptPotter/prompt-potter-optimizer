@@ -62,13 +62,16 @@ Artifacts not persisted (lost after each cycle):
 
 ### Step Table
 
-| Step | Purpose | Current function | Module |
-|------|---------|------------------|--------|
-| `l1_generate` | Candidate generation (also init mode) | `generate_candidates()` / `restructure_context()` | `prompt_optimizer.py` / `search/context.py` |
-| `l1_evaluate` | Eval + winner selection + critique + style sampling | `evaluate_and_select_winner()` | `prompt_optimizer.py` |
-| `l2_refine_context` | Context/parameter tuning on L1 stall | `refine_context()` | `campaign/layer_transitions.py` |
-| `l3_modify_plan` | Strategic replanning on L2 stall or escalation | `modify_plan()` | `campaign/layer_transitions.py` |
-| `l4_meta_optimize` | Meta-optimization (optimizer self-improvement) | (future) | `campaign/meta_optimize.py` (future) |
+| Step | Purpose | Node class | Service function | Module |
+|------|---------|-----------|------------------|--------|
+| `l1_generate` | Candidate generation (also init mode) | `L1GenerateNode` | `generate_candidates()` | `prompt_optimizer.py` |
+| `l1_evaluate` | Eval + winner selection + critique + style sampling | `L1EvaluateNode` | `evaluate_and_select_winner()` | `prompt_optimizer.py` |
+| `l2_refine_context` | Context/parameter tuning on L1 stall | `L2RefineNode` | `refine_context()` | `campaign/layer_transitions.py` |
+| `l3_modify_plan` | Strategic replanning on L2 stall or escalation | `L3ModifyPlanNode` | `modify_plan()` | `campaign/layer_transitions.py` |
+| `init` | Context decomposition into baseline PromptState | `InitNode` | `restructure_context()` | `search/context.py` |
+| `l4_meta_optimize` | Meta-optimization (optimizer self-improvement) | `L4MetaNode` (future) | (future) | `campaign/meta_optimize.py` (future) |
+
+All node classes live in `api/nodes/optimizer_nodes.py` and extend `NodeBase[TInput, TOutput]` from `api/nodes/base.py`.
 
 ### Input/Output Schemas
 
@@ -217,14 +220,14 @@ Escalation actions bypass patience — they are immediate signals, not gradual s
 
 ### Observability Events
 
-| Step | Current event | Proposed trace observation |
-|------|--------------|---------------------------|
-| `l1_generate` | `PhaseEvent("l1_generate", ...)` | `generation` observation with full meta-prompt I/O |
-| `l1_evaluate` | `PhaseEvent("l1_evaluate", ...)` | `span` with nested `generation` (critique) |
-| `l2_refine_context` | `PhaseEvent("refine_context", ...)` | `generation` observation with rationale |
-| `l3_modify_plan` | `PhaseEvent("modify_plan", ...)` | `generation` observation with rationale |
-| escalation | `PhaseEvent("escalation", ...)` | metadata on parent span (check_name, target, context) |
-| `l4_meta_optimize` | (future PhaseEvent) | `generation` observation with meta-eval I/O |
+| Step | Node class | PhaseEvent (display) | Langfuse observation (tracing) |
+|------|-----------|---------------------|-------------------------------|
+| `l1_generate` | `L1GenerateNode` | `PhaseEvent("l1_generate", ...)` | `generation` — meta-prompt I/O via `NodeBase.process()` |
+| `l1_evaluate` | `L1EvaluateNode` | `PhaseEvent("l1_evaluate", ...)` | `span` with nested `generation` (critique) via `NodeBase.process()` |
+| `l2_refine_context` | `L2RefineNode` | `PhaseEvent("refine_context", ...)` | `generation` — rationale via `NodeBase.process()` |
+| `l3_modify_plan` | `L3ModifyPlanNode` | `PhaseEvent("modify_plan", ...)` | `generation` — rationale via `NodeBase.process()` |
+| escalation | (orchestrator) | `PhaseEvent("escalation", ...)` | metadata on parent span (check_name, target, context) |
+| `l4_meta_optimize` | `L4MetaNode` (future) | (future) | `generation` — meta-eval I/O |
 
 ---
 
@@ -456,6 +459,121 @@ OPTIMIZER_PIPELINE_SCHEMA = PipelineSchema(
 
 ---
 
+## Node Architecture
+
+Each optimizer step is a `NodeBase[TInput, TOutput]` subclass in `api/nodes/optimizer_nodes.py`. Nodes are the **canonical execution boundary** — the orchestrator (`feedback_cycle.py`) calls `node.process()`, not raw service functions. This gives every step typed I/O, automatic timing, and a single hook point for tracing.
+
+### Design Principles
+
+1. **Node = traced execution boundary.** `NodeBase.process()` validates input, runs `_execute()`, validates output, and captures `NodeMetrics` (timing, tokens, errors). Tracing hooks attach here — one integration point, all steps covered.
+2. **Orchestrator owns control flow.** Patience, stall detection, stop conditions, escalation routing — all stay in `feedback_cycle.py`. Nodes are stateless step executors.
+3. **Node output = artifact contract.** The output model defines what gets traced and persisted. No separate artifact assembly — the typed output is the single source of truth.
+4. **Service functions remain.** `generate_candidates()`, `evaluate_and_select_winner()`, `refine_context()`, `modify_plan()` stay as implementation. Nodes are thin wrappers that add typed I/O and tracing. The service functions are the testable core; nodes add the execution boundary.
+
+### Node Roster
+
+| Node class | Step | Input model | Output model | Service function |
+|-----------|------|------------|-------------|-----------------|
+| `InitNode` | `init` | `InitNodeInput` | `InitNodeOutput` | `restructure_context()` |
+| `L1GenerateNode` | `l1_generate` | `L1GenerateInput` | `L1GenerateOutput` | `generate_candidates()` |
+| `L1EvaluateNode` | `l1_evaluate` | `L1EvaluateInput` | `L1EvaluateOutput` | `evaluate_and_select_winner()` |
+| `L2RefineNode` | `l2_refine_context` | `L2RefineInput` | `L2RefineOutput` | `refine_context()` |
+| `L3ModifyPlanNode` | `l3_modify_plan` | `L3ModifyPlanInput` | `L3ModifyPlanOutput` | `modify_plan()` |
+
+Naming convention: `L{layer}{Verb}Node`. Input/output models use the same prefix without "Node".
+
+### Orchestrator Pattern
+
+```python
+# feedback_cycle.py — round loop (simplified)
+for round_num in range(max_rounds):
+    gen_result = await l1_generate_node.process(L1GenerateInput(
+        prompt_state=state.current_sp.prompt_state.model_dump(),
+        accuracy=state.current_accuracy,
+        results=state.current_results,
+        critique_text=state.critique_text,
+        thinking_styles=state.thinking_styles,
+        scan_context=config.scan_context,
+    ))
+
+    eval_result = await l1_evaluate_node.process(L1EvaluateInput(
+        candidates=gen_result.candidates,
+        eval_data=round_eval_data,
+        current_best={...},
+        improvement_threshold=config.improvement_threshold,
+    ))
+
+    # Orchestrator updates state, checks patience, routes escalation
+    state.critique_text = eval_result.critique_text
+    state.thinking_styles = eval_result.thinking_styles
+
+    if stalled and config.enable_l2:
+        l2_result = await l2_refine_node.process(L2RefineInput(
+            prompt_state=state.current_sp.prompt_state.model_dump(),
+            stalled_rounds=[...],
+            eval_data=round_eval_data,
+            pipeline_params=state.current_sp.pipeline_params,
+            pipeline_schema=config.pipeline_schema,
+        ))
+
+    if l2_stalled and config.enable_l3:
+        l3_result = await l3_modify_plan_node.process(L3ModifyPlanInput(...))
+```
+
+**Key:** The orchestrator passes critique_text/thinking_styles from one round's `L1EvaluateNode` output to the next round's `L1GenerateNode` input. These are orchestrator-level state, not node-internal state.
+
+### Critique and Thinking Styles
+
+The M8 spec classifies critique and thinking style sampling as **sub-tools of l1_evaluate** (see Input/Output Schemas above). Two viable placements:
+
+**Option A — Inside L1EvaluateNode**: The node calls `CritiqueAgent.run()` and `sample_thinking_styles()` after winner selection. Output includes `critique_text` and `thinking_styles`. The node is a span containing nested generations (eval + critique).
+
+**Option B — Orchestrator calls them separately**: `L1EvaluateNode` only does eval + winner selection. The orchestrator calls critique and style sampling between l1_evaluate exit and the next round's l1_generate enter.
+
+**Decision: Option A.** Critique and style sampling are part of the l1_evaluate step's output contract. Keeping them inside the node means the node's output model is the complete artifact — no orchestrator assembly needed. The Langfuse observation for l1_evaluate is a span with nested generations (one for each candidate eval, one for critique).
+
+### NodeBase → ObsLogger Integration (Future Phase 3)
+
+When tracing is wired, `NodeBase` gains optional observability:
+
+```python
+class NodeBase(ABC, Generic[TInput, TOutput]):
+    def __init__(self, node_id, config=None, *, obs=None, trace_id=None):
+        self.obs = obs            # Optional ObsLogger
+        self.trace_id = trace_id  # Active Langfuse trace
+
+    async def process(self, input_data):
+        obs_id = self._start_observation(input_data)  # Langfuse span/generation
+        try:
+            result = await self._execute(validated_input)
+            self._end_observation(obs_id, result)
+            return result
+        except Exception as e:
+            self._end_observation(obs_id, error=e)
+            raise
+```
+
+- **Generation nodes** (l1_generate, l2_refine, l3_modify): Create Langfuse `generation` observations with model, prompt, response, token usage.
+- **Span nodes** (l1_evaluate): Create Langfuse `span` observations containing nested `generation` children (one per candidate eval, one for critique).
+- **File trace**: `NodeBase._end_observation()` writes `{step_name}.json` to `obs/langfuse/traces/{campaign_id}/round_{N}/`.
+- **Opt-in**: When `obs=None`, tracing is skipped. Nodes work identically without observability.
+
+### PhaseEvent Relationship
+
+PhaseEvent remains the **notebook display** mechanism. The orchestrator emits PhaseEvents around `node.process()` calls:
+
+```python
+_emit_phase(on_phase, "l1_generate", "enter", round=round_num, ...)
+gen_result = await l1_generate_node.process(input)
+_emit_phase(on_phase, "l1_generate", "exit", round=round_num, n_candidates=gen_result.n_generated, ...)
+```
+
+PhaseEvent carries **display summaries** (accuracy, counts, previews). Node output carries **full artifacts** (meta_prompt, critique_text, rationale). Two separate concerns:
+- PhaseEvent → notebook UI (real-time display during optimization)
+- Node output → tracing + persistence (post-hoc analysis, reproducibility)
+
+---
+
 ## Meta-Experiment Tracing Design
 
 Each optimizer step gets traced through three channels:
@@ -616,37 +734,44 @@ Viable because optimizer prompts are domain-general — they don't need re-optim
 
 ## Migration Path
 
-### Phase 0: Escalation checks + optimizer state control
+### Phase 0: Boundary cleanup + terminology ✅
+
+- Renamed phase events: `"growth"` → `"l1_generate"`, `"analysis_eval"` → `"l1_evaluate"`
+- Split `_escalate_l2()` into `_do_l2_transition()` + `_do_l3_transition()` + thin dispatcher
+- Stopped `_evaluate_candidates()` from mutating state — returns critique/styles as values
+- Made L2 meta-param override explicit (`n_variants`/`creativity` resolved in `_execute_round()`)
+
+### Phase 0.5: Node alignment
+
+- ~~Rename `GrowFilterNode` → `L1GenerateNode`, `AnalysisEvalNode` → `L1EvaluateNode`~~ ✅
+- ~~Rename I/O models to match (`L1GenerateInput`/`Output`, `L1EvaluateInput`/`Output`)~~ ✅
+- Add `L2RefineNode` and `L3ModifyPlanNode` with typed I/O
+- Wire `feedback_cycle.py` to call `node.process()` instead of raw service functions
+- Orchestrator state management (patience, escalation) unchanged
+
+### Phase 1: Escalation checks + optimizer state control
 
 - `EscalationCheck`/`EscalationSignal` mechanism in `models.py`
 - `DegradationCheck` as first concrete check
 - Eval loop integration (`evaluate_and_select_winner`)
 - Round loop generic handler (`_execute_round`, `run_feedback_cycle`)
-- `_escalate_l3` accepts `EscalationSignal` context; `modify_plan()` receives it for targeted LLM guidance
-- Eval path refactoring: inline `_evaluate_candidates` into `_execute_round`, cached scores in `_select_round_winner`, enriched `candidate_scores`
 - Optimizer state overrides (`initial_plan`/`initial_context`/`initial_critique` on CycleConfig)
 - Preflight "OPTIMIZER STATE" section with full text + escalation config
 - Critique/thinking-style steps skipped when escalation fires
 
-### Phase 1: Artifact capture
-
-- Capture `meta_prompt` from `_build_constrained_meta_prompt()` in l1_generate phase data
-- Capture `critique_text` and `thinking_styles` in trial checkpoints
-- Capture L2/L3 rationale alongside `TransitionResult`
-- Capture `EscalationSignal` in trial checkpoints
-- Persist to `CampaignStore` trial JSON
-
-### Phase 2: Schema
+### Phase 2: Schema + artifact capture
 
 - Define `OPTIMIZER_PIPELINE_SCHEMA` in `pipeline_discovery.py`
 - `GET /optimizer/pipeline` REST endpoint
-- Register in `_KNOWN_PIPELINES`
+- Node output models = artifact contracts — persist `node.process()` outputs to trial JSON
+- No separate artifact assembly; `CycleRoundResult.steps` maps step name → node output dict
 
 ### Phase 3: Trace
 
-- Langfuse observations per optimizer step
-- Map `PhaseEvent` → observation lifecycle (enter = start, exit = end)
-- Attach meta-prompt, critique, rationale, escalation signals as observation I/O
+- `NodeBase` gains optional `obs: ObsLogger` + `trace_id`
+- `process()` auto-creates Langfuse observation (generation or span) with full I/O
+- File trace per step: `obs/langfuse/traces/{campaign_id}/round_{N}/{step_name}.json`
+- PhaseEvent remains for notebook display (separate concern)
 
 ### Phase 4: L4 Implementation
 
@@ -661,29 +786,30 @@ Viable because optimizer prompts are domain-general — they don't need re-optim
 
 | ID | Work Package | Sessions | Depends on | Description |
 |----|-------------|:--------:|------------|-------------|
-| 8.0 | Escalation checks + state control | 1 | M6 exit | `EscalationCheck`/`EscalationSignal`, `DegradationCheck`, eval path refactoring, optimizer state overrides, preflight visibility |
-| 8.1 | Step artifact capture | 1 | 8.0 | Capture meta_prompt, critique, styles, L2/L3 rationale, escalation signals in trial JSON |
-| 8.2 | Extended trial persistence | 1 | 8.1 | Per-step artifact dict in `CampaignStore` trial format |
-| 8.3 | `OPTIMIZER_PIPELINE_SCHEMA` | 1 | 8.1 | Schema in `pipeline_discovery.py`, `GET /optimizer/pipeline` endpoint |
-| 8.4 | Optimizer step tracing | 1 | 8.2, 8.3 | Langfuse observations per step, PhaseEvent → observation lifecycle |
-| 8.5 | Prompt externalization | 1 | 8.3 | Extract optimizer prompts to configurable templates |
-| 8.6 | Meta-evaluation function | 1 | 8.4 | Convergence speed + final accuracy fitness function |
-| 8.7 | L4 meta-optimization | 2 | 8.5, 8.6 | L4 escalation, optimizer prompt optimization loop, l4_patience |
-| 8.8 | Self-optimization integration | 1 | 8.7, M7 | `OptimizerConnector` + sensitivity scan on optimizer params |
+| 8.0 | Boundary cleanup + terminology | 1 | M6 exit | Phase renames, `_do_l2/_do_l3` split, eval state returns, L2 meta-param resolution. **✅ Done.** |
+| 8.0.5a | Node rename + L2/L3 nodes | 1 | 8.0 | ~~Rename nodes~~ ✅. Add `L2RefineNode`, `L3ModifyPlanNode` with typed I/O. |
+| 8.0.5b | Orchestrator → nodes | 1 | 8.0.5a | Wire `feedback_cycle.py` to call `node.process()` instead of raw service functions. |
+| 8.1 | Escalation checks + state control | 1 | 8.0.5b | `EscalationCheck`/`EscalationSignal`, `DegradationCheck`, optimizer state overrides, preflight visibility |
+| 8.2 | Schema + artifact capture | 1 | 8.1 | `OPTIMIZER_PIPELINE_SCHEMA`, `GET /optimizer/pipeline`, node outputs persisted as trial step artifacts |
+| 8.3 | Optimizer step tracing | 1 | 8.2 | `NodeBase` → ObsLogger integration, Langfuse observations per step, file traces |
+| 8.4 | Prompt externalization | 1 | 8.2 | Extract optimizer prompts to configurable templates |
+| 8.5 | Meta-evaluation function | 1 | 8.3 | Convergence speed + final accuracy fitness function |
+| 8.6 | L4 meta-optimization | 2 | 8.4, 8.5 | L4 escalation, optimizer prompt optimization loop, l4_patience |
+| 8.7 | Self-optimization integration | 1 | 8.6, M7 | `OptimizerConnector` + sensitivity scan on optimizer params |
 
 ### Reading list per work package
 
 | WP | Read first |
 |----|-----------|
-| 8.0 | `api/services/campaign/models.py` (`CycleConfig`, `CycleRoundResult`, `_LoopState`), `api/services/prompt_optimizer.py` (`evaluate_and_select_winner`, `_select_round_winner`), `api/services/campaign/feedback_cycle.py` (`_execute_round`, `_escalate_l2`, `run_feedback_cycle`), `notebooks/_campaign_lib/_optimize.py` (`_print_preflight_sections`) |
-| 8.1 | `api/services/campaign/feedback_cycle.py` (`_generate_or_load_candidates`, `_execute_round`, `_escalate_l2`), `api/services/campaign/layer_transitions.py` |
-| 8.2 | `api/services/stores/campaign_store.py`, `api/services/campaign/models.py` (`CycleRoundResult`) |
-| 8.3 | `api/services/pipeline_discovery.py` (`TERMNORM_DEFAULT_SCHEMA`, `_KNOWN_PIPELINES`), `api/models/pipeline_schema.py` |
-| 8.4 | `api/services/obs/observability_logger.py` (`log_round_start`, `log_round_end`), `api/models/phase_event.py` |
-| 8.5 | `api/services/prompt_optimizer.py` (`_build_constrained_meta_prompt`), `api/services/campaign/critique.py`, `api/services/campaign/layer_transitions.py` |
-| 8.6 | `api/services/campaign/models.py` (`CycleResult`), `api/services/prompt_eval.py` (`compute_composite_score`) |
-| 8.7 | `api/services/campaign/feedback_cycle.py` (L3 stall detection), `api/services/campaign/models.py` (`CycleResult`) |
-| 8.8 | `docs/specs/m7-multi-connector.md` (ConnectorProtocol), `api/services/search/smart_search.py` (`sensitivity_scan`) |
+| 8.0.5a | `api/nodes/optimizer_nodes.py` (current nodes), `api/nodes/base.py` (`NodeBase`), M8 spec I/O schemas |
+| 8.0.5b | `api/services/campaign/feedback_cycle.py` (`_generate_or_load_candidates`, `_execute_round`, `_escalate_l2`), `api/nodes/optimizer_nodes.py` |
+| 8.1 | `api/services/campaign/models.py` (`CycleConfig`, `CycleRoundResult`, `_LoopState`), `api/services/prompt_optimizer.py` (`evaluate_and_select_winner`), `notebooks/_campaign_lib/_optimize.py` (`_print_preflight_sections`) |
+| 8.2 | `api/services/pipeline_discovery.py` (`TERMNORM_DEFAULT_SCHEMA`, `_KNOWN_PIPELINES`), `api/services/stores/campaign_store.py` |
+| 8.3 | `api/services/obs/observability_logger.py` (`log_round_start`, `log_round_end`), `api/nodes/base.py` (`NodeBase.process`) |
+| 8.4 | `api/services/prompt_optimizer.py` (`_build_constrained_meta_prompt`), `api/services/campaign/critique.py`, `api/services/campaign/layer_transitions.py` |
+| 8.5 | `api/services/campaign/models.py` (`CycleResult`), `api/services/prompt_eval.py` (`compute_composite_score`) |
+| 8.6 | `api/services/campaign/feedback_cycle.py` (L3 stall detection), `api/services/campaign/models.py` (`CycleResult`) |
+| 8.7 | `docs/specs/m7-multi-connector.md` (ConnectorProtocol), `api/services/search/smart_search.py` (`sensitivity_scan`) |
 
 ---
 
@@ -695,22 +821,26 @@ Viable because optimizer prompts are domain-general — they don't need re-optim
 
 ## Exit Criteria
 
-- **Phase 0:** Escalation checks fire and route correctly. Optimizer state visible in preflight and overridable.
-- **Phase 1:** All step-level artifacts captured in trial JSON.
-- **Phase 2:** `OPTIMIZER_PIPELINE_SCHEMA` defined and discoverable via REST endpoint.
-- **Phase 3:** Optimizer steps traced end-to-end in Langfuse with full I/O.
+- **Phase 0:** ✅ Boundary cleanup committed. Phase names aligned to M8 terminology.
+- **Phase 0.5:** Orchestrator calls nodes. All 5 nodes (`InitNode`, `L1GenerateNode`, `L1EvaluateNode`, `L2RefineNode`, `L3ModifyPlanNode`) have typed I/O. Existing tests pass through node layer.
+- **Phase 1:** Escalation checks fire and route correctly. Optimizer state visible in preflight and overridable.
+- **Phase 2:** `OPTIMIZER_PIPELINE_SCHEMA` defined and discoverable via REST. Node outputs persisted as trial step artifacts.
+- **Phase 3:** Optimizer steps traced end-to-end in Langfuse via `NodeBase.process()`.
 - **Phase 4 (stretch):** Meta-optimization demonstrated on at least one optimizer prompt.
 
 ## Test Strategy
 
 | Test | Type | What it verifies |
 |------|------|-----------------|
+| `test_l1_generate_node` | Unit | `L1GenerateNode.process()` returns `L1GenerateOutput` with candidates |
+| `test_l1_evaluate_node` | Unit | `L1EvaluateNode.process()` returns winner + critique + styles |
+| `test_l2_refine_node` | Unit | `L2RefineNode.process()` returns `TransitionResult` fields |
+| `test_l3_modify_plan_node` | Unit | `L3ModifyPlanNode.process()` returns plan + rationale |
+| `test_feedback_cycle_uses_nodes` | Integration | `run_feedback_cycle()` calls node.process(), not raw service fns |
 | `test_escalation_triggers_l3` | Unit | `DegradationCheck` fires, round aborts, L3 invoked with signal context |
 | `test_escalation_disabled` | Unit | Threshold=1.0 disables check, normal patience flow |
-| `test_escalation_no_target` | Unit | Escalation with `enable_l3=False` stops cycle with `escalation_*` reason |
 | `test_state_overrides` | Unit | `initial_plan`/`initial_context`/`initial_critique` applied to baseline |
-| `test_optimizer_schema` | Unit | `OPTIMIZER_PIPELINE_SCHEMA` has 4 steps with correct names, roles, param_keys |
-| `test_trial_step_artifacts` | Unit | Trial JSON contains per-step artifact dicts |
-| `test_step_tracing` | Integration | Langfuse observations created per step |
-| `test_reproducibility` | Integration | Given trial JSON + eval_data, reconstruct exact LLM calls |
+| `test_optimizer_schema` | Unit | `OPTIMIZER_PIPELINE_SCHEMA` has 5 steps with correct names, roles, param_keys |
+| `test_trial_step_artifacts` | Unit | Trial JSON contains per-step node output dicts |
+| `test_step_tracing` | Integration | Langfuse observations created per step via NodeBase |
 | `test_optimizer_pipeline_endpoint` | API | `GET /optimizer/pipeline` returns valid PipelineSchema |

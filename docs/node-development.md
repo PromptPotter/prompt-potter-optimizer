@@ -58,8 +58,8 @@ register_node(MyNode)
 | `RankerNode` | `ranker_node.py` | LLM candidate ranking with scoring |
 | `PipelineConfigNode` | `pipeline_config_node.py` | Pipeline parameter assembly for backend forwarding |
 | `InitNode` | `optimizer_nodes.py` | Decompose instruction into Layer 1 fields → baseline PromptState |
-| `GrowFilterNode` | `optimizer_nodes.py` | Generate N candidate PromptState variants via LLM |
-| `AnalysisEvalNode` | `optimizer_nodes.py` | Evaluate candidates via backend, select winner |
+| `L1GenerateNode` | `optimizer_nodes.py` | Generate N candidate PromptState variants via LLM |
+| `L1EvaluateNode` | `optimizer_nodes.py` | Evaluate candidates via backend, select winner |
 
 All files under `api/nodes/`.
 
@@ -87,9 +87,9 @@ Handled by `WorkflowRunner._resolve_input()`:
 
 ## Patterns
 
-- **Service wrapper** (InitNode, GrowFilterNode): lazy-import service functions inside `_execute()`, serialize Pydantic ↔ dict at boundaries
+- **Service wrapper** (InitNode, L1GenerateNode): lazy-import service functions inside `_execute()`, serialize Pydantic ↔ dict at boundaries
 - **LLM direct** (LLMNode, RankerNode): call `get_llm_client()`, parse structured JSON responses
-- **Multi-service orchestrator** (AnalysisEvalNode): constructs infrastructure objects from config, supports both dict and flat-field input shapes for CWL compatibility
+- **Multi-service orchestrator** (L1EvaluateNode): constructs infrastructure objects from config, supports both dict and flat-field input shapes for CWL compatibility
 
 ## Files
 

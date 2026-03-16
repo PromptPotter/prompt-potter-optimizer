@@ -1,9 +1,9 @@
-"""Optimizer nodes for prompt optimization workflows.
+"""Optimizer pipeline nodes (M8).
 
-Three nodes wrapping existing service logic:
+Node classes wrapping existing service logic with typed I/O:
 - **InitNode** — restructure context into Layer 1 fields, produce initial PromptState
-- **GrowFilterNode** — generate N candidate PromptState variants via LLM
-- **AnalysisEvalNode** — evaluate candidates via backend, select winner, suggest next steps
+- **L1GenerateNode** — generate N candidate PromptState variants via LLM
+- **L1EvaluateNode** — evaluate candidates via backend, select winner, suggest next steps
 """
 
 import logging
@@ -89,12 +89,12 @@ class InitNode(NodeBase[InitNodeInput, InitNodeOutput]):
 
 
 # ---------------------------------------------------------------------------
-# GrowFilterNode — candidate generation
+# L1GenerateNode — candidate generation
 # ---------------------------------------------------------------------------
 
 
-class GrowFilterInput(BaseModel):
-    """Input for GrowFilterNode."""
+class L1GenerateInput(BaseModel):
+    """Input for L1GenerateNode."""
 
     prompt_state: dict = Field(..., description="Current best PromptState (serialized)")
     accuracy: float = Field(..., description="Current accuracy (0.0-1.0)")
@@ -104,8 +104,8 @@ class GrowFilterInput(BaseModel):
     )
 
 
-class GrowFilterOutput(BaseModel):
-    """Output from GrowFilterNode."""
+class L1GenerateOutput(BaseModel):
+    """Output from L1GenerateNode."""
 
     candidates: list[dict] = Field(
         ..., description="List of candidate PromptStates (serialized)",
@@ -113,7 +113,7 @@ class GrowFilterOutput(BaseModel):
     n_generated: int = Field(..., description="Number of candidates generated")
 
 
-class GrowFilterNode(NodeBase[GrowFilterInput, GrowFilterOutput]):
+class L1GenerateNode(NodeBase[L1GenerateInput, L1GenerateOutput]):
     """Generate N candidate PromptState variants via LLM meta-prompt.
 
     Wraps ``generate_candidates()`` from ``api.services.prompt_optimizer``.
@@ -126,14 +126,14 @@ class GrowFilterNode(NodeBase[GrowFilterInput, GrowFilterOutput]):
     """
 
     @classmethod
-    def get_input_model(cls) -> Type[GrowFilterInput]:
-        return GrowFilterInput
+    def get_input_model(cls) -> Type[L1GenerateInput]:
+        return L1GenerateInput
 
     @classmethod
-    def get_output_model(cls) -> Type[GrowFilterOutput]:
-        return GrowFilterOutput
+    def get_output_model(cls) -> Type[L1GenerateOutput]:
+        return L1GenerateOutput
 
-    async def _execute(self, input_data: GrowFilterInput) -> GrowFilterOutput:
+    async def _execute(self, input_data: L1GenerateInput) -> L1GenerateOutput:
         from api.models.prompt_state import PromptState
         from api.services.llm_client import get_llm_client
         from api.services.prompt_optimizer import generate_candidates
@@ -151,19 +151,19 @@ class GrowFilterNode(NodeBase[GrowFilterInput, GrowFilterOutput]):
             model=model,
         )
 
-        return GrowFilterOutput(
+        return L1GenerateOutput(
             candidates=[c.model_dump() for c in candidates],
             n_generated=len(candidates),
         )
 
 
 # ---------------------------------------------------------------------------
-# AnalysisEvalNode — evaluate, select winner, suggest improvements
+# L1EvaluateNode — evaluate, select winner, suggest improvements
 # ---------------------------------------------------------------------------
 
 
-class AnalysisEvalInput(BaseModel):
-    """Input for AnalysisEvalNode.
+class L1EvaluateInput(BaseModel):
+    """Input for L1EvaluateNode.
 
     ``current_best`` can be supplied as a pre-built dict **or** assembled
     from flat fields (``baseline_prompt_state``, ``baseline_accuracy``,
@@ -212,8 +212,8 @@ class AnalysisEvalInput(BaseModel):
     )
 
 
-class AnalysisEvalOutput(BaseModel):
-    """Output from AnalysisEvalNode."""
+class L1EvaluateOutput(BaseModel):
+    """Output from L1EvaluateNode."""
 
     winner: dict = Field(..., description="Winner round entry dict")
     winner_prompt_state: dict = Field(..., description="Winner PromptState (serialized)")
@@ -237,7 +237,7 @@ class AnalysisEvalOutput(BaseModel):
     )
 
 
-class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
+class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
     """Evaluate candidates via backend, select winner, generate suggestions.
 
     Wraps ``evaluate_prompt_cached()``, ``_select_round_winner()``, and
@@ -258,14 +258,14 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
     """
 
     @classmethod
-    def get_input_model(cls) -> Type[AnalysisEvalInput]:
-        return AnalysisEvalInput
+    def get_input_model(cls) -> Type[L1EvaluateInput]:
+        return L1EvaluateInput
 
     @classmethod
-    def get_output_model(cls) -> Type[AnalysisEvalOutput]:
-        return AnalysisEvalOutput
+    def get_output_model(cls) -> Type[L1EvaluateOutput]:
+        return L1EvaluateOutput
 
-    async def _execute(self, input_data: AnalysisEvalInput) -> AnalysisEvalOutput:
+    async def _execute(self, input_data: L1EvaluateInput) -> L1EvaluateOutput:
         from api.services.backend_client import BackendClient
         from api.services.prompt_optimizer import (
             evaluate_and_select_winner,
@@ -274,7 +274,7 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
 
         backend_url = self.config.get("backend_url", "")
         if not backend_url:
-            raise ValueError("AnalysisEvalNode requires 'backend_url' in config")
+            raise ValueError("L1EvaluateNode requires 'backend_url' in config")
 
         # Build dependencies
         backend_client = BackendClient(backend_url)
@@ -296,7 +296,7 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
             }
         else:
             raise ValueError(
-                "AnalysisEvalNode requires either 'current_best' dict or "
+                "L1EvaluateNode requires either 'current_best' dict or "
                 "'baseline_prompt_state' flat field"
             )
 
@@ -348,4 +348,4 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
             except Exception:
                 logger.warning("Suggestion generation failed", exc_info=True)
 
-        return AnalysisEvalOutput(**result)
+        return L1EvaluateOutput(**result)

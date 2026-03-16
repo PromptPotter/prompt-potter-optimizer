@@ -71,7 +71,7 @@ The AI Loop is itself a 4-step pipeline, implemented by `feedback_cycle.py`:
 | **l2_refine_context** | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` |
 | **l3_modify_plan** | Strategic replanning on L2 stall | `modify_plan()` in `layer_transitions.py` |
 
-These 4 steps are designed to be modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend, enabling step-level tracing, full reproducibility, and self-optimization. The existing scaffold nodes (`InitNode`, `GrowFilterNode`, `AnalysisEvalNode` in `api/nodes/optimizer_nodes.py`) are thin wrappers around the same service functions. See the [M8 spec](m8-optimizer-pipeline.md) for the full optimizer-as-pipeline design.
+These 4 steps are designed to be modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend, enabling step-level tracing, full reproducibility, and self-optimization. The existing nodes (`InitNode`, `L1GenerateNode`, `L1EvaluateNode` in `api/nodes/optimizer_nodes.py`) are thin wrappers around the same service functions. See the [M8 spec](m8-optimizer-pipeline.md) for the full optimizer-as-pipeline design.
 
 Each round runs l1_generate then l1_evaluate. Stopping: `max_rounds`, `patience`, `next_action == "stop"`, or perfect accuracy. On L1 stall, escalates to l2_refine_context; on L2 stall, to l3_modify_plan. Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (bypassing patience).
 

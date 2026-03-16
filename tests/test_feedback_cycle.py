@@ -5,7 +5,7 @@ Covers:
 - Patience-based stopping (consecutive non-improvements)
 - Perfect score early exit
 - next_action routing from analysis node
-- AnalysisEvalOutput.next_action field
+- L1EvaluateOutput.next_action field
 - select_scan_winner greedy composition from OAT scan results
 """
 
@@ -136,7 +136,7 @@ async def test_max_rounds(monkeypatch, eval_data):
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
-    """Loop stops when AnalysisEvalNode outputs next_action='stop'."""
+    """Loop stops when L1EvaluateNode outputs next_action='stop'."""
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
@@ -171,15 +171,15 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
 
 
 # ---------------------------------------------------------------------------
-# AnalysisEvalOutput.next_action field test
+# L1EvaluateOutput.next_action field test
 # ---------------------------------------------------------------------------
 
 
 def test_next_action_in_output():
-    """AnalysisEvalOutput has next_action field with correct default."""
-    from api.nodes.optimizer_nodes import AnalysisEvalOutput
+    """L1EvaluateOutput has next_action field with correct default."""
+    from api.nodes.optimizer_nodes import L1EvaluateOutput
 
-    output = AnalysisEvalOutput(
+    output = L1EvaluateOutput(
         winner={"label": "test", "accuracy": 0.5, "hits": 1, "total": 2,
                 "improved": False, "candidates_evaluated": 1},
         winner_prompt_state={},
@@ -268,11 +268,11 @@ async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_config):
-    """Winner results are passed forward to next round's GrowFilterNode."""
+    """Winner results are passed forward to next round's L1GenerateNode."""
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
 
-    # Track what results GrowFilterNode receives each round
+    # Track what results L1GenerateNode receives each round
     grow_results_received = []
 
     async def mock_generate(current_ps, accuracy, results, n, creativity,
@@ -676,7 +676,7 @@ async def test_interrupt_writes_interrupted_status(
 async def test_mid_round_resume_uses_persisted_candidates(
     monkeypatch, eval_data, tmp_path,
 ):
-    """Abort mid-round, re-run -> GrowFilterNode skipped, same candidates used."""
+    """Abort mid-round, re-run -> L1GenerateNode skipped, same candidates used."""
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
 

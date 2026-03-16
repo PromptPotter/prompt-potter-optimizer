@@ -526,7 +526,7 @@ async def evaluate_and_select_winner(
 ) -> dict[str, Any]:
     """Evaluate candidates and select the round winner.
 
-    This is the core eval+select logic extracted from AnalysisEvalNode so it
+    This is the core eval+select logic extracted from L1EvaluateNode so it
     can be called directly by the feedback cycle without node overhead.
 
     Returns:

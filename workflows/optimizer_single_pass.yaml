@@ -1,5 +1,5 @@
 # Optimizer Single-Pass Workflow
-# Linear pipeline: InitNode → GrowFilterNode → AnalysisEvalNode
+# Linear pipeline: InitNode → L1GenerateNode → L1EvaluateNode
 #
 # This workflow runs one optimization pass:
 # 1. Decompose instruction into Layer 1 fields, create baseline PromptState
@@ -51,7 +51,7 @@ steps:
       deterministic: false
 
   - id: grow
-    run: nodes/GrowFilterNode
+    run: nodes/L1GenerateNode
     in:
       prompt_state: init/prompt_state
       accuracy: initial_accuracy
@@ -68,7 +68,7 @@ steps:
       deterministic: false
 
   - id: evaluate
-    run: nodes/AnalysisEvalNode
+    run: nodes/L1EvaluateNode
     in:
       candidates: grow/candidates
       eval_data: eval_data
