@@ -130,7 +130,10 @@ async def refine_context(
     )
 
     new_ps = current_ps.derive(**changes) if changes else current_ps
-    return TransitionResult(prompt_state=new_ps, pipeline_params=new_pipeline_params)
+    return TransitionResult(
+        prompt_state=new_ps,
+        pipeline_params=new_pipeline_params,
+    )
 
 
 async def modify_plan(
@@ -209,7 +212,10 @@ async def modify_plan(
         plan=new_plan,
         changes_description=f"L3: {rationale[:80]}",
     )
-    return TransitionResult(prompt_state=new_ps, pipeline_params=new_pipeline_params)
+    return TransitionResult(
+        prompt_state=new_ps,
+        pipeline_params=new_pipeline_params,
+    )
 
 
 # ---------------------------------------------------------------------------

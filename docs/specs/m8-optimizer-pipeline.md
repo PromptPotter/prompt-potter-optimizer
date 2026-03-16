@@ -219,8 +219,8 @@ Escalation actions bypass patience — they are immediate signals, not gradual s
 
 | Step | Current event | Proposed trace observation |
 |------|--------------|---------------------------|
-| `l1_generate` | `PhaseEvent("growth", ...)` | `generation` observation with full meta-prompt I/O |
-| `l1_evaluate` | `PhaseEvent("analysis_eval", ...)` | `span` with nested `generation` (critique) |
+| `l1_generate` | `PhaseEvent("l1_generate", ...)` | `generation` observation with full meta-prompt I/O |
+| `l1_evaluate` | `PhaseEvent("l1_evaluate", ...)` | `span` with nested `generation` (critique) |
 | `l2_refine_context` | `PhaseEvent("refine_context", ...)` | `generation` observation with rationale |
 | `l3_modify_plan` | `PhaseEvent("modify_plan", ...)` | `generation` observation with rationale |
 | escalation | `PhaseEvent("escalation", ...)` | metadata on parent span (check_name, target, context) |
@@ -630,7 +630,7 @@ Viable because optimizer prompts are domain-general — they don't need re-optim
 
 ### Phase 1: Artifact capture
 
-- Capture `meta_prompt` from `_build_constrained_meta_prompt()` in growth phase data
+- Capture `meta_prompt` from `_build_constrained_meta_prompt()` in l1_generate phase data
 - Capture `critique_text` and `thinking_styles` in trial checkpoints
 - Capture L2/L3 rationale alongside `TransitionResult`
 - Capture `EscalationSignal` in trial checkpoints

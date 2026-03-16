@@ -44,7 +44,7 @@ class _CycleDisplayState:
     baseline_total: int = 0  # sample count for significance tests
     best_in_round: tuple[str, float] | None = None  # (label, accuracy)
     scan_context: dict | None = None  # cached for scan reasoning display
-    candidates_meta: list = field(default_factory=list)  # from growth_exit
+    candidates_meta: list = field(default_factory=list)  # from l1_generate exit
 
 __all__ = [
     # Campaign
@@ -443,7 +443,7 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
         print("    Starting fresh (no prior rounds for this cycle)")
 
 
-def _print_growth_enter(d: dict, state: _CycleDisplayState) -> None:
+def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     acc = d.get("current_accuracy", 0.0)
     preview = d.get("prompt_preview", "").replace("\n", " ").strip()
     if len(preview) > 50:
@@ -481,7 +481,7 @@ def _print_growth_enter(d: dict, state: _CycleDisplayState) -> None:
             print(f"  {CYAN}Scan baseline:{RESET} {bl_acc:.1%}")
 
 
-def _print_growth_exit(d: dict, state: _CycleDisplayState) -> None:
+def _print_l1_generate_exit(d: dict, state: _CycleDisplayState) -> None:
     n = d.get("n_candidates", 0)
     source = "loaded from disk" if d.get("loaded_from_disk") else "from LLM"
     n_eval = d.get("n_eval_queries", 0)
@@ -510,7 +510,7 @@ def _print_growth_exit(d: dict, state: _CycleDisplayState) -> None:
     print(f"  Evaluating {n} x {n_eval} = {n * n_eval} backend calls")
 
 
-def _print_eval_enter(d: dict, state: _CycleDisplayState) -> None:
+def _print_l1_evaluate_enter(d: dict, state: _CycleDisplayState) -> None:
     n_cand = d.get("n_candidates", 0)
     n_q = d.get("n_queries", 0)
     best = d.get("current_best_accuracy", 0.0)
@@ -519,7 +519,7 @@ def _print_eval_enter(d: dict, state: _CycleDisplayState) -> None:
           f" x {n_q} queries  |  beat {best:.1%} + {thresh:.1%}")
 
 
-def _print_eval_exit(d: dict, state: _CycleDisplayState) -> None:
+def _print_l1_evaluate_exit(d: dict, state: _CycleDisplayState) -> None:
     w_acc = d.get("winner_accuracy", 0.0)
     w_comp = d.get("winner_composite")
     improved = d.get("improved", False)
@@ -564,7 +564,7 @@ def _print_eval_exit(d: dict, state: _CycleDisplayState) -> None:
               f"  best candidate {w_acc:.1%}{comp_tag}"
               f"  ->  patience {state.stall_count + 1}/{state.patience}")
 
-    # Critique preview (fed forward to next round's growth)
+    # Critique preview (fed forward to next l1_generate)
     crit = d.get("critique_text", "")
     if crit:
         preview = crit.replace("\n", " ").strip()
@@ -636,10 +636,10 @@ def _print_plan_exit(d: dict, state: _CycleDisplayState) -> None:
 _PHASE_HANDLERS: dict[str, callable] = {
     "init:enter": _print_init_enter,
     "init:exit": _print_init_exit,
-    "growth:enter": _print_growth_enter,
-    "growth:exit": _print_growth_exit,
-    "analysis_eval:enter": _print_eval_enter,
-    "analysis_eval:exit": _print_eval_exit,
+    "l1_generate:enter": _print_l1_generate_enter,
+    "l1_generate:exit": _print_l1_generate_exit,
+    "l1_evaluate:enter": _print_l1_evaluate_enter,
+    "l1_evaluate:exit": _print_l1_evaluate_exit,
     "refine_context:enter": _print_refine_enter,
     "refine_context:exit": _print_refine_exit,
     "modify_plan:enter": _print_plan_enter,
@@ -761,7 +761,7 @@ async def run_feedback_cycle_notebook(
         acc_tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
         print(f"\n  {_box_top(f'{label}/{total}', acc_tag, width=w)}")
 
-        # Line 1: description + pp from growth_exit metadata
+        # Line 1: description + pp from l1_generate exit metadata
         meta = {}
         if idx < len(_ds.candidates_meta):
             meta = _ds.candidates_meta[idx]

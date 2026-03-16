@@ -154,7 +154,7 @@ async def test_grow_filter_node(monkeypatch, baseline_ps, baseline_results):
 
 
 @pytest.mark.asyncio
-async def test_analysis_eval_node(
+async def test_l1_evaluate_node(
     monkeypatch, baseline_ps, eval_data, baseline_results,
 ):
     """AnalysisEvalNode evaluates candidates and selects a winner."""

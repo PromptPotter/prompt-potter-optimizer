@@ -217,9 +217,7 @@ async def generate_candidates(
         thinking_styles: Sampled thinking styles for mutation guidance.
 
     Returns:
-        List of candidate dicts. Each dict contains serialized PromptState
-        fields, plus an optional ``__pipeline_params_override__`` key when
-        scan_context is provided.
+        List of candidate dicts.
     """
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")

@@ -310,7 +310,7 @@ class AnalysisEvalNode(NodeBase[AnalysisEvalInput, AnalysisEvalOutput]):
             obs=self.config.get("obs"),
             dataset_name=self.config.get("dataset_name"),
             dataset_item_map=self.config.get("dataset_item_map"),
-            source="analysis_eval_node",
+            source="l1_evaluate",
             model=self.config.get("model") or "",
             temperature=self.config.get("temperature", 0.0),
             pipeline_params=self.config.get("pipeline_params"),

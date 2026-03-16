@@ -236,16 +236,21 @@ async def _generate_or_load_candidates(
     cycle_id: str | None,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     n_eval_queries: int = 0,
+    *,
+    n_variants: int | None = None,
+    creativity: float | None = None,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
+    _n_variants = n_variants if n_variants is not None else config.n_variants
+    _creativity = creativity if creativity is not None else config.creativity
     current_ps = state.current_sp.prompt_state
     prompt_preview = current_ps.render()[:120]
 
-    _emit_phase(on_phase, "growth", "enter", round=round_num,
+    _emit_phase(on_phase, "l1_generate", "enter", round=round_num,
                 current_accuracy=state.current_accuracy,
                 prompt_preview=prompt_preview,
-                n_variants=config.n_variants,
-                creativity=config.creativity,
+                n_variants=_n_variants,
+                creativity=_creativity,
                 model=config.model or "(default)",
                 has_scan_context=config.scan_context is not None,
                 has_critique=bool(state.critique_text))
@@ -259,7 +264,7 @@ async def _generate_or_load_candidates(
                 "Loaded %d persisted candidates for round %d",
                 len(persisted), round_num,
             )
-            _emit_phase(on_phase, "growth", "exit", round=round_num,
+            _emit_phase(on_phase, "l1_generate", "exit", round=round_num,
                         n_candidates=len(persisted),
                         n_eval_queries=n_eval_queries,
                         loaded_from_disk=True,
@@ -270,19 +275,15 @@ async def _generate_or_load_candidates(
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
     llm_client = _llm_client.get_llm_client(config.provider)
 
-    # L2 meta-param overrides from PromptState.parameters
-    n_variants = current_ps.parameters.get("n_variants", config.n_variants)
-    creativity = current_ps.parameters.get("creativity", config.creativity)
-
     raw_candidates = await _prompt_optimizer.generate_candidates(
         current_ps, state.current_accuracy, state.current_results,
-        n_variants, creativity, llm_client,
+        _n_variants, _creativity, llm_client,
         model=config.model,
         scan_context=config.scan_context,
         critique_text=state.critique_text,
         thinking_styles=state.thinking_styles,
     )
-    # Normalize to dicts (generate_candidates returns dicts, but mocks may return PromptState)
+    # Normalize to dicts
     candidates = [
         c if isinstance(c, dict) else c.model_dump()
         for c in raw_candidates
@@ -293,7 +294,7 @@ async def _generate_or_load_candidates(
             config.backend_id, cycle_id, round_num, candidates,
         )
 
-    _emit_phase(on_phase, "growth", "exit", round=round_num,
+    _emit_phase(on_phase, "l1_generate", "exit", round=round_num,
                 n_candidates=len(candidates),
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=False,
@@ -316,7 +317,7 @@ async def _evaluate_candidates(
     """Evaluate candidates, select winner, optionally generate suggestions."""
     from api.services.prompt_optimizer import generate_suggestions  # lazy: rarely used
 
-    _emit_phase(on_phase, "analysis_eval", "enter", round=round_num,
+    _emit_phase(on_phase, "l1_evaluate", "enter", round=round_num,
                 n_candidates=len(candidates),
                 n_queries=len(round_eval_data),
                 current_best_accuracy=state.current_accuracy,
@@ -365,7 +366,7 @@ async def _evaluate_candidates(
         except Exception:
             logger.warning("Suggestion generation failed", exc_info=True)
 
-    # Run critique on winner results for next round's growth phase
+    # Run critique on winner results for next round's l1_generate phase
     critique_text = ""
     if config.enable_critique:
         try:
@@ -376,14 +377,16 @@ async def _evaluate_candidates(
                 eval_out["winner_accuracy"],
                 threshold=config.critique_positive_threshold,
             )
-            state.critique_text = critique_text
         except Exception:
             logger.warning("Round %d critique failed", round_num, exc_info=True)
 
-    # Resample thinking styles for next round
-    state.thinking_styles = sample_thinking_styles(n=3, seed=config.seed + round_num + 1)
+    # Return critique + styles as values (caller writes to state)
+    eval_out["critique_text"] = critique_text
+    eval_out["thinking_styles"] = sample_thinking_styles(
+        n=3, seed=config.seed + round_num + 1,
+    )
 
-    _emit_phase(on_phase, "analysis_eval", "exit", round=round_num,
+    _emit_phase(on_phase, "l1_evaluate", "exit", round=round_num,
                 winner_label=eval_out["winner"].get("label", ""),
                 winner_accuracy=eval_out["winner_accuracy"],
                 winner_composite=eval_out.get("winner_composite",
@@ -460,15 +463,25 @@ async def _execute_round(
         except Exception:
             logger.warning("ObsLogger.log_round_start failed", exc_info=True)
 
+    # Resolve L2 meta-param overrides from PromptState.parameters
+    ps_params = state.current_sp.prompt_state.parameters
+    n_variants = ps_params.get("n_variants", config.n_variants)
+    creativity = ps_params.get("creativity", config.creativity)
+
     candidates = await _generate_or_load_candidates(
         round_num, state, config, campaign_store, cycle_id, on_phase,
         n_eval_queries=len(round_eval_data),
+        n_variants=n_variants, creativity=creativity,
     )
 
     eval_out = await _evaluate_candidates(
         candidates, round_num, state, round_eval_data, config,
         on_candidate_eval, on_query_eval, on_phase,
     )
+
+    # Update state with critique + thinking styles from eval output
+    state.critique_text = eval_out.pop("critique_text", "")
+    state.thinking_styles = eval_out.pop("thinking_styles", [])
 
     round_result = CycleRoundResult(
         round=round_num,
@@ -545,91 +558,18 @@ def _finalize_campaign(
 # ---------------------------------------------------------------------------
 
 
-async def _escalate_l2(
+async def _do_l2_transition(
     state: _LoopState,
     config: CycleConfig,
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
-) -> str | None:
-    """Handle L1→L2 escalation and optionally L2→L3.
-
-    Returns a stop_reason string if the cycle should stop, or None to continue.
-    """
+) -> layer_transitions.TransitionResult:
+    """Perform L2 refine_context transition. Updates state in-place."""
     llm_client = _llm_client.get_llm_client(config.provider)
     current_ps = state.current_sp.prompt_state
     current_pp = state.current_sp.pipeline_params
 
-    # Check if L2 itself has stalled (no improvement since last L2 entry)
-    l2_improved = state.best_composite > state.best_composite_at_l2_entry
-    if not l2_improved and state.l2_round > 0:
-        state.l2_stall_count += 1
-    else:
-        state.l2_stall_count = 0
-
-    # L2 stalled → check L3
-    if state.l2_stall_count >= config.l2_patience:
-        if config.enable_l3:
-            # L2→L3 escalation
-            l3_improved = state.best_composite > state.best_composite_at_l3_entry
-            if not l3_improved and state.l3_round > 0:
-                state.l3_stall_count += 1
-            else:
-                state.l3_stall_count = 0
-
-            if state.l3_stall_count >= config.l3_patience:
-                logger.info(
-                    "L3 patience exhausted (%d stalls) at round %d",
-                    state.l3_stall_count, round_num,
-                )
-                return "l3_patience_exhausted"
-
-            # Perform L3 transition
-            l2_history = [{
-                "l2_round": state.l2_round,
-                "parameters": current_ps.parameters,
-                "accuracy_change": state.best_composite - state.best_composite_at_l3_entry,
-            }]
-            _emit_phase(on_phase, "modify_plan", "enter", round=round_num,
-                        l3_round=state.l3_round,
-                        l2_stall_count=state.l2_stall_count,
-                        current_plan_preview=str(current_ps.plan)[:120])
-            tr = await layer_transitions.modify_plan(
-                current_ps, l2_history, eval_data, llm_client,
-                model=config.model, temperature=config.l3_temperature,
-                pipeline_params=current_pp,
-                pipeline_schema=config.pipeline_schema,
-            )
-            state.current_sp = state.current_sp.derive(
-                prompt_state=tr.prompt_state,
-                **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),
-            )
-            state.l3_round += 1
-            state.best_accuracy_at_l3_entry = state.best_accuracy
-            state.best_composite_at_l3_entry = state.best_composite
-            state.l2_stall_count = 0
-            state.l2_round = 0
-            state.stall_count = 0
-            state.best_accuracy_at_l2_entry = state.best_accuracy
-            state.best_composite_at_l2_entry = state.best_composite
-            _emit_phase(on_phase, "modify_plan", "exit", round=round_num,
-                        l3_round=state.l3_round,
-                        new_plan_preview=str(tr.prompt_state.plan)[:120],
-                        changes_description=tr.prompt_state.changes_description or "",
-                        pipeline_params_changed=tr.pipeline_params is not None)
-            logger.info(
-                "L3 modify_plan at round %d (l3_round=%d)",
-                round_num, state.l3_round,
-            )
-            return None  # continue
-        else:
-            logger.info(
-                "L2 patience exhausted (%d stalls) at round %d",
-                state.l2_stall_count, round_num,
-            )
-            return "l2_patience_exhausted"
-
-    # Perform L2 transition
     stalled_rounds = [
         {
             "round": r.round,
@@ -667,6 +607,108 @@ async def _escalate_l2(
     logger.info(
         "L2 refine_context at round %d (l2_round=%d)",
         round_num, state.l2_round,
+    )
+    return tr
+
+
+async def _do_l3_transition(
+    state: _LoopState,
+    config: CycleConfig,
+    round_num: int,
+    eval_data: list[dict],
+    on_phase: Callable[[PhaseEvent], None] | None = None,
+) -> layer_transitions.TransitionResult:
+    """Perform L3 modify_plan transition. Updates state in-place."""
+    llm_client = _llm_client.get_llm_client(config.provider)
+    current_ps = state.current_sp.prompt_state
+    current_pp = state.current_sp.pipeline_params
+
+    l2_history = [{
+        "l2_round": state.l2_round,
+        "parameters": current_ps.parameters,
+        "accuracy_change": state.best_composite - state.best_composite_at_l3_entry,
+    }]
+    _emit_phase(on_phase, "modify_plan", "enter", round=round_num,
+                l3_round=state.l3_round,
+                l2_stall_count=state.l2_stall_count,
+                current_plan_preview=str(current_ps.plan)[:120])
+    tr = await layer_transitions.modify_plan(
+        current_ps, l2_history, eval_data, llm_client,
+        model=config.model, temperature=config.l3_temperature,
+        pipeline_params=current_pp,
+        pipeline_schema=config.pipeline_schema,
+    )
+    state.current_sp = state.current_sp.derive(
+        prompt_state=tr.prompt_state,
+        **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),
+    )
+    state.l3_round += 1
+    state.best_accuracy_at_l3_entry = state.best_accuracy
+    state.best_composite_at_l3_entry = state.best_composite
+    state.l2_stall_count = 0
+    state.l2_round = 0
+    state.stall_count = 0
+    state.best_accuracy_at_l2_entry = state.best_accuracy
+    state.best_composite_at_l2_entry = state.best_composite
+    _emit_phase(on_phase, "modify_plan", "exit", round=round_num,
+                l3_round=state.l3_round,
+                new_plan_preview=str(tr.prompt_state.plan)[:120],
+                changes_description=tr.prompt_state.changes_description or "",
+                pipeline_params_changed=tr.pipeline_params is not None)
+    logger.info(
+        "L3 modify_plan at round %d (l3_round=%d)",
+        round_num, state.l3_round,
+    )
+    return tr
+
+
+async def _escalate_l2(
+    state: _LoopState,
+    config: CycleConfig,
+    round_num: int,
+    eval_data: list[dict],
+    on_phase: Callable[[PhaseEvent], None] | None = None,
+) -> str | None:
+    """Handle L1→L2 escalation and optionally L2→L3.
+
+    Returns a stop_reason string if the cycle should stop, or None to continue.
+    """
+    # Check if L2 itself has stalled (no improvement since last L2 entry)
+    l2_improved = state.best_composite > state.best_composite_at_l2_entry
+    if not l2_improved and state.l2_round > 0:
+        state.l2_stall_count += 1
+    else:
+        state.l2_stall_count = 0
+
+    # L2 stalled → check L3
+    if state.l2_stall_count >= config.l2_patience:
+        if config.enable_l3:
+            l3_improved = state.best_composite > state.best_composite_at_l3_entry
+            if not l3_improved and state.l3_round > 0:
+                state.l3_stall_count += 1
+            else:
+                state.l3_stall_count = 0
+
+            if state.l3_stall_count >= config.l3_patience:
+                logger.info(
+                    "L3 patience exhausted (%d stalls) at round %d",
+                    state.l3_stall_count, round_num,
+                )
+                return "l3_patience_exhausted"
+
+            await _do_l3_transition(
+                state, config, round_num, eval_data, on_phase,
+            )
+            return None  # continue
+        else:
+            logger.info(
+                "L2 patience exhausted (%d stalls) at round %d",
+                state.l2_stall_count, round_num,
+            )
+            return "l2_patience_exhausted"
+
+    await _do_l2_transition(
+        state, config, round_num, eval_data, on_phase,
     )
     return None  # continue
 

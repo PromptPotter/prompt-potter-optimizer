@@ -762,7 +762,7 @@ async def test_no_store_no_persistence(monkeypatch, eval_data, cycle_config):
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
-    """on_phase is called with init, growth, and analysis_eval enter/exit events."""
+    """on_phase is called with init, l1_generate, and l1_evaluate enter/exit events."""
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
@@ -785,24 +785,24 @@ async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
     assert ("init", "enter") in pairs
     assert ("init", "exit") in pairs
 
-    # Each round should have growth + analysis_eval enter/exit
+    # Each round should have l1_generate + l1_evaluate enter/exit
     for round_num in range(result.n_rounds):
-        growth_enters = [e for e in events
-                         if e.phase == "growth" and e.event == "enter"
+        gen_enters = [e for e in events
+                         if e.phase == "l1_generate" and e.event == "enter"
                          and e.round == round_num]
-        growth_exits = [e for e in events
-                        if e.phase == "growth" and e.event == "exit"
+        gen_exits = [e for e in events
+                        if e.phase == "l1_generate" and e.event == "exit"
                         and e.round == round_num]
         eval_enters = [e for e in events
-                       if e.phase == "analysis_eval" and e.event == "enter"
+                       if e.phase == "l1_evaluate" and e.event == "enter"
                        and e.round == round_num]
         eval_exits = [e for e in events
-                      if e.phase == "analysis_eval" and e.event == "exit"
+                      if e.phase == "l1_evaluate" and e.event == "exit"
                       and e.round == round_num]
-        assert len(growth_enters) == 1, f"round {round_num}: missing growth enter"
-        assert len(growth_exits) == 1, f"round {round_num}: missing growth exit"
-        assert len(eval_enters) == 1, f"round {round_num}: missing analysis_eval enter"
-        assert len(eval_exits) == 1, f"round {round_num}: missing analysis_eval exit"
+        assert len(gen_enters) == 1, f"round {round_num}: missing l1_generate enter"
+        assert len(gen_exits) == 1, f"round {round_num}: missing l1_generate exit"
+        assert len(eval_enters) == 1, f"round {round_num}: missing l1_evaluate enter"
+        assert len(eval_exits) == 1, f"round {round_num}: missing l1_evaluate exit"
 
     # Verify init enter has expected data keys
     init_enter = next(e for e in events if e.phase == "init" and e.event == "enter")
@@ -810,20 +810,27 @@ async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
     assert "eval_data_count" in init_enter.data
     assert init_enter.data["eval_data_count"] == len(eval_data)
 
-    # Verify growth exit has rich candidate info
-    growth_exit = next(e for e in events if e.phase == "growth" and e.event == "exit")
-    assert "n_candidates" in growth_exit.data
-    assert "n_eval_queries" in growth_exit.data
-    assert growth_exit.data["n_eval_queries"] == len(eval_data)
-    assert "candidates" in growth_exit.data
-    candidates = growth_exit.data["candidates"]
+    # Verify l1_generate exit has rich candidate info
+    gen_exit = next(e for e in events if e.phase == "l1_generate" and e.event == "exit")
+    assert "n_candidates" in gen_exit.data
+    assert "n_eval_queries" in gen_exit.data
+    assert gen_exit.data["n_eval_queries"] == len(eval_data)
+    assert "candidates" in gen_exit.data
+    candidates = gen_exit.data["candidates"]
     assert isinstance(candidates, list)
     assert len(candidates) > 0
     assert "changed_fields" in candidates[0]
     assert "changes_description" in candidates[0]
 
-    # Verify analysis_eval exit has winner info
+    # Verify l1_evaluate exit has winner info
     eval_exit = next(e for e in events
-                     if e.phase == "analysis_eval" and e.event == "exit")
+                     if e.phase == "l1_evaluate" and e.event == "exit")
     assert "winner_accuracy" in eval_exit.data
     assert "improved" in eval_exit.data
+
+
+# ---------------------------------------------------------------------------
+# Step artifact capture tests (M8 Phase 1)
+# ---------------------------------------------------------------------------
+
+
