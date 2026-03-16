@@ -265,6 +265,7 @@ async def init_services(
         experiment_id=experiment_id,
         project_root=project_root,
         dataset_name=dataset_name,
+        on_status=print,
     )
 
     exp_data = svc.get("exp_data", {})

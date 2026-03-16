@@ -35,8 +35,7 @@ async def test_run_match_auto_reinit_on_400():
 
     mock_client = AsyncMock()
     mock_client.post = mock_post
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.is_closed = False
 
     with patch("api.services.backend_client.httpx.AsyncClient", return_value=mock_client):
         result = await client.run_match("test query")
@@ -57,8 +56,7 @@ async def test_run_match_no_reinit_without_stored_terms():
 
     mock_client = AsyncMock()
     mock_client.post = mock_post
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.is_closed = False
 
     with patch("api.services.backend_client.httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(httpx.HTTPStatusError):
@@ -76,8 +74,7 @@ async def test_init_session_stores_terms():
 
     mock_client = AsyncMock()
     mock_client.post = mock_post
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.is_closed = False
 
     with patch("api.services.backend_client.httpx.AsyncClient", return_value=mock_client):
         await client.init_session(["alpha", "beta"])

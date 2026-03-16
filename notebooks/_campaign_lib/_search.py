@@ -51,6 +51,20 @@ __all__ = [
 ]
 
 
+# ── Variant library helpers ───────────────────────────────────────────────
+
+
+def _load_filtered_variants(
+    pipeline_params: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
+) -> dict:
+    """Load variant library, filtering to active pipeline steps when possible."""
+    lib = load_variant_library()
+    if pipeline_params and pipeline_schema:
+        lib = _filter_variant_library(lib, pipeline_params, schema=pipeline_schema)
+    return lib
+
+
 # ── Variant library & advisor prompt ──────────────────────────────────────
 
 
@@ -74,11 +88,7 @@ def preview_advisor_prompt(
         pipeline_params = campaign_config.get("pipeline_params") if campaign_config else None
         exclude_steps = campaign_config.get("exclude_steps") if campaign_config else None
 
-        variant_library = load_variant_library()
-        if pipeline_params and pipeline_schema:
-            variant_library = _filter_variant_library(
-                variant_library, pipeline_params, schema=pipeline_schema,
-            )
+        variant_library = _load_filtered_variants(pipeline_params, pipeline_schema)
 
         prompt = _preview_advisor_prompt(
             pipeline_schema=pipeline_schema,
@@ -374,13 +384,8 @@ async def resume_or_build_diagnostic(
         (plan_id, search_baseline, diagnostic, cached_profiles, variant_library)
     """
     # Prepare variant library: base + scan_variants merge
-    variant_library = load_variant_library()
     pipeline_params = campaign_config.get("pipeline_params")
-    pipeline_schema = svc.get("pipeline_schema")
-    if pipeline_params and pipeline_schema:
-        variant_library = _filter_variant_library(
-            variant_library, pipeline_params, schema=pipeline_schema,
-        )
+    variant_library = _load_filtered_variants(pipeline_params, svc.get("pipeline_schema"))
     if scan_variants:
         variant_library["pipeline_params"] = scan_variants
 
@@ -727,11 +732,7 @@ async def scan_advisor(
     pipeline_params = campaign_config.get("pipeline_params")
     user_excluded = campaign_config.get("exclude_steps", [])
 
-    variant_library = load_variant_library()
-    if pipeline_params and pipeline_schema:
-        variant_library = _filter_variant_library(
-            variant_library, pipeline_params, schema=pipeline_schema,
-        )
+    variant_library = _load_filtered_variants(pipeline_params, pipeline_schema)
 
     llm_client, model = setup_llm(campaign_config)
 

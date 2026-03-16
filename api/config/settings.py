@@ -1,6 +1,7 @@
 """
 Application settings and configuration.
 """
+import functools
 import json
 from pathlib import Path
 
@@ -52,6 +53,7 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+@functools.lru_cache(maxsize=1)
 def _load_variant_library_raw() -> dict:
     path = Path(__file__).parent / "prompt_variants.json"
     with open(path) as f:
