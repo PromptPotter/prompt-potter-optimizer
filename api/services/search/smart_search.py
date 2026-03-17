@@ -6,6 +6,7 @@ coordinate descent over prompt-field and pipeline-param axes.
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 from collections import defaultdict
@@ -376,6 +377,7 @@ async def sensitivity_scan(
     progress_cb: Callable[[ScanEvent], None] | None = None,
     on_result: Callable | None = None,
     experiment_id: str = "",
+    scan_coverage: dict | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -506,11 +508,31 @@ async def sensitivity_scan(
                     pipeline_params={**(baseline.pipeline_params or {}), axis_name: value},
                 )
 
-            results, scores, cached = await evaluate_prompt_cached(
-                perturbed, eval_data, scan_ctx,
-                label="scan",
-                on_result=on_result,
-            )
+            # Check pre-computed coverage for cached scores
+            _cached_from_coverage = False
+            if scan_coverage and axis_type == "pipeline_param":
+                _axis_cov = scan_coverage.get("axes", {}).get(axis_name, {})
+                _vkey = (
+                    json.dumps(value, sort_keys=True) if isinstance(value, dict)
+                    else str(value)
+                )
+                _cov_scores = _axis_cov.get("value_scores", {}).get(_vkey)
+                if _cov_scores and _axis_cov.get("values", {}).get(_vkey, 0) > 0:
+                    scores = _cov_scores
+                    results = []  # no per-query results from coverage
+                    cached = True
+                    _cached_from_coverage = True
+                    logger.debug(
+                        "Scan %s=%s: loaded from coverage (acc=%.3f)",
+                        axis_name, _vkey[:30], scores.get("accuracy", 0),
+                    )
+
+            if not _cached_from_coverage:
+                results, scores, cached = await evaluate_prompt_cached(
+                    perturbed, eval_data, scan_ctx,
+                    label="scan",
+                    on_result=on_result,
+                )
 
             acc = scores["accuracy"]
             composite = scores.get("composite", acc)

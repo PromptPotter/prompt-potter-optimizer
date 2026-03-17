@@ -196,6 +196,9 @@ def diagnose_scan_variants(
             target_keys[key] = v
             value_counts[key] = 0
 
+        # Track best scores per variant value for scan cache
+        value_scores: dict[str, dict] = {}
+
         for entry in matching:
             pp = entry.get("pipeline_params") or {}
             hist_val = pp.get(axis_name)
@@ -207,11 +210,17 @@ def diagnose_scan_variants(
             )
             if hist_key in value_counts:
                 value_counts[hist_key] += 1
+                # Keep the first matching run's scores (most recent by list order)
+                if hist_key not in value_scores:
+                    scores = entry.get("scores", {})
+                    if scores:
+                        value_scores[hist_key] = scores
             else:
                 other_values.add(hist_key)
 
         axes[axis_name] = {
             "values": value_counts,
+            "value_scores": value_scores,
             "other_count": len(other_values),
             "total_matching": sum(value_counts.values()),
         }
