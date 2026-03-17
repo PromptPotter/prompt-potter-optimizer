@@ -102,7 +102,7 @@ def build_pipeline_params(
 
 
 # TermNorm-specific query fields extracted from query_data.
-# M7: replace with ConnectorProtocol.extract_query_fields()
+# M8: replace with ConnectorProtocol.extract_query_fields()
 _TERMNORM_QUERY_FIELDS = ("bom_material", "process")
 _TERMNORM_VARIANT_B_FIELDS = {
     "variant_b_predicted": ("original_predicted", ""),
@@ -137,7 +137,7 @@ def _build_result_dict(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "status": status,
     }
-    # TermNorm-specific fields (M7: move to connector)
+    # TermNorm-specific fields (M8: move to connector)
     for f in _TERMNORM_QUERY_FIELDS:
         result[f] = query_data[f]
     result["query_fields"] = {f: query_data[f] for f in _TERMNORM_QUERY_FIELDS}

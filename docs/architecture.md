@@ -93,7 +93,7 @@ The optimizer itself is a 4-step pipeline, designed to be modeled using the same
 - Pluggable `EscalationCheck`s run after each candidate eval — can short-circuit a round and route to L2/L3/abort
 - The schema describes step capabilities; loop control stays in `feedback_cycle.py`
 
-This model enables optimizer-level tracing (each step as a Langfuse observation), full reproducibility (every LLM call reconstructible from trial artifacts), and self-optimization (a meta-PromptPotter optimizing its own prompts). See the [M8 spec](specs/m8-optimizer-pipeline.md) for the full design.
+This model enables optimizer-level tracing (each step as a Langfuse observation), full reproducibility (every LLM call reconstructible from trial artifacts), and self-optimization (a meta-PromptPotter optimizing its own prompts). See the [M7 spec](specs/m7-optimizer-pipeline.md) for the full design.
 
 ## Further Reading
 

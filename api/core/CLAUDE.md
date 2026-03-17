@@ -1,6 +1,6 @@
 # api/core — Workflow Engine Scaffold
 
-CWL-inspired workflow engine — **future architecture, not dead code**. The node base classes and optimizer nodes (InitNode, L1GenerateNode, L1EvaluateNode) are actively used by the feedback cycle. M6 Wave 2 (PipelineSchema) complete; workflow node migration deferred to M7.
+CWL-inspired workflow engine — **future architecture, not dead code**. The node base classes and optimizer nodes (InitNode, L1GenerateNode, L1EvaluateNode) are actively used by the feedback cycle. M6 Wave 2 (PipelineSchema) complete; workflow node migration deferred to M8.
 
 ## Future / Scaffold Nodes (no consumers yet)
 

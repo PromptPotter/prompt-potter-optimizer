@@ -52,7 +52,7 @@ Optimization strategy — rarely changed:
 
 `render()` assembles prompt fields into the final string. `derive()` creates child states forming a lineage chain.
 
-> **L4 (meta-optimization):** The escalation hierarchy extends naturally — when L3 stalls, L4 optimizes the optimizer itself (meta-prompts, critique templates, optimizer parameters). See [M8 spec](specs/m8-optimizer-pipeline.md#l4-meta-optimization).
+> **L4 (meta-optimization):** The escalation hierarchy extends naturally — when L3 stalls, L4 optimizes the optimizer itself (meta-prompts, critique templates, optimizer parameters). See [M7 spec](specs/m7-optimizer-pipeline.md#l4-meta-optimization).
 
 ---
 
@@ -117,7 +117,7 @@ The feedback cycle is itself a 4-step pipeline, designed to be modeled using the
 
 **`suggestion_generation` is legacy/optional.** Controlled by `generate_suggestions=False` (default), superseded by critique-guided generation. If re-enabled, it operates as a tool of `l1_evaluate`.
 
-This pipeline model enables step-level tracing, full reproducibility, and self-optimization. See the [M8 spec](specs/m8-optimizer-pipeline.md) for the full design including `OPTIMIZER_PIPELINE_SCHEMA`, tracing design, and migration path.
+This pipeline model enables step-level tracing, full reproducibility, and self-optimization. See the [M7 spec](specs/m7-optimizer-pipeline.md) for the full design including `OPTIMIZER_PIPELINE_SCHEMA`, tracing design, and migration path.
 
 ### Phase Events
 

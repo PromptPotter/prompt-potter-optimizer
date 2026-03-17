@@ -2,22 +2,22 @@
 
 **Version:** 0.10.0
 **Date:** 2026-03-05
-**Status:** Waves 0-3 complete, Wave 4 deferred to M7, Waves 5-6 active
+**Status:** Waves 0-3 complete, Wave 4 deferred to M8, Waves 5-6 active
 **Depends on:** [Roadmap M6](roadmap.md), [ADD v0.9.0](add.md), [PRD P1.12, P1.14](prd.md)
 
 ---
 
 ## Context
 
-**Waves 0-3 are complete.** PipelineSchema is implemented with derivation methods replacing all Wave 2 chokepoints. TermNorm exposes `GET /pipeline` with the full 6-step config, fuzzy matcher is simplified, and unified tracing is in place. Former Wave 5 (notebook migration + Docker) moved to M7.
+**Waves 0-3 are complete.** PipelineSchema is implemented with derivation methods replacing all Wave 2 chokepoints. TermNorm exposes `GET /pipeline` with the full 6-step config, fuzzy matcher is simplified, and unified tracing is in place. Former Wave 5 (notebook migration + Docker) moved to M8.
 
-**Wave 4 (workflow nodes) deferred to M7** — the YAML-driven workflow engine is not needed for the current optimization loop. Remaining M6 work focuses on scoring resolution: Wave 5 adds a hardcoded composite score (accuracy + token recall) with per-query rank display. Wave 6 generalizes this into auto-wired intermediate metrics derived from pipeline step roles.
+**Wave 4 (workflow nodes) deferred to M8** — the YAML-driven workflow engine is not needed for the current optimization loop. Remaining M6 work focuses on scoring resolution: Wave 5 adds a hardcoded composite score (accuracy + token recall) with per-query rank display. Wave 6 generalizes this into auto-wired intermediate metrics derived from pipeline step roles.
 
 **Exit gate (reframed):** MVP performance validation — prove TermNorm accuracy improvement from ~15% to >90% using the PipelineSchema-driven evaluation pipeline.
 
 Two repos affected:
 - **TermNorm** (`C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\`) — Waves 0, 1, 3 (complete)
-- **PromptPotter** (`C:\Users\dsacc\Desktop\PromptPotter\prompt-potter-optimizer\`) — Waves 2, 5, 6 (Wave 4 deferred to M7)
+- **PromptPotter** (`C:\Users\dsacc\Desktop\PromptPotter\prompt-potter-optimizer\`) — Waves 2, 5, 6 (Wave 4 deferred to M8)
 
 ---
 
@@ -34,7 +34,7 @@ Two repos affected:
 | 8 | `REQUIRED_TEMPLATE_VARS` | `schema.template_variables` |
 | 9 | `DATASET_NAME` | `schema.dataset_name` |
 
-**Remaining (M7 — require ConnectorProtocol):**
+**Remaining (M8 — require ConnectorProtocol):**
 
 | # | Hardcoded Thing | Fix |
 |---|----------------|-----|
@@ -73,7 +73,7 @@ Gaps A-J identified and resolved during planning. Key decisions: `FeedbackCycleN
 
 **Waves 0-3 (complete):** See [`docs/connectors/termnorm.md`](../connectors/termnorm.md) for the pipeline config contract. PipelineSchema model and factory: [`api/models/pipeline_schema.py`](../../api/models/pipeline_schema.py), [`api/services/pipeline_discovery.py`](../../api/services/pipeline_discovery.py). See [`api/models/CLAUDE.md`](../../api/models/CLAUDE.md) for field details.
 
-**Wave 4: Workflow Nodes** — Deferred to M7. See Work Packages section below.
+**Wave 4: Workflow Nodes** — Deferred to M8. See Work Packages section below.
 
 ---
 
@@ -265,7 +265,7 @@ Wave 5 (composite scoring + rank display — hardcoded stepping stone)
   ↓
 Wave 6 (auto-wired intermediate metrics)
 
-Wave 4 (workflow nodes) → deferred to M7
+Wave 4 (workflow nodes) → deferred to M8
 ```
 
 ---
@@ -274,7 +274,7 @@ Wave 4 (workflow nodes) → deferred to M7
 
 **Waves 0-3: Complete.** TermNorm cleanup (6.0a), GET /pipeline (6.0b), PipelineSchema model + factory (6.1), schema derivation replacement (6.2), n8n mapper spec (6.0d), unified tracing (6.0c).
 
-**Wave 4: Workflow Nodes** — **Deferred to M7.** The YAML-driven workflow engine (`WorkflowRunner`, `runtime_config`, DatasetLoadNode, FeedbackCycleNode, ScanNode) is not needed for the current notebook-driven optimization loop. Work packages 6.3-6.6 move to M7 alongside notebook migration.
+**Wave 4: Workflow Nodes** — **Deferred to M8.** The YAML-driven workflow engine (`WorkflowRunner`, `runtime_config`, DatasetLoadNode, FeedbackCycleNode, ScanNode) is not needed for the current notebook-driven optimization loop. Work packages 6.3-6.6 move to M8 alongside notebook migration.
 
 ---
 
@@ -433,7 +433,7 @@ Default composite for TermNorm: `0.9 * accuracy + 0.05 * source_recall + 0.05 * 
 2. **Per-step I/O in `pipeline_data`** — Already available via `OBS_EXTRACTION_MAP` / `obs_extraction_map()`. Token matching outputs `token_matched_candidates`, LLM ranking outputs `ranked_candidates`.
 3. **Wave 5 composite** — Proves the formula shape works before auto-wiring generalizes the metric sources.
 
-### Relationship to M7 chokepoints
+### Relationship to M8 chokepoints
 
 Wave 6 resolves chokepoint #7 ("Hit@1 exact match" → `schema.eval_config`). The `IntermediateMetric` registry + `PipelineSchema.derive_metrics()` make scoring backend-agnostic. A new connector only needs to declare its steps' `node_role` values; metrics and composite scoring follow automatically.
 

@@ -69,7 +69,7 @@ Three sources merged in order (later wins):
 
 1. **YAML `config:`** — static defaults
 2. **YAML `metadata:`** — `model`, `temperature`, `max_tokens` extracted by runner via `setdefault` (so explicit `config:` wins)
-3. **`runtime_config`** (M7) — dynamic values from `WorkflowRunner.execute()`
+3. **`runtime_config`** (M8) — dynamic values from `WorkflowRunner.execute()`
 
 Access: `self.config.get("key", default)`.
 

@@ -29,7 +29,7 @@
 | P1.10 | File-Based Observability | P1 | Complete (M5) |
 | P1.11 | LLM Retry Logic | P1 | Complete (M5) |
 | P1.12 | Workflow-Driven Optimization | P1 | Planned (M6) |
-| P1.13 | Multi-Connector Support | P1 | Planned (M7) |
+| P1.13 | Multi-Connector Support | P1 | Planned (M8) |
 | P1.14 | PipelineSchema | P1 | Complete (M6 Wave 2) |
 | P2.1 | Evolutionary Operators | P2 | Planned |
 | P2.2 | MCP Server Mode | P2 | Planned |
@@ -59,14 +59,14 @@ P1.1–P1.9: All implemented (M1–M3). Optimizer nodes, feedback cycling with 3
 
 ---
 
-## P1 (continued) -- Should Have (M5–M7 Infrastructure)
+## P1 (continued) -- Should Have (M5–M8 Infrastructure)
 
 | ID | What | Implementation | Milestone |
 |----|------|---------------|-----------|
 | P1.10 | File-based observability: Langfuse-compatible traces + MLflow-compatible experiments on disk. Prompt versioning. | See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) | M5 (Complete) |
 | P1.11 | LLM retry logic: exponential backoff for transient 503/429 errors | See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) | M5 (Complete) |
 | P1.12 | Workflow-driven optimization: `WorkflowRunner` with `runtime_config`, `FeedbackCycleNode`, `DatasetLoadNode`, YAML campaigns | [M6 spec](m6-pipeline-composability.md) | M6 |
-| P1.13 | Multi-connector support: `ConnectorProtocol`, `MockConnector`, `ConnectorRegistry`, backend-agnostic evaluation | [M7 spec](m7-multi-connector.md) | M7 |
+| P1.13 | Multi-connector support: `ConnectorProtocol`, `MockConnector`, `ConnectorRegistry`, backend-agnostic evaluation | [M8 spec](m8-multi-connector.md) | M8 |
 | P1.14 | PipelineSchema: backend-agnostic pipeline description as single source of truth. Eliminates 13 backend-specific assumptions. Derived from backend discovery, consumed by all services. | [M6 spec](m6-pipeline-composability.md) — WP 6.1–6.2 | M6 |
 
 ---
@@ -124,4 +124,4 @@ P1.1–P1.9: All implemented (M1–M3). Optimizer nodes, feedback cycling with 3
 | P2.4 Non-Prompt Targets | x | | | | | x | | |
 
 **SC7: Observability** — File-based Langfuse traces, MLflow experiments, prompt versioning (M5).
-**SC8: Workflow** — YAML-defined campaigns, runtime_config DI, PipelineSchema, multi-connector support (M6, M7).
+**SC8: Workflow** — YAML-defined campaigns, runtime_config DI, PipelineSchema, multi-connector support (M6, M8).

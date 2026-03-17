@@ -1,4 +1,4 @@
-"""Optimizer pipeline nodes (M8).
+"""Optimizer pipeline nodes (M7).
 
 Node classes wrapping existing service logic with typed I/O:
 - **InitNode** — restructure context into Layer 1 fields, produce initial PromptState

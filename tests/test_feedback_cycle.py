@@ -830,7 +830,7 @@ async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
 
 
 # ---------------------------------------------------------------------------
-# Step artifact capture tests (M8 Phase 1)
+# Step artifact capture tests (M7 Phase 1)
 # ---------------------------------------------------------------------------
 
 
