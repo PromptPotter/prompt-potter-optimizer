@@ -66,6 +66,8 @@ async def run_manual_round(
     eval_data: list,
     campaign_config: dict,
     svc: dict,
+    *,
+    experiment_id: str | None = None,
 ) -> dict | None:
     """Run a single manual optimization round via feedback cycle.
 
@@ -88,6 +90,7 @@ async def run_manual_round(
         if svc.get("backend_client") else "http://127.0.0.1:8000",
         pipeline_params=campaign_config.get("pipeline_params"),
         session_terms=svc.get("session_terms"),
+        experiment_id=experiment_id,
     )
 
     display_progress(campaign_rounds)
