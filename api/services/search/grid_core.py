@@ -384,6 +384,7 @@ async def _load_or_compute_point(
         run_data = build_dataset_run_data(
             run_id, f"grid_point_{info.point_idx}", info.content_hash,
             sp, acc, results, source="grid_search",
+            experiment_id=experiment_id,
         )
         store.dataset_runs.save(backend_id, run_id, run_data)
 
@@ -408,6 +409,7 @@ async def run_grid_search(
     seed: int = 42,
     plan_id: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
+    experiment_id: str = "",
 ) -> pd.DataFrame:
     """Evaluate each grid point on eval_data via the backend.
 

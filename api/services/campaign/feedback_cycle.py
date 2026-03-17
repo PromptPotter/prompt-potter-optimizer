@@ -930,6 +930,9 @@ async def run_feedback_cycle(
         cycle_id_override=cycle_id,
     )
     # -- Step 3: Observability setup --
+    # Default Langfuse session_id to cycle_id for experiment-level grouping
+    if not langfuse_session_id and cycle_id:
+        langfuse_session_id = cycle_id
     obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
     obs, dataset_name, dataset_item_map = _init_obs(
         config, obs_campaign_id, baseline_accuracy, eval_data, langfuse_session_id,
@@ -1001,6 +1004,7 @@ async def run_feedback_cycle(
         model=config.model or "",
         temperature=config.temperature,
         pipeline_params=config.pipeline_params,
+        experiment_id=cycle_id.replace("cycle_", "")[:12] if cycle_id else "",
     )
 
     stop_reason = "max_rounds"

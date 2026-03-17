@@ -375,6 +375,7 @@ async def sensitivity_scan(
     pipeline_schema: "PipelineSchema | None" = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
     on_result: Callable | None = None,
+    experiment_id: str = "",
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -418,6 +419,7 @@ async def sensitivity_scan(
         model=baseline.model,
         temperature=baseline.temperature,
         pipeline_params=baseline.pipeline_params,
+        experiment_id=experiment_id,
     )
 
     # Classify axes: prompt_field vs pipeline_param
@@ -586,6 +588,7 @@ async def adaptive_search(
     progress_cb: Callable[[ScanEvent], None] | None = None,
     plan_id: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
+    experiment_id: str = "",
 ) -> tuple[PromptState, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.
 
@@ -643,6 +646,7 @@ async def adaptive_search(
         pipeline_schema=pipeline_schema,
         source="adaptive_search",
         pipeline_params=pipeline_params,
+        experiment_id=experiment_id,
     )
     _eval_ps = _make_eval_fn(
         eval_data, _scan_ctx,

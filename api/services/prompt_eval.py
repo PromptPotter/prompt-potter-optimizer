@@ -51,6 +51,7 @@ class EvalContext:
     model: str = ""
     temperature: float = 0.0
     pipeline_params: dict | None = None
+    experiment_id: str = ""
 
 
 def build_dataset_run_data(
@@ -62,6 +63,7 @@ def build_dataset_run_data(
     results: list,
     *,
     source: str = "",
+    experiment_id: str = "",
 ) -> dict:
     """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
     rendered_prompt = search_point.render()
@@ -83,6 +85,8 @@ def build_dataset_run_data(
     }
     if search_point.pipeline_params:
         data["pipeline_params"] = search_point.pipeline_params
+    if experiment_id:
+        data["experiment_id"] = experiment_id
     return data
 
 
@@ -514,6 +518,7 @@ async def evaluate_prompt_cached(
         run_data = build_dataset_run_data(
             run_id, label, content_hash, search_point,
             scores, results, source=source,
+            experiment_id=ctx.experiment_id,
         )
         store.dataset_runs.save(backend_id, run_id, run_data)
 
