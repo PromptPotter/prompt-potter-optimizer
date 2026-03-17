@@ -21,10 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from api.models.opt_search_point import OptSearchPoint
 from api.models.phase_event import PhaseEvent
 from api.models.prompt_state import PromptState, diff as prompt_diff
 from api.models.search_point import SearchPoint
-from api.nodes.optimizer_nodes import InitNode
+from api.nodes.optimizer_nodes import (
+    InitNode, L1GenerateNode, L1EvaluateNode, L2RefineNode, L3ModifyPlanNode,
+)
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
 from api.services.constants import DATASET_NAME
@@ -35,10 +38,8 @@ from api.services.campaign.critique import CritiqueAgent, sample_thinking_styles
 from api.services.prompt_eval import EvalContext, compute_composite_score
 from api.services.query_utils import subsample_queries
 
-# Module-level imports for functions that tests mock via monkeypatch.
-# Using module references ensures patching at the source module works.
+# Module-level import for LLM client — still needed for suggestions + bootstrap critique.
 from api.services import llm_client as _llm_client
-from api.services import prompt_optimizer as _prompt_optimizer
 
 if TYPE_CHECKING:
     from api.services.obs.observability_logger import ObsLogger
@@ -97,14 +98,14 @@ def _candidate_summaries(
 
 def cycle_config_identity(
     config: CycleConfig,
-    baseline_rendered: str,
     eval_data: list[dict],
 ) -> str:
     """Compute a stable identity hash for a feedback cycle configuration.
 
     Covers optimization-relevant fields only so the same config produces the
     same cycle_id across kernel restarts.  Infrastructure fields (backend_url,
-    project_root, etc.) are excluded.
+    project_root, etc.) and baseline prompt are excluded — the baseline may
+    involve non-deterministic LLM steps that change between runs.
     """
     payload = json.dumps(
         {
@@ -118,7 +119,6 @@ def cycle_config_identity(
             "temperature": config.temperature,
             "sample_size": config.sample_size,
             "seed": config.seed,
-            "baseline_rendered": baseline_rendered,
             "eval_data_pairs": sorted(
                 (d.get("query", ""), d.get("ground_truth", ""))
                 for d in eval_data
@@ -184,8 +184,6 @@ def _init_obs(
 def _resume_or_create_campaign(
     config: CycleConfig,
     eval_data: list[dict],
-    current_ps: dict,
-    baseline_prompt_state: dict | None,
     baseline_accuracy: float,
 ) -> tuple[Any | None, str | None, int]:
     """Handle campaign resume detection.
@@ -202,8 +200,7 @@ def _resume_or_create_campaign(
         store_base = Path(config.project_root)
         campaign_store = CampaignStore(store_base)
 
-        bl_ps = baseline_prompt_state if baseline_prompt_state is not None else current_ps
-        cycle_id = cycle_config_identity(config, PromptState(**bl_ps).render(), eval_data)
+        cycle_id = cycle_config_identity(config, eval_data)
         logger.info("Cycle identity: %s", cycle_id)
 
         existing = campaign_store.load(config.backend_id, cycle_id)
@@ -239,6 +236,8 @@ async def _generate_or_load_candidates(
     *,
     n_variants: int | None = None,
     creativity: float | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
     _n_variants = n_variants if n_variants is not None else config.n_variants
@@ -273,21 +272,22 @@ async def _generate_or_load_candidates(
             return persisted
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
-    llm_client = _llm_client.get_llm_client(config.provider)
 
-    raw_candidates = await _prompt_optimizer.generate_candidates(
-        current_ps, state.current_accuracy, state.current_results,
-        _n_variants, _creativity, llm_client,
-        model=config.model,
-        scan_context=config.scan_context,
-        critique_text=state.critique_text,
-        thinking_styles=state.thinking_styles,
+    l1_gen_node = L1GenerateNode(
+        node_id=f"l1_generate_r{round_num}",
+        config={"model": config.model, "provider": config.provider,
+                "n_variants": _n_variants, "creativity": _creativity},
+        obs=obs, trace_id=trace_id,
     )
-    # Normalize to dicts
-    candidates = [
-        c if isinstance(c, dict) else c.model_dump()
-        for c in raw_candidates
-    ]
+    gen_result = await l1_gen_node.process({
+        "prompt_state": current_ps.model_dump(),
+        "accuracy": state.current_accuracy,
+        "results": state.current_results,
+        "critique_text": state.critique_text,
+        "thinking_styles": state.thinking_styles,
+        "scan_context": config.scan_context,
+    })
+    candidates = gen_result.candidates
 
     if campaign_store and cycle_id:
         campaign_store.save_round_candidates(
@@ -313,10 +313,10 @@ async def _evaluate_candidates(
     on_candidate_eval: Callable[[int, int, dict], None] | None,
     on_query_eval: Callable[[int, int, int, int, dict], None] | None,
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> dict:
-    """Evaluate candidates, select winner, optionally generate suggestions."""
-    from api.services.prompt_optimizer import generate_suggestions  # lazy: rarely used
-
+    """Evaluate candidates via L1EvaluateNode, optionally generate suggestions."""
     _emit_phase(on_phase, "l1_evaluate", "enter", round=round_num,
                 n_candidates=len(candidates),
                 n_queries=len(round_eval_data),
@@ -332,15 +332,46 @@ async def _evaluate_candidates(
         "label": baseline_label,
     }
 
-    eval_out = await _prompt_optimizer.evaluate_and_select_winner(
-        candidates, round_eval_data, current_best, state.eval_ctx,
-        improvement_threshold=config.improvement_threshold,
-        on_candidate_eval=on_candidate_eval,
-        on_query_eval=on_query_eval,
+    l1_eval_node = L1EvaluateNode(
+        node_id=f"l1_evaluate_r{round_num}",
+        config={
+            "eval_ctx": state.eval_ctx,
+            "improvement_threshold": config.improvement_threshold,
+            "on_candidate_eval": on_candidate_eval,
+            "on_query_eval": on_query_eval,
+            "model": config.model,
+            "provider": config.provider,
+            "enable_critique": config.enable_critique,
+            "critique_positive_threshold": config.critique_positive_threshold,
+            "thinking_styles_seed": config.seed + round_num + 1,
+        },
+        obs=obs, trace_id=trace_id,
     )
+    eval_result = await l1_eval_node.process({
+        "candidates": candidates,
+        "eval_data": round_eval_data,
+        "current_best": current_best,
+    })
 
+    eval_out: dict = {
+        "winner": eval_result.winner,
+        "winner_prompt_state": eval_result.winner_prompt_state,
+        "winner_accuracy": eval_result.winner_accuracy,
+        "improved": eval_result.improved,
+        "next_action": eval_result.next_action,
+        "candidate_scores": eval_result.candidate_scores,
+        "winner_results": eval_result.winner_results,
+        "critique_text": eval_result.critique_text,
+        "thinking_styles": eval_result.thinking_styles,
+        "winner_composite": eval_result.winner_composite,
+        "winner_pipeline_params": eval_result.winner_pipeline_params,
+    }
+
+    # Suggestion generation stays in orchestrator (ADR-4)
     if config.generate_suggestions:
         try:
+            from api.services.prompt_optimizer import generate_suggestions
+
             llm_client = _llm_client.get_llm_client(config.provider)
             rounds_for_suggestions = [
                 {"round": r.round, "label": r.label, "accuracy": r.accuracy,
@@ -366,26 +397,6 @@ async def _evaluate_candidates(
         except Exception:
             logger.warning("Suggestion generation failed", exc_info=True)
 
-    # Run critique on winner results for next round's l1_generate phase
-    critique_text = ""
-    if config.enable_critique:
-        try:
-            llm_crit = _llm_client.get_llm_client(config.provider)
-            agent = CritiqueAgent(llm_crit, model=config.model)
-            critique_text = await agent.run(
-                eval_out["winner_results"],
-                eval_out["winner_accuracy"],
-                threshold=config.critique_positive_threshold,
-            )
-        except Exception:
-            logger.warning("Round %d critique failed", round_num, exc_info=True)
-
-    # Return critique + styles as values (caller writes to state)
-    eval_out["critique_text"] = critique_text
-    eval_out["thinking_styles"] = sample_thinking_styles(
-        n=3, seed=config.seed + round_num + 1,
-    )
-
     _emit_phase(on_phase, "l1_evaluate", "exit", round=round_num,
                 winner_label=eval_out["winner"].get("label", ""),
                 winner_accuracy=eval_out["winner_accuracy"],
@@ -394,7 +405,7 @@ async def _evaluate_candidates(
                 improved=eval_out["improved"],
                 next_action=eval_out["next_action"],
                 candidate_scores=eval_out["candidate_scores"],
-                critique_text=critique_text)
+                critique_text=eval_out.get("critique_text", ""))
 
     return eval_out
 
@@ -464,6 +475,7 @@ async def _execute_round(
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     obs = state.eval_ctx.obs if state.eval_ctx else None
+    trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
     if obs:
         try:
             obs.log_round_start(obs_campaign_id, round_num)
@@ -479,11 +491,13 @@ async def _execute_round(
         round_num, state, config, campaign_store, cycle_id, on_phase,
         n_eval_queries=len(round_eval_data),
         n_variants=n_variants, creativity=creativity,
+        obs=obs, trace_id=trace_id,
     )
 
     eval_out = await _evaluate_candidates(
         candidates, round_num, state, round_eval_data, config,
         on_candidate_eval, on_query_eval, on_phase,
+        obs=obs, trace_id=trace_id,
     )
 
     # Update state with critique + thinking styles from eval output
@@ -571,9 +585,10 @@ async def _do_l2_transition(
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> layer_transitions.TransitionResult:
-    """Perform L2 refine_context transition. Updates state in-place."""
-    llm_client = _llm_client.get_llm_client(config.provider)
+    """Perform L2 refine_context transition via L2RefineNode. Updates state in-place."""
     current_ps = state.current_sp.prompt_state
     current_pp = state.current_sp.pipeline_params
 
@@ -591,12 +606,30 @@ async def _do_l2_transition(
                 current_params=current_ps.parameters,
                 current_accuracy=state.current_accuracy,
                 best_accuracy=state.best_accuracy)
-    tr = await layer_transitions.refine_context(
-        current_ps, stalled_rounds, eval_data, llm_client,
-        model=config.model, temperature=config.l2_temperature,
-        pipeline_params=current_pp,
-        pipeline_schema=config.pipeline_schema,
+
+    l2_node = L2RefineNode(
+        node_id=f"l2_refine_r{round_num}",
+        config={
+            "model": config.model,
+            "provider": config.provider,
+            "temperature": config.l2_temperature,
+            "pipeline_schema": config.pipeline_schema,
+        },
+        obs=obs, trace_id=trace_id,
     )
+    l2_result = await l2_node.process({
+        "prompt_state": current_ps.model_dump(),
+        "stalled_rounds": stalled_rounds,
+        "eval_data": eval_data,
+        "pipeline_params": current_pp,
+    })
+
+    new_ps = PromptState(**l2_result.prompt_state)
+    tr = layer_transitions.TransitionResult(
+        prompt_state=new_ps,
+        pipeline_params=l2_result.pipeline_params,
+    )
+
     state.current_sp = state.current_sp.derive(
         prompt_state=tr.prompt_state,
         **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),
@@ -624,9 +657,10 @@ async def _do_l3_transition(
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> layer_transitions.TransitionResult:
-    """Perform L3 modify_plan transition. Updates state in-place."""
-    llm_client = _llm_client.get_llm_client(config.provider)
+    """Perform L3 modify_plan transition via L3ModifyPlanNode. Updates state in-place."""
     current_ps = state.current_sp.prompt_state
     current_pp = state.current_sp.pipeline_params
 
@@ -639,12 +673,30 @@ async def _do_l3_transition(
                 l3_round=state.l3_round,
                 l2_stall_count=state.l2_stall_count,
                 current_plan_preview=str(current_ps.plan)[:120])
-    tr = await layer_transitions.modify_plan(
-        current_ps, l2_history, eval_data, llm_client,
-        model=config.model, temperature=config.l3_temperature,
-        pipeline_params=current_pp,
-        pipeline_schema=config.pipeline_schema,
+
+    l3_node = L3ModifyPlanNode(
+        node_id=f"l3_modify_plan_r{round_num}",
+        config={
+            "model": config.model,
+            "provider": config.provider,
+            "temperature": config.l3_temperature,
+            "pipeline_schema": config.pipeline_schema,
+        },
+        obs=obs, trace_id=trace_id,
     )
+    l3_result = await l3_node.process({
+        "prompt_state": current_ps.model_dump(),
+        "l2_history": l2_history,
+        "eval_data": eval_data,
+        "pipeline_params": current_pp,
+    })
+
+    new_ps = PromptState(**l3_result.prompt_state)
+    tr = layer_transitions.TransitionResult(
+        prompt_state=new_ps,
+        pipeline_params=l3_result.pipeline_params,
+    )
+
     state.current_sp = state.current_sp.derive(
         prompt_state=tr.prompt_state,
         **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),
@@ -675,6 +727,8 @@ async def _escalate_l2(
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> str | None:
     """Handle L1→L2 escalation and optionally L2→L3.
 
@@ -705,6 +759,7 @@ async def _escalate_l2(
 
             await _do_l3_transition(
                 state, config, round_num, eval_data, on_phase,
+                obs=obs, trace_id=trace_id,
             )
             return None  # continue
         else:
@@ -716,6 +771,7 @@ async def _escalate_l2(
 
     await _do_l2_transition(
         state, config, round_num, eval_data, on_phase,
+        obs=obs, trace_id=trace_id,
     )
     return None  # continue
 
@@ -818,8 +874,7 @@ async def run_feedback_cycle(
 
     # -- Step 2: Resume detection --
     campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
-        config, eval_data, current_ps.model_dump(),
-        baseline_prompt_state, baseline_accuracy,
+        config, eval_data, baseline_accuracy,
     )
     # -- Step 3: Observability setup --
     obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
@@ -940,6 +995,13 @@ async def run_feedback_cycle(
             # Checkpoint round to disk
             if campaign_store and cycle_id:
                 try:
+                    opt_sp = OptSearchPoint(
+                        critique_text=state.critique_text,
+                        thinking_styles=state.thinking_styles,
+                        plan=state.current_sp.prompt_state.plan,
+                        context=state.current_sp.prompt_state.context,
+                        parameters=state.current_sp.prompt_state.parameters,
+                    )
                     campaign_store.add_trial(config.backend_id, cycle_id, {
                         "trial_id": f"round_{round_num}",
                         "round": round_num,
@@ -962,6 +1024,7 @@ async def run_feedback_cycle(
                         "l3_stall_count": state.l3_stall_count,
                         "l2_round": state.l2_round,
                         "l3_round": state.l3_round,
+                        "opt_search_point": opt_sp.model_dump(),
                     })
                 except Exception:
                     logger.warning("Round checkpoint failed", exc_info=True)
@@ -980,8 +1043,14 @@ async def run_feedback_cycle(
             if state.stall_count >= config.patience:
                 if config.enable_l2:
                     # L1 stalled → escalate to L2
+                    _esc_obs = state.eval_ctx.obs if state.eval_ctx else None
+                    _esc_trace_id = (
+                        _esc_obs.get_file_trace_id(obs_campaign_id)
+                        if _esc_obs else None
+                    )
                     stop_reason = await _escalate_l2(
                         state, config, round_num, round_eval_data, on_phase,
+                        obs=_esc_obs, trace_id=_esc_trace_id,
                     )
                     if stop_reason:
                         break
