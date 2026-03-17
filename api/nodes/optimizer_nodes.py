@@ -3,7 +3,9 @@
 Node classes wrapping existing service logic with typed I/O:
 - **InitNode** — restructure context into Layer 1 fields, produce initial PromptState
 - **L1GenerateNode** — generate N candidate PromptState variants via LLM
-- **L1EvaluateNode** — evaluate candidates via backend, select winner, suggest next steps
+- **L1EvaluateNode** — evaluate candidates via backend, select winner, critique results
+- **L2RefineNode** — L2 refine_context transition (parameter/context adjustment)
+- **L3ModifyPlanNode** — L3 modify_plan transition (strategic plan change)
 """
 
 import logging
@@ -102,6 +104,16 @@ class L1GenerateInput(BaseModel):
         default_factory=list,
         description="Previous eval results for failure analysis",
     )
+    critique_text: str = Field(
+        "", description="Critique from previous round's evaluation",
+    )
+    thinking_styles: list[str] = Field(
+        default_factory=list,
+        description="Sampled mutation guidance styles",
+    )
+    scan_context: dict | None = Field(
+        None, description="Pipeline-aware generation context from scan analytics",
+    )
 
 
 class L1GenerateOutput(BaseModel):
@@ -149,66 +161,38 @@ class L1GenerateNode(NodeBase[L1GenerateInput, L1GenerateOutput]):
             ps, input_data.accuracy, input_data.results,
             n_variants, creativity, client,
             model=model,
+            scan_context=input_data.scan_context,
+            critique_text=input_data.critique_text,
+            thinking_styles=input_data.thinking_styles,
         )
 
         return L1GenerateOutput(
-            candidates=[c.model_dump() for c in candidates],
+            candidates=[
+                c if isinstance(c, dict) else c.model_dump()
+                for c in candidates
+            ],
             n_generated=len(candidates),
         )
 
 
 # ---------------------------------------------------------------------------
-# L1EvaluateNode — evaluate, select winner, suggest improvements
+# L1EvaluateNode — evaluate, select winner, critique
 # ---------------------------------------------------------------------------
 
 
 class L1EvaluateInput(BaseModel):
-    """Input for L1EvaluateNode.
-
-    ``current_best`` can be supplied as a pre-built dict **or** assembled
-    from flat fields (``baseline_prompt_state``, ``baseline_accuracy``,
-    ``baseline_results``, ``baseline_label``).  Flat fields are used when
-    the node is wired inside a CWL workflow where each input resolves to
-    a single source reference.
-    """
-
-    model_config = {"arbitrary_types_allowed": True}
+    """Input for L1EvaluateNode."""
 
     candidates: list[dict] = Field(
         ..., description="Candidate PromptStates (serialized)",
     )
     eval_data: list = Field(..., description="Evaluation query dicts")
-
-    # Option A: pre-built current_best dict
     current_best: dict = Field(
-        default_factory=dict,
+        ...,
         description=(
             "Current best round entry with keys: accuracy, prompt_state, "
-            "results, label.  Leave empty when using flat baseline_* fields."
+            "results, label."
         ),
-    )
-
-    # Option B: flat baseline fields (for CWL workflow wiring)
-    baseline_prompt_state: dict | None = Field(
-        None, description="Baseline PromptState (serialized) — flat alternative",
-    )
-    baseline_accuracy: float = Field(
-        0.0, description="Baseline accuracy — flat alternative",
-    )
-    baseline_results: list = Field(
-        default_factory=list, description="Baseline eval results — flat alternative",
-    )
-    baseline_label: str = Field(
-        "baseline", description="Baseline label — flat alternative",
-    )
-
-    campaign_rounds: list[dict] = Field(
-        default_factory=list,
-        description="Full campaign rounds history (for suggestion generation)",
-    )
-    campaign_config: dict = Field(
-        default_factory=dict,
-        description="Campaign config (for suggestion generation)",
     )
 
 
@@ -223,10 +207,6 @@ class L1EvaluateOutput(BaseModel):
         "generate",
         description="Routing hint for feedback cycling: 'generate' or 'stop'",
     )
-    suggestions: dict = Field(
-        default_factory=dict,
-        description="LLM suggestions for next round",
-    )
     candidate_scores: list[dict] = Field(
         default_factory=list,
         description="Per-candidate accuracy summary",
@@ -235,27 +215,41 @@ class L1EvaluateOutput(BaseModel):
         default_factory=list,
         description="Per-query eval results for the winner (for failure analysis)",
     )
+    critique_text: str = Field(
+        "", description="Critique of winner results for next round's generation",
+    )
+    thinking_styles: list[str] = Field(
+        default_factory=list,
+        description="Sampled thinking styles for next round's generation",
+    )
+    winner_composite: float = Field(
+        0.0, description="Composite score of the winner",
+    )
+    winner_pipeline_params: dict | None = Field(
+        None, description="Pipeline params from winner (if changed)",
+    )
 
 
 class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
-    """Evaluate candidates via backend, select winner, generate suggestions.
+    """Evaluate candidates via backend, select winner, critique results.
 
-    Wraps ``evaluate_prompt_cached()``, ``_select_round_winner()``, and
-    ``generate_suggestions()`` from ``api.services``.  Evaluation uses the
-    evaluator framework (``api.evaluators.exact_match.ExactMatchEvaluator``)
-    via the ``prompt_eval`` service.
+    Wraps ``evaluate_and_select_winner()`` from ``api.services.prompt_optimizer``
+    and ``CritiqueAgent`` from ``api.services.campaign.critique``.
 
     Config:
-        model: LLM model identifier
-        provider: LLM provider
-        backend_url: Backend URL for evaluation (required)
-        backend_id: Backend identifier for caching (default: "")
-        project_root: Project root for ProjectStore (default: "")
+        eval_ctx: Pre-built EvalContext from orchestrator (required)
         improvement_threshold: Min accuracy improvement to accept (default: 0.01)
-        pipeline_params: Pipeline parameter overrides (default: {})
-        temperature: Temperature for content hash (default: 0.0)
-        generate_suggestions: Whether to call LLM for suggestions (default: true)
+        on_candidate_eval: Optional callback per candidate
+        on_query_eval: Optional callback per query
+        model: LLM model identifier (for critique)
+        provider: LLM provider (for critique)
+        enable_critique: Whether to run critique (default: false)
+        critique_positive_threshold: Accuracy threshold for positive critique (default: 0.7)
+        thinking_styles_seed: Seed for thinking style sampling (default: 42)
     """
+
+    def _node_obs_type(self) -> str:
+        return "span"
 
     @classmethod
     def get_input_model(cls) -> Type[L1EvaluateInput]:
@@ -266,86 +260,209 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
         return L1EvaluateOutput
 
     async def _execute(self, input_data: L1EvaluateInput) -> L1EvaluateOutput:
-        from api.services.backend_client import BackendClient
-        from api.services.prompt_optimizer import (
-            evaluate_and_select_winner,
-            generate_suggestions,
-        )
+        from api.services.prompt_optimizer import evaluate_and_select_winner
 
-        backend_url = self.config.get("backend_url", "")
-        if not backend_url:
-            raise ValueError("L1EvaluateNode requires 'backend_url' in config")
-
-        # Build dependencies
-        backend_client = BackendClient(backend_url)
-        store = None
-        project_root = self.config.get("project_root", "")
-        if project_root:
-            from api.services.project_store import ProjectStore
-            store = ProjectStore(project_root)
-
-        # Assemble current_best — prefer pre-built dict, fall back to flat fields
-        if input_data.current_best:
-            current_best = dict(input_data.current_best)
-        elif input_data.baseline_prompt_state is not None:
-            current_best = {
-                "accuracy": input_data.baseline_accuracy,
-                "prompt_state": input_data.baseline_prompt_state,
-                "results": input_data.baseline_results,
-                "label": input_data.baseline_label,
-            }
-        else:
-            raise ValueError(
-                "L1EvaluateNode requires either 'current_best' dict or "
-                "'baseline_prompt_state' flat field"
-            )
-
-        from api.services.prompt_eval import EvalContext
-
-        ctx = EvalContext(
-            backend_client=backend_client,
-            store=store,
-            backend_id=self.config.get("backend_id", ""),
-            pipeline_schema=self.config.get("pipeline_schema"),
-            obs=self.config.get("obs"),
-            dataset_name=self.config.get("dataset_name"),
-            dataset_item_map=self.config.get("dataset_item_map"),
-            source="l1_evaluate",
-            model=self.config.get("model") or "",
-            temperature=self.config.get("temperature", 0.0),
-            pipeline_params=self.config.get("pipeline_params"),
-        )
+        ctx = self.config.get("eval_ctx")
+        if ctx is None:
+            raise ValueError("L1EvaluateNode requires 'eval_ctx' in config")
 
         result = await evaluate_and_select_winner(
             input_data.candidates,
             input_data.eval_data,
-            current_best,
+            input_data.current_best,
             ctx,
             improvement_threshold=self.config.get("improvement_threshold", 0.01),
             on_candidate_eval=self.config.get("on_candidate_eval"),
             on_query_eval=self.config.get("on_query_eval"),
         )
 
-        # Generate suggestions separately if requested
-        if (
-            self.config.get("generate_suggestions", True)
-            and input_data.campaign_rounds
-        ):
+        # Run critique on winner results (Option A: inside L1EvaluateNode)
+        critique_text = ""
+        if self.config.get("enable_critique", False):
             try:
+                from api.services.campaign.critique import CritiqueAgent
                 from api.services.llm_client import get_llm_client
-                llm_client = get_llm_client(self.config.get("provider"))
-                suggestions = await generate_suggestions(
-                    input_data.campaign_rounds,
-                    input_data.eval_data,
-                    input_data.campaign_config,
-                    llm_client,
-                    model=self.config.get("model"),
-                )
-                result["suggestions"] = suggestions
-                next_action = suggestions.get("next_action", "generate")
-                if next_action in ("generate", "stop"):
-                    result["next_action"] = next_action
-            except Exception:
-                logger.warning("Suggestion generation failed", exc_info=True)
 
-        return L1EvaluateOutput(**result)
+                llm_client = get_llm_client(self.config.get("provider"))
+                agent = CritiqueAgent(llm_client, model=self.config.get("model"))
+                critique_text = await agent.run(
+                    result["winner_results"],
+                    result["winner_accuracy"],
+                    threshold=self.config.get("critique_positive_threshold", 0.7),
+                )
+            except Exception:
+                logger.warning("Critique failed in L1EvaluateNode", exc_info=True)
+
+        # Sample thinking styles for next round
+        from api.services.campaign.critique import sample_thinking_styles
+
+        thinking_styles = sample_thinking_styles(
+            n=3,
+            seed=self.config.get("thinking_styles_seed", 42),
+        )
+
+        return L1EvaluateOutput(
+            winner=result["winner"],
+            winner_prompt_state=result["winner_prompt_state"],
+            winner_accuracy=result["winner_accuracy"],
+            improved=result["improved"],
+            next_action=result.get("next_action", "generate"),
+            candidate_scores=result.get("candidate_scores", []),
+            winner_results=result.get("winner_results", []),
+            critique_text=critique_text,
+            thinking_styles=thinking_styles,
+            winner_composite=result.get("winner_composite", result["winner_accuracy"]),
+            winner_pipeline_params=result.get("winner_pipeline_params"),
+        )
+
+
+# ---------------------------------------------------------------------------
+# L2RefineNode — L2 refine_context transition
+# ---------------------------------------------------------------------------
+
+
+class L2RefineInput(BaseModel):
+    """Input for L2RefineNode."""
+
+    prompt_state: dict = Field(..., description="Current PromptState (serialized)")
+    stalled_rounds: list[dict] = Field(
+        ..., description="Recent stalled round summaries",
+    )
+    eval_data: list[dict] = Field(..., description="Evaluation query dicts")
+    pipeline_params: dict | None = Field(
+        None, description="Current pipeline parameters",
+    )
+
+
+class L2RefineOutput(BaseModel):
+    """Output from L2RefineNode."""
+
+    prompt_state: dict = Field(..., description="New PromptState (serialized)")
+    pipeline_params: dict | None = Field(
+        None, description="Updated pipeline params (None if unchanged)",
+    )
+    changes_description: str = Field(
+        "", description="Description of changes made",
+    )
+
+
+class L2RefineNode(NodeBase[L2RefineInput, L2RefineOutput]):
+    """L2 refine_context transition: adjust parameters and context.
+
+    Wraps ``refine_context()`` from ``api.services.campaign.layer_transitions``.
+
+    Config:
+        model: LLM model identifier
+        provider: LLM provider
+        temperature: Temperature for L2 LLM call (default: 0.3)
+        pipeline_schema: PipelineSchema object (optional)
+    """
+
+    @classmethod
+    def get_input_model(cls) -> Type[L2RefineInput]:
+        return L2RefineInput
+
+    @classmethod
+    def get_output_model(cls) -> Type[L2RefineOutput]:
+        return L2RefineOutput
+
+    async def _execute(self, input_data: L2RefineInput) -> L2RefineOutput:
+        from api.models.prompt_state import PromptState
+        from api.services.campaign.layer_transitions import refine_context
+        from api.services.llm_client import get_llm_client
+
+        client = get_llm_client(self.config.get("provider"))
+        ps = PromptState(**input_data.prompt_state)
+
+        tr = await refine_context(
+            ps,
+            input_data.stalled_rounds,
+            input_data.eval_data,
+            client,
+            model=self.config.get("model"),
+            temperature=self.config.get("temperature", 0.3),
+            pipeline_params=input_data.pipeline_params,
+            pipeline_schema=self.config.get("pipeline_schema"),
+        )
+
+        return L2RefineOutput(
+            prompt_state=tr.prompt_state.model_dump(),
+            pipeline_params=tr.pipeline_params,
+            changes_description=tr.prompt_state.changes_description or "",
+        )
+
+
+# ---------------------------------------------------------------------------
+# L3ModifyPlanNode — L3 modify_plan transition
+# ---------------------------------------------------------------------------
+
+
+class L3ModifyPlanInput(BaseModel):
+    """Input for L3ModifyPlanNode."""
+
+    prompt_state: dict = Field(..., description="Current PromptState (serialized)")
+    l2_history: list[dict] = Field(
+        ..., description="L2 adjustment history summaries",
+    )
+    eval_data: list[dict] = Field(..., description="Evaluation query dicts")
+    pipeline_params: dict | None = Field(
+        None, description="Current pipeline parameters",
+    )
+
+
+class L3ModifyPlanOutput(BaseModel):
+    """Output from L3ModifyPlanNode."""
+
+    prompt_state: dict = Field(..., description="New PromptState (serialized)")
+    pipeline_params: dict | None = Field(
+        None, description="Updated pipeline params (None if unchanged)",
+    )
+    changes_description: str = Field(
+        "", description="Description of changes made",
+    )
+
+
+class L3ModifyPlanNode(NodeBase[L3ModifyPlanInput, L3ModifyPlanOutput]):
+    """L3 modify_plan transition: change strategic optimization plan.
+
+    Wraps ``modify_plan()`` from ``api.services.campaign.layer_transitions``.
+
+    Config:
+        model: LLM model identifier
+        provider: LLM provider
+        temperature: Temperature for L3 LLM call (default: 0.5)
+        pipeline_schema: PipelineSchema object (optional)
+    """
+
+    @classmethod
+    def get_input_model(cls) -> Type[L3ModifyPlanInput]:
+        return L3ModifyPlanInput
+
+    @classmethod
+    def get_output_model(cls) -> Type[L3ModifyPlanOutput]:
+        return L3ModifyPlanOutput
+
+    async def _execute(self, input_data: L3ModifyPlanInput) -> L3ModifyPlanOutput:
+        from api.models.prompt_state import PromptState
+        from api.services.campaign.layer_transitions import modify_plan
+        from api.services.llm_client import get_llm_client
+
+        client = get_llm_client(self.config.get("provider"))
+        ps = PromptState(**input_data.prompt_state)
+
+        tr = await modify_plan(
+            ps,
+            input_data.l2_history,
+            input_data.eval_data,
+            client,
+            model=self.config.get("model"),
+            temperature=self.config.get("temperature", 0.5),
+            pipeline_params=input_data.pipeline_params,
+            pipeline_schema=self.config.get("pipeline_schema"),
+        )
+
+        return L3ModifyPlanOutput(
+            prompt_state=tr.prompt_state.model_dump(),
+            pipeline_params=tr.pipeline_params,
+            changes_description=tr.prompt_state.changes_description or "",
+        )

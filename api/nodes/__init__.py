@@ -98,6 +98,8 @@ from .optimizer_nodes import (  # noqa: E402
     InitNode,
     L1GenerateNode,
     L1EvaluateNode,
+    L2RefineNode,
+    L3ModifyPlanNode,
 )
 
 register_node(LLMNode)
@@ -106,6 +108,8 @@ register_node(RankerNode)
 register_node(InitNode)
 register_node(L1GenerateNode)
 register_node(L1EvaluateNode)
+register_node(L2RefineNode)
+register_node(L3ModifyPlanNode)
 
 
 __all__ = [
@@ -121,4 +125,6 @@ __all__ = [
     "InitNode",
     "L1GenerateNode",
     "L1EvaluateNode",
+    "L2RefineNode",
+    "L3ModifyPlanNode",
 ]
