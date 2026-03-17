@@ -227,6 +227,14 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
             end_time = datetime.now(timezone.utc).isoformat() + "Z"
             duration_ms = (time.time() - start) * 1000
 
+            # Build safe metadata — exclude non-serializable objects (e.g.
+            # eval_ctx with httpx AsyncClient) that can hang on copy/repr
+            # when the event loop is corrupted by KeyboardInterrupt.
+            safe_meta = {
+                k: v for k, v in self.config.items()
+                if isinstance(v, (str, int, float, bool, list, type(None)))
+            }
+
             self._last_metrics = NodeMetrics(
                 node_id=self.node_id,
                 node_type=self.__class__.__name__,
@@ -234,7 +242,7 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
                 end_time=end_time,
                 duration_ms=duration_ms,
                 error=error_msg,
-                metadata=self.config.copy()
+                metadata=safe_meta,
             )
 
             # Close step observation (opt-in)

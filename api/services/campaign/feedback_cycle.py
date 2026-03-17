@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from api.models.phase_event import PhaseEvent
 from api.models.prompt_state import PromptState, diff as prompt_diff
 from api.models.search_point import SearchPoint
-from api.nodes.optimizer_nodes import InitNode, L1GenerateNode
+from api.nodes.optimizer_nodes import InitNode, L1GenerateNode, L1EvaluateNode
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
 from api.services.constants import DATASET_NAME
@@ -316,10 +316,10 @@ async def _evaluate_candidates(
     on_candidate_eval: Callable[[int, int, dict], None] | None,
     on_query_eval: Callable[[int, int, int, int, dict], None] | None,
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> dict:
-    """Evaluate candidates, select winner, optionally generate suggestions."""
-    from api.services.prompt_optimizer import generate_suggestions  # lazy: rarely used
-
+    """Evaluate candidates via L1EvaluateNode, optionally generate suggestions."""
     _emit_phase(on_phase, "l1_evaluate", "enter", round=round_num,
                 n_candidates=len(candidates),
                 n_queries=len(round_eval_data),
@@ -335,15 +335,46 @@ async def _evaluate_candidates(
         "label": baseline_label,
     }
 
-    eval_out = await _prompt_optimizer.evaluate_and_select_winner(
-        candidates, round_eval_data, current_best, state.eval_ctx,
-        improvement_threshold=config.improvement_threshold,
-        on_candidate_eval=on_candidate_eval,
-        on_query_eval=on_query_eval,
+    l1_eval_node = L1EvaluateNode(
+        node_id=f"l1_evaluate_r{round_num}",
+        config={
+            "eval_ctx": state.eval_ctx,
+            "improvement_threshold": config.improvement_threshold,
+            "on_candidate_eval": on_candidate_eval,
+            "on_query_eval": on_query_eval,
+            "model": config.model,
+            "provider": config.provider,
+            "enable_critique": config.enable_critique,
+            "critique_positive_threshold": config.critique_positive_threshold,
+            "thinking_styles_seed": config.seed + round_num + 1,
+        },
+        obs=obs, trace_id=trace_id,
     )
+    eval_result = await l1_eval_node.process({
+        "candidates": candidates,
+        "eval_data": round_eval_data,
+        "current_best": current_best,
+    })
 
+    eval_out: dict = {
+        "winner": eval_result.winner,
+        "winner_prompt_state": eval_result.winner_prompt_state,
+        "winner_accuracy": eval_result.winner_accuracy,
+        "improved": eval_result.improved,
+        "next_action": eval_result.next_action,
+        "candidate_scores": eval_result.candidate_scores,
+        "winner_results": eval_result.winner_results,
+        "critique_text": eval_result.critique_text,
+        "thinking_styles": eval_result.thinking_styles,
+        "winner_composite": eval_result.winner_composite,
+        "winner_pipeline_params": eval_result.winner_pipeline_params,
+    }
+
+    # Suggestion generation stays in orchestrator (ADR-4)
     if config.generate_suggestions:
         try:
+            from api.services.prompt_optimizer import generate_suggestions
+
             llm_client = _llm_client.get_llm_client(config.provider)
             rounds_for_suggestions = [
                 {"round": r.round, "label": r.label, "accuracy": r.accuracy,
@@ -369,26 +400,6 @@ async def _evaluate_candidates(
         except Exception:
             logger.warning("Suggestion generation failed", exc_info=True)
 
-    # Run critique on winner results for next round's l1_generate phase
-    critique_text = ""
-    if config.enable_critique:
-        try:
-            llm_crit = _llm_client.get_llm_client(config.provider)
-            agent = CritiqueAgent(llm_crit, model=config.model)
-            critique_text = await agent.run(
-                eval_out["winner_results"],
-                eval_out["winner_accuracy"],
-                threshold=config.critique_positive_threshold,
-            )
-        except Exception:
-            logger.warning("Round %d critique failed", round_num, exc_info=True)
-
-    # Return critique + styles as values (caller writes to state)
-    eval_out["critique_text"] = critique_text
-    eval_out["thinking_styles"] = sample_thinking_styles(
-        n=3, seed=config.seed + round_num + 1,
-    )
-
     _emit_phase(on_phase, "l1_evaluate", "exit", round=round_num,
                 winner_label=eval_out["winner"].get("label", ""),
                 winner_accuracy=eval_out["winner_accuracy"],
@@ -397,7 +408,7 @@ async def _evaluate_candidates(
                 improved=eval_out["improved"],
                 next_action=eval_out["next_action"],
                 candidate_scores=eval_out["candidate_scores"],
-                critique_text=critique_text)
+                critique_text=eval_out.get("critique_text", ""))
 
     return eval_out
 
@@ -489,6 +500,7 @@ async def _execute_round(
     eval_out = await _evaluate_candidates(
         candidates, round_num, state, round_eval_data, config,
         on_candidate_eval, on_query_eval, on_phase,
+        obs=obs, trace_id=trace_id,
     )
 
     # Update state with critique + thinking styles from eval output

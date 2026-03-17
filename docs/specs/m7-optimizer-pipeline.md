@@ -569,6 +569,24 @@ The v1 implementation has an unresolvable Jupyter kernel hang bug: cell interrup
 
 **RC-4: Langfuse SDK lazy Langfuse init in hot path** — `LangfuseLogger.get_instance()` is called repeatedly. If Langfuse SDK is initializing its background threads when interrupt fires, thread state becomes inconsistent.
 
+### Root cause found (v2 bisect)
+
+**RC-5: `self.config.copy()` in `NodeBase.process()` finally block.**
+
+When `L1EvaluateNode` is interrupted mid-httpx-request, Python runs the `finally` block in `process()`. The original code did `metadata=self.config.copy()` to capture config in `NodeMetrics`. For L1EvaluateNode, `self.config` contains `eval_ctx` — an `EvalContext` holding a `BackendClient` with a live httpx `AsyncClient`. Copying this object on a corrupted event loop triggers httpx internals (connection pool inspection, `__repr__`, or `__deepcopy__`) that hang indefinitely.
+
+**Why L1GenerateNode didn't hang:** Its config is plain primitives (`{"model": "...", "n_variants": 5}`) — no live I/O objects.
+
+**Fix (applied):** `NodeMetrics.metadata` filters to JSON-safe primitives only:
+```python
+safe_meta = {
+    k: v for k, v in self.config.items()
+    if isinstance(v, (str, int, float, bool, list, type(None)))
+}
+```
+
+This is a permanent design rule, not a workaround: metrics metadata must never reference live infrastructure objects. The full config remains on `self.config` for runtime use.
+
 ### Failed fixes (v1)
 
 | Fix attempted | Why it failed |
@@ -578,14 +596,11 @@ The v1 implementation has an unresolvable Jupyter kernel hang bug: cell interrup
 | `concurrent.futures.ThreadPoolExecutor` timeout on flush/shutdown | Mitigates Langfuse hang but not httpx hang |
 | `obs.shutdown()` in `finally` block | The shutdown itself hangs because Langfuse thread is stuck |
 | `asyncio.get_event_loop().stop()` | Can't call from within a hung event loop |
+| Skip `_end_observation()` on `KeyboardInterrupt` flag | Wrong target — the hang was in `self.config.copy()`, not obs cleanup |
 
-### Recommendations for v2
+### Additional recommendations
 
-**R-1: Synchronous httpx for notebook path** (HIGH PRIORITY — fix root cause before migrating orchestrator)
-
-Replace `BackendClient`'s async httpx client with sync httpx for the notebook execution path. The notebook runs cells sequentially — there's no concurrency benefit from async HTTP in a Jupyter context. Sync httpx uses `urllib3` under the hood, which handles `KeyboardInterrupt` cleanly (just raises the exception, no stuck connections).
-
-Implementation: Add `BackendClient.match_sync()` alongside existing async `match()`. The feedback cycle can call sync match when `config.notebook_mode=True` or when running in a Jupyter kernel (detectable via `get_ipython()`).
+**R-1: No live objects in node config metadata** — ENFORCED. `NodeMetrics.metadata` uses primitive filter. This prevents future regressions if new nodes pass complex objects via config.
 
 **R-2: Daemon threads for Langfuse SDK** — Ensure all Langfuse-spawned threads are daemon threads so they don't prevent interpreter exit on interrupt.
 
