@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from api.models.phase_event import PhaseEvent
 from api.models.prompt_state import PromptState, diff as prompt_diff
 from api.models.search_point import SearchPoint
-from api.nodes.optimizer_nodes import InitNode
+from api.nodes.optimizer_nodes import InitNode, L1GenerateNode
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
 from api.services.constants import DATASET_NAME
@@ -239,6 +239,8 @@ async def _generate_or_load_candidates(
     *,
     n_variants: int | None = None,
     creativity: float | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
     _n_variants = n_variants if n_variants is not None else config.n_variants
@@ -273,21 +275,22 @@ async def _generate_or_load_candidates(
             return persisted
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
-    llm_client = _llm_client.get_llm_client(config.provider)
 
-    raw_candidates = await _prompt_optimizer.generate_candidates(
-        current_ps, state.current_accuracy, state.current_results,
-        _n_variants, _creativity, llm_client,
-        model=config.model,
-        scan_context=config.scan_context,
-        critique_text=state.critique_text,
-        thinking_styles=state.thinking_styles,
+    l1_gen_node = L1GenerateNode(
+        node_id=f"l1_generate_r{round_num}",
+        config={"model": config.model, "provider": config.provider,
+                "n_variants": _n_variants, "creativity": _creativity},
+        obs=obs, trace_id=trace_id,
     )
-    # Normalize to dicts
-    candidates = [
-        c if isinstance(c, dict) else c.model_dump()
-        for c in raw_candidates
-    ]
+    gen_result = await l1_gen_node.process({
+        "prompt_state": current_ps.model_dump(),
+        "accuracy": state.current_accuracy,
+        "results": state.current_results,
+        "critique_text": state.critique_text,
+        "thinking_styles": state.thinking_styles,
+        "scan_context": config.scan_context,
+    })
+    candidates = gen_result.candidates
 
     if campaign_store and cycle_id:
         campaign_store.save_round_candidates(
@@ -464,6 +467,7 @@ async def _execute_round(
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     obs = state.eval_ctx.obs if state.eval_ctx else None
+    trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
     if obs:
         try:
             obs.log_round_start(obs_campaign_id, round_num)
@@ -479,6 +483,7 @@ async def _execute_round(
         round_num, state, config, campaign_store, cycle_id, on_phase,
         n_eval_queries=len(round_eval_data),
         n_variants=n_variants, creativity=creativity,
+        obs=obs, trace_id=trace_id,
     )
 
     eval_out = await _evaluate_candidates(
