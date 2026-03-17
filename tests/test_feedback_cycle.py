@@ -16,6 +16,7 @@ import pandas as pd
 from api.models.prompt_state import PromptState
 from api.services.campaign.models import CycleConfig
 from api.services.campaign.feedback_cycle import (
+    _validate_config_match,
     cycle_config_identity,
     run_feedback_cycle,
 )
@@ -525,6 +526,37 @@ class TestCycleConfigIdentity:
         ]
         assert cycle_config_identity(cycle_config, rendered, data_a) == \
             cycle_config_identity(cycle_config, rendered, data_b)
+
+
+class TestValidateConfigMatch:
+    """Tests for _validate_config_match (EXPERIMENT_ID invariant)."""
+
+    def test_raises_on_mismatch(self, cycle_config):
+        """Mismatched config fields raise ValueError with diff."""
+        stored = {
+            "max_rounds": 99,
+            "patience": cycle_config.patience,
+            "n_variants": cycle_config.n_variants,
+            "creativity": cycle_config.creativity,
+            "improvement_threshold": cycle_config.improvement_threshold,
+            "model": cycle_config.model,
+            "sample_size": cycle_config.sample_size,
+        }
+        with pytest.raises(ValueError, match="Config mismatch"):
+            _validate_config_match(cycle_config, stored, "test-cycle-id")
+
+    def test_passes_on_match(self, cycle_config):
+        """Matching config raises no error."""
+        stored = {
+            "max_rounds": cycle_config.max_rounds,
+            "patience": cycle_config.patience,
+            "n_variants": cycle_config.n_variants,
+            "creativity": cycle_config.creativity,
+            "improvement_threshold": cycle_config.improvement_threshold,
+            "model": cycle_config.model,
+            "sample_size": cycle_config.sample_size,
+        }
+        _validate_config_match(cycle_config, stored, "test-cycle-id")
 
 
 @pytest.mark.slow

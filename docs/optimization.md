@@ -125,7 +125,7 @@ All four feedback cycle call sites route through optimizer nodes (`NodeBase.proc
 
 ### Experiment Dashboard
 
-`show_experiment_dashboard()` replaces the old coverage diagnostic cell. Shows all campaigns with inline config, dataset_run summary by source, and active campaign detection. `EXPERIMENT_ID` set in the dashboard controls all downstream cells — scan, grid, feedback cycle, manual round, save winner.
+`show_experiment_dashboard()` is the notebook entry point for experiment management. Shows all campaigns with inline config, dataset_run summary by source, and active campaign detection. `EXPERIMENT_ID` set in the dashboard controls all downstream cells — scan, grid, feedback cycle, manual round, save winner.
 
 ### Phase Events
 

@@ -55,13 +55,13 @@ Seven key design choices from the v1 implementation with rationale. These MUST b
 
 **Alternative rejected:** Running critique in the orchestrator after `L1EvaluateNode.process()`. This splits the observation across two trace locations and requires the orchestrator to know about critique internals.
 
-### ADR-2: `baseline_rendered` excluded from `cycle_config_identity()`
+### ADR-2: `baseline_rendered` INCLUDED in `cycle_config_identity()`
 
-**Decision:** `cycle_config_identity()` hashes only optimization-relevant config fields (max_rounds, patience, n_variants, etc.) + sorted eval_data pairs. It excludes the baseline prompt entirely.
+**Decision:** `cycle_config_identity()` includes `baseline_rendered` alongside optimization-relevant config fields + sorted eval_data pairs.
 
-**Rationale:** The baseline may involve non-deterministic LLM steps (InitNode runs `restructure_context()` which produces semantically equivalent but textually different decompositions). Including it would make cycle_id unstable across kernel restarts, breaking resume.
+**Rationale:** Removing `baseline_rendered` from the hash orphans existing campaign data — the cycle_id changes, breaking campaign continuity (resume, trial lookup, dashboard display). The non-determinism concern from `restructure_context()` is acceptable because the baseline is typically set once per experiment and reused across kernel restarts via `baseline_prompt_state` passthrough.
 
-**Fields included:** `max_rounds`, `patience`, `n_variants`, `creativity`, `improvement_threshold`, `model`, `provider`, `temperature`, `sample_size`, `seed`, sorted `eval_data_pairs`.
+**Fields included:** `max_rounds`, `patience`, `n_variants`, `creativity`, `improvement_threshold`, `model`, `provider`, `temperature`, `sample_size`, `seed`, `baseline_rendered`, sorted `eval_data_pairs`.
 
 ### ADR-3: `scan_context` as node input, not config
 
@@ -852,12 +852,12 @@ campaign_store.add_trial(config.backend_id, cycle_id, {
 
 **Rollback:** Remove the `OptSearchPoint` construction + `opt_search_point` key from trial dict.
 
-#### D6: Fix `cycle_config_identity()` (exclude baseline_rendered)
+#### D6: Verify `cycle_config_identity()` (baseline_rendered stays in hash)
 
 **Files modified:**
-- `api/services/campaign/feedback_cycle.py` — verify `cycle_config_identity()` only hashes optimization-relevant fields
+- `api/services/campaign/feedback_cycle.py` — verified `cycle_config_identity()` includes `baseline_rendered`
 
-**What it does:** This is already correct in v1 (ADR-2). V2 just needs to port the same implementation.
+**What it does:** Verified: `baseline_rendered` stays in hash (campaign continuity). Removing it would orphan existing campaign data by changing cycle_id. See ADR-2.
 
 **Verify:** `TestCycleConfigIdentity` — all 3 tests pass.
 

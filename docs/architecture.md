@@ -51,9 +51,9 @@ All paths converge on `evaluate_prompt_cached()` — single gateway for eval per
 
 ## Caching & Crash Recovery
 
-- **Incremental writes** — `.partial.jsonl` files enable resume after crash
 - **Content-hash dedup** — same configuration returns cached results instantly
 - **Shared store** — grid search, sensitivity scan, and feedback cycle all write to `dataset_runs`; coverage advisor discovers all cached results
+- **Write with experiment_id, read by config similarity** — all dataset_runs are tagged with `experiment_id` for provenance, but reads use alias groups + pipeline_param matching to find results by config similarity, not experiment scope. This means data is shared across experiments via content-addressed dedup.
 
 ## Pipeline Composability
 

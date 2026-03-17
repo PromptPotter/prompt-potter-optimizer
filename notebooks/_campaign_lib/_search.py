@@ -1121,6 +1121,7 @@ async def adaptive_search(
     pipeline_params: dict | None = None,
     session_terms: list | None = None,
     plan_id: str = "",
+    experiment_id: str = "",
 ) -> tuple:
     """Run adaptive coordinate descent search with progress output.
 
@@ -1153,6 +1154,7 @@ async def adaptive_search(
             session_terms=session_terms,
             progress_cb=cb,
             plan_id=plan_id,
+            experiment_id=experiment_id,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         import pandas as _pd

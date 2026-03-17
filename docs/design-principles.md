@@ -27,3 +27,7 @@ No shims, no dual-format readers, no fallback paths. Old data is regenerated, no
 ## Direct field access for guaranteed fields
 
 `dict[key]` instead of `.get(key, fallback)` when a field is structurally guaranteed. Surfaces schema violations immediately rather than hiding them behind silent defaults.
+
+## Display parity
+
+Cached results must display identically to fresh results — no visible difference in output format between cached and computed data. The user should not be able to tell whether a result came from cache or a live backend call. This applies to all notebook display functions, progress callbacks, and result summaries.

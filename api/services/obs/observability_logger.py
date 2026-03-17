@@ -587,8 +587,7 @@ class ObsLogger:
             obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
             obs_path = obs_dir / f"{obs_id}.json"
             if obs_path.exists():
-                import json as _json
-                obs_data = _json.loads(obs_path.read_text(encoding="utf-8"))
+                obs_data = json.loads(obs_path.read_text(encoding="utf-8"))
                 obs_data["output"] = output_data
                 obs_data["end_time"] = _utcnow_iso()
                 if metrics:

@@ -248,6 +248,7 @@ async def run_grid_search(
     sample_size: int = 0,
     shared_queries: bool = True,
     grid_seed: int = 42,
+    experiment_id: str = "",
 ) -> pd.DataFrame:
     """Evaluate each grid point on eval_data via the backend."""
     if backend_client is None:
@@ -314,6 +315,7 @@ async def run_grid_search(
             shared_queries=shared_queries,
             seed=grid_seed,
             plan_id=plan_id,
+            experiment_id=experiment_id,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         import pandas as _pd

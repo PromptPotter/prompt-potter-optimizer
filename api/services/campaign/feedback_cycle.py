@@ -38,10 +38,8 @@ from api.services.campaign.critique import CritiqueAgent, sample_thinking_styles
 from api.services.prompt_eval import EvalContext, compute_composite_score
 from api.services.query_utils import subsample_queries
 
-# Module-level imports for functions that tests mock via monkeypatch.
-# Using module references ensures patching at the source module works.
+# Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client
-from api.services import prompt_optimizer as _prompt_optimizer
 
 if TYPE_CHECKING:
     from api.services.obs.observability_logger import ObsLogger
