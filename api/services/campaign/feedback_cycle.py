@@ -100,14 +100,14 @@ def _candidate_summaries(
 
 def cycle_config_identity(
     config: CycleConfig,
+    baseline_rendered: str,
     eval_data: list[dict],
 ) -> str:
     """Compute a stable identity hash for a feedback cycle configuration.
 
     Covers optimization-relevant fields only so the same config produces the
     same cycle_id across kernel restarts.  Infrastructure fields (backend_url,
-    project_root, etc.) and baseline prompt are excluded — the baseline may
-    involve non-deterministic LLM steps that change between runs.
+    project_root, etc.) are excluded.
     """
     payload = json.dumps(
         {
@@ -121,6 +121,7 @@ def cycle_config_identity(
             "temperature": config.temperature,
             "sample_size": config.sample_size,
             "seed": config.seed,
+            "baseline_rendered": baseline_rendered,
             "eval_data_pairs": sorted(
                 (d.get("query", ""), d.get("ground_truth", ""))
                 for d in eval_data
@@ -186,6 +187,8 @@ def _init_obs(
 def _resume_or_create_campaign(
     config: CycleConfig,
     eval_data: list[dict],
+    current_ps: dict,
+    baseline_prompt_state: dict | None,
     baseline_accuracy: float,
 ) -> tuple[Any | None, str | None, int]:
     """Handle campaign resume detection.
@@ -202,7 +205,8 @@ def _resume_or_create_campaign(
         store_base = Path(config.project_root)
         campaign_store = CampaignStore(store_base)
 
-        cycle_id = cycle_config_identity(config, eval_data)
+        bl_ps = baseline_prompt_state if baseline_prompt_state is not None else current_ps
+        cycle_id = cycle_config_identity(config, PromptState(**bl_ps).render(), eval_data)
         logger.info("Cycle identity: %s", cycle_id)
 
         existing = campaign_store.load(config.backend_id, cycle_id)
@@ -874,7 +878,8 @@ async def run_feedback_cycle(
 
     # -- Step 2: Resume detection --
     campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
-        config, eval_data, baseline_accuracy,
+        config, eval_data, current_ps.model_dump(),
+        baseline_prompt_state, baseline_accuracy,
     )
     # -- Step 3: Observability setup --
     obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
