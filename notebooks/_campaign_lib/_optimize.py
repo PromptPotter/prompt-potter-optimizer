@@ -49,7 +49,7 @@ class _CycleDisplayState:
 __all__ = [
     # Campaign
     "show_feedback_preflight", "run_feedback_cycle_notebook",
-    "display_progress", "run_manual_round",
+    "display_progress", "run_manual_round", "list_campaigns", "diff_campaign_config",
     # Langfuse
     "push_langfuse", "sync_langfuse",
 ]
@@ -865,6 +865,169 @@ async def run_feedback_cycle_notebook(
     print(_dbox_bottom())
 
     return campaign_rounds
+
+
+# ---------------------------------------------------------------------------
+# Campaign listing
+# ---------------------------------------------------------------------------
+
+
+def list_campaigns(
+    store: "ProjectStore",
+    backend_id: str,
+    *,
+    campaign_id: str | None = None,
+) -> list[dict] | dict | None:
+    """Interactive campaign explorer — two modes in one cell.
+
+    **Overview** (no campaign_id): table of all campaigns with inline config.
+    **Detail** (campaign_id provided): full config for one campaign, copy-pasteable.
+
+    Usage::
+
+        # Mode 1: overview
+        list_campaigns(store=svc["store"], backend_id=svc["backend_id"])
+
+        # Mode 2: detail (copy an ID from the overview)
+        list_campaigns(store=svc["store"], backend_id=svc["backend_id"],
+                       campaign_id="cycle_68e2c53845c3")
+    """
+    import json as _json
+
+    if campaign_id is not None:
+        # --- Detail mode ---
+        campaign = store.campaigns.load(backend_id, campaign_id)
+        if campaign is None:
+            print(f"Campaign {campaign_id} not found.")
+            return None
+
+        status = campaign["status"]
+        n = campaign["n_trials"]
+        best = f"{campaign['best_accuracy']:.1%}"
+        base = f"{campaign['baseline_accuracy']:.1%}"
+        updated = campaign["updated_at"][:16].replace("T", " ")
+
+        print(f"\nCAMPAIGN: {campaign_id}")
+        print("=" * 72)
+        print(f"  Status: {status}  |  Rounds: {n}  |  Best: {best}  |  Baseline: {base}")
+        print(f"  Updated: {updated}")
+
+        cfg = campaign.get("config", {})
+        if cfg:
+            print(f"\n  Config (copy to campaign_config):")
+            for k in ["max_rounds", "patience", "n_variants", "creativity",
+                       "improvement_threshold", "model", "temperature",
+                       "sample_size", "seed"]:
+                if k in cfg:
+                    print(f"    {k}: {cfg[k]}")
+            pp = cfg.get("pipeline_params")
+            if pp:
+                pp_str = _json.dumps(pp, indent=6)
+                print(f"    pipeline_params: {pp_str}")
+
+        print("=" * 72)
+        return campaign
+
+    # --- Overview mode ---
+    campaigns = store.campaigns.list_all(backend_id)
+
+    if not campaigns:
+        print("No campaigns found.")
+        return []
+
+    print(f"\nCAMPAIGNS ({backend_id})")
+    print("=" * 72)
+    for c in sorted(campaigns, key=lambda x: x["updated_at"], reverse=True):
+        cid = c["campaign_id"]
+        status = c["status"]
+        n = c["n_trials"]
+        best = f"{c['best_accuracy']:.1%}"
+        base = f"{c['baseline_accuracy']:.1%}"
+        updated = c["updated_at"][:16].replace("T", " ")
+
+        print(f"  {cid}  {status}  {n} rounds  best={best}  base={base}")
+
+        # Inline config from stored campaign data
+        full = store.campaigns.load(backend_id, cid)
+        cfg = full.get("config", {}) if full else {}
+        if cfg:
+            model = cfg.get("model", "?")
+            patience = cfg.get("patience", "?")
+            max_r = cfg.get("max_rounds", "?")
+            sample = cfg.get("sample_size", "?")
+            print(f"    model={model}  patience={patience}  "
+                  f"rounds={max_r}  sample={sample}")
+        print(f"    updated: {updated}")
+        print()
+
+    print("=" * 72)
+    print(f'{len(campaigns)} campaign(s) — pass campaign_id="cycle_..." to see full config\n')
+    return campaigns
+
+
+def diff_campaign_config(
+    store: "ProjectStore",
+    backend_id: str,
+    campaign_id: str,
+    campaign_config: dict,
+    pipeline_params: dict | None = None,
+) -> dict:
+    """Show parameter differences between current config and a stored campaign.
+
+    Usage::
+
+        diff_campaign_config(svc["store"], svc["backend_id"],
+                             "cycle_68e2c53845c3", campaign_config,
+                             pipeline_params=campaign_config.get("pipeline_params"))
+    """
+    from api.services.campaign.models import CycleConfig
+
+    campaign = store.campaigns.load(backend_id, campaign_id)
+    if campaign is None:
+        print(f"Campaign {campaign_id} not found.")
+        return {}
+
+    stored = campaign.get("config", {})
+    current = CycleConfig.from_campaign_config(
+        campaign_config, pipeline_params=pipeline_params,
+    ).model_dump()
+
+    keys = ["max_rounds", "patience", "n_variants", "creativity",
+            "improvement_threshold", "model", "temperature",
+            "sample_size", "seed"]
+
+    diffs: dict = {}
+    print(f"\nDiff: current config vs {campaign_id}")
+    print("=" * 60)
+    any_diff = False
+    for k in keys:
+        sv = stored.get(k)
+        cv = current.get(k)
+        if sv != cv:
+            print(f"  {k}: {sv} (stored) → {cv} (current)")
+            diffs[k] = {"stored": sv, "current": cv}
+            any_diff = True
+
+    # Pipeline params diff
+    sp = stored.get("pipeline_params")
+    cp = current.get("pipeline_params")
+    if sp != cp:
+        sp_keys = set(sp or {})
+        cp_keys = set(cp or {})
+        for pk in sorted(sp_keys | cp_keys):
+            sv = (sp or {}).get(pk)
+            cv = (cp or {}).get(pk)
+            if sv != cv:
+                sv_str = str(sv)[:40] if sv is not None else "(none)"
+                cv_str = str(cv)[:40] if cv is not None else "(none)"
+                print(f"  pp.{pk}: {sv_str} → {cv_str}")
+                diffs[f"pp.{pk}"] = {"stored": sv, "current": cv}
+                any_diff = True
+
+    if not any_diff:
+        print("  (identical — will resume this campaign)")
+    print("=" * 60)
+    return diffs
 
 
 # ---------------------------------------------------------------------------

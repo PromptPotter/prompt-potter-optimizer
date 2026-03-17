@@ -100,7 +100,7 @@ class CampaignStore:
         if not campaigns_dir.exists():
             return []
         results = []
-        for path in sorted(campaigns_dir.glob("campaign_*.json")):
+        for path in sorted(campaigns_dir.glob("*.json")):
             data = read_json(path)
             results.append({
                 "campaign_id": data["campaign_id"],
