@@ -184,6 +184,35 @@ def _init_obs(
     return obs, dataset_name, dataset_item_map
 
 
+def _validate_config_match(
+    config: CycleConfig,
+    stored_cfg: dict,
+    cycle_id: str,
+) -> None:
+    """Validate current config matches stored campaign config.
+
+    Raises ValueError with a clear diff if key optimization fields differ.
+    This enforces the EXPERIMENT_ID invariant: no silent config drift.
+    """
+    check_keys = [
+        "max_rounds", "patience", "n_variants", "creativity",
+        "improvement_threshold", "model", "sample_size",
+    ]
+    mismatches = []
+    for k in check_keys:
+        cv = getattr(config, k, None)
+        sv = stored_cfg.get(k)
+        if cv != sv:
+            mismatches.append(f"  {k}: stored={sv} vs current={cv}")
+    if mismatches:
+        raise ValueError(
+            f"Config mismatch for experiment {cycle_id}.\n"
+            f"Set EXPERIMENT_ID = None to start a new experiment, "
+            f"or update campaign_config to match.\n"
+            + "\n".join(mismatches)
+        )
+
+
 def _resume_or_create_campaign(
     config: CycleConfig,
     eval_data: list[dict],
@@ -198,6 +227,7 @@ def _resume_or_create_campaign(
     Args:
         cycle_id_override: Explicit campaign ID (skips hash computation).
             Used when the user sets EXPERIMENT_ID in the notebook.
+            When set and campaign exists, validates config matches stored.
 
     Returns:
         (campaign_store, cycle_id, resumed_from_round)
@@ -220,6 +250,11 @@ def _resume_or_create_campaign(
 
         existing = campaign_store.load(config.backend_id, cycle_id)
         if existing is not None:
+            # Validate config matches when resuming with explicit ID
+            if cycle_id_override:
+                stored_cfg = existing.get("config", {})
+                if stored_cfg:
+                    _validate_config_match(config, stored_cfg, cycle_id)
             resumed_from = len(existing.get("trials", []))
             if resumed_from:
                 logger.info(
@@ -235,6 +270,8 @@ def _resume_or_create_campaign(
             })
 
         return campaign_store, cycle_id, resumed_from
+    except ValueError:
+        raise  # config mismatch — propagate to user
     except Exception:
         logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
         return None, None, 0

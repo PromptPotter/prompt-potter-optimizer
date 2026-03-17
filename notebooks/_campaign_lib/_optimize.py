@@ -829,6 +829,16 @@ async def run_feedback_cycle_notebook(
         resolved_cycle_id = _resolve_experiment_id(store, backend_id, experiment_id)
         if resolved_cycle_id is None:
             print(f"  No campaign matching '{experiment_id}' — starting fresh")
+        else:
+            # Load stored baseline to prevent stale notebook state from
+            # overriding the original experiment's baseline accuracy.
+            stored = store.campaigns.load(backend_id, resolved_cycle_id)
+            if stored:
+                stored_bl = stored.get("baseline_accuracy")
+                if stored_bl is not None and stored_bl != baseline_acc:
+                    print(f"  {YELLOW}Using stored baseline {stored_bl:.1%}"
+                          f" (notebook had {baseline_acc:.1%}){RESET}")
+                    baseline_acc = stored_bl
 
     result = await run_feedback_cycle(
         instruction=instruction,
