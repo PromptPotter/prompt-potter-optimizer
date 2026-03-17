@@ -494,7 +494,6 @@ class TestSelectScanWinner:
 class TestCycleConfigIdentity:
     def test_differs_on_config_change(self, eval_data):
         """Different config fields produce different cycle_ids."""
-        rendered = "You are an expert."
         c1 = CycleConfig(
             max_rounds=5, patience=2, n_variants=3, creativity=0.5,
             backend_url="http://mock:8000",
@@ -503,18 +502,18 @@ class TestCycleConfigIdentity:
             max_rounds=10, patience=2, n_variants=3, creativity=0.5,
             backend_url="http://mock:8000",
         )
-        assert cycle_config_identity(c1, rendered, eval_data) != \
-            cycle_config_identity(c2, rendered, eval_data)
+        assert cycle_config_identity(c1, eval_data) != \
+            cycle_config_identity(c2, eval_data)
 
-    def test_differs_on_baseline_change(self, cycle_config, eval_data):
-        """Different baseline rendered prompt produces different cycle_id."""
-        id1 = cycle_config_identity(cycle_config, "prompt A", eval_data)
-        id2 = cycle_config_identity(cycle_config, "prompt B", eval_data)
-        assert id1 != id2
+    def test_stable_across_baseline_change(self, cycle_config, eval_data):
+        """Cycle ID is stable regardless of baseline — enables resume after
+        kernel restart when baseline involves non-deterministic LLM steps."""
+        id1 = cycle_config_identity(cycle_config, eval_data)
+        id2 = cycle_config_identity(cycle_config, eval_data)
+        assert id1 == id2
 
     def test_eval_order_invariant(self, cycle_config):
         """Eval data order doesn't affect the hash."""
-        rendered = "test"
         data_a = [
             {"query": "z_last", "ground_truth": "Z"},
             {"query": "a_first", "ground_truth": "A"},
@@ -523,8 +522,8 @@ class TestCycleConfigIdentity:
             {"query": "a_first", "ground_truth": "A"},
             {"query": "z_last", "ground_truth": "Z"},
         ]
-        assert cycle_config_identity(cycle_config, rendered, data_a) == \
-            cycle_config_identity(cycle_config, rendered, data_b)
+        assert cycle_config_identity(cycle_config, data_a) == \
+            cycle_config_identity(cycle_config, data_b)
 
 
 @pytest.mark.slow

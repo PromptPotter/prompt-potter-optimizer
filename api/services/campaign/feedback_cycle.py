@@ -24,7 +24,10 @@ from typing import TYPE_CHECKING, Any
 from api.models.phase_event import PhaseEvent
 from api.models.prompt_state import PromptState, diff as prompt_diff
 from api.models.search_point import SearchPoint
-from api.nodes.optimizer_nodes import InitNode, L1GenerateNode, L1EvaluateNode
+from api.models.opt_search_point import OptSearchPoint
+from api.nodes.optimizer_nodes import (
+    InitNode, L1GenerateNode, L1EvaluateNode, L2RefineNode, L3ModifyPlanNode,
+)
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
 from api.services.constants import DATASET_NAME
@@ -97,14 +100,14 @@ def _candidate_summaries(
 
 def cycle_config_identity(
     config: CycleConfig,
-    baseline_rendered: str,
     eval_data: list[dict],
 ) -> str:
     """Compute a stable identity hash for a feedback cycle configuration.
 
     Covers optimization-relevant fields only so the same config produces the
     same cycle_id across kernel restarts.  Infrastructure fields (backend_url,
-    project_root, etc.) are excluded.
+    project_root, etc.) and baseline prompt are excluded — the baseline may
+    involve non-deterministic LLM steps that change between runs.
     """
     payload = json.dumps(
         {
@@ -118,7 +121,6 @@ def cycle_config_identity(
             "temperature": config.temperature,
             "sample_size": config.sample_size,
             "seed": config.seed,
-            "baseline_rendered": baseline_rendered,
             "eval_data_pairs": sorted(
                 (d.get("query", ""), d.get("ground_truth", ""))
                 for d in eval_data
@@ -184,8 +186,6 @@ def _init_obs(
 def _resume_or_create_campaign(
     config: CycleConfig,
     eval_data: list[dict],
-    current_ps: dict,
-    baseline_prompt_state: dict | None,
     baseline_accuracy: float,
 ) -> tuple[Any | None, str | None, int]:
     """Handle campaign resume detection.
@@ -202,8 +202,7 @@ def _resume_or_create_campaign(
         store_base = Path(config.project_root)
         campaign_store = CampaignStore(store_base)
 
-        bl_ps = baseline_prompt_state if baseline_prompt_state is not None else current_ps
-        cycle_id = cycle_config_identity(config, PromptState(**bl_ps).render(), eval_data)
+        cycle_id = cycle_config_identity(config, eval_data)
         logger.info("Cycle identity: %s", cycle_id)
 
         existing = campaign_store.load(config.backend_id, cycle_id)
@@ -588,9 +587,10 @@ async def _do_l2_transition(
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> layer_transitions.TransitionResult:
-    """Perform L2 refine_context transition. Updates state in-place."""
-    llm_client = _llm_client.get_llm_client(config.provider)
+    """Perform L2 refine_context transition via L2RefineNode. Updates state in-place."""
     current_ps = state.current_sp.prompt_state
     current_pp = state.current_sp.pipeline_params
 
@@ -608,11 +608,28 @@ async def _do_l2_transition(
                 current_params=current_ps.parameters,
                 current_accuracy=state.current_accuracy,
                 best_accuracy=state.best_accuracy)
-    tr = await layer_transitions.refine_context(
-        current_ps, stalled_rounds, eval_data, llm_client,
-        model=config.model, temperature=config.l2_temperature,
-        pipeline_params=current_pp,
-        pipeline_schema=config.pipeline_schema,
+
+    l2_node = L2RefineNode(
+        node_id=f"l2_refine_r{round_num}",
+        config={
+            "model": config.model,
+            "provider": config.provider,
+            "temperature": config.l2_temperature,
+            "pipeline_schema": config.pipeline_schema,
+        },
+        obs=obs, trace_id=trace_id,
+    )
+    l2_result = await l2_node.process({
+        "prompt_state": current_ps.model_dump(),
+        "stalled_rounds": stalled_rounds,
+        "eval_data": eval_data,
+        "pipeline_params": current_pp,
+    })
+
+    new_ps = PromptState(**l2_result.prompt_state)
+    tr = layer_transitions.TransitionResult(
+        prompt_state=new_ps,
+        pipeline_params=l2_result.pipeline_params,
     )
     state.current_sp = state.current_sp.derive(
         prompt_state=tr.prompt_state,
@@ -641,9 +658,10 @@ async def _do_l3_transition(
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> layer_transitions.TransitionResult:
-    """Perform L3 modify_plan transition. Updates state in-place."""
-    llm_client = _llm_client.get_llm_client(config.provider)
+    """Perform L3 modify_plan transition via L3ModifyPlanNode. Updates state in-place."""
     current_ps = state.current_sp.prompt_state
     current_pp = state.current_sp.pipeline_params
 
@@ -656,11 +674,28 @@ async def _do_l3_transition(
                 l3_round=state.l3_round,
                 l2_stall_count=state.l2_stall_count,
                 current_plan_preview=str(current_ps.plan)[:120])
-    tr = await layer_transitions.modify_plan(
-        current_ps, l2_history, eval_data, llm_client,
-        model=config.model, temperature=config.l3_temperature,
-        pipeline_params=current_pp,
-        pipeline_schema=config.pipeline_schema,
+
+    l3_node = L3ModifyPlanNode(
+        node_id=f"l3_modify_plan_r{round_num}",
+        config={
+            "model": config.model,
+            "provider": config.provider,
+            "temperature": config.l3_temperature,
+            "pipeline_schema": config.pipeline_schema,
+        },
+        obs=obs, trace_id=trace_id,
+    )
+    l3_result = await l3_node.process({
+        "prompt_state": current_ps.model_dump(),
+        "l2_history": l2_history,
+        "eval_data": eval_data,
+        "pipeline_params": current_pp,
+    })
+
+    new_ps = PromptState(**l3_result.prompt_state)
+    tr = layer_transitions.TransitionResult(
+        prompt_state=new_ps,
+        pipeline_params=l3_result.pipeline_params,
     )
     state.current_sp = state.current_sp.derive(
         prompt_state=tr.prompt_state,
@@ -692,6 +727,8 @@ async def _escalate_l2(
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    obs: "ObsLogger | None" = None,
+    trace_id: str | None = None,
 ) -> str | None:
     """Handle L1→L2 escalation and optionally L2→L3.
 
@@ -722,6 +759,7 @@ async def _escalate_l2(
 
             await _do_l3_transition(
                 state, config, round_num, eval_data, on_phase,
+                obs=obs, trace_id=trace_id,
             )
             return None  # continue
         else:
@@ -733,6 +771,7 @@ async def _escalate_l2(
 
     await _do_l2_transition(
         state, config, round_num, eval_data, on_phase,
+        obs=obs, trace_id=trace_id,
     )
     return None  # continue
 
@@ -835,8 +874,7 @@ async def run_feedback_cycle(
 
     # -- Step 2: Resume detection --
     campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
-        config, eval_data, current_ps.model_dump(),
-        baseline_prompt_state, baseline_accuracy,
+        config, eval_data, baseline_accuracy,
     )
     # -- Step 3: Observability setup --
     obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
@@ -957,6 +995,13 @@ async def run_feedback_cycle(
             # Checkpoint round to disk
             if campaign_store and cycle_id:
                 try:
+                    opt_sp = OptSearchPoint(
+                        critique_text=state.critique_text,
+                        thinking_styles=state.thinking_styles,
+                        plan=state.current_sp.prompt_state.plan,
+                        context=state.current_sp.prompt_state.context,
+                        parameters=state.current_sp.prompt_state.parameters,
+                    )
                     campaign_store.add_trial(config.backend_id, cycle_id, {
                         "trial_id": f"round_{round_num}",
                         "round": round_num,
@@ -979,6 +1024,7 @@ async def run_feedback_cycle(
                         "l3_stall_count": state.l3_stall_count,
                         "l2_round": state.l2_round,
                         "l3_round": state.l3_round,
+                        "opt_search_point": opt_sp.model_dump(),
                     })
                 except Exception:
                     logger.warning("Round checkpoint failed", exc_info=True)
@@ -997,8 +1043,14 @@ async def run_feedback_cycle(
             if state.stall_count >= config.patience:
                 if config.enable_l2:
                     # L1 stalled → escalate to L2
+                    _esc_obs = state.eval_ctx.obs if state.eval_ctx else None
+                    _esc_trace_id = (
+                        _esc_obs.get_file_trace_id(obs_campaign_id)
+                        if _esc_obs else None
+                    )
                     stop_reason = await _escalate_l2(
                         state, config, round_num, round_eval_data, on_phase,
+                        obs=_esc_obs, trace_id=_esc_trace_id,
                     )
                     if stop_reason:
                         break
