@@ -195,6 +195,7 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
         error_msg = None
         obs_id = None
         validated_output = None
+        interrupted = False
 
         try:
             # Validate input
@@ -219,6 +220,10 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
 
             return validated_output
 
+        except KeyboardInterrupt:
+            interrupted = True
+            raise
+
         except Exception as e:
             error_msg = str(e)
             raise
@@ -237,12 +242,15 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
                 metadata=self.config.copy()
             )
 
-            # Close step observation (opt-in)
-            self._end_observation(
-                obs_id,
-                validated_output.model_dump() if validated_output else None,
-                error_msg,
-            )
+            # Skip obs cleanup on interrupt — event loop may be corrupted
+            # (Windows asyncio + httpx aclose hang). Metrics are pure
+            # computation and safe; obs I/O is not.
+            if not interrupted:
+                self._end_observation(
+                    obs_id,
+                    validated_output.model_dump() if validated_output else None,
+                    error_msg,
+                )
 
     def get_last_metrics(self) -> NodeMetrics | None:
         """Return metrics from the last execution."""
