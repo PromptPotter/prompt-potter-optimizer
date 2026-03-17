@@ -134,8 +134,10 @@ def save_campaign_winner(
     campaign_config: dict,
     store: "ProjectStore",
     backend_id: str,
+    *,
+    experiment_id: str | None = None,
 ) -> dict:
-    """Find best round, save to store. Returns save_data dict."""
+    """Find best round, save to store + link to campaign. Returns save_data dict."""
     from datetime import datetime, timezone
 
     winner = campaign_rounds[-1]["prompt_state"]
@@ -159,6 +161,20 @@ def save_campaign_winner(
 
     filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
     store.backends.save_sync(backend_id, filename, save_data)
+
+    # Link winner to campaign store if experiment_id provided
+    if experiment_id:
+        from notebooks._campaign_lib._optimize import _resolve_experiment_id
+        full_id = _resolve_experiment_id(store, backend_id, experiment_id)
+        if full_id:
+            try:
+                store.campaigns.update(backend_id, full_id, {
+                    "winner_prompt_state_id": winner.id,
+                    "winner_accuracy": winner_acc,
+                    "winner_filename": filename,
+                })
+            except Exception:
+                pass  # campaign may not exist yet
 
     print(f"Winner saved: {filename} (acc={winner_acc:.1%})")
     return {

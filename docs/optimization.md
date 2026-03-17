@@ -119,6 +119,14 @@ The feedback cycle is itself a 4-step pipeline, designed to be modeled using the
 
 This pipeline model enables step-level tracing, full reproducibility, and self-optimization. See the [M7 spec](specs/m7-optimizer-pipeline.md) for the full design including `OPTIMIZER_PIPELINE_SCHEMA`, tracing design, and migration path.
 
+### Node Wiring (M7)
+
+All four feedback cycle call sites route through optimizer nodes (`NodeBase.process()`): `L1GenerateNode`, `L1EvaluateNode`, `L2RefineNode`, `L3ModifyPlanNode`. Each node has typed Pydantic I/O models. Tracing is opt-in via `obs` + `trace_id` on the node constructor. `OptSearchPoint` checkpoints optimizer state (critique, thinking_styles, plan, context) per round.
+
+### Experiment Dashboard
+
+`show_experiment_dashboard()` replaces the old coverage diagnostic cell. Shows all campaigns with inline config, dataset_run summary by source, and active campaign detection. `EXPERIMENT_ID` set in the dashboard controls all downstream cells — scan, grid, feedback cycle, manual round, save winner.
+
 ### Phase Events
 
 The feedback cycle emits structured `PhaseEvent` objects at phase boundaries via the `on_phase` callback. The notebook renders these as ANSI-colored banners (`>>>` enter, `<<<` exit).

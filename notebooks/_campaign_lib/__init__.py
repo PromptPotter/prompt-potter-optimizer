@@ -51,7 +51,7 @@ __all__ = [  # noqa: F405
     "prepare_scan_baseline", "preview_advisor_prompt", "display_variant_library",
     # Campaign
     "show_feedback_preflight", "run_feedback_cycle_notebook", "save_campaign_winner",
-    "display_progress", "run_manual_round",
+    "display_progress",
     "list_campaigns", "diff_campaign_config", "show_experiment_dashboard",
     "load_experiment_config",
     "select_and_seed_grid_winner",

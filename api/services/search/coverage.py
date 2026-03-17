@@ -225,12 +225,20 @@ def diagnose_scan_variants(
             "total_matching": sum(value_counts.values()),
         }
 
+    # Baseline scores from first matching run (for scan cache skip)
+    baseline_scores = None
+    if matching:
+        first_scores = matching[0].get("scores", {})
+        if first_scores:
+            baseline_scores = first_scores
+
     return {
         "n_total_runs": len(summaries),
         "n_matching_runs": len(matching),
         "n_matching_results": n_cached_results,
         "alias_hashes": sorted(baseline_rp_hashes),
         "axes": axes,
+        "baseline_scores": baseline_scores,
     }
 
 

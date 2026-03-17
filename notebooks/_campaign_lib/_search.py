@@ -951,7 +951,6 @@ async def sensitivity_scan(
     backend_id: str = "",
     pipeline_schema=None,
     experiment_id: str = "",
-    scan_coverage: dict | None = None,
 ) -> tuple:
     """Run a sensitivity scan with progress output.
 
@@ -1007,7 +1006,6 @@ async def sensitivity_scan(
             progress_cb=cb,
             on_result=on_result_cb,
             experiment_id=experiment_id,
-            scan_coverage=scan_coverage,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         _print_interrupt_banner(

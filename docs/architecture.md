@@ -95,6 +95,14 @@ The optimizer itself is a 4-step pipeline, designed to be modeled using the same
 
 This model enables optimizer-level tracing (each step as a Langfuse observation), full reproducibility (every LLM call reconstructible from trial artifacts), and self-optimization (a meta-PromptPotter optimizing its own prompts). See the [M7 spec](specs/m7-optimizer-pipeline.md) for the full design.
 
+### EXPERIMENT_ID & Config Stability
+
+`EXPERIMENT_ID` is the single source of truth for the notebook. When set, config MUST match the stored experiment — mismatches raise `ValueError`. When `None`, a new experiment is auto-created from the config hash.
+
+- **Writing**: all dataset_runs, campaign data, Langfuse traces are tagged with experiment_id
+- **Reading**: scan/grid results are found by **config similarity** (alias groups + pipeline_param matching), not experiment_id — data is shared across experiments via content-addressed dedup
+- **Dashboard**: `show_experiment_dashboard()` loads stored config, overrides notebook variables, shows resume status
+
 ## Further Reading
 
 - [Design Principles](design-principles.md) — Core patterns

@@ -27,6 +27,10 @@ This is where 90% of implementation work happens. All core logic lives here.
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
 | `query_utils.py` | Shared query-parsing utilities |
 
+## Optimizer nodes (`api/nodes/`)
+
+`NodeBase[TInput, TOutput]` in `api/nodes/base.py` — Template Method pattern with Pydantic generics, opt-in observability. 5 optimizer nodes in `optimizer_nodes.py`: `InitNode`, `L1GenerateNode`, `L1EvaluateNode`, `L2RefineNode`, `L3ModifyPlanNode`. All wired into `feedback_cycle.py`. `OptSearchPoint` (`api/models/opt_search_point.py`) checkpoints optimizer state per round.
+
 ## Evaluation gateway
 
 `evaluate_prompt_cached()` in `prompt_eval.py` is the **single entry point** for all eval persistence. All evaluation paths (grid search, smart search, feedback cycle) converge here — no data is siloed per campaign.
@@ -56,7 +60,6 @@ File-first + cloud-optional. `ObsLogger` writes to disk, delegates to `CloudObsB
   executions/{id}.json
   datasets/{name}.json
   dataset_runs/{run_id}.json          # completed eval runs (shared across all eval paths)
-  dataset_runs/{run_id}.partial.jsonl  # in-progress (crash recovery)
   dataset_runs.json                   # index of all runs (content_hash -> run_id)
   grid_plans/{plan_id}.json
   smart_search_plans/{plan_id}.json

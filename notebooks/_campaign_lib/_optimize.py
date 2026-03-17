@@ -49,7 +49,7 @@ class _CycleDisplayState:
 __all__ = [
     # Campaign
     "show_feedback_preflight", "run_feedback_cycle_notebook",
-    "display_progress", "run_manual_round",
+    "display_progress",
     "list_campaigns", "diff_campaign_config", "show_experiment_dashboard",
     "load_experiment_config",
     # Langfuse
@@ -57,48 +57,6 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Optimization rounds (thin wrappers over prompt_optimizer)
-# ---------------------------------------------------------------------------
-
-
-async def run_manual_round(
-    campaign_rounds: list,
-    eval_data: list,
-    campaign_config: dict,
-    svc: dict,
-    *,
-    experiment_id: str | None = None,
-) -> dict | None:
-    """Run a single manual optimization round via feedback cycle.
-
-    Returns:
-        The round entry dict (also appended to campaign_rounds), or None
-        if interrupted before any round completed.
-    """
-    # Override max_rounds=1 for single-round behaviour
-    override = dict(campaign_config)
-    override.setdefault("optimization", {})
-    override["optimization"] = {**override["optimization"], "max_rounds": 1, "patience": 1}
-
-    initial_len = len(campaign_rounds)
-
-    await run_feedback_cycle_notebook(
-        campaign_rounds, eval_data, override,
-        store=svc.get("store"),
-        backend_id=svc.get("backend_id", ""),
-        backend_url=svc["backend_client"].base_url
-        if svc.get("backend_client") else "http://127.0.0.1:8000",
-        pipeline_params=campaign_config.get("pipeline_params"),
-        session_terms=svc.get("session_terms"),
-        experiment_id=experiment_id,
-    )
-
-    display_progress(campaign_rounds)
-
-    if len(campaign_rounds) > initial_len:
-        return campaign_rounds[-1]
-    return None
 
 
 # ---------------------------------------------------------------------------

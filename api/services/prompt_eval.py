@@ -285,7 +285,8 @@ async def evaluate_prompt_batch(
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.warning(
             "Eval batch interrupted at query %d/%d. "
-            "Results so far are lost — re-run to restart.",
+            "This candidate will be re-evaluated on resume. "
+            "Completed candidates are cached.",
             len(results), len(eval_data),
         )
         raise
