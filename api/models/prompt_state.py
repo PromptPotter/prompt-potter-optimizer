@@ -113,14 +113,19 @@ class PromptState(BaseModel):
 
         Uses Langfuse-compatible double-brace syntax: ``{{var}}`` is substituted,
         single ``{braces}`` are literal.  Raises :class:`KeyError` if any
-        ``{{var}}`` remains unsubstituted after processing all *kwargs*.
+        *template-defined* ``{{var}}`` remains unsubstituted.
+
+        Variables introduced by substituted *values* (e.g., a user prompt
+        containing ``{{core_concept}}``) are ignored — only variables present
+        in the original rendered template are validated.
         """
         text = self.render()
+        expected = set(re.findall(r"\{\{(\w+)\}\}", text))
         for key, value in kwargs.items():
             text = text.replace("{{" + key + "}}", str(value))
-        remaining = re.findall(r"\{\{(\w+)\}\}", text)
-        if remaining:
-            raise KeyError(f"Unsubstituted template variables: {remaining}")
+        missing = expected - set(kwargs.keys())
+        if missing:
+            raise KeyError(f"Unsubstituted template variables: {sorted(missing)}")
         return text
 
     def derive(self, **changes: Any) -> "PromptState":
