@@ -847,6 +847,7 @@ async def run_feedback_cycle(
     langfuse_session_id: str | None = None,
     scan_context: dict | None = None,
     cycle_id: str | None = None,
+    experiment_id: str = "",
 ) -> CycleResult:
     """Run iterative optimization with feedback cycling.
 
@@ -1004,7 +1005,7 @@ async def run_feedback_cycle(
         model=config.model or "",
         temperature=config.temperature,
         pipeline_params=config.pipeline_params,
-        experiment_id=cycle_id.replace("cycle_", "")[:12] if cycle_id else "",
+        experiment_id=experiment_id or (cycle_id.replace("cycle_", "")[:12] if cycle_id else ""),
     )
 
     stop_reason = "max_rounds"

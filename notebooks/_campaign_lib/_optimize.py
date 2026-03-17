@@ -51,6 +51,7 @@ __all__ = [
     "show_feedback_preflight", "run_feedback_cycle_notebook",
     "display_progress", "run_manual_round",
     "list_campaigns", "diff_campaign_config", "show_experiment_dashboard",
+    "load_experiment_config",
     # Langfuse
     "push_langfuse", "sync_langfuse",
 ]
@@ -856,6 +857,7 @@ async def run_feedback_cycle_notebook(
         on_phase=_on_phase,
         langfuse_session_id=langfuse_session_id,
         cycle_id=resolved_cycle_id,
+        experiment_id=experiment_id or "",
     )
 
     # --- Final summary ---
@@ -1051,6 +1053,29 @@ def diff_campaign_config(
         print("  (identical — will resume this campaign)")
     print("=" * 60)
     return diffs
+
+
+def load_experiment_config(
+    store: "ProjectStore",
+    backend_id: str,
+    experiment_id: str,
+) -> dict | None:
+    """Load stored campaign config for an experiment.
+
+    When EXPERIMENT_ID is set in the notebook, call this to load the
+    stored pipeline_params and optimization config. This ensures all
+    downstream cells (scan, grid, feedback cycle) use the same params
+    that created the original experiment data.
+
+    Returns the stored config dict, or None if not found.
+    """
+    full_id = _resolve_experiment_id(store, backend_id, experiment_id)
+    if not full_id:
+        return None
+    campaign = store.campaigns.load(backend_id, full_id)
+    if not campaign:
+        return None
+    return campaign.get("config", {})
 
 
 def _resolve_experiment_id(store: "ProjectStore", backend_id: str, short_id: str) -> str | None:

@@ -501,6 +501,11 @@ async def evaluate_prompt_cached(
     # --- evaluate via backend ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
+    # Prefix display name with experiment_id for discoverability
+    display_name = (
+        f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id
+        else safe_label
+    )
 
     def _on_result(result: dict, index: int, total: int) -> None:
         if on_result is not None:
@@ -516,7 +521,7 @@ async def evaluate_prompt_cached(
     # --- finalize: save complete run + observability ---
     if store and backend_id:
         run_data = build_dataset_run_data(
-            run_id, label, content_hash, search_point,
+            run_id, display_name, content_hash, search_point,
             scores, results, source=source,
             experiment_id=ctx.experiment_id,
         )

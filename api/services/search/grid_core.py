@@ -334,6 +334,7 @@ async def _load_or_compute_point(
     pipeline_params: dict | None,
     on_query_done: Callable | None,
     pipeline_schema: "PipelineSchema | None" = None,
+    experiment_id: str = "",
 ) -> tuple[dict[str, Any], bool]:
     """Evaluate (or load from cache) a single grid point.
 
@@ -442,6 +443,7 @@ async def run_grid_search(
                 info, state_lookup, backend_client, request_delay,
                 store, backend_id, pipeline_params, on_query_done,
                 pipeline_schema=pipeline_schema,
+                experiment_id=experiment_id,
             )
 
             row = dict(info.coord_dict)
