@@ -683,6 +683,7 @@ async def run_feedback_cycle_notebook(
     session_terms: "list[str] | None" = None,
     langfuse_session_id: str | None = None,
     scan_context: "dict | None" = None,
+    experiment_id: str | None = None,
 ) -> list:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
@@ -822,6 +823,13 @@ async def run_feedback_cycle_notebook(
                 print(f"  {RED}Stopping: patience exhausted"
                       f" ({config.patience} consecutive stalls){RESET}")
 
+    # Resolve explicit experiment_id to full cycle_id
+    resolved_cycle_id = None
+    if experiment_id and store:
+        resolved_cycle_id = _resolve_experiment_id(store, backend_id, experiment_id)
+        if resolved_cycle_id is None:
+            print(f"  No campaign matching '{experiment_id}' — starting fresh")
+
     result = await run_feedback_cycle(
         instruction=instruction,
         eval_data=eval_data,
@@ -834,6 +842,7 @@ async def run_feedback_cycle_notebook(
         on_query_eval=_on_query,
         on_phase=_on_phase,
         langfuse_session_id=langfuse_session_id,
+        cycle_id=resolved_cycle_id,
     )
 
     # --- Final summary ---

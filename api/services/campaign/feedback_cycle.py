@@ -190,8 +190,14 @@ def _resume_or_create_campaign(
     current_ps: dict,
     baseline_prompt_state: dict | None,
     baseline_accuracy: float,
+    *,
+    cycle_id_override: str | None = None,
 ) -> tuple[Any | None, str | None, int]:
     """Handle campaign resume detection.
+
+    Args:
+        cycle_id_override: Explicit campaign ID (skips hash computation).
+            Used when the user sets EXPERIMENT_ID in the notebook.
 
     Returns:
         (campaign_store, cycle_id, resumed_from_round)
@@ -205,8 +211,11 @@ def _resume_or_create_campaign(
         store_base = Path(config.project_root)
         campaign_store = CampaignStore(store_base)
 
-        bl_ps = baseline_prompt_state if baseline_prompt_state is not None else current_ps
-        cycle_id = cycle_config_identity(config, PromptState(**bl_ps).render(), eval_data)
+        if cycle_id_override:
+            cycle_id = cycle_id_override
+        else:
+            bl_ps = baseline_prompt_state if baseline_prompt_state is not None else current_ps
+            cycle_id = cycle_config_identity(config, PromptState(**bl_ps).render(), eval_data)
         logger.info("Cycle identity: %s", cycle_id)
 
         existing = campaign_store.load(config.backend_id, cycle_id)
@@ -800,6 +809,7 @@ async def run_feedback_cycle(
     on_phase: Callable[[PhaseEvent], None] | None = None,
     langfuse_session_id: str | None = None,
     scan_context: dict | None = None,
+    cycle_id: str | None = None,
 ) -> CycleResult:
     """Run iterative optimization with feedback cycling.
 
@@ -880,6 +890,7 @@ async def run_feedback_cycle(
     campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
         config, eval_data, current_ps.model_dump(),
         baseline_prompt_state, baseline_accuracy,
+        cycle_id_override=cycle_id,
     )
     # -- Step 3: Observability setup --
     obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
