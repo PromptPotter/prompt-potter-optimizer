@@ -204,6 +204,7 @@ async def prepare_scan_baseline(
     backend_id: str = "",
     scan_variants: dict | None = None,
     force_restructure: bool = False,
+    svc: dict | None = None,
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
@@ -218,6 +219,11 @@ async def prepare_scan_baseline(
     """
     import hashlib
     from api.models.search_point import SearchPoint
+
+    # svc shorthand: extract store/backend_id if provided
+    if svc is not None:
+        store = store or svc.get("store")
+        backend_id = backend_id or svc.get("backend_id", "")
 
     llm_client, llm_model = setup_llm(campaign_config)
 
@@ -944,13 +950,14 @@ async def sensitivity_scan(
     baseline,
     scan_variants: dict[str, list],
     eval_data: list,
-    backend_client,
+    backend_client=None,
     *,
     sample_size: int = 0,
     store=None,
     backend_id: str = "",
     pipeline_schema=None,
     experiment_id: str = "",
+    svc: dict | None = None,
 ) -> tuple:
     """Run a sensitivity scan with progress output.
 
@@ -959,6 +966,13 @@ async def sensitivity_scan(
 
     Returns (per_variant_df, axis_profiles).
     """
+    # svc shorthand: extract infrastructure params if provided
+    if svc is not None:
+        backend_client = backend_client or svc.get("backend_client")
+        store = store or svc.get("store")
+        backend_id = backend_id or svc.get("backend_id", "")
+        pipeline_schema = pipeline_schema or svc.get("pipeline_schema")
+
     # Print scan overview
     print("Running sensitivity scan...")
     print("\n  Baseline field values:")
@@ -1112,8 +1126,8 @@ async def adaptive_search(
     baseline_ps,
     variant_library: dict,
     eval_data: list,
-    backend_client,
-    axis_profiles: list[dict],
+    backend_client=None,
+    axis_profiles: list[dict] | None = None,
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
     store=None,
@@ -1122,12 +1136,20 @@ async def adaptive_search(
     session_terms: list | None = None,
     plan_id: str = "",
     experiment_id: str = "",
+    svc: dict | None = None,
 ) -> tuple:
     """Run adaptive coordinate descent search with progress output.
 
     Returns (best_ps, best_pipeline_params, search_log_df).
     """
-    active = [p for p in axis_profiles if p["exploration_budget"] != "skip"]
+    # svc shorthand
+    if svc is not None:
+        backend_client = backend_client or svc.get("backend_client")
+        store = store or svc.get("store")
+        backend_id = backend_id or svc.get("backend_id", "")
+        session_terms = session_terms or svc.get("session_terms")
+
+    active = [p for p in (axis_profiles or []) if p["exploration_budget"] != "skip"]
     print(f"Adaptive search: {len(active)} active axes, max {max_rounds} rounds")
     for p in active:
         print(

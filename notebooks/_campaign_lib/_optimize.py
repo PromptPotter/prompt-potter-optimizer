@@ -51,10 +51,41 @@ __all__ = [
     "show_feedback_preflight", "run_feedback_cycle_notebook",
     "display_progress",
     "list_campaigns", "diff_campaign_config", "show_experiment_dashboard",
-    "load_experiment_config",
+    "load_experiment_config", "apply_experiment_overrides",
     # Langfuse
     "push_langfuse", "sync_langfuse",
 ]
+
+
+def apply_experiment_overrides(
+    campaign_config: dict,
+    stored_cfg: dict,
+) -> dict | None:
+    """Merge stored experiment config into campaign_config (in-place).
+
+    Returns updated pipeline_params if stored, else None.
+    """
+    _OVERRIDE_KEYS: dict[str, tuple[str, ...]] = {
+        "patience": ("optimization",),
+        "max_rounds": ("optimization",),
+        "n_variants": ("optimization",),
+        "creativity": ("optimization",),
+        "model": ("eval_llm",),
+        "sample_size": (),
+    }
+    for key, path in _OVERRIDE_KEYS.items():
+        val = stored_cfg.get(key)
+        if val is not None:
+            target = campaign_config
+            for p in path:
+                target = target.setdefault(p, {})
+            target[key] = val
+
+    stored_pp = stored_cfg.get("pipeline_params")
+    if stored_pp:
+        campaign_config["pipeline_params"] = stored_pp
+        return stored_pp
+    return None
 
 
 
@@ -646,6 +677,7 @@ async def run_feedback_cycle_notebook(
     langfuse_session_id: str | None = None,
     scan_context: "dict | None" = None,
     experiment_id: str | None = None,
+    svc: dict | None = None,
 ) -> list:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
@@ -660,6 +692,13 @@ async def run_feedback_cycle_notebook(
     """
     from api.services.campaign.models import CycleConfig
     from api.services.campaign.feedback_cycle import run_feedback_cycle
+
+    # svc shorthand
+    if svc is not None:
+        store = store or svc.get("store")
+        backend_id = backend_id or svc.get("backend_id", "")
+        backend_url = backend_url or svc["backend_client"].base_url
+        session_terms = session_terms or svc.get("session_terms")
 
     config = CycleConfig.from_campaign_config(
         campaign_config,
@@ -897,7 +936,7 @@ def list_campaigns(
 
         cfg = campaign.get("config", {})
         if cfg:
-            print(f"\n  Config (copy to campaign_config):")
+            print("\n  Config (copy to campaign_config):")
             for k in ["max_rounds", "patience", "n_variants", "creativity",
                        "improvement_threshold", "model", "temperature",
                        "sample_size", "seed"]:
@@ -1053,21 +1092,25 @@ def _resolve_experiment_id(store: "ProjectStore", backend_id: str, short_id: str
 
 
 def show_experiment_dashboard(
-    store: "ProjectStore",
-    backend_id: str,
+    store: "ProjectStore | None" = None,
+    backend_id: str = "",
     *,
     experiment_id: str | None = None,
     campaign_config: dict | None = None,
     eval_data: list | None = None,
     pipeline_params: dict | None = None,
     baseline_prompt_state: dict | None = None,
+    svc: dict | None = None,
 ) -> dict | list | None:
     """Unified experiment dashboard — overview or detail by experiment ID.
 
     **Overview** (experiment_id=None): all campaigns + data summary + active detection.
     **Detail** (experiment_id="68e2c5"): full config + diff vs current.
     """
-    import json as _json
+    # svc shorthand
+    if svc is not None:
+        store = store or svc.get("store")
+        backend_id = backend_id or svc.get("backend_id", "")
 
     # --- Resolve short ID ---
     full_id = None
@@ -1113,7 +1156,7 @@ def show_experiment_dashboard(
 
         cfg = campaign.get("config", {})
         if cfg:
-            print(f"\n  Config (copy to campaign_config to resume):")
+            print("\n  Config (copy to campaign_config to resume):")
             for k in ["max_rounds", "patience", "n_variants", "creativity",
                        "improvement_threshold", "model", "temperature",
                        "sample_size", "seed"]:
@@ -1143,13 +1186,13 @@ def show_experiment_dashboard(
         is_active = full_id == active_id
         if is_active:
             if status == "completed" and n > 0:
-                print(f"  → Re-run will REPLAY from cache (campaign completed)")
+                print("  → Re-run will REPLAY from cache (campaign completed)")
             elif n > 0:
                 print(f"  → Re-run will RESUME from round {n}")
             else:
-                print(f"  → Re-run starts fresh")
+                print("  → Re-run starts fresh")
         else:
-            print(f"  → Config does NOT match — update campaign_config to resume")
+            print("  → Config does NOT match — update campaign_config to resume")
 
         print(f"{'=' * 72}\n")
         return campaign
@@ -1182,16 +1225,15 @@ def show_experiment_dashboard(
         if best_acc > 0:
             print(f"  Best result: {best_acc:.1%} ({best_name})")
     else:
-        print(f"  Dataset runs: none")
+        print("  Dataset runs: none")
 
     if not campaigns:
-        print(f"\n  No campaigns yet.")
+        print("\n  No campaigns yet.")
     else:
-        print(f"\n  Campaigns (most recent first):")
+        print("\n  Campaigns (most recent first):")
         sorted_camps = sorted(campaigns, key=lambda x: x["updated_at"], reverse=True)
         for i, c in enumerate(sorted_camps):
             cid = c["campaign_id"]
-            short = cid.replace("cycle_", "")[:12]
             status = c["status"]
             n = c["n_trials"]
             best = f"{c['best_accuracy']:.1%}"
@@ -1220,11 +1262,11 @@ def show_experiment_dashboard(
                 ac_status = ac["status"] if ac else "?"
                 ac_n = ac["n_trials"] if ac else 0
                 if ac_status == "completed" and ac_n > 0:
-                    print(f"      → Re-run will REPLAY from cache")
+                    print("      → Re-run will REPLAY from cache")
                 elif ac_n > 0:
                     print(f"      → Re-run will RESUME from round {ac_n}")
                 else:
-                    print(f"      → Re-run starts fresh")
+                    print("      → Re-run starts fresh")
             print()
 
     print(f"{'=' * 72}")
@@ -1233,7 +1275,7 @@ def show_experiment_dashboard(
     if active_id:
         print(f"  Active: {active_id}")
     elif campaign_config is not None:
-        print(f"  No matching campaign — feedback cycle will create new")
+        print("  No matching campaign — feedback cycle will create new")
     print()
     return campaigns
 
