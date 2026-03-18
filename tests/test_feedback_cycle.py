@@ -532,11 +532,9 @@ class TestValidateConfigMatch:
     """Tests for _validate_config_match (EXPERIMENT_ID invariant)."""
 
     def test_raises_on_mismatch(self, cycle_config):
-        """Mismatched config fields raise ValueError with diff."""
+        """Mismatched data-affecting config fields raise ValueError."""
         stored = {
-            "max_rounds": 99,
-            "patience": cycle_config.patience,
-            "n_variants": cycle_config.n_variants,
+            "n_variants": 99,  # data-affecting → mismatch
             "creativity": cycle_config.creativity,
             "improvement_threshold": cycle_config.improvement_threshold,
             "model": cycle_config.model,
@@ -546,10 +544,21 @@ class TestValidateConfigMatch:
             _validate_config_match(cycle_config, stored, "test-cycle-id")
 
     def test_passes_on_match(self, cycle_config):
-        """Matching config raises no error."""
+        """Matching data-affecting config raises no error."""
         stored = {
-            "max_rounds": cycle_config.max_rounds,
-            "patience": cycle_config.patience,
+            "n_variants": cycle_config.n_variants,
+            "creativity": cycle_config.creativity,
+            "improvement_threshold": cycle_config.improvement_threshold,
+            "model": cycle_config.model,
+            "sample_size": cycle_config.sample_size,
+        }
+        _validate_config_match(cycle_config, stored, "test-cycle-id")
+
+    def test_loop_control_fields_allowed_to_differ(self, cycle_config):
+        """Loop-control fields (max_rounds, patience) don't trigger mismatch."""
+        stored = {
+            "max_rounds": 99,
+            "patience": 99,
             "n_variants": cycle_config.n_variants,
             "creativity": cycle_config.creativity,
             "improvement_threshold": cycle_config.improvement_threshold,

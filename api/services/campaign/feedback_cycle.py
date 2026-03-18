@@ -192,8 +192,11 @@ def _validate_config_match(
     Raises ValueError with a clear diff if key optimization fields differ.
     This enforces the EXPERIMENT_ID invariant: no silent config drift.
     """
+    # Only data-affecting fields — loop-control fields (max_rounds,
+    # patience, l2_patience, l3_patience, degradation_threshold) can
+    # change freely between runs of the same experiment.
     check_keys = [
-        "max_rounds", "patience", "n_variants", "creativity",
+        "n_variants", "creativity",
         "improvement_threshold", "model", "sample_size",
     ]
     mismatches = []
@@ -253,6 +256,22 @@ def _resume_or_create_campaign(
                 stored_cfg = existing.get("config", {})
                 if stored_cfg:
                     _validate_config_match(config, stored_cfg, cycle_id)
+                    # Update loop-control fields in stored config
+                    _LOOP_CONTROL_KEYS = [
+                        "max_rounds", "patience", "l2_patience",
+                        "l3_patience", "degradation_threshold",
+                    ]
+                    current_cfg = config.model_dump()
+                    cfg_updated = False
+                    for k in _LOOP_CONTROL_KEYS:
+                        if stored_cfg.get(k) != current_cfg.get(k):
+                            stored_cfg[k] = current_cfg.get(k)
+                            cfg_updated = True
+                    if cfg_updated:
+                        campaign_store.update(
+                            config.backend_id, cycle_id, {"config": stored_cfg},
+                        )
+                        logger.info("Updated loop-control config for %s", cycle_id)
             resumed_from = len(existing.get("trials", []))
             if resumed_from:
                 logger.info(
@@ -714,7 +733,6 @@ async def _do_l2_transition(
     state.l2_round += 1
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
-    state.stall_count = 0  # reset L1 patience
     _emit_phase(on_phase, "refine_context", "exit", round=round_num,
                 l2_round=state.l2_round,
                 param_changes_count=len(tr.prompt_state.parameters),
@@ -782,7 +800,6 @@ async def _do_l3_transition(
     state.best_composite_at_l3_entry = state.best_composite
     state.l2_stall_count = 0
     state.l2_round = 0
-    state.stall_count = 0
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
     _emit_phase(on_phase, "modify_plan", "exit", round=round_num,
@@ -797,6 +814,35 @@ async def _do_l3_transition(
     return tr
 
 
+def _update_round_state(
+    state: _LoopState, rr: CycleRoundResult, round_num: int,
+) -> None:
+    """Apply round result to loop state (shared by escalation + normal paths)."""
+    state.rounds.append(rr)
+    winner_ps = PromptState(**rr.prompt_state)
+    derive_kwargs: dict = {"prompt_state": winner_ps}
+    if rr.pipeline_params is not None:
+        derive_kwargs["pipeline_params"] = rr.pipeline_params
+    state.current_sp = state.current_sp.derive(**derive_kwargs)
+    state.current_accuracy = rr.accuracy
+    state.current_composite = rr.composite
+    state.current_results = list(rr.results)
+    if state.current_composite > state.best_composite:
+        state.best_composite = state.current_composite
+        state.best_accuracy = state.current_accuracy
+        state.best_round = round_num
+        state.best_sp = state.current_sp
+
+
+def _escalation_obs(
+    state: _LoopState, obs_campaign_id: str,
+) -> tuple["ObsLogger | None", str | None]:
+    """Get obs logger + trace ID for escalation calls."""
+    obs = state.eval_ctx.obs if state.eval_ctx else None
+    trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
+    return obs, trace_id
+
+
 async def _escalate_l2(
     state: _LoopState,
     config: CycleConfig,
@@ -805,10 +851,13 @@ async def _escalate_l2(
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: "ObsLogger | None" = None,
     trace_id: str | None = None,
+    from_degradation: bool = False,
 ) -> str | None:
     """Handle L1→L2 escalation and optionally L2→L3.
 
     Returns a stop_reason string if the cycle should stop, or None to continue.
+    When *from_degradation* is True, L2/L3 patience exhaustion resets counters
+    instead of stopping — the degradation investigation loop continues.
     """
     # Check if L2 itself has stalled (no improvement since last L2 entry)
     l2_improved = state.best_composite > state.best_composite_at_l2_entry
@@ -827,6 +876,20 @@ async def _escalate_l2(
                 state.l3_stall_count = 0
 
             if config.l3_patience is not None and state.l3_stall_count >= config.l3_patience:
+                if from_degradation:
+                    logger.info(
+                        "L3 patience exhausted during degradation — "
+                        "resetting L2/L3 counters at round %d", round_num,
+                    )
+                    state.l2_stall_count = 0
+                    state.l3_stall_count = 0
+                    state.l2_round = 0
+                    state.l3_round = 0
+                    await _do_l2_transition(
+                        state, config, round_num, eval_data, on_phase,
+                        obs=obs, trace_id=trace_id,
+                    )
+                    return None  # continue
                 logger.info(
                     "L3 patience exhausted (%d stalls) at round %d",
                     state.l3_stall_count, round_num,
@@ -839,6 +902,18 @@ async def _escalate_l2(
             )
             return None  # continue
         else:
+            if from_degradation:
+                logger.info(
+                    "L2 patience exhausted during degradation — "
+                    "resetting L2 counters at round %d", round_num,
+                )
+                state.l2_stall_count = 0
+                state.l2_round = 0
+                await _do_l2_transition(
+                    state, config, round_num, eval_data, on_phase,
+                    obs=obs, trace_id=trace_id,
+                )
+                return None  # continue
             logger.info(
                 "L2 patience exhausted (%d stalls) at round %d",
                 state.l2_stall_count, round_num,
@@ -1035,20 +1110,27 @@ async def run_feedback_cycle(
         experiment_id=experiment_id or (cycle_id.replace("cycle_", "")[:12] if cycle_id else ""),
     )
 
-    stop_reason = "max_rounds"
+    stop_reason: str | None = None
 
     # -- Step 5: Build escalation checks + round loop --
     from api.services.campaign.escalation import build_escalation_checks
     escalation_checks = build_escalation_checks(config)
 
+    _HARD_CAP = 100  # safety valve for runaway degradation loops
+
     try:
-        for round_num in range(config.max_rounds or 999):
+        round_num = 0
+        clean_rounds = 0
+        max_rounds = config.max_rounds or 999
+
+        while clean_rounds < max_rounds and round_num < _HARD_CAP:
             # Sync eval_ctx pipeline_params from current search point
             state.eval_ctx.pipeline_params = state.current_sp.pipeline_params
 
             logger.info(
-                "Feedback cycle round %d (acc=%.3f, stall=%d/%d)",
-                round_num, state.current_accuracy, state.stall_count, config.patience,
+                "Feedback cycle round %d (clean=%d/%d, acc=%.3f, stall=%d/%d)",
+                round_num, clean_rounds, max_rounds,
+                state.current_accuracy, state.stall_count, config.patience,
             )
 
             round_result = await _execute_round(
@@ -1059,29 +1141,13 @@ async def run_feedback_cycle(
                 escalation_checks=escalation_checks,
             )
 
-            # --- Escalation check FIRST (before normal state update) ---
-            # Degradation isn't optimization failure — handle before
-            # stall_count, callback, checkpoint, and stopping conditions.
+            # Common state update (both escalation + normal paths)
+            _update_round_state(state, round_result, round_num)
+
+            # --- Escalation path ---
             if round_result.escalation_signal:
                 signal = round_result.escalation_signal
-                state.rounds.append(round_result)
-                # Update SearchPoint with winner data
-                winner_ps = PromptState(**round_result.prompt_state)
-                derive_kwargs: dict = {"prompt_state": winner_ps}
-                if round_result.pipeline_params is not None:
-                    derive_kwargs["pipeline_params"] = round_result.pipeline_params
-                state.current_sp = state.current_sp.derive(**derive_kwargs)
-                state.current_accuracy = round_result.accuracy
-                state.current_composite = round_result.composite
-                state.current_results = list(round_result.results)
-
-                if state.current_composite > state.best_composite:
-                    state.best_composite = state.current_composite
-                    state.best_accuracy = state.current_accuracy
-                    state.best_round = round_num
-                    state.best_sp = state.current_sp
-
-                state.stall_count = 0  # reset — degradation, not failure
+                # No stall_count reset — degradation didn't produce L1 signal
 
                 _emit_phase(
                     on_phase, "escalation", "enter", round=round_num,
@@ -1107,62 +1173,38 @@ async def run_feedback_cycle(
                 ])
                 _exit_data = {
                     "classifications": [c.to_dict() for c in _classifications],
-                    "stall_reset": True,
                 }
 
+                # Dispatch by target
                 if signal["target"] in ("l2", "l3") and config.enable_l2:
-                    _esc_obs = state.eval_ctx.obs if state.eval_ctx else None
-                    _esc_trace_id = (
-                        _esc_obs.get_file_trace_id(obs_campaign_id)
-                        if _esc_obs else None
-                    )
-                    stop_reason = await _escalate_l2(
+                    _obs, _tid = _escalation_obs(state, obs_campaign_id)
+                    _l2_stop = await _escalate_l2(
                         state, config, round_num, round_eval_data, on_phase,
-                        obs=_esc_obs, trace_id=_esc_trace_id,
+                        obs=_obs, trace_id=_tid,
+                        from_degradation=True,
                     )
-                    if stop_reason:
+                    if _l2_stop:
+                        stop_reason = _l2_stop
                         break
-                    # Invalidate next round's cached candidates — they were
-                    # generated without escalation critique data.
-                    if campaign_store and cycle_id:
-                        campaign_store.delete_round_candidates(
-                            config.backend_id, cycle_id, round_num + 1,
-                        )
-                    _emit_phase(on_phase, "escalation", "exit", round=round_num,
-                                **_exit_data)
-                    continue
                 elif signal["target"] == "abort":
                     stop_reason = "escalation_abort"
                     break
 
-                # L2 disabled or target="retry" — continue with reset
-                # patience. Critique v2 has pipeline health data.
+                # Common escalation exit (L2 continued, retry, or L2 disabled)
                 if campaign_store and cycle_id:
                     campaign_store.delete_round_candidates(
                         config.backend_id, cycle_id, round_num + 1,
                     )
                 _emit_phase(on_phase, "escalation", "exit", round=round_num,
                             **_exit_data)
+                # Degradation rounds don't count toward max_rounds
+                round_num += 1
                 continue
 
             # --- Normal path (no escalation) ---
-            state.rounds.append(round_result)
-            winner_ps = PromptState(**round_result.prompt_state)
-            derive_kwargs: dict = {"prompt_state": winner_ps}
-            if round_result.pipeline_params is not None:
-                derive_kwargs["pipeline_params"] = round_result.pipeline_params
-            state.current_sp = state.current_sp.derive(**derive_kwargs)
-            state.current_accuracy = round_result.accuracy
-            state.current_composite = round_result.composite
-            state.current_results = list(round_result.results)
-
-            if state.current_composite > state.best_composite:
-                state.best_composite = state.current_composite
-                state.best_accuracy = state.current_accuracy
-                state.best_round = round_num
-                state.best_sp = state.current_sp
-
-            state.stall_count = 0 if round_result.improved else state.stall_count + 1
+            state.stall_count = (
+                0 if round_result.improved else state.stall_count + 1
+            )
 
             if on_round_complete:
                 on_round_complete(round_result, state.stall_count)
@@ -1204,38 +1246,38 @@ async def run_feedback_cycle(
                 except Exception:
                     logger.warning("Round checkpoint failed", exc_info=True)
 
-            # Check stopping conditions
+            # Stopping conditions
             if state.current_accuracy >= 1.0:
                 stop_reason = "perfect_score"
-                logger.info("Perfect score reached at round %d", round_num)
                 break
             if round_result.next_action == "stop":
                 stop_reason = "next_action_stop"
-                logger.info("Analysis node signaled stop at round %d", round_num)
                 break
-
-            # Hierarchical patience escalation
             if state.stall_count >= config.patience:
                 if config.enable_l2:
-                    # L1 stalled → escalate to L2
-                    _esc_obs = state.eval_ctx.obs if state.eval_ctx else None
-                    _esc_trace_id = (
-                        _esc_obs.get_file_trace_id(obs_campaign_id)
-                        if _esc_obs else None
-                    )
-                    stop_reason = await _escalate_l2(
+                    _obs, _tid = _escalation_obs(state, obs_campaign_id)
+                    _l2_stop = await _escalate_l2(
                         state, config, round_num, round_eval_data, on_phase,
-                        obs=_esc_obs, trace_id=_esc_trace_id,
+                        obs=_obs, trace_id=_tid,
                     )
-                    if stop_reason:
+                    if _l2_stop:
+                        stop_reason = _l2_stop
                         break
+                    state.stall_count = 0  # L2/L3 changed prompt — fresh window
                 else:
                     stop_reason = "patience_exhausted"
-                    logger.info(
-                        "Patience exhausted after %d stalls at round %d",
-                        state.stall_count, round_num,
-                    )
                     break
+
+            round_num += 1
+            clean_rounds += 1
+
+        # Loop completed without break
+        if stop_reason is None:
+            if round_num >= _HARD_CAP:
+                stop_reason = "hard_cap_reached"
+            else:
+                stop_reason = "max_rounds"
+
     except (KeyboardInterrupt, asyncio.CancelledError):
         stop_reason = "interrupted"
         logger.warning(

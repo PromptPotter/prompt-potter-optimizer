@@ -485,8 +485,6 @@ def _print_escalation_exit(d: dict, state: _CycleDisplayState) -> None:
         print(f"  {CYAN}Warning classifications:{RESET}")
         for c in classifications:
             print(f"    {c['warning_type']}: {c['status']}")
-    if d.get("stall_reset"):
-        print("  Patience reset to 0")
 
 
 def _print_refine_enter(d: dict, state: _CycleDisplayState) -> None:
