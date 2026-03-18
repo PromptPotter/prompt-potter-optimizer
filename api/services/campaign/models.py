@@ -23,7 +23,7 @@ class CycleConfig(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    max_rounds: int = Field(10, description="Maximum optimization rounds")
+    max_rounds: int | None = Field(10, description="Maximum optimization rounds (None = unlimited)")
     patience: int = Field(3, description="Stop after N consecutive non-improvements")
     n_variants: int = Field(5, description="Candidates per round")
     creativity: float = Field(0.7, description="Temperature for candidate generation")
@@ -52,10 +52,10 @@ class CycleConfig(BaseModel):
     scan_context: dict | None = Field(None, description="Scan analytics context for candidate gen")
 
     # L2/L3 escalation
-    enable_l2: bool = Field(False, description="Enable L2 refine_context loop")
-    enable_l3: bool = Field(False, description="Enable L3 modify_plan loop")
-    l2_patience: int = Field(2, description="L2 stalls before escalating to L3")
-    l3_patience: int = Field(1, description="L3 stalls before stopping")
+    enable_l2: bool = Field(True, description="Enable L2 refine_context loop")
+    enable_l3: bool = Field(True, description="Enable L3 modify_plan loop")
+    l2_patience: int | None = Field(2, description="L2 stalls before L3 (None=unlimited)")
+    l3_patience: int | None = Field(1, description="L3 stalls before stop (None=unlimited)")
 
     # Configurable temperatures for L2/L3/suggestions
     l2_temperature: float = Field(0.3, description="Temperature for L2 refine_context LLM call")
@@ -103,8 +103,8 @@ class CycleConfig(BaseModel):
             seed=42,
             pipeline_schema=pipeline_schema,
             scan_context=scan_context,
-            enable_l2=opt.get("enable_l2", False),
-            enable_l3=opt.get("enable_l3", False),
+            enable_l2=opt.get("enable_l2", True),
+            enable_l3=opt.get("enable_l3", True),
             l2_patience=opt.get("l2_patience", 2),
             l3_patience=opt.get("l3_patience", 1),
             l2_temperature=opt.get("l2_temperature", 0.3),

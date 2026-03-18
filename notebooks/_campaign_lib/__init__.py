@@ -10,6 +10,8 @@ from ._setup import *      # noqa: F403
 from ._eval import *       # noqa: F403
 from ._grid import *       # noqa: F403
 from ._search import *     # noqa: F403
+from ._campaigns import *  # noqa: F403
+from ._langfuse import *   # noqa: F403
 from ._optimize import *   # noqa: F403
 
 # Private names used by tests (not exported by *)

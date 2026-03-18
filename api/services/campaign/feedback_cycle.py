@@ -302,7 +302,9 @@ async def _generate_or_load_candidates(
                 creativity=_creativity,
                 model=config.model or "(default)",
                 has_scan_context=config.scan_context is not None,
-                has_critique=bool(state.critique_text))
+                has_critique=bool(state.critique_text),
+                pipeline_params=state.current_sp.pipeline_params,
+                temperature=state.current_sp.temperature)
 
     if campaign_store and cycle_id:
         persisted = campaign_store.load_round_candidates(
@@ -372,7 +374,8 @@ async def _evaluate_candidates(
                 n_candidates=len(candidates),
                 n_queries=len(round_eval_data),
                 current_best_accuracy=state.current_accuracy,
-                improvement_threshold=config.improvement_threshold)
+                improvement_threshold=config.improvement_threshold,
+                current_pipeline_params=state.current_sp.pipeline_params)
 
     baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
@@ -815,7 +818,7 @@ async def _escalate_l2(
         state.l2_stall_count = 0
 
     # L2 stalled → check L3
-    if state.l2_stall_count >= config.l2_patience:
+    if config.l2_patience is not None and state.l2_stall_count >= config.l2_patience:
         if config.enable_l3:
             l3_improved = state.best_composite > state.best_composite_at_l3_entry
             if not l3_improved and state.l3_round > 0:
@@ -823,7 +826,7 @@ async def _escalate_l2(
             else:
                 state.l3_stall_count = 0
 
-            if state.l3_stall_count >= config.l3_patience:
+            if config.l3_patience is not None and state.l3_stall_count >= config.l3_patience:
                 logger.info(
                     "L3 patience exhausted (%d stalls) at round %d",
                     state.l3_stall_count, round_num,
@@ -915,7 +918,8 @@ async def run_feedback_cycle(
                 eval_data_count=len(eval_data),
                 baseline_accuracy=baseline_accuracy,
                 has_scan_context=config.scan_context is not None,
-                enable_critique=config.enable_critique)
+                enable_critique=config.enable_critique,
+                pipeline_params=config.pipeline_params)
 
     # Initialize backend session (required before /matches calls)
     if config.session_terms:
@@ -1038,7 +1042,7 @@ async def run_feedback_cycle(
     escalation_checks = build_escalation_checks(config)
 
     try:
-        for round_num in range(config.max_rounds):
+        for round_num in range(config.max_rounds or 999):
             # Sync eval_ctx pipeline_params from current search point
             state.eval_ctx.pipeline_params = state.current_sp.pipeline_params
 
@@ -1118,6 +1122,12 @@ async def run_feedback_cycle(
                     )
                     if stop_reason:
                         break
+                    # Invalidate next round's cached candidates — they were
+                    # generated without escalation critique data.
+                    if campaign_store and cycle_id:
+                        campaign_store.delete_round_candidates(
+                            config.backend_id, cycle_id, round_num + 1,
+                        )
                     _emit_phase(on_phase, "escalation", "exit", round=round_num,
                                 **_exit_data)
                     continue
@@ -1127,6 +1137,10 @@ async def run_feedback_cycle(
 
                 # L2 disabled or target="retry" — continue with reset
                 # patience. Critique v2 has pipeline health data.
+                if campaign_store and cycle_id:
+                    campaign_store.delete_round_candidates(
+                        config.backend_id, cycle_id, round_num + 1,
+                    )
                 _emit_phase(on_phase, "escalation", "exit", round=round_num,
                             **_exit_data)
                 continue

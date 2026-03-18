@@ -513,7 +513,7 @@ async def evaluate_and_select_winner(
         # Check for escalation signal from mid-batch abort
         escalation_signal = scores.pop("escalation_signal", None)
 
-        aborted = bool(escalation_signal)
+        aborted = bool(escalation_signal) and len(results) < len(eval_data)
         all_candidate_results[c.id] = results
         candidate_scores.append({
             "candidate_id": c.id,
