@@ -95,6 +95,7 @@ def _build_scan_aware_meta_prompt(
     current_results: list,
     failure_examples: str,
     scan_context: dict,
+    escalation_journal: list[dict] | None = None,
 ) -> str:
     """Build meta-prompt enriched with scan analytics for pipeline_param optimization."""
     prompt_relevant = scan_context.get("has_prompt_axes", True)
@@ -116,6 +117,22 @@ def _build_scan_aware_meta_prompt(
             "Focus entirely on pipeline_params_override — do NOT modify "
             "the instruction.\n\n"
         )
+
+    # Inject degradation data so L1 focuses on unstable pipeline params
+    if escalation_journal:
+        latest = escalation_journal[-1]
+        rate = latest.get("degraded_rate", 0)
+        prefix = latest.get("query_prefix", "")
+        lines = [
+            f"PIPELINE DEGRADATION: {rate:.0%} of queries fail due to web_search.",
+        ]
+        if prefix:
+            lines.append(f"Last tried prefix: {prefix!r}")
+        if len(escalation_journal) > 1:
+            tried = [e.get("query_prefix", "?") for e in escalation_journal]
+            lines.append(f"All tried prefixes: {tried}")
+        lines.append("")
+        focus_note = "\n".join(lines) + "\n" + focus_note
 
     return load_optimizer_prompt("meta_scan_aware").compile(
         n_variants=n_variants,
@@ -144,6 +161,7 @@ async def generate_candidates(
     scan_context: dict | None = None,
     critique_text: str = "",
     thinking_styles: list[str] | None = None,
+    escalation_journal: list[dict] | None = None,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -185,6 +203,7 @@ async def generate_candidates(
         meta_prompt = _build_scan_aware_meta_prompt(
             n_variants, rendered_prompt, current_accuracy,
             current_results, failure_examples, scan_context,
+            escalation_journal=escalation_journal,
         )
     elif variant_library:
         meta_prompt = _build_constrained_meta_prompt(

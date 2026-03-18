@@ -94,12 +94,16 @@ def _round_rule(label: str, label_right: str = "", width: int = _NW) -> str:
 
 
 def _pp_val(v) -> str:
-    """Format a pipeline param value compactly."""
+    """Format a pipeline param value for display.
+
+    No truncation here — the diff table legend shows full values,
+    and inline cells use _VAL_INLINE_MAX to decide when to use a
+    legend code instead.
+    """
     if isinstance(v, float):
         return f"{v:g}"
     if isinstance(v, (dict, list)):
-        s = str(v)
-        return s[:25] + "..." if len(s) > 25 else s
+        return str(v)
     return str(v)
 
 
@@ -517,12 +521,37 @@ def _print_refine_enter(d: dict, state: _CycleDisplayState) -> None:
 
 
 def _print_refine_exit(d: dict, state: _CycleDisplayState) -> None:
+    import json
+
     n_changes = d.get("param_changes_count", 0)
     ctx = "context updated" if d.get("context_changed") else "context unchanged"
+    pp_changed = d.get("pipeline_params_changed", False)
+    pp_str = f", {GREEN}pipeline_params updated{RESET}" if pp_changed else ""
     desc = d.get("changes_description", "")
-    print(f"  {GREEN}✓{RESET} L2 decision: {n_changes} param changes, {ctx}")
+    print(f"  {GREEN}✓{RESET} L2 decision: {n_changes} param changes, {ctx}{pp_str}")
     if desc:
         print(f"    {desc}")
+    if pp_changed:
+        pp = d.get("pipeline_params") or {}
+        for step, cfg in sorted(pp.items()):
+            if isinstance(cfg, dict):
+                print(f"    {CYAN}{step}{RESET}: {json.dumps(cfg)}")
+
+    # Debug: show full L2 prompt and response
+    l2_prompt = d.get("l2_prompt", "")
+    if l2_prompt:
+        print(f"\n  {CYAN}--- L2 PROMPT (sent to LLM) ---{RESET}")
+        for line in l2_prompt.split("\n"):
+            print(f"  {CYAN}│{RESET} {line}")
+        print(f"  {CYAN}--- END PROMPT ---{RESET}")
+
+    l2_resp = d.get("l2_response")
+    if l2_resp:
+        print(f"\n  {CYAN}--- L2 RESPONSE (raw JSON) ---{RESET}")
+        formatted = json.dumps(l2_resp, indent=2)
+        for line in formatted.split("\n")[:40]:
+            print(f"  {CYAN}│{RESET} {line}")
+        print(f"  {CYAN}--- END RESPONSE ---{RESET}")
 
 
 def _print_plan_enter(d: dict, state: _CycleDisplayState) -> None:

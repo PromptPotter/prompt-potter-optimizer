@@ -357,6 +357,7 @@ async def _generate_or_load_candidates(
         "critique_text": state.critique_text,
         "thinking_styles": state.thinking_styles,
         "scan_context": config.scan_context,
+        "escalation_journal": state.escalation_journal,
     })
     candidates = gen_result.candidates
 
@@ -684,6 +685,7 @@ async def _do_l2_transition(
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: "ObsLogger | None" = None,
     trace_id: str | None = None,
+    escalation_context: dict | None = None,
 ) -> layer_transitions.TransitionResult:
     """Perform L2 refine_context transition via L2RefineNode. Updates state in-place."""
     current_ps = state.current_sp.prompt_state
@@ -719,12 +721,16 @@ async def _do_l2_transition(
         "stalled_rounds": stalled_rounds,
         "eval_data": eval_data,
         "pipeline_params": current_pp,
+        "escalation_context": escalation_context,
+        "escalation_journal": state.escalation_journal,
     })
 
     new_ps = PromptState(**l2_result.prompt_state)
     tr = layer_transitions.TransitionResult(
         prompt_state=new_ps,
         pipeline_params=l2_result.pipeline_params,
+        debug_prompt=getattr(l2_result, "debug_prompt", ""),
+        debug_response=getattr(l2_result, "debug_response", None),
     )
     state.current_sp = state.current_sp.derive(
         prompt_state=tr.prompt_state,
@@ -738,7 +744,10 @@ async def _do_l2_transition(
                 param_changes_count=len(tr.prompt_state.parameters),
                 context_changed=tr.prompt_state.context != current_ps.context,
                 changes_description=tr.prompt_state.changes_description or "",
-                pipeline_params_changed=tr.pipeline_params is not None)
+                pipeline_params_changed=tr.pipeline_params is not None,
+                pipeline_params=tr.pipeline_params,
+                l2_prompt=tr.debug_prompt,
+                l2_response=tr.debug_response)
     logger.info(
         "L2 refine_context at round %d (l2_round=%d)",
         round_num, state.l2_round,
@@ -852,6 +861,7 @@ async def _escalate_l2(
     obs: "ObsLogger | None" = None,
     trace_id: str | None = None,
     from_degradation: bool = False,
+    escalation_context: dict | None = None,
 ) -> str | None:
     """Handle L1→L2 escalation and optionally L2→L3.
 
@@ -888,6 +898,7 @@ async def _escalate_l2(
                     await _do_l2_transition(
                         state, config, round_num, eval_data, on_phase,
                         obs=obs, trace_id=trace_id,
+                        escalation_context=escalation_context,
                     )
                     return None  # continue
                 logger.info(
@@ -912,6 +923,7 @@ async def _escalate_l2(
                 await _do_l2_transition(
                     state, config, round_num, eval_data, on_phase,
                     obs=obs, trace_id=trace_id,
+                    escalation_context=escalation_context,
                 )
                 return None  # continue
             logger.info(
@@ -923,6 +935,7 @@ async def _escalate_l2(
     await _do_l2_transition(
         state, config, round_num, eval_data, on_phase,
         obs=obs, trace_id=trace_id,
+        escalation_context=escalation_context,
     )
     return None  # continue
 
@@ -1111,6 +1124,7 @@ async def run_feedback_cycle(
     )
 
     stop_reason: str | None = None
+    interrupted = False
 
     # -- Step 5: Build escalation checks + round loop --
     from api.services.campaign.escalation import build_escalation_checks
@@ -1176,16 +1190,52 @@ async def run_feedback_cycle(
                 }
 
                 # Dispatch by target
+                _esc_ctx = signal["context"]
                 if signal["target"] in ("l2", "l3") and config.enable_l2:
+                    # Fill outcome of previous journal entry (if any)
+                    if (state.escalation_journal
+                            and state.escalation_journal[-1].get("outcome_degraded_rate") is None):
+                        state.escalation_journal[-1]["outcome_degraded_rate"] = (
+                            _esc_ctx.get("degraded_rate", 0)
+                        )
+
                     _obs, _tid = _escalation_obs(state, obs_campaign_id)
-                    _l2_stop = await _escalate_l2(
-                        state, config, round_num, round_eval_data, on_phase,
-                        obs=_obs, trace_id=_tid,
-                        from_degradation=True,
-                    )
+                    try:
+                        _l2_stop = await _escalate_l2(
+                            state, config, round_num, round_eval_data, on_phase,
+                            obs=_obs, trace_id=_tid,
+                            from_degradation=True,
+                            escalation_context=_esc_ctx,
+                        )
+                    except (KeyboardInterrupt, asyncio.CancelledError):
+                        raise
+                    except Exception:
+                        logger.warning("L2 escalation failed", exc_info=True)
+                        _l2_stop = None
                     if _l2_stop:
                         stop_reason = _l2_stop
                         break
+
+                    # Record journal entry after L2 transition
+                    _ws_cfg = (
+                        (state.current_sp.pipeline_params or {}).get("web_search", {})
+                    )
+                    state.escalation_journal.append({
+                        "round": round_num,
+                        "degraded_rate": _esc_ctx.get("degraded_rate", 0),
+                        "query_prefix": _ws_cfg.get("query_prefix", ""),
+                        "query_suffix": _ws_cfg.get("query_suffix", ""),
+                        "web_search_config": {
+                            k: _ws_cfg[k]
+                            for k in ("max_sites", "num_results", "content_char_limit")
+                            if k in _ws_cfg
+                        },
+                        "warning_types": _esc_ctx.get("warning_types", {}),
+                        "l2_action": (
+                            state.current_sp.prompt_state.changes_description or ""
+                        ),
+                        "outcome_degraded_rate": None,
+                    })
                 elif signal["target"] == "abort":
                     stop_reason = "escalation_abort"
                     break
@@ -1280,19 +1330,32 @@ async def run_feedback_cycle(
 
     except (KeyboardInterrupt, asyncio.CancelledError):
         stop_reason = "interrupted"
+        interrupted = True
         logger.warning(
             "Feedback cycle interrupted at round %d. "
             "Completed rounds are checkpointed.",
             len(state.rounds),
         )
 
+    finally:
+        # Best-effort httpx cleanup — prevents event loop leak on interrupt.
+        # Same pattern as NodeBase.process() RC-5 fix (commit d898e64).
+        try:
+            await _bc.aclose()
+        except Exception:
+            pass
+
     # -- Step 6: Finalize --
+    # Skip I/O-heavy finalization on interrupt — Langfuse/obs calls hang
+    # on corrupted Windows asyncio event loop (same root cause as RC-5).
     finished_at = datetime.now(timezone.utc).isoformat()
-    campaign_status = "interrupted" if stop_reason == "interrupted" else "completed"
-    cloud_trace_id = _finalize_campaign(
-        campaign_store, cycle_id, config, state, stop_reason, finished_at,
-        obs, obs_campaign_id, status=campaign_status,
-    )
+    cloud_trace_id = None
+    if not interrupted:
+        campaign_status = "completed"
+        cloud_trace_id = _finalize_campaign(
+            campaign_store, cycle_id, config, state, stop_reason, finished_at,
+            obs, obs_campaign_id, status=campaign_status,
+        )
 
     return CycleResult(
         rounds=state.rounds,

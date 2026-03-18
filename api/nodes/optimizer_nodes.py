@@ -123,6 +123,10 @@ class L1GenerateInput(BaseModel):
     scan_context: dict | None = Field(
         None, description="Pipeline-aware generation context from scan analytics",
     )
+    escalation_journal: list[dict] = Field(
+        default_factory=list,
+        description="Degradation investigation history",
+    )
 
 
 class L1GenerateOutput(BaseModel):
@@ -173,6 +177,7 @@ class L1GenerateNode(NodeBase[L1GenerateInput, L1GenerateOutput]):
             scan_context=input_data.scan_context,
             critique_text=input_data.critique_text,
             thinking_styles=input_data.thinking_styles,
+            escalation_journal=input_data.escalation_journal,
         )
 
         return L1GenerateOutput(
@@ -374,6 +379,13 @@ class L2RefineInput(BaseModel):
     pipeline_params: dict | None = Field(
         None, description="Current pipeline parameters",
     )
+    escalation_context: dict | None = Field(
+        None, description="Escalation diagnostics when called from degradation",
+    )
+    escalation_journal: list[dict] = Field(
+        default_factory=list,
+        description="History of escalation investigation attempts and outcomes",
+    )
 
 
 class L2RefineOutput(BaseModel):
@@ -386,6 +398,8 @@ class L2RefineOutput(BaseModel):
     changes_description: str = Field(
         "", description="Description of changes made",
     )
+    debug_prompt: str = Field("", description="Compiled prompt sent to LLM")
+    debug_response: dict | None = Field(None, description="Raw LLM response")
 
 
 class L2RefineNode(NodeBase[L2RefineInput, L2RefineOutput]):
@@ -425,12 +439,16 @@ class L2RefineNode(NodeBase[L2RefineInput, L2RefineOutput]):
             temperature=self.config.get("temperature", 0.3),
             pipeline_params=input_data.pipeline_params,
             pipeline_schema=self.config.get("pipeline_schema"),
+            escalation_context=input_data.escalation_context,
+            escalation_journal=input_data.escalation_journal,
         )
 
         return L2RefineOutput(
             prompt_state=tr.prompt_state.model_dump(),
             pipeline_params=tr.pipeline_params,
             changes_description=tr.prompt_state.changes_description or "",
+            debug_prompt=tr.debug_prompt,
+            debug_response=tr.debug_response,
         )
 
 

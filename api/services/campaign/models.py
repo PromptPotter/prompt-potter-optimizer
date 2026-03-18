@@ -184,3 +184,6 @@ class _LoopState:
     best_accuracy_at_l3_entry: float = 0.0
     best_composite_at_l2_entry: float = 0.0
     best_composite_at_l3_entry: float = 0.0
+
+    # Escalation investigation memory (fed to L2 across degradation rounds)
+    escalation_journal: list[dict] = field(default_factory=list)

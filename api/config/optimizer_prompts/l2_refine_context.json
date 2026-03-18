@@ -1,7 +1,7 @@
 {
   "persona": "You are a prompt optimization expert.",
   "task_intent": "The L1 inner optimization loop has stalled \u2014 candidates are no longer improving.",
-  "instruction": "ROUND HISTORY (stalled):\n{{round_summary}}\n\nCURRENT PROMPT:\n---\n{{rendered_prompt}}\n---\n\nFAILURE EXAMPLES:\n{{failure_lines}}\n\nCURRENT PARAMETERS: {{current_params}}\nCURRENT CONTEXT: {{current_context}}\n\n{{pipeline_section}}Analyze WHY L1 is stuck and recommend:\n1. Parameter adjustments (creativity, n_variants, variant_strategy)\n2. Context text changes (domain grounding, constraints)",
+  "instruction": "ROUND HISTORY (stalled):\n{{round_summary}}\n\nCURRENT PROMPT:\n---\n{{rendered_prompt}}\n---\n\nFAILURE EXAMPLES:\n{{failure_lines}}\n\nCURRENT PARAMETERS: {{current_params}}\nCURRENT CONTEXT: {{current_context}}\n\n{{pipeline_section}}{{escalation_section}}Analyze the failure patterns and recommend changes. You can adjust:\n- parameters (creativity, n_variants, variant_strategy)\n- context (domain grounding text)\n- pipeline_params (query_prefix, max_sites, etc. \u2014 see available params above)\nFocus on what will have the biggest impact on accuracy.",
   "thinking_style": "",
   "answer_format": "{{response_schema_suffix}}"
 }

@@ -36,6 +36,8 @@ class TransitionResult:
 
     prompt_state: PromptState
     pipeline_params: dict | None = None
+    debug_prompt: str = ""
+    debug_response: dict | None = None
 
 
 async def refine_context(
@@ -47,6 +49,8 @@ async def refine_context(
     temperature: float = 0.3,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
+    escalation_context: dict | None = None,
+    escalation_journal: list[dict] | None = None,
 ) -> TransitionResult:
     """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
 
@@ -74,24 +78,18 @@ async def refine_context(
     )
 
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
+    escalation_section = _build_escalation_prompt_section(
+        escalation_context, escalation_journal, pipeline_params,
+    )
 
-    if pipeline_section:
-        response_schema_suffix = (
-            "3. Pipeline parameter adjustments (see available params above)\n"
-            "\nReturn a JSON object with:\n"
-            '  "parameters": dict of parameter changes to apply\n'
-            '  "context": new context string (or empty to keep current)\n'
-            '  "pipeline_params": dict of pipeline parameter changes '
-            "(param_name -> new value)\n"
-            '  "rationale": 1-2 sentence explanation'
-        )
-    else:
-        response_schema_suffix = (
-            "\nReturn a JSON object with:\n"
-            '  "parameters": dict of parameter changes to apply\n'
-            '  "context": new context string (or empty to keep current)\n'
-            '  "rationale": 1-2 sentence explanation'
-        )
+    response_schema_suffix = (
+        "\nReturn a JSON object with:\n"
+        '  "parameters": dict of parameter changes (or {} to keep current)\n'
+        '  "context": new context string (or "" to keep current)\n'
+        '  "pipeline_params": {"step_name": {"param": value}} '
+        "(or {} for no changes)\n"
+        '  "rationale": 1-2 sentence explanation'
+    )
 
     prompt = load_optimizer_prompt("l2_refine_context").compile(
         round_summary=round_summary,
@@ -100,6 +98,7 @@ async def refine_context(
         current_params=json.dumps(current_ps.parameters),
         current_context=current_ps.context[:200] if current_ps.context else "(empty)",
         pipeline_section=pipeline_section,
+        escalation_section=escalation_section,
         response_schema_suffix=response_schema_suffix,
     )
 
@@ -135,6 +134,8 @@ async def refine_context(
     return TransitionResult(
         prompt_state=new_ps,
         pipeline_params=new_pipeline_params,
+        debug_prompt=prompt,
+        debug_response=result,
     )
 
 
@@ -166,21 +167,13 @@ async def modify_plan(
 
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
 
-    if pipeline_section:
-        response_schema_suffix = (
-            "- Pipeline parameter changes (see available params above)\n"
-            "\nReturn a JSON object with:\n"
-            '  "plan": new strategy text for guiding future optimization\n'
-            '  "pipeline_params": dict of pipeline parameter changes '
-            "(param_name -> new value)\n"
-            '  "rationale": 1-2 sentence explanation of the strategic shift'
-        )
-    else:
-        response_schema_suffix = (
-            "\nReturn a JSON object with:\n"
-            '  "plan": new strategy text for guiding future optimization\n'
-            '  "rationale": 1-2 sentence explanation of the strategic shift'
-        )
+    response_schema_suffix = (
+        "\nReturn a JSON object with:\n"
+        '  "plan": new strategy text for guiding future optimization\n'
+        '  "pipeline_params": {"step_name": {"param": value}} '
+        "(or {} for no changes)\n"
+        '  "rationale": 1-2 sentence explanation of the strategic shift'
+    )
 
     prompt = load_optimizer_prompt("l3_modify_plan").compile(
         current_plan=current_ps.plan or "(none — default strategy)",
@@ -247,6 +240,70 @@ def _build_pipeline_prompt_section(
         lines.append(f"  {step_name}: {', '.join(sorted(keys))}")
         if current_vals:
             lines.append(f"    current: {json.dumps(current_vals)}")
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _build_escalation_prompt_section(
+    escalation_context: dict | None,
+    escalation_journal: list[dict] | None,
+    pipeline_params: dict | None = None,
+) -> str:
+    """Build the escalation diagnostics section for L2 prompts.
+
+    Returns an empty string when no escalation context is available,
+    keeping the normal L2 prompt unchanged.  When present, the section
+    shows a data-driven stability map of tried configs so the LLM can
+    figure out what to change.
+    """
+    if not escalation_context:
+        return ""
+
+    dominant = escalation_context.get("dominant_warning", "unknown")
+    step_name = dominant.split(":")[0] if ":" in dominant else "unknown"
+    rate = escalation_context.get("degraded_rate", 0)
+
+    wt = escalation_context.get("warning_types", {})
+    wt_str = ", ".join(f"{k} ({v})" for k, v in sorted(wt.items(), key=lambda x: -x[1]))
+
+    lines = [
+        f"PIPELINE STABILITY REPORT ({step_name}):\n",
+        f"  Current degradation: {rate:.0%} of queries ({wt_str})",
+    ]
+
+    # Show current web_search config
+    step_cfg = (pipeline_params or {}).get(step_name, {})
+    if isinstance(step_cfg, dict) and step_cfg:
+        lines.append(f"  Current {step_name} config: {json.dumps(step_cfg)}")
+
+    lines.append("")
+
+    if escalation_journal:
+        lines.append("  Tried configs and stability:")
+        for entry in escalation_journal:
+            prefix = entry.get("query_prefix", "?")
+            suffix = entry.get("query_suffix", "")
+            prev_rate = entry.get("degraded_rate", 0)
+            outcome = entry.get("outcome_degraded_rate")
+            outcome_str = f" -> {outcome:.0%}" if outcome is not None else ""
+            ws_cfg = entry.get("web_search_config", {})
+            cfg_parts = [f"prefix={prefix!r}"]
+            if suffix:
+                cfg_parts.append(f"suffix={suffix!r}")
+            if ws_cfg:
+                for k, v in sorted(ws_cfg.items()):
+                    cfg_parts.append(f"{k}={v}")
+            lines.append(
+                f"    Round {entry.get('round', '?')}: "
+                f"{', '.join(cfg_parts)}"
+                f" | {prev_rate:.0%} degraded{outcome_str}"
+            )
+        lines.append("")
+
+    lines.append(
+        "  The configurations above are all unstable. Suggest different "
+        "query_prefix/query_suffix values or web_search settings to stabilize."
+    )
     lines.append("")
     return "\n".join(lines) + "\n"
 
