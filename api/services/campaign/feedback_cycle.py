@@ -365,6 +365,7 @@ async def _evaluate_candidates(
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: "ObsLogger | None" = None,
     trace_id: str | None = None,
+    escalation_checks: list | None = None,
 ) -> dict:
     """Evaluate candidates via L1EvaluateNode, optionally generate suggestions."""
     _emit_phase(on_phase, "l1_evaluate", "enter", round=round_num,
@@ -394,6 +395,24 @@ async def _evaluate_candidates(
             "enable_critique": config.enable_critique,
             "critique_positive_threshold": config.critique_positive_threshold,
             "thinking_styles_seed": config.seed + round_num + 1,
+            "escalation_checks": escalation_checks,
+            # Rich critique context
+            "round_history": [
+                {"round": r.round, "accuracy": r.accuracy,
+                 "composite": r.composite,
+                 "pipeline_params": r.pipeline_params,
+                 "degraded": getattr(r, "degraded_queries", 0),
+                 "n_candidates": len(r.candidate_scores)}
+                for r in state.rounds
+            ],
+            "current_round": round_num,
+            "stall_count": state.stall_count,
+            "best_accuracy": state.best_accuracy,
+            "best_round": state.best_round,
+            "scan_context": config.scan_context,
+            "pipeline_params": (
+                state.current_sp.pipeline_params if state.current_sp else None
+            ),
         },
         obs=obs, trace_id=trace_id,
     )
@@ -415,6 +434,8 @@ async def _evaluate_candidates(
         "thinking_styles": eval_result.thinking_styles,
         "winner_composite": eval_result.winner_composite,
         "winner_pipeline_params": eval_result.winner_pipeline_params,
+        "escalation_signal": eval_result.escalation_signal,
+        "degraded_queries": eval_result.degraded_queries,
     }
 
     # Suggestion generation stays in orchestrator (ADR-4)
@@ -522,6 +543,7 @@ async def _execute_round(
     on_candidate_eval: Callable[[int, int, dict], None] | None,
     on_query_eval: Callable[[int, int, int, int, dict], None] | None,
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    escalation_checks: list | None = None,
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     obs = state.eval_ctx.obs if state.eval_ctx else None
@@ -548,6 +570,7 @@ async def _execute_round(
         candidates, round_num, state, round_eval_data, config,
         on_candidate_eval, on_query_eval, on_phase,
         obs=obs, trace_id=trace_id,
+        escalation_checks=escalation_checks,
     )
 
     # Update state with critique + thinking styles from eval output
@@ -568,6 +591,8 @@ async def _execute_round(
         results=eval_out["winner_results"],
         candidates_evaluated=eval_out["winner"].get("candidates_evaluated", 0),
         candidate_scores=eval_out["candidate_scores"],
+        degraded_queries=eval_out.get("degraded_queries", 0),
+        escalation_signal=eval_out.get("escalation_signal"),
     )
 
     if obs:
@@ -1008,7 +1033,10 @@ async def run_feedback_cycle(
 
     stop_reason = "max_rounds"
 
-    # -- Step 5: Round loop --
+    # -- Step 5: Build escalation checks + round loop --
+    from api.services.campaign.escalation import build_escalation_checks
+    escalation_checks = build_escalation_checks(config)
+
     try:
         for round_num in range(config.max_rounds):
             # Sync eval_ctx pipeline_params from current search point
@@ -1024,9 +1052,86 @@ async def run_feedback_cycle(
                 obs_campaign_id,
                 campaign_store, cycle_id,
                 on_candidate_eval, on_query_eval, on_phase,
+                escalation_checks=escalation_checks,
             )
 
-            # Update loop state — derive new SearchPoint with winner's prompt + pipeline_params
+            # --- Escalation check FIRST (before normal state update) ---
+            # Degradation isn't optimization failure — handle before
+            # stall_count, callback, checkpoint, and stopping conditions.
+            if round_result.escalation_signal:
+                signal = round_result.escalation_signal
+                state.rounds.append(round_result)
+                # Update SearchPoint with winner data
+                winner_ps = PromptState(**round_result.prompt_state)
+                derive_kwargs: dict = {"prompt_state": winner_ps}
+                if round_result.pipeline_params is not None:
+                    derive_kwargs["pipeline_params"] = round_result.pipeline_params
+                state.current_sp = state.current_sp.derive(**derive_kwargs)
+                state.current_accuracy = round_result.accuracy
+                state.current_composite = round_result.composite
+                state.current_results = list(round_result.results)
+
+                if state.current_composite > state.best_composite:
+                    state.best_composite = state.current_composite
+                    state.best_accuracy = state.current_accuracy
+                    state.best_round = round_num
+                    state.best_sp = state.current_sp
+
+                state.stall_count = 0  # reset — degradation, not failure
+
+                _emit_phase(
+                    on_phase, "escalation", "enter", round=round_num,
+                    check_name=signal["check_name"],
+                    target=signal["target"],
+                    degraded_rate=signal["context"].get("degraded_rate"),
+                    warning_types=signal["context"].get("warning_types"),
+                )
+                logger.warning(
+                    "Escalation '%s' at round %d — target=%s, "
+                    "degraded_rate=%.1f%%",
+                    signal["check_name"], round_num, signal["target"],
+                    signal["context"].get("degraded_rate", 0) * 100,
+                )
+
+                # Classify warnings for exit event
+                from api.services.campaign.escalation import classify_warnings
+                _wt = signal["context"].get("warning_types", {})
+                _classifications = classify_warnings(_wt, [
+                    {"round": r.round, "pipeline_params": r.pipeline_params,
+                     "warning_types": {}}
+                    for r in state.rounds
+                ])
+                _exit_data = {
+                    "classifications": [c.to_dict() for c in _classifications],
+                    "stall_reset": True,
+                }
+
+                if signal["target"] in ("l2", "l3") and config.enable_l2:
+                    _esc_obs = state.eval_ctx.obs if state.eval_ctx else None
+                    _esc_trace_id = (
+                        _esc_obs.get_file_trace_id(obs_campaign_id)
+                        if _esc_obs else None
+                    )
+                    stop_reason = await _escalate_l2(
+                        state, config, round_num, round_eval_data, on_phase,
+                        obs=_esc_obs, trace_id=_esc_trace_id,
+                    )
+                    if stop_reason:
+                        break
+                    _emit_phase(on_phase, "escalation", "exit", round=round_num,
+                                **_exit_data)
+                    continue
+                elif signal["target"] == "abort":
+                    stop_reason = "escalation_abort"
+                    break
+
+                # L2 disabled or target="retry" — continue with reset
+                # patience. Critique v2 has pipeline health data.
+                _emit_phase(on_phase, "escalation", "exit", round=round_num,
+                            **_exit_data)
+                continue
+
+            # --- Normal path (no escalation) ---
             state.rounds.append(round_result)
             winner_ps = PromptState(**round_result.prompt_state)
             derive_kwargs: dict = {"prompt_state": winner_ps}

@@ -30,4 +30,4 @@ No shims, no dual-format readers, no fallback paths. Old data is regenerated, no
 
 ## Display parity
 
-Cached results must display identically to fresh results — no visible difference in output format between cached and computed data. The user should not be able to tell whether a result came from cache or a live backend call. This applies to all notebook display functions, progress callbacks, and result summaries.
+Cached and fresh results use the same output format (fields, layout, ordering). A provenance indicator (📖 for cached, no marker for live) distinguishes data source for transparency — the user should know whether results are replayed or freshly computed. All other formatting (accuracy, CI, delta, hit/miss) is identical regardless of source.

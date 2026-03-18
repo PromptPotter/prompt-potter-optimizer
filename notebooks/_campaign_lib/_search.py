@@ -1346,7 +1346,15 @@ def seed_campaign_from_scan(
         if "steps" in existing_pp:
             merged["steps"] = existing_pp["steps"]
         campaign_config["pipeline_params"] = merged
-        print(f"Updated pipeline_params: {merged}")
+        # Summarize — avoid dumping full JSON schemas
+        display_pp = {}
+        for k, v in merged.items():
+            if isinstance(v, dict) and len(str(v)) > 100:
+                n_keys = len(v.get("properties", v))
+                display_pp[k] = f"<{n_keys} fields>"
+            else:
+                display_pp[k] = v
+        print(f"Updated pipeline_params: {display_pp}")
 
     # Get scan baseline accuracy as fallback when campaign_rounds is empty
     scan_baseline_acc = 0.0

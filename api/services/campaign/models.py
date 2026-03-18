@@ -62,6 +62,12 @@ class CycleConfig(BaseModel):
     l3_temperature: float = Field(0.5, description="Temperature for L3 modify_plan LLM call")
     suggestion_temperature: float = Field(0.0, description="Temperature for suggestion generation")
 
+    # Escalation
+    degradation_threshold: float = Field(
+        0.4,
+        description="Fraction of degraded queries to trigger escalation (0 = disabled)",
+    )
+
     @classmethod
     def from_campaign_config(
         cls,
@@ -106,6 +112,7 @@ class CycleConfig(BaseModel):
             suggestion_temperature=opt.get("suggestion_temperature", 0.0),
             enable_critique=opt.get("enable_critique", True),
             critique_positive_threshold=opt.get("critique_positive_threshold", 0.7),
+            degradation_threshold=opt.get("degradation_threshold", 0.4),
         )
 
 
@@ -125,6 +132,9 @@ class CycleRoundResult(BaseModel):
     results: list[dict] = Field(default_factory=list)
     candidates_evaluated: int
     candidate_scores: list[dict] = Field(default_factory=list)
+    degraded_queries: int = 0
+    escalation_signal: dict | None = None
+    warning_classifications: list[dict] = Field(default_factory=list)
 
 
 class CycleResult(BaseModel):

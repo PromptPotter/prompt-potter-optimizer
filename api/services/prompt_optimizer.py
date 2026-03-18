@@ -447,6 +447,7 @@ async def evaluate_and_select_winner(
     improvement_threshold: float = 0.01,
     on_candidate_eval: Callable[[int, int, dict], None] | None = None,
     on_query_eval: Callable[[int, int, int, int, dict], None] | None = None,
+    escalation_checks: list | None = None,
 ) -> dict[str, Any]:
     """Evaluate candidates and select the round winner.
 
@@ -482,6 +483,10 @@ async def evaluate_and_select_winner(
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []
 
+    escalation_signal = None
+    ctx.escalation_checks = escalation_checks
+    ctx.n_total_candidates = len(ps_candidates)
+
     for idx, c in enumerate(ps_candidates):
         _on_result = None
         if on_query_eval:
@@ -498,11 +503,17 @@ async def evaluate_and_select_winner(
             temperature=_sp_temperature,
             pipeline_params=pp,
         )
+        ctx.candidate_idx = idx
         results, scores, cached = await evaluate_prompt_cached(
             sp, eval_data, ctx,
             label=f"candidate_{idx}",
             on_result=_on_result,
         )
+
+        # Check for escalation signal from mid-batch abort
+        escalation_signal = scores.pop("escalation_signal", None)
+
+        aborted = bool(escalation_signal)
         all_candidate_results[c.id] = results
         candidate_scores.append({
             "candidate_id": c.id,
@@ -511,17 +522,40 @@ async def evaluate_and_select_winner(
             "hits": scores["hits"],
             "total": scores["total"],
             "cached": cached,
+            "escalation_aborted": aborted,
+            "eval_queries": len(results),
+            "expected_queries": len(eval_data),
         })
         if on_candidate_eval:
+            scores["escalation_aborted"] = aborted
+            scores["eval_queries"] = len(results)
+            scores["expected_queries"] = len(eval_data)
             on_candidate_eval(idx, len(ps_candidates), scores)
+
+        if escalation_signal:
+            logger.warning(
+                "Escalation '%s' — aborting remaining %d candidates",
+                escalation_signal["check_name"],
+                len(ps_candidates) - idx - 1,
+            )
+            break
 
     # Assemble current_best with PromptState object for select_round_winner
     cb = dict(current_best)
     if isinstance(cb.get("prompt_state"), dict):
         cb["prompt_state"] = PromptState(**cb["prompt_state"])
 
+    # Only pass non-aborted candidates that were fully evaluated
+    evaluated_candidates = [
+        c for c in ps_candidates
+        if c.id in all_candidate_results
+        and not any(
+            cs.get("escalation_aborted") and cs["candidate_id"] == c.id
+            for cs in candidate_scores
+        )
+    ]
     winner_entry = _select_round_winner(
-        ps_candidates, all_candidate_results, cb, improvement_threshold,
+        evaluated_candidates, all_candidate_results, cb, improvement_threshold,
     )
 
     # Resolve the winner's pipeline_params: if a candidate won, merge its
@@ -548,8 +582,13 @@ async def evaluate_and_select_winner(
         "winner_accuracy": winner_entry["accuracy"],
         "winner_composite": winner_entry.get("composite", winner_entry["accuracy"]),
         "improved": winner_entry["improved"],
-        "next_action": "generate",
+        "next_action": "escalate" if escalation_signal else "generate",
         "suggestions": {},
         "candidate_scores": candidate_scores,
         "winner_results": winner_entry.get("results", []),
+        "escalation_signal": escalation_signal,
+        "degraded_queries": sum(
+            1 for r in winner_entry.get("results", [])
+            if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
+        ),
     }

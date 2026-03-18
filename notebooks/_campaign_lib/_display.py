@@ -159,8 +159,11 @@ def _scoreboard(
         ci_str = fmt_ci(ci_lo, ci_hi)
         delta = acc - baseline_accuracy
         delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
-        is_winner = label == winner_label
+        aborted = s.get("escalation_aborted", False)
+        is_winner = label == winner_label and not aborted
         winner_mark = f"  {GREEN}{BOLD}*{RESET}" if is_winner else ""
+        if aborted:
+            winner_mark = f"  {YELLOW}(aborted){RESET}"
 
         if has_composite:
             comp = s.get("composite", acc)
@@ -274,7 +277,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
         else:
             tag = "MISS"
 
-    cache_marker = " \u26a1" if cached else ""
+    cache_marker = " \U0001f4d6" if cached else ""
     step = f"{step}{cache_marker}"
 
     indent = prefix if prefix else "        "

@@ -523,9 +523,10 @@ def _print_l1_evaluate_exit(d: dict, state: _CycleDisplayState) -> None:
     # Normalize labels to C{i+1} for display (service uses candidate_id)
     for i, s in enumerate(scores):
         s["label"] = f"C{i + 1}"
-    best_s = max(scores, key=lambda s: (
+    non_aborted = [s for s in scores if not s.get("escalation_aborted")]
+    best_s = max(non_aborted, key=lambda s: (
         s.get("composite", s["accuracy"]), s["accuracy"]
-    )) if scores else {}
+    )) if non_aborted else {}
     winner = best_s.get("label", "?")
 
     # Scoreboard (with CI column)
@@ -555,8 +556,7 @@ def _print_l1_evaluate_exit(d: dict, state: _CycleDisplayState) -> None:
         state.baseline_accuracy = w_acc
     else:
         print(f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}"
-              f"  best candidate {w_acc:.1%}{comp_tag}"
-              f"  ->  patience {state.stall_count + 1}/{state.patience}")
+              f"  best candidate {w_acc:.1%}{comp_tag}")
 
     # Critique preview (fed forward to next l1_generate)
     crit = d.get("critique_text", "")
@@ -627,6 +627,28 @@ def _print_plan_exit(d: dict, state: _CycleDisplayState) -> None:
 
 
 # Phase dispatch table
+def _print_escalation_enter(d: dict, state: _CycleDisplayState) -> None:
+    check = d.get("check_name", "?")
+    target = d.get("target", "?")
+    rate = d.get("degraded_rate", 0)
+    wtypes = d.get("warning_types", {})
+    print(f"\n  {YELLOW}{BOLD}⚠ ESCALATION: {check} → {target}{RESET}")
+    print(f"    Degraded: {rate:.0%} of queries")
+    for wt, count in wtypes.items():
+        print(f"    {wt}: {count} occurrences")
+    print("    Action: patience reset, continuing with critique data")
+
+
+def _print_escalation_exit(d: dict, state: _CycleDisplayState) -> None:
+    classifications = d.get("classifications", [])
+    if classifications:
+        print(f"    {CYAN}Warning classifications:{RESET}")
+        for c in classifications:
+            print(f"      {c['warning_type']}: {c['status']}")
+    if d.get("stall_reset"):
+        print("    Patience reset to 0")
+
+
 _PHASE_HANDLERS: dict[str, callable] = {
     "init:enter": _print_init_enter,
     "init:exit": _print_init_exit,
@@ -638,6 +660,8 @@ _PHASE_HANDLERS: dict[str, callable] = {
     "refine_context:exit": _print_refine_exit,
     "modify_plan:enter": _print_plan_enter,
     "modify_plan:exit": _print_plan_exit,
+    "escalation:enter": _print_escalation_enter,
+    "escalation:exit": _print_escalation_exit,
 }
 
 
@@ -731,6 +755,10 @@ async def run_feedback_cycle_notebook(
 
     def _on_phase(event: PhaseEvent) -> None:
         _dispatch_phase(event, _ds)
+        # Reset query counter on escalation exit (on_round is skipped)
+        if event.phase == "escalation" and event.event == "exit":
+            _query_counter[0] = 0
+            _ds.best_in_round = None
         # On resume: clear stale optimization rounds before replay re-appends them
         if event.phase == "init" and event.event == "exit":
             resumed = event.data.get("resumed_from_round", 0)
@@ -783,7 +811,12 @@ async def run_feedback_cycle_notebook(
             print(f"  {_box_line(desc, width=w)}")
 
         # Line 2: hits/total + composite + delta + degraded
-        stats = f"{hits}/{n} hits"
+        if scores.get("escalation_aborted"):
+            eval_q = scores.get("eval_queries", n)
+            expected_q = scores.get("expected_queries", n)
+            stats = f"{hits}/{eval_q} hits  {YELLOW}⚠ aborted at {eval_q}/{expected_q}{RESET}"
+        else:
+            stats = f"{hits}/{n} hits"
         if comp is not None and comp != acc:
             stats += f"  composite={comp:.4f}"
         degraded = scores.get("degraded_queries", 0)
@@ -812,7 +845,14 @@ async def run_feedback_cycle_notebook(
         print(f"\n├─ Round {rn} complete "
               f"{'─' * (70 - 20 - len(str(rn)))}┤")
         display_progress(campaign_rounds)
-        print(f"  hits: {round_result.hits}/{round_result.total}"
+        _rr_hits = round_result.hits
+        _rr_total = round_result.total
+        if _rr_total == 0 and round_result.candidate_scores:
+            # Winner is current_best (no improvement) — show best candidate stats
+            best_cs = max(round_result.candidate_scores, key=lambda s: s.get("accuracy", 0))
+            _rr_hits = best_cs.get("hits", 0)
+            _rr_total = best_cs.get("total", 0)
+        print(f"  hits: {_rr_hits}/{_rr_total}"
               f"  |  evaluated: {round_result.candidates_evaluated} candidates")
 
         if round_result.improved:

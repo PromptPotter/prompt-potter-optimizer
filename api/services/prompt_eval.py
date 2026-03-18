@@ -52,6 +52,10 @@ class EvalContext:
     temperature: float = 0.0
     pipeline_params: dict | None = None
     experiment_id: str = ""
+    # Escalation checks (passed through to evaluate_prompt_batch)
+    escalation_checks: list | None = None
+    candidate_idx: int = 0
+    n_total_candidates: int = 1
 
 
 def build_dataset_run_data(
@@ -231,6 +235,9 @@ async def evaluate_prompt_batch(
     backend_client: "BackendClient",
     on_result: Callable | None = None,
     pipeline_schema: "PipelineSchema | None" = None,
+    escalation_checks: list | None = None,
+    candidate_idx: int = 0,
+    n_total_candidates: int = 1,
 ) -> list:
     """Evaluate a prompt on all eval_data queries via the backend.
 
@@ -240,10 +247,18 @@ async def evaluate_prompt_batch(
         backend_client: BackendClient with ``run_match()`` method.
         on_result: Optional callback ``(result, index, total)`` called after
             each query evaluation.
+        escalation_checks: Optional list of ``EscalationCheck`` instances.
+            Checked after each query result — raises ``EscalationError``
+            on threshold breach to abort immediately.
 
     Returns:
         List of result dicts from backend_reranker_eval.
+
+    Raises:
+        EscalationError: If an escalation check triggers mid-batch.
     """
+    from api.services.campaign.escalation import EscalationError
+
     results = []
     rendered = search_point.render()
     consecutive_errors = 0
@@ -279,6 +294,23 @@ async def evaluate_prompt_batch(
                     break
             else:
                 consecutive_errors = 0
+
+            # Escalation checks — run after each query result
+            if escalation_checks:
+                for check in escalation_checks:
+                    if not check.enabled:
+                        continue
+                    signal = check.evaluate(
+                        results, candidate_idx, n_total_candidates,
+                    )
+                    if signal:
+                        logger.warning(
+                            "EscalationCheck '%s' triggered at query %d/%d "
+                            "(candidate %d/%d)",
+                            check.name, i + 1, len(eval_data),
+                            candidate_idx + 1, n_total_candidates,
+                        )
+                        raise EscalationError(signal, results)
 
             if on_result is not None:
                 on_result(result, i, len(eval_data))
@@ -497,6 +529,20 @@ async def evaluate_prompt_cached(
             search_point, eval_data, pipeline_schema, on_result,
         )
         if cached is not None:
+            # Run escalation checks on cached results too — the per-query
+            # check in evaluate_prompt_batch only fires on live calls.
+            if ctx.escalation_checks:
+                results, scores, was_cached = cached
+                for check in ctx.escalation_checks:
+                    if not check.enabled:
+                        continue
+                    signal = check.evaluate(
+                        results, ctx.candidate_idx, ctx.n_total_candidates,
+                    )
+                    if signal:
+                        scores["escalation_signal"] = signal.to_dict()
+                        break
+                return results, scores, was_cached
             return cached
 
     # --- evaluate via backend ---
@@ -512,12 +558,28 @@ async def evaluate_prompt_cached(
         if on_result is not None:
             on_result(result, index, len(eval_data))
 
-    results = await evaluate_prompt_batch(
-        search_point, eval_data, backend_client,
-        on_result=_on_result,
-        pipeline_schema=pipeline_schema,
-    )
+    from api.services.campaign.escalation import EscalationError as _EscalationError
+
+    escalation_signal = None
+    try:
+        results = await evaluate_prompt_batch(
+            search_point, eval_data, backend_client,
+            on_result=_on_result,
+            pipeline_schema=pipeline_schema,
+            escalation_checks=ctx.escalation_checks,
+            candidate_idx=ctx.candidate_idx,
+            n_total_candidates=ctx.n_total_candidates,
+        )
+    except _EscalationError as e:
+        results = e.partial_results
+        escalation_signal = e.signal
+        logger.warning(
+            "Escalation '%s' aborted eval at %d/%d queries",
+            e.signal.check_name, len(results), len(eval_data),
+        )
     scores = compute_composite_score(results, pipeline_schema)
+    if escalation_signal:
+        scores["escalation_signal"] = escalation_signal.to_dict()
 
     # --- finalize: save complete run + observability ---
     if store and backend_id:

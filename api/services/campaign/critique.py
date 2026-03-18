@@ -20,6 +20,7 @@ from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import load_variant_library
 
 if TYPE_CHECKING:
+    from api.services.campaign.critique_stats import CritiqueContext
     from api.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -50,12 +51,45 @@ class CritiqueAgent:
         results: list[dict],
         accuracy: float,
         threshold: float = 0.7,
+        critique_context: "CritiqueContext | None" = None,
     ) -> str:
-        """Route to the appropriate critique tool based on accuracy."""
+        """Route to rich critique (when context available) or legacy tools."""
+        if critique_context is not None:
+            return await self._rich_critique(critique_context)
         tool_name = "positive_critique" if accuracy >= threshold else "negative_critique"
         logger.info("Critique agent: using %s (acc=%.3f, threshold=%.2f)",
                      tool_name, accuracy, threshold)
         return await self.tools[tool_name](results, accuracy)
+
+    async def _rich_critique(self, ctx: "CritiqueContext") -> str:
+        """Pipeline-aware critique with pre-computed stats and JSON fallback."""
+        from api.services.campaign.critique_stats import assemble_critique_prompt
+
+        prompt = assemble_critique_prompt(ctx)
+        logger.info(
+            "Rich critique: %d chars prompt, round %d, acc=%.3f",
+            len(prompt), ctx.current_round + 1, ctx.accuracy,
+        )
+
+        try:
+            response = await self.llm_client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model,
+                temperature=0.3,
+                max_tokens=4096,
+                output_format="json",
+            )
+            result = response.parsed or json.loads(response.content)
+            return result.get("summary", json.dumps(result, indent=2))
+        except Exception:
+            logger.warning("Rich critique JSON failed, falling back to text", exc_info=True)
+            response = await self.llm_client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model,
+                temperature=0.3,
+                max_tokens=4096,
+            )
+            return response.content
 
     async def _negative_critique(self, results: list[dict], accuracy: float) -> str:
         """Analyze failures: categories, root causes, priority fixes."""
