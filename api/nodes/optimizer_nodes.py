@@ -8,6 +8,8 @@ Node classes wrapping existing service logic with typed I/O:
 - **L3ModifyPlanNode** — L3 modify_plan transition (strategic plan change)
 """
 
+from __future__ import annotations
+
 __all__ = [
     "InitNode",
     "L1GenerateNode",
@@ -17,7 +19,6 @@ __all__ = [
 ]
 
 import logging
-from typing import Type
 
 from pydantic import BaseModel, Field
 
@@ -60,11 +61,11 @@ class InitNode(NodeBase[InitNodeInput, InitNodeOutput]):
     """
 
     @classmethod
-    def get_input_model(cls) -> Type[InitNodeInput]:
+    def get_input_model(cls) -> type[InitNodeInput]:
         return InitNodeInput
 
     @classmethod
-    def get_output_model(cls) -> Type[InitNodeOutput]:
+    def get_output_model(cls) -> type[InitNodeOutput]:
         return InitNodeOutput
 
     async def _execute(self, input_data: InitNodeInput) -> InitNodeOutput:
@@ -146,11 +147,11 @@ class L1GenerateNode(NodeBase[L1GenerateInput, L1GenerateOutput]):
     """
 
     @classmethod
-    def get_input_model(cls) -> Type[L1GenerateInput]:
+    def get_input_model(cls) -> type[L1GenerateInput]:
         return L1GenerateInput
 
     @classmethod
-    def get_output_model(cls) -> Type[L1GenerateOutput]:
+    def get_output_model(cls) -> type[L1GenerateOutput]:
         return L1GenerateOutput
 
     async def _execute(self, input_data: L1GenerateInput) -> L1GenerateOutput:
@@ -260,11 +261,11 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
         return "span"
 
     @classmethod
-    def get_input_model(cls) -> Type[L1EvaluateInput]:
+    def get_input_model(cls) -> type[L1EvaluateInput]:
         return L1EvaluateInput
 
     @classmethod
-    def get_output_model(cls) -> Type[L1EvaluateOutput]:
+    def get_output_model(cls) -> type[L1EvaluateOutput]:
         return L1EvaluateOutput
 
     async def _execute(self, input_data: L1EvaluateInput) -> L1EvaluateOutput:
@@ -367,11 +368,11 @@ class L2RefineNode(NodeBase[L2RefineInput, L2RefineOutput]):
     """
 
     @classmethod
-    def get_input_model(cls) -> Type[L2RefineInput]:
+    def get_input_model(cls) -> type[L2RefineInput]:
         return L2RefineInput
 
     @classmethod
-    def get_output_model(cls) -> Type[L2RefineOutput]:
+    def get_output_model(cls) -> type[L2RefineOutput]:
         return L2RefineOutput
 
     async def _execute(self, input_data: L2RefineInput) -> L2RefineOutput:
@@ -443,11 +444,11 @@ class L3ModifyPlanNode(NodeBase[L3ModifyPlanInput, L3ModifyPlanOutput]):
     """
 
     @classmethod
-    def get_input_model(cls) -> Type[L3ModifyPlanInput]:
+    def get_input_model(cls) -> type[L3ModifyPlanInput]:
         return L3ModifyPlanInput
 
     @classmethod
-    def get_output_model(cls) -> Type[L3ModifyPlanOutput]:
+    def get_output_model(cls) -> type[L3ModifyPlanOutput]:
         return L3ModifyPlanOutput
 
     async def _execute(self, input_data: L3ModifyPlanInput) -> L3ModifyPlanOutput:

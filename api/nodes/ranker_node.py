@@ -3,7 +3,9 @@ Ranker node.
 
 Ranks candidates using LLM-based scoring against a query.
 """
-from typing import Any, Type
+from __future__ import annotations
+
+from typing import Any
 from pydantic import BaseModel, Field
 
 from .base import NodeBase
@@ -99,11 +101,11 @@ Scoring guidelines:
 Return candidates sorted from highest to lowest score."""
 
     @classmethod
-    def get_input_model(cls) -> Type[RankerInput]:
+    def get_input_model(cls) -> type[RankerInput]:
         return RankerInput
 
     @classmethod
-    def get_output_model(cls) -> Type[RankerOutput]:
+    def get_output_model(cls) -> type[RankerOutput]:
         return RankerOutput
 
     def format_user_prompt(self, input_data: RankerInput) -> str:

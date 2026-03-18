@@ -73,7 +73,7 @@ Each round:
 
 1. **Growth** — Generate N candidates. Meta-prompt includes **critique from previous round** + freshly sampled **thinking styles** as mutation guidance.
 2. **Eval + Critique** — Evaluate candidates via the backend, compare by composite score against the current best (previous winner). Generate a **critique** of remaining failures/successes, fed forward to next round.
-3. **Loop control** — Stall counter on no improvement. Patience exhausted → escalate L2 (context) → L3 (strategy). Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (e.g., `DegradationCheck` on pipeline regression). Stop on `max_rounds` or perfect accuracy.
+3. **Loop control** — Stall counter on no improvement. Patience exhausted → escalate L2 (context) → L3 (strategy). Pluggable `EscalationCheck`s (planned, Wave E) can also trigger L2/L3/abort mid-round (e.g., `DegradationCheck` on pipeline regression). Stop on `max_rounds` or perfect accuracy.
 
 **Init** bootstraps the first critique from baseline results. When scan data is available (leaderboard, axis sensitivity, query difficulty), it feeds into both the bootstrap critique and subsequent rounds via `prepare_scan_context()`.
 
@@ -138,7 +138,7 @@ The feedback cycle emits structured `PhaseEvent` objects at phase boundaries via
 | `l1_evaluate` | Evaluation, winner selection & critique | `n_candidates`, `n_queries`, `current_best_accuracy`, `improvement_threshold` | `winner_label`, `winner_accuracy`, `winner_composite`, `improved`, `next_action`, `critique_text`, `critique_path` |
 | `refine_context` | L2 escalation (when `enable_l2=True`) | `l2_round`, `stall_count`, `current_accuracy`, `best_accuracy` | `param_changes_count`, `context_changed`, `changes_description` |
 | `modify_plan` | L3 escalation (when `enable_l3=True`) | `l3_round`, `l2_stall_count` | `new_plan_preview`, `changes_description` |
-| `escalation` | `EscalationCheck` fires mid-eval | `check_name`, `target`, `context`, `candidate_idx` | (routed to L2/L3/abort) |
+| `escalation` *(planned, Wave E)* | `EscalationCheck` fires mid-eval | `check_name`, `target`, `context`, `candidate_idx` | (routed to L2/L3/abort) |
 
 Each event: `phase` (str), `event` ("enter"/"exit"), `round` (int or None), `data` (dict), `timestamp` (ISO 8601).
 

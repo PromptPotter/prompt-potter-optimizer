@@ -265,14 +265,12 @@ class BackendClient:
         """POST /matches — forward node_config to the backend as-is."""
         payload: dict[str, Any] = {"query": query}
 
-        pp = dict(pipeline_params or {})
+        _pp = pipeline_params or {}
 
-        if "steps" in pp:
-            payload["steps"] = pp.pop("steps")
+        if "steps" in _pp:
+            payload["steps"] = _pp["steps"]
 
-        node_config: dict[str, dict] = {}
-        if "node_config" in pp:
-            node_config = pp.pop("node_config")
+        node_config: dict[str, dict] = _pp.get("node_config", {})
 
         # ranking_prompt shorthand → inject into node_config.llm_ranking.prompt
         if ranking_prompt:

@@ -29,10 +29,7 @@ from api.models.hashing import eval_content_hash
 _PROMPT_STATE_FIELDS = set()
 for _fields in LAYER_FIELDS.values():
     _PROMPT_STATE_FIELDS.update(_fields)
-_PROMPT_STATE_FIELDS |= {
-    "id", "parent_id", "changes_description", "created_at",
-    "context", "parameters", "plan",
-}
+_PROMPT_STATE_FIELDS |= {"id", "parent_id", "changes_description", "created_at"}
 
 
 class SearchPoint(BaseModel):

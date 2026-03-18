@@ -5,16 +5,16 @@ Provides registration and discovery of node types.
 Nodes are registered by class name and can be looked up
 by the workflow runner.
 """
-from typing import Type
+from __future__ import annotations
 
 from .base import NodeBase
 
 
 # Global node registry
-_NODE_REGISTRY: dict[str, Type[NodeBase]] = {}
+_NODE_REGISTRY: dict[str, type[NodeBase]] = {}
 
 
-def register_node(node_class: Type[NodeBase]) -> Type[NodeBase]:
+def register_node(node_class: type[NodeBase]) -> type[NodeBase]:
     """
     Register a node class in the registry.
 
@@ -43,7 +43,7 @@ def register_node(node_class: Type[NodeBase]) -> Type[NodeBase]:
     return node_class
 
 
-def get_node_registry() -> dict[str, Type[NodeBase]]:
+def get_node_registry() -> dict[str, type[NodeBase]]:
     """
     Get the full node registry.
 
@@ -53,7 +53,7 @@ def get_node_registry() -> dict[str, Type[NodeBase]]:
     return _NODE_REGISTRY.copy()
 
 
-def get_node_class(node_type: str) -> Type[NodeBase] | None:
+def get_node_class(node_type: str) -> type[NodeBase] | None:
     """
     Get a node class by type name.
 

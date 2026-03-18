@@ -3,7 +3,9 @@ LLM inference node.
 
 Executes a single LLM call with configurable model, temperature, and prompts.
 """
-from typing import Any, Type
+from __future__ import annotations
+
+from typing import Any
 from pydantic import BaseModel, Field
 
 from .base import NodeBase
@@ -57,11 +59,11 @@ class LLMNode(NodeBase[LLMInput, LLMOutput]):
     """
 
     @classmethod
-    def get_input_model(cls) -> Type[LLMInput]:
+    def get_input_model(cls) -> type[LLMInput]:
         return LLMInput
 
     @classmethod
-    def get_output_model(cls) -> Type[LLMOutput]:
+    def get_output_model(cls) -> type[LLMOutput]:
         return LLMOutput
 
     def format_user_prompt(self, input_data: LLMInput) -> str:

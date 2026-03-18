@@ -5,7 +5,9 @@ Assembles pipeline configuration parameters (e.g., model overrides,
 candidate limits) for forwarding to a backend.
 PromptPotter configures *what* the backend does, not executes it directly.
 """
-from typing import Any, Type
+from __future__ import annotations
+
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -45,11 +47,11 @@ class PipelineConfigNode(NodeBase[PipelineConfigInput, PipelineConfigOutput]):
     """
 
     @classmethod
-    def get_input_model(cls) -> Type[PipelineConfigInput]:
+    def get_input_model(cls) -> type[PipelineConfigInput]:
         return PipelineConfigInput
 
     @classmethod
-    def get_output_model(cls) -> Type[PipelineConfigOutput]:
+    def get_output_model(cls) -> type[PipelineConfigOutput]:
         return PipelineConfigOutput
 
     async def _execute(

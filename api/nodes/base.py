@@ -9,7 +9,7 @@ automatic step tracing (file + Langfuse cloud). When omitted, tracing is silentl
 skipped and the node works identically.
 """
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, TypeVar, Generic, Type
+from typing import TYPE_CHECKING, Any, TypeVar, Generic
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 import logging
@@ -51,11 +51,11 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
     Usage:
         class MyNode(NodeBase[MyInput, MyOutput]):
             @classmethod
-            def get_input_model(cls) -> Type[MyInput]:
+            def get_input_model(cls) -> type[MyInput]:
                 return MyInput
 
             @classmethod
-            def get_output_model(cls) -> Type[MyOutput]:
+            def get_output_model(cls) -> type[MyOutput]:
                 return MyOutput
 
             async def _execute(self, input_data: MyInput) -> MyOutput:
@@ -134,13 +134,13 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
 
     @classmethod
     @abstractmethod
-    def get_input_model(cls) -> Type[TInput]:
+    def get_input_model(cls) -> type[TInput]:
         """Return the Pydantic model class for input validation."""
         pass
 
     @classmethod
     @abstractmethod
-    def get_output_model(cls) -> Type[TOutput]:
+    def get_output_model(cls) -> type[TOutput]:
         """Return the Pydantic model class for output validation."""
         pass
 

@@ -14,6 +14,8 @@ Target data stays clean — all provenance lives in the optimizer layer.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -24,11 +26,13 @@ class OptSearchPoint(BaseModel):
     correlate optimizer configuration with target-pipeline evaluation outcomes.
     """
 
+    model_config = {"frozen": True}
+
     critique_text: str = ""
     thinking_styles: list[str] = Field(default_factory=list)
     plan: str = ""
     context: str = ""
-    parameters: dict = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
     content_hashes: list[str] = Field(
         default_factory=list,
         description="Content hashes of dataset_runs produced under this config",

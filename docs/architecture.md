@@ -72,7 +72,7 @@ The optimizer itself is a 4-step pipeline, designed to be modeled using the same
 | `l1_generate` | Candidate generation | `generate_candidates()` in `prompt_optimizer.py` | Every round (also init mode via `restructure_context()`) |
 | `l1_evaluate` | Eval + winner selection + critique | `evaluate_and_select_winner()` in `prompt_optimizer.py` | Every round |
 | `l2_refine_context` | Context/parameter tuning | `refine_context()` in `layer_transitions.py` | L1 patience exhausted |
-| `l3_modify_plan` | Strategic replanning | `modify_plan()` in `layer_transitions.py` | L2 patience exhausted OR `EscalationCheck(target="l3")` |
+| `l3_modify_plan` | Strategic replanning | `modify_plan()` in `layer_transitions.py` | L2 patience exhausted OR `EscalationCheck(target="l3")` (planned, Wave E) |
 
 ```
   ┌────────────────────────────────────────────────────┐
@@ -90,7 +90,7 @@ The optimizer itself is a 4-step pipeline, designed to be modeled using the same
 **Key design decisions:**
 - Init is `l1_generate` in naked mode (single decomposition pass, no critique/styles)
 - Critique and thinking style sampling are sub-tools of `l1_evaluate`, not separate steps
-- Pluggable `EscalationCheck`s run after each candidate eval — can short-circuit a round and route to L2/L3/abort
+- Pluggable `EscalationCheck`s (planned, Wave E) run after each candidate eval — can short-circuit a round and route to L2/L3/abort
 - The schema describes step capabilities; loop control stays in `feedback_cycle.py`
 
 This model enables optimizer-level tracing (each step as a Langfuse observation), full reproducibility (every LLM call reconstructible from trial artifacts), and self-optimization (a meta-PromptPotter optimizing its own prompts). See the [M7 spec](specs/m7-optimizer-pipeline.md) for the full design.
