@@ -995,12 +995,6 @@ async def sensitivity_scan(
           f"queries/variant: {n_eval}, cached results: {n_cached}")
     print(f"  Estimated calls: ~{n_configs * n_eval}")
 
-    # Ensure backend session is initialized (required for /matches)
-    if backend_client is not None:
-        terms = sorted({d["ground_truth"] for d in eval_data if d.get("ground_truth")})
-        if terms:
-            await backend_client.init_session(terms)
-
     cb, on_result_cb = _make_scan_progress_cb()
 
     _httpx_log = logging.getLogger("httpx")

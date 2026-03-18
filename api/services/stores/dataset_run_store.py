@@ -1,5 +1,9 @@
 """
 Dataset run (eval result caching) storage.
+
+Performance: in-memory caches for the index, alias groups, and
+rendered-prompt-hash secondary index avoid repeated disk reads during
+scan/grid/feedback-cycle hot loops.  All caches are invalidated on write.
 """
 import logging
 import os
@@ -21,11 +25,62 @@ _LOCK_RETRY_INTERVAL = 0.05  # seconds between retries
 _LOCK_TIMEOUT = 5.0  # seconds before treating lock as stale
 
 
+def _strip_steps(pp: dict | None) -> dict | None:
+    """Normalize pipeline_params for comparison (exclude 'steps' key)."""
+    if not pp:
+        return None
+    stripped = {k: v for k, v in pp.items() if k != "steps"}
+    return stripped or None
+
+
 class DatasetRunStore:
     """File I/O for dataset evaluation runs and incremental eval writes."""
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
+        # In-memory caches — invalidated on save()/register_alias()
+        self._index_cache: dict[str, dict] = {}
+        self._alias_cache: dict[str, dict] = {}
+        self._rp_index: dict[str, dict[str, list[dict]]] = {}
+
+    # -- internal cache helpers -----------------------------------------------
+
+    def _load_index(self, backend_id: str) -> dict:
+        """Return cached index, loading from disk on first access."""
+        if backend_id not in self._index_cache:
+            self._index_cache[backend_id] = (
+                read_json_optional(self._index_path(backend_id))
+                or {"dataset_runs": [], "total": 0}
+            )
+        return self._index_cache[backend_id]
+
+    def _load_aliases(self, backend_id: str) -> dict:
+        """Return cached alias data, loading from disk on first access."""
+        if backend_id not in self._alias_cache:
+            self._alias_cache[backend_id] = (
+                read_json_optional(self._alias_path(backend_id))
+                or {"groups": []}
+            )
+        return self._alias_cache[backend_id]
+
+    def _get_rp_index(self, backend_id: str) -> dict[str, list[dict]]:
+        """Return {rendered_prompt_hash: [index_entries]} secondary index."""
+        if backend_id not in self._rp_index:
+            idx: dict[str, list[dict]] = {}
+            for entry in self._load_index(backend_id).get("dataset_runs", []):
+                rp = entry.get("rendered_prompt_hash", "")
+                if rp:
+                    idx.setdefault(rp, []).append(entry)
+            self._rp_index[backend_id] = idx
+        return self._rp_index[backend_id]
+
+    def _invalidate_cache(self, backend_id: str) -> None:
+        """Drop all in-memory caches for a backend (after write)."""
+        self._index_cache.pop(backend_id, None)
+        self._alias_cache.pop(backend_id, None)
+        self._rp_index.pop(backend_id, None)
+
+    # -- path helpers ---------------------------------------------------------
 
     def _runs_dir(self, backend_id: str) -> Path:
         validate_path_component(backend_id)
@@ -143,6 +198,7 @@ class DatasetRunStore:
         finally:
             self._release_lock(lock_path)
 
+        self._invalidate_cache(backend_id)
         return detail_path
 
     def load_by_id(
@@ -154,12 +210,8 @@ class DatasetRunStore:
     def load_by_hash(
         self, backend_id: str, content_hash: str,
     ) -> dict[str, Any] | None:
-        """Scan the index for a matching content_hash, load and return detail."""
-        index = read_json_optional(self._index_path(backend_id))
-        if index is None:
-            return None
-
-        for entry in index.get("dataset_runs", []):
+        """Scan the cached index for a matching content_hash, load detail."""
+        for entry in self._load_index(backend_id).get("dataset_runs", []):
             if entry.get("content_hash") == content_hash:
                 return read_json_optional(
                     self._runs_dir(backend_id) / f"{entry['run_id']}.json",
@@ -168,10 +220,7 @@ class DatasetRunStore:
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return the index entries (summaries without full items)."""
-        index = read_json_optional(self._index_path(backend_id))
-        if index is None:
-            return []
-        return index.get("dataset_runs", [])
+        return self._load_index(backend_id).get("dataset_runs", [])
 
     def load_by_alias(
         self,
@@ -184,38 +233,26 @@ class DatasetRunStore:
     ) -> dict[str, Any] | None:
         """Find a cached run via prompt alias groups.
 
-        Resolves ``rp_hash`` to its alias set, then scans the index for an
-        entry whose ``rendered_prompt_hash``, ``model``, ``temperature``,
-        ``pipeline_params``, and ``item_count`` all match.  Returns the
-        detail file for the first match, or ``None``.
+        Uses the secondary rp_hash index for O(alias_set × entries_per_hash)
+        lookups instead of O(total_entries) linear scan.
         """
         alias_set = self.resolve_aliases(backend_id, rp_hash)
-        index = read_json_optional(self._index_path(backend_id))
-        if index is None:
-            return None
-
-        def _strip_steps(pp):
-            if not pp:
-                return None
-            stripped = {k: v for k, v in pp.items() if k != "steps"}
-            return stripped or None
-
+        rp_idx = self._get_rp_index(backend_id)
         norm_pp = _strip_steps(pipeline_params)
 
-        for entry in index.get("dataset_runs", []):
-            if entry.get("rendered_prompt_hash", "") not in alias_set:
-                continue
-            if entry.get("model") != model:
-                continue
-            if entry.get("temperature") != temperature:
-                continue
-            if _strip_steps(entry.get("pipeline_params")) != norm_pp:
-                continue
-            if entry.get("item_count") != item_count:
-                continue
-            return read_json_optional(
-                self._runs_dir(backend_id) / f"{entry['run_id']}.json",
-            )
+        for h in alias_set:
+            for entry in rp_idx.get(h, []):
+                if entry.get("model") != model:
+                    continue
+                if entry.get("temperature") != temperature:
+                    continue
+                if _strip_steps(entry.get("pipeline_params")) != norm_pp:
+                    continue
+                if entry.get("item_count") != item_count:
+                    continue
+                return read_json_optional(
+                    self._runs_dir(backend_id) / f"{entry['run_id']}.json",
+                )
         return None
 
     # -- prompt alias groups ---------------------------------------------------
@@ -251,16 +288,14 @@ class DatasetRunStore:
         data["groups"] = remaining
         path.parent.mkdir(parents=True, exist_ok=True)
         write_json(path, data)
+        self._alias_cache.pop(backend_id, None)
 
     def resolve_aliases(self, backend_id: str, rp_hash: str) -> set[str]:
         """Return all hashes equivalent to *rp_hash* (including itself)."""
         if not rp_hash:
             return set()
-        data = read_json_optional(self._alias_path(backend_id))
-        if not data:
-            return {rp_hash}
+        data = self._load_aliases(backend_id)
         for group in data.get("groups", []):
             if rp_hash in group:
                 return set(group)
         return {rp_hash}
-

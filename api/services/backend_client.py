@@ -245,9 +245,12 @@ class BackendClient:
     async def init_session(self, terms: list[str]) -> dict[str, Any]:
         """POST /sessions with terms array.
 
-        Stores ``terms`` internally so that ``run_match()`` can
-        auto-reinitialize the session if the backend restarts.
+        Idempotent: skips the HTTP call if already initialized with the
+        same terms.  Stores ``terms`` internally so that ``run_match()``
+        can auto-reinitialize the session if the backend restarts.
         """
+        if self._session_terms == terms:
+            return {"status": "already_initialized", "terms_count": len(terms)}
         resp = await self._get_http().post(
             f"{self.base_url}/sessions",
             json={"terms": terms},
@@ -289,7 +292,9 @@ class BackendClient:
         # Auto-reinitialize session on 400 (lost after backend restart)
         if resp.status_code == 400 and self._session_terms:
             logger.warning("Got 400 from /matches — re-initializing session")
-            await self.init_session(self._session_terms)
+            terms = self._session_terms
+            self._session_terms = None  # clear so idempotency guard re-sends
+            await self.init_session(terms)
             resp = await client.post(
                 f"{self.base_url}/matches",
                 json=payload,
