@@ -621,7 +621,7 @@ async def adaptive_search(
     _cb = progress_cb or (lambda _e: None)
 
     if session_terms:
-        await backend_client.init_session(session_terms)
+        backend_client.init_session(session_terms)
 
     # Filter variant library to active pipeline steps
     variant_library = filter_variant_library(

@@ -648,6 +648,7 @@ async def run_feedback_cycle_notebook(
         langfuse_session_id=langfuse_session_id,
         cycle_id=resolved_cycle_id,
         experiment_id=experiment_id or "",
+        backend_client=svc["backend_client"] if svc else None,
     )
 
     # --- Final summary ---

@@ -195,7 +195,6 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
         error_msg = None
         obs_id = None
         validated_output = None
-        interrupted = False
 
         try:
             # Validate input
@@ -220,42 +219,34 @@ class NodeBase(ABC, Generic[TInput, TOutput]):
 
             return validated_output
 
-        except KeyboardInterrupt:
-            interrupted = True
-            raise
-
         except Exception as e:
             error_msg = str(e)
             raise
 
         finally:
-            # On KeyboardInterrupt: skip everything. The Windows asyncio
-            # event loop is corrupted — any I/O (obs, Langfuse, even
-            # Pydantic construction touching complex config) can hang.
-            if not interrupted:
-                end_time = datetime.now(timezone.utc).isoformat() + "Z"
-                duration_ms = (time.time() - start) * 1000
+            end_time = datetime.now(timezone.utc).isoformat() + "Z"
+            duration_ms = (time.time() - start) * 1000
 
-                safe_meta = {
-                    k: v for k, v in self.config.items()
-                    if isinstance(v, (str, int, float, bool, list, type(None)))
-                }
+            safe_meta = {
+                k: v for k, v in self.config.items()
+                if isinstance(v, (str, int, float, bool, list, type(None)))
+            }
 
-                self._last_metrics = NodeMetrics(
-                    node_id=self.node_id,
-                    node_type=self.__class__.__name__,
-                    start_time=start_time,
-                    end_time=end_time,
-                    duration_ms=duration_ms,
-                    error=error_msg,
-                    metadata=safe_meta,
-                )
+            self._last_metrics = NodeMetrics(
+                node_id=self.node_id,
+                node_type=self.__class__.__name__,
+                start_time=start_time,
+                end_time=end_time,
+                duration_ms=duration_ms,
+                error=error_msg,
+                metadata=safe_meta,
+            )
 
-                self._end_observation(
-                    obs_id,
-                    validated_output.model_dump() if validated_output else None,
-                    error_msg,
-                )
+            self._end_observation(
+                obs_id,
+                validated_output.model_dump() if validated_output else None,
+                error_msg,
+            )
 
     def get_last_metrics(self) -> NodeMetrics | None:
         """Return metrics from the last execution."""

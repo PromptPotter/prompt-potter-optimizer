@@ -78,7 +78,7 @@ async def smoke_test_override(
     bc = svc["backend_client"]
     query = eval_data[0]["query"] if eval_data else "Stahl S235"
 
-    await bc.init_session(svc.get("session_terms", []))
+    bc.init_session(svc.get("session_terms", []))
 
     schema = copy.deepcopy(
         pipeline_config["resolved_schemas"][schema_ref]["json_schema"],
@@ -87,7 +87,7 @@ async def smoke_test_override(
         schema["properties"][name] = {"type": "string", "description": desc}
         schema.setdefault("required", []).append(name)
 
-    result = await bc.run_match(
+    result = bc.run_match(
         query,
         pipeline_params={"node_config": {step: {"output_schema": schema}}},
     )
@@ -193,7 +193,7 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     """
     import json
 
-    pipeline_raw = await svc["backend_client"].fetch_pipeline()
+    pipeline_raw = svc["backend_client"].fetch_pipeline()
     config = pipeline_raw.get("data", pipeline_raw)
 
     name = config.get("name", "?")
@@ -323,7 +323,7 @@ async def show_backend_status(client) -> dict:
 
     Returns the raw status dict (or error dict).
     """
-    status = await client.check_status()
+    status = client.check_status()
 
     st = status.get("status", "")
     if st == "unreachable":

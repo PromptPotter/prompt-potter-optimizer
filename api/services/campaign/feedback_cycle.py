@@ -962,6 +962,7 @@ async def run_feedback_cycle(
     scan_context: dict | None = None,
     cycle_id: str | None = None,
     experiment_id: str = "",
+    backend_client: "BackendClient | None" = None,
 ) -> CycleResult:
     """Run iterative optimization with feedback cycling.
 
@@ -1009,10 +1010,12 @@ async def run_feedback_cycle(
                 enable_critique=config.enable_critique,
                 pipeline_params=config.pipeline_params)
 
+    # Resolve backend client: prefer caller-provided, fall back to new
+    _bc = backend_client or BackendClient(config.backend_url)
+
     # Initialize backend session (required before /matches calls)
     if config.session_terms:
-        bc = BackendClient(config.backend_url)
-        await bc.init_session(config.session_terms)
+        _bc.init_session(config.session_terms)
 
     round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
 
@@ -1103,7 +1106,6 @@ async def run_feedback_cycle(
                 critique_text=bootstrap_critique)
 
     # Build shared EvalContext once (reused across all rounds)
-    _bc = BackendClient(config.backend_url)
     _store = None
     if config.project_root:
         from api.services.project_store import ProjectStore
@@ -1114,8 +1116,6 @@ async def run_feedback_cycle(
         backend_id=config.backend_id,
         pipeline_schema=config.pipeline_schema,
         obs=obs,
-        dataset_name=dataset_name if dataset_name and dataset_item_map else None,
-        dataset_item_map=dataset_item_map if dataset_name and dataset_item_map else None,
         source="feedback_cycle",
         model=config.model or "",
         temperature=config.temperature,
@@ -1124,7 +1124,6 @@ async def run_feedback_cycle(
     )
 
     stop_reason: str | None = None
-    interrupted = False
 
     # -- Step 5: Build escalation checks + round loop --
     from api.services.campaign.escalation import build_escalation_checks
@@ -1330,32 +1329,19 @@ async def run_feedback_cycle(
 
     except (KeyboardInterrupt, asyncio.CancelledError):
         stop_reason = "interrupted"
-        interrupted = True
         logger.warning(
             "Feedback cycle interrupted at round %d. "
             "Completed rounds are checkpointed.",
             len(state.rounds),
         )
 
-    finally:
-        # Best-effort httpx cleanup — prevents event loop leak on interrupt.
-        # Same pattern as NodeBase.process() RC-5 fix (commit d898e64).
-        try:
-            await _bc.aclose()
-        except Exception:
-            pass
-
     # -- Step 6: Finalize --
-    # Skip I/O-heavy finalization on interrupt — Langfuse/obs calls hang
-    # on corrupted Windows asyncio event loop (same root cause as RC-5).
     finished_at = datetime.now(timezone.utc).isoformat()
-    cloud_trace_id = None
-    if not interrupted:
-        campaign_status = "completed"
-        cloud_trace_id = _finalize_campaign(
-            campaign_store, cycle_id, config, state, stop_reason, finished_at,
-            obs, obs_campaign_id, status=campaign_status,
-        )
+    campaign_status = "interrupted" if stop_reason == "interrupted" else "completed"
+    cloud_trace_id = _finalize_campaign(
+        campaign_store, cycle_id, config, state, stop_reason, finished_at,
+        obs, obs_campaign_id, status=campaign_status,
+    )
 
     return CycleResult(
         rounds=state.rounds,

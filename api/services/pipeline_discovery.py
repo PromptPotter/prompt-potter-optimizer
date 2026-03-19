@@ -516,7 +516,7 @@ async def compute_pipeline_view(
     # Fetch from backend
     if raw is None:
         try:
-            raw = await backend_client.fetch_pipeline()
+            raw = backend_client.fetch_pipeline()
             _set_cached(base_url, raw)
             source = "live"
         except Exception:

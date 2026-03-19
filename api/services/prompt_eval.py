@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
@@ -45,8 +45,6 @@ class EvalContext:
     backend_id: str = ""
     pipeline_schema: PipelineSchema | None = None
     obs: ObsLogger | None = None
-    dataset_name: str | None = None
-    dataset_item_map: dict[str, str] | None = field(default=None)
     source: str = ""
     model: str = ""
     temperature: float = 0.0
@@ -196,7 +194,7 @@ async def backend_reranker_eval(
         steps = pp.get("steps")
         include_ranking = steps is None or "llm_ranking" in steps
 
-        resp = await backend_client.run_match(
+        resp = backend_client.run_match(
             query,
             pipeline_params=pipeline_params,
             ranking_prompt=rendered_prompt if include_ranking else None,
@@ -554,17 +552,13 @@ async def evaluate_prompt_cached(
         else safe_label
     )
 
-    def _on_result(result: dict, index: int, total: int) -> None:
-        if on_result is not None:
-            on_result(result, index, len(eval_data))
-
     from api.services.campaign.escalation import EscalationError as _EscalationError
 
     escalation_signal = None
     try:
         results = await evaluate_prompt_batch(
             search_point, eval_data, backend_client,
-            on_result=_on_result,
+            on_result=on_result,
             pipeline_schema=pipeline_schema,
             escalation_checks=ctx.escalation_checks,
             candidate_idx=ctx.candidate_idx,
