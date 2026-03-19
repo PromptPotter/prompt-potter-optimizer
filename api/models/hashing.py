@@ -38,8 +38,6 @@ def eval_content_hash(
         "model": model, "temperature": temperature,
     }
     if pipeline_params:
-        pp = {k: v for k, v in pipeline_params.items() if k != "steps"}
-        if pp:
-            blob_dict["pipeline_params"] = pp
+        blob_dict["pipeline_params"] = pipeline_params
     blob = json.dumps(blob_dict, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]

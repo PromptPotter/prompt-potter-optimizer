@@ -1,10 +1,9 @@
 # Optimizer Single-Pass Workflow
-# Linear pipeline: InitNode → L1GenerateNode → L1EvaluateNode
+# Linear pipeline: L1GenerateNode → L1EvaluateNode
 #
 # This workflow runs one optimization pass:
-# 1. Decompose instruction into Layer 1 fields, create baseline PromptState
-# 2. Generate N candidate PromptState variants via LLM meta-prompt
-# 3. Evaluate candidates against eval dataset, select winner
+# 1. Generate N candidate PromptState variants via LLM meta-prompt
+# 2. Evaluate candidates against eval dataset, select winner
 #
 # For iterative optimization (multiple passes), see feedback cycling (WP 3.4).
 
@@ -13,17 +12,16 @@ cwlVersion: v1.2
 id: optimizer_single_pass
 label: "Optimizer Single Pass"
 description: >
-  One-shot prompt optimization: decompose instruction into Layer 1 fields,
-  generate candidate variants, evaluate against dataset, select winner.
+  One-shot prompt optimization: generate candidate variants from a provided
+  baseline, evaluate against dataset, select winner.
 
 inputs:
   instruction:
     type: string
-    description: "Raw prompt instruction text to optimize"
-  improvement_areas:
-    type: string
-    description: "Domain-expert observations about where improvement is likely"
-    default: ""
+    description: "Raw prompt instruction text (for alias registration)"
+  baseline_prompt_state:
+    type: object
+    description: "Baseline PromptState (serialized dict) — required"
   eval_data:
     type: array
     description: "Evaluation dataset — list of {query, ground_truth} dicts"
@@ -33,27 +31,10 @@ inputs:
     default: 0.0
 
 steps:
-  - id: init
-    run: nodes/InitNode
-    in:
-      instruction: instruction
-      improvement_areas: improvement_areas
-    out:
-      - prompt_state
-      - prompt_state_id
-      - layer1_fields
-      - rendered_prompt
-    config:
-      # model/provider inherited from settings when omitted
-      provider: groq
-    metadata:
-      type: llm
-      deterministic: false
-
   - id: grow
     run: nodes/L1GenerateNode
     in:
-      prompt_state: init/prompt_state
+      prompt_state: baseline_prompt_state
       accuracy: initial_accuracy
       results: []
     out:
@@ -72,7 +53,7 @@ steps:
     in:
       candidates: grow/candidates
       eval_data: eval_data
-      baseline_prompt_state: init/prompt_state
+      baseline_prompt_state: baseline_prompt_state
       baseline_accuracy: initial_accuracy
       baseline_results: []
       baseline_label: "baseline"
@@ -108,12 +89,6 @@ outputs:
   candidate_scores:
     type: array
     outputSource: evaluate/candidate_scores
-  baseline_prompt:
-    type: string
-    outputSource: init/rendered_prompt
-  layer1_fields:
-    type: object
-    outputSource: init/layer1_fields
   n_candidates:
     type: int
     outputSource: grow/n_generated

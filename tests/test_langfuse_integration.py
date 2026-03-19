@@ -10,9 +10,9 @@ from api.services.campaign.models import CycleConfig
 from api.services.campaign.feedback_cycle import run_feedback_cycle
 from api.services.obs.langfuse_client import LangfuseLogger
 
+from api.models.prompt_state import PromptState
 from _helpers import (
     MockLangfuseLogger,
-    apply_init_mock,
     apply_eval_mock,
     apply_grow_mock,
     apply_llm_mock,
@@ -57,7 +57,6 @@ def mock_langfuse(monkeypatch):
 
 def _apply_service_mocks(monkeypatch):
     """Apply all service mocks for Langfuse integration testing."""
-    apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[1, 1, 1])
@@ -80,6 +79,9 @@ async def test_full_langfuse_integration(
         eval_data=eval_data,
         config=cycle_config,
         langfuse_session_id="test_session_123",
+        baseline_prompt_state=PromptState(instruction="Test.").model_dump(),
+        baseline_accuracy=0.0,
+        baseline_results=[],
     )
 
     # Cloud trace ID returned

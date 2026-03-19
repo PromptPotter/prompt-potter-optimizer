@@ -16,21 +16,6 @@ from api.models.hashing import HASH_TRUNCATE
 # ---------------------------------------------------------------------------
 
 
-def apply_init_mock(monkeypatch):
-    """Mock restructure_context for InitNode."""
-    async def mock_restructure(context_input, llm_client, **kwargs):
-        return {
-            "persona": "Expert",
-            "instruction": "Rank by relevance",
-            "thinking_style": "Step by step",
-        }
-
-    monkeypatch.setattr(
-        "api.services.search.context.restructure_context",
-        mock_restructure,
-    )
-
-
 def apply_llm_mock(monkeypatch):
     """Mock get_llm_client to return a MockLLMClient."""
     monkeypatch.setattr(

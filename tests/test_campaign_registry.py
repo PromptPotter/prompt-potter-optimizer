@@ -361,6 +361,9 @@ async def test_e2e_feedback_cycle_with_registry(
         instruction="Normalize drug names.",
         eval_data=eval_data,
         config=config,
+        baseline_prompt_state=PromptState(instruction="Normalize drug names.").model_dump(),
+        baseline_accuracy=0.0,
+        baseline_results=[],
     )
 
     assert result.n_rounds > 0

@@ -24,7 +24,6 @@ from api.services.llm_client import MockLLMClient
 from _helpers import (
     apply_eval_mock,
     apply_grow_mock,
-    apply_init_mock,
     apply_llm_mock,
 )
 
@@ -159,7 +158,6 @@ async def test_modify_plan_preserves_other_fields():
 @pytest.mark.asyncio
 async def test_l1_l2_escalation(monkeypatch, eval_data):
     """When L1 stalls and enable_l2=True, cycle calls refine_context and continues."""
-    apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
 
@@ -197,6 +195,9 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
+        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
+        baseline_accuracy=0.0,
+        baseline_results=[],
     )
 
     # L2 should have been called at least once
@@ -213,7 +214,6 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
 @pytest.mark.asyncio
 async def test_l2_l3_escalation(monkeypatch, eval_data):
     """Full L1→L2→L3 escalation chain when all levels stall."""
-    apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[0])
@@ -260,6 +260,9 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
+        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
+        baseline_accuracy=0.0,
+        baseline_results=[],
     )
 
     # L2 called multiple times (resets after each L3)
@@ -278,7 +281,6 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
 @pytest.mark.asyncio
 async def test_l2_meta_param_overrides(monkeypatch, eval_data):
     """PromptState.optimizer_params override n_variants and creativity in generation."""
-    apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[3])  # perfect → stops after round 0
 
@@ -338,7 +340,6 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
 @pytest.mark.asyncio
 async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
     """PromptState.plan is appended to meta-prompt during candidate generation."""
-    apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[3])  # perfect → stops
 

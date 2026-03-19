@@ -1,7 +1,6 @@
 """Optimizer pipeline nodes (M7).
 
 Node classes wrapping existing service logic with typed I/O:
-- **InitNode** — restructure context into Layer 1 fields, produce initial PromptState
 - **L1GenerateNode** — generate N candidate PromptState variants via LLM
 - **L1EvaluateNode** — evaluate candidates via backend, select winner, critique results
 - **L2RefineNode** — L2 refine_context transition (parameter/context adjustment)
@@ -11,7 +10,6 @@ Node classes wrapping existing service logic with typed I/O:
 from __future__ import annotations
 
 __all__ = [
-    "InitNode",
     "L1GenerateNode",
     "L1EvaluateNode",
     "L2RefineNode",
@@ -25,78 +23,6 @@ from pydantic import BaseModel, Field
 from .base import NodeBase
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# InitNode — context decomposition into PromptState
-# ---------------------------------------------------------------------------
-
-
-class InitNodeInput(BaseModel):
-    """Input for InitNode."""
-
-    instruction: str = Field(..., description="Raw prompt instruction text")
-    improvement_areas: str = Field(
-        "", description="Domain-expert observations about where improvement is likely",
-    )
-
-
-class InitNodeOutput(BaseModel):
-    """Output from InitNode."""
-
-    prompt_state: dict = Field(..., description="Serialized PromptState (baseline)")
-    prompt_state_id: str = Field(..., description="PromptState ID")
-    layer1_fields: dict = Field(..., description="Decomposed Layer 1 fields")
-    rendered_prompt: str = Field(..., description="Full rendered prompt")
-
-
-class InitNode(NodeBase[InitNodeInput, InitNodeOutput]):
-    """Decompose raw context into Layer 1 fields and create a baseline PromptState.
-
-    Wraps ``restructure_context()`` from ``api.services.search.context``.
-
-    Config:
-        model: LLM model identifier (default: from settings)
-        provider: LLM provider — "groq", "openai", "mock" (default: auto-detect)
-    """
-
-    @classmethod
-    def get_input_model(cls) -> type[InitNodeInput]:
-        return InitNodeInput
-
-    @classmethod
-    def get_output_model(cls) -> type[InitNodeOutput]:
-        return InitNodeOutput
-
-    async def _execute(self, input_data: InitNodeInput) -> InitNodeOutput:
-        from api.models.prompt_state import PromptState
-        from api.services.llm_client import get_llm_client
-        from api.services.search.context import restructure_context
-
-        client = get_llm_client(self.config.get("provider"))
-        model = self.config.get("model")
-
-        fields = await restructure_context(
-            input_data.instruction, client,
-            model=model,
-            improvement_areas=input_data.improvement_areas,
-        )
-
-        # Fields from restructure may include 'instruction' — use it if present,
-        # otherwise fall back to the raw input instruction.
-        ps_kwargs = {k: v for k, v in fields.items() if v and k != "consultation"}
-        ps_kwargs.setdefault("instruction", input_data.instruction)
-        ps = PromptState(
-            **ps_kwargs,
-            changes_description="init_node_baseline",
-        )
-
-        return InitNodeOutput(
-            prompt_state=ps.model_dump(),
-            prompt_state_id=ps.id,
-            layer1_fields=fields,
-            rendered_prompt=ps.render(),
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +209,40 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
     def get_output_model(cls) -> type[L1EvaluateOutput]:
         return L1EvaluateOutput
 
+    async def _run_critique(self, result: dict) -> tuple[str, list[str]]:
+        """Run critique + sample thinking styles. Returns (critique_text, styles)."""
+        from api.services.campaign.critique import sample_thinking_styles
+
+        critique_text = ""
+        if self.config.get("enable_critique", False) and result.get("winner_results"):
+            from api.services.campaign.critique import CritiqueAgent
+            from api.services.campaign.critique_stats import CritiqueContext
+            from api.services.llm_client import get_llm_client
+
+            llm_client = get_llm_client(self.config.get("provider"))
+            agent = CritiqueAgent(llm_client, model=self.config.get("model"))
+            cctx = CritiqueContext(
+                results=result["winner_results"],
+                accuracy=result["winner_accuracy"],
+                composite=result.get("winner_composite", result["winner_accuracy"]),
+                degraded_queries=result.get("degraded_queries", 0),
+                round_history=self.config.get("round_history", []),
+                current_round=self.config.get("current_round", 0),
+                stall_count=self.config.get("stall_count", 0),
+                best_accuracy=self.config.get("best_accuracy", 0.0),
+                best_round=self.config.get("best_round", -1),
+                scan_context=self.config.get("scan_context"),
+                pipeline_params=self.config.get("pipeline_params"),
+            )
+            critique_result = await agent.run(cctx)
+            from api.services.campaign.critique import format_critique_for_prompt
+            critique_text = format_critique_for_prompt(critique_result)
+
+        thinking_styles = sample_thinking_styles(
+            n=3, seed=self.config.get("thinking_styles_seed", 42),
+        )
+        return critique_text, thinking_styles
+
     async def _execute(self, input_data: L1EvaluateInput) -> L1EvaluateOutput:
         from api.services.prompt_optimizer import evaluate_and_select_winner
 
@@ -301,7 +261,9 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
             escalation_checks=self.config.get("escalation_checks"),
         )
 
-        # Escalation → skip all post-eval work, return immediately
+        # Run critique on both paths — escalation rounds need it too
+        critique_text, thinking_styles = await self._run_critique(result)
+
         if result.get("escalation_signal"):
             return L1EvaluateOutput(
                 winner=result["winner"],
@@ -311,44 +273,13 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
                 next_action=result.get("next_action", "generate"),
                 candidate_scores=result.get("candidate_scores", []),
                 winner_results=result.get("winner_results", []),
-                critique_text="",
-                thinking_styles=[],
+                critique_text=critique_text,
+                thinking_styles=thinking_styles,
                 winner_composite=result.get("winner_composite", result["winner_accuracy"]),
                 winner_pipeline_params=result.get("winner_pipeline_params"),
                 escalation_signal=result["escalation_signal"],
                 degraded_queries=result.get("degraded_queries", 0),
             )
-
-        # Normal path: critique + thinking styles
-        critique_text = ""
-        if self.config.get("enable_critique", False):
-            from api.services.campaign.critique import CritiqueAgent
-            from api.services.campaign.critique_stats import CritiqueContext
-            from api.services.llm_client import get_llm_client
-
-            llm_client = get_llm_client(self.config.get("provider"))
-            agent = CritiqueAgent(llm_client, model=self.config.get("model"))
-            ctx = CritiqueContext(
-                results=result["winner_results"],
-                accuracy=result["winner_accuracy"],
-                composite=result.get("winner_composite", result["winner_accuracy"]),
-                degraded_queries=result.get("degraded_queries", 0),
-                round_history=self.config.get("round_history", []),
-                current_round=self.config.get("current_round", 0),
-                stall_count=self.config.get("stall_count", 0),
-                best_accuracy=self.config.get("best_accuracy", 0.0),
-                best_round=self.config.get("best_round", -1),
-                scan_context=self.config.get("scan_context"),
-                pipeline_params=self.config.get("pipeline_params"),
-            )
-            critique_result = await agent.run(ctx)
-            from api.services.campaign.critique import format_critique_for_prompt
-            critique_text = format_critique_for_prompt(critique_result)
-
-        from api.services.campaign.critique import sample_thinking_styles
-        thinking_styles = sample_thinking_styles(
-            n=3, seed=self.config.get("thinking_styles_seed", 42),
-        )
 
         return L1EvaluateOutput(
             winner=result["winner"],

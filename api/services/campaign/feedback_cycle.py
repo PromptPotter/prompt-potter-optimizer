@@ -26,7 +26,7 @@ from api.models.prompt_state import PromptState, diff as prompt_diff
 from api.models.search_point import SearchPoint
 from api.models.opt_search_point import OptSearchPoint
 from api.nodes.optimizer_nodes import (
-    InitNode, L1GenerateNode, L1EvaluateNode, L2RefineNode, L3ModifyPlanNode,
+    L1GenerateNode, L1EvaluateNode, L2RefineNode, L3ModifyPlanNode,
 )
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
@@ -625,7 +625,7 @@ async def _execute_round(
         escalation_signal=eval_out.get("escalation_signal"),
     )
 
-    if obs and not round_result.escalation_signal:
+    if obs:
         _log_round_obs(eval_out, round_num, config, obs, obs_campaign_id)
 
     return round_result
@@ -950,7 +950,6 @@ async def run_feedback_cycle(
     eval_data: list[dict[str, Any]],
     config: CycleConfig,
     *,
-    improvement_areas: str = "",
     baseline_prompt_state: dict | None = None,
     baseline_accuracy: float = 0.0,
     baseline_results: list | None = None,
@@ -967,19 +966,16 @@ async def run_feedback_cycle(
     """Run iterative optimization with feedback cycling.
 
     Executes:
-    1. InitNode — create baseline PromptState (skipped if baseline_prompt_state provided)
+    1. Use provided baseline_prompt_state as starting point
     2. Loop: generate_candidates → evaluate_and_select_winner
     3. Stop when patience exhausted, max_rounds reached, or perfect score
 
     Args:
-        instruction: Raw prompt instruction text (used by InitNode if no baseline).
+        instruction: Raw prompt instruction text (used for alias registration).
         eval_data: Evaluation dataset (list of query dicts).
         config: Cycle configuration.
-        improvement_areas: Domain-expert guidance for context restructuring.
-        baseline_prompt_state: Existing baseline PromptState (serialized dict).
-            If provided, InitNode is skipped and this is used as the starting point.
-        baseline_accuracy: Accuracy of the baseline (used when baseline_prompt_state
-            is provided).
+        baseline_prompt_state: Baseline PromptState (serialized dict). Required.
+        baseline_accuracy: Accuracy of the baseline.
         baseline_results: Eval results for the baseline (for failure analysis).
         on_round_complete: Optional callback after each round:
             ``(round_result: CycleRoundResult, stall_count: int)``
@@ -1020,27 +1016,17 @@ async def run_feedback_cycle(
     round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
 
     # -- Step 1: Initialize baseline --
-    if baseline_prompt_state is not None:
-        current_ps = PromptState(**baseline_prompt_state) if isinstance(
-            baseline_prompt_state, dict,
-        ) else baseline_prompt_state
-        current_accuracy = baseline_accuracy
-        current_results: list = baseline_results or []
-        logger.info("Using provided baseline (acc=%.3f)", current_accuracy)
-    else:
-        init_node = InitNode(
-            node_id="cycle_init",
-            config={"model": config.model, "provider": config.provider},
+    if baseline_prompt_state is None:
+        raise ValueError(
+            "baseline_prompt_state is required. Run baseline evaluation in the "
+            "notebook before starting the feedback cycle.",
         )
-        init_out = await init_node.process({
-            "instruction": instruction,
-            "improvement_areas": improvement_areas,
-        })
-        current_ps = PromptState(**init_out.prompt_state) if isinstance(
-            init_out.prompt_state, dict,
-        ) else init_out.prompt_state
-        current_accuracy = 0.0
-        current_results = []
+    current_ps = PromptState(**baseline_prompt_state) if isinstance(
+        baseline_prompt_state, dict,
+    ) else baseline_prompt_state
+    current_accuracy = baseline_accuracy
+    current_results: list = baseline_results or []
+    logger.info("Using provided baseline (acc=%.3f)", current_accuracy)
 
     # -- Step 2: Resume detection --
     campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
@@ -1057,8 +1043,7 @@ async def run_feedback_cycle(
         config, obs_campaign_id, baseline_accuracy, eval_data, langfuse_session_id,
     )
 
-    # -- Step 4: Initialize loop state (always fresh from baseline) --
-    # Even on resume, start fresh — cached rounds replay from disk/cache.
+    # -- Step 4: Initialize loop state --
     if current_results:
         _bl_scores = compute_composite_score(current_results, config.pipeline_schema)
         _bl_composite = _bl_scores["composite"]
@@ -1080,6 +1065,34 @@ async def run_feedback_cycle(
         best_sp=baseline_sp,
         task_context=config.task_context or {},
     )
+
+    # Restore optimizer state from latest checkpoint on resume
+    if resumed_from_round > 0 and campaign_store and cycle_id:
+        _latest_trial = campaign_store.load_trial(
+            config.backend_id, cycle_id, resumed_from_round - 1,
+        )
+        if _latest_trial:
+            _osp = _latest_trial.get("opt_search_point", {})
+            if _osp.get("critique_text"):
+                state.critique_text = _osp["critique_text"]
+            if _osp.get("thinking_styles"):
+                state.thinking_styles = _osp["thinking_styles"]
+            if _osp.get("task_context"):
+                state.task_context = _osp["task_context"]
+            # Restore L2/L3 counters
+            state.l2_round = _latest_trial.get("l2_round", 0)
+            state.l3_round = _latest_trial.get("l3_round", 0)
+            state.l2_stall_count = _latest_trial.get("l2_stall_count", 0)
+            state.l3_stall_count = _latest_trial.get("l3_stall_count", 0)
+            state.stall_count = _latest_trial.get("stall_count", 0)
+            logger.info(
+                "Restored optimizer state from round %d "
+                "(critique=%d chars, task_context=%d keys, l2_round=%d)",
+                resumed_from_round - 1,
+                len(state.critique_text),
+                len(state.task_context),
+                state.l2_round,
+            )
 
     # -- Step 4b: Bootstrap critique + thinking styles --
     bootstrap_critique = ""
@@ -1129,6 +1142,21 @@ async def run_feedback_cycle(
         pipeline_params=config.pipeline_params,
         experiment_id=experiment_id or (cycle_id.replace("cycle_", "")[:12] if cycle_id else ""),
     )
+
+    # Register alias: raw instruction ↔ restructured baseline
+    if _store and config.backend_id and instruction:
+        _raw_hash = hashlib.sha256(instruction.encode()).hexdigest()[:16]
+        _restructured_hash = hashlib.sha256(
+            current_ps.render().encode(),
+        ).hexdigest()[:16]
+        if _raw_hash != _restructured_hash:
+            _store.dataset_runs.register_alias(
+                config.backend_id, _raw_hash, _restructured_hash,
+            )
+            logger.info(
+                "Registered prompt alias: %s ↔ %s",
+                _raw_hash[:8], _restructured_hash[:8],
+            )
 
     stop_reason: str | None = None
 

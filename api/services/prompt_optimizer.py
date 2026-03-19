@@ -98,39 +98,40 @@ def _build_scan_aware_meta_prompt(
     escalation_journal: list[dict] | None = None,
 ) -> str:
     """Build meta-prompt enriched with scan analytics for pipeline_param optimization."""
-    prompt_relevant = scan_context.get("has_prompt_axes", True)
-
-    if prompt_relevant:
-        instruction_spec = (
-            "  - \"instruction\": full prompt template text "
-            "(keep template variables)\n"
-        )
-        focus_note = ""
-    else:
-        instruction_spec = (
-            "  - \"instruction\": null  (keep unchanged — the ranking prompt "
-            "is NOT active in this pipeline)\n"
-        )
+    # Always allow instruction modification — scan results are guidance, not a gate
+    instruction_spec = (
+        "  - \"instruction\": full prompt template text "
+        "(keep template variables)\n"
+    )
+    if not scan_context.get("has_prompt_axes", True):
         focus_note = (
-            "IMPORTANT: The ranking prompt is NOT active in this pipeline "
-            "configuration. All improving axes are pipeline parameters. "
-            "Focus entirely on pipeline_params_override — do NOT modify "
-            "the instruction.\n\n"
+            "NOTE: Scan analytics show pipeline parameters had the most impact "
+            "on accuracy. Consider prioritizing pipeline_params_override, but you "
+            "MAY also modify the instruction if you see a clear opportunity.\n\n"
         )
+    else:
+        focus_note = ""
 
-    # Inject degradation data so L1 focuses on unstable pipeline params
+    # Inject degradation data so L1 addresses pipeline instability
     if escalation_journal:
         latest = escalation_journal[-1]
         rate = latest.get("degraded_rate", 0)
         prefix = latest.get("query_prefix", "")
         lines = [
-            f"PIPELINE DEGRADATION: {rate:.0%} of queries fail due to web_search.",
+            f"PIPELINE ISSUE: {rate:.0%} of queries degrade due to web_search failures.",
+            "This is the primary accuracy bottleneck — address it in your candidates.",
         ]
         if prefix:
             lines.append(f"Last tried prefix: {prefix!r}")
         if len(escalation_journal) > 1:
             tried = [e.get("query_prefix", "?") for e in escalation_journal]
-            lines.append(f"All tried prefixes: {tried}")
+            lines.append(f"Previously tried prefixes (all failed): {tried}")
+            lines.append(
+                "Try a fundamentally different approach to web_search config.",
+            )
+        wtypes = latest.get("warning_types", {})
+        if wtypes:
+            lines.append(f"Warning breakdown: {wtypes}")
         lines.append("")
         focus_note = "\n".join(lines) + "\n" + focus_note
 
@@ -311,6 +312,7 @@ def _select_round_winner(
     all_candidate_results: dict[str, list[dict]],
     current_best: dict[str, Any],
     improvement_threshold: float,
+    pipeline_schema: Any = None,
 ) -> dict[str, Any]:
     """Compare candidates and select the round winner.
 
@@ -319,6 +321,7 @@ def _select_round_winner(
         all_candidate_results: Dict mapping candidate.id -> list of result dicts.
         current_best: Dict with keys: accuracy, prompt_state, results, label.
         improvement_threshold: Minimum accuracy improvement to accept a new winner.
+        pipeline_schema: Pipeline schema for role-aware composite scoring.
 
     Returns:
         Dict with keys: label, prompt_state, accuracy, hits, total, results,
@@ -338,7 +341,7 @@ def _select_round_winner(
 
     for idx, candidate in enumerate(candidates):
         c_results = all_candidate_results[candidate.id]
-        c_scores = compute_composite_score(c_results)
+        c_scores = compute_composite_score(c_results, pipeline_schema)
         c_composite = c_scores["composite"]
         if c_composite > best_composite:
             best_composite = c_composite
@@ -358,7 +361,7 @@ def _select_round_winner(
     ]
     for candidate in candidates:
         c_results = all_candidate_results[candidate.id]
-        c_scores = compute_composite_score(c_results)
+        c_scores = compute_composite_score(c_results, pipeline_schema)
         c_composite = c_scores["composite"]
         delta = c_composite - current_composite
         rows.append({
@@ -580,6 +583,7 @@ async def evaluate_and_select_winner(
     ]
     winner_entry = _select_round_winner(
         evaluated_candidates, all_candidate_results, cb, improvement_threshold,
+        pipeline_schema=ctx.pipeline_schema,
     )
 
     # Resolve the winner's pipeline_params: if a candidate won, merge its

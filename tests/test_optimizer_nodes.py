@@ -12,8 +12,6 @@ from api.nodes.optimizer_nodes import (
     L2RefineOutput,
     L3ModifyPlanNode,
     L3ModifyPlanOutput,
-    InitNode,
-    InitNodeOutput,
 )
 
 
@@ -54,58 +52,11 @@ def test_nodes_registered():
     """All optimizer nodes appear in the registry."""
     from api.nodes import get_node_class
 
-    assert get_node_class("InitNode") is InitNode
     assert get_node_class("L1GenerateNode") is L1GenerateNode
     assert get_node_class("L1EvaluateNode") is L1EvaluateNode
     assert get_node_class("L2RefineNode") is L2RefineNode
     assert get_node_class("L3ModifyPlanNode") is L3ModifyPlanNode
-    assert get_node_class("nodes/InitNode") is InitNode
     assert get_node_class("nodes/L2RefineNode") is L2RefineNode
-
-
-# ---------------------------------------------------------------------------
-# InitNode
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_init_node(monkeypatch):
-    """InitNode decomposes instruction into Layer 1 fields."""
-    fake_fields = {
-        "persona": "You are a ranking expert.",
-        "task_intent": "Rank candidates.",
-        "problem_description": "Term normalization.",
-        "instruction": "Rank by relevance.",
-        "thinking_style": "Step by step.",
-        "answer_format": "JSON array.",
-    }
-
-    async def mock_restructure(context_input, llm_client, **kwargs):
-        return dict(fake_fields)
-
-    monkeypatch.setattr(
-        "api.services.search.context.restructure_context",
-        mock_restructure,
-    )
-
-    from api.services.llm_client import MockLLMClient
-    monkeypatch.setattr(
-        "api.services.llm_client.get_llm_client",
-        lambda provider=None: MockLLMClient(),
-    )
-
-    node = InitNode(node_id="test_init", config={"model": "test-model"})
-    output = await node.process({
-        "instruction": "Rank candidates by relevance.",
-        "improvement_areas": "Focus on entity profiling.",
-    })
-
-    assert isinstance(output, InitNodeOutput)
-    assert output.prompt_state_id
-    assert output.layer1_fields["persona"] == "You are a ranking expert."
-    assert len(output.rendered_prompt) > 0
-    ps = PromptState(**output.prompt_state)
-    assert ps.id == output.prompt_state_id
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +337,6 @@ def test_node_obs_types():
     assert L1EvaluateNode(node_id="t", config={})._node_obs_type() == "span"
     assert L2RefineNode(node_id="t", config={})._node_obs_type() == "generation"
     assert L3ModifyPlanNode(node_id="t", config={})._node_obs_type() == "generation"
-    assert InitNode(node_id="t", config={})._node_obs_type() == "generation"
 
 
 # ---------------------------------------------------------------------------
