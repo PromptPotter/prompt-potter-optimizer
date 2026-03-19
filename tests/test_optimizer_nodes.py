@@ -301,13 +301,12 @@ async def test_l2_refine_node(monkeypatch, baseline_ps):
     async def mock_refine(current_ps, stalled_rounds, eval_data, llm_client, **kwargs):
         from api.services.campaign.layer_transitions import TransitionResult
         new_ps = current_ps.derive(
-            context="refined context",
-            parameters={"n_variants": 7},
+            optimizer_params={"n_variants": 7},
             changes_description="L2: test refinement",
         )
         return TransitionResult(
             prompt_state=new_ps,
-            pipeline_params={"llm_ranking": {"temperature": 0.3}},
+            task_context={"domain": "test"},
         )
 
     monkeypatch.setattr(
@@ -327,8 +326,8 @@ async def test_l2_refine_node(monkeypatch, baseline_ps):
 
     assert isinstance(output, L2RefineOutput)
     ps = PromptState(**output.prompt_state)
-    assert ps.context == "refined context"
-    assert output.pipeline_params == {"llm_ranking": {"temperature": 0.3}}
+    assert ps.optimizer_params.get("n_variants") == 7
+    assert output.task_context == {"domain": "test"}
     assert "L2" in output.changes_description
 
 

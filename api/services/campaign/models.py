@@ -178,7 +178,8 @@ class _LoopState:
     eval_ctx: EvalContext | None = None
 
     # Critique + thinking styles (meta-level, fed forward between rounds)
-    critique_text: str = ""
+    critique_text: str = ""  # legacy — formatted text for L1 prompt
+    critique: dict = field(default_factory=dict)  # full 5-field critique dict
     thinking_styles: list[str] = field(default_factory=list)
 
     # L2/L3 state

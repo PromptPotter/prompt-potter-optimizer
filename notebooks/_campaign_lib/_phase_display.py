@@ -524,18 +524,11 @@ def _print_refine_exit(d: dict, state: _CycleDisplayState) -> None:
     import json
 
     n_changes = d.get("param_changes_count", 0)
-    ctx = "context updated" if d.get("context_changed") else "context unchanged"
-    pp_changed = d.get("pipeline_params_changed", False)
-    pp_str = f", {GREEN}pipeline_params updated{RESET}" if pp_changed else ""
+    tc = f", {GREEN}task_context updated{RESET}" if d.get("task_context_changed") else ""
     desc = d.get("changes_description", "")
-    print(f"  {GREEN}✓{RESET} L2 decision: {n_changes} param changes, {ctx}{pp_str}")
+    print(f"  {GREEN}✓{RESET} L2 decision: {n_changes} param changes{tc}")
     if desc:
         print(f"    {desc}")
-    if pp_changed:
-        pp = d.get("pipeline_params") or {}
-        for step, cfg in sorted(pp.items()):
-            if isinstance(cfg, dict):
-                print(f"    {CYAN}{step}{RESET}: {json.dumps(cfg)}")
 
     # Debug: show full L2 prompt and response
     l2_prompt = d.get("l2_prompt", "")

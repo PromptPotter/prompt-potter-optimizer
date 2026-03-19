@@ -5,7 +5,7 @@ Covers:
 - modify_plan() — L3 strategic plan change with mock LLM
 - L1→L2 escalation in feedback cycle
 - L2→L3 escalation in feedback cycle
-- L2 meta-param overrides (n_variants, creativity from PromptState.parameters)
+- L2 meta-param overrides (n_variants, creativity from PromptState.optimizer_params)
 - PromptState.plan injection into meta-prompt
 """
 
@@ -43,12 +43,12 @@ def _mock_client(response_dict: dict) -> MockLLMClient:
 async def test_refine_context_applies_parameters():
     """refine_context merges LLM-recommended parameters onto current state."""
     client = _mock_client({
-        "parameters": {"creativity": 0.9, "n_variants": 8},
+        "optimizer_params": {"creativity": 0.9, "n_variants": 8},
         "context": "",
         "rationale": "Increase diversity to escape local minimum",
     })
 
-    ps = PromptState(instruction="Rank candidates", parameters={"creativity": 0.5})
+    ps = PromptState(instruction="Rank candidates", optimizer_params={"creativity": 0.5})
     stalled_rounds = [
         {"round": 0, "accuracy": 0.4, "results": [
             {"query": "aspirin", "ground_truth": "Aspirin", "predicted": "WRONG", "hit": False},
@@ -60,34 +60,36 @@ async def test_refine_context_applies_parameters():
 
     assert isinstance(result, TransitionResult)
     assert result.prompt_state.parent_id == ps.id
-    assert result.prompt_state.parameters["creativity"] == 0.9
-    assert result.prompt_state.parameters["n_variants"] == 8
+    assert result.prompt_state.optimizer_params["creativity"] == 0.9
+    assert result.prompt_state.optimizer_params["n_variants"] == 8
     assert "L2:" in result.prompt_state.changes_description
     assert result.pipeline_params is None
 
 
 @pytest.mark.asyncio
-async def test_refine_context_applies_context():
-    """refine_context updates context when LLM recommends it."""
+async def test_refine_context_applies_task_context():
+    """refine_context updates task_context when LLM recommends it."""
     client = _mock_client({
-        "parameters": {},
-        "context": "Focus on pharmaceutical brand name matching.",
+        "optimizer_params": {},
+        "task_context": {"domain": "pharmaceutical"},
         "rationale": "Add domain grounding",
     })
 
-    ps = PromptState(instruction="Rank candidates", context="")
+    _ps = PromptState(instruction="Rank candidates")
+    result = await refine_context(
+        _ps, [{"round": 0, "accuracy": 0.3, "results": []}], [], client,
+        task_context={"domain": "generic"},
+    )
 
-    result = await refine_context(ps, [{"round": 0, "accuracy": 0.3, "results": []}], [], client)
-
-    assert result.prompt_state.context == "Focus on pharmaceutical brand name matching."
-    assert result.prompt_state.parent_id == ps.id
+    assert result.task_context == {"domain": "pharmaceutical"}
+    assert result.prompt_state.parent_id == _ps.id
 
 
 @pytest.mark.asyncio
 async def test_refine_context_no_changes_returns_same():
     """refine_context returns current PS unchanged when LLM suggests nothing."""
     client = _mock_client({
-        "parameters": {},
+        "optimizer_params": {},
         "context": "",
         "rationale": "No changes needed",
     })
@@ -115,7 +117,7 @@ async def test_modify_plan_sets_new_plan():
     })
 
     ps = PromptState(instruction="Rank candidates", plan="")
-    l2_history = [{"l2_round": 1, "parameters": {}, "accuracy_change": 0.0}]
+    l2_history = [{"l2_round": 1, "optimizer_params": {}, "accuracy_change": 0.0}]
 
     result = await modify_plan(ps, l2_history, [], client)
 
@@ -138,16 +140,14 @@ async def test_modify_plan_preserves_other_fields():
     ps = PromptState(
         instruction="Rank candidates",
         persona="Expert pharmacologist",
-        context="Medical domain",
-        parameters={"creativity": 0.8},
+        optimizer_params={"creativity": 0.8},
     )
 
     result = await modify_plan(ps, [], [], client)
 
     assert result.prompt_state.instruction == ps.instruction
     assert result.prompt_state.persona == ps.persona
-    assert result.prompt_state.context == ps.context
-    assert result.prompt_state.parameters == ps.parameters
+    assert result.prompt_state.optimizer_params == ps.optimizer_params
     assert result.prompt_state.plan == "New strategy"
 
 
@@ -173,7 +173,7 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
     async def mock_refine_context(current_ps, stalled_rounds, eval_d, llm_client, **kwargs):
         l2_calls.append({"ps_id": current_ps.id, "n_stalled": len(stalled_rounds)})
         return TransitionResult(prompt_state=current_ps.derive(
-            parameters={"creativity": 0.9},
+            optimizer_params={"creativity": 0.9},
             changes_description="L2: mock refine",
         ))
 
@@ -224,7 +224,7 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
     async def mock_refine_context(current_ps, stalled_rounds, eval_d, llm_client, **kwargs):
         l2_calls.append(current_ps.id)
         return TransitionResult(prompt_state=current_ps.derive(
-            parameters={"creativity": 0.9},
+            optimizer_params={"creativity": 0.9},
             changes_description="L2: mock",
         ))
 
@@ -277,7 +277,7 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
 
 @pytest.mark.asyncio
 async def test_l2_meta_param_overrides(monkeypatch, eval_data):
-    """PromptState.parameters override n_variants and creativity in generation."""
+    """PromptState.optimizer_params override n_variants and creativity in generation."""
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[3])  # perfect → stops after round 0
@@ -304,7 +304,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
     # Provide baseline with L2 meta-param overrides
     baseline_ps = PromptState(
         instruction="Rank candidates",
-        parameters={"n_variants": 7, "creativity": 0.95},
+        optimizer_params={"n_variants": 7, "creativity": 0.95},
     )
 
     config = CycleConfig(
@@ -325,7 +325,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
         baseline_accuracy=0.0,
     )
 
-    # Should use PromptState.parameters overrides, not config defaults
+    # Should use PromptState.optimizer_params overrides, not config defaults
     assert gen_calls[0]["n"] == 7
     assert gen_calls[0]["creativity"] == 0.95
 
@@ -394,13 +394,13 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
 
 
 @pytest.mark.asyncio
-async def test_refine_context_with_pipeline_params():
-    """refine_context returns pipeline_params when LLM suggests them."""
+async def test_refine_context_ignores_pipeline_params():
+    """refine_context does NOT return pipeline_params (L1's job)."""
     client = _mock_client({
-        "parameters": {},
-        "context": "",
+        "optimizer_params": {"creativity": 0.5},
+        "context": "Updated context",
         "pipeline_params": {"llm_ranking": {"temperature": 0.5}},
-        "rationale": "Lower temperature for more precise ranking",
+        "rationale": "L2 focuses on context, not pipeline_params",
     })
 
     ps = PromptState(instruction="Rank candidates")
@@ -409,8 +409,9 @@ async def test_refine_context_with_pipeline_params():
         pipeline_params={"llm_ranking": {"temperature": 0.3}},
     )
 
-    assert result.pipeline_params is not None
-    assert result.pipeline_params["llm_ranking"]["temperature"] == 0.5
+    # L2 no longer sets pipeline_params — only context + meta-settings
+    assert result.pipeline_params is None
+    assert result.prompt_state.optimizer_params.get("creativity") == 0.5
 
 
 @pytest.mark.asyncio

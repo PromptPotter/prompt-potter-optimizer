@@ -71,29 +71,31 @@ The optimizer itself is a 4-step pipeline, designed to be modeled using the same
 
 | Step | Purpose | Current function | Trigger |
 |------|---------|------------------|---------|
-| `l1_generate` | Candidate generation | `generate_candidates()` in `prompt_optimizer.py` | Every round (also init mode via `restructure_context()`) |
+| `l1_generate` | Candidate generation (sole pipeline_params decider) | `generate_candidates()` in `prompt_optimizer.py` | Every round (also init mode via `restructure_context()`) |
 | `l1_evaluate` | Eval + winner selection + critique | `evaluate_and_select_winner()` in `prompt_optimizer.py` | Every round |
-| `l2_refine_context` | Context/parameter tuning | `refine_context()` in `layer_transitions.py` | L1 patience exhausted |
+| `l2_refine_context` | Situation context + meta-settings (creativity, n_variants, sample_size) | `refine_context()` in `layer_transitions.py` | L1 patience exhausted or degradation escalation |
 | `l3_modify_plan` | Strategic replanning | `modify_plan()` in `layer_transitions.py` | L2 patience exhausted OR `EscalationCheck(target="l3")`  |
 
 ```
-  ┌────────────────────────────────────────────────────┐
-  │  l1_generate ──► l1_evaluate                       │
-  │       ▲               │                            │
-  │       │    critique +  │                            │
-  │       └── styles ◄────┘                            │
-  │                                                    │
-  │  stall? ──────► l2_refine_context ──► resume L1      │
-  │  stall? ──────► l3_modify_plan    ──► resume L2+L1  │
-  │  escalation? ─► l3_modify_plan    ──► resume L1     │
-  └────────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────┐
+  │  l1_generate ────► l1_evaluate (+ critique)              │
+  │       ▲                 │                                │
+  │       │  critique (5 fields)                             │
+  │       │  + thinking_styles                               │
+  │       └──────── ◄───────┘                                │
+  │                                                          │
+  │  stall?       ──► l2_refine_context ──► resume L1        │
+  │  degradation? ──► l2_refine_context ──► resume L1        │
+  │  l2 stall?    ──► l3_modify_plan    ──► resume L2+L1     │
+  └──────────────────────────────────────────────────────────┘
 ```
 
 **Key design decisions:**
-- Init is `l1_generate` in naked mode (single decomposition pass, no critique/styles). Also produces `task_context` (structured domain fields) stored on `OptSearchPoint`
-- Critique and thinking style sampling are sub-tools of `l1_evaluate`, not separate steps
-- Pluggable `EscalationCheck`s  run after each candidate eval — can short-circuit a round and route to L2/L3/abort
-- The schema describes step capabilities; loop control stays in `feedback_cycle.py`
+- **L1 Generate is the sole pipeline_params decider.** L2 refines context and meta-settings; L3 modifies the strategic plan. Neither touches pipeline_params directly.
+- **Setup** before the loop: define pipeline → load dataset → decompose `TASK_DESCRIPTION` → `task_context` → restructure prompt → sensitivity scan → baseline eval + bootstrap critique. Init is `l1_evaluate` in naked mode (eval + critique, no candidate generation).
+- Critique produces 5 fields (`positive_critique`, `negative_critique`, `priority_fix`, `suggested_axes`, `summary`) — fed to both L1 Generate and L2 Refine. See [`critique-agent.md`](critique-agent.md) for details.
+- Pluggable `EscalationCheck`s run after each candidate eval — can short-circuit a round and route to L2/L3/abort.
+- The schema describes step capabilities; loop control stays in `feedback_cycle.py`.
 
 This model enables optimizer-level tracing (each step as a Langfuse observation), full reproducibility (every LLM call reconstructible from trial artifacts), and self-optimization (a meta-PromptPotter optimizing its own prompts). See the [M7 spec](specs/m7-optimizer-pipeline.md) for the full design.
 

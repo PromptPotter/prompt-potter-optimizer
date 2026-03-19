@@ -341,7 +341,9 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
                 scan_context=self.config.get("scan_context"),
                 pipeline_params=self.config.get("pipeline_params"),
             )
-            critique_text = await agent.run(ctx)
+            critique_result = await agent.run(ctx)
+            from api.services.campaign.critique import format_critique_for_prompt
+            critique_text = format_critique_for_prompt(critique_result)
 
         from api.services.campaign.critique import sample_thinking_styles
         thinking_styles = sample_thinking_styles(

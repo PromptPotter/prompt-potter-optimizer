@@ -67,20 +67,19 @@ def _get_candidates(r: dict) -> list:
 
 
 CRITIQUE_TASK = """\
-You are a pipeline optimization analyst. Analyze all data above and return JSON:
+Analyze all data above and return JSON:
 {
-  "failure_categories": [{"category": "<name>", "count": <n>, "description": "<why>"}],
-  "root_cause": "<single most important cause of failures>",
-  "pipeline_insights": "<what the pipeline telemetry reveals>",
+  "positive_critique": "<what is working well — patterns to extend>",
+  "negative_critique": "<what is failing — root causes and blockers>",
   "priority_fix": "<single most impactful change to make>",
   "suggested_axes": ["<pipeline_param or prompt_field to try next>"],
   "summary": "<2-3 sentence actionable critique for the next candidate generator>"
 }
 Rules:
-- failure_categories may be empty if accuracy is high
-- pipeline_insights should reference specific stats (degradation rate, rank distribution, etc.)
-- suggested_axes should be concrete parameter names from the scan context or pipeline config
-- summary is the key output — it will be injected into the next generation prompt
+- positive_critique: identify success patterns even at low accuracy (partial matches)
+- negative_critique: reference specific stats (degradation rate, rank distribution, timing)
+- suggested_axes: concrete parameter names from the scan context or pipeline config
+- All 5 fields are fed to the next generation round — be concise and actionable
 """
 
 

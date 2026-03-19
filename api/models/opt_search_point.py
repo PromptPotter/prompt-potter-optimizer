@@ -31,8 +31,7 @@ class OptSearchPoint(BaseModel):
     critique_text: str = ""
     thinking_styles: list[str] = Field(default_factory=list)
     plan: str = ""
-    context: str = ""
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    optimizer_params: dict[str, Any] = Field(default_factory=dict)
     task_context: dict[str, Any] = Field(
         default_factory=dict,
         description="Structured domain context (domain, pipeline_purpose, "

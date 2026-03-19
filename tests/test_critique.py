@@ -13,34 +13,45 @@ from api.services.llm_client import MockLLMClient
 
 
 @pytest.mark.asyncio
-async def test_critique_returns_string():
-    """CritiqueAgent.run returns a non-empty string from LLM response."""
+async def test_critique_returns_dict():
+    """CritiqueAgent.run returns a dict with 5 critique fields."""
     agent = CritiqueAgent(MockLLMClient(), model=None)
     ctx = CritiqueContext(results=[], accuracy=0.5)
     result = await agent.run(ctx)
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert isinstance(result, dict)
+    assert "summary" in result
+    assert "positive_critique" in result
+    assert "negative_critique" in result
 
 
 @pytest.mark.asyncio
-async def test_critique_extracts_json_summary():
-    """When LLM returns JSON with summary key, extracts it."""
+async def test_critique_extracts_json_fields():
+    """When LLM returns JSON with critique fields, extracts them."""
     import json
-    client = MockLLMClient(responses=[json.dumps({"summary": "Fix ranking"})])
+    client = MockLLMClient(responses=[json.dumps({
+        "summary": "Fix ranking",
+        "positive_critique": "Good recall",
+        "negative_critique": "Poor precision",
+        "priority_fix": "Adjust prefix",
+        "suggested_axes": ["query_prefix"],
+    })])
     agent = CritiqueAgent(client, model=None)
     ctx = CritiqueContext(results=[], accuracy=0.3)
     result = await agent.run(ctx)
-    assert result == "Fix ranking"
+    assert result["summary"] == "Fix ranking"
+    assert result["positive_critique"] == "Good recall"
+    assert result["suggested_axes"] == ["query_prefix"]
 
 
 @pytest.mark.asyncio
 async def test_critique_falls_through_on_non_json():
-    """When LLM returns non-JSON text, uses raw content."""
+    """When LLM returns non-JSON text, wraps in summary field."""
     client = MockLLMClient(responses=["Plain text critique about failures"])
     agent = CritiqueAgent(client, model=None)
     ctx = CritiqueContext(results=[], accuracy=0.3)
     result = await agent.run(ctx)
-    assert result == "Plain text critique about failures"
+    assert isinstance(result, dict)
+    assert result["summary"] == "Plain text critique about failures"
 
 
 # ---------------------------------------------------------------------------

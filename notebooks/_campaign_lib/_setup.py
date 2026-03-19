@@ -86,6 +86,7 @@ async def decompose_task_context(
     )
 
     task_context = result.get("task_context", {})
+    task_context["raw_description"] = task_description
     cache_tag = " (cached)" if was_cached else ""
 
     print(f"{'=' * 70}")

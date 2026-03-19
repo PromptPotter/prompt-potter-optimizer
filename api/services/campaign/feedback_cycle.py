@@ -576,8 +576,8 @@ async def _execute_round(
         except Exception:
             logger.warning("ObsLogger.log_round_start failed", exc_info=True)
 
-    # Resolve L2 meta-param overrides from PromptState.parameters
-    ps_params = state.current_sp.prompt_state.parameters
+    # Resolve L2 meta-param overrides from PromptState.optimizer_params
+    ps_params = state.current_sp.prompt_state.optimizer_params
     n_variants = ps_params.get("n_variants", config.n_variants)
     creativity = ps_params.get("creativity", config.creativity)
 
@@ -596,8 +596,16 @@ async def _execute_round(
     )
 
     # Update state with critique + thinking styles from eval output
-    state.critique_text = eval_out.pop("critique_text", "")
+    _critique_raw = eval_out.pop("critique_text", "")
     state.thinking_styles = eval_out.pop("thinking_styles", [])
+    # critique_text can be str (legacy) or dict (new 5-field format)
+    if isinstance(_critique_raw, dict):
+        state.critique = _critique_raw
+        from api.services.campaign.critique import format_critique_for_prompt
+        state.critique_text = format_critique_for_prompt(_critique_raw)
+    else:
+        state.critique_text = _critique_raw
+        state.critique = {"summary": _critique_raw}
 
     round_result = CycleRoundResult(
         round=round_num,
@@ -701,7 +709,7 @@ async def _do_l2_transition(
     _emit_phase(on_phase, "refine_context", "enter", round=round_num,
                 l2_round=state.l2_round,
                 stall_count=state.stall_count,
-                current_params=current_ps.parameters,
+                current_params=current_ps.optimizer_params,
                 current_accuracy=state.current_accuracy,
                 best_accuracy=state.best_accuracy)
 
@@ -728,25 +736,22 @@ async def _do_l2_transition(
     new_ps = PromptState(**l2_result.prompt_state)
     tr = layer_transitions.TransitionResult(
         prompt_state=new_ps,
-        pipeline_params=l2_result.pipeline_params,
-        task_context=l2_result.task_context,
+        task_context=getattr(l2_result, "task_context", None),
         debug_prompt=getattr(l2_result, "debug_prompt", ""),
         debug_response=getattr(l2_result, "debug_response", None),
     )
     # Update task_context if L2 refined it
     if tr.task_context:
         state.task_context = tr.task_context
-    state.current_sp = state.current_sp.derive(
-        prompt_state=tr.prompt_state,
-        **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),
-    )
+    # L2 does NOT set pipeline_params — only L1 Generate does that
+    state.current_sp = state.current_sp.derive(prompt_state=tr.prompt_state)
     state.l2_round += 1
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
     _emit_phase(on_phase, "refine_context", "exit", round=round_num,
                 l2_round=state.l2_round,
-                param_changes_count=len(tr.prompt_state.parameters),
-                context_changed=tr.prompt_state.context != current_ps.context,
+                param_changes_count=len(tr.prompt_state.optimizer_params),
+                task_context_changed=tr.task_context is not None,
                 changes_description=tr.prompt_state.changes_description or "",
                 pipeline_params_changed=tr.pipeline_params is not None,
                 pipeline_params=tr.pipeline_params,
@@ -774,7 +779,7 @@ async def _do_l3_transition(
 
     l2_history = [{
         "l2_round": state.l2_round,
-        "parameters": current_ps.parameters,
+        "optimizer_params": current_ps.optimizer_params,
         "accuracy_change": state.best_composite - state.best_composite_at_l3_entry,
     }]
     _emit_phase(on_phase, "modify_plan", "enter", round=round_num,
@@ -1080,15 +1085,21 @@ async def run_feedback_cycle(
     bootstrap_critique = ""
     if config.enable_critique and current_results:
         from api.services.campaign.critique_stats import CritiqueContext
+        from api.services.campaign.critique import format_critique_for_prompt
         _crit_llm = _llm_client.get_llm_client(config.provider)
-        agent = CritiqueAgent(_crit_llm, model=config.model)
+        agent = CritiqueAgent(
+            _crit_llm, model=config.model,
+            positive_threshold=config.critique_positive_threshold,
+        )
         ctx = CritiqueContext(
             results=current_results,
             accuracy=current_accuracy,
             composite=current_accuracy,
         )
-        bootstrap_critique = await agent.run(ctx)
-        state.critique_text = bootstrap_critique
+        _boot_result = await agent.run(ctx)
+        state.critique = _boot_result
+        state.critique_text = format_critique_for_prompt(_boot_result)
+        bootstrap_critique = state.critique_text
         logger.info("Bootstrap critique: %s", bootstrap_critique[:100])
     state.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
@@ -1249,8 +1260,7 @@ async def run_feedback_cycle(
                         critique_text=state.critique_text,
                         thinking_styles=state.thinking_styles,
                         plan=state.current_sp.prompt_state.plan,
-                        context=state.current_sp.prompt_state.context,
-                        parameters=state.current_sp.prompt_state.parameters,
+                        optimizer_params=state.current_sp.prompt_state.optimizer_params,
                         task_context=state.task_context,
                     )
                     campaign_store.add_trial(config.backend_id, cycle_id, {

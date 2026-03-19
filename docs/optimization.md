@@ -39,8 +39,8 @@ Adjusted when Layer 1 improvements stall:
 
 | Field | Purpose |
 |-------|---------|
-| `context` | Additional optimization context |
-| `parameters` | Hypervariables (family, version, template_variables) |
+| `optimizer_params` | Meta-settings (creativity, n_variants, sample_size, variant_strategy) |
+| `task_context` | Structured domain context (domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges, raw_description). Decomposed from `TASK_DESCRIPTION` at init. L2 can refine individual fields. `PromptState.context` is auto-synced from this — one source of truth. |
 
 ### Layer 3: Modify Plan
 
@@ -79,6 +79,8 @@ Each round:
 
 ### Critique Agent
 
+See **[critique-agent.md](critique-agent.md)** for the full architecture: stat injection, anomaly detection, escalation chain, and how to wire new nodes into the error kill chain.
+
 Failure analysis is **separated from candidate generation** (PromptWizard pattern). The critique agent is a researcher with two specialized tools:
 
 | Tool | When | Analyzes |
@@ -108,10 +110,24 @@ The feedback cycle is itself a 4-step pipeline, designed to be modeled using the
 |------|---------|----------|-----------|
 | `l1_generate` | Candidate generation | `generate_candidates()` in `prompt_optimizer.py` | Scan context enrichment (optional) |
 | `l1_evaluate` | Eval + winner selection | `evaluate_and_select_winner()` in `prompt_optimizer.py` | `CritiqueAgent.run()`, `sample_thinking_styles()` |
-| `l2_refine_context` | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` | Pipeline param adjustment (with schema) |
+| `l2_refine_context` | Context/parameter/task_context tuning on L1 stall | `refine_context()` in `layer_transitions.py` | Pipeline param adjustment (with schema), task_context refinement |
 | `l3_modify_plan` | Strategic replanning on L2 stall or escalation | `modify_plan()` in `layer_transitions.py` | Pipeline param adjustment, escalation context |
 
-**Init is `l1_generate` in naked mode.** The init phase runs `restructure_context()` -- the same LLM decomposition used by candidate generation, but as a single-pass operation without critique feedback, thinking styles, or scan context. Same step, simpler mode.
+**Init phase** (notebook cells before the optimization loop):
+
+```
+1. Define pipeline    → GET /pipeline → PipelineSchema
+2. Define dataset     → load ground truth, train/test split
+3. Define context     → TASK_DESCRIPTION (string or structured)
+4. Restructure        → LLM decomposes context → task_context dict
+                        (domain, pipeline_purpose, data_characteristics,
+                         optimization_goals, key_challenges, raw_description)
+                      → PromptState.context = stringified task_context
+5. Scan advisor       → LLM recommends which axes to scan
+6. Sensitivity scan   → OAT scan across recommended axes → scan_context
+7. Partial L1 eval    → baseline accuracy + bootstrap critique
+                      → prepares scan_context for 1st loop L1 Generate
+```
 
 **Critique and thinking styles are tools of `l1_evaluate`, not separate steps.** The critique agent runs *within* the evaluation step -- its output (`critique_text`) feeds the *next* round's `l1_generate`. Similarly, `sample_thinking_styles()` runs at the end of evaluation to prepare mutation guidance for the next round. Neither has an independent parameter surface or routing decision that would warrant a separate pipeline step.
 
