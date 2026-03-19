@@ -343,6 +343,7 @@ async def run_feedback_cycle_notebook(
     scan_context: "dict | None" = None,
     experiment_id: str | None = None,
     svc: dict | None = None,
+    task_context: "dict | None" = None,
 ) -> list:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
@@ -375,6 +376,7 @@ async def run_feedback_cycle_notebook(
         session_terms=session_terms,
         scan_context=scan_context,
         pipeline_schema=pipeline_schema,
+        task_context=task_context,
     )
 
     bl = _extract_campaign_baseline(campaign_rounds)

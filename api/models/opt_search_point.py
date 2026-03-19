@@ -33,6 +33,12 @@ class OptSearchPoint(BaseModel):
     plan: str = ""
     context: str = ""
     parameters: dict[str, Any] = Field(default_factory=dict)
+    task_context: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured domain context (domain, pipeline_purpose, "
+        "data_characteristics, optimization_goals, key_challenges). "
+        "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
+    )
     content_hashes: list[str] = Field(
         default_factory=list,
         description="Content hashes of dataset_runs produced under this config",

@@ -127,6 +127,9 @@ class L1GenerateInput(BaseModel):
         default_factory=list,
         description="Degradation investigation history",
     )
+    task_context: dict | None = Field(
+        None, description="Structured domain context for generation guidance",
+    )
 
 
 class L1GenerateOutput(BaseModel):
@@ -178,6 +181,7 @@ class L1GenerateNode(NodeBase[L1GenerateInput, L1GenerateOutput]):
             critique_text=input_data.critique_text,
             thinking_styles=input_data.thinking_styles,
             escalation_journal=input_data.escalation_journal,
+            task_context=input_data.task_context,
         )
 
         return L1GenerateOutput(
@@ -384,6 +388,9 @@ class L2RefineInput(BaseModel):
         default_factory=list,
         description="History of escalation investigation attempts and outcomes",
     )
+    task_context: dict | None = Field(
+        None, description="Structured domain context (refinable by L2)",
+    )
 
 
 class L2RefineOutput(BaseModel):
@@ -392,6 +399,9 @@ class L2RefineOutput(BaseModel):
     prompt_state: dict = Field(..., description="New PromptState (serialized)")
     pipeline_params: dict | None = Field(
         None, description="Updated pipeline params (None if unchanged)",
+    )
+    task_context: dict | None = Field(
+        None, description="Refined domain context (None if unchanged)",
     )
     changes_description: str = Field(
         "", description="Description of changes made",
@@ -439,11 +449,13 @@ class L2RefineNode(NodeBase[L2RefineInput, L2RefineOutput]):
             pipeline_schema=self.config.get("pipeline_schema"),
             escalation_context=input_data.escalation_context,
             escalation_journal=input_data.escalation_journal,
+            task_context=input_data.task_context,
         )
 
         return L2RefineOutput(
             prompt_state=tr.prompt_state.model_dump(),
             pipeline_params=tr.pipeline_params,
+            task_context=tr.task_context,
             changes_description=tr.prompt_state.changes_description or "",
             debug_prompt=tr.debug_prompt,
             debug_response=tr.debug_response,

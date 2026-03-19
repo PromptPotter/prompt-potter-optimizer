@@ -39,6 +39,8 @@ This is where 90% of implementation work happens. All core logic lives here.
 
 PromptPotter internally decomposes prompts into specific elements (persona, task_intent, etc.) to perturb them independently during sensitivity scanning. The scan baseline is created by LLM restructure (`restructure_context()` in `search/context.py`) — semantically equivalent, just reorganized for optimization.
 
+`restructure_context()` also produces a `task_context` sub-dict with structured domain fields (domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges). This is decomposed from `TASK_DESCRIPTION` at campaign start via `decompose_task_context()` in the notebook, stored on `OptSearchPoint`, and flows to L1 candidate generation and L2 refinement.
+
 ## Pipeline discovery — ownership principle
 
 **TermNorm owns all registry artifacts** (schemas, prompts). PromptPotter never hardcodes them:

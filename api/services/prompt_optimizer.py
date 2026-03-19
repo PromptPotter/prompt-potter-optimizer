@@ -162,6 +162,7 @@ async def generate_candidates(
     critique_text: str = "",
     thinking_styles: list[str] | None = None,
     escalation_journal: list[dict] | None = None,
+    task_context: dict | None = None,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -215,6 +216,15 @@ async def generate_candidates(
             n_variants, rendered_prompt, current_accuracy,
             current_results, failure_examples,
         )
+
+    # Append structured domain context
+    if task_context:
+        tc_lines = "\n".join(f"  {k}: {v}" for k, v in task_context.items() if v)
+        if tc_lines:
+            meta_prompt += (
+                f"\n\nTASK CONTEXT (domain understanding — use to guide your changes):\n"
+                f"{tc_lines}\n"
+            )
 
     # Append critique from previous round's evaluation
     if critique_text:

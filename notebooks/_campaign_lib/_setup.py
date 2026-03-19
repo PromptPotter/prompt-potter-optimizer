@@ -28,11 +28,81 @@ __all__ = [
     "configure_pipeline",
     # Pipeline snapshot
     "show_pipeline_snapshot",
+    # Task context
+    "decompose_task_context",
     # Notebook-facing wrappers
     "smoke_test_override",
     # Re-exports
     "save_campaign_winner",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Task context decomposition
+# ---------------------------------------------------------------------------
+
+TASK_CONTEXT_FIELDS = ("domain", "pipeline_purpose", "data_characteristics",
+                       "optimization_goals", "key_challenges")
+
+
+async def decompose_task_context(
+    task_description: str,
+    campaign_config: dict,
+    svc: dict,
+) -> dict:
+    """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
+
+    Calls ``restructure_context_cached()`` and extracts the ``task_context``
+    sub-dict. Prints the decomposed fields for visibility.
+
+    Returns:
+        Dict with keys: domain, pipeline_purpose, data_characteristics,
+        optimization_goals, key_challenges.
+    """
+    import hashlib
+    from api.services.search.context import restructure_context_cached
+
+    if not task_description:
+        print("  (no task description provided)")
+        return {}
+
+    llm_client, llm_model = setup_llm(campaign_config)
+    store = svc.get("store")
+    backend_id = svc.get("backend_id", "")
+    improvement_areas = campaign_config.get("improvement_areas", "")
+
+    # Content-hash for caching
+    rp_hash = hashlib.sha256(
+        f"task_ctx:{task_description}".encode(),
+    ).hexdigest()[:16]
+
+    result, was_cached = await restructure_context_cached(
+        task_description, llm_client,
+        model=llm_model,
+        improvement_areas=improvement_areas,
+        store_base_dir=store.base_dir if store else None,
+        backend_id=backend_id,
+        rp_hash=rp_hash,
+    )
+
+    task_context = result.get("task_context", {})
+    cache_tag = " (cached)" if was_cached else ""
+
+    print(f"{'=' * 70}")
+    print(f"TASK CONTEXT DECOMPOSITION{cache_tag}")
+    print(f"{'=' * 70}")
+    for field in TASK_CONTEXT_FIELDS:
+        val = task_context.get(field, "")
+        if val:
+            print(f"  {field}: {val}")
+        else:
+            print(f"  {field}: (empty)")
+
+    if result.get("consultation"):
+        print(f"\n  Consultation: {result['consultation']}")
+    print(f"{'=' * 70}")
+
+    return task_context
 
 
 # ---------------------------------------------------------------------------

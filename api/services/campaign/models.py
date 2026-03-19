@@ -51,6 +51,11 @@ class CycleConfig(BaseModel):
     # Scan-aware optimization
     scan_context: dict | None = Field(None, description="Scan analytics context for candidate gen")
 
+    # Structured domain context (from TASK_DESCRIPTION decomposition)
+    task_context: dict | None = Field(
+        None, description="Structured domain context for L1 gen and L2 refinement",
+    )
+
     # L2/L3 escalation
     enable_l2: bool = Field(True, description="Enable L2 refine_context loop")
     enable_l3: bool = Field(True, description="Enable L3 modify_plan loop")
@@ -80,6 +85,7 @@ class CycleConfig(BaseModel):
         session_terms: list[str] | None = None,
         pipeline_schema: PipelineSchema | None = None,
         scan_context: dict | None = None,
+        task_context: dict | None = None,
     ) -> CycleConfig:
         """Build from the notebook's ``campaign_config`` dict."""
         opt = campaign_config.get("optimization", {})
@@ -103,6 +109,7 @@ class CycleConfig(BaseModel):
             seed=42,
             pipeline_schema=pipeline_schema,
             scan_context=scan_context,
+            task_context=task_context,
             enable_l2=opt.get("enable_l2", True),
             enable_l3=opt.get("enable_l3", True),
             l2_patience=opt.get("l2_patience", 2),
@@ -186,3 +193,6 @@ class _LoopState:
 
     # Escalation investigation memory (fed to L2 across degradation rounds)
     escalation_journal: list[dict] = field(default_factory=list)
+
+    # Structured domain context (refinable by L2)
+    task_context: dict = field(default_factory=dict)

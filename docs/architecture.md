@@ -41,6 +41,8 @@ All core logic in `api/services/`. See [`api/services/CLAUDE.md`](../api/service
 
 **PipelineSchema** — defines the backend pipeline. Together: `f(SearchPoint, PipelineSchema, eval_data) → scores`.
 
+**OptSearchPoint** — optimizer-level checkpoint per round. Bundles critique_text, thinking_styles, plan, context, parameters, `task_context` (structured domain context refinable by L2), and content_hashes linking to target evaluation data.
+
 **EvalContext** — groups infrastructure for evaluation. See [`api/models/CLAUDE.md`](../api/models/CLAUDE.md).
 
 ## Evaluation Flow
@@ -88,7 +90,7 @@ The optimizer itself is a 4-step pipeline, designed to be modeled using the same
 ```
 
 **Key design decisions:**
-- Init is `l1_generate` in naked mode (single decomposition pass, no critique/styles)
+- Init is `l1_generate` in naked mode (single decomposition pass, no critique/styles). Also produces `task_context` (structured domain fields) stored on `OptSearchPoint`
 - Critique and thinking style sampling are sub-tools of `l1_evaluate`, not separate steps
 - Pluggable `EscalationCheck`s  run after each candidate eval — can short-circuit a round and route to L2/L3/abort
 - The schema describes step capabilities; loop control stays in `feedback_cycle.py`

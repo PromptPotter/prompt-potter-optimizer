@@ -358,6 +358,7 @@ async def _generate_or_load_candidates(
         "thinking_styles": state.thinking_styles,
         "scan_context": config.scan_context,
         "escalation_journal": state.escalation_journal,
+        "task_context": state.task_context or None,
     })
     candidates = gen_result.candidates
 
@@ -721,15 +722,20 @@ async def _do_l2_transition(
         "pipeline_params": current_pp,
         "escalation_context": escalation_context,
         "escalation_journal": state.escalation_journal,
+        "task_context": state.task_context or None,
     })
 
     new_ps = PromptState(**l2_result.prompt_state)
     tr = layer_transitions.TransitionResult(
         prompt_state=new_ps,
         pipeline_params=l2_result.pipeline_params,
+        task_context=l2_result.task_context,
         debug_prompt=getattr(l2_result, "debug_prompt", ""),
         debug_response=getattr(l2_result, "debug_response", None),
     )
+    # Update task_context if L2 refined it
+    if tr.task_context:
+        state.task_context = tr.task_context
     state.current_sp = state.current_sp.derive(
         prompt_state=tr.prompt_state,
         **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),
@@ -1067,6 +1073,7 @@ async def run_feedback_cycle(
         best_accuracy=current_accuracy,
         best_composite=_bl_composite,
         best_sp=baseline_sp,
+        task_context=config.task_context or {},
     )
 
     # -- Step 4b: Bootstrap critique + thinking styles --
@@ -1244,6 +1251,7 @@ async def run_feedback_cycle(
                         plan=state.current_sp.prompt_state.plan,
                         context=state.current_sp.prompt_state.context,
                         parameters=state.current_sp.prompt_state.parameters,
+                        task_context=state.task_context,
                     )
                     campaign_store.add_trial(config.backend_id, cycle_id, {
                         "trial_id": f"round_{round_num}",

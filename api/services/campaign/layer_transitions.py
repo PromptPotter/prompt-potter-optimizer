@@ -36,6 +36,7 @@ class TransitionResult:
 
     prompt_state: PromptState
     pipeline_params: dict | None = None
+    task_context: dict | None = None
     debug_prompt: str = ""
     debug_response: dict | None = None
 
@@ -51,6 +52,7 @@ async def refine_context(
     pipeline_schema: PipelineSchema | None = None,
     escalation_context: dict | None = None,
     escalation_journal: list[dict] | None = None,
+    task_context: dict | None = None,
 ) -> TransitionResult:
     """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
 
@@ -82,12 +84,20 @@ async def refine_context(
         escalation_context, escalation_journal, pipeline_params,
     )
 
+    task_context_section = ""
+    if task_context:
+        task_context_section = (
+            "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
+            + json.dumps(task_context, indent=2)
+        )
+
     response_schema_suffix = (
         "\nReturn a JSON object with:\n"
         '  "parameters": dict of parameter changes (or {} to keep current)\n'
         '  "context": new context string (or "" to keep current)\n'
         '  "pipeline_params": {"step_name": {"param": value}} '
         "(or {} for no changes)\n"
+        '  "task_context": dict of refined domain fields (or {} to keep current)\n'
         '  "rationale": 1-2 sentence explanation'
     )
 
@@ -97,6 +107,7 @@ async def refine_context(
         failure_lines=chr(10).join(failure_lines[:15]),
         current_params=json.dumps(current_ps.parameters),
         current_context=current_ps.context[:200] if current_ps.context else "(empty)",
+        task_context_section=task_context_section,
         pipeline_section=pipeline_section,
         escalation_section=escalation_section,
         response_schema_suffix=response_schema_suffix,
@@ -123,17 +134,27 @@ async def refine_context(
 
     new_pipeline_params = _parse_pipeline_params(result, pipeline_params)
 
+    # Parse refined task_context (merge with current, only non-empty updates)
+    new_task_context = None
+    if result.get("task_context") and isinstance(result["task_context"], dict):
+        merged = {**(task_context or {}), **result["task_context"]}
+        # Only count as changed if there are actual differences
+        if merged != (task_context or {}):
+            new_task_context = merged
+
     logger.info(
-        "L2 refine_context: %d param changes, context %s, pipeline_params %s",
+        "L2 refine_context: %d param changes, context %s, pipeline_params %s, task_context %s",
         len(result.get("parameters", {})),
         "updated" if result.get("context") else "unchanged",
         "updated" if new_pipeline_params else "unchanged",
+        "updated" if new_task_context else "unchanged",
     )
 
     new_ps = current_ps.derive(**changes) if changes else current_ps
     return TransitionResult(
         prompt_state=new_ps,
         pipeline_params=new_pipeline_params,
+        task_context=new_task_context,
         debug_prompt=prompt,
         debug_response=result,
     )

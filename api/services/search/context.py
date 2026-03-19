@@ -1,4 +1,4 @@
-"""LLM-assisted context restructuring into Layer 1 fields."""
+"""LLM-assisted context restructuring into Layer 1 fields and domain context."""
 
 import hashlib
 import json
@@ -32,8 +32,10 @@ async def restructure_context(
             improvement is most likely.
 
     Returns:
-        Dict of structured Layer 1 field values, plus a ``consultation``
-        string when improvement_areas is provided.
+        Dict of structured Layer 1 field values, a ``task_context`` sub-dict
+        with domain fields (domain, pipeline_purpose, data_characteristics,
+        optimization_goals, key_challenges), and a ``consultation`` string
+        when improvement_areas is provided.
     """
     if isinstance(context_input, dict):
         user_content = (
@@ -93,6 +95,12 @@ async def restructure_context(
 
     if improvement_areas:
         result.setdefault("consultation", "")
+
+    # Ensure task_context sub-dict exists with domain fields
+    tc = result.setdefault("task_context", {})
+    for key in ("domain", "pipeline_purpose", "data_characteristics",
+                "optimization_goals", "key_challenges"):
+        tc.setdefault(key, "")
 
     return result
 

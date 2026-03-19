@@ -72,7 +72,7 @@ def preview_advisor_prompt(
     campaign_config: dict | None = None,
     svc: dict | None = None,
     *,
-    task_description: str = "",
+    task_description: str | dict = "",
     raw: bool = False,
 ) -> None:
     """Display the scan advisor prompt — with real data when svc is provided.
@@ -719,7 +719,7 @@ async def scan_advisor(
     campaign_config: dict,
     svc: dict,
     *,
-    task_description: str = "",
+    task_description: str | dict = "",
 ) -> dict:
     """LLM-powered scan configuration advice.
 
@@ -751,7 +751,12 @@ async def scan_advisor(
     if user_excluded:
         print(f"  Excluded: {user_excluded}")
     if task_description:
-        print(f"  Task context: {task_description[:80].strip()}...")
+        if isinstance(task_description, dict):
+            domain = task_description.get('domain', '?')
+            purpose = task_description.get('pipeline_purpose', '?')[:60]
+            print(f"  Task context: {domain} — {purpose}")
+        else:
+            print(f"  Task context: {task_description[:80].strip()}...")
     print(f"  Calling {model or '?'} ...")
     print()
 
@@ -865,7 +870,7 @@ async def run_scan_advisor(
     campaign_config: dict,
     svc: dict,
     *,
-    task_description: str = "",
+    task_description: str | dict = "",
 ) -> tuple[dict, dict, dict]:
     """Run scan advisor + extract/display proposed variants.
 

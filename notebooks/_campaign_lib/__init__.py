@@ -23,7 +23,7 @@ __all__ = [  # noqa: F405
     # Constants
     "RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
     # Service init
-    "init_services", "setup_llm", "load_variant_library",
+    "init_services", "setup_llm", "load_variant_library", "decompose_task_context",
     # Backend status & datasets
     "show_backend_status", "show_dataset_summary", "build_all_session_terms",
     "load_or_create_datasets", "load_stored_dataset", "prepare_datasets",
