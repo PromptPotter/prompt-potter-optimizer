@@ -321,7 +321,7 @@ async def _generate_or_load_candidates(
                 creativity=_creativity,
                 model=config.model or "(default)",
                 has_scan_context=config.scan_context is not None,
-                has_critique=bool(state.critique_text),
+                has_critique=bool(state.opt_sp.critique_text),
                 pipeline_params=state.current_sp.pipeline_params,
                 temperature=state.current_sp.temperature)
 
@@ -354,11 +354,12 @@ async def _generate_or_load_candidates(
         "prompt_state": current_ps.model_dump(),
         "accuracy": state.current_accuracy,
         "results": state.current_results,
-        "critique_text": state.critique_text,
-        "thinking_styles": state.thinking_styles,
+        "critique_text": state.opt_sp.critique_text,
+        "thinking_styles": state.opt_sp.thinking_styles,
         "scan_context": config.scan_context,
-        "escalation_journal": state.escalation_journal,
-        "task_context": state.task_context or None,
+        "escalation_journal": state.opt_sp.escalation_journal,
+        "task_context": state.opt_sp.task_context or None,
+        "warning_inventory": state.opt_sp.query_failure_tracker or None,
     })
     candidates = gen_result.candidates
 
@@ -437,6 +438,9 @@ async def _evaluate_candidates(
             "pipeline_params": (
                 state.current_sp.pipeline_params if state.current_sp else None
             ),
+            "warning_inventory": (
+                state.opt_sp.query_failure_tracker or None
+            ),
         },
         obs=obs, trace_id=trace_id,
     )
@@ -460,6 +464,7 @@ async def _evaluate_candidates(
         "winner_pipeline_params": eval_result.winner_pipeline_params,
         "escalation_signal": eval_result.escalation_signal,
         "degraded_queries": eval_result.degraded_queries,
+        "all_eval_results": eval_result.all_eval_results,
     }
 
     # Suggestion generation stays in orchestrator (ADR-4)
@@ -597,15 +602,15 @@ async def _execute_round(
 
     # Update state with critique + thinking styles from eval output
     _critique_raw = eval_out.pop("critique_text", "")
-    state.thinking_styles = eval_out.pop("thinking_styles", [])
+    state.opt_sp.thinking_styles = eval_out.pop("thinking_styles", [])
     # critique_text can be str (legacy) or dict (new 5-field format)
     if isinstance(_critique_raw, dict):
-        state.critique = _critique_raw
+        state.opt_sp.critique = _critique_raw
         from api.services.campaign.critique import format_critique_for_prompt
-        state.critique_text = format_critique_for_prompt(_critique_raw)
+        state.opt_sp.critique_text = format_critique_for_prompt(_critique_raw)
     else:
-        state.critique_text = _critique_raw
-        state.critique = {"summary": _critique_raw}
+        state.opt_sp.critique_text = _critique_raw
+        state.opt_sp.critique = {"summary": _critique_raw}
 
     round_result = CycleRoundResult(
         round=round_num,
@@ -624,6 +629,13 @@ async def _execute_round(
         degraded_queries=eval_out.get("degraded_queries", 0),
         escalation_signal=eval_out.get("escalation_signal"),
     )
+
+    # Update per-query warning inventory from ALL candidate results
+    # (not just winner — aborted candidates carry the pipeline warnings)
+    _all_results = eval_out.get("all_eval_results", [])
+    if _all_results:
+        from api.services.campaign.critique_stats import update_query_tracker
+        update_query_tracker(state.opt_sp.query_failure_tracker, _all_results)
 
     if obs:
         _log_round_obs(eval_out, round_num, config, obs, obs_campaign_id)
@@ -729,25 +741,41 @@ async def _do_l2_transition(
         "eval_data": eval_data,
         "pipeline_params": current_pp,
         "escalation_context": escalation_context,
-        "escalation_journal": state.escalation_journal,
-        "task_context": state.task_context or None,
+        "escalation_journal": state.opt_sp.escalation_journal,
+        "task_context": state.opt_sp.task_context or None,
+        "warning_inventory": state.opt_sp.query_failure_tracker or None,
     })
 
     new_ps = PromptState(**l2_result.prompt_state)
     tr = layer_transitions.TransitionResult(
         prompt_state=new_ps,
         task_context=getattr(l2_result, "task_context", None),
+        action=getattr(l2_result, "action", "continue"),
         debug_prompt=getattr(l2_result, "debug_prompt", ""),
         debug_response=getattr(l2_result, "debug_response", None),
     )
     # Update task_context if L2 refined it
     if tr.task_context:
-        state.task_context = tr.task_context
+        state.opt_sp.task_context = tr.task_context
     # L2 does NOT set pipeline_params — only L1 Generate does that
     state.current_sp = state.current_sp.derive(prompt_state=tr.prompt_state)
     state.l2_round += 1
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
+    # Build warning inventory one-liner for display
+    _inv = state.opt_sp.query_failure_tracker
+    _warned_count = sum(
+        1 for e in _inv.values() if e.get("warnings")
+    ) if _inv else 0
+    _top_warning = ""
+    if _inv:
+        _all_wtypes: dict[str, int] = {}
+        for e in _inv.values():
+            for wt, c in e.get("warnings", {}).items():
+                _all_wtypes[wt] = _all_wtypes.get(wt, 0) + c
+        if _all_wtypes:
+            _top_warning = max(_all_wtypes, key=_all_wtypes.get)
+
     _emit_phase(on_phase, "refine_context", "exit", round=round_num,
                 l2_round=state.l2_round,
                 param_changes_count=len(tr.prompt_state.optimizer_params),
@@ -755,8 +783,16 @@ async def _do_l2_transition(
                 changes_description=tr.prompt_state.changes_description or "",
                 pipeline_params_changed=tr.pipeline_params is not None,
                 pipeline_params=tr.pipeline_params,
+                action=tr.action,
+                warned_queries=_warned_count,
+                top_warning=_top_warning,
                 l2_prompt=tr.debug_prompt,
                 l2_response=tr.debug_response)
+    # Flag next round as probe if L2 requested it
+    if tr.action == "probe":
+        state.probe_next_round = True
+        logger.info("L2 requested probe — next round uses warned queries")
+
     logger.info(
         "L2 refine_context at round %d (l2_round=%d)",
         round_num, state.l2_round,
@@ -924,6 +960,7 @@ async def _escalate_l2(
                     state, config, round_num, eval_data, on_phase,
                     obs=obs, trace_id=trace_id,
                     escalation_context=escalation_context,
+
                 )
                 return None  # continue
             logger.info(
@@ -1063,7 +1100,7 @@ async def run_feedback_cycle(
         best_accuracy=current_accuracy,
         best_composite=_bl_composite,
         best_sp=baseline_sp,
-        task_context=config.task_context or {},
+        opt_sp=OptSearchPoint(task_context=config.task_context or {}),
     )
 
     # Restore optimizer state from latest checkpoint on resume
@@ -1073,12 +1110,11 @@ async def run_feedback_cycle(
         )
         if _latest_trial:
             _osp = _latest_trial.get("opt_search_point", {})
-            if _osp.get("critique_text"):
-                state.critique_text = _osp["critique_text"]
-            if _osp.get("thinking_styles"):
-                state.thinking_styles = _osp["thinking_styles"]
-            if _osp.get("task_context"):
-                state.task_context = _osp["task_context"]
+            if _osp:
+                state.opt_sp = OptSearchPoint(**{
+                    k: v for k, v in _osp.items()
+                    if k in OptSearchPoint.model_fields
+                })
             # Restore L2/L3 counters
             state.l2_round = _latest_trial.get("l2_round", 0)
             state.l3_round = _latest_trial.get("l3_round", 0)
@@ -1087,10 +1123,12 @@ async def run_feedback_cycle(
             state.stall_count = _latest_trial.get("stall_count", 0)
             logger.info(
                 "Restored optimizer state from round %d "
-                "(critique=%d chars, task_context=%d keys, l2_round=%d)",
+                "(critique=%d chars, task_context=%d keys, "
+                "escalation_journal=%d entries, l2_round=%d)",
                 resumed_from_round - 1,
-                len(state.critique_text),
-                len(state.task_context),
+                len(state.opt_sp.critique_text),
+                len(state.opt_sp.task_context),
+                len(state.opt_sp.escalation_journal),
                 state.l2_round,
             )
 
@@ -1110,11 +1148,11 @@ async def run_feedback_cycle(
             composite=current_accuracy,
         )
         _boot_result = await agent.run(ctx)
-        state.critique = _boot_result
-        state.critique_text = format_critique_for_prompt(_boot_result)
-        bootstrap_critique = state.critique_text
+        state.opt_sp.critique = _boot_result
+        state.opt_sp.critique_text = format_critique_for_prompt(_boot_result)
+        bootstrap_critique = state.opt_sp.critique_text
         logger.info("Bootstrap critique: %s", bootstrap_critique[:100])
-    state.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
+    state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
     _emit_phase(on_phase, "init", "exit",
                 cycle_id=cycle_id,
@@ -1175,22 +1213,66 @@ async def run_feedback_cycle(
             # Sync eval_ctx pipeline_params from current search point
             state.eval_ctx.pipeline_params = state.current_sp.pipeline_params
 
+            # --- Probe round: override eval data + disable escalation ---
+            _is_probe = state.probe_next_round
+            if _is_probe:
+                _warned_queries = {
+                    q for q, e in state.opt_sp.query_failure_tracker.items()
+                    if e.get("warnings")
+                }
+                _round_data = [
+                    d for d in eval_data
+                    if d.get("query") in _warned_queries
+                ]
+                _round_checks = None  # no degradation abort during probe
+                logger.info(
+                    "PROBE round %d: %d warned queries (from %d tracked)",
+                    round_num, len(_round_data), len(_warned_queries),
+                )
+            else:
+                _round_data = round_eval_data
+                _round_checks = escalation_checks
+
             logger.info(
-                "Feedback cycle round %d (clean=%d/%d, acc=%.3f, stall=%d/%d)",
+                "Feedback cycle round %d (clean=%d/%d, acc=%.3f, "
+                "stall=%d/%d%s)",
                 round_num, clean_rounds, max_rounds,
                 state.current_accuracy, state.stall_count, config.patience,
+                ", PROBE" if _is_probe else "",
             )
 
             round_result = await _execute_round(
-                round_num, state, round_eval_data, config,
+                round_num, state, _round_data, config,
                 obs_campaign_id,
                 campaign_store, cycle_id,
                 on_candidate_eval, on_query_eval, on_phase,
-                escalation_checks=escalation_checks,
+                escalation_checks=_round_checks,
             )
 
             # Common state update (both escalation + normal paths)
             _update_round_state(state, round_result, round_num)
+
+            # (tracker already updated inside _execute_round from all_eval_results)
+
+            # --- After probe round: reset flag + force L2 ---
+            if _is_probe:
+                state.probe_next_round = False
+                if config.enable_l2:
+                    _obs = state.eval_ctx.obs if state.eval_ctx else None
+                    _tid = (
+                        _obs.get_file_trace_id(obs_campaign_id) if _obs
+                        else None
+                    )
+                    _l2_stop = await _escalate_l2(
+                        state, config, round_num, _round_data, on_phase,
+                        obs=_obs, trace_id=_tid,
+                    )
+                    if _l2_stop:
+                        stop_reason = _l2_stop
+                        break
+                round_num += 1
+                clean_rounds += 1
+                continue  # skip normal escalation/stopping — L2 handled it
 
             # --- Escalation path ---
             if round_result.escalation_signal:
@@ -1215,9 +1297,9 @@ async def run_feedback_cycle(
                 _esc_ctx = signal["context"]
                 if signal["target"] in ("l2", "l3") and config.enable_l2:
                     # Fill outcome of previous journal entry (if any)
-                    if (state.escalation_journal
-                            and state.escalation_journal[-1].get("outcome_degraded_rate") is None):
-                        state.escalation_journal[-1]["outcome_degraded_rate"] = (
+                    _ej = state.opt_sp.escalation_journal
+                    if _ej and _ej[-1].get("outcome_degraded_rate") is None:
+                        _ej[-1]["outcome_degraded_rate"] = (
                             _esc_ctx.get("degraded_rate", 0)
                         )
 
@@ -1243,7 +1325,7 @@ async def run_feedback_cycle(
                     _ws_cfg = (
                         (state.current_sp.pipeline_params or {}).get("web_search", {})
                     )
-                    state.escalation_journal.append({
+                    state.opt_sp.escalation_journal.append({
                         "round": round_num,
                         "degraded_rate": _esc_ctx.get("degraded_rate", 0),
                         "query_prefix": _ws_cfg.get("query_prefix", ""),
@@ -1284,12 +1366,10 @@ async def run_feedback_cycle(
             # Checkpoint round to disk
             if campaign_store and cycle_id:
                 try:
-                    opt_sp = OptSearchPoint(
-                        critique_text=state.critique_text,
-                        thinking_styles=state.thinking_styles,
-                        plan=state.current_sp.prompt_state.plan,
-                        optimizer_params=state.current_sp.prompt_state.optimizer_params,
-                        task_context=state.task_context,
+                    # Sync plan + optimizer_params from current SearchPoint
+                    state.opt_sp.plan = state.current_sp.prompt_state.plan
+                    state.opt_sp.optimizer_params = (
+                        state.current_sp.prompt_state.optimizer_params
                     )
                     campaign_store.add_trial(config.backend_id, cycle_id, {
                         "trial_id": f"round_{round_num}",
@@ -1313,7 +1393,7 @@ async def run_feedback_cycle(
                         "l3_stall_count": state.l3_stall_count,
                         "l2_round": state.l2_round,
                         "l3_round": state.l3_round,
-                        "opt_search_point": opt_sp.model_dump(),
+                        "opt_search_point": state.opt_sp.model_dump(),
                     })
                 except Exception:
                     logger.warning("Round checkpoint failed", exc_info=True)

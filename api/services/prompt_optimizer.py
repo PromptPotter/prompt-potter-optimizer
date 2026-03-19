@@ -164,6 +164,7 @@ async def generate_candidates(
     thinking_styles: list[str] | None = None,
     escalation_journal: list[dict] | None = None,
     task_context: dict | None = None,
+    warning_inventory: dict | None = None,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -192,12 +193,24 @@ async def generate_candidates(
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
     failures = [r for r in current_results if not r["hit"] and not r.get("error")]
-    failure_examples = "\n".join(
-        f"  Query: {r['query'][:DISPLAY_TRUNCATE]}  |  "
-        f"Predicted: {r['predicted'][:DISPLAY_TRUNCATE]}  |  "
-        f"GT: {r['ground_truth'][:DISPLAY_TRUNCATE]}"
-        for r in failures[:MAX_FAILURES_GENERATE]
-    )
+    _fe_lines = []
+    for r in failures[:MAX_FAILURES_GENERATE]:
+        line = (
+            f"  Query: {r['query'][:DISPLAY_TRUNCATE]}  |  "
+            f"Predicted: {r['predicted'][:DISPLAY_TRUNCATE]}  |  "
+            f"GT: {r['ground_truth'][:DISPLAY_TRUNCATE]}"
+        )
+        # Annotate with recurring warning history if available
+        if warning_inventory:
+            entry = warning_inventory.get(r["query"])
+            if entry and entry.get("warnings"):
+                top_warn = max(entry["warnings"], key=entry["warnings"].get)
+                wcount = entry["warnings"][top_warn]
+                seen = entry.get("rounds_seen", 0)
+                if wcount >= 2:
+                    line += f"  [{top_warn} {wcount}/{seen} rounds]"
+        _fe_lines.append(line)
+    failure_examples = "\n".join(_fe_lines)
 
     rendered_prompt = current_ps.render()
 
@@ -614,6 +627,10 @@ async def evaluate_and_select_winner(
         "suggestions": {},
         "candidate_scores": candidate_scores,
         "winner_results": winner_entry.get("results", []),
+        "all_eval_results": [
+            r for results in all_candidate_results.values()
+            for r in results
+        ],
         "escalation_signal": escalation_signal,
         "degraded_queries": sum(
             1 for r in winner_entry.get("results", [])

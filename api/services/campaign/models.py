@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from api.models.opt_search_point import OptSearchPoint
 from api.models.pipeline_schema import PipelineSchema
 from api.models.search_point import SearchPoint
 
@@ -163,7 +164,13 @@ class CycleResult(BaseModel):
 
 @dataclass
 class _LoopState:
-    """Mutable state threaded through the feedback cycle round loop."""
+    """Mutable state threaded through the feedback cycle round loop.
+
+    Optimizer-level state (critique, thinking_styles, task_context,
+    escalation_journal, query_failure_tracker) lives on ``opt_sp``
+    — a mutable ``OptSearchPoint`` that is serialized at checkpoint
+    time and hydrated on resume.
+    """
 
     rounds: list[CycleRoundResult] = field(default_factory=list)
     current_sp: SearchPoint | None = None
@@ -177,10 +184,11 @@ class _LoopState:
     stall_count: int = 0
     eval_ctx: EvalContext | None = None
 
-    # Critique + thinking styles (meta-level, fed forward between rounds)
-    critique_text: str = ""  # legacy — formatted text for L1 prompt
-    critique: dict = field(default_factory=dict)  # full 5-field critique dict
-    thinking_styles: list[str] = field(default_factory=list)
+    # Optimizer state — single source of truth for all meta-level fields
+    opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
+
+    # Probe round flag (set by L2 action="probe", reset after probe round)
+    probe_next_round: bool = False
 
     # L2/L3 state
     l2_stall_count: int = 0
@@ -191,9 +199,3 @@ class _LoopState:
     best_accuracy_at_l3_entry: float = 0.0
     best_composite_at_l2_entry: float = 0.0
     best_composite_at_l3_entry: float = 0.0
-
-    # Escalation investigation memory (fed to L2 across degradation rounds)
-    escalation_journal: list[dict] = field(default_factory=list)
-
-    # Structured domain context (refinable by L2)
-    task_context: dict = field(default_factory=dict)

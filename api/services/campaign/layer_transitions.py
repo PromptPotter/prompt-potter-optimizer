@@ -37,6 +37,7 @@ class TransitionResult:
     prompt_state: PromptState
     pipeline_params: dict | None = None
     task_context: dict | None = None
+    action: str = "continue"  # "continue" | "probe" (extensible)
     debug_prompt: str = ""
     debug_response: dict | None = None
 
@@ -53,6 +54,7 @@ async def refine_context(
     escalation_context: dict | None = None,
     escalation_journal: list[dict] | None = None,
     task_context: dict | None = None,
+    warning_inventory: dict | None = None,
 ) -> TransitionResult:
     """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
 
@@ -91,15 +93,27 @@ async def refine_context(
             + json.dumps(task_context, indent=2)
         )
 
+    # Inject cross-round warning inventory
+    warning_section = ""
+    if warning_inventory:
+        from api.services.campaign.critique_stats import summarize_warning_inventory
+        warning_section = summarize_warning_inventory(warning_inventory)
+        if warning_section:
+            warning_section = "\n\n" + warning_section + "\n"
+
     response_schema_suffix = (
         "\nReturn a JSON object with:\n"
         '  "optimizer_params": dict of meta-setting changes '
         "(creativity, n_variants, sample_size — or {} to keep current)\n"
         '  "task_context": dict of refined domain fields (or {} to keep current)\n'
+        '  "action": "continue" (normal L1 cycle) or "probe" '
+        "(test warned queries with new settings first)\n"
         '  "rationale": 1-2 sentence explanation\n'
         "\nNote: L1 Generate makes the final decision on pipeline_params "
         "(query_prefix, max_sites, etc.). Your job is to refine the "
-        "situation context and meta-settings so L1 makes better choices."
+        "situation context and meta-settings so L1 makes better choices.\n"
+        "If the warning inventory shows recurring pipeline issues, set "
+        '"action": "probe" to verify your changes help those queries.'
     )
 
     prompt = load_optimizer_prompt("l2_refine_context").compile(
@@ -109,7 +123,7 @@ async def refine_context(
         current_params=json.dumps(current_ps.optimizer_params),
         task_context_section=task_context_section,
         pipeline_section=pipeline_section,
-        escalation_section=escalation_section,
+        escalation_section=escalation_section + warning_section,
         response_schema_suffix=response_schema_suffix,
     )
 
@@ -136,16 +150,24 @@ async def refine_context(
         if merged != (task_context or {}):
             new_task_context = merged
 
+    # Parse action classification
+    action = result.get("action", "continue")
+    if action not in ("continue", "probe"):
+        action = "continue"
+
     logger.info(
-        "L2 refine_context: %d param changes, task_context %s",
+        "L2 refine_context: %d param changes, task_context %s, "
+        "action=%s",
         len(result.get("optimizer_params", {})),
         "updated" if new_task_context else "unchanged",
+        action,
     )
 
     new_ps = current_ps.derive(**changes) if changes else current_ps
     return TransitionResult(
         prompt_state=new_ps,
         task_context=new_task_context,
+        action=action,
         debug_prompt=prompt,
         debug_response=result,
     )

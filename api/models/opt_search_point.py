@@ -11,6 +11,11 @@ search over SearchPoints.
 Cross-reference design: OptSearchPoint holds ``content_hashes`` linking
 to target-layer ``dataset_runs`` produced under this optimizer config.
 Target data stays clean — all provenance lives in the optimizer layer.
+
+ADR-8: OptSearchPoint is mutable (not frozen). Unlike SearchPoint which
+is content-addressed (identity = hash), OptSearchPoint is a checkpoint
+snapshot written once per round. Freezing adds no benefit and forces
+unnecessary reconstruction. See M7 spec §13.2.
 """
 from __future__ import annotations
 
@@ -24,11 +29,17 @@ class OptSearchPoint(BaseModel):
 
     Persisted in trial checkpoints as ``opt_search_point``. Enables L4 to
     correlate optimizer configuration with target-pipeline evaluation outcomes.
+
+    Mutable — updated in-place during the feedback cycle, then serialized
+    via ``model_dump()`` at checkpoint time.
     """
 
-    model_config = {"frozen": True}
-
     critique_text: str = ""
+    critique: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Full 5-field critique dict (positive_critique, negative_critique, "
+        "priority_fix, suggested_axes, summary).",
+    )
     thinking_styles: list[str] = Field(default_factory=list)
     plan: str = ""
     optimizer_params: dict[str, Any] = Field(default_factory=dict)
@@ -37,6 +48,16 @@ class OptSearchPoint(BaseModel):
         description="Structured domain context (domain, pipeline_purpose, "
         "data_characteristics, optimization_goals, key_challenges). "
         "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
+    )
+    escalation_journal: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Cross-round degradation investigation memory. "
+        "Tracks tried configs and their outcomes across escalation rounds.",
+    )
+    query_failure_tracker: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Per-query warning inventory across rounds. "
+        "Keyed by query text, values are warning counters.",
     )
     content_hashes: list[str] = Field(
         default_factory=list,

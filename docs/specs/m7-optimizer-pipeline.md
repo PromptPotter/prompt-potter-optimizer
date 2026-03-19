@@ -1136,40 +1136,53 @@ Query: PA 66 25%... | Predicted: Glass fibre... | GT: Polyamide...  [⚠ web_sea
 
 `DegradationCheck` in `escalation.py` stays exactly as-is. It fires when degradation rate exceeds threshold, triggering L2. The improvement is that **L2 now has the warning inventory context** to make better decisions instead of blindly trying query prefix changes.
 
-### 13.6 L2 Diagnostic Probe Round
+### 13.6 L2 Action Classification & Probe Rounds
 
-When L2 fires and sees queries with recurring pipeline warnings (from the inventory), it can request an **extraordinary eval round** — a focused probe that tests whether its pipeline param change fixed the degraded queries, with results flowing back to L2.
+L2's structured output includes an `"action"` classification field:
+
+| Action | Meaning |
+|--------|---------|
+| `"continue"` | Default — normal L1 cycle continues with random subsample |
+| `"probe"` | Next L1 round is a **probe round** — specialized eval batch + no degradation abort |
+
+Extensible — future actions (e.g., `"skip_warned"`, `"retry"`) can be added without schema changes.
+
+**Design principle:** L2 decides WHETHER to probe based on the warning inventory data (per-query warning counts across rounds). Low counts in early rounds → L2 naturally ignores them. As counts grow, L2 classifies the situation as needing a probe.
+
+**Probe round = specialized L1 round**, not a separate mini-eval:
+
+- **Eval batch**: All queries with warnings from the tracker (looked up in full `eval_data`), not the random subsample
+- **No degradation abort**: `DegradationCheck` disabled — we expect degradation, that's the point of probing
+- **Normal L1 flow**: Generate → evaluate → winner selection proceeds as usual
+- **Counts toward `max_rounds`**: Probe rounds are regular rounds with a different eval batch, not exempt from accounting
+- **L2 follows**: After a probe round completes, L2 fires to assess probe results and decide next action (continue, probe again, etc.)
 
 **Flow:**
 
 ```
 Round N: 8/20 queries degraded (recurring web_search warnings)
   → Escalation fires, L2 runs
-  → L2 sees warning inventory: 8 queries with recurring web_search:partial_scrape
-  → L2 suggests pipeline_param change: {"web_search": {"query_prefix": "material datasheet"}}
-  → L2 returns TransitionResult with probe_queries = ["PA 66 25%...", "Kingfa NPG25", ...]
+  → L2 sees warning inventory: "PA 66 25%... (3/4 rounds, 0 hits)"
+  → L2 returns {"action": "probe", "optimizer_params": {...}, ...}
+  → state.probe_next_round = True
 
-Probe round (extraordinary):
-  → Evaluates ONLY probe_queries with the new pipeline_params
-  → Results flow back to L2 (second L2 call with probe results)
-  → L2 assesses: did degradation decrease for these queries?
-    → YES: Update tracker, continue normal L1 with new params
-    → NO: L2 tries different approach or accepts current state
-  → Tracker updated with probe round observations
+Round N+1 (probe round):
+  → round_eval_data = all warned queries from tracker (via full eval_data)
+  → escalation_checks disabled for this round
+  → L1 generates candidates (with warning inventory context)
+  → Evaluate candidates against warned queries only
+  → Winner selection, tracker updated
+  → L2 fires to assess probe results
+    → action="continue": resume normal L1 with random subsample
+    → action="probe": another probe round
 ```
 
 **Implementation:**
 
-1. `TransitionResult` gets `probe_queries: list[str] | None = None`
-2. L2 prompt template (`l2_refine_context.json`) updated: L2 can return `"probe_queries": [...]` in its JSON response
-3. Orchestrator (`feedback_cycle.py`): after L2 returns with `probe_queries`, runs mini-eval on those queries, passes results back to L2 (second call), L2 returns final `TransitionResult`
-4. Probe round accounting: does NOT increment `round_num`, does NOT count toward `max_rounds` or patience. Logged as `round_{N}_probe` in campaign store.
-
-**Why L2 decides:**
-- L2 has context about what changed and why
-- L2 picks which queries to probe (not necessarily all warned queries)
-- L2 can decide NOT to probe
-- Keeps the escalation hierarchy clean: L2 is the strategic decision-maker
+1. `TransitionResult.action: str = "continue"` — parsed from L2 JSON response
+2. `_LoopState.probe_next_round: bool = False` — set by orchestrator when `action == "probe"`
+3. Main loop: if `probe_next_round`, override `round_eval_data` with warned queries, pass `escalation_checks=None`
+4. After probe round: reset flag, force L2 to fire
 
 ### 13.7 Wave F — Execution Plan
 

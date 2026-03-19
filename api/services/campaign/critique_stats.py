@@ -37,6 +37,9 @@ class CritiqueContext:
     # Current pipeline config
     pipeline_params: dict | None = None
 
+    # Cross-round warning inventory (from OptSearchPoint.query_failure_tracker)
+    warning_inventory: dict | None = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,6 +62,96 @@ def _find_rank(candidates: list, ground_truth: str) -> int | None:
 def _get_candidates(r: dict) -> list:
     pd = r.get("pipeline_data") or {}
     return pd.get("ranked_candidates") or pd.get("token_matched_candidates") or []
+
+
+# ---------------------------------------------------------------------------
+# Per-query warning inventory (cross-round tracking)
+# ---------------------------------------------------------------------------
+
+
+def _extract_warning_types(result: dict) -> list[str]:
+    """Extract warning type strings from a single eval result."""
+    pd = result.get("pipeline_data") or {}
+    diag = pd.get("diagnostics") or {}
+    types: list[str] = []
+    for w in diag.get("warnings") or []:
+        if isinstance(w, dict):
+            types.append(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
+        elif isinstance(w, str):
+            types.append(w)
+    return types
+
+
+def update_query_tracker(
+    tracker: dict[str, dict],
+    results: list[dict],
+) -> None:
+    """Merge current round's results into the per-query warning inventory.
+
+    Mutates *tracker* in-place. For each query, increments ``rounds_seen``,
+    ``hits``/``misses``, warning type counts, and updates ``last_terminated_at``.
+    """
+    for r in results:
+        query = r.get("query", "")
+        if not query:
+            continue
+        entry = tracker.setdefault(query, {
+            "rounds_seen": 0,
+            "hits": 0,
+            "misses": 0,
+            "warnings": {},
+            "last_terminated_at": "",
+        })
+        entry["rounds_seen"] += 1
+        if r.get("hit"):
+            entry["hits"] += 1
+        else:
+            entry["misses"] += 1
+        pd = r.get("pipeline_data") or {}
+        terminated = pd.get("terminated_at", "")
+        if terminated:
+            entry["last_terminated_at"] = terminated
+        for wtype in _extract_warning_types(r):
+            entry["warnings"][wtype] = entry["warnings"].get(wtype, 0) + 1
+
+
+
+def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
+    """Build a text summary of recurring warnings across rounds.
+
+    Groups queries by warning type and shows per-query hit/miss stats.
+    Returns empty string when no warnings are tracked.
+    """
+    # Collect queries that have any warnings
+    by_warning: dict[str, list[tuple[str, dict]]] = {}
+    for query, entry in tracker.items():
+        for wtype, count in entry.get("warnings", {}).items():
+            by_warning.setdefault(wtype, []).append((query, entry))
+
+    if not by_warning:
+        return ""
+
+    max_rounds = max(
+        (e.get("rounds_seen", 0) for e in tracker.values()), default=0,
+    )
+    lines = [f"## RECURRING PIPELINE WARNINGS (across {max_rounds} rounds)"]
+    for wtype, entries in sorted(
+        by_warning.items(), key=lambda x: -len(x[1]),
+    ):
+        lines.append(f"  {wtype} — {len(entries)} queries affected:")
+        # Sort by warning frequency descending
+        for query, entry in sorted(
+            entries,
+            key=lambda x: -x[1]["warnings"].get(wtype, 0),
+        )[:10]:
+            wcount = entry["warnings"].get(wtype, 0)
+            seen = entry["rounds_seen"]
+            hits = entry["hits"]
+            lines.append(
+                f"    {query[:70]}  "
+                f"({wcount}/{seen} rounds, {hits} hits)"
+            )
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +379,12 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
             lines.append("\nTested values per axis:")
             lines.append(sc["tested_values"])
         sections.append("\n".join(lines))
+
+    # --- Warning inventory (cross-round) ---
+    if ctx.warning_inventory:
+        inv_text = summarize_warning_inventory(ctx.warning_inventory)
+        if inv_text:
+            sections.append(inv_text)
 
     # --- Failure details ---
     failures = [r for r in results if not r.get("hit") and not r.get("error")]

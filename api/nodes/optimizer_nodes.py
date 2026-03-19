@@ -56,6 +56,9 @@ class L1GenerateInput(BaseModel):
     task_context: dict | None = Field(
         None, description="Structured domain context for generation guidance",
     )
+    warning_inventory: dict | None = Field(
+        None, description="Per-query warning inventory for failure annotation",
+    )
 
 
 class L1GenerateOutput(BaseModel):
@@ -108,6 +111,7 @@ class L1GenerateNode(NodeBase[L1GenerateInput, L1GenerateOutput]):
             thinking_styles=input_data.thinking_styles,
             escalation_journal=input_data.escalation_journal,
             task_context=input_data.task_context,
+            warning_inventory=input_data.warning_inventory,
         )
 
         return L1GenerateOutput(
@@ -178,6 +182,10 @@ class L1EvaluateOutput(BaseModel):
     degraded_queries: int = Field(
         0, description="Count of queries with pipeline warnings",
     )
+    all_eval_results: list[dict] = Field(
+        default_factory=list,
+        description="All per-query results from all candidates (for tracker)",
+    )
 
 
 class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
@@ -233,6 +241,7 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
                 best_round=self.config.get("best_round", -1),
                 scan_context=self.config.get("scan_context"),
                 pipeline_params=self.config.get("pipeline_params"),
+                warning_inventory=self.config.get("warning_inventory"),
             )
             critique_result = await agent.run(cctx)
             from api.services.campaign.critique import format_critique_for_prompt
@@ -264,24 +273,7 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
         # Run critique on both paths — escalation rounds need it too
         critique_text, thinking_styles = await self._run_critique(result)
 
-        if result.get("escalation_signal"):
-            return L1EvaluateOutput(
-                winner=result["winner"],
-                winner_prompt_state=result["winner_prompt_state"],
-                winner_accuracy=result["winner_accuracy"],
-                improved=result["improved"],
-                next_action=result.get("next_action", "generate"),
-                candidate_scores=result.get("candidate_scores", []),
-                winner_results=result.get("winner_results", []),
-                critique_text=critique_text,
-                thinking_styles=thinking_styles,
-                winner_composite=result.get("winner_composite", result["winner_accuracy"]),
-                winner_pipeline_params=result.get("winner_pipeline_params"),
-                escalation_signal=result["escalation_signal"],
-                degraded_queries=result.get("degraded_queries", 0),
-            )
-
-        return L1EvaluateOutput(
+        _common = dict(
             winner=result["winner"],
             winner_prompt_state=result["winner_prompt_state"],
             winner_accuracy=result["winner_accuracy"],
@@ -295,7 +287,9 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
             winner_pipeline_params=result.get("winner_pipeline_params"),
             escalation_signal=result.get("escalation_signal"),
             degraded_queries=result.get("degraded_queries", 0),
+            all_eval_results=result.get("all_eval_results", []),
         )
+        return L1EvaluateOutput(**_common)
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +318,9 @@ class L2RefineInput(BaseModel):
     task_context: dict | None = Field(
         None, description="Structured domain context (refinable by L2)",
     )
+    warning_inventory: dict | None = Field(
+        None, description="Per-query warning inventory for L2 context",
+    )
 
 
 class L2RefineOutput(BaseModel):
@@ -335,6 +332,10 @@ class L2RefineOutput(BaseModel):
     )
     task_context: dict | None = Field(
         None, description="Refined domain context (None if unchanged)",
+    )
+    action: str = Field(
+        "continue",
+        description="L2 action classification: 'continue' or 'probe'",
     )
     changes_description: str = Field(
         "", description="Description of changes made",
@@ -383,12 +384,14 @@ class L2RefineNode(NodeBase[L2RefineInput, L2RefineOutput]):
             escalation_context=input_data.escalation_context,
             escalation_journal=input_data.escalation_journal,
             task_context=input_data.task_context,
+            warning_inventory=input_data.warning_inventory,
         )
 
         return L2RefineOutput(
             prompt_state=tr.prompt_state.model_dump(),
             pipeline_params=tr.pipeline_params,
             task_context=tr.task_context,
+            action=tr.action,
             changes_description=tr.prompt_state.changes_description or "",
             debug_prompt=tr.debug_prompt,
             debug_response=tr.debug_response,

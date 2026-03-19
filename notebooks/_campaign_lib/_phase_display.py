@@ -525,10 +525,19 @@ def _print_refine_exit(d: dict, state: _CycleDisplayState) -> None:
 
     n_changes = d.get("param_changes_count", 0)
     tc = f", {GREEN}task_context updated{RESET}" if d.get("task_context_changed") else ""
+    _action = d.get("action", "continue")
+    probe = f", {CYAN}action={_action}{RESET}" if _action != "continue" else ""
     desc = d.get("changes_description", "")
-    print(f"  {GREEN}✓{RESET} L2 decision: {n_changes} param changes{tc}")
+    print(f"  {GREEN}✓{RESET} L2 decision: {n_changes} param changes{tc}{probe}")
     if desc:
         print(f"    {desc}")
+
+    # Warning inventory one-liner
+    warned = d.get("warned_queries", 0)
+    top_w = d.get("top_warning", "")
+    if warned:
+        print(f"    {YELLOW}⚠ {warned} queries with recurring pipeline warnings"
+              f" ({top_w}){RESET}")
 
     # Debug: show full L2 prompt and response
     l2_prompt = d.get("l2_prompt", "")
@@ -545,6 +554,30 @@ def _print_refine_exit(d: dict, state: _CycleDisplayState) -> None:
         for line in formatted.split("\n")[:40]:
             print(f"  {CYAN}│{RESET} {line}")
         print(f"  {CYAN}--- END RESPONSE ---{RESET}")
+
+
+def _print_probe_enter(d: dict, state: _CycleDisplayState) -> None:
+    n = d.get("n_probe_queries", 0)
+    queries = d.get("probe_queries", [])
+    print()
+    print(_node_top("PROBE ROUND", f"{n} queries"))
+    print(_node_line("Testing warned queries with new settings..."))
+    for q in queries[:5]:
+        print(_node_line(f"  {q[:70]}"))
+    if len(queries) > 5:
+        print(_node_line(f"  ... +{len(queries) - 5} more"))
+    print(_node_bottom())
+
+
+def _print_probe_exit(d: dict, state: _CycleDisplayState) -> None:
+    n = d.get("n_probed", 0)
+    hits = d.get("probe_hits", 0)
+    if n:
+        rate = hits / n
+        color = GREEN if rate > 0.5 else YELLOW
+        print(f"  {color}⚡ Probe: {hits}/{n} hits ({rate:.0%}){RESET}")
+    else:
+        print(f"  {YELLOW}⚡ Probe: no matching queries found{RESET}")
 
 
 def _print_plan_enter(d: dict, state: _CycleDisplayState) -> None:
@@ -589,6 +622,8 @@ _PHASE_HANDLERS: dict[str, callable] = {
     "modify_plan:exit": _print_plan_exit,
     "escalation:enter": _print_escalation_enter,
     "escalation:exit": _print_escalation_exit,
+    "probe_round:enter": _print_probe_enter,
+    "probe_round:exit": _print_probe_exit,
 }
 
 
