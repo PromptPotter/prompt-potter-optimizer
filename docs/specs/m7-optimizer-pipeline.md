@@ -1,7 +1,7 @@
 # Milestone 7: Optimizer-as-Pipeline
 
-**Version:** 1.0.0
-**Date:** 2026-03-17
+**Version:** 1.1.0
+**Date:** 2026-03-19
 **Status:** Reset for re-implementation (v2 branch). v1 implementation (`feat/m8-optimizer-pipeline`) retained as code reference.
 **Depends on:** [M6 PipelineSchema](m6-pipeline-composability.md), [ADD v0.10.0](add.md)
 
@@ -987,3 +987,211 @@ Status after v1 Phase 0.5 (to be re-achieved by Wave D5):
 | `OPTIMIZER_PIPELINE_SCHEMA` | N/A | ❌ Phase 2 (Wave E2) | E2 |
 | Per-round Langfuse scores | Partial | ✅ Obs round_end | Already present |
 | Phase events (display) | N/A | ✅ `_emit_phase()` callbacks | Already present |
+| `escalation_journal` | Lost on restart | ❌ Move to OptSearchPoint | F1 |
+| `critique` (full dict) | Lost (only text) | ❌ Move to OptSearchPoint | F1 |
+| `query_failure_tracker` | N/A | ❌ New in Wave F | F1 |
+
+---
+
+## 13. Warning Inventory & L2 Probe Rounds
+
+### 13.1 Problem
+
+The optimizer treats every query failure identically — whether the query failed because the prompt was bad or because `web_search` returned no content (e.g., "3 of 14 fetched URLs returned content"). Consequences:
+
+1. **Wasted eval budget**: Same queries fail every round for the same pipeline reason. L1 generates prompt variants trying to fix unfixable-by-prompt queries.
+2. **False escalation loops**: `DegradationCheck` fires every round because the same queries always degrade, even when the prompt is improving on other queries.
+3. **No cross-round memory**: Critique sees per-query `pipeline_data` (warnings, `terminated_at`) within a single round, but nobody tracks "Query X has had `web_search:partial_scrape` warnings for 3 consecutive rounds."
+
+### 13.2 OptSearchPoint Consolidation
+
+**ADR-8: OptSearchPoint is mutable, not frozen.**
+
+`OptSearchPoint` was `frozen=True`, modeled after `SearchPoint`'s content-addressed design. But `OptSearchPoint` serves a different role — it's a **checkpoint snapshot** written once per round, not a content-addressed identity used for dedup. Freezing forces unnecessary full reconstruction each round.
+
+**Decision:** Remove `model_config = {"frozen": True}`. Add missing optimizer-state fields that were scattered on `_LoopState`:
+
+```python
+class OptSearchPoint(BaseModel):
+    # Existing fields
+    critique_text: str = ""
+    thinking_styles: list[str] = Field(default_factory=list)
+    plan: str = ""
+    optimizer_params: dict[str, Any] = Field(default_factory=dict)
+    task_context: dict[str, Any] = Field(default_factory=dict)
+    content_hashes: list[str] = Field(default_factory=list)
+
+    # New fields (Wave F1)
+    critique: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Full 5-field critique dict (positive_critique, negative_critique, "
+        "priority_fix, suggested_axes, summary). Currently only critique_text persists.",
+    )
+    escalation_journal: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Cross-round degradation investigation memory. "
+        "Currently on _LoopState only — lost on kernel restart.",
+    )
+    query_failure_tracker: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Per-query warning inventory across rounds. "
+        "Keyed by query text, values are warning counters.",
+    )
+```
+
+**`_LoopState` consolidation:** Replace 5 scattered optimizer-state fields (`critique_text`, `critique`, `thinking_styles`, `task_context`, `escalation_journal`) with single `opt_sp: OptSearchPoint`. Loop-mechanics fields (`current_sp`, `stall_count`, `l2_stall_count`, etc.) stay on `_LoopState`.
+
+| Before (`_LoopState`) | After (`_LoopState`) |
+|---|---|
+| `critique_text: str` | `opt_sp: OptSearchPoint` |
+| `critique: dict` | *(26 references in feedback_cycle.py migrate to `state.opt_sp.X`)* |
+| `thinking_styles: list[str]` | |
+| `task_context: dict` | |
+| `escalation_journal: list[dict]` | |
+
+**Checkpoint simplification:**
+
+```python
+# Before: construct new frozen OSP from scattered fields
+opt_sp = OptSearchPoint(critique_text=state.critique_text, ...)
+
+# After: direct serialization (opt_sp already up-to-date)
+state.opt_sp.plan = state.current_sp.prompt_state.plan
+state.opt_sp.optimizer_params = state.current_sp.prompt_state.optimizer_params
+campaign_store.add_trial(..., "opt_search_point": state.opt_sp.model_dump())
+```
+
+**Resume simplification:** `state.opt_sp = OptSearchPoint(**_osp)` — one-shot hydration. `escalation_journal` and `query_failure_tracker` now survive kernel restarts for free.
+
+**Scope boundary:** Node I/O models (`L1GenerateInput.critique_text`, etc.) are wire-format fields — unchanged. The orchestrator passes `state.opt_sp.critique_text` into node input dicts.
+
+### 13.3 Per-Query Warning Inventory
+
+A cross-round per-query warning inventory on `OptSearchPoint.query_failure_tracker`. Updated after each round's eval results. Simple counters, no complex classification.
+
+**Data shape:**
+
+```python
+{
+    "PA 66 25% GF V0 RAL 7012/0": {
+        "rounds_seen": 3,
+        "hits": 0,
+        "misses": 3,
+        "warnings": {
+            "web_search:partial_scrape": 3,
+            "web_search:low_content": 2,
+        },
+        "last_terminated_at": "web_search",
+    },
+    "Kingfa NPG25": {
+        "rounds_seen": 3,
+        "hits": 1,
+        "misses": 2,
+        "warnings": {"web_search:partial_scrape": 2},
+        "last_terminated_at": "llm_ranking",
+    },
+    "Aspirin powder": {
+        "rounds_seen": 3,
+        "hits": 3,
+        "misses": 0,
+        "warnings": {},
+        "last_terminated_at": "llm_ranking",
+    },
+}
+```
+
+**Pure functions** in `critique_stats.py`:
+
+- **`update_query_tracker(tracker, results)`** — merges current round's per-query results into the inventory. Increments `rounds_seen`, `hits`/`misses`, warning type counts, updates `last_terminated_at`.
+- **`summarize_warning_inventory(tracker)`** — produces a text summary grouped by warning type for prompt injection. Returns empty string when no warnings tracked.
+
+Output example:
+```
+## RECURRING PIPELINE WARNINGS (across 5 rounds)
+  web_search:partial_scrape — 3 queries affected:
+    PA 66 25% GF V0 RAL 7012/0  (3/3 rounds, 0 hits)
+    Kingfa NPG25  (2/3 rounds, 1 hit)
+    BASF Ultramid  (2/3 rounds, 0 hits)
+  entity_profiling:timeout — 1 query affected:
+    Specialty resin XR-200  (2/5 rounds, 2 hits)
+```
+
+### 13.4 Context Injection
+
+The warning inventory summary is injected into three consumers (only when tracker has data, typically round 2+):
+
+| Consumer | Injection point | Purpose |
+|----------|----------------|---------|
+| **Critique** | New `## RECURRING PIPELINE WARNINGS` section in `assemble_critique_prompt()` | Critique can distinguish prompt failures from pipeline failures |
+| **L2 refine_context** | Alongside existing escalation section in the L2 prompt | L2 sees which queries have recurring warnings, can reason about targeted fixes |
+| **L1 generate** | `focus_note` in scan-aware meta-prompt | L1 knows which failures have recurring pipeline issues |
+
+Additionally, `failure_examples` in `prompt_optimizer.py` annotated with warning history:
+
+```
+Query: PA 66 25%... | Predicted: Glass fibre... | GT: Polyamide...  [⚠ web_search:partial_scrape 3/3 rounds]
+```
+
+### 13.5 DegradationCheck — Unchanged
+
+`DegradationCheck` in `escalation.py` stays exactly as-is. It fires when degradation rate exceeds threshold, triggering L2. The improvement is that **L2 now has the warning inventory context** to make better decisions instead of blindly trying query prefix changes.
+
+### 13.6 L2 Diagnostic Probe Round
+
+When L2 fires and sees queries with recurring pipeline warnings (from the inventory), it can request an **extraordinary eval round** — a focused probe that tests whether its pipeline param change fixed the degraded queries, with results flowing back to L2.
+
+**Flow:**
+
+```
+Round N: 8/20 queries degraded (recurring web_search warnings)
+  → Escalation fires, L2 runs
+  → L2 sees warning inventory: 8 queries with recurring web_search:partial_scrape
+  → L2 suggests pipeline_param change: {"web_search": {"query_prefix": "material datasheet"}}
+  → L2 returns TransitionResult with probe_queries = ["PA 66 25%...", "Kingfa NPG25", ...]
+
+Probe round (extraordinary):
+  → Evaluates ONLY probe_queries with the new pipeline_params
+  → Results flow back to L2 (second L2 call with probe results)
+  → L2 assesses: did degradation decrease for these queries?
+    → YES: Update tracker, continue normal L1 with new params
+    → NO: L2 tries different approach or accepts current state
+  → Tracker updated with probe round observations
+```
+
+**Implementation:**
+
+1. `TransitionResult` gets `probe_queries: list[str] | None = None`
+2. L2 prompt template (`l2_refine_context.json`) updated: L2 can return `"probe_queries": [...]` in its JSON response
+3. Orchestrator (`feedback_cycle.py`): after L2 returns with `probe_queries`, runs mini-eval on those queries, passes results back to L2 (second call), L2 returns final `TransitionResult`
+4. Probe round accounting: does NOT increment `round_num`, does NOT count toward `max_rounds` or patience. Logged as `round_{N}_probe` in campaign store.
+
+**Why L2 decides:**
+- L2 has context about what changed and why
+- L2 picks which queries to probe (not necessarily all warned queries)
+- L2 can decide NOT to probe
+- Keeps the escalation hierarchy clean: L2 is the strategic decision-maker
+
+### 13.7 Wave F — Execution Plan
+
+#### F1: OptSearchPoint consolidation
+
+- `api/models/opt_search_point.py` — remove frozen, add 3 new fields
+- `api/services/campaign/models.py` — replace 5 scattered fields with `opt_sp: OptSearchPoint`
+- `api/services/campaign/feedback_cycle.py` — migrate 26 `state.X` → `state.opt_sp.X`; simplify checkpoint/resume
+
+#### F2: Warning inventory
+
+- `api/services/campaign/critique_stats.py` — `update_query_tracker()`, `summarize_warning_inventory()`
+- `api/services/campaign/feedback_cycle.py` — call `update_query_tracker()` after each round
+- `api/services/campaign/critique_stats.py` — add inventory section to `assemble_critique_prompt()`
+
+#### F3: Context injection
+
+- `api/services/prompt_optimizer.py` — annotate failure_examples with `[⚠ warning_type N/M rounds]`
+- `api/services/campaign/feedback_cycle.py` — wire inventory into L2 and L1-gen prompts
+
+#### F4: L2 probe rounds
+
+- `api/services/campaign/layer_transitions.py` — `TransitionResult.probe_queries`; parse from L2 response
+- `api/config/optimizer_prompts/l2_refine_context.json` — probe instruction in L2 prompt
+- `api/services/campaign/feedback_cycle.py` — probe round orchestration logic

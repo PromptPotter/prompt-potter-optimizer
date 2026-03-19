@@ -1,7 +1,7 @@
 # Work Breakdown Structure: PromptPotter Optimizer
 
-**Version:** 0.10.0
-**Date:** 2026-03-05
+**Version:** 0.11.0
+**Date:** 2026-03-19
 **Status:** Active
 **Depends on:** [PRD v0.9.0](prd.md), [ADD v0.10.0](add.md)
 
@@ -85,6 +85,44 @@ See [M6 spec](m6-pipeline-composability.md) for full details. Cross-repo: TermNo
 
 ---
 
+## Phase 7: Optimizer-as-Pipeline (M7) -- In Progress
+
+See [M7 spec](m7-optimizer-pipeline.md) for full details (§1-§13).
+
+**Waves A-E: Complete**
+
+| ID | Work Package | Status |
+|----|-------------|--------|
+| 7.A1 | Prompt templates + optimizer_prompt_loader.py | Complete |
+| 7.A2 | OptSearchPoint model | Complete |
+| 7.A3 | NodeBase in base.py | Complete |
+| 7.A4 | Node I/O Pydantic models | Complete |
+| 7.B2 | L1GenerateNode implementation | Complete |
+| 7.B3 | L1EvaluateNode implementation | Complete |
+| 7.B4 | L2RefineNode + L3ModifyPlanNode | Complete |
+| 7.B5 | Node tests | Complete |
+| 7.C1 | ObsLogger node step methods | Complete |
+| 7.C2 | CloudObsBackend node step support | Complete |
+| 7.C3 | Wire NodeBase tracing hooks | Complete |
+| 7.D1 | Sync httpx client for notebook path | Complete |
+| 7.D2 | Swap L1Generate call site | Complete |
+| 7.D3 | Swap L1Evaluate call site | Complete |
+| 7.D4 | Swap L2/L3 escalation | Complete |
+| 7.D5 | OptSearchPoint checkpointing | Complete |
+| 7.D6 | Verify cycle_config_identity | Complete |
+| 7.E1 | EscalationCheck framework + DegradationCheck | Complete |
+
+**Wave F: Warning Inventory + OptSearchPoint Consolidation + L2 Probe Rounds**
+
+| ID | Work Package | Sessions | Depends | Status |
+|----|-------------|:--------:|---------|--------|
+| 7.F1 | OptSearchPoint consolidation (unfreeze, add critique/escalation_journal/query_failure_tracker, consolidate _LoopState) | 1 | 7.D5 | Active |
+| 7.F2 | Warning inventory: `update_query_tracker()`, `summarize_warning_inventory()` in critique_stats.py | 1 | 7.F1 | Planned |
+| 7.F3 | Context injection: wire inventory into critique, L2, L1-gen prompts | 1 | 7.F2 | Planned |
+| 7.F4 | L2 diagnostic probe rounds: `TransitionResult.probe_queries`, L2 prompt update, orchestrator probe logic | 1 | 7.F3 | Planned |
+
+---
+
 ## Phase 8: Multi-Connector Architecture (M8) -- Planned
 
 See [M8 spec](m8-multi-connector.md) for full details. Absorbs former M6 Wave 5 (notebook migration + Docker Compose) and M6 Wave 4 (workflow nodes).
@@ -124,8 +162,8 @@ See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depe
 | M3: Optimization Infrastructure | 11 | 14 | Complete |
 | M4: Integration and Polish | -- | -- | Complete (reclassified) |
 | M5: Observability Layer | 7 | 7 | Complete |
-| M6: PipelineSchema + Pipeline Composability | 14 | 14 | In Progress (Waves 0-3 complete, Wave 4 → M8, Waves 5-6 active) |
-| M7: Optimizer-as-Pipeline | 6 | 6 | In Progress |
+| M6: PipelineSchema + Pipeline Composability | 14 | 14 | Waves 0-3, 5-7 complete; Wave 4 → M8 |
+| M7: Optimizer-as-Pipeline | 22 | 22 | In Progress (Waves A-E complete, Wave F active) |
 | M8: Multi-Connector | 6 | 6 | Planned |
 | M9: n8n Connector | 4 | 4 | Planned |
 | **Total** | **63** | **~67** | |

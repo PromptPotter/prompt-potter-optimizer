@@ -13,6 +13,6 @@ Each milestone has an executable spec in `docs/specs/`. One Claude Code session 
 | Milestone | Spec file | Pre-reading hint |
 |-----------|-----------|-----------------|
 | M5: Observability | Complete | See [`docs/observability.md`](../observability.md) for data exploration. |
-| M6: PipelineSchema + Pipeline Composability | Waves 0-3, 5-7 complete; Wave 6 mostly complete; Wave 4 → M8. [`m6-pipeline-composability.md`](m6-pipeline-composability.md) | Read `api/services/prompt_eval.py` and `api/models/pipeline_schema.py` |
-| M7: Optimizer-as-Pipeline | [`m7-optimizer-pipeline.md`](m7-optimizer-pipeline.md) | Read `api/services/campaign/feedback_cycle.py` and `api/nodes/optimizer_nodes.py` |
+| M6: PipelineSchema + Pipeline Composability | Waves 0-3, 5-7 complete; Wave 4 → M8. [`m6-pipeline-composability.md`](m6-pipeline-composability.md) | Read `api/services/prompt_eval.py` and `api/models/pipeline_schema.py` |
+| M7: Optimizer-as-Pipeline | Waves A-E complete, Wave F active. [`m7-optimizer-pipeline.md`](m7-optimizer-pipeline.md) | Read `api/services/campaign/feedback_cycle.py`, `api/nodes/optimizer_nodes.py`, `api/models/opt_search_point.py` |
 | M8: Multi-Connector | [`m8-multi-connector.md`](m8-multi-connector.md) | Read `docs/connectors/termnorm.md` and `api/services/backend_client.py` |

@@ -71,7 +71,7 @@ The AI Loop is itself a 4-step pipeline, implemented by `feedback_cycle.py`:
 | **l2_refine_context** | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` |
 | **l3_modify_plan** | Strategic replanning on L2 stall | `modify_plan()` in `layer_transitions.py` |
 
-These 4 steps are designed to be modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend, enabling step-level tracing, full reproducibility, and self-optimization. The existing nodes (`InitNode`, `L1GenerateNode`, `L1EvaluateNode` in `api/nodes/optimizer_nodes.py`) are thin wrappers around the same service functions. See the [M7 spec](m7-optimizer-pipeline.md) for the full optimizer-as-pipeline design.
+These 4 steps are modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend, enabling step-level tracing, full reproducibility, and self-optimization. The nodes (`L1GenerateNode`, `L1EvaluateNode`, `L2RefineNode`, `L3ModifyPlanNode` in `api/nodes/optimizer_nodes.py`) are thin wrappers around the same service functions. `OptSearchPoint` (`api/models/opt_search_point.py`) captures the optimizer's configuration at each round — critique, thinking styles, task context, escalation journal, and per-query warning inventory — checkpointed in trial JSON for traceability and resume. See the [M7 spec](m7-optimizer-pipeline.md) for the full design including the warning inventory (§13) and L2 diagnostic probe rounds.
 
 Each round runs l1_generate then l1_evaluate. Stopping: `max_rounds`, `patience`, `next_action == "stop"`, or perfect accuracy. On L1 stall, escalates to l2_refine_context; on L2 stall, to l3_modify_plan. Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (bypassing patience).
 

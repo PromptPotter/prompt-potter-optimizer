@@ -1,7 +1,7 @@
 # Roadmap: PromptPotter Optimizer
 
-**Version:** 0.10.0
-**Date:** 2026-03-05
+**Version:** 0.11.0
+**Date:** 2026-03-19
 **Status:** Active
 **Depends on:** [WBS v0.10.0](wbs.md)
 
@@ -17,8 +17,8 @@
 | M3 | Optimization Infrastructure | Complete |
 | M4 | Integration and Polish (reclassified — absorbed into M3-M5) | Complete |
 | M5 | Observability Layer | Complete |
-| M6 | PipelineSchema + Pipeline Composability | Waves 0-3 complete, Wave 4 deferred to M8, Waves 5-6 active |
-| M7 | Optimizer-as-Pipeline | In Progress |
+| M6 | PipelineSchema + Pipeline Composability | Waves 0-3, 5-7 complete; Wave 4 → M8 |
+| M7 | Optimizer-as-Pipeline | In Progress (Waves A-E complete, Wave F active) |
 | M8 | Multi-Connector Architecture | Future |
 
 ---
@@ -41,7 +41,7 @@ File-based observability (Langfuse traces, MLflow experiments, prompt versioning
 
 ---
 
-## M6: PipelineSchema + Pipeline Composability -- In Progress
+## M6: PipelineSchema + Pipeline Composability -- Waves 0-3, 5-7 Complete
 
 | Wave | Scope | Status |
 |------|-------|--------|
@@ -50,8 +50,9 @@ File-based observability (Langfuse traces, MLflow experiments, prompt versioning
 | 2 | PipelineSchema model + schema derivation (6 chokepoints resolved) | Complete |
 | 3 | Unified tracing (one trace per query) | Complete |
 | 4 | Workflow nodes (runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode) | Deferred to M8 |
-| 5 | Composite scoring + rank display (hardcoded stepping stone) | Active |
-| 6 | Node-role-driven intermediate metrics (auto-wired) | Planned |
+| 5 | Composite scoring + rank display | Complete |
+| 6 | `node_role`, `IntermediateMetric`, `derive_metrics()` | Complete |
+| 7 | Consolidated pipeline control surfaces (`node_config`) | Complete |
 
 **Exit gate (reframed):** MVP performance validation — TermNorm accuracy from ~15% to >90%. Composite scoring (accuracy + intermediate metrics) used as optimization target. No hardcoded pipeline step names in service layer.
 
@@ -63,7 +64,16 @@ Full spec: [`docs/specs/m6-pipeline-composability.md`](m6-pipeline-composability
 
 The optimizer itself is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_context`, `l3_modify_plan`), modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend. This solves three problems by design: tracing (optimizer steps get Langfuse observations), reproducibility (every meta-optimizer decision traced with full I/O), and self-optimization (a meta-PromptPotter optimizing its own prompts).
 
-Today, key artifacts are lost after each cycle: `critique_text`, `thinking_styles`, L2/L3 transition rationale and inputs, candidate generation meta-prompts. M7 captures all step-level artifacts, defines `OPTIMIZER_PIPELINE_SCHEMA`, and wires optimizer steps into the existing tracing infrastructure.
+| Wave | Scope | Status |
+|------|-------|--------|
+| A | Leaf modules: prompt templates, OptSearchPoint, NodeBase, I/O models | Complete |
+| B | Node implementations: L1Generate, L1Evaluate, L2Refine, L3ModifyPlan | Complete |
+| C | Observability plumbing: ObsLogger + CloudObsBackend node step methods | Complete |
+| D | Orchestrator migration: swap call sites in feedback_cycle.py | Complete |
+| E | EscalationCheck framework, end-to-end Langfuse tracing | Complete (E1); E2 → M8 |
+| F | Warning inventory, OptSearchPoint consolidation, L2 probe rounds | Active |
+
+**Wave F** (§13 of spec): Per-query warning inventory tracks recurring pipeline warnings (e.g., `web_search:partial_scrape`) across rounds. `OptSearchPoint` unfrozen and consolidated as the single optimizer-state model. L2 gains diagnostic probe rounds — extraordinary eval rounds on specific queries, with results flowing back to L2 for assessment.
 
 **Entry criteria:** M6 exit gate passed (PipelineSchema + composite scoring active).
 
