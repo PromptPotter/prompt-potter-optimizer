@@ -23,7 +23,6 @@ from api.services.campaign.feedback_cycle import (
 from api.services.search import select_scan_winner
 
 from _helpers import (
-    apply_critique_mock,
     apply_eval_mock,
     apply_grow_mock,
     apply_init_mock,
@@ -43,7 +42,7 @@ async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
-    apply_critique_mock(monkeypatch)
+
 
     # Hits improve each round: 1/3 → 2/3 → 3/3 (perfect, stops early)
     apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
@@ -76,7 +75,7 @@ async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
-    apply_critique_mock(monkeypatch)
+
 
     # All candidates return 0% — never beats baseline (which is also 0%)
     apply_eval_mock(monkeypatch, round_hits=[0])
@@ -105,7 +104,7 @@ async def test_max_rounds(monkeypatch, eval_data):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
-    apply_critique_mock(monkeypatch)
+
 
     # Slow steady improvement: 1/3, 1/3, 2/3 hits — never reaches perfect or stalls
     apply_eval_mock(monkeypatch, round_hits=[1, 1, 2])
@@ -115,7 +114,8 @@ async def test_max_rounds(monkeypatch, eval_data):
         patience=10,  # Won't trigger
         n_variants=2,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
+        enable_l2=False,
     )
 
     result = await run_feedback_cycle(
@@ -141,7 +141,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
     apply_init_mock(monkeypatch)
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
-    apply_critique_mock(monkeypatch)
+
 
     # First candidate gets 33%, analysis suggestions say stop
     apply_eval_mock(monkeypatch, round_hits=[1])
@@ -622,7 +622,8 @@ async def test_resume_from_interrupted_cycle(
         creativity=0.5,
         improvement_threshold=0.01,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
+        enable_l2=False,
         project_root=str(tmp_path),
         backend_id="test_backend",
     )
@@ -664,7 +665,7 @@ async def test_interrupt_writes_interrupted_status(
 
     call_count = [0]
 
-    async def mock_eval_interrupt(search_point, data, ctx=None, **kwargs):
+    def mock_eval_interrupt(search_point, data, ctx=None, **kwargs):
         call_count[0] += 1
         # Round 0: all candidates return 1/3 hits → round completes
         # Round 1: interrupt on first candidate
@@ -694,7 +695,8 @@ async def test_interrupt_writes_interrupted_status(
         creativity=0.5,
         improvement_threshold=0.01,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
+        enable_l2=False,
         project_root=str(tmp_path),
         backend_id="test_backend",
     )
@@ -747,7 +749,8 @@ async def test_mid_round_resume_uses_persisted_candidates(
         creativity=0.5,
         improvement_threshold=0.01,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
+        enable_l2=False,
         project_root=str(tmp_path),
         backend_id="test_backend",
     )

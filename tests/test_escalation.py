@@ -5,8 +5,6 @@ import pytest
 from api.services.campaign.escalation import (
     DegradationCheck,
     EscalationStrategy,
-    WarningClassification,
-    classify_warnings,
     collect_warning_types,
 )
 
@@ -125,61 +123,3 @@ class TestCollectWarningTypes:
         assert types["unknown"] == 1
 
 
-class TestClassifyWarnings:
-    def test_default_under_investigation(self):
-        classifications = classify_warnings(
-            {"web_search:partial_scrape": 5},
-            round_history=[],
-        )
-        assert len(classifications) == 1
-        assert classifications[0].status == "under_investigation"
-
-    def test_promotes_to_config_sensitivity(self):
-        history = [
-            {
-                "round": 0,
-                "pipeline_params": {"content_char_limit": 800},
-                "warning_types": {"web_search:partial_scrape": 9},
-            },
-            {
-                "round": 1,
-                "pipeline_params": {"content_char_limit": 2000},
-                "warning_types": {"web_search:partial_scrape": 3},
-            },
-        ]
-        classifications = classify_warnings(
-            {"web_search:partial_scrape": 3},
-            round_history=history,
-        )
-        assert classifications[0].status == "config_sensitivity"
-        assert any("content_char_limit" in e for e in classifications[0].evidence)
-
-    def test_stays_under_investigation_without_correlation(self):
-        history = [
-            {
-                "round": 0,
-                "pipeline_params": {"temp": 0.3},
-                "warning_types": {"web_search:partial_scrape": 9},
-            },
-            {
-                "round": 1,
-                "pipeline_params": {"temp": 0.3},
-                "warning_types": {"web_search:partial_scrape": 9},
-            },
-        ]
-        classifications = classify_warnings(
-            {"web_search:partial_scrape": 9},
-            round_history=history,
-        )
-        assert classifications[0].status == "under_investigation"
-
-    def test_to_dict(self):
-        wc = WarningClassification(
-            warning_type="web_search:partial_scrape",
-            status="under_investigation",
-            evidence=["test"],
-            rounds_observed=1,
-        )
-        d = wc.to_dict()
-        assert d["warning_type"] == "web_search:partial_scrape"
-        assert d["status"] == "under_investigation"

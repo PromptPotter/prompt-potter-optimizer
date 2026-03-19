@@ -523,7 +523,7 @@ async def evaluate_and_select_winner(
             pipeline_params=pp,
         )
         ctx.candidate_idx = idx
-        results, scores, cached = await evaluate_prompt_cached(
+        results, scores, cached = evaluate_prompt_cached(
             sp, eval_data, ctx,
             label=f"candidate_{idx}",
             on_result=_on_result,
@@ -552,11 +552,6 @@ async def evaluate_and_select_winner(
             on_candidate_eval(idx, len(ps_candidates), scores)
 
         if escalation_signal:
-            logger.warning(
-                "Escalation '%s' — aborting remaining %d candidates",
-                escalation_signal["check_name"],
-                len(ps_candidates) - idx - 1,
-            )
             break
 
     # Assemble current_best with PromptState object for select_round_winner

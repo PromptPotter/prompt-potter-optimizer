@@ -161,7 +161,7 @@ def _make_eval_fn(
             prompt_state=ps,
             pipeline_params=pp or get_params(),
         )
-        results, scores, cached = await evaluate_prompt_cached(
+        results, scores, cached = evaluate_prompt_cached(
             sp, eval_data, ctx,
             label="scan",
             on_result=on_result,
@@ -431,7 +431,7 @@ async def sensitivity_scan(
         axes.append((name, axis_type, values))
 
     # Evaluate baseline
-    baseline_results, baseline_scores, baseline_cached = await evaluate_prompt_cached(
+    baseline_results, baseline_scores, baseline_cached = evaluate_prompt_cached(
         baseline, eval_data, scan_ctx,
         label="scan",
         on_result=on_result,
@@ -506,7 +506,7 @@ async def sensitivity_scan(
                     pipeline_params={**(baseline.pipeline_params or {}), axis_name: value},
                 )
 
-            results, scores, cached = await evaluate_prompt_cached(
+            results, scores, cached = evaluate_prompt_cached(
                 perturbed, eval_data, scan_ctx,
                 label="scan",
                 on_result=on_result,

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
     from api.services.project_store import ProjectStore
 
 from api.models.prompt_state import PromptState
@@ -80,6 +81,7 @@ def show_feedback_preflight(
     campaign_config: dict,
     *,
     pipeline_params: "dict | None" = None,
+    pipeline_schema: "PipelineSchema | None" = None,
     scan_df=None,
     axis_profiles=None,
     scan_variants=None,
@@ -121,6 +123,7 @@ def show_feedback_preflight(
     config = CycleConfig.from_campaign_config(
         campaign_config, pipeline_params=pipeline_params,
         scan_context=scan_context,
+        pipeline_schema=pipeline_schema,
     )
 
     bl = _extract_campaign_baseline(campaign_rounds)
@@ -325,15 +328,6 @@ def _print_preflight_sections(config, bl, eval_data,
 # ---------------------------------------------------------------------------
 
 
-def _round_result_to_dict(rr, round_idx: int) -> dict:
-    """Convert CycleRoundResult to campaign_rounds entry."""
-    d = rr.model_dump()
-    ps_raw = d.get("prompt_state", {})
-    d["prompt_state"] = PromptState(**ps_raw) if isinstance(ps_raw, dict) else ps_raw
-    d["round"] = round_idx
-    return d
-
-
 async def run_feedback_cycle_notebook(
     campaign_rounds: list,
     eval_data: list,
@@ -343,6 +337,7 @@ async def run_feedback_cycle_notebook(
     backend_id: str = "",
     backend_url: str = "http://127.0.0.1:8000",
     pipeline_params: "dict | None" = None,
+    pipeline_schema: "PipelineSchema | None" = None,
     session_terms: "list[str] | None" = None,
     langfuse_session_id: str | None = None,
     scan_context: "dict | None" = None,
@@ -369,6 +364,7 @@ async def run_feedback_cycle_notebook(
         backend_id = backend_id or svc.get("backend_id", "")
         backend_url = backend_url or svc["backend_client"].base_url
         session_terms = session_terms or svc.get("session_terms")
+        pipeline_schema = pipeline_schema or svc.get("pipeline_schema")
 
     config = CycleConfig.from_campaign_config(
         campaign_config,
@@ -378,6 +374,7 @@ async def run_feedback_cycle_notebook(
         pipeline_params=pipeline_params,
         session_terms=session_terms,
         scan_context=scan_context,
+        pipeline_schema=pipeline_schema,
     )
 
     bl = _extract_campaign_baseline(campaign_rounds)
@@ -493,7 +490,10 @@ async def run_feedback_cycle_notebook(
         _ds.stall_count = stall_count
         _ds.best_in_round = None
 
-        round_entry = _round_result_to_dict(round_result, len(campaign_rounds))
+        round_entry = round_result.model_dump()
+        ps_raw = round_entry.get("prompt_state", {})
+        round_entry["prompt_state"] = PromptState(**ps_raw) if isinstance(ps_raw, dict) else ps_raw
+        round_entry["round"] = len(campaign_rounds)
         campaign_rounds.append(round_entry)
 
         rn = _ds.round_num + 1
@@ -572,33 +572,36 @@ async def run_feedback_cycle_notebook(
         # Per-round pipeline health stats
         if round_result.results:
             try:
-                from api.services.campaign.critique_stats import (
-                    compute_pipeline_health, compute_rank_analysis,
-                )
-                _health = compute_pipeline_health(round_result.results)
-                _ranks = compute_rank_analysis(round_result.results)
+                from collections import Counter
+                from api.services.campaign.critique_stats import _find_rank, _get_candidates
 
-                _td = _health.get("termination_distribution", {})
-                _dr = _health.get("web_search_degradation_rate", 0)
-                _ts = _health.get("timing_stats", {})
-                _tk = _ranks.get("top_k_recall", {})
+                _results = round_result.results
+                _total = len(_results)
+                _td: Counter[str] = Counter()
+                _deg = 0
+                for _r in _results:
+                    _pd = _r.get("pipeline_data") or {}
+                    _td[_pd.get("terminated_at", "unknown")] += 1
+                    if (_pd.get("diagnostics") or {}).get("warnings"):
+                        _deg += 1
 
                 if _td:
                     print(_node_line(
-                        f"Pipeline: {' | '.join(f'{k}:{v}' for k, v in _td.items())}"))
-                if _dr > 0:
+                        f"Pipeline: {' | '.join(f'{k}:{v}' for k, v in _td.most_common())}"))
+                if _deg > 0:
+                    print(_node_line(f"Degradation: {_deg / _total:.0%}"))
+
+                _n_valid = sum(1 for _r in _results if not _r.get("error"))
+                if _n_valid > 0:
+                    for _k in [1, 5, 10]:
+                        _in_top = sum(
+                            1 for _r in _results if not _r.get("error")
+                            and (_rank := _find_rank(_get_candidates(_r), _r.get("ground_truth", ""))) is not None
+                            and _rank <= _k
+                        )
                     print(_node_line(
-                        f"Degradation: {_dr:.0%}"
-                        f" | URL yield: {_health.get('web_search_url_yield', 0):.0%}"))
-                if _ts:
-                    print(_node_line(
-                        f"Timing: p50={_ts.get('p50_ms', 0):.0f}ms"
-                        f" p90={_ts.get('p90_ms', 0):.0f}ms"))
-                if _tk:
-                    print(_node_line(
-                        f"Recall: top-1={_tk.get(1, 0):.0%}"
-                        f" top-5={_tk.get(5, 0):.0%}"
-                        f" top-10={_tk.get(10, 0):.0%}"))
+                        f"Recall: top-1={sum(1 for _r in _results if not _r.get('error') and _find_rank(_get_candidates(_r), _r.get('ground_truth', '')) == 1) / _n_valid:.0%}"
+                        f" top-5={sum(1 for _r in _results if not _r.get('error') and (_rk := _find_rank(_get_candidates(_r), _r.get('ground_truth', ''))) is not None and _rk <= 5) / _n_valid:.0%}"))
             except Exception:
                 pass  # stats are best-effort
 
@@ -633,6 +636,9 @@ async def run_feedback_cycle_notebook(
                     print(f"  {YELLOW}Using stored baseline {stored_bl:.1%}"
                           f" (notebook had {baseline_acc:.1%}){RESET}")
                     baseline_acc = stored_bl
+
+    print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
+    print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
     result = await run_feedback_cycle(
         instruction=instruction,

@@ -187,8 +187,9 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
         patience=2,
         n_variants=2,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
         enable_l2=True,
+        enable_l3=False,
         l2_patience=2,
     )
 
@@ -248,7 +249,7 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
         patience=2,
         n_variants=2,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
         enable_l2=True,
         enable_l3=True,
         l2_patience=2,
@@ -267,31 +268,6 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
     assert len(l3_calls) >= 1
     # Stops at L3 patience exhaustion
     assert result.stop_reason == "l3_patience_exhausted"
-
-
-# ---------------------------------------------------------------------------
-# enable_l2=False preserves existing behavior
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_enable_l2_false_unchanged_behavior(monkeypatch, eval_data, cycle_config):
-    """With enable_l2=False (default), patience exhaustion behaves as before."""
-    apply_init_mock(monkeypatch)
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-    apply_eval_mock(monkeypatch, round_hits=[0])
-
-    assert not cycle_config.enable_l2  # default is False
-
-    result = await run_feedback_cycle(
-        instruction="Rank candidates.",
-        eval_data=eval_data,
-        config=cycle_config,
-    )
-
-    assert result.stop_reason == "patience_exhausted"
-    assert result.n_rounds == cycle_config.patience
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +313,8 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
         n_variants=3,          # default: 3
         creativity=0.5,        # default: 0.5
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
+        enable_l2=False,
     )
 
     await run_feedback_cycle(
@@ -395,7 +372,8 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
         patience=5,
         n_variants=2,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
+        enable_l2=False,
     )
 
     await run_feedback_cycle(

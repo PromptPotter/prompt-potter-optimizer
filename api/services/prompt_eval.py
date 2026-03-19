@@ -6,7 +6,6 @@ and evaluates reranker prompts via the TermNorm backend's /matches endpoint.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -163,7 +162,7 @@ def _extract_pipeline_data(
     return pd
 
 
-async def backend_reranker_eval(
+def backend_reranker_eval(
     query_data: dict,
     backend_client: BackendClient,
     rendered_prompt: str,
@@ -227,7 +226,7 @@ async def backend_reranker_eval(
         }
 
 
-async def evaluate_prompt_batch(
+def evaluate_prompt_batch(
     search_point: "SearchPoint",
     eval_data: list,
     backend_client: "BackendClient",
@@ -264,7 +263,7 @@ async def evaluate_prompt_batch(
 
     try:
         for i, qd in enumerate(eval_data):
-            result = await backend_reranker_eval(
+            result = backend_reranker_eval(
                 qd, backend_client, rendered,
                 pipeline_params=search_point.pipeline_params,
                 pipeline_schema=pipeline_schema,
@@ -293,7 +292,10 @@ async def evaluate_prompt_batch(
             else:
                 consecutive_errors = 0
 
-            # Escalation checks — run after each query result
+            if on_result is not None:
+                on_result(result, i, len(eval_data))
+
+            # Escalation checks — run after display
             if escalation_checks:
                 for check in escalation_checks:
                     if not check.enabled:
@@ -302,17 +304,8 @@ async def evaluate_prompt_batch(
                         results, candidate_idx, n_total_candidates,
                     )
                     if signal:
-                        logger.warning(
-                            "EscalationCheck '%s' triggered at query %d/%d "
-                            "(candidate %d/%d)",
-                            check.name, i + 1, len(eval_data),
-                            candidate_idx + 1, n_total_candidates,
-                        )
                         raise EscalationError(signal, results)
-
-            if on_result is not None:
-                on_result(result, i, len(eval_data))
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except KeyboardInterrupt:
         logger.warning(
             "Eval batch interrupted at query %d/%d. "
             "This candidate will be re-evaluated on resume. "
@@ -480,7 +473,7 @@ def _try_cached_lookup(
     return None
 
 
-async def evaluate_prompt_cached(
+def evaluate_prompt_cached(
     search_point: "SearchPoint",
     eval_data: list,
     ctx: EvalContext,
@@ -556,7 +549,7 @@ async def evaluate_prompt_cached(
 
     escalation_signal = None
     try:
-        results = await evaluate_prompt_batch(
+        results = evaluate_prompt_batch(
             search_point, eval_data, backend_client,
             on_result=on_result,
             pipeline_schema=pipeline_schema,
@@ -567,10 +560,6 @@ async def evaluate_prompt_cached(
     except _EscalationError as e:
         results = e.partial_results
         escalation_signal = e.signal
-        logger.warning(
-            "Escalation '%s' aborted eval at %d/%d queries",
-            e.signal.check_name, len(results), len(eval_data),
-        )
     scores = compute_composite_score(results, pipeline_schema)
     if escalation_signal:
         scores["escalation_signal"] = escalation_signal.to_dict()

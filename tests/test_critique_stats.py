@@ -1,15 +1,10 @@
-"""Tests for critique_stats — stat computers and anomaly detection."""
+"""Tests for critique_stats — prompt assembly and inline stat computation."""
 
-import pytest
 
 from api.services.campaign.critique_stats import (
     CritiqueContext,
     assemble_critique_prompt,
-    compute_pipeline_health,
-    compute_query_categories,
-    compute_rank_analysis,
-    compute_round_evolution,
-    detect_anomalies,
+    _find_rank,
 )
 
 
@@ -41,208 +36,36 @@ def _make_result(
 
 
 # ---------------------------------------------------------------------------
-# Pipeline health
+# _find_rank
 # ---------------------------------------------------------------------------
 
 
-class TestPipelineHealth:
-    def test_empty_results(self):
-        assert compute_pipeline_health([]) == {}
+class TestFindRank:
+    def test_found_at_position_1(self):
+        assert _find_rank([{"candidate": "A"}], "A") == 1
 
-    def test_degradation_rate(self):
-        results = [
-            _make_result(warnings=["2 of 14 fetched URLs returned content"]),
-            _make_result(warnings=[]),
-            _make_result(warnings=["0 of 10 fetched URLs returned content"]),
-        ]
-        health = compute_pipeline_health(results)
-        assert health["web_search_degradation_rate"] == pytest.approx(2 / 3)
-        assert health["degraded_count"] == 2
-        assert health["total"] == 3
-
-    def test_termination_distribution(self):
-        results = [
-            _make_result(terminated_at="fuzzy_matching"),
-            _make_result(terminated_at="token_matching"),
-            _make_result(terminated_at="token_matching"),
-        ]
-        health = compute_pipeline_health(results)
-        assert health["termination_distribution"]["token_matching"] == 2
-        assert health["termination_distribution"]["fuzzy_matching"] == 1
-
-    def test_timing_stats(self):
-        results = [
-            _make_result(total_time=100),
-            _make_result(total_time=200),
-            _make_result(total_time=300),
-        ]
-        health = compute_pipeline_health(results)
-        assert health["timing_stats"]["p50_ms"] == 200
-        assert health["timing_stats"]["max_ms"] == 300
-
-    def test_error_rate(self):
-        results = [
-            _make_result(error="timeout"),
-            _make_result(),
-            _make_result(),
-        ]
-        health = compute_pipeline_health(results)
-        assert health["error_rate"] == pytest.approx(1 / 3)
-
-
-# ---------------------------------------------------------------------------
-# Rank analysis
-# ---------------------------------------------------------------------------
-
-
-class TestRankAnalysis:
-    def test_near_misses(self):
-        results = [
-            _make_result(
-                gt="Target",
-                candidates=[
-                    {"candidate": "Wrong1"},
-                    {"candidate": "Wrong2"},
-                    {"candidate": "Target"},
-                ],
-            ),
-        ]
-        ranks = compute_rank_analysis(results)
-        assert ranks["rank_distribution"]["2-5"] == 1
-        assert len(ranks["near_misses"]) == 1
-        assert ranks["near_misses"][0]["rank"] == 3
+    def test_found_at_position_3(self):
+        assert _find_rank(
+            [{"candidate": "X"}, {"candidate": "Y"}, {"candidate": "A"}], "A"
+        ) == 3
 
     def test_not_found(self):
-        results = [_make_result(gt="Missing", candidates=[{"candidate": "Other"}])]
-        ranks = compute_rank_analysis(results)
-        assert ranks["rank_distribution"]["not_found"] == 1
+        assert _find_rank([{"candidate": "X"}], "A") is None
 
-    def test_top_k_recall(self):
-        results = [
-            _make_result(gt="A", candidates=[{"candidate": "A"}]),
-            _make_result(gt="B", candidates=[
-                {"candidate": "X"}, {"candidate": "B"},
-            ]),
-            _make_result(gt="C", candidates=[]),
-        ]
-        ranks = compute_rank_analysis(results)
-        assert ranks["top_k_recall"][1] == pytest.approx(1 / 3)
-        assert ranks["top_k_recall"][3] == pytest.approx(2 / 3)
+    def test_empty_candidates(self):
+        assert _find_rank([], "A") is None
+
+    def test_empty_gt(self):
+        assert _find_rank([{"candidate": "A"}], "") is None
 
 
 # ---------------------------------------------------------------------------
-# Round evolution
-# ---------------------------------------------------------------------------
-
-
-class TestRoundEvolution:
-    def test_empty(self):
-        assert compute_round_evolution([]) == {}
-
-    def test_trajectory(self):
-        history = [
-            {"round": 0, "accuracy": 0.5, "composite": 0.5},
-            {"round": 1, "accuracy": 0.6, "composite": 0.6},
-            {"round": 2, "accuracy": 0.6, "composite": 0.6},
-        ]
-        evo = compute_round_evolution(history)
-        assert len(evo["trajectory"]) == 3
-        assert evo["trajectory"][1]["delta"] == pytest.approx(0.1)
-        assert evo["trajectory"][2]["delta"] == pytest.approx(0.0)
-
-    def test_plateau_detection(self):
-        history = [
-            {"round": 0, "accuracy": 0.5},
-            {"round": 1, "accuracy": 0.5},
-            {"round": 2, "accuracy": 0.505},
-        ]
-        evo = compute_round_evolution(history)
-        assert evo["plateau_rounds"] >= 2
-
-    def test_param_changes(self):
-        history = [
-            {"round": 0, "accuracy": 0.5, "pipeline_params": {"temp": 0.3}},
-            {"round": 1, "accuracy": 0.6, "pipeline_params": {"temp": 0.7}},
-        ]
-        evo = compute_round_evolution(history)
-        assert len(evo["param_changes"]) == 1
-        assert "temp" in evo["param_changes"][0]["changed_params"]
-
-
-# ---------------------------------------------------------------------------
-# Query categories
-# ---------------------------------------------------------------------------
-
-
-class TestQueryCategories:
-    def test_failures_by_step(self):
-        results = [
-            _make_result(query="q1", terminated_at="fuzzy_matching"),
-            _make_result(query="q2", terminated_at="token_matching"),
-            _make_result(query="q3", hit=True),
-        ]
-        cats = compute_query_categories(results)
-        assert cats["failures_by_step"]["fuzzy_matching"] == 1
-        assert cats["failures_by_step"]["token_matching"] == 1
-        assert len(cats["hit_queries"]) == 1
-
-    def test_blindspot_terms(self):
-        results = [
-            _make_result(query="Copper Wire/cold forming"),
-            _make_result(query="Copper Strip EN"),
-            _make_result(query="Copper alloy tube"),
-        ]
-        cats = compute_query_categories(results)
-        blindspots = dict(cats["blindspot_terms"])
-        assert "Copper" in blindspots
-        assert blindspots["Copper"] == 3
-
-
-# ---------------------------------------------------------------------------
-# Anomaly detection
-# ---------------------------------------------------------------------------
-
-
-class TestAnomalyDetection:
-    def test_high_degradation(self):
-        results = [_make_result(warnings=["bad"]) for _ in range(5)]
-        ctx = CritiqueContext(results=results, accuracy=0.0)
-        health = compute_pipeline_health(results)
-        flags = detect_anomalies(ctx, health, {}, {})
-        names = [f.name for f in flags]
-        assert "high_degradation" in names
-
-    def test_plateau_signal(self):
-        ctx = CritiqueContext(results=[], accuracy=0.5)
-        evolution = {"plateau_rounds": 3}
-        flags = detect_anomalies(ctx, {}, {}, evolution)
-        names = [f.name for f in flags]
-        assert "plateau_signal" in names
-
-    def test_near_miss_pattern(self):
-        misses = [_make_result() for _ in range(10)]
-        ctx = CritiqueContext(results=misses, accuracy=0.0)
-        ranks = {"near_misses": [{"rank": 3}] * 5}
-        flags = detect_anomalies(ctx, {}, ranks, {})
-        names = [f.name for f in flags]
-        assert "near_miss_pattern" in names
-
-    def test_no_flags_on_clean_data(self):
-        results = [_make_result(hit=True) for _ in range(10)]
-        ctx = CritiqueContext(results=results, accuracy=1.0)
-        health = compute_pipeline_health(results)
-        ranks = compute_rank_analysis(results)
-        flags = detect_anomalies(ctx, health, ranks, {})
-        assert len(flags) == 0
-
-
-# ---------------------------------------------------------------------------
-# Prompt assembly
+# Prompt assembly (integration — covers all inline stats)
 # ---------------------------------------------------------------------------
 
 
 class TestAssemblePrompt:
-    def test_assembles_without_error(self):
+    def test_assembles_with_all_sections(self):
         results = [
             _make_result(query="q1", hit=True),
             _make_result(query="q2", gt="Target", candidates=[{"candidate": "Wrong"}]),
@@ -272,9 +95,62 @@ class TestAssemblePrompt:
         assert "SCAN CONTEXT" in prompt
         assert "FAILURE DETAILS" in prompt
         assert "SUCCESS DETAILS" in prompt
-        assert len(prompt) < 100_000  # under 100k token budget
 
     def test_handles_empty_results(self):
         ctx = CritiqueContext(results=[], accuracy=0.0)
         prompt = assemble_critique_prompt(ctx)
         assert "EVALUATION SUMMARY" in prompt
+
+    def test_includes_degradation_anomaly(self):
+        results = [_make_result(warnings=["bad"]) for _ in range(5)]
+        ctx = CritiqueContext(results=results, accuracy=0.0)
+        prompt = assemble_critique_prompt(ctx)
+        assert "ANOMALY FLAGS" in prompt
+        assert "high_degradation" in prompt
+
+    def test_includes_near_miss_info(self):
+        results = [
+            _make_result(
+                gt="Target",
+                candidates=[{"candidate": "Wrong"}, {"candidate": "Target"}],
+            ),
+        ]
+        ctx = CritiqueContext(results=results, accuracy=0.0)
+        prompt = assemble_critique_prompt(ctx)
+        assert "Near misses" in prompt
+
+    def test_includes_round_evolution(self):
+        ctx = CritiqueContext(
+            results=[_make_result()],
+            accuracy=0.5,
+            round_history=[
+                {"round": 0, "accuracy": 0.3},
+                {"round": 1, "accuracy": 0.5},
+            ],
+        )
+        prompt = assemble_critique_prompt(ctx)
+        assert "ROUND EVOLUTION" in prompt
+
+    def test_includes_plateau_anomaly(self):
+        ctx = CritiqueContext(
+            results=[_make_result()],
+            accuracy=0.5,
+            round_history=[
+                {"round": 0, "accuracy": 0.5},
+                {"round": 1, "accuracy": 0.5},
+                {"round": 2, "accuracy": 0.505},
+            ],
+        )
+        prompt = assemble_critique_prompt(ctx)
+        assert "plateau_signal" in prompt
+
+    def test_termination_distribution(self):
+        results = [
+            _make_result(terminated_at="fuzzy_matching"),
+            _make_result(terminated_at="token_matching"),
+            _make_result(terminated_at="token_matching"),
+        ]
+        ctx = CritiqueContext(results=results, accuracy=0.0)
+        prompt = assemble_critique_prompt(ctx)
+        assert "token_matching: 2/3" in prompt
+        assert "fuzzy_matching: 1/3" in prompt

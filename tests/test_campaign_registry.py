@@ -318,7 +318,7 @@ def _apply_e2e_mocks(monkeypatch):
         mock_generate,
     )
 
-    async def mock_eval(search_point, data, ctx=None, **kwargs):
+    def mock_eval(search_point, data, ctx=None, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
             results, scores = build_eval_results(data, hits=3)

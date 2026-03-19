@@ -113,19 +113,16 @@ async def smoke_test_override(
 # ---------------------------------------------------------------------------
 
 
-def _url_to_provider(url: str) -> str:
-    """Map a provider base URL to a provider name for get_llm_client()."""
-    if "anthropic.com" in url:
-        return "anthropic"
-    if "openai.com" in url:
-        return "openai"
-    return "groq"
-
-
 def setup_llm(campaign_config: dict) -> tuple[LLMClientBase, str]:
     """Create LLM client + model from campaign_config['eval_llm']."""
     eval_llm = campaign_config["eval_llm"]
-    provider = _url_to_provider(eval_llm.get("provider_url", ""))
+    url = eval_llm.get("provider_url", "")
+    if "anthropic.com" in url:
+        provider = "anthropic"
+    elif "openai.com" in url:
+        provider = "openai"
+    else:
+        provider = "groq"
     return get_llm_client(provider), eval_llm.get("model", "")
 
 
@@ -185,7 +182,7 @@ def save_campaign_winner(
     }
 
 
-async def show_pipeline_snapshot(svc: dict) -> dict:
+def show_pipeline_snapshot(svc: dict) -> dict:
     """Fetch and display full pipeline config from backend.
 
     Prints: pipeline name/version, node list, resolved schemas/prompts,
@@ -262,7 +259,7 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def init_services(
+def init_services(
     backend_url: str = "http://127.0.0.1:8000",
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
@@ -275,7 +272,7 @@ async def init_services(
     """
     project_root = Path(__file__).resolve().parent.parent.parent
 
-    svc = await _init_services(
+    svc = _init_services(
         backend_url=backend_url,
         backend_id=backend_id,
         experiment_id=experiment_id,
@@ -318,7 +315,7 @@ async def init_services(
 # ---------------------------------------------------------------------------
 
 
-async def show_backend_status(client) -> dict:
+def show_backend_status(client) -> dict:
     """Call backend /status and display formatted status table.
 
     Returns the raw status dict (or error dict).
@@ -365,7 +362,7 @@ async def show_backend_status(client) -> dict:
     return status
 
 
-async def prepare_eval_context(
+def prepare_eval_context(
     svc: dict,
     train_data: list[dict] | None,
 ) -> tuple[PromptState, list[dict], dict]:
@@ -377,7 +374,7 @@ async def prepare_eval_context(
     from api.services.prompt_eval import load_baseline_prompt
     baseline = load_baseline_prompt(svc["exp_data"])
     eval_data = train_data or []
-    backend_status = await show_backend_status(svc["backend_client"])
+    backend_status = show_backend_status(svc["backend_client"])
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
     return baseline, eval_data, backend_status

@@ -34,7 +34,8 @@ def cycle_config(tmp_path):
         patience=2,
         n_variants=2,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
+        enable_l2=False,
         project_root=str(store_base),
         backend_id="test-backend",
     )

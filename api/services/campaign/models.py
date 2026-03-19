@@ -134,7 +134,6 @@ class CycleRoundResult(BaseModel):
     candidate_scores: list[dict] = Field(default_factory=list)
     degraded_queries: int = 0
     escalation_signal: dict | None = None
-    warning_classifications: list[dict] = Field(default_factory=list)
 
 
 class CycleResult(BaseModel):

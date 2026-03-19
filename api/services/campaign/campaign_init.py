@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def init_services(
+def init_services(
     backend_url: str = "http://127.0.0.1:8000",
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
@@ -262,7 +262,7 @@ def _verify_matches_liveness(
             return
 
 
-async def run_baseline_eval(
+def run_baseline_eval(
     baseline: "PromptState",
     eval_data: list,
     backend_client: BackendClient,
@@ -340,7 +340,7 @@ async def run_baseline_eval(
         temperature=temperature,
         pipeline_params=pipeline_params,
     )
-    baseline_results, scores, _cached = await evaluate_prompt_cached(
+    baseline_results, scores, _cached = evaluate_prompt_cached(
         sp, eval_data, ctx,
         label="Baseline",
         on_result=on_result,

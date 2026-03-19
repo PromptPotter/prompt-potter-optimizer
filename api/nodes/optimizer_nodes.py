@@ -245,10 +245,6 @@ class L1EvaluateOutput(BaseModel):
     escalation_signal: dict | None = Field(
         None, description="EscalationSignal dict if triggered mid-eval",
     )
-    warning_classifications: list[dict] = Field(
-        default_factory=list,
-        description="Per-warning-type classifications",
-    )
     degraded_queries: int = Field(
         0, description="Count of queries with pipeline warnings",
     )
@@ -301,49 +297,51 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
             escalation_checks=self.config.get("escalation_checks"),
         )
 
-        # Run critique on winner results (Option A: inside L1EvaluateNode)
+        # Escalation → skip all post-eval work, return immediately
+        if result.get("escalation_signal"):
+            return L1EvaluateOutput(
+                winner=result["winner"],
+                winner_prompt_state=result["winner_prompt_state"],
+                winner_accuracy=result["winner_accuracy"],
+                improved=result["improved"],
+                next_action=result.get("next_action", "generate"),
+                candidate_scores=result.get("candidate_scores", []),
+                winner_results=result.get("winner_results", []),
+                critique_text="",
+                thinking_styles=[],
+                winner_composite=result.get("winner_composite", result["winner_accuracy"]),
+                winner_pipeline_params=result.get("winner_pipeline_params"),
+                escalation_signal=result["escalation_signal"],
+                degraded_queries=result.get("degraded_queries", 0),
+            )
+
+        # Normal path: critique + thinking styles
         critique_text = ""
         if self.config.get("enable_critique", False):
-            try:
-                from api.services.campaign.critique import CritiqueAgent
-                from api.services.campaign.critique_stats import CritiqueContext
-                from api.services.llm_client import get_llm_client
+            from api.services.campaign.critique import CritiqueAgent
+            from api.services.campaign.critique_stats import CritiqueContext
+            from api.services.llm_client import get_llm_client
 
-                llm_client = get_llm_client(self.config.get("provider"))
-                agent = CritiqueAgent(llm_client, model=self.config.get("model"))
+            llm_client = get_llm_client(self.config.get("provider"))
+            agent = CritiqueAgent(llm_client, model=self.config.get("model"))
+            ctx = CritiqueContext(
+                results=result["winner_results"],
+                accuracy=result["winner_accuracy"],
+                composite=result.get("winner_composite", result["winner_accuracy"]),
+                degraded_queries=result.get("degraded_queries", 0),
+                round_history=self.config.get("round_history", []),
+                current_round=self.config.get("current_round", 0),
+                stall_count=self.config.get("stall_count", 0),
+                best_accuracy=self.config.get("best_accuracy", 0.0),
+                best_round=self.config.get("best_round", -1),
+                scan_context=self.config.get("scan_context"),
+                pipeline_params=self.config.get("pipeline_params"),
+            )
+            critique_text = await agent.run(ctx)
 
-                # Build rich context when round history is available
-                critique_ctx = None
-                if self.config.get("round_history") is not None:
-                    critique_ctx = CritiqueContext(
-                        results=result["winner_results"],
-                        accuracy=result["winner_accuracy"],
-                        composite=result.get("winner_composite", result["winner_accuracy"]),
-                        degraded_queries=result.get("degraded_queries", 0),
-                        round_history=self.config.get("round_history", []),
-                        current_round=self.config.get("current_round", 0),
-                        stall_count=self.config.get("stall_count", 0),
-                        best_accuracy=self.config.get("best_accuracy", 0.0),
-                        best_round=self.config.get("best_round", -1),
-                        scan_context=self.config.get("scan_context"),
-                        pipeline_params=self.config.get("pipeline_params"),
-                    )
-
-                critique_text = await agent.run(
-                    result["winner_results"],
-                    result["winner_accuracy"],
-                    threshold=self.config.get("critique_positive_threshold", 0.7),
-                    critique_context=critique_ctx,
-                )
-            except Exception:
-                logger.warning("Critique failed in L1EvaluateNode", exc_info=True)
-
-        # Sample thinking styles for next round
         from api.services.campaign.critique import sample_thinking_styles
-
         thinking_styles = sample_thinking_styles(
-            n=3,
-            seed=self.config.get("thinking_styles_seed", 42),
+            n=3, seed=self.config.get("thinking_styles_seed", 42),
         )
 
         return L1EvaluateOutput(

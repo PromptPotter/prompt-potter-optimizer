@@ -462,7 +462,8 @@ async def _evaluate_candidates(
     }
 
     # Suggestion generation stays in orchestrator (ADR-4)
-    if config.generate_suggestions:
+    # Skip on escalation — immediate return to main loop for L2/L3 dispatch
+    if config.generate_suggestions and not eval_out.get("escalation_signal"):
         try:
             from api.services.prompt_optimizer import generate_suggestions
 
@@ -504,12 +505,6 @@ async def _evaluate_candidates(
     return eval_out
 
 
-def _infer_optimizer_templates(config: CycleConfig) -> list[str]:
-    """Infer which optimizer prompt templates were used in a round."""
-    gen = "meta_scan_aware" if config.scan_context else "meta_freeform"
-    return [gen, "critique_negative", "critique_positive"]
-
-
 def _log_round_obs(
     eval_out: dict,
     round_num: int,
@@ -532,7 +527,10 @@ def _log_round_obs(
             model=config.model or "",
             temperature=config.temperature,
             n_variants=config.n_variants,
-            optimizer_templates=_infer_optimizer_templates(config),
+            optimizer_templates=[
+                "meta_scan_aware" if config.scan_context else "meta_freeform",
+                "critique_negative", "critique_positive",
+            ],
         )
     except Exception:
         logger.warning("ObsLogger.log_round_end failed", exc_info=True)
@@ -618,7 +616,7 @@ async def _execute_round(
         escalation_signal=eval_out.get("escalation_signal"),
     )
 
-    if obs:
+    if obs and not round_result.escalation_signal:
         _log_round_obs(eval_out, round_num, config, obs, obs_campaign_id)
 
     return round_result
@@ -841,15 +839,6 @@ def _update_round_state(
         state.best_accuracy = state.current_accuracy
         state.best_round = round_num
         state.best_sp = state.current_sp
-
-
-def _escalation_obs(
-    state: _LoopState, obs_campaign_id: str,
-) -> tuple["ObsLogger | None", str | None]:
-    """Get obs logger + trace ID for escalation calls."""
-    obs = state.eval_ctx.obs if state.eval_ctx else None
-    trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
-    return obs, trace_id
 
 
 async def _escalate_l2(
@@ -1083,17 +1072,17 @@ async def run_feedback_cycle(
     # -- Step 4b: Bootstrap critique + thinking styles --
     bootstrap_critique = ""
     if config.enable_critique and current_results:
-        try:
-            _crit_llm = _llm_client.get_llm_client(config.provider)
-            agent = CritiqueAgent(_crit_llm, model=config.model)
-            bootstrap_critique = await agent.run(
-                current_results, current_accuracy,
-                threshold=config.critique_positive_threshold,
-            )
-            state.critique_text = bootstrap_critique
-            logger.info("Bootstrap critique: %s", bootstrap_critique[:100])
-        except Exception:
-            logger.warning("Bootstrap critique failed", exc_info=True)
+        from api.services.campaign.critique_stats import CritiqueContext
+        _crit_llm = _llm_client.get_llm_client(config.provider)
+        agent = CritiqueAgent(_crit_llm, model=config.model)
+        ctx = CritiqueContext(
+            results=current_results,
+            accuracy=current_accuracy,
+            composite=current_accuracy,
+        )
+        bootstrap_critique = await agent.run(ctx)
+        state.critique_text = bootstrap_critique
+        logger.info("Bootstrap critique: %s", bootstrap_critique[:100])
     state.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
     _emit_phase(on_phase, "init", "exit",
@@ -1176,18 +1165,6 @@ async def run_feedback_cycle(
                     signal["context"].get("degraded_rate", 0) * 100,
                 )
 
-                # Classify warnings for exit event
-                from api.services.campaign.escalation import classify_warnings
-                _wt = signal["context"].get("warning_types", {})
-                _classifications = classify_warnings(_wt, [
-                    {"round": r.round, "pipeline_params": r.pipeline_params,
-                     "warning_types": {}}
-                    for r in state.rounds
-                ])
-                _exit_data = {
-                    "classifications": [c.to_dict() for c in _classifications],
-                }
-
                 # Dispatch by target
                 _esc_ctx = signal["context"]
                 if signal["target"] in ("l2", "l3") and config.enable_l2:
@@ -1198,7 +1175,8 @@ async def run_feedback_cycle(
                             _esc_ctx.get("degraded_rate", 0)
                         )
 
-                    _obs, _tid = _escalation_obs(state, obs_campaign_id)
+                    _obs = state.eval_ctx.obs if state.eval_ctx else None
+                    _tid = _obs.get_file_trace_id(obs_campaign_id) if _obs else None
                     try:
                         _l2_stop = await _escalate_l2(
                             state, config, round_num, round_eval_data, on_phase,
@@ -1244,8 +1222,7 @@ async def run_feedback_cycle(
                     campaign_store.delete_round_candidates(
                         config.backend_id, cycle_id, round_num + 1,
                     )
-                _emit_phase(on_phase, "escalation", "exit", round=round_num,
-                            **_exit_data)
+                _emit_phase(on_phase, "escalation", "exit", round=round_num)
                 # Degradation rounds don't count toward max_rounds
                 round_num += 1
                 continue
@@ -1304,7 +1281,8 @@ async def run_feedback_cycle(
                 break
             if state.stall_count >= config.patience:
                 if config.enable_l2:
-                    _obs, _tid = _escalation_obs(state, obs_campaign_id)
+                    _obs = state.eval_ctx.obs if state.eval_ctx else None
+                    _tid = _obs.get_file_trace_id(obs_campaign_id) if _obs else None
                     _l2_stop = await _escalate_l2(
                         state, config, round_num, round_eval_data, on_phase,
                         obs=_obs, trace_id=_tid,
@@ -1336,12 +1314,29 @@ async def run_feedback_cycle(
         )
 
     # -- Step 6: Finalize --
+    # Disk write only on interrupt (fast); full finalization otherwise
     finished_at = datetime.now(timezone.utc).isoformat()
     campaign_status = "interrupted" if stop_reason == "interrupted" else "completed"
-    cloud_trace_id = _finalize_campaign(
-        campaign_store, cycle_id, config, state, stop_reason, finished_at,
-        obs, obs_campaign_id, status=campaign_status,
-    )
+    if stop_reason == "interrupted":
+        # Minimal: update campaign status on disk, skip obs/cloud
+        if campaign_store and cycle_id:
+            try:
+                campaign_store.update(config.backend_id, cycle_id, {
+                    "status": "interrupted",
+                    "stop_reason": "interrupted",
+                    "best_accuracy": state.best_accuracy,
+                    "best_round": state.best_round,
+                    "n_rounds": len(state.rounds),
+                    "finished_at": finished_at,
+                })
+            except Exception:
+                logger.warning("Campaign interrupt update failed", exc_info=True)
+        cloud_trace_id = None
+    else:
+        cloud_trace_id = _finalize_campaign(
+            campaign_store, cycle_id, config, state, stop_reason, finished_at,
+            obs, obs_campaign_id, status=campaign_status,
+        )
 
     return CycleResult(
         rounds=state.rounds,

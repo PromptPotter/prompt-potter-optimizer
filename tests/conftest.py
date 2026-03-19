@@ -57,5 +57,6 @@ def cycle_config():
         creativity=0.5,
         improvement_threshold=0.01,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
+        enable_critique=False,
+        enable_l2=False,
     )
