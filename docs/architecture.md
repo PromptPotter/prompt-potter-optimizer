@@ -41,7 +41,7 @@ All core logic in `api/services/`. See [`api/services/CLAUDE.md`](../api/service
 
 **PipelineSchema** — defines the backend pipeline. Together: `f(SearchPoint, PipelineSchema, eval_data) → scores`.
 
-**OptSearchPoint** — optimizer-level checkpoint per round. Bundles critique_text, thinking_styles, plan, context, parameters, `task_context` (structured domain context refinable by L2), and content_hashes linking to target evaluation data.
+**OptSearchPoint** — optimizer-level checkpoint per round. Bundles critique_text, thinking_styles, plan, optimizer_params, `task_context` (structured domain context refinable by L2), and content_hashes linking to target evaluation data.
 
 **EvalContext** — groups infrastructure for evaluation. See [`api/models/CLAUDE.md`](../api/models/CLAUDE.md).
 
@@ -59,7 +59,7 @@ All paths converge on `evaluate_prompt_cached()` — single gateway for eval per
 
 ## Pipeline Composability
 
-**`node_config`** format throughout — same nested dict shape as `pipeline.json` and `/matches` wire format. `run_match()` forwards as-is to the backend. See [`connectors/termnorm.md`](connectors/termnorm.md) for key mapping.
+**`pipeline_params`** format throughout — nested dicts keyed by step name (e.g. `{"llm_ranking": {"temperature": 0.5}}`). `BackendClient.run_match()` translates to the `node_config` wire-format key at the TermNorm boundary. See [`connectors/termnorm.md`](connectors/termnorm.md) for key mapping.
 
 ## Pipeline Discovery
 

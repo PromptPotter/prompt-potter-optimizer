@@ -14,7 +14,7 @@ The critique agent runs **inside L1 Evaluate**, after backend evaluation and win
 │         ↓                                                              │
 │  L1 EVALUATE                                                           │
 │    ┌─ Backend /matches ──── per candidate × per query ──────────────┐  │
-│    │  in:  query + node_config (pipeline_params from candidate)     │  │
+│    │  in:  query + pipeline_params (per-node overrides)             │  │
 │    │  out: ranked_candidates + diagnostics.warnings                 │  │
 │    │                                                                │  │
 │    │  DegradationCheck (per-query):                                 │  │

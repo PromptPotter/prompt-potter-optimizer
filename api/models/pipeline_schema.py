@@ -7,7 +7,7 @@ instead of hardcoding TermNorm-specific constants.
 
 Derivation methods:
   step_param_keys()       → step name → param keys
-  flat_to_node_config()   → flat param → (node, wire_key)
+  flat_to_pipeline_params()   → flat param → (node, wire_key)
   obs_extraction_map()    → observation name → extraction rules
   langfuse_type_map()     → step name → Langfuse as_type
   backend_steps()         → runtime filtering
@@ -181,7 +181,7 @@ class PipelineSchema(BaseModel):
                 return step
         return None
 
-    def flat_to_node_config(self) -> dict[str, tuple[str, str]]:
+    def flat_to_pipeline_params(self) -> dict[str, tuple[str, str]]:
         """Build a flat_param_name → (node_name, wire_key) mapping.
 
         Aggregates ``override_map`` from every step.

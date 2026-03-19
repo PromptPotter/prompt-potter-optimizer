@@ -8,7 +8,7 @@ Bundles the four dimensions that fully specify an evaluation:
   - PromptState    — the prompt configuration (layers 1-3)
   - model          — LLM model identifier
   - temperature    — LLM inference temperature
-  - pipeline_params — backend pipeline overrides (node_config)
+  - pipeline_params — backend pipeline overrides
 
 Related objects:
   - ``EvalContext`` carries infrastructure (backend_client, store, obs,

@@ -78,9 +78,9 @@ The response `pipeline_params.steps` echoes the actual steps that ran.
 | `token_matching` | Yes | Deterministic token-overlap scoring |
 | `llm_ranking` | No | LLM reranks candidates (controlled by `steps`) |
 
-#### Pipeline Node Configuration (`node_config`)
+#### Pipeline Node Configuration (`node_config` wire format)
 
-PromptPotter uses **`node_config`** format throughout — the same nested dict shape as `pipeline.json` and the `/matches` wire format. `run_match()` forwards `node_config` as-is. No translation layer.
+TermNorm's `/matches` endpoint accepts per-node overrides under the **`node_config`** key. This is the wire-format name for what PromptPotter internally calls **`pipeline_params`** — a nested dict keyed by step name. `BackendClient.run_match()` translates `pipeline_params` to `node_config` at the boundary.
 
 **Example request:**
 ```json

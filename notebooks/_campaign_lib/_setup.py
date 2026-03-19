@@ -160,7 +160,7 @@ async def smoke_test_override(
 
     result = bc.run_match(
         query,
-        pipeline_params={"node_config": {step: {"output_schema": schema}}},
+        pipeline_params={step: {"output_schema": schema}},
     )
 
     data = result.get("data", {})
@@ -308,9 +308,10 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
     # Apply overrides via schema if available
     if overrides and pipeline_schema:
         for flat_name, value in overrides.items():
-            node_config = pipeline_schema.resolve_flat_param(flat_name)
-            if node_config:
-                pipeline_params.update(node_config)
+            resolved = pipeline_schema.resolve_flat_param(flat_name)
+            if resolved:
+                node, wire_key = resolved
+                pipeline_params.setdefault(node, {})[wire_key] = value
             else:
                 pipeline_params[flat_name] = value
     elif overrides:

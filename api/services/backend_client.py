@@ -53,13 +53,15 @@ def build_pipeline_params(
     """Build pipeline_params from a (possibly shortened) pipeline config.
 
     Returns dict ready for evaluate_prompt(..., pipeline_params=params).
-    Includes ``steps`` list and ``node_config`` dict in the same
-    shape the backend already expects.
+    Includes ``steps`` list and per-node override dicts (e.g.
+    ``{"steps": [...], "llm_ranking": {"temperature": 0.5}}``).
+    ``BackendClient.run_match()`` translates these to the ``node_config``
+    wire format at the TermNorm boundary.
 
     Args:
         pipeline_config: Pipeline config with ``steps`` list.
         overrides: Optional parameter overrides using flat param names
-            (e.g. ``ranking_temperature``). Translated to ``node_config``
+            (e.g. ``ranking_temperature``). Translated to per-node dicts
             via the schema's ``override_map``.
         exclude_steps: Step names to remove from the active pipeline
             (e.g. ``["llm_ranking"]`` for token-matching-only evaluation).
@@ -79,19 +81,16 @@ def build_pipeline_params(
         for name in step_names:
             active_param_names |= step_param_map.get(name, set())
 
-        nc: dict[str, dict] = {}
         for k, v in overrides.items():
             if k not in active_param_names:
                 continue
             resolved = schema.resolve_flat_param(k)
             if resolved:
                 node, wire_key = resolved
-                nc.setdefault(node, {})[wire_key] = v
+                params.setdefault(node, {})[wire_key] = v
             else:
                 # No override_map entry — pass through as flat key
                 params[k] = v
-        if nc:
-            params["node_config"] = nc
     else:
         # No schema — pass overrides through as-is (legacy fallback)
         params.update(overrides)
@@ -263,7 +262,13 @@ class BackendClient:
         pipeline_params: dict[str, Any] | None = None,
         ranking_prompt: str | None = None,
     ) -> dict[str, Any]:
-        """POST /matches — forward node_config to the backend as-is."""
+        """POST /matches — translate pipeline_params to TermNorm wire format.
+
+        ``pipeline_params`` is the PromptPotter-internal nested dict
+        (e.g. ``{"steps": [...], "llm_ranking": {"temperature": 0.5}}``).
+        This method translates non-``steps`` keys into the ``node_config``
+        wire-format key that TermNorm expects.
+        """
         payload: dict[str, Any] = {"query": query}
 
         _pp = pipeline_params or {}
@@ -271,14 +276,20 @@ class BackendClient:
         if "steps" in _pp:
             payload["steps"] = _pp["steps"]
 
-        node_config: dict[str, dict] = _pp.get("node_config", {})
+        # Collect per-node overrides (everything except "steps")
+        wire_overrides: dict[str, dict] = {}
+        for k, v in _pp.items():
+            if k == "steps":
+                continue
+            if isinstance(v, dict):
+                wire_overrides[k] = v
 
-        # ranking_prompt shorthand → inject into node_config.llm_ranking.prompt
+        # ranking_prompt shorthand → inject into llm_ranking.prompt
         if ranking_prompt:
-            node_config.setdefault("llm_ranking", {})["prompt"] = ranking_prompt
+            wire_overrides.setdefault("llm_ranking", {})["prompt"] = ranking_prompt
 
-        if node_config:
-            payload["node_config"] = node_config
+        if wire_overrides:
+            payload["node_config"] = wire_overrides
 
         client = self._get_http()
         resp = client.post(

@@ -46,7 +46,7 @@ Two core mechanisms that work together (both actively evolving):
 
 ### Pipeline composability
 
-PromptPotter uses **`node_config`** format throughout — the same nested dict shape as `pipeline.json` and the `/matches` wire format (e.g. `{"llm_ranking": {"temperature": 0.5}}`). No flat param names, no translation layer.
+PromptPotter uses **`pipeline_params`** format throughout — nested dicts keyed by step name (e.g. `{"llm_ranking": {"temperature": 0.5}}`). `BackendClient.run_match()` translates to the `node_config` wire-format key at the TermNorm boundary. No flat param names, no translation layer.
 
 ### North star workflow (HITL optimization cycle)
 

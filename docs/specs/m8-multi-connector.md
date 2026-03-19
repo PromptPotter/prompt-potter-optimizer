@@ -3,7 +3,9 @@
 **Version:** 0.9.0
 **Date:** 2026-02-27
 **Status:** Planned
-**Depends on:** [Roadmap M8](roadmap.md), [ADD v0.9.0](add.md), [M6 Pipeline Composability](m6-pipeline-composability.md), [PRD P1.13](prd.md)
+**Depends on:** [Roadmap M8](roadmap.md), [ADD v0.10.0](add.md), [M6 Pipeline Composability](m6-pipeline-composability.md), [PRD P1.13](prd.md)
+
+> **Staleness note:** Written against ADD v0.9.0 (2026-02-27), before the ADD/WBS v0.10.0 rewrite. Verify `BackendClient` signatures against current code before implementing.
 
 ---
 
@@ -228,6 +230,7 @@ async def backend_reranker_eval(
 | 8.2 | ConnectorRegistry | 1 | 8.1 | Create `connector_registry.py`. Register/get/list connectors. Integration with `runtime_config` from M6. |
 | 8.3 | Service migration | 1 | 8.1 | Change type annotations in `prompt_eval.py`, `feedback_cycle.py`, `optimizer_nodes.py`. Update node instantiation to use registry or runtime_config connector. |
 | 8.4 | Docs + integration test | 1 | 8.2, 8.3 | Write `docs/connectors/connector-protocol.md`. Integration test: run feedback cycle with MockConnector through WorkflowRunner. |
+| 8.5 | OPTIMIZER_PIPELINE_SCHEMA | 1 | 8.1 | Describe the optimizer's own 4-step pipeline as a `PipelineSchema` instance (moved from M7 Wave E2). Enables `GET /optimizer/pipeline` for L4 self-optimization. |
 
 ### Reading list per work package
 

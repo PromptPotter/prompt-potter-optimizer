@@ -31,15 +31,15 @@ Artifacts not persisted (lost after each cycle):
 | `critique_text` | `_LoopState.critique_text` | Memory only — overwritten each round |
 | `thinking_styles` | `_LoopState.thinking_styles` | Memory only — resampled each round |
 | `plan` | `PromptState.plan` | Buried in prompt_state, not indexed |
-| `context` | `PromptState.context` | Buried in prompt_state, not indexed |
-| `parameters` | `PromptState.parameters` | Buried in prompt_state, not indexed |
+| `task_context` | `OptSearchPoint.task_context` | Structured domain context (set at campaign init, refined by L2) |
+| `optimizer_params` | `OptSearchPoint.optimizer_params` | Optimizer meta-settings (creativity, n_variants, etc.) |
 | L2 transition rationale | `refine_context()` LLM response | Only derived PromptState kept |
 | L3 transition rationale | `modify_plan()` LLM response | Only derived PromptState kept |
 | L2/L3 transition inputs | stalled_rounds / l2_history | Not persisted |
 | Candidate generation prompt | `_build_*_meta_prompt()` | Not logged |
 | Scan context enrichment | `prepare_scan_context()` output | Lost after feeding to meta-prompt |
 
-**Phase 0.5 of v1 solved:** critique_text, thinking_styles, plan, context, parameters — via `OptSearchPoint` checkpointing in trial JSON + node-level Langfuse tracing via `NodeBase`.
+**Phase 0.5 of v1 solved:** critique_text, thinking_styles, plan, task_context, optimizer_params — via `OptSearchPoint` checkpointing in trial JSON + node-level Langfuse tracing via `NodeBase`.
 
 ---
 
@@ -81,11 +81,10 @@ Seven key design choices from the v1 implementation with rationale. These MUST b
 
 **Decision:** `NodeBase._node_obs_type()` returns `"generation"` by default. `L1EvaluateNode` overrides to return `"span"`.
 
-**Rationale:** Most nodes (InitNode, L1GenerateNode, L2RefineNode, L3ModifyPlanNode) make a single LLM call — a Langfuse `generation` observation. L1EvaluateNode is a composite operation with nested children (N candidate evaluations + optional critique) — a Langfuse `span` that contains child observations.
+**Rationale:** Most nodes (L1GenerateNode, L2RefineNode, L3ModifyPlanNode) make a single LLM call — a Langfuse `generation` observation. L1EvaluateNode is a composite operation with nested children (N candidate evaluations + optional critique) — a Langfuse `span` that contains child observations.
 
 | Node | `_node_obs_type()` | Why |
 |------|--------------------|-----|
-| `InitNode` | `"generation"` | Single `restructure_context()` LLM call |
 | `L1GenerateNode` | `"generation"` | Single `generate_candidates()` LLM call |
 | `L1EvaluateNode` | `"span"` | N eval calls + optional critique agent |
 | `L2RefineNode` | `"generation"` | Single `refine_context()` LLM call |
@@ -144,23 +143,9 @@ class NodeMetrics(BaseModel):
     metadata: dict[str, Any]
 ```
 
-### InitNode
+### InitNode (removed)
 
-Decomposes raw context into Layer 1 fields via `restructure_context()`.
-
-**Config:** `model`, `provider`
-
-```
-InitNodeInput:
-    instruction: str          # Raw prompt instruction text
-    improvement_areas: str    # Domain-expert observations (default: "")
-
-InitNodeOutput:
-    prompt_state: dict        # Serialized PromptState (baseline)
-    prompt_state_id: str      # PromptState ID
-    layer1_fields: dict       # Decomposed Layer 1 fields
-    rendered_prompt: str      # Full rendered prompt
-```
+InitNode was removed in the M7 v2 audit. Baseline decomposition is now handled by `decompose_task_context()` at campaign init time, before the feedback cycle starts. The `task_context` dict produced by decomposition flows to `OptSearchPoint` and is used by L1 Generate and L2 Refine. See §6.1 for details.
 
 ### L1GenerateNode
 
@@ -255,11 +240,11 @@ L3ModifyPlanOutput:
 ### State Machine
 
 ```
-                    ┌─────────────┐
-                    │  InitNode   │  (or skip if baseline_prompt_state provided)
-                    └──────┬──────┘
-                           │ baseline PromptState
-                           ▼
+                    ┌──────────────────────────┐
+                    │  Campaign Init           │  (decompose_task_context + restructure)
+                    └──────────┬───────────────┘
+                               │ baseline PromptState + task_context
+                               ▼
              ┌──── Resume Detection ────┐
              │  CampaignStore lookup    │
              │  Obs setup               │
@@ -348,7 +333,7 @@ class _LoopState:
 
 Each round in `_execute_round()`:
 
-1. Resolve L2 meta-param overrides from `PromptState.parameters` (n_variants, creativity)
+1. Resolve L2 meta-param overrides from `OptSearchPoint.optimizer_params` (n_variants, creativity)
 2. `_generate_or_load_candidates()` — check disk first, then `L1GenerateNode.process()`
 3. `_evaluate_candidates()` — `L1EvaluateNode.process()` + optional suggestions
 4. Pop critique_text/thinking_styles from eval output → store in `_LoopState`
@@ -392,7 +377,7 @@ All templates are `PromptState` JSON with 5 Layer 1 fields (`persona`, `task_int
 | `l2_refine_context.json` | `round_summary`, `rendered_prompt`, `failure_lines`, `current_params`, `current_context`, `pipeline_section`, `response_schema_suffix` | `refine_context()` in `layer_transitions.py` |
 | `l3_modify_plan.json` | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `response_schema_suffix` | `modify_plan()` in `layer_transitions.py` |
 | `suggestions.json` | `history_lines`, `accuracy_pct`, `rendered_prompt`, `campaign_config`, `n_failures`, `n_queries`, `failure_detail` | `generate_suggestions()` — post-round analysis |
-| `restructure.json` | `consultation_instruction` | `restructure_context()` — InitNode decomposition |
+| `restructure.json` | `consultation_instruction` | `restructure_context()` — campaign init decomposition |
 
 **Loading:** `load_optimizer_prompt(name)` in `api/config/optimizer_prompt_loader.py`. Resolution order: Langfuse prompt registry (opt-in, by `production` label, SDK-cached) → local JSON in `api/config/optimizer_prompts/`. LRU-cached for local files. Push via `push_all_to_langfuse()`.
 
@@ -408,8 +393,7 @@ class OptSearchPoint(BaseModel):
     critique_text: str = ""
     thinking_styles: list[str] = Field(default_factory=list)
     plan: str = ""
-    context: str = ""
-    parameters: dict = Field(default_factory=dict)
+    optimizer_params: dict = Field(default_factory=dict)
     task_context: dict = Field(
         default_factory=dict,
         description="Structured domain context (domain, pipeline_purpose, "
@@ -435,8 +419,7 @@ Checkpointed in trial JSON after each round:
     "critique_text": "...",
     "thinking_styles": ["analytical", "comparative", "systematic"],
     "plan": "",
-    "context": "",
-    "parameters": {},
+    "optimizer_params": {},
     "task_context": {
       "domain": "Life Cycle Assessment",
       "pipeline_purpose": "Normalize terminology...",
@@ -452,6 +435,29 @@ Checkpointed in trial JSON after each round:
 ### L4 path
 
 L4 meta-optimization searches over `OptSearchPoint`s the same way L1-L3 search over `SearchPoint`s. The join key is `content_hashes` — linking optimizer config to target-layer evaluation outcomes without duplicating data. *Design note: the recursive closure (L4 — optimizing the optimizer's own prompts) was recognized from inception as an inherent property of the architecture.*
+
+### Task context decomposition
+
+`decompose_task_context()` (in `notebooks/_campaign_lib/_setup.py`) runs at campaign init, before the feedback cycle. It calls `restructure_context_cached()` with `TASK_DESCRIPTION` to produce a structured domain context dict.
+
+**Fields:**
+
+| Field | Description |
+|-------|-------------|
+| `domain` | Domain of the backend pipeline (e.g. "Life Cycle Assessment") |
+| `pipeline_purpose` | What the pipeline does (e.g. "Normalize terminology...") |
+| `data_characteristics` | Nature of the input data |
+| `optimization_goals` | What success looks like |
+| `key_challenges` | Known difficulties |
+| `raw_description` | Original `TASK_DESCRIPTION` text |
+
+**Flow:**
+
+1. Campaign init → `decompose_task_context()` → structured dict
+2. Stored on `OptSearchPoint.task_context`
+3. Flows to L1 candidate generation meta-prompt (via `scan_context` or direct injection)
+4. L2 `refine_context()` can update `task_context` fields when escalation fires
+5. `PromptState.context` auto-synced from `task_context` — one source of truth
 
 ---
 
@@ -646,7 +652,7 @@ Each wave swaps ONE piece while the system stays working. `feedback_cycle.py` (h
 **Files added:**
 - `api/models/opt_search_point.py`
 
-**What it does:** Defines `OptSearchPoint` Pydantic model with 6 fields: `critique_text`, `thinking_styles`, `plan`, `context`, `parameters`, `content_hashes`.
+**What it does:** Defines `OptSearchPoint` Pydantic model with 6 fields: `critique_text`, `thinking_styles`, `plan`, `optimizer_params`, `task_context`, `content_hashes`.
 
 **Verify:** `from api.models.opt_search_point import OptSearchPoint; osp = OptSearchPoint(critique_text="test"); assert osp.content_hashes == []`
 
@@ -678,11 +684,9 @@ Each wave swaps ONE piece while the system stays working. `feedback_cycle.py` (h
 
 ### Wave B — Node implementations (still no feedback_cycle.py changes)
 
-#### B1: `InitNode` implementation
+#### B1: `InitNode` implementation — REMOVED
 
-**What it does:** Wraps `restructure_context()`. Config: `model`, `provider`.
-
-**Verify:** `test_init_node` passes with mocked `restructure_context`.
+InitNode was removed in the M7 v2 audit. Decomposition now happens at campaign init via `decompose_task_context()`.
 
 #### B2: `L1GenerateNode` implementation
 
@@ -707,7 +711,7 @@ Each wave swaps ONE piece while the system stays working. `feedback_cycle.py` (h
 **Files added:**
 - `tests/test_optimizer_nodes.py`
 
-**What it does:** Tests for all 5 nodes: registration, I/O contracts, critique forwarding, obs type, step tracing (opt-in), error tracing.
+**What it does:** Tests for all 4 nodes: registration, I/O contracts, critique forwarding, obs type, step tracing (opt-in), error tracing.
 
 ⚠️ **WARNING:** Node tests require mocking `restructure_context`, `generate_candidates`, `evaluate_and_select_winner`, `refine_context`, `modify_plan`. Use `monkeypatch` on the import paths inside the node modules (e.g., `"api.services.search.context.restructure_context"`).
 
@@ -852,8 +856,8 @@ opt_sp = OptSearchPoint(
     critique_text=state.critique_text,
     thinking_styles=state.thinking_styles,
     plan=state.current_sp.prompt_state.plan,
-    context=state.current_sp.prompt_state.context,
-    parameters=state.current_sp.prompt_state.parameters,
+    optimizer_params={},  # populated from CycleConfig meta-settings
+    task_context=state.task_context,
 )
 campaign_store.add_trial(config.backend_id, cycle_id, {
     ...,
@@ -876,12 +880,12 @@ campaign_store.add_trial(config.backend_id, cycle_id, {
 
 ### Wave E — New capabilities (after full migration)
 
-#### E1: EscalationCheck framework
+#### E1: EscalationCheck framework — IMPLEMENTED
 
-**Files added:**
+**Files:**
 - `api/services/campaign/escalation.py` — `EscalationCheck`, `EscalationSignal`, `DegradationCheck`
 
-**What it does:** Pluggable mid-evaluation escalation. `EscalationCheck.evaluate()` runs after each candidate eval. `DegradationCheck` fires when degraded queries exceed threshold.
+**Status:** Fully implemented with 7 passing tests. Pluggable mid-evaluation escalation. `EscalationCheck.evaluate()` runs after each candidate eval. `DegradationCheck` fires when degraded queries exceed threshold.
 
 ```python
 @dataclass
@@ -904,14 +908,9 @@ class DegradationCheck(EscalationCheck):
     threshold: float = 0.3
 ```
 
-**Verify:** Unit tests for DegradationCheck with various score distributions.
+#### E2: OPTIMIZER_PIPELINE_SCHEMA — MOVED TO M8
 
-#### E2: OPTIMIZER_PIPELINE_SCHEMA
-
-**Files added:**
-- `api/config/optimizer_pipeline.py` — `OPTIMIZER_PIPELINE_SCHEMA` as a `PipelineSchema` instance
-
-**What it does:** Describes the optimizer's own 4-step pipeline using the same `PipelineSchema`/`PipelineStep` as target backends. Enables `GET /optimizer/pipeline` endpoint for L4.
+Moved to M8 as work package 8.5. Describes the optimizer's own 4-step pipeline using `PipelineSchema`/`PipelineStep`. Depends on ConnectorProtocol for `GET /optimizer/pipeline` endpoint.
 
 #### E3: End-to-end Langfuse tracing
 
@@ -944,7 +943,7 @@ class DegradationCheck(EscalationCheck):
 
 ### Node tests
 
-- **Registration:** All 5 nodes discoverable via `get_node_class()`
+- **Registration:** All 4 nodes discoverable via `get_node_class()`
 - **I/O contracts:** Process with valid input → correct output types
 - **Critique forwarding:** `L1GenerateNode` forwards `critique_text`, `thinking_styles`, `scan_context`
 - **Obs type:** Each node returns correct `_node_obs_type()`
@@ -977,8 +976,8 @@ Status after v1 Phase 0.5 (to be re-achieved by Wave D5):
 | `critique_text` | Lost | ✅ OptSearchPoint in trial | D5 |
 | `thinking_styles` | Lost | ✅ OptSearchPoint in trial | D5 |
 | `plan` | Buried | ✅ OptSearchPoint in trial | D5 |
-| `context` | Buried | ✅ OptSearchPoint in trial | D5 |
-| `parameters` | Buried | ✅ OptSearchPoint in trial | D5 |
+| `task_context` | Not tracked | ✅ OptSearchPoint in trial | D5 |
+| `optimizer_params` | Not tracked | ✅ OptSearchPoint in trial | D5 |
 | L2 transition rationale | Lost | ✅ Node I/O in Langfuse | C3 + D4 |
 | L3 transition rationale | Lost | ✅ Node I/O in Langfuse | C3 + D4 |
 | L2/L3 transition inputs | Lost | ✅ Node input in Langfuse | C3 + D4 |
