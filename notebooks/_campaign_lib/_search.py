@@ -252,23 +252,24 @@ async def prepare_scan_baseline(
     print(f"  Search baseline: {search_baseline.id[:12]} "
           f"(render: {len(search_baseline.render())} chars)")
 
-    # Historical data diagnostic with alias groups
+    # Historical data diagnostic via sp_hash matching
+    baseline_sp = SearchPoint(
+        prompt_state=search_baseline,
+        pipeline_params=pipeline_params,
+    )
+
     if can_cache:
         from api.services.search.coverage import (
             build_prompt_result_index,
             diagnose_scan_variants,
         )
 
+        # Register semantic equivalence (still useful for Layer 1 content-hash dedup)
         restructured_hash = hashlib.sha256(
             search_baseline.render().encode(),
         ).hexdigest()[:16]
-
-        # Register semantic equivalence
         store.dataset_runs.register_alias(
             backend_id, original_hash, restructured_hash,
-        )
-        alias_group = store.dataset_runs.resolve_aliases(
-            backend_id, restructured_hash,
         )
 
         prompt_index = build_prompt_result_index(store, backend_id)
@@ -276,19 +277,14 @@ async def prepare_scan_baseline(
         scan_diag = None
         if scan_variants:
             scan_diag = diagnose_scan_variants(
-                store, backend_id, scan_variants, alias_group, prompt_index,
+                store, backend_id, scan_variants, baseline_sp,
             )
 
         _print_historical_diagnostic(
-            prompt_index, alias_group,
-            original_hash, restructured_hash,
-            scan_diagnosis=scan_diag,
+            prompt_index, scan_diagnosis=scan_diag,
         )
 
-    return SearchPoint(
-        prompt_state=search_baseline,
-        pipeline_params=pipeline_params,
-    ), scan_diag
+    return baseline_sp, scan_diag
 
 
 # ── Coverage & data inventory ────────────────────────────────────────────
@@ -296,13 +292,10 @@ async def prepare_scan_baseline(
 
 def _print_historical_diagnostic(
     prompt_index: dict[str, dict[str, dict]],
-    alias_group: set[str],
-    original_hash: str,
-    restructured_hash: str,
     *,
     scan_diagnosis: dict | None = None,
 ) -> None:
-    """Print historical data diagnostic with alias group + scan coverage."""
+    """Print historical data diagnostic with sp_hash scan coverage."""
     n_prompts = len(prompt_index)
     n_results = sum(len(v) for v in prompt_index.values())
     if n_results == 0:
@@ -311,35 +304,21 @@ def _print_historical_diagnostic(
 
     print(f"\n  Historical data: {n_results} results across {n_prompts} unique prompts")
 
-    # Alias group info
-    alias_list = sorted(alias_group)
-    if len(alias_list) > 1:
-        short = [h[:8] for h in alias_list]
-        print(f"  Baseline alias group: {' \u2194 '.join(short)} "
-              f"({len(alias_list)} prompts linked)")
-    else:
-        print(f"  Baseline: {original_hash[:12]}")
-
-    # Matching results from alias group
-    n_alias_results = 0
-    n_alias_runs = 0
-    for h in alias_group:
-        n_alias_results += len(prompt_index.get(h, {}))
     if scan_diagnosis:
-        n_alias_runs = scan_diagnosis["n_matching_runs"]
-    print(f"  Matching runs: {n_alias_runs}, "
-          f"{n_alias_results} cached results")
+        n_matching = scan_diagnosis["n_matching_runs"]
+        n_cached = scan_diagnosis["n_matching_results"]
+        print(f"  Matching runs (sp_hash): {n_matching}, {n_cached} cached results")
 
     # Scan variant coverage
     if scan_diagnosis and scan_diagnosis["axes"]:
-        print(f"\n  Scan variant coverage ({n_alias_runs} matching runs):")
+        n_matching = scan_diagnosis["n_matching_runs"]
+        print(f"\n  Scan variant coverage ({n_matching} matching runs):")
         for axis_name, info in scan_diagnosis["axes"].items():
             values = info["values"]
             n_covered = sum(1 for c in values.values() if c > 0)
             n_total = len(values)
 
             if n_total <= 5:
-                # Show per-value counts
                 parts = []
                 for key, count in values.items():
                     if count > 0:
@@ -350,13 +329,11 @@ def _print_historical_diagnostic(
             else:
                 detail = f"{n_covered}/{n_total} values tested"
 
-            other = info.get("other_count", 0)
-            other_str = f"  (+{other} other)" if other else ""
             label = f"    {axis_name:<24s}"
             if n_covered == 0:
                 print(f"{label} (not tested)")
             else:
-                print(f"{label} {detail}{other_str}")
+                print(f"{label} {detail}")
 
 
 async def resume_or_build_diagnostic(
