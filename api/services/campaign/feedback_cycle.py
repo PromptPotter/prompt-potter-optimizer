@@ -34,7 +34,7 @@ from api.services.constants import DATASET_NAME
 from api.services.campaign.models import (
     CycleConfig, CycleResult, CycleRoundResult, _LoopState,
 )
-from api.services.campaign.critique import CritiqueAgent, sample_thinking_styles
+from api.services.campaign.critique import sample_thinking_styles
 from api.services.prompt_eval import EvalContext, compute_composite_score
 from api.services.query_utils import subsample_queries
 
@@ -360,6 +360,8 @@ async def _generate_or_load_candidates(
         "escalation_journal": state.opt_sp.escalation_journal,
         "task_context": state.opt_sp.task_context or None,
         "warning_inventory": state.opt_sp.query_failure_tracker or None,
+        "l2_directive": state.opt_sp.l2_directive,
+        "is_probe_round": state.probe_next_round,
     })
     candidates = gen_result.candidates
 
@@ -440,6 +442,9 @@ async def _evaluate_candidates(
             ),
             "warning_inventory": (
                 state.opt_sp.query_failure_tracker or None
+            ),
+            "task_context": (
+                state.opt_sp.task_context or None
             ),
         },
         obs=obs, trace_id=trace_id,
@@ -744,12 +749,15 @@ async def _do_l2_transition(
         "escalation_journal": state.opt_sp.escalation_journal,
         "task_context": state.opt_sp.task_context or None,
         "warning_inventory": state.opt_sp.query_failure_tracker or None,
+        "critique_text": state.opt_sp.critique_text,
+        "prev_l2_directive": state.opt_sp.l2_directive,
     })
 
     new_ps = PromptState(**l2_result.prompt_state)
     tr = layer_transitions.TransitionResult(
         prompt_state=new_ps,
         task_context=getattr(l2_result, "task_context", None),
+        l2_directive=getattr(l2_result, "l2_directive", ""),
         action=getattr(l2_result, "action", "continue"),
         debug_prompt=getattr(l2_result, "debug_prompt", ""),
         debug_response=getattr(l2_result, "debug_response", None),
@@ -757,6 +765,8 @@ async def _do_l2_transition(
     # Update task_context if L2 refined it
     if tr.task_context:
         state.opt_sp.task_context = tr.task_context
+    # Store L2 directive for next L1 round (sliding window=1)
+    state.opt_sp.l2_directive = tr.l2_directive
     # L2 does NOT set pipeline_params — only L1 Generate does that
     state.current_sp = state.current_sp.derive(prompt_state=tr.prompt_state)
     state.l2_round += 1
@@ -1132,26 +1142,9 @@ async def run_feedback_cycle(
                 state.l2_round,
             )
 
-    # -- Step 4b: Bootstrap critique + thinking styles --
-    bootstrap_critique = ""
-    if config.enable_critique and current_results:
-        from api.services.campaign.critique_stats import CritiqueContext
-        from api.services.campaign.critique import format_critique_for_prompt
-        _crit_llm = _llm_client.get_llm_client(config.provider)
-        agent = CritiqueAgent(
-            _crit_llm, model=config.model,
-            positive_threshold=config.critique_positive_threshold,
-        )
-        ctx = CritiqueContext(
-            results=current_results,
-            accuracy=current_accuracy,
-            composite=current_accuracy,
-        )
-        _boot_result = await agent.run(ctx)
-        state.opt_sp.critique = _boot_result
-        state.opt_sp.critique_text = format_critique_for_prompt(_boot_result)
-        bootstrap_critique = state.opt_sp.critique_text
-        logger.info("Bootstrap critique: %s", bootstrap_critique[:100])
+    # -- Step 4b: Bootstrap thinking styles --
+    # Critique is produced by L1EvaluateNode after each round — no separate
+    # bootstrap needed. Round 1 uses scan_context + task_context as guidance.
     state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
     _emit_phase(on_phase, "init", "exit",
@@ -1160,8 +1153,7 @@ async def run_feedback_cycle(
                 baseline_accuracy=current_accuracy,
                 obs_enabled=obs is not None,
                 sample_count=len(round_eval_data),
-                enable_critique=config.enable_critique,
-                critique_text=bootstrap_critique)
+                enable_critique=config.enable_critique)
 
     # Build shared EvalContext once (reused across all rounds)
     _store = None
@@ -1359,6 +1351,9 @@ async def run_feedback_cycle(
             state.stall_count = (
                 0 if round_result.improved else state.stall_count + 1
             )
+            # L2 directive is valid for one round only — clear when L2 didn't fire
+            if round_result.improved:
+                state.opt_sp.l2_directive = ""
 
             if on_round_complete:
                 on_round_complete(round_result, state.stall_count)

@@ -165,6 +165,8 @@ async def generate_candidates(
     escalation_journal: list[dict] | None = None,
     task_context: dict | None = None,
     warning_inventory: dict | None = None,
+    l2_directive: str = "",
+    is_probe_round: bool = False,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -239,6 +241,22 @@ async def generate_candidates(
                 f"\n\nTASK CONTEXT (domain understanding — use to guide your changes):\n"
                 f"{tc_lines}\n"
             )
+
+    # Probe round note (same prompt, additional injected string)
+    if is_probe_round:
+        meta_prompt += (
+            "\n\nPROBE ROUND: These queries have recurring pipeline warnings. "
+            "Generate candidates that specifically address pipeline robustness "
+            "(e.g., fallback behavior when web_search fails, handling missing "
+            "entity profiles gracefully).\n"
+        )
+
+    # L2 directive (primary guidance from context refinement)
+    if l2_directive:
+        meta_prompt += (
+            "\n\nL2 DIRECTIVE (from context refinement — primary guidance for this round):\n"
+            f"{l2_directive}\n"
+        )
 
     # Append critique from previous round's evaluation
     if critique_text:

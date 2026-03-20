@@ -40,6 +40,9 @@ class CritiqueContext:
     # Cross-round warning inventory (from OptSearchPoint.query_failure_tracker)
     warning_inventory: dict | None = None
 
+    # L2 domain context (so critique understands L2's problem framing)
+    task_context: dict | None = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -379,6 +382,14 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
             lines.append("\nTested values per axis:")
             lines.append(sc["tested_values"])
         sections.append("\n".join(lines))
+
+    # --- Task context (L2 domain framing) ---
+    if ctx.task_context:
+        tc_lines = "\n".join(
+            f"  {k}: {v}" for k, v in ctx.task_context.items() if v
+        )
+        if tc_lines:
+            sections.append(f"## TASK CONTEXT\n{tc_lines}")
 
     # --- Warning inventory (cross-round) ---
     if ctx.warning_inventory:

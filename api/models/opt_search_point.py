@@ -59,6 +59,11 @@ class OptSearchPoint(BaseModel):
         description="Per-query warning inventory across rounds. "
         "Keyed by query text, values are warning counters.",
     )
+    l2_directive: str = Field(
+        default="",
+        description="L2's diagnostic reasoning + action guidance for L1. "
+        "Sliding window of 1 — set after L2 runs, cleared when L2 doesn't fire.",
+    )
     content_hashes: list[str] = Field(
         default_factory=list,
         description="Content hashes of dataset_runs produced under this config",

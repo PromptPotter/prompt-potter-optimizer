@@ -13,7 +13,7 @@ This is where 90% of implementation work happens. All core logic lives here.
 | `pipeline_discovery.py` | Pipeline schema factory (`TERMNORM_DEFAULT_SCHEMA` + live metadata merging) |
 | `project_store.py` | Facade over focused store modules in `stores/` |
 | `campaign/feedback_cycle.py` | Iterative optimization: 3-loop escalation (L1→L2→L3) with patience-based stopping + pluggable escalation checks |
-| `campaign/layer_transitions.py` | L2 (context + meta-settings), L3 (plan) — neither sets pipeline_params |
+| `campaign/layer_transitions.py` | L2 (context + meta-settings + l2_directive), L3 (plan) — neither sets pipeline_params |
 | `dataset_builder.py` | Excel ground-truth loading and train/test splitting |
 | `campaign/campaign_init.py` | Campaign initialization: store setup, backend sync, baseline eval |
 | `search/smart_search.py` | Sensitivity scan (OAT), adaptive search, `filter_variant_library()` |

@@ -37,6 +37,7 @@ class TransitionResult:
     prompt_state: PromptState
     pipeline_params: dict | None = None
     task_context: dict | None = None
+    l2_directive: str = ""
     action: str = "continue"  # "continue" | "probe" (extensible)
     debug_prompt: str = ""
     debug_response: dict | None = None
@@ -55,6 +56,8 @@ async def refine_context(
     escalation_journal: list[dict] | None = None,
     task_context: dict | None = None,
     warning_inventory: dict | None = None,
+    critique_text: str = "",
+    prev_l2_directive: str = "",
 ) -> TransitionResult:
     """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
 
@@ -101,6 +104,22 @@ async def refine_context(
         if warning_section:
             warning_section = "\n\n" + warning_section + "\n"
 
+    # Inject previous critique so L2 builds on it rather than re-analyzing
+    critique_section = ""
+    if critique_text:
+        critique_section = (
+            "\n\nPREVIOUS CRITIQUE (build on this analysis, don't repeat it):\n"
+            + critique_text
+        )
+
+    # Sliding window: L2 sees only its own previous directive (window=1)
+    prev_directive_section = ""
+    if prev_l2_directive:
+        prev_directive_section = (
+            "\n\nYOUR PREVIOUS DIRECTIVE (evolve or supersede — do not repeat verbatim):\n"
+            + prev_l2_directive
+        )
+
     response_schema_suffix = (
         "\nReturn a JSON object with:\n"
         '  "optimizer_params": dict of meta-setting changes '
@@ -108,6 +127,9 @@ async def refine_context(
         '  "task_context": dict of refined domain fields (or {} to keep current)\n'
         '  "action": "continue" (normal L1 cycle) or "probe" '
         "(test warned queries with new settings first)\n"
+        '  "directive": 2-3 sentence instruction for the next candidate '
+        "generator — what to focus on and why (this will be injected into "
+        "the generation prompt as primary guidance)\n"
         '  "rationale": 1-2 sentence explanation\n'
         "\nNote: L1 Generate makes the final decision on pipeline_params "
         "(query_prefix, max_sites, etc.). Your job is to refine the "
@@ -124,6 +146,8 @@ async def refine_context(
         task_context_section=task_context_section,
         pipeline_section=pipeline_section,
         escalation_section=escalation_section + warning_section,
+        critique_section=critique_section,
+        prev_directive_section=prev_directive_section,
         response_schema_suffix=response_schema_suffix,
     )
 
@@ -155,18 +179,25 @@ async def refine_context(
     if action not in ("continue", "probe"):
         action = "continue"
 
+    # Extract L2 directive for L1 injection
+    l2_directive = result.get("directive", "")
+    if not isinstance(l2_directive, str):
+        l2_directive = ""
+
     logger.info(
         "L2 refine_context: %d param changes, task_context %s, "
-        "action=%s",
+        "action=%s, directive=%d chars",
         len(result.get("optimizer_params", {})),
         "updated" if new_task_context else "unchanged",
         action,
+        len(l2_directive),
     )
 
     new_ps = current_ps.derive(**changes) if changes else current_ps
     return TransitionResult(
         prompt_state=new_ps,
         task_context=new_task_context,
+        l2_directive=l2_directive,
         action=action,
         debug_prompt=prompt,
         debug_response=result,

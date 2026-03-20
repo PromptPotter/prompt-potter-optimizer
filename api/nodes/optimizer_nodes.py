@@ -59,6 +59,12 @@ class L1GenerateInput(BaseModel):
     warning_inventory: dict | None = Field(
         None, description="Per-query warning inventory for failure annotation",
     )
+    l2_directive: str = Field(
+        "", description="L2 diagnostic reasoning + action guidance (primary signal for generation)",
+    )
+    is_probe_round: bool = Field(
+        False, description="Whether this is a probe round targeting warned queries",
+    )
 
 
 class L1GenerateOutput(BaseModel):
@@ -112,6 +118,8 @@ class L1GenerateNode(NodeBase[L1GenerateInput, L1GenerateOutput]):
             escalation_journal=input_data.escalation_journal,
             task_context=input_data.task_context,
             warning_inventory=input_data.warning_inventory,
+            l2_directive=input_data.l2_directive,
+            is_probe_round=input_data.is_probe_round,
         )
 
         return L1GenerateOutput(
@@ -242,6 +250,7 @@ class L1EvaluateNode(NodeBase[L1EvaluateInput, L1EvaluateOutput]):
                 scan_context=self.config.get("scan_context"),
                 pipeline_params=self.config.get("pipeline_params"),
                 warning_inventory=self.config.get("warning_inventory"),
+                task_context=self.config.get("task_context"),
             )
             critique_result = await agent.run(cctx)
             from api.services.campaign.critique import format_critique_for_prompt
@@ -321,6 +330,12 @@ class L2RefineInput(BaseModel):
     warning_inventory: dict | None = Field(
         None, description="Per-query warning inventory for L2 context",
     )
+    critique_text: str = Field(
+        "", description="Critique from previous evaluation (so L2 builds on it)",
+    )
+    prev_l2_directive: str = Field(
+        "", description="L2's previous directive (sliding window=1, evolve or supersede)",
+    )
 
 
 class L2RefineOutput(BaseModel):
@@ -332,6 +347,9 @@ class L2RefineOutput(BaseModel):
     )
     task_context: dict | None = Field(
         None, description="Refined domain context (None if unchanged)",
+    )
+    l2_directive: str = Field(
+        "", description="Diagnostic reasoning + action guidance for L1 injection",
     )
     action: str = Field(
         "continue",
@@ -385,12 +403,15 @@ class L2RefineNode(NodeBase[L2RefineInput, L2RefineOutput]):
             escalation_journal=input_data.escalation_journal,
             task_context=input_data.task_context,
             warning_inventory=input_data.warning_inventory,
+            critique_text=input_data.critique_text,
+            prev_l2_directive=input_data.prev_l2_directive,
         )
 
         return L2RefineOutput(
             prompt_state=tr.prompt_state.model_dump(),
             pipeline_params=tr.pipeline_params,
             task_context=tr.task_context,
+            l2_directive=tr.l2_directive,
             action=tr.action,
             changes_description=tr.prompt_state.changes_description or "",
             debug_prompt=tr.debug_prompt,
