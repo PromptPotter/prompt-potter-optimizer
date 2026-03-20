@@ -131,13 +131,13 @@ async def refine_context(
         "(test warned queries with new settings first)\n"
         '  "directive": 2-3 sentence instruction for the next candidate '
         "generator — what to focus on and why (this will be injected into "
-        "the generation prompt as primary guidance)\n"
+        "the generation prompt as additional guidance)\n"
         '  "rationale": 1-2 sentence explanation\n'
         "\nNote: L1 Generate makes the final decision on pipeline_params. "
         "Your job is to refine the "
         "situation context and meta-settings so L1 makes better choices.\n"
-        "If the warning inventory shows recurring pipeline issues, set "
-        '"action": "probe" to verify your changes help those queries.'
+        "Use your judgment on when to set action to \"probe\" vs \"continue\" "
+        "based on the data above."
     )
 
     prompt = load_optimizer_prompt("l2_refine_context").compile(

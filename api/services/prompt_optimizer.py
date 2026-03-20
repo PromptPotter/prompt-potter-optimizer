@@ -243,7 +243,7 @@ async def generate_candidates(
     # L2 directive (primary guidance from context refinement)
     if l2_directive:
         meta_prompt += (
-            "\n\nL2 DIRECTIVE (from context refinement — primary guidance for this round):\n"
+            "\n\nL2 DIRECTIVE (from context refinement — additional guidance for this round):\n"
             f"{l2_directive}\n"
         )
 

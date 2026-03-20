@@ -167,14 +167,14 @@ Analyze all data above and return JSON:
 {
   "positive_critique": "<what is working well — patterns to extend>",
   "negative_critique": "<what is failing — root causes and blockers>",
-  "priority_fix": "<single most impactful change to make>",
+  "priority_fix": "<what change(s) would have the most impact>",
   "suggested_axes": ["<pipeline_param or prompt_field to try next>"],
   "summary": "<2-3 sentence actionable critique for the next candidate generator>"
 }
 Rules:
-- positive_critique: identify success patterns even at low accuracy (partial matches)
-- negative_critique: reference specific stats (degradation rate, rank distribution, timing)
-- suggested_axes: concrete parameter names from the scan context or pipeline config
+- positive_critique: identify success patterns from the data (hits, near-misses, rank distribution)
+- negative_critique: reference specific stats from the sections above
+- suggested_axes: name parameters or fields visible in the data above
 - All 5 fields are fed to the next generation round — be concise and actionable
 """
 
@@ -220,7 +220,7 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
             lines.append("Termination distribution:")
             for step, count in termination.most_common():
                 lines.append(f"  {step}: {count}/{total}")
-        lines.append(f"Web search degradation: {deg_rate:.0%} of queries")
+        lines.append(f"Step degradation: {deg_rate:.0%} of queries")
         if times:
             ts = sorted(times)
             lines.append(
