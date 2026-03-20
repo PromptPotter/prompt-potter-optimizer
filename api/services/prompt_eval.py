@@ -36,7 +36,7 @@ class EvalContext:
 
     Pure infrastructure — does NOT carry a SearchPoint.  The search-space
     dimensions (model, temperature, pipeline_params) live here so that
-    ``evaluate_and_select_winner`` can build per-candidate SearchPoints.
+    ``l1_evaluate`` can build per-candidate SearchPoints.
     """
 
     backend_client: BackendClient
@@ -235,6 +235,7 @@ def evaluate_prompt_batch(
     escalation_checks: list | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
+    cached_query_results: dict[str, dict] | None = None,
 ) -> list:
     """Evaluate a prompt on all eval_data queries via the backend.
 
@@ -260,17 +261,30 @@ def evaluate_prompt_batch(
     rendered = search_point.render()
     consecutive_errors = 0
     max_consecutive_errors = 3
+    n_reused = 0
 
     try:
         for i, qd in enumerate(eval_data):
-            result = backend_reranker_eval(
-                qd, backend_client, rendered,
-                pipeline_params=search_point.pipeline_params,
-                pipeline_schema=pipeline_schema,
+            # Per-query cache reuse — skip backend call if result exists
+            cached = (
+                cached_query_results.get(qd["query"])
+                if cached_query_results else None
             )
+            if cached is not None:
+                result = {**cached, "cached": True}
+                n_reused += 1
+            else:
+                result = backend_reranker_eval(
+                    qd, backend_client, rendered,
+                    pipeline_params=search_point.pipeline_params,
+                    pipeline_schema=pipeline_schema,
+                )
             results.append(result)
 
-            if result.get("error"):
+            if cached is not None:
+                # Cached results don't count toward consecutive error tracking
+                pass
+            elif result.get("error"):
                 consecutive_errors += 1
                 if consecutive_errors >= max_consecutive_errors:
                     logger.warning(
@@ -314,6 +328,11 @@ def evaluate_prompt_batch(
         )
         raise
 
+    if n_reused:
+        logger.info(
+            "Per-query reuse: %d/%d queries from prior runs",
+            n_reused, len(eval_data),
+        )
     return results
 
 
@@ -547,6 +566,30 @@ def evaluate_prompt_cached(
 
     from api.services.campaign.escalation import EscalationError as _EscalationError
 
+    # Per-query reuse: find individual query results from prior runs
+    # with matching config but potentially different sample sizes.
+    # When llm_ranking is not in the active steps, the ranking prompt
+    # is never executed — results are prompt-independent, so we can
+    # match on (model, temperature, pipeline_params) alone.
+    per_query_cache: dict[str, dict] | None = None
+    if store and backend_id:
+        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
+        pp = search_point.pipeline_params or {}
+        active_steps = pp.get("steps", [])
+        prompt_irrelevant = bool(active_steps) and "llm_ranking" not in active_steps
+        per_query_cache = store.dataset_runs.find_query_results(
+            backend_id, rp_hash,
+            search_point.model, search_point.temperature,
+            search_point.pipeline_params,
+            ignore_prompt=prompt_irrelevant,
+        )
+        if per_query_cache:
+            logger.info(
+                "Per-query reuse: %d cached query results available for %d eval queries%s",
+                len(per_query_cache), len(eval_data),
+                " (prompt-independent)" if prompt_irrelevant else "",
+            )
+
     escalation_signal = None
     try:
         results = evaluate_prompt_batch(
@@ -556,6 +599,7 @@ def evaluate_prompt_cached(
             escalation_checks=ctx.escalation_checks,
             candidate_idx=ctx.candidate_idx,
             n_total_candidates=ctx.n_total_candidates,
+            cached_query_results=per_query_cache,
         )
     except _EscalationError as e:
         results = e.partial_results

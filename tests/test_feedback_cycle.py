@@ -146,10 +146,10 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
     # First candidate gets 33%, analysis suggestions say stop
     apply_eval_mock(monkeypatch, round_hits=[1])
 
-    # Wrap evaluate_and_select_winner to force next_action="stop"
-    from api.services.prompt_optimizer import evaluate_and_select_winner
+    # Wrap l1_evaluate to force next_action="stop"
+    from api.services.prompt_optimizer import l1_evaluate
 
-    original_eval = evaluate_and_select_winner
+    original_eval = l1_evaluate
 
     async def patched_eval(*args, **kwargs):
         result = await original_eval(*args, **kwargs)
@@ -157,7 +157,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
         return result
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.evaluate_and_select_winner",
+        "api.services.prompt_optimizer.l1_evaluate",
         patched_eval,
     )
 
@@ -180,11 +180,11 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
 
 
 def test_next_action_default():
-    """evaluate_and_select_winner returns next_action='generate' by default."""
+    """l1_evaluate returns next_action='generate' by default."""
     # This is tested by the integration tests above (test_next_action_stop).
-    # The default is hardcoded in evaluate_and_select_winner() return dict.
-    from api.services.prompt_optimizer import evaluate_and_select_winner
-    assert callable(evaluate_and_select_winner)
+    # The default is hardcoded in l1_evaluate() return dict.
+    from api.services.prompt_optimizer import l1_evaluate
+    assert callable(l1_evaluate)
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +284,7 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
+        "api.services.prompt_optimizer.l1_generate",
         mock_generate,
     )
 
@@ -751,7 +751,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
+        "api.services.prompt_optimizer.l1_generate",
         mock_generate,
     )
     apply_eval_mock(monkeypatch, round_hits=[2, 2])

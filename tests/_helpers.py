@@ -25,7 +25,7 @@ def apply_llm_mock(monkeypatch):
 
 
 def apply_grow_mock(monkeypatch):
-    """Mock generate_candidates to return deterministic variants (as dicts)."""
+    """Mock l1_generate to return deterministic variants (as dicts)."""
     async def mock_generate(current_ps, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         return [
@@ -37,7 +37,7 @@ def apply_grow_mock(monkeypatch):
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
+        "api.services.prompt_optimizer.l1_generate",
         mock_generate,
     )
 

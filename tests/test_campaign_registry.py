@@ -314,7 +314,7 @@ def _apply_e2e_mocks(monkeypatch):
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
+        "api.services.prompt_optimizer.l1_generate",
         mock_generate,
     )
 

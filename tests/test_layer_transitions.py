@@ -284,7 +284,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
     apply_llm_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[3])  # perfect → stops after round 0
 
-    # Track what generate_candidates receives
+    # Track what l1_generate receives
     gen_calls = []
 
     async def mock_generate(current_ps, accuracy, results, n, creativity,
@@ -299,7 +299,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
+        "api.services.prompt_optimizer.l1_generate",
         mock_generate,
     )
 
@@ -343,7 +343,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
     apply_llm_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[3])  # perfect → stops
 
-    # Track what meta-prompt generate_candidates builds
+    # Track what meta-prompt l1_generate builds
     captured_prompts = []
 
     async def mock_generate(current_ps, accuracy, results, n, creativity,
@@ -359,7 +359,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
+        "api.services.prompt_optimizer.l1_generate",
         mock_generate,
     )
 
@@ -385,7 +385,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
         baseline_accuracy=0.0,
     )
 
-    # The plan should be present on the PromptState passed to generate_candidates
+    # The plan should be present on the PromptState passed to l1_generate
     assert any("chain-of-thought" in (p or "") for p in captured_prompts)
 
 

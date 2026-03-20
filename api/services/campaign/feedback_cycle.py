@@ -1,7 +1,7 @@
 """
 Feedback cycling orchestrator for iterative prompt optimization.
 
-Runs ``generate_candidates()`` → ``evaluate_and_select_winner()`` in a
+Runs ``l1_generate()`` → ``l1_evaluate()`` in a
 counter-based loop.  Each round generates Layer 1 variants and evaluates
 them against the current best.
 
@@ -342,12 +342,12 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    from api.services.prompt_optimizer import generate_candidates
+    from api.services.prompt_optimizer import l1_generate
 
     client = _llm_client.get_llm_client(config.provider)
     async with observed_step(f"l1_generate_r{round_num}", "L1Generate",
                              obs=obs, trace_id=trace_id):
-        candidates = await generate_candidates(
+        candidates = await l1_generate(
             current_ps, state.current_accuracy, state.current_results,
             _n_variants, _creativity, client,
             model=config.model,
@@ -406,11 +406,11 @@ async def _evaluate_candidates(
         "label": baseline_label,
     }
 
-    from api.services.prompt_optimizer import evaluate_and_select_winner
+    from api.services.prompt_optimizer import l1_evaluate
 
     async with observed_step(f"l1_evaluate_r{round_num}", "L1Evaluate",
                              obs=obs, trace_id=trace_id, obs_type="span"):
-        eval_out = await evaluate_and_select_winner(
+        eval_out = await l1_evaluate(
             candidates, round_eval_data, current_best, state.eval_ctx,
             improvement_threshold=config.improvement_threshold,
             on_candidate_eval=on_candidate_eval,
@@ -975,7 +975,7 @@ async def run_feedback_cycle(
 
     Executes:
     1. Use provided baseline_prompt_state as starting point
-    2. Loop: generate_candidates → evaluate_and_select_winner
+    2. Loop: l1_generate → l1_evaluate
     3. Stop when patience exhausted, max_rounds reached, or perfect score
 
     Args:

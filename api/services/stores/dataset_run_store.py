@@ -290,6 +290,72 @@ class DatasetRunStore:
         write_json(path, data)
         self._alias_cache.pop(backend_id, None)
 
+    def find_query_results(
+        self,
+        backend_id: str,
+        rp_hash: str,
+        model: str,
+        temperature: float,
+        pipeline_params: dict | None,
+        *,
+        ignore_prompt: bool = False,
+    ) -> dict[str, dict]:
+        """Per-query cross-run lookup filtered by config.
+
+        Returns ``{query_string: result_dict}`` from all runs matching
+        the config, regardless of ``item_count``.  Enables per-query reuse
+        across different sample sizes.
+
+        When ``ignore_prompt`` is True, skips rp_hash filtering and matches
+        on ``(model, temperature, pipeline_params)`` only — using full
+        pipeline_params comparison including ``steps``.  Use this when the
+        ranking prompt is irrelevant (e.g. ``llm_ranking`` excluded from
+        active steps).
+
+        Later runs overwrite earlier (same config = same result).
+        """
+        matching_entries: list[dict] = []
+
+        if ignore_prompt:
+            # Prompt-independent: scan ALL runs matching config.
+            # Compare full pipeline_params (including steps) because
+            # different step sets produce different results.
+            for entry in self._load_index(backend_id).get("dataset_runs", []):
+                if entry.get("model") != model:
+                    continue
+                if entry.get("temperature") != temperature:
+                    continue
+                if entry.get("pipeline_params") != pipeline_params:
+                    continue
+                matching_entries.append(entry)
+        else:
+            # Prompt-dependent: filter by rp_hash alias group + strip steps.
+            alias_set = self.resolve_aliases(backend_id, rp_hash)
+            rp_idx = self._get_rp_index(backend_id)
+            norm_pp = _strip_steps(pipeline_params)
+            for h in alias_set:
+                for entry in rp_idx.get(h, []):
+                    if entry.get("model") != model:
+                        continue
+                    if entry.get("temperature") != temperature:
+                        continue
+                    if _strip_steps(entry.get("pipeline_params")) != norm_pp:
+                        continue
+                    matching_entries.append(entry)
+
+        results: dict[str, dict] = {}
+        for entry in matching_entries:
+            detail = read_json_optional(
+                self._runs_dir(backend_id) / f"{entry['run_id']}.json",
+            )
+            if not detail:
+                continue
+            for item in detail.get("dataset_run_items", []):
+                query = item.get("query", "")
+                if query:
+                    results[query] = item
+        return results
+
     def resolve_aliases(self, backend_id: str, rp_hash: str) -> set[str]:
         """Return all hashes equivalent to *rp_hash* (including itself)."""
         if not rp_hash:

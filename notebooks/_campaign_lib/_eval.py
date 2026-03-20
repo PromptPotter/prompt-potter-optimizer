@@ -19,7 +19,7 @@ from api.services.search.coverage import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
 )
 from api.services.prompt_optimizer import (
-    generate_candidates,
+    l1_generate as generate_candidates,
     generate_suggestions,
 )
 from api.services.search import (

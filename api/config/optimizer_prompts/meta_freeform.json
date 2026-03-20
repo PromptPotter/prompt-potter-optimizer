@@ -1,7 +1,0 @@
-{
-  "persona": "You are a prompt engineering expert.",
-  "task_intent": "Generate {{n_variants}} improved variants of a candidate-ranking prompt used in a terminology normalization pipeline.",
-  "instruction": "CURRENT PROMPT ({{accuracy_pct}} accuracy on {{n_queries}} queries):\n---\n{{rendered_prompt}}\n---\n\nFAILURE EXAMPLES (predicted != ground_truth):\n{{failure_examples}}\n\nThe prompt uses template variables (double-brace syntax):\n  {core_concept} -- core concept from entity profile\n  {entity_profile_json} -- full JSON entity profile from web research\n  {matches} -- newline-separated list of \"- candidate_term\" from token matching",
-  "thinking_style": "For each variant:\n1. Analyze WHY the current prompt fails on the examples above\n2. Make targeted changes to improve ranking accuracy (get correct candidate to rank #1)\n3. Keep the same template variables and JSON output format",
-  "answer_format": "Return a JSON object with key \"variants\" containing an array of objects:\n  - \"variant_name\": short identifier\n  - \"changes_description\": 1-2 sentence description of what changed and why\n  - \"prompt_text\": full prompt template text"
-}
