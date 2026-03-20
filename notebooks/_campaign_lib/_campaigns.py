@@ -8,6 +8,10 @@ if TYPE_CHECKING:
     from api.services.project_store import ProjectStore
 
 from api.models.prompt_state import PromptState
+from api.services.campaign.campaign_init import (  # noqa: F401
+    apply_experiment_overrides,
+    resolve_experiment_id as _resolve_experiment_id,
+)
 
 
 __all__ = [
@@ -17,55 +21,6 @@ __all__ = [
     "show_experiment_dashboard",
     "apply_experiment_overrides",
 ]
-
-
-def apply_experiment_overrides(
-    campaign_config: dict,
-    stored_cfg: dict,
-) -> dict | None:
-    """Merge stored experiment config into campaign_config (in-place).
-
-    Returns updated pipeline_params if stored, else None.
-    """
-    _OVERRIDE_KEYS: dict[str, tuple[str, ...]] = {
-        "patience": ("optimization",),
-        "max_rounds": ("optimization",),
-        "n_variants": ("optimization",),
-        "creativity": ("optimization",),
-        "model": ("eval_llm",),
-        "sample_size": (),
-    }
-    for key, path in _OVERRIDE_KEYS.items():
-        val = stored_cfg.get(key)
-        if val is not None:
-            target = campaign_config
-            for p in path:
-                target = target.setdefault(p, {})
-            target[key] = val
-
-    stored_pp = stored_cfg.get("pipeline_params")
-    if stored_pp:
-        campaign_config["pipeline_params"] = stored_pp
-        return stored_pp
-    return None
-
-
-def _resolve_experiment_id(
-    store: "ProjectStore", backend_id: str, short_id: str,
-) -> str | None:
-    """Resolve short prefix/suffix to full campaign_id."""
-    campaigns = store.campaigns.list_all(backend_id)
-    matches = [c for c in campaigns
-               if short_id in c["campaign_id"]]
-    if len(matches) == 1:
-        return matches[0]["campaign_id"]
-    if len(matches) > 1:
-        print(f"  Ambiguous ID '{short_id}' — matches:")
-        for m in matches:
-            print(f"    {m['campaign_id']}  {m['status']}  {m['n_trials']} rounds")
-        return None
-    print(f"  No campaign matching '{short_id}'")
-    return None
 
 
 def list_campaigns(

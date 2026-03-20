@@ -15,7 +15,7 @@ This is where 90% of implementation work happens. All core logic lives here.
 | `campaign/feedback_cycle.py` | Iterative optimization: 3-loop escalation (L1→L2→L3) with patience-based stopping + pluggable escalation checks |
 | `campaign/layer_transitions.py` | L2 (context + meta-settings + l2_directive), L3 (plan) — neither sets pipeline_params |
 | `dataset_builder.py` | Excel ground-truth loading and train/test splitting |
-| `campaign/campaign_init.py` | Campaign initialization: store setup, backend sync, baseline eval |
+| `campaign/campaign_init.py` | Campaign initialization: store setup, backend sync, baseline eval, `resolve_experiment_id()`, `apply_experiment_overrides()`, `save_campaign_winner()`, `build_all_session_terms()`, `create_llm_client()` |
 | `search/smart_search.py` | Sensitivity scan (OAT), adaptive search, `filter_variant_library()` |
 | `search/scan_advisor.py` | LLM-driven scan recommendations |
 | `search/scan_seeding.py` | Deterministic scan context builder for feedback cycle |

@@ -564,13 +564,6 @@ Cloud failures never crash the main flow — circuit breaker trips on first erro
 | `l3_patience` | int | 1 | L3 stalls before stopping |
 | `l2_temperature` | float | 0.3 | Temperature for L2 LLM call |
 | `l3_temperature` | float | 0.5 | Temperature for L3 LLM call |
-| `suggestion_temperature` | float | 0.0 | Temperature for suggestion generation |
-
-### Misc
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `generate_suggestions` | bool | False | LLM suggestions each round |
 
 ---
 

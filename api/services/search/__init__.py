@@ -26,6 +26,7 @@ _SUBMODULE_MAP: dict[str, str] = {
     "adaptive_search": "api.services.search.smart_search",
     "build_diagnostic_set": "api.services.search.smart_search",
     "filter_variant_library": "api.services.search.smart_search",
+    "load_filtered_variant_library": "api.services.search.smart_search",
     "load_scan_results_from_plan": "api.services.search.smart_search",
     "resume_or_build_diagnostic": "api.services.search.smart_search",
     "select_scan_winner": "api.services.search.scan_winner",

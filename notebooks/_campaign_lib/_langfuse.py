@@ -63,24 +63,19 @@ def sync_langfuse(
     Returns:
         Push stats dict, or None if backfill was skipped.
     """
-    import api.services.obs.langfuse_push as _lfp
-    _lfp.DATASET_NAME = dataset_name
+    from api.services.obs.langfuse_push import sync_langfuse_runs
 
-    if not backfill:
-        print(f"Langfuse dataset: {dataset_name} (backfill disabled)")
+    result = sync_langfuse_runs(
+        store, backend_id,
+        dataset_name=dataset_name, backfill=backfill, reset=reset,
+    )
+    if result is None:
+        if not backfill:
+            print(f"Langfuse dataset: {dataset_name} (backfill disabled)")
+        else:
+            print("No completed dataset runs yet — skipping Langfuse backfill.")
         return None
-
-    if reset:
-        from api.services.obs.langfuse_push import _fresh_state, _save_state
-        _save_state(store, backend_id, _fresh_state())
-        print("Langfuse push state reset -- will re-push all runs.")
-
-    n_runs = len(store.dataset_runs.list_all(backend_id))
-    if n_runs == 0:
-        print("No completed dataset runs yet -- skipping Langfuse backfill (run after eval).")
-        return None
-
-    return push_langfuse(store, backend_id)
+    return result
 
 
 def push_langfuse(store: "ProjectStore", backend_id: str) -> dict:

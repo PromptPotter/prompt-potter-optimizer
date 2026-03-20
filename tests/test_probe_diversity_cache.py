@@ -15,6 +15,23 @@ from api.services.stores.dataset_run_store import DatasetRunStore
 # ---------------------------------------------------------------------------
 
 
+def _capture_llm_prompts(monkeypatch):
+    """Mock llm_call and return list of captured system prompts."""
+    captured: list[str] = []
+
+    async def mock_llm_call(client, *, messages, config, model=None, temperature=None):
+        captured.append(messages[0]["content"])
+        _parsed = {"variants": [{"instruction": "v1", "variant_name": "v1"}]}
+
+        class R:
+            parsed = _parsed
+            content = json.dumps(_parsed)
+        return R()
+
+    monkeypatch.setattr("api.services.prompt_optimizer.llm_call", mock_llm_call)
+    return captured
+
+
 class TestProbeRoundEnrichment:
     """l1_generate() with is_probe_round=True injects structured signal."""
 
@@ -52,19 +69,7 @@ class TestProbeRoundEnrichment:
         self, monkeypatch, warning_inventory,
     ):
         """Probe round meta-prompt includes summarize_warning_inventory output."""
-        captured_prompts: list[str] = []
-
-        async def mock_llm_call(client, *, messages, config, model=None, temperature=None):
-            captured_prompts.append(messages[0]["content"])
-
-            class R:
-                parsed = {"variants": [{"instruction": "v1", "variant_name": "v1"}]}
-                content = json.dumps(parsed)
-            return R()
-
-        monkeypatch.setattr(
-            "api.services.prompt_optimizer.llm_call", mock_llm_call,
-        )
+        captured = _capture_llm_prompts(monkeypatch)
 
         ps = PromptState(instruction="test prompt")
         await l1_generate(
@@ -76,12 +81,9 @@ class TestProbeRoundEnrichment:
             is_probe_round=True,
         )
 
-        assert len(captured_prompts) == 1
-        prompt = captured_prompts[0]
-        # Should contain the warning inventory text
+        prompt = captured[0]
         assert "RECURRING PIPELINE WARNINGS" in prompt
         assert "web_search:timeout" in prompt
-        # Should contain dominant problem step
         assert "Dominant problem step: web_search" in prompt
 
     @pytest.mark.asyncio
@@ -89,19 +91,7 @@ class TestProbeRoundEnrichment:
         self, monkeypatch, warning_inventory, escalation_journal,
     ):
         """Probe round includes tried configs from escalation journal."""
-        captured_prompts: list[str] = []
-
-        async def mock_llm_call(client, *, messages, config, model=None, temperature=None):
-            captured_prompts.append(messages[0]["content"])
-
-            class R:
-                parsed = {"variants": [{"instruction": "v1", "variant_name": "v1"}]}
-                content = json.dumps(parsed)
-            return R()
-
-        monkeypatch.setattr(
-            "api.services.prompt_optimizer.llm_call", mock_llm_call,
-        )
+        captured = _capture_llm_prompts(monkeypatch)
 
         ps = PromptState(instruction="test prompt")
         await l1_generate(
@@ -114,7 +104,7 @@ class TestProbeRoundEnrichment:
             is_probe_round=True,
         )
 
-        prompt = captured_prompts[0]
+        prompt = captured[0]
         assert "Previous attempts targeting web_search" in prompt
         assert "degraded_rate=40%" in prompt
 
@@ -123,19 +113,7 @@ class TestProbeRoundEnrichment:
         self, monkeypatch, warning_inventory,
     ):
         """During probe, single-occurrence warnings are annotated on failure examples."""
-        captured_prompts: list[str] = []
-
-        async def mock_llm_call(client, *, messages, config, model=None, temperature=None):
-            captured_prompts.append(messages[0]["content"])
-
-            class R:
-                parsed = {"variants": [{"instruction": "v1", "variant_name": "v1"}]}
-                content = json.dumps(parsed)
-            return R()
-
-        monkeypatch.setattr(
-            "api.services.prompt_optimizer.llm_call", mock_llm_call,
-        )
+        captured = _capture_llm_prompts(monkeypatch)
 
         # Give aspirin a single-count warning
         inv = {
@@ -156,28 +134,14 @@ class TestProbeRoundEnrichment:
             is_probe_round=True,
         )
 
-        prompt = captured_prompts[0]
-        # With threshold=1 during probe, single-occurrence warning should be annotated
-        assert "[web_search:timeout 1/1 rounds]" in prompt
+        assert "[web_search:timeout 1/1 rounds]" in captured[0]
 
     @pytest.mark.asyncio
     async def test_non_probe_does_not_annotate_single_occurrence(
         self, monkeypatch,
     ):
         """Outside probe, single-occurrence warnings are NOT annotated."""
-        captured_prompts: list[str] = []
-
-        async def mock_llm_call(client, *, messages, config, model=None, temperature=None):
-            captured_prompts.append(messages[0]["content"])
-
-            class R:
-                parsed = {"variants": [{"instruction": "v1", "variant_name": "v1"}]}
-                content = json.dumps(parsed)
-            return R()
-
-        monkeypatch.setattr(
-            "api.services.prompt_optimizer.llm_call", mock_llm_call,
-        )
+        captured = _capture_llm_prompts(monkeypatch)
 
         inv = {
             "aspirin": {
@@ -197,8 +161,7 @@ class TestProbeRoundEnrichment:
             is_probe_round=False,
         )
 
-        prompt = captured_prompts[0]
-        assert "[web_search:timeout" not in prompt
+        assert "[web_search:timeout" not in captured[0]
 
 
 # ---------------------------------------------------------------------------
@@ -212,21 +175,7 @@ class TestValueDiversity:
     @pytest.mark.asyncio
     async def test_diversity_in_thinking_style(self, monkeypatch):
         """Meta-prompt thinking_style includes value diversity instruction."""
-        captured: list[str] = []
-
-        async def mock_llm_call(client, *, messages, config, model=None,
-                                temperature=None):
-            captured.append(messages[0]["content"])
-
-            class R:
-                parsed = {"variants": [{"instruction": "v1",
-                                        "variant_name": "v1"}]}
-                content = json.dumps(parsed)
-            return R()
-
-        monkeypatch.setattr(
-            "api.services.prompt_optimizer.llm_call", mock_llm_call,
-        )
+        captured = _capture_llm_prompts(monkeypatch)
 
         ps = PromptState(instruction="test")
         await l1_generate(
@@ -237,10 +186,8 @@ class TestValueDiversity:
             n_variants=1, creativity=0.5, llm_client=None,
         )
 
-        prompt = captured[0]
-        assert "Maximize value diversity" in prompt
-        # Should NOT have rigid per-candidate axis assignments
-        assert "Candidate 1 → focus on:" not in prompt
+        assert "Maximize value diversity" in captured[0]
+        assert "Candidate 1 → focus on:" not in captured[0]
 
 
 # ---------------------------------------------------------------------------

@@ -358,6 +358,18 @@ def filter_variant_library(
     return result
 
 
+def load_filtered_variant_library(
+    pipeline_params: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
+) -> dict:
+    """Load variant library, filtering to active pipeline steps when possible."""
+    from api.config.settings import load_variant_library
+    lib = load_variant_library()
+    if pipeline_params and pipeline_schema:
+        lib = filter_variant_library(lib, pipeline_params, schema=pipeline_schema)
+    return lib
+
+
 # ---------------------------------------------------------------------------
 # Sensitivity scan
 # ---------------------------------------------------------------------------

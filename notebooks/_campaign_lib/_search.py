@@ -9,7 +9,7 @@ from pathlib import Path
 from api.models.pipeline_schema import PipelineSchema
 from api.models.prompt_state import LAYER1_STRING_FIELDS
 
-from api.config.settings import load_variant_library, load_variant_library_rich
+from api.config.settings import load_variant_library_rich
 from api.services.search import (
     build_diagnostic_set,
     sensitivity_scan as _sensitivity_scan,
@@ -21,12 +21,12 @@ from api.services.search import (
     build_data_inventory as _build_data_inventory,
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
     advise_scan_config as _advise_scan_config,
-    filter_variant_library as _filter_variant_library,
     preview_advisor_prompt as _preview_advisor_prompt,
     build_pipeline_overview,
     build_tunable_params,
     build_llm_context,
     restructure_context_cached as _restructure_context_cached,
+    load_filtered_variant_library as _load_filtered_variants,
 )
 
 from ._display import (
@@ -49,20 +49,6 @@ __all__ = [
     "build_pipeline_overview", "build_tunable_params", "build_llm_context",
     "display_variant_library",
 ]
-
-
-# ── Variant library helpers ───────────────────────────────────────────────
-
-
-def _load_filtered_variants(
-    pipeline_params: dict | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-) -> dict:
-    """Load variant library, filtering to active pipeline steps when possible."""
-    lib = load_variant_library()
-    if pipeline_params and pipeline_schema:
-        lib = _filter_variant_library(lib, pipeline_params, schema=pipeline_schema)
-    return lib
 
 
 # ── Variant library & advisor prompt ──────────────────────────────────────

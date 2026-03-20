@@ -5,10 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from api.models.prompt_state import PromptState
 from api.services.backend_client import load_pipeline_config
-from api.services.llm_client import LLMClientBase, get_llm_client
 from api.services.project_store import ProjectStore
 
-from api.services.campaign.campaign_init import init_services as _init_services
+from api.services.campaign.campaign_init import (
+    init_services as _init_services,
+    build_all_session_terms,
+    create_llm_client as setup_llm,
+    save_campaign_winner,
+)
 from api.services.dataset_builder import (
     load_excel_ground_truth as _load_excel_gt,
     train_test_split as _train_test_split,
@@ -184,73 +188,9 @@ async def smoke_test_override(
 # ---------------------------------------------------------------------------
 
 
-def setup_llm(campaign_config: dict) -> tuple[LLMClientBase, str]:
-    """Create LLM client + model from campaign_config['eval_llm']."""
-    eval_llm = campaign_config["eval_llm"]
-    url = eval_llm.get("provider_url", "")
-    if "anthropic.com" in url:
-        provider = "anthropic"
-    elif "openai.com" in url:
-        provider = "openai"
-    else:
-        provider = "groq"
-    return get_llm_client(provider), eval_llm.get("model", "")
 
-
-def save_campaign_winner(
-    campaign_rounds: list,
-    campaign_config: dict,
-    store: "ProjectStore",
-    backend_id: str,
-    *,
-    experiment_id: str | None = None,
-) -> dict:
-    """Find best round, save to store + link to campaign. Returns save_data dict."""
-    from datetime import datetime, timezone
-
-    winner = campaign_rounds[-1]["prompt_state"]
-    winner_acc = campaign_rounds[-1]["accuracy"]
-
-    for rd in campaign_rounds:
-        if rd["accuracy"] > winner_acc:
-            winner = rd["prompt_state"]
-            winner_acc = rd["accuracy"]
-
-    baseline_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else None
-    save_data = {
-        "winner": winner.model_dump(),
-        "accuracy": winner_acc,
-        "campaign_rounds": len(campaign_rounds),
-        "baseline_accuracy": baseline_acc,
-        "improvement": (winner_acc - baseline_acc) if baseline_acc is not None else None,
-        "config": campaign_config,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
-    store.backends.save_sync(backend_id, filename, save_data)
-
-    # Link winner to campaign store if experiment_id provided
-    if experiment_id:
-        from notebooks._campaign_lib._optimize import _resolve_experiment_id
-        full_id = _resolve_experiment_id(store, backend_id, experiment_id)
-        if full_id:
-            try:
-                store.campaigns.update(backend_id, full_id, {
-                    "winner_prompt_state_id": winner.id,
-                    "winner_accuracy": winner_acc,
-                    "winner_filename": filename,
-                })
-            except Exception:
-                pass  # campaign may not exist yet
-
-    print(f"Winner saved: {filename} (acc={winner_acc:.1%})")
-    return {
-        **save_data,
-        "winner_id": winner.id,
-        "filename": filename,
-        "backend_id": backend_id,
-    }
+# setup_llm and save_campaign_winner are now imported from
+# api.services.campaign.campaign_init (see imports above)
 
 
 def show_pipeline_snapshot(svc: dict) -> dict:
@@ -452,25 +392,9 @@ def prepare_eval_context(
     return baseline, eval_data, backend_status
 
 
-def build_all_session_terms(
-    store: "ProjectStore",
-    backend_id: str,
-) -> list[str]:
-    """Unique ground_truth identifiers across all stored datasets (train + test).
 
-    For /match to work correctly, the session must contain ALL identifiers:
-    - Train: query->ground_truth mappings (used for optimization evaluation)
-    - Test: ground_truth only (identifiers in candidate pool, no query mapping)
-    """
-    gt_set: set[str] = set()
-    for name in ("train", "test_processes", "test_material"):
-        ds = store.datasets.load(backend_id, name)
-        if ds and ds.get("items"):
-            for item in ds["items"]:
-                gt = item.get("ground_truth", "").strip()
-                if gt:
-                    gt_set.add(gt)
-    return sorted(gt_set)
+# build_all_session_terms is now imported from
+# api.services.campaign.campaign_init (see imports above)
 
 
 def show_dataset_summary(store: "ProjectStore", backend_id: str) -> dict:

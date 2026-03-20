@@ -24,7 +24,7 @@ from ._phase_display import (
     _CycleDisplayState, _dispatch_phase, _pp_val,
     _node_bottom, _node_line, _node_top,
 )
-from ._campaigns import _resolve_experiment_id
+from api.services.campaign.campaign_init import resolve_experiment_id as _resolve_experiment_id
 
 # Phase event printer for feedback cycle observability
 from api.models.phase_event import PhaseEvent
@@ -593,17 +593,22 @@ async def run_feedback_cycle_notebook(
                 if _deg > 0:
                     print(_node_line(f"Degradation: {_deg / _total:.0%}"))
 
-                _n_valid = sum(1 for _r in _results if not _r.get("error"))
-                if _n_valid > 0:
-                    for _k in [1, 5, 10]:
-                        _in_top = sum(
-                            1 for _r in _results if not _r.get("error")
-                            and (_rank := _find_rank(_get_candidates(_r), _r.get("ground_truth", ""))) is not None
-                            and _rank <= _k
-                        )
+                _valid = [
+                    _r for _r in _results if not _r.get("error")
+                ]
+                if _valid:
+                    def _recall_at_k(k):
+                        return sum(
+                            1 for _r in _valid
+                            if (_rk := _find_rank(
+                                _get_candidates(_r),
+                                _r.get("ground_truth", ""),
+                            )) is not None and _rk <= k
+                        ) / len(_valid)
+
                     print(_node_line(
-                        f"Recall: top-1={sum(1 for _r in _results if not _r.get('error') and _find_rank(_get_candidates(_r), _r.get('ground_truth', '')) == 1) / _n_valid:.0%}"
-                        f" top-5={sum(1 for _r in _results if not _r.get('error') and (_rk := _find_rank(_get_candidates(_r), _r.get('ground_truth', ''))) is not None and _rk <= 5) / _n_valid:.0%}"))
+                        f"Recall: top-1={_recall_at_k(1):.0%}"
+                        f" top-5={_recall_at_k(5):.0%}"))
             except Exception:
                 pass  # stats are best-effort
 

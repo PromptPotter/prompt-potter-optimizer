@@ -383,3 +383,25 @@ def build_eval_results(data: list[dict], hits: int):
 def make_http_error(status_code: int, message: str = "error"):
     """Create a mock HTTP error class with the given status_code."""
     return type(f"Mock{status_code}Error", (Exception,), {"status_code": status_code})(message)
+
+
+async def run_simple_cycle(
+    monkeypatch, eval_data, config, *, round_hits, **kwargs,
+):
+    """Apply standard mocks and run a feedback cycle. Returns CycleResult."""
+    from api.services.campaign.feedback_cycle import run_feedback_cycle
+
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
+    apply_eval_mock(monkeypatch, round_hits=round_hits)
+
+    defaults = dict(
+        instruction="Rank candidates.",
+        eval_data=eval_data,
+        config=config,
+        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
+        baseline_accuracy=0.0,
+        baseline_results=[],
+    )
+    defaults.update(kwargs)
+    return await run_feedback_cycle(**defaults)

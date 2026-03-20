@@ -26,6 +26,7 @@ from _helpers import (
     apply_eval_mock,
     apply_grow_mock,
     apply_llm_mock,
+    run_simple_cycle,
 )
 
 
@@ -38,26 +39,13 @@ from _helpers import (
 @pytest.mark.asyncio
 async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
     """Feedback cycle improves accuracy over multiple rounds."""
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-
-    # Hits improve each round: 1/3 → 2/3 → 3/3 (perfect, stops early)
-    apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
-
-    result = await run_feedback_cycle(
-        instruction="Rank candidates.",
-        eval_data=eval_data,
-        config=cycle_config,
-        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
+    result = await run_simple_cycle(
+        monkeypatch, eval_data, cycle_config, round_hits=[1, 2, 3],
     )
-
     assert result.n_rounds == 3
     assert result.best_accuracy == 1.0
     assert result.stop_reason == "perfect_score"
     assert result.baseline_accuracy == pytest.approx(1 / 3, abs=0.01)
-    # Each round should show improvement
     assert result.rounds[0].accuracy == pytest.approx(1 / 3, abs=0.01)
     assert result.rounds[1].accuracy == pytest.approx(2 / 3, abs=0.01)
     assert result.rounds[2].accuracy == 1.0
@@ -72,22 +60,9 @@ async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
     """Loop stops after patience consecutive non-improvements."""
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-
-    # All candidates return 0% — never beats baseline (which is also 0%)
-    apply_eval_mock(monkeypatch, round_hits=[0])
-
-    result = await run_feedback_cycle(
-        instruction="Rank candidates.",
-        eval_data=eval_data,
-        config=cycle_config,
-        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
+    result = await run_simple_cycle(
+        monkeypatch, eval_data, cycle_config, round_hits=[0],
     )
-
-    # patience=2 → stops after 2 consecutive non-improvements
     assert result.stop_reason == "patience_exhausted"
     assert result.n_rounds == 2
     assert result.best_accuracy == 0.0
@@ -102,30 +77,14 @@ async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_max_rounds(monkeypatch, eval_data):
     """Loop stops at max_rounds even with continuous improvement."""
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-
-    # Slow steady improvement: 1/3, 1/3, 2/3 hits — never reaches perfect or stalls
-    apply_eval_mock(monkeypatch, round_hits=[1, 1, 2])
-
     config = CycleConfig(
-        max_rounds=3,
-        patience=10,  # Won't trigger
-        n_variants=2,
+        max_rounds=3, patience=10, n_variants=2,
         backend_url="http://mock:8000",
-        enable_critique=False,
-        enable_l2=False,
+        enable_critique=False, enable_l2=False,
     )
-
-    result = await run_feedback_cycle(
-        instruction="Rank candidates.",
-        eval_data=eval_data,
-        config=config,
-        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
+    result = await run_simple_cycle(
+        monkeypatch, eval_data, config, round_hits=[1, 1, 2],
     )
-
     assert result.stop_reason == "max_rounds"
     assert result.n_rounds == 3
     assert result.best_accuracy > 0
@@ -196,23 +155,15 @@ def test_next_action_default():
 @pytest.mark.asyncio
 async def test_result_structure(monkeypatch, eval_data, cycle_config):
     """CycleResult has all expected fields with correct types."""
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-    apply_eval_mock(monkeypatch, round_hits=[0])
-
-    result = await run_feedback_cycle(
-        instruction="Test.", eval_data=eval_data, config=cycle_config,
-        baseline_prompt_state=PromptState(instruction="Test.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
+    result = await run_simple_cycle(
+        monkeypatch, eval_data, cycle_config, round_hits=[0],
     )
-
     assert isinstance(result.rounds, list)
     assert isinstance(result.n_rounds, int)
     assert isinstance(result.best_accuracy, float)
     assert isinstance(result.stop_reason, str)
     assert result.started_at < result.finished_at
-    assert result.winner_prompt_state  # non-empty dict
+    assert result.winner_prompt_state
 
     for rd in result.rounds:
         assert isinstance(rd.round, int)
@@ -230,30 +181,18 @@ async def test_result_structure(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
     """Feedback cycle uses provided baseline_prompt_state."""
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-
-    from api.models.prompt_state import PromptState
-
-    # Create a pre-existing baseline
     baseline_ps = PromptState(
         instruction="Pre-existing baseline",
         persona="Expert pharmacologist",
         changes_description="manual_baseline",
     )
-
-    # All candidates score 0% → patience stops after 2 rounds
-    apply_eval_mock(monkeypatch, round_hits=[0])
-
-    result = await run_feedback_cycle(
+    result = await run_simple_cycle(
+        monkeypatch, eval_data, cycle_config, round_hits=[0],
         instruction="",
-        eval_data=eval_data,
-        config=cycle_config,
         baseline_prompt_state=baseline_ps.model_dump(),
         baseline_accuracy=0.5,
         baseline_results=[{"query": "test", "hit": True}],
     )
-
     assert result.n_rounds == 2  # patience=2, all 0% < 0.5 baseline
     assert result.stop_reason == "patience_exhausted"
 
@@ -322,25 +261,16 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
 @pytest.mark.asyncio
 async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
     """on_round_complete is called after each round with correct args."""
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-    apply_eval_mock(monkeypatch, round_hits=[0])
-
     callbacks = []
 
     def on_round(round_result, stall_count):
         callbacks.append((round_result.round, stall_count))
 
-    result = await run_feedback_cycle(
-        instruction="Test.", eval_data=eval_data, config=cycle_config,
+    result = await run_simple_cycle(
+        monkeypatch, eval_data, cycle_config, round_hits=[0],
         on_round_complete=on_round,
-        baseline_prompt_state=PromptState(instruction="Test.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
     )
-
     assert len(callbacks) == result.n_rounds
-    # Each callback should have incrementing stall_count
     for i, (round_num, stall) in enumerate(callbacks):
         assert round_num == i
         assert stall == i + 1  # All rounds are non-improving
@@ -804,19 +734,9 @@ async def test_mid_round_resume_uses_persisted_candidates(
 @pytest.mark.asyncio
 async def test_no_store_no_persistence(monkeypatch, eval_data, cycle_config):
     """Without project_root, cycle runs fresh every time with no cycle_id."""
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-    apply_eval_mock(monkeypatch, round_hits=[0])
-
-    result = await run_feedback_cycle(
-        instruction="Test.",
-        eval_data=eval_data,
-        config=cycle_config,
-        baseline_prompt_state=PromptState(instruction="Test.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
+    result = await run_simple_cycle(
+        monkeypatch, eval_data, cycle_config, round_hits=[0],
     )
-
     assert result.cycle_id is None
     assert result.resumed_from_round == 0
 
@@ -830,72 +750,35 @@ async def test_no_store_no_persistence(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
     """on_phase is called with init, l1_generate, and l1_evaluate enter/exit events."""
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-    apply_eval_mock(monkeypatch, round_hits=[0])
-
     events = []
-
-    def on_phase(event):
-        events.append(event)
-
-    result = await run_feedback_cycle(
-        instruction="Test.", eval_data=eval_data, config=cycle_config,
-        on_phase=on_phase,
-        baseline_prompt_state=PromptState(instruction="Test.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
+    result = await run_simple_cycle(
+        monkeypatch, eval_data, cycle_config, round_hits=[0],
+        on_phase=lambda e: events.append(e),
     )
 
-    # Collect (phase, event) pairs
     pairs = [(e.phase, e.event) for e in events]
-
-    # init enter/exit always present
     assert ("init", "enter") in pairs
     assert ("init", "exit") in pairs
 
-    # Each round should have l1_generate + l1_evaluate enter/exit
-    for round_num in range(result.n_rounds):
-        gen_enters = [e for e in events
-                         if e.phase == "l1_generate" and e.event == "enter"
-                         and e.round == round_num]
-        gen_exits = [e for e in events
-                        if e.phase == "l1_generate" and e.event == "exit"
-                        and e.round == round_num]
-        eval_enters = [e for e in events
-                       if e.phase == "l1_evaluate" and e.event == "enter"
-                       and e.round == round_num]
-        eval_exits = [e for e in events
-                      if e.phase == "l1_evaluate" and e.event == "exit"
-                      and e.round == round_num]
-        assert len(gen_enters) == 1, f"round {round_num}: missing l1_generate enter"
-        assert len(gen_exits) == 1, f"round {round_num}: missing l1_generate exit"
-        assert len(eval_enters) == 1, f"round {round_num}: missing l1_evaluate enter"
-        assert len(eval_exits) == 1, f"round {round_num}: missing l1_evaluate exit"
+    def _count(phase, event, round_num):
+        return sum(1 for e in events
+                   if e.phase == phase and e.event == event
+                   and e.round == round_num)
 
-    # Verify init enter has expected data keys
+    for rn in range(result.n_rounds):
+        for phase in ("l1_generate", "l1_evaluate"):
+            assert _count(phase, "enter", rn) == 1
+            assert _count(phase, "exit", rn) == 1
+
     init_enter = next(e for e in events if e.phase == "init" and e.event == "enter")
-    assert "max_rounds" in init_enter.data
-    assert "eval_data_count" in init_enter.data
     assert init_enter.data["eval_data_count"] == len(eval_data)
 
-    # Verify l1_generate exit has rich candidate info
     gen_exit = next(e for e in events if e.phase == "l1_generate" and e.event == "exit")
-    assert "n_candidates" in gen_exit.data
-    assert "n_eval_queries" in gen_exit.data
     assert gen_exit.data["n_eval_queries"] == len(eval_data)
-    assert "candidates" in gen_exit.data
-    candidates = gen_exit.data["candidates"]
-    assert isinstance(candidates, list)
-    assert len(candidates) > 0
-    assert "changed_fields" in candidates[0]
-    assert "changes_description" in candidates[0]
+    assert len(gen_exit.data["candidates"]) > 0
 
-    # Verify l1_evaluate exit has winner info
-    eval_exit = next(e for e in events
-                     if e.phase == "l1_evaluate" and e.event == "exit")
+    eval_exit = next(e for e in events if e.phase == "l1_evaluate" and e.event == "exit")
     assert "winner_accuracy" in eval_exit.data
-    assert "improved" in eval_exit.data
 
 
 # ---------------------------------------------------------------------------

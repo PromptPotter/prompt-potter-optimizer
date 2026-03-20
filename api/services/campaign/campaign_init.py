@@ -20,6 +20,7 @@ from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
     from api.models.prompt_state import PromptState
+    from api.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)
 
@@ -353,3 +354,155 @@ def run_baseline_eval(
     }]
 
     return campaign_rounds, baseline_results
+
+
+# ---------------------------------------------------------------------------
+# Functions extracted from notebooks/_campaign_lib
+# ---------------------------------------------------------------------------
+
+
+def resolve_experiment_id(
+    store: ProjectStore, backend_id: str, short_id: str,
+) -> str | None:
+    """Resolve short prefix/suffix to full campaign_id."""
+    campaigns = store.campaigns.list_all(backend_id)
+    matches = [c for c in campaigns if short_id in c["campaign_id"]]
+    if len(matches) == 1:
+        return matches[0]["campaign_id"]
+    if len(matches) > 1:
+        logger.warning(
+            "Ambiguous ID '%s' — %d matches: %s",
+            short_id, len(matches),
+            [m["campaign_id"] for m in matches],
+        )
+        return None
+    logger.warning("No campaign matching '%s'", short_id)
+    return None
+
+
+def apply_experiment_overrides(
+    campaign_config: dict,
+    stored_cfg: dict,
+) -> dict | None:
+    """Merge stored experiment config into campaign_config (in-place).
+
+    Returns updated pipeline_params if stored, else None.
+    """
+    _OVERRIDE_KEYS: dict[str, tuple[str, ...]] = {
+        "patience": ("optimization",),
+        "max_rounds": ("optimization",),
+        "n_variants": ("optimization",),
+        "creativity": ("optimization",),
+        "model": ("eval_llm",),
+        "sample_size": (),
+    }
+    for key, path in _OVERRIDE_KEYS.items():
+        val = stored_cfg.get(key)
+        if val is not None:
+            target = campaign_config
+            for p in path:
+                target = target.setdefault(p, {})
+            target[key] = val
+
+    stored_pp = stored_cfg.get("pipeline_params")
+    if stored_pp:
+        campaign_config["pipeline_params"] = stored_pp
+        return stored_pp
+    return None
+
+
+def save_campaign_winner(
+    campaign_rounds: list,
+    campaign_config: dict,
+    store: ProjectStore,
+    backend_id: str,
+    *,
+    experiment_id: str | None = None,
+) -> dict:
+    """Find best round, save to store + link to campaign. Returns save_data dict."""
+    from datetime import datetime, timezone
+
+    winner = campaign_rounds[-1]["prompt_state"]
+    winner_acc = campaign_rounds[-1]["accuracy"]
+
+    for rd in campaign_rounds:
+        if rd["accuracy"] > winner_acc:
+            winner = rd["prompt_state"]
+            winner_acc = rd["accuracy"]
+
+    baseline_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else None
+    save_data = {
+        "winner": winner.model_dump(),
+        "accuracy": winner_acc,
+        "campaign_rounds": len(campaign_rounds),
+        "baseline_accuracy": baseline_acc,
+        "improvement": (winner_acc - baseline_acc) if baseline_acc is not None else None,
+        "config": campaign_config,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
+    store.backends.save_sync(backend_id, filename, save_data)
+
+    # Link winner to campaign store if experiment_id provided
+    if experiment_id:
+        full_id = resolve_experiment_id(store, backend_id, experiment_id)
+        if full_id:
+            try:
+                store.campaigns.update(backend_id, full_id, {
+                    "winner_prompt_state_id": winner.id,
+                    "winner_accuracy": winner_acc,
+                    "winner_filename": filename,
+                })
+            except Exception:
+                pass  # campaign may not exist yet
+
+    logger.info("Winner saved: %s (acc=%.1f%%)", filename, winner_acc * 100)
+    return {
+        **save_data,
+        "winner_id": winner.id,
+        "filename": filename,
+        "backend_id": backend_id,
+    }
+
+
+def build_all_session_terms(
+    store: ProjectStore,
+    backend_id: str,
+) -> list[str]:
+    """Unique ground_truth identifiers across all stored datasets (train + test).
+
+    For /match to work correctly, the session must contain ALL identifiers:
+    - Train: query->ground_truth mappings (used for optimization evaluation)
+    - Test: ground_truth only (identifiers in candidate pool, no query mapping)
+    """
+    gt_set: set[str] = set()
+    for name in ("train", "test_processes", "test_material"):
+        ds = store.datasets.load(backend_id, name)
+        if ds and ds.get("items"):
+            for item in ds["items"]:
+                gt = item.get("ground_truth", "").strip()
+                if gt:
+                    gt_set.add(gt)
+    return sorted(gt_set)
+
+
+def create_llm_client(
+    campaign_config: dict,
+) -> tuple["LLMClientBase", str]:
+    """Create LLM client + model from campaign_config['eval_llm'].
+
+    Returns:
+        Tuple of (llm_client, model_name).
+    """
+    from api.services.llm_client import get_llm_client
+
+    eval_llm = campaign_config["eval_llm"]
+    url = eval_llm.get("provider_url", "")
+    if "anthropic.com" in url:
+        provider = "anthropic"
+    elif "openai.com" in url:
+        provider = "openai"
+    else:
+        provider = "groq"
+    return get_llm_client(provider), eval_llm.get("model", "")

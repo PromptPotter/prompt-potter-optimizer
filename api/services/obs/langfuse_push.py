@@ -313,6 +313,38 @@ def push_run(
 # ---------------------------------------------------------------------------
 
 
+def sync_langfuse_runs(
+    store: ProjectStore,
+    backend_id: str,
+    *,
+    dataset_name: str = "termnorm_ground_truth",
+    backfill: bool = True,
+    reset: bool = False,
+) -> dict | None:
+    """Configure Langfuse dataset name and optionally push all runs.
+
+    Returns:
+        Push stats dict, or None if backfill was skipped.
+    """
+    global DATASET_NAME
+    DATASET_NAME = dataset_name
+
+    if not backfill:
+        logger.info("Langfuse dataset: %s (backfill disabled)", dataset_name)
+        return None
+
+    if reset:
+        _save_state(store, backend_id, _fresh_state())
+        logger.info("Langfuse push state reset — will re-push all runs.")
+
+    n_runs = len(store.dataset_runs.list_all(backend_id))
+    if n_runs == 0:
+        logger.info("No completed dataset runs — skipping Langfuse backfill.")
+        return None
+
+    return push_all_runs(store, backend_id)
+
+
 def push_all_runs(
     store: ProjectStore,
     backend_id: str,

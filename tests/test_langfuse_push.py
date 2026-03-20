@@ -17,7 +17,10 @@ from api.services.obs.langfuse_push import (
 from api.services.obs.langfuse_client import LangfuseLogger
 from api.services.project_store import ProjectStore
 
-from _helpers import MockLangfuseLogger, make_dataset_run
+from _helpers import (
+    MockLangfuseLogger, make_dataset_run,
+    apply_eval_mock, apply_grow_mock, apply_llm_mock,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -413,3 +416,58 @@ def test_finalize_obs_with_explicit_obs(tmp_path):
         "model", 0.0, "ps-1",
         obs=obs,
     )
+
+
+# ---------------------------------------------------------------------------
+# Feedback-cycle Langfuse integration (merged from test_langfuse_integration)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
+    """Full feedback cycle: campaign trace, per-round spans/scores, final output."""
+    from api.services.campaign.models import CycleConfig
+    from api.services.campaign.feedback_cycle import run_feedback_cycle
+    from api.models.prompt_state import PromptState
+    from api.config import settings as _settings_mod
+
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
+    apply_eval_mock(monkeypatch, round_hits=[1, 1, 1])
+
+    store_base = tmp_path / ".promptpotter" / "projects"
+    store_base.mkdir(parents=True)
+    config = CycleConfig(
+        max_rounds=3, patience=2, n_variants=2,
+        backend_url="http://mock:8000",
+        enable_critique=False, enable_l2=False,
+        project_root=str(store_base), backend_id="test-backend",
+    )
+
+    monkeypatch.setattr(_settings_mod.settings, "OBS_ENABLED", True)
+    mock = MockLangfuseLogger()
+    monkeypatch.setattr(
+        LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
+    )
+
+    result = await run_feedback_cycle(
+        instruction="Test.", eval_data=eval_data, config=config,
+        langfuse_session_id="test_session_123",
+        baseline_prompt_state=PromptState(instruction="Test.").model_dump(),
+        baseline_accuracy=0.0, baseline_results=[],
+    )
+
+    assert result.langfuse_trace_id is not None
+    assert result.langfuse_trace_id.startswith("mock_trace_")
+    campaign_traces = [t for t in mock.traces if t["name"] == "feedback_cycle"]
+    assert len(campaign_traces) == 1
+    assert campaign_traces[0]["session_id"] == "test_session_123"
+    assert result.n_rounds == 3
+    round_spans = [s for s in mock.spans if s["name"].startswith("round_")]
+    assert len(round_spans) == 3
+    best_scores = [s for s in mock.scores if s["name"] == "best_accuracy"]
+    assert len(best_scores) == 1
+    assert best_scores[0]["value"] == result.best_accuracy
+    assert len(mock.trace_updates) == 1
+    assert mock.flush_count >= 1
+    assert len(mock.end_trace_calls) == 1
