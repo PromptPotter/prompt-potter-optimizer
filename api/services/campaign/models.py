@@ -34,7 +34,6 @@ class CycleConfig(BaseModel):
     backend_url: str = Field(..., description="Backend URL for evaluation")
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
-    generate_suggestions: bool = Field(False, description="LLM suggestions each round")
     pipeline_params: dict | None = Field(None, description="Pipeline parameter overrides")
     session_terms: list[str] | None = Field(None, description="Backend session terms")
     temperature: float = Field(0.0, description="Temperature for content hash")
@@ -63,10 +62,9 @@ class CycleConfig(BaseModel):
     l2_patience: int | None = Field(2, description="L2 stalls before L3 (None=unlimited)")
     l3_patience: int | None = Field(1, description="L3 stalls before stop (None=unlimited)")
 
-    # Configurable temperatures for L2/L3/suggestions
+    # Configurable temperatures for L2/L3
     l2_temperature: float = Field(0.3, description="Temperature for L2 refine_context LLM call")
     l3_temperature: float = Field(0.5, description="Temperature for L3 modify_plan LLM call")
-    suggestion_temperature: float = Field(0.0, description="Temperature for suggestion generation")
 
     # Escalation
     degradation_threshold: float = Field(
@@ -102,7 +100,6 @@ class CycleConfig(BaseModel):
             backend_url=backend_url,
             backend_id=backend_id,
             project_root=project_root,
-            generate_suggestions=False,
             pipeline_params=pipeline_params,
             session_terms=session_terms,
             temperature=eval_llm.get("temperature", 0.0),
@@ -117,7 +114,6 @@ class CycleConfig(BaseModel):
             l3_patience=opt.get("l3_patience", 1),
             l2_temperature=opt.get("l2_temperature", 0.3),
             l3_temperature=opt.get("l3_temperature", 0.5),
-            suggestion_temperature=opt.get("suggestion_temperature", 0.0),
             enable_critique=opt.get("enable_critique", True),
             critique_positive_threshold=opt.get("critique_positive_threshold", 0.7),
             degradation_threshold=opt.get("degradation_threshold", 0.4),

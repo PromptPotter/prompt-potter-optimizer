@@ -18,10 +18,7 @@ from api.services.prompt_eval import load_baseline_prompt
 from api.services.search.coverage import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
 )
-from api.services.prompt_optimizer import (
-    l1_generate as generate_candidates,
-    generate_suggestions,
-)
+from api.services.prompt_optimizer import l1_generate as generate_candidates
 from api.services.search import (
     load_eval_dataset as _load_eval_dataset,
 )
@@ -34,7 +31,7 @@ __all__ = [
     "analyze_candidate_coverage", "load_eval_dataset",
     "run_coverage_diagnostic",
     # Candidates & suggestions
-    "generate_candidates", "generate_suggestions",
+    "generate_candidates",
     # Entity profiles
     "show_entity_profiles",
 ]

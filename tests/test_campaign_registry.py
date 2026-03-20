@@ -354,7 +354,6 @@ async def test_e2e_feedback_cycle_with_registry(
         patience=2,
         n_variants=2,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
     )
 
     result = await run_feedback_cycle(

@@ -34,7 +34,7 @@ __all__ = [  # noqa: F405
     "analyze_candidate_coverage", "load_eval_dataset",
     "run_coverage_diagnostic",
     # Candidates & suggestions
-    "generate_candidates", "generate_suggestions", "display_suggestions",
+    "generate_candidates",
     # Grid search
     "validate_grid_config", "build_grid_points", "run_grid_search",
     "display_grid_results", "select_grid_winner", "analyze_grid_results",

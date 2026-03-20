@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MAX_FAILURES_GENERATE = 15
-MAX_FAILURES_SUGGEST = 20
 DISPLAY_TRUNCATE = 60
 
 
@@ -510,74 +509,3 @@ async def l1_evaluate(
     }
 
 
-# ---------------------------------------------------------------------------
-# Suggestions (post-campaign analysis)
-# ---------------------------------------------------------------------------
-
-
-async def generate_suggestions(
-    campaign_rounds: list[dict],
-    eval_data: list[dict],
-    campaign_config: dict[str, Any],
-    llm_client: LLMClientBase,
-    model: str | None = None,
-    suggestion_temperature: float = 0.0,
-) -> dict:
-    """Generate improvement suggestions via LLM analysis."""
-    current_best = campaign_rounds[-1]
-    current_ps = current_best["prompt_state"]
-    current_results = current_best["results"]
-    current_acc = current_best["accuracy"]
-
-    failures = [r for r in current_results if not r["hit"] and not r.get("error")]
-    failure_detail = []
-    for r in failures[:MAX_FAILURES_SUGGEST]:
-        pd_data = next(
-            (
-                rd.get("pipeline_data", {})
-                for rd in eval_data
-                if rd["query"] == r["query"]
-            ),
-            {},
-        )
-        candidates = pd_data.get("token_matched_candidates", [])
-        candidate_names = [
-            c[0] if isinstance(c, (list, tuple)) else str(c)
-            for c in candidates[:10]
-        ]
-        gt_in_candidates = r["ground_truth"] in candidate_names
-        profile = pd_data.get("entity_profile", {})
-
-        failure_detail.append(
-            f"  Query: {r['query'][:DISPLAY_TRUNCATE]}\n"
-            f"    Predicted: {r['predicted'][:DISPLAY_TRUNCATE]}\n"
-            f"    Ground truth: {r['ground_truth'][:DISPLAY_TRUNCATE]}\n"
-            f"    GT in candidates: {gt_in_candidates}\n"
-            f"    Top candidates: {candidate_names[:5]}\n"
-            f"    Core concept: {profile.get('core_concept', '?')}\n"
-        )
-
-    history_lines = []
-    for rd in campaign_rounds:
-        history_lines.append(
-            f"  Round {rd['round']}: {rd['label'][:DISPLAY_TRUNCATE]} -> {rd['accuracy']:.1%}"
-        )
-
-    suggestion_prompt = load_optimizer_prompt("suggestions").compile(
-        history_lines="\n".join(history_lines),
-        accuracy_pct=f"{current_acc:.1%}",
-        rendered_prompt=current_ps.render(),
-        campaign_config=json.dumps(campaign_config, indent=2),
-        n_failures=len(failures),
-        n_queries=len(current_results),
-        failure_detail="\n".join(failure_detail),
-    )
-
-    response = await llm_client.chat(
-        messages=[{"role": "user", "content": suggestion_prompt}],
-        model=model,
-        temperature=suggestion_temperature,
-        max_tokens=8000,
-        output_format="json",
-    )
-    return response.parsed or json.loads(response.content)

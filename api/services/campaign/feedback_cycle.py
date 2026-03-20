@@ -461,37 +461,6 @@ async def _evaluate_candidates(
         eval_out["critique_text"] = critique_text
         eval_out["thinking_styles"] = thinking_styles
 
-    # Suggestion generation stays in orchestrator (ADR-4)
-    # Skip on escalation — immediate return to main loop for L2/L3 dispatch
-    if config.generate_suggestions and not eval_out.get("escalation_signal"):
-        try:
-            from api.services.prompt_optimizer import generate_suggestions
-
-            llm_client = _llm_client.get_llm_client(config.provider)
-            rounds_for_suggestions = [
-                {"round": r.round, "label": r.label, "accuracy": r.accuracy,
-                 "prompt_state": PromptState(**r.prompt_state),
-                 "results": r.results}
-                for r in state.rounds
-            ]
-            rounds_for_suggestions.append({
-                "round": round_num, "label": eval_out["winner"]["label"],
-                "accuracy": eval_out["winner_accuracy"],
-                "prompt_state": PromptState(**eval_out["winner_prompt_state"]),
-                "results": eval_out["winner_results"],
-            })
-            suggestions = await generate_suggestions(
-                rounds_for_suggestions, round_eval_data, {},
-                llm_client, model=config.model,
-                suggestion_temperature=config.suggestion_temperature,
-            )
-            next_action = suggestions.get("next_action", "generate")
-            if next_action in ("generate", "stop", "refine_context", "modify_plan"):
-                eval_out["next_action"] = next_action
-            eval_out["suggestions"] = suggestions
-        except Exception:
-            logger.warning("Suggestion generation failed", exc_info=True)
-
     _emit_phase(on_phase, "l1_evaluate", "exit", round=round_num,
                 winner_label=eval_out["winner"].get("label", ""),
                 winner_accuracy=eval_out["winner_accuracy"],
@@ -528,7 +497,7 @@ def _log_round_obs(
             temperature=config.temperature,
             n_variants=config.n_variants,
             optimizer_templates=[
-                "meta_scan_aware" if config.scan_context else "meta_freeform",
+                "meta_scan_aware",
                 "critique_negative", "critique_positive",
             ],
         )
@@ -953,6 +922,178 @@ async def _escalate_l2(
 # ---------------------------------------------------------------------------
 
 
+def _init_cycle_state(
+    instruction: str,
+    eval_data: list[dict[str, Any]],
+    config: CycleConfig,
+    baseline_prompt_state: dict | None,
+    baseline_accuracy: float,
+    baseline_results: list | None,
+    on_phase: Callable[[PhaseEvent], None] | None,
+    langfuse_session_id: str | None,
+    cycle_id: str | None,
+    experiment_id: str,
+    backend_client: "BackendClient | None",
+    started_at: str,
+) -> tuple[_LoopState, Any, str | None, str, list[dict], list, int]:
+    """Initialize all cycle state: baseline, resume, obs, eval context.
+
+    Returns:
+        (state, campaign_store, cycle_id, obs_campaign_id,
+         round_eval_data, escalation_checks, resumed_from_round)
+    """
+    _emit_phase(on_phase, "init", "enter",
+                max_rounds=config.max_rounds,
+                patience=config.patience,
+                n_variants=config.n_variants,
+                model=config.model or "(default)",
+                sample_size=config.sample_size,
+                enable_l2=config.enable_l2,
+                enable_l3=config.enable_l3,
+                eval_data_count=len(eval_data),
+                baseline_accuracy=baseline_accuracy,
+                has_scan_context=config.scan_context is not None,
+                enable_critique=config.enable_critique,
+                pipeline_params=config.pipeline_params,
+                step_param_keys=(
+                    {s: sorted(k) for s, k in config.pipeline_schema.step_param_keys().items()}
+                    if config.pipeline_schema else None
+                ))
+
+    _bc = backend_client or BackendClient(config.backend_url)
+    if config.session_terms:
+        _bc.init_session(config.session_terms)
+
+    round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
+
+    if baseline_prompt_state is None:
+        raise ValueError(
+            "baseline_prompt_state is required. Run baseline evaluation in the "
+            "notebook before starting the feedback cycle.",
+        )
+    current_ps = PromptState(**baseline_prompt_state) if isinstance(
+        baseline_prompt_state, dict,
+    ) else baseline_prompt_state
+    current_results: list = baseline_results or []
+    logger.info("Using provided baseline (acc=%.3f)", baseline_accuracy)
+
+    # Resume detection
+    campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
+        config, eval_data, current_ps.model_dump(),
+        baseline_prompt_state, baseline_accuracy,
+        cycle_id_override=cycle_id,
+    )
+
+    # Observability
+    if not langfuse_session_id and cycle_id:
+        langfuse_session_id = cycle_id
+    obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
+    obs, _dataset_name, _dataset_item_map = _init_obs(
+        config, obs_campaign_id, baseline_accuracy, eval_data, langfuse_session_id,
+    )
+
+    # Loop state
+    if current_results:
+        _bl_composite = compute_composite_score(
+            current_results, config.pipeline_schema,
+        )["composite"]
+    else:
+        _bl_composite = baseline_accuracy
+    baseline_sp = SearchPoint(
+        prompt_state=current_ps,
+        model=config.model or "",
+        temperature=config.temperature,
+        pipeline_params=config.pipeline_params,
+    )
+    state = _LoopState(
+        current_sp=baseline_sp,
+        current_accuracy=baseline_accuracy,
+        current_composite=_bl_composite,
+        current_results=current_results,
+        best_accuracy=baseline_accuracy,
+        best_composite=_bl_composite,
+        best_sp=baseline_sp,
+        opt_sp=OptSearchPoint(task_context=config.task_context or {}),
+    )
+
+    # Restore optimizer state on resume
+    if resumed_from_round > 0 and campaign_store and cycle_id:
+        _latest_trial = campaign_store.load_trial(
+            config.backend_id, cycle_id, resumed_from_round - 1,
+        )
+        if _latest_trial:
+            _osp = _latest_trial.get("opt_search_point", {})
+            if _osp:
+                state.opt_sp = OptSearchPoint(**{
+                    k: v for k, v in _osp.items()
+                    if k in OptSearchPoint.model_fields
+                })
+            state.l2_round = _latest_trial.get("l2_round", 0)
+            state.l3_round = _latest_trial.get("l3_round", 0)
+            state.l2_stall_count = _latest_trial.get("l2_stall_count", 0)
+            state.l3_stall_count = _latest_trial.get("l3_stall_count", 0)
+            state.stall_count = _latest_trial.get("stall_count", 0)
+            logger.info(
+                "Restored optimizer state from round %d "
+                "(critique=%d chars, task_context=%d keys, "
+                "escalation_journal=%d entries, l2_round=%d)",
+                resumed_from_round - 1,
+                len(state.opt_sp.critique_text),
+                len(state.opt_sp.task_context),
+                len(state.opt_sp.escalation_journal),
+                state.l2_round,
+            )
+
+    state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
+
+    # EvalContext (shared across all rounds)
+    _store = None
+    if config.project_root:
+        from api.services.project_store import ProjectStore
+        _store = ProjectStore(config.project_root)
+    state.eval_ctx = EvalContext(
+        backend_client=_bc,
+        store=_store,
+        backend_id=config.backend_id,
+        pipeline_schema=config.pipeline_schema,
+        obs=obs,
+        source="feedback_cycle",
+        model=config.model or "",
+        temperature=config.temperature,
+        pipeline_params=config.pipeline_params,
+        experiment_id=experiment_id or (cycle_id.replace("cycle_", "")[:12] if cycle_id else ""),
+    )
+
+    # Alias: raw instruction ↔ restructured baseline
+    if _store and config.backend_id and instruction:
+        _raw_hash = hashlib.sha256(instruction.encode()).hexdigest()[:16]
+        _restructured_hash = hashlib.sha256(
+            current_ps.render().encode(),
+        ).hexdigest()[:16]
+        if _raw_hash != _restructured_hash:
+            _store.dataset_runs.register_alias(
+                config.backend_id, _raw_hash, _restructured_hash,
+            )
+            logger.info(
+                "Registered prompt alias: %s ↔ %s",
+                _raw_hash[:8], _restructured_hash[:8],
+            )
+
+    from api.services.campaign.escalation import build_escalation_checks
+    escalation_checks = build_escalation_checks(config)
+
+    _emit_phase(on_phase, "init", "exit",
+                cycle_id=cycle_id,
+                resumed_from_round=resumed_from_round,
+                baseline_accuracy=baseline_accuracy,
+                obs_enabled=obs is not None,
+                sample_count=len(round_eval_data),
+                enable_critique=config.enable_critique)
+
+    return (state, campaign_store, cycle_id, obs_campaign_id,
+            round_eval_data, escalation_checks, resumed_from_round)
+
+
 async def run_feedback_cycle(
     instruction: str,
     eval_data: list[dict[str, Any]],
@@ -973,193 +1114,25 @@ async def run_feedback_cycle(
 ) -> CycleResult:
     """Run iterative optimization with feedback cycling.
 
-    Executes:
-    1. Use provided baseline_prompt_state as starting point
-    2. Loop: l1_generate → l1_evaluate
-    3. Stop when patience exhausted, max_rounds reached, or perfect score
-
-    Args:
-        instruction: Raw prompt instruction text (used for alias registration).
-        eval_data: Evaluation dataset (list of query dicts).
-        config: Cycle configuration.
-        baseline_prompt_state: Baseline PromptState (serialized dict). Required.
-        baseline_accuracy: Accuracy of the baseline.
-        baseline_results: Eval results for the baseline (for failure analysis).
-        on_round_complete: Optional callback after each round:
-            ``(round_result: CycleRoundResult, stall_count: int)``
-        on_candidate_eval: Optional callback after each candidate evaluation:
-            ``(candidate_idx: int, n_candidates: int, scores: dict)``
-        langfuse_session_id: Optional session ID for grouping Langfuse traces.
-        scan_context: Scan analytics context for scan-aware candidate generation.
-            When provided, overrides config.scan_context for this run.
-
-    Returns:
-        CycleResult with all rounds and final winner.
+    Executes: init → round loop (l1_generate → l1_evaluate) → finalize.
+    Stops on: patience exhaustion, max_rounds, perfect score, or interrupt.
     """
     if scan_context is not None:
         config = config.model_copy(update={"scan_context": scan_context})
     started_at = datetime.now(timezone.utc).isoformat()
 
-    _emit_phase(on_phase, "init", "enter",
-                max_rounds=config.max_rounds,
-                patience=config.patience,
-                n_variants=config.n_variants,
-                model=config.model or "(default)",
-                sample_size=config.sample_size,
-                enable_l2=config.enable_l2,
-                enable_l3=config.enable_l3,
-                eval_data_count=len(eval_data),
-                baseline_accuracy=baseline_accuracy,
-                has_scan_context=config.scan_context is not None,
-                enable_critique=config.enable_critique,
-                pipeline_params=config.pipeline_params,
-                step_param_keys=(
-                    {s: sorted(k) for s, k in config.pipeline_schema.step_param_keys().items()}
-                    if config.pipeline_schema else None
-                ))
-
-    # Resolve backend client: prefer caller-provided, fall back to new
-    _bc = backend_client or BackendClient(config.backend_url)
-
-    # Initialize backend session (required before /matches calls)
-    if config.session_terms:
-        _bc.init_session(config.session_terms)
-
-    round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
-
-    # -- Step 1: Initialize baseline --
-    if baseline_prompt_state is None:
-        raise ValueError(
-            "baseline_prompt_state is required. Run baseline evaluation in the "
-            "notebook before starting the feedback cycle.",
-        )
-    current_ps = PromptState(**baseline_prompt_state) if isinstance(
-        baseline_prompt_state, dict,
-    ) else baseline_prompt_state
-    current_accuracy = baseline_accuracy
-    current_results: list = baseline_results or []
-    logger.info("Using provided baseline (acc=%.3f)", current_accuracy)
-
-    # -- Step 2: Resume detection --
-    campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
-        config, eval_data, current_ps.model_dump(),
-        baseline_prompt_state, baseline_accuracy,
-        cycle_id_override=cycle_id,
-    )
-    # -- Step 3: Observability setup --
-    # Default Langfuse session_id to cycle_id for experiment-level grouping
-    if not langfuse_session_id and cycle_id:
-        langfuse_session_id = cycle_id
-    obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
-    obs, dataset_name, dataset_item_map = _init_obs(
-        config, obs_campaign_id, baseline_accuracy, eval_data, langfuse_session_id,
+    # -- Init --
+    (state, campaign_store, cycle_id, obs_campaign_id,
+     round_eval_data, escalation_checks, resumed_from_round) = _init_cycle_state(
+        instruction, eval_data, config,
+        baseline_prompt_state, baseline_accuracy, baseline_results,
+        on_phase, langfuse_session_id, cycle_id, experiment_id,
+        backend_client, started_at,
     )
 
-    # -- Step 4: Initialize loop state --
-    if current_results:
-        _bl_scores = compute_composite_score(current_results, config.pipeline_schema)
-        _bl_composite = _bl_scores["composite"]
-    else:
-        _bl_composite = current_accuracy
-    baseline_sp = SearchPoint(
-        prompt_state=current_ps,
-        model=config.model or "",
-        temperature=config.temperature,
-        pipeline_params=config.pipeline_params,
-    )
-    state = _LoopState(
-        current_sp=baseline_sp,
-        current_accuracy=current_accuracy,
-        current_composite=_bl_composite,
-        current_results=current_results,
-        best_accuracy=current_accuracy,
-        best_composite=_bl_composite,
-        best_sp=baseline_sp,
-        opt_sp=OptSearchPoint(task_context=config.task_context or {}),
-    )
-
-    # Restore optimizer state from latest checkpoint on resume
-    if resumed_from_round > 0 and campaign_store and cycle_id:
-        _latest_trial = campaign_store.load_trial(
-            config.backend_id, cycle_id, resumed_from_round - 1,
-        )
-        if _latest_trial:
-            _osp = _latest_trial.get("opt_search_point", {})
-            if _osp:
-                state.opt_sp = OptSearchPoint(**{
-                    k: v for k, v in _osp.items()
-                    if k in OptSearchPoint.model_fields
-                })
-            # Restore L2/L3 counters
-            state.l2_round = _latest_trial.get("l2_round", 0)
-            state.l3_round = _latest_trial.get("l3_round", 0)
-            state.l2_stall_count = _latest_trial.get("l2_stall_count", 0)
-            state.l3_stall_count = _latest_trial.get("l3_stall_count", 0)
-            state.stall_count = _latest_trial.get("stall_count", 0)
-            logger.info(
-                "Restored optimizer state from round %d "
-                "(critique=%d chars, task_context=%d keys, "
-                "escalation_journal=%d entries, l2_round=%d)",
-                resumed_from_round - 1,
-                len(state.opt_sp.critique_text),
-                len(state.opt_sp.task_context),
-                len(state.opt_sp.escalation_journal),
-                state.l2_round,
-            )
-
-    # -- Step 4b: Bootstrap thinking styles --
-    # Critique is produced by L1EvaluateNode after each round — no separate
-    # bootstrap needed. Round 1 uses scan_context + task_context as guidance.
-    state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
-
-    _emit_phase(on_phase, "init", "exit",
-                cycle_id=cycle_id,
-                resumed_from_round=resumed_from_round,
-                baseline_accuracy=current_accuracy,
-                obs_enabled=obs is not None,
-                sample_count=len(round_eval_data),
-                enable_critique=config.enable_critique)
-
-    # Build shared EvalContext once (reused across all rounds)
-    _store = None
-    if config.project_root:
-        from api.services.project_store import ProjectStore
-        _store = ProjectStore(config.project_root)
-    state.eval_ctx = EvalContext(
-        backend_client=_bc,
-        store=_store,
-        backend_id=config.backend_id,
-        pipeline_schema=config.pipeline_schema,
-        obs=obs,
-        source="feedback_cycle",
-        model=config.model or "",
-        temperature=config.temperature,
-        pipeline_params=config.pipeline_params,
-        experiment_id=experiment_id or (cycle_id.replace("cycle_", "")[:12] if cycle_id else ""),
-    )
-
-    # Register alias: raw instruction ↔ restructured baseline
-    if _store and config.backend_id and instruction:
-        _raw_hash = hashlib.sha256(instruction.encode()).hexdigest()[:16]
-        _restructured_hash = hashlib.sha256(
-            current_ps.render().encode(),
-        ).hexdigest()[:16]
-        if _raw_hash != _restructured_hash:
-            _store.dataset_runs.register_alias(
-                config.backend_id, _raw_hash, _restructured_hash,
-            )
-            logger.info(
-                "Registered prompt alias: %s ↔ %s",
-                _raw_hash[:8], _restructured_hash[:8],
-            )
-
+    # -- Round loop --
     stop_reason: str | None = None
-
-    # -- Step 5: Build escalation checks + round loop --
-    from api.services.campaign.escalation import build_escalation_checks
-    escalation_checks = build_escalation_checks(config)
-
-    _HARD_CAP = 100  # safety valve for runaway degradation loops
+    _HARD_CAP = 100
 
     try:
         round_num = 0
@@ -1396,12 +1369,11 @@ async def run_feedback_cycle(
             len(state.rounds),
         )
 
-    # -- Step 6: Finalize --
-    # Disk write only on interrupt (fast); full finalization otherwise
+    # -- Finalize --
     finished_at = datetime.now(timezone.utc).isoformat()
+    obs = state.eval_ctx.obs if state.eval_ctx else None
     campaign_status = "interrupted" if stop_reason == "interrupted" else "completed"
     if stop_reason == "interrupted":
-        # Minimal: update campaign status on disk, skip obs/cloud
         if campaign_store and cycle_id:
             try:
                 campaign_store.update(config.backend_id, cycle_id, {

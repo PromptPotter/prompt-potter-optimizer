@@ -21,7 +21,7 @@ __all__ = [
     "_dbox_top", "_dbox_bottom", "_dbox_line", "_dbox_sep",
     "_dotted_line", "_fmt_delta", "_scoreboard",
     # Display functions
-    "display_progress", "display_suggestions", "display_axis_profiles",
+    "display_progress", "display_axis_profiles",
     # Scan analytics
     "show_scan_leaderboard", "show_scan_query_difficulty",
     # Campaign results display
@@ -362,38 +362,6 @@ def display_progress(campaign_rounds: list, window: int = 8) -> None:
             print(f"  {YELLOW}-- Plateau: rolling avg stable at"
                   f" {recent_avg:.1%} for 3 rounds{RESET}")
 
-
-def display_suggestions(suggestions: dict, round_num: int) -> None:
-    """Pretty-print failure patterns, parameter suggestions, and prompt phrases."""
-    print(f"\n{'=' * 70}")
-    print(f"LLM SUGGESTIONS FOR ROUND {round_num}")
-    print(f"{'=' * 70}")
-
-    print(f"\nSUMMARY: {suggestions.get('summary', '')}")
-
-    print("\n--- FAILURE PATTERNS ---")
-    for fp in suggestions.get("failure_patterns", []):
-        print(
-            f"  [{fp.get('category', '?')}] ~{fp.get('count', '?')} queries: "
-            f"{fp.get('description', '')}"
-        )
-        for ex in fp.get("examples", [])[:2]:
-            print(f"    e.g. {ex[:60]}")
-
-    print("\n--- PARAMETER CHANGE SUGGESTIONS ---")
-    for ps in suggestions.get("parameter_suggestions", []):
-        print(
-            f"  {ps.get('parameter', '?')}: "
-            f"{ps.get('current_value', '?')} -> {ps.get('suggested_value', '?')}"
-        )
-        print(f"    Rationale: {ps.get('rationale', '')}")
-
-    print("\n--- PROMPT PHRASE FRAGMENTS ---")
-    for pf in suggestions.get("prompt_phrase_fragments", []):
-        print(f"  [{pf.get('action', '?')}]")
-        print(f"    Text: \"{pf.get('text', '')}\"")
-        print(f"    Rationale: {pf.get('rationale', '')}")
-        print()
 
 
 def display_axis_profiles(profiles: list[dict]) -> None:
