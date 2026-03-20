@@ -22,7 +22,9 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from api.models.prompt_state import LAYER_FIELDS, PromptState
-from api.models.hashing import eval_content_hash
+import hashlib
+
+from api.models.hashing import HASH_TRUNCATE, eval_content_hash, sp_identity_hash
 
 
 # All PromptState field names (used by derive to route kwargs)
@@ -50,6 +52,22 @@ class SearchPoint(BaseModel):
     def render(self) -> str:
         """Delegate to ``prompt_state.render()``."""
         return self.prompt_state.render()
+
+    def sp_hash(self) -> str:
+        """SearchPoint identity hash — eval_data independent.
+
+        Two SearchPoints with the same prompt, model, temperature, and
+        pipeline_params produce the same hash regardless of which queries
+        are evaluated.
+        """
+        rendered = self.prompt_state.render()
+        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
+        return sp_identity_hash(
+            rp_hash,
+            self.model,
+            self.temperature,
+            self.pipeline_params,
+        )
 
     def content_hash(self, eval_data: list) -> str:
         """Content-addressed hash for evaluation deduplication.

@@ -84,6 +84,7 @@ def build_dataset_run_data(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "dataset_run_items": results,
     }
+    data["sp_hash"] = search_point.sp_hash()
     if search_point.pipeline_params:
         data["pipeline_params"] = search_point.pipeline_params
     if experiment_id:
@@ -235,7 +236,7 @@ def evaluate_prompt_batch(
     escalation_checks: list | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
-    cached_query_results: dict[str, dict] | None = None,
+    cached_queries: dict[str, dict] | None = None,
 ) -> list:
     """Evaluate a prompt on all eval_data queries via the backend.
 
@@ -248,6 +249,9 @@ def evaluate_prompt_batch(
         escalation_checks: Optional list of ``EscalationCheck`` instances.
             Checked after each query result — raises ``EscalationError``
             on threshold breach to abort immediately.
+        cached_queries: Optional ``{query_string: result_dict}`` from prior
+            runs with the same SearchPoint.  Matching queries skip the
+            backend call.
 
     Returns:
         List of result dicts from backend_reranker_eval.
@@ -267,8 +271,8 @@ def evaluate_prompt_batch(
         for i, qd in enumerate(eval_data):
             # Per-query cache reuse — skip backend call if result exists
             cached = (
-                cached_query_results.get(qd["query"])
-                if cached_query_results else None
+                cached_queries.get(qd["query"])
+                if cached_queries else None
             )
             if cached is not None:
                 result = {**cached, "cached": True}
@@ -566,28 +570,17 @@ def evaluate_prompt_cached(
 
     from api.services.campaign.escalation import EscalationError as _EscalationError
 
-    # Per-query reuse: find individual query results from prior runs
-    # with matching config but potentially different sample sizes.
-    # When llm_ranking is not in the active steps, the ranking prompt
-    # is never executed — results are prompt-independent, so we can
-    # match on (model, temperature, pipeline_params) alone.
-    per_query_cache: dict[str, dict] | None = None
+    # SP-hash query cache: find individual query results from prior runs
+    # with the same SearchPoint (prompt + model + temp + pipeline_params).
+    # Bridges different sample sizes automatically.
+    sp_cache: dict[str, dict] | None = None
     if store and backend_id:
-        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
-        pp = search_point.pipeline_params or {}
-        active_steps = pp.get("steps", [])
-        prompt_irrelevant = bool(active_steps) and "llm_ranking" not in active_steps
-        per_query_cache = store.dataset_runs.find_query_results(
-            backend_id, rp_hash,
-            search_point.model, search_point.temperature,
-            search_point.pipeline_params,
-            ignore_prompt=prompt_irrelevant,
-        )
-        if per_query_cache:
+        sp_h = search_point.sp_hash()
+        sp_cache = store.dataset_runs.find_cached_queries(backend_id, sp_h)
+        if sp_cache:
             logger.info(
-                "Per-query reuse: %d cached query results available for %d eval queries%s",
-                len(per_query_cache), len(eval_data),
-                " (prompt-independent)" if prompt_irrelevant else "",
+                "SP cache: %d cached queries for %d eval queries",
+                len(sp_cache), len(eval_data),
             )
 
     escalation_signal = None
@@ -599,7 +592,7 @@ def evaluate_prompt_cached(
             escalation_checks=ctx.escalation_checks,
             candidate_idx=ctx.candidate_idx,
             n_total_candidates=ctx.n_total_candidates,
-            cached_query_results=per_query_cache,
+            cached_queries=sp_cache,
         )
     except _EscalationError as e:
         results = e.partial_results

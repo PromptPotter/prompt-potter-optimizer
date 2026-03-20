@@ -25,14 +25,6 @@ _LOCK_RETRY_INTERVAL = 0.05  # seconds between retries
 _LOCK_TIMEOUT = 5.0  # seconds before treating lock as stale
 
 
-def _strip_steps(pp: dict | None) -> dict | None:
-    """Normalize pipeline_params for comparison (exclude 'steps' key)."""
-    if not pp:
-        return None
-    stripped = {k: v for k, v in pp.items() if k != "steps"}
-    return stripped or None
-
-
 class DatasetRunStore:
     """File I/O for dataset evaluation runs and incremental eval writes."""
 
@@ -166,6 +158,7 @@ class DatasetRunStore:
             "scores": data["scores"],
             "content_hash": data["content_hash"],
             "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
+            "sp_hash": data.get("sp_hash", ""),
             "pipeline_params": data.get("pipeline_params"),
             "source": data.get("source", ""),
             "created_at": data["created_at"],
@@ -238,7 +231,6 @@ class DatasetRunStore:
         """
         alias_set = self.resolve_aliases(backend_id, rp_hash)
         rp_idx = self._get_rp_index(backend_id)
-        norm_pp = _strip_steps(pipeline_params)
 
         for h in alias_set:
             for entry in rp_idx.get(h, []):
@@ -246,7 +238,7 @@ class DatasetRunStore:
                     continue
                 if entry.get("temperature") != temperature:
                     continue
-                if _strip_steps(entry.get("pipeline_params")) != norm_pp:
+                if entry.get("pipeline_params") != pipeline_params:
                     continue
                 if entry.get("item_count") != item_count:
                     continue
@@ -290,58 +282,59 @@ class DatasetRunStore:
         write_json(path, data)
         self._alias_cache.pop(backend_id, None)
 
-    def find_query_results(
+    def _ensure_sp_hashes(self, backend_id: str) -> None:
+        """Compute sp_hash for index entries missing it.
+
+        Uses ``rendered_prompt_hash``, ``model``, ``temperature``, and
+        ``pipeline_params`` from the index — no detail file loading needed.
+        """
+        from api.models.hashing import sp_identity_hash
+
+        index = self._load_index(backend_id)
+        entries = index.get("dataset_runs", [])
+        updated = 0
+        for entry in entries:
+            if entry.get("sp_hash"):
+                continue
+            rp_hash = entry.get("rendered_prompt_hash", "")
+            if not rp_hash:
+                continue
+            entry["sp_hash"] = sp_identity_hash(
+                rp_hash,
+                entry.get("model", ""),
+                entry.get("temperature", 0.0),
+                entry.get("pipeline_params"),
+            )
+            updated += 1
+
+        if updated:
+            index_path = self._index_path(backend_id)
+            write_json(index_path, index)
+            logger.info("Backfilled sp_hash for %d/%d index entries", updated, len(entries))
+
+    def find_cached_queries(
         self,
         backend_id: str,
-        rp_hash: str,
-        model: str,
-        temperature: float,
-        pipeline_params: dict | None,
-        *,
-        ignore_prompt: bool = False,
+        sp_hash: str,
     ) -> dict[str, dict]:
-        """Per-query cross-run lookup filtered by config.
+        """Find cached query results for a SearchPoint.
 
-        Returns ``{query_string: result_dict}`` from all runs matching
-        the config, regardless of ``item_count``.  Enables per-query reuse
-        across different sample sizes.
+        Returns ``{query_string: result_dict}`` from all prior runs whose
+        ``sp_hash`` matches.  Different sample sizes are bridged
+        automatically — any query evaluated under the same SearchPoint
+        is reusable.
 
-        When ``ignore_prompt`` is True, skips rp_hash filtering and matches
-        on ``(model, temperature, pipeline_params)`` only — using full
-        pipeline_params comparison including ``steps``.  Use this when the
-        ranking prompt is irrelevant (e.g. ``llm_ranking`` excluded from
-        active steps).
-
-        Later runs overwrite earlier (same config = same result).
+        Later runs overwrite earlier (last-write-wins per query).
         """
-        matching_entries: list[dict] = []
+        # Backfill sp_hash for old entries on first access
+        index = self._load_index(backend_id)
+        if any(not e.get("sp_hash") for e in index.get("dataset_runs", [])):
+            self._ensure_sp_hashes(backend_id)
 
-        if ignore_prompt:
-            # Prompt-independent: scan ALL runs matching config.
-            # Compare full pipeline_params (including steps) because
-            # different step sets produce different results.
-            for entry in self._load_index(backend_id).get("dataset_runs", []):
-                if entry.get("model") != model:
-                    continue
-                if entry.get("temperature") != temperature:
-                    continue
-                if entry.get("pipeline_params") != pipeline_params:
-                    continue
-                matching_entries.append(entry)
-        else:
-            # Prompt-dependent: filter by rp_hash alias group + strip steps.
-            alias_set = self.resolve_aliases(backend_id, rp_hash)
-            rp_idx = self._get_rp_index(backend_id)
-            norm_pp = _strip_steps(pipeline_params)
-            for h in alias_set:
-                for entry in rp_idx.get(h, []):
-                    if entry.get("model") != model:
-                        continue
-                    if entry.get("temperature") != temperature:
-                        continue
-                    if _strip_steps(entry.get("pipeline_params")) != norm_pp:
-                        continue
-                    matching_entries.append(entry)
+        matching_entries = [
+            entry for entry in self._load_index(backend_id).get("dataset_runs", [])
+            if entry.get("sp_hash") == sp_hash
+        ]
 
         results: dict[str, dict] = {}
         for entry in matching_entries:
