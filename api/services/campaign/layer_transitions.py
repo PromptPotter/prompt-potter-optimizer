@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
+from api.core.llm_call import get_node_config, llm_call
 from api.models.prompt_state import PromptState
 
 if TYPE_CHECKING:
@@ -152,12 +153,12 @@ async def refine_context(
         response_schema_suffix=response_schema_suffix,
     )
 
-    response = await llm_client.chat(
+    response = await llm_call(
+        llm_client,
         messages=[{"role": "user", "content": prompt}],
+        config=get_node_config("l2_refine_context"),
         model=model,
         temperature=temperature,
-        max_tokens=2048,
-        output_format="json",
     )
     result = response.parsed or json.loads(response.content)
 
@@ -249,12 +250,12 @@ async def modify_plan(
         response_schema_suffix=response_schema_suffix,
     )
 
-    response = await llm_client.chat(
+    response = await llm_call(
+        llm_client,
         messages=[{"role": "user", "content": prompt}],
+        config=get_node_config("l3_modify_plan"),
         model=model,
         temperature=temperature,
-        max_tokens=2048,
-        output_format="json",
     )
     result = response.parsed or json.loads(response.content)
 

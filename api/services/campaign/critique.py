@@ -12,6 +12,7 @@ import random
 from typing import TYPE_CHECKING
 
 from api.config.settings import load_variant_library
+from api.core.llm_call import get_node_config, llm_call
 
 if TYPE_CHECKING:
     from api.services.campaign.critique_stats import CritiqueContext
@@ -61,11 +62,11 @@ class CritiqueAgent:
             len(prompt), ctx.current_round + 1, ctx.accuracy,
         )
 
-        response = await self.llm_client.chat(
+        response = await llm_call(
+            self.llm_client,
             messages=[{"role": "user", "content": prompt}],
+            config=get_node_config("critique"),
             model=self.model,
-            temperature=0.3,
-            max_tokens=4096,
         )
 
         return _parse_critique(response.content)

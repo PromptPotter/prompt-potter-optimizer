@@ -1239,6 +1239,6 @@ Declares the optimizer's nodes using the same JSON format as TermNorm's `GET /pi
 
 ### Current scope
 
-This wave delivers the standard (documentation + config declaration). The actual `llm_call()` primitive extraction and shared library are future work, dependent on ConnectorProtocol readiness.
+`llm_call()` primitive is implemented (`api/core/llm_call.py`); all optimizer pipeline nodes use it. The shared cross-repo library extraction is future work, dependent on ConnectorProtocol readiness.
 
 **Full reference:** [`docs/building-blocks.md`](../building-blocks.md)

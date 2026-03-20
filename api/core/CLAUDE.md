@@ -1,10 +1,14 @@
-# api/core — Workflow Engine Scaffold
+# api/core — Building Blocks + Workflow Engine Scaffold
 
-CWL-inspired workflow engine — **future architecture, not dead code**. The node base classes and optimizer nodes (InitNode, L1GenerateNode, L1EvaluateNode) are actively used by the feedback cycle. M6 Wave 2 (PipelineSchema) complete; workflow node migration deferred to M8.
+## Building block primitive (`llm_call.py`)
 
-## Future / Scaffold Nodes (no consumers yet)
+`llm_call()` is the shared LLM interaction primitive. Config-driven from `api/config/optimizer_pipeline.json` with runtime overrides. Used by all optimizer building block nodes (`generate_candidates`, `refine_context`, `modify_plan`, `CritiqueAgent`). `get_node_config(node_name)` loads node configs from the pipeline declaration.
 
-Registered but zero callers today. Building blocks for the workflow server vision:
+See [`docs/building-blocks.md`](../../docs/building-blocks.md) for the full standard.
+
+## Workflow engine scaffold (future architecture, not dead code)
+
+CWL-inspired workflow engine — an aligned direction for eventually expressing both TermNorm and optimizer pipelines as declarative workflows. Registered but zero callers today:
 
 - **LLMNode** (`llm_node.py`) — General-purpose LLM inference with {{variable}} templates
 - **RankerNode** (`ranker_node.py`) — LLM-based candidate ranking with scoring

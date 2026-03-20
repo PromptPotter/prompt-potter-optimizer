@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.prompt_state import PromptState
+from api.core.llm_call import get_node_config, llm_call
 from api.services.llm_client import LLMClientBase
 from api.services.prompt_eval import compute_composite_score
 
@@ -268,12 +269,12 @@ async def generate_candidates(
             f"{current_ps.plan}\n"
         )
 
-    response = await llm_client.chat(
+    response = await llm_call(
+        llm_client,
         messages=[{"role": "user", "content": meta_prompt}],
+        config=get_node_config("l1_generate"),
         model=model,
         temperature=creativity,
-        max_tokens=8192,
-        output_format="json",
     )
     generated = response.parsed or json.loads(response.content)
 

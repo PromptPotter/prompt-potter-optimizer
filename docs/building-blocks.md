@@ -2,7 +2,7 @@
 
 **Version:** 0.1.0
 **Date:** 2026-03-20
-**Status:** Established (documentation + config); shared library extraction is future work
+**Status:** Established — `llm_call()` primitive + `optimizer_pipeline.json` config implemented; shared library extraction is future work
 
 ---
 
@@ -193,14 +193,14 @@ The `pipelines` dict composes named sequences from the node pool. The same node 
 
 ### Now (M7 Wave G)
 
+- **`llm_call()`** (`api/core/llm_call.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline steps use it.
+- **`get_node_config()`** — loads node configs from `optimizer_pipeline.json` (cached)
 - **`optimizer_pipeline.json`** declares optimizer nodes with the same config shape as TermNorm's pipeline
 - **`observed_step`** traces optimizer steps using the same observability infrastructure
-- Optimizer service functions (`generate_candidates`, `refine_context`, `modify_plan`) call `llm_client.chat()` directly — the LLM interaction is already structurally identical
+- Optimizer building block nodes — `generate_candidates` (`llm/meta`), `refine_context` (`llm/meta`), `modify_plan` (`llm/meta`), `CritiqueAgent` (`agent`) — use `llm_call()` with their declared config from `optimizer_pipeline.json`
 
 ### Future (milestone TBD, post-ConnectorProtocol)
 
-- Extract `llm_call()` as a shared primitive function
-- Refactor optimizer service functions to use `llm_call()` internally
 - Extract building block types into a shared package importable by both repos
 - Shared `PipelineContext`, config resolution, and runner
 
