@@ -87,6 +87,7 @@ async def refine_context(
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
     escalation_section = _build_escalation_prompt_section(
         escalation_context, escalation_journal, pipeline_params,
+        pipeline_schema=pipeline_schema,
     )
 
     task_context_section = ""
@@ -131,8 +132,8 @@ async def refine_context(
         "generator — what to focus on and why (this will be injected into "
         "the generation prompt as primary guidance)\n"
         '  "rationale": 1-2 sentence explanation\n'
-        "\nNote: L1 Generate makes the final decision on pipeline_params "
-        "(query_prefix, max_sites, etc.). Your job is to refine the "
+        "\nNote: L1 Generate makes the final decision on pipeline_params. "
+        "Your job is to refine the "
         "situation context and meta-settings so L1 makes better choices.\n"
         "If the warning inventory shows recurring pipeline issues, set "
         '"action": "probe" to verify your changes help those queries.'
@@ -295,8 +296,8 @@ def _build_pipeline_prompt_section(
     param_keys = pipeline_schema.step_param_keys()
     if not param_keys:
         return ""
-    lines = ["AVAILABLE PIPELINE PARAMETERS (you may suggest value changes):\n"]
-    for step_name, keys in sorted(param_keys.items()):
+    lines = ["AVAILABLE PIPELINE PARAMETERS (in pipeline execution order):\n"]
+    for step_name, keys in param_keys.items():
         current_vals = {}
         if pipeline_params:
             step_cfg = pipeline_params.get(step_name, {})
@@ -305,7 +306,7 @@ def _build_pipeline_prompt_section(
         lines.append(f"  {step_name}: {', '.join(sorted(keys))}")
         if current_vals:
             lines.append(f"    current: {json.dumps(current_vals)}")
-    lines.append("")
+        lines.append("")
     return "\n".join(lines) + "\n"
 
 
@@ -313,6 +314,7 @@ def _build_escalation_prompt_section(
     escalation_context: dict | None,
     escalation_journal: list[dict] | None,
     pipeline_params: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
 ) -> str:
     """Build the escalation diagnostics section for L2 prompts.
 
@@ -346,28 +348,31 @@ def _build_escalation_prompt_section(
     if escalation_journal:
         lines.append("  Tried configs and stability:")
         for entry in escalation_journal:
-            prefix = entry.get("query_prefix", "?")
-            suffix = entry.get("query_suffix", "")
+            step = entry.get("problem_step", "unknown")
+            step_cfg = entry.get("step_config", {})
             prev_rate = entry.get("degraded_rate", 0)
             outcome = entry.get("outcome_degraded_rate")
             outcome_str = f" -> {outcome:.0%}" if outcome is not None else ""
-            ws_cfg = entry.get("web_search_config", {})
-            cfg_parts = [f"prefix={prefix!r}"]
-            if suffix:
-                cfg_parts.append(f"suffix={suffix!r}")
-            if ws_cfg:
-                for k, v in sorted(ws_cfg.items()):
-                    cfg_parts.append(f"{k}={v}")
+            cfg_parts = [f"{k}={v!r}" for k, v in sorted(step_cfg.items())]
             lines.append(
                 f"    Round {entry.get('round', '?')}: "
-                f"{', '.join(cfg_parts)}"
+                f"{step} [{', '.join(cfg_parts) or 'defaults'}]"
                 f" | {prev_rate:.0%} degraded{outcome_str}"
             )
         lines.append("")
 
+    # Surface the problem step's configurable axes
+    if pipeline_schema:
+        all_keys = pipeline_schema.step_param_keys()
+        step_keys = all_keys.get(step_name, set())
+        if step_keys:
+            lines.append(
+                f"  Available {step_name} parameters: {', '.join(sorted(step_keys))}"
+            )
+
     lines.append(
         "  The configurations above are all unstable. Suggest different "
-        "query_prefix/query_suffix values or web_search settings to stabilize."
+        "parameter values to stabilize the pipeline."
     )
     lines.append("")
     return "\n".join(lines) + "\n"

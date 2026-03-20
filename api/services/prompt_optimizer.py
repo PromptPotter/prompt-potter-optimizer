@@ -103,31 +103,20 @@ def _build_scan_aware_meta_prompt(
         "  - \"instruction\": full prompt template text "
         "(keep template variables)\n"
     )
-    if not scan_context.get("has_prompt_axes", True):
-        focus_note = (
-            "NOTE: Scan analytics show pipeline parameters had the most impact "
-            "on accuracy. Consider prioritizing pipeline_params_override, but you "
-            "MAY also modify the instruction if you see a clear opportunity.\n\n"
-        )
-    else:
-        focus_note = ""
+    focus_note = ""
 
     # Inject degradation data so L1 addresses pipeline instability
     if escalation_journal:
         latest = escalation_journal[-1]
         rate = latest.get("degraded_rate", 0)
-        prefix = latest.get("query_prefix", "")
+        problem_step = latest.get("problem_step", "unknown")
         lines = [
-            f"PIPELINE ISSUE: {rate:.0%} of queries degrade due to web_search failures.",
-            "This is the primary accuracy bottleneck — address it in your candidates.",
+            f"PIPELINE ISSUE: {rate:.0%} of queries degrade at the {problem_step} step.",
+            "Address pipeline instability in your candidates.",
         ]
-        if prefix:
-            lines.append(f"Last tried prefix: {prefix!r}")
         if len(escalation_journal) > 1:
-            tried = [e.get("query_prefix", "?") for e in escalation_journal]
-            lines.append(f"Previously tried prefixes (all failed): {tried}")
             lines.append(
-                "Try a fundamentally different approach to web_search config.",
+                f"Previous {len(escalation_journal)} attempts have not resolved the issue.",
             )
         wtypes = latest.get("warning_types", {})
         if wtypes:
@@ -247,8 +236,7 @@ async def generate_candidates(
         meta_prompt += (
             "\n\nPROBE ROUND: These queries have recurring pipeline warnings. "
             "Generate candidates that specifically address pipeline robustness "
-            "(e.g., fallback behavior when web_search fails, handling missing "
-            "entity profiles gracefully).\n"
+            "for the affected steps.\n"
         )
 
     # L2 directive (primary guidance from context refinement)

@@ -15,7 +15,7 @@ def _visible_len(text: str) -> int:
 
 __all__ = [
     # Constants
-    "RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
+    "RESET", "BOLD", "DIM", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
     # Box-drawing helpers
     "_box_top", "_box_bottom", "_box_line",
     "_dbox_top", "_dbox_bottom", "_dbox_line", "_dbox_sep",
@@ -33,6 +33,7 @@ __all__ = [
 # ANSI foreground colors
 RESET   = "\033[0m"
 BOLD    = "\033[1m"
+DIM     = "\033[2m"
 RED     = "\033[31m"
 GREEN   = "\033[32m"
 YELLOW  = "\033[33m"

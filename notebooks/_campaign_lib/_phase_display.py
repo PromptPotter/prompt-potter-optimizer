@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from api.models.phase_event import PhaseEvent
 
 from ._display import (
-    BOLD, CYAN, GREEN, RESET, YELLOW,
+    BOLD, CYAN, DIM, GREEN, RESET, YELLOW,
     _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
     _fmt_delta, _scoreboard,
 )
@@ -47,6 +47,8 @@ class _CycleDisplayState:
     original_sp_flat: dict[str, str] = field(default_factory=dict)
     previous_sp_flat: dict[str, str] = field(default_factory=dict)
     current_sp_flat: dict[str, str] = field(default_factory=dict)
+    # Pipeline step ordering for grouped diff display
+    step_param_keys: dict[str, list[str]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -176,13 +178,51 @@ def _build_candidate_flat(
     return flat
 
 
-def _print_sp_diff(columns: list[tuple[str, dict[str, str]]]) -> None:
+def _group_diff_keys(
+    diff_keys: list[str],
+    step_param_keys: dict[str, list[str]] | None,
+) -> list[tuple[str, list[str]]]:
+    """Group diff keys by pipeline step in execution order.
+
+    Returns ``(step_name, [keys])`` pairs.  When ``step_param_keys``
+    is ``None``, returns a single unnamed group sorted alphabetically.
+    """
+    if not step_param_keys:
+        return [("", diff_keys)]
+
+    # Reverse map: flat_key → step_name (including dot-notation children)
+    key_to_step: dict[str, str] = {}
+    for sname, keys in step_param_keys.items():
+        for k in keys:
+            key_to_step[k] = sname
+    for k in diff_keys:
+        if k not in key_to_step:
+            base = k.split(".")[0]
+            if base in key_to_step:
+                key_to_step[k] = key_to_step[base]
+
+    groups: dict[str, list[str]] = {sname: [] for sname in step_param_keys}
+    groups[""] = []
+    for k in diff_keys:
+        sname = key_to_step.get(k, "")
+        groups.setdefault(sname, []).append(k)
+
+    return [(sname, sorted(keys)) for sname, keys in groups.items() if keys]
+
+
+def _print_sp_diff(
+    columns: list[tuple[str, dict[str, str]]],
+    step_param_keys: dict[str, list[str]] | None = None,
+) -> None:
     """Print N-column diff table with lookup codes for long values.
 
     ``columns`` is a list of (label, flat_dict) pairs.
     Only rows where at least one column differs are shown.
     Short values (<=12 chars) are shown inline; longer values get a
     letter code [a]..[z] with full text in a legend below the table.
+
+    When ``step_param_keys`` is provided, rows are grouped by pipeline
+    step in execution order with separator lines between groups.
     """
     if len(columns) < 2:
         return
@@ -235,16 +275,21 @@ def _print_sp_diff(columns: list[tuple[str, dict[str, str]]]) -> None:
         f"{label:<{col_w}}" for label, _ in columns)
     print(_node_line(hdr))
 
-    # Rows
-    for k in diff_keys:
-        cells = []
-        prev_val = None
-        for _, d in columns:
-            v = d.get(k)
-            cells.append(_cell(v, prev_val))
-            prev_val = v
-        row = f"{k:>{max_key}}  " + "".join(f"{c:<{col_w}}" for c in cells)
-        print(_node_line(row))
+    # Rows — grouped by pipeline step
+    groups = _group_diff_keys(diff_keys, step_param_keys)
+    for gi, (step_name, group_keys) in enumerate(groups):
+        if step_name and len(groups) > 1:
+            sep = f"{'─── ' + step_name + ' ':─<{max_key + 2}}"
+            print(_node_line(f"{DIM}{sep}{RESET}"))
+        for k in group_keys:
+            cells = []
+            prev_val = None
+            for _, d in columns:
+                v = d.get(k)
+                cells.append(_cell(v, prev_val))
+                prev_val = v
+            row = f"{k:>{max_key}}  " + "".join(f"{c:<{col_w}}" for c in cells)
+            print(_node_line(row))
 
     # Legend
     if legend:
@@ -266,6 +311,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     state.original_sp_flat = _flatten_sp_summary(
         d.get("pipeline_params"), d.get("model", ""), 0.0,
     )
+    state.step_param_keys = d.get("step_param_keys")
 
     model = d.get("model", "(default)")
     l2 = "enabled" if d.get("enable_l2") else "disabled"
@@ -399,7 +445,7 @@ def _print_l1_generate_exit(d: dict, state: _CycleDisplayState) -> None:
         c_flat = _build_candidate_flat(state.current_sp_flat, c)
         columns.append((f"C{c['idx'] + 1}", c_flat))
     print()
-    _print_sp_diff(columns)
+    _print_sp_diff(columns, step_param_keys=state.step_param_keys)
 
 
 def _print_l1_evaluate_enter(d: dict, state: _CycleDisplayState) -> None:

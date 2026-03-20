@@ -1051,7 +1051,11 @@ async def run_feedback_cycle(
                 baseline_accuracy=baseline_accuracy,
                 has_scan_context=config.scan_context is not None,
                 enable_critique=config.enable_critique,
-                pipeline_params=config.pipeline_params)
+                pipeline_params=config.pipeline_params,
+                step_param_keys=(
+                    {s: sorted(k) for s, k in config.pipeline_schema.step_param_keys().items()}
+                    if config.pipeline_schema else None
+                ))
 
     # Resolve backend client: prefer caller-provided, fall back to new
     _bc = backend_client or BackendClient(config.backend_url)
@@ -1314,19 +1318,16 @@ async def run_feedback_cycle(
                         break
 
                     # Record journal entry after L2 transition
-                    _ws_cfg = (
-                        (state.current_sp.pipeline_params or {}).get("web_search", {})
+                    _dominant = _esc_ctx.get("dominant_warning", "unknown:unknown")
+                    _problem_step = _dominant.split(":")[0] if ":" in _dominant else "unknown"
+                    _step_cfg = (
+                        (state.current_sp.pipeline_params or {}).get(_problem_step, {})
                     )
                     state.opt_sp.escalation_journal.append({
                         "round": round_num,
                         "degraded_rate": _esc_ctx.get("degraded_rate", 0),
-                        "query_prefix": _ws_cfg.get("query_prefix", ""),
-                        "query_suffix": _ws_cfg.get("query_suffix", ""),
-                        "web_search_config": {
-                            k: _ws_cfg[k]
-                            for k in ("max_sites", "num_results", "content_char_limit")
-                            if k in _ws_cfg
-                        },
+                        "problem_step": _problem_step,
+                        "step_config": dict(_step_cfg) if isinstance(_step_cfg, dict) else {},
                         "warning_types": _esc_ctx.get("warning_types", {}),
                         "l2_action": (
                             state.current_sp.prompt_state.changes_description or ""
