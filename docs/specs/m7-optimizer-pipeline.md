@@ -908,9 +908,9 @@ class DegradationCheck(EscalationCheck):
     threshold: float = 0.3
 ```
 
-#### E2: OPTIMIZER_PIPELINE_SCHEMA — MOVED TO M8
+#### E2: OPTIMIZER_PIPELINE_SCHEMA — REPLACED BY BUILDING BLOCK APPROACH
 
-Moved to M8 as work package 8.5. Describes the optimizer's own 4-step pipeline using `PipelineSchema`/`PipelineStep`. Depends on ConnectorProtocol for `GET /optimizer/pipeline` endpoint.
+The original plan to model the optimizer pipeline as a `PipelineSchema`/`PipelineStep` instance has been replaced by the building block standard. Instead of reusing `PipelineSchema` (which is tightly coupled to target backend pipeline semantics), the optimizer declares its nodes in `api/config/optimizer_pipeline.json` using the same JSON format as TermNorm's `GET /pipeline` but with building block type annotations (`llm/meta`, `agent`, `evaluation`). See §14 and [`docs/building-blocks.md`](../building-blocks.md).
 
 #### E3: End-to-end Langfuse tracing
 
@@ -984,7 +984,7 @@ Status after v1 Phase 0.5 (to be re-achieved by Wave D5):
 | Candidate generation prompt | Lost | ✅ Node I/O in Langfuse | C3 + D2 |
 | Scan context enrichment | Lost | ✅ L1Generate input | D2 |
 | Escalation signals | Not indexed | ❌ Phase 1 (Wave E1) | E1 |
-| `OPTIMIZER_PIPELINE_SCHEMA` | N/A | ❌ Phase 2 (Wave E2) | E2 |
+| `OPTIMIZER_PIPELINE_SCHEMA` | N/A | ✅ Replaced by `optimizer_pipeline.json` + building block standard | G |
 | Per-round Langfuse scores | Partial | ✅ Obs round_end | Already present |
 | Phase events (display) | N/A | ✅ `_emit_phase()` callbacks | Already present |
 | `escalation_journal` | Lost on restart | ❌ Move to OptSearchPoint | F1 |
@@ -1208,3 +1208,37 @@ Round N+1 (probe round):
 - `api/services/campaign/layer_transitions.py` — `TransitionResult.probe_queries`; parse from L2 response
 - `api/config/optimizer_prompts/l2_refine_context.json` — probe instruction in L2 prompt
 - `api/services/campaign/feedback_cycle.py` — probe round orchestration logic
+
+---
+
+## 14. Building Block Standard
+
+**Wave G** replaced the Pydantic node I/O wrappers (Waves A-D) with direct service calls + `observed_step` tracing. This simplification revealed a more fundamental pattern: both TermNorm and PromptPotter use the same primitives (LLM calls, web search, deterministic functions) and should share a common vocabulary for declaring and composing them.
+
+### Type hierarchy
+
+Every node is self-contained: prompt assembly + execution + response parsing in one unit.
+
+```
+llm                  ← raw prompt → response
+├── llm/structured   ← + prompt template + output schema (TermNorm nodes)
+│   └── llm/meta     ← + multi-source assembly + context parsing (optimizer nodes)
+└── agent            ← + multi-step loop (CritiqueAgent)
+web_search           ← external HTTP service
+deterministic        ← pure function
+evaluation           ← backend call + comparison
+```
+
+### Composability pattern
+
+Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx, writes to ctx. Pipelines are lists of nodes; the runner just loops.
+
+### `optimizer_pipeline.json`
+
+Declares the optimizer's nodes using the same JSON format as TermNorm's `GET /pipeline`. Located at `api/config/optimizer_pipeline.json`. Defines 5 nodes (`l1_generate`, `l1_evaluate`, `critique`, `l2_refine_context`, `l3_modify_plan`) and 4 pipeline sequences (`l1_round`, `l1_round_with_critique`, `l2_escalation`, `l3_escalation`).
+
+### Current scope
+
+This wave delivers the standard (documentation + config declaration). The actual `llm_call()` primitive extraction and shared library are future work, dependent on ConnectorProtocol readiness.
+
+**Full reference:** [`docs/building-blocks.md`](../building-blocks.md)

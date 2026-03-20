@@ -18,7 +18,7 @@
 | M4 | Integration and Polish (reclassified — absorbed into M3-M5) | Complete |
 | M5 | Observability Layer | Complete |
 | M6 | PipelineSchema + Pipeline Composability | Waves 0-3, 5-7 complete; Wave 4 → M8 |
-| M7 | Optimizer-as-Pipeline | In Progress (Waves A-E complete, Wave F active) |
+| M7 | Optimizer-as-Pipeline | In Progress (Waves A-F complete, Wave G active) |
 | M8 | Multi-Connector Architecture | Future |
 
 ---
@@ -70,10 +70,13 @@ The optimizer itself is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_ref
 | B | Node implementations: L1Generate, L1Evaluate, L2Refine, L3ModifyPlan | Complete |
 | C | Observability plumbing: ObsLogger + CloudObsBackend node step methods | Complete |
 | D | Orchestrator migration: swap call sites in feedback_cycle.py | Complete |
-| E | EscalationCheck framework, end-to-end Langfuse tracing | Complete (E1); E2 → M8 |
-| F | Warning inventory, OptSearchPoint consolidation, L2 probe rounds | Active |
+| E | EscalationCheck framework, end-to-end Langfuse tracing | Complete (E1); E2 replaced by building block approach |
+| F | Warning inventory, OptSearchPoint consolidation, L2 probe rounds, l2_directive bridge, Critique↔L2 context sharing | Complete |
+| G | Node I/O removal + building block standard | Active |
 
-**Wave F** (§13 of spec): Per-query warning inventory tracks recurring pipeline warnings (e.g., `web_search:partial_scrape`) across rounds. `OptSearchPoint` unfrozen and consolidated as the single optimizer-state model. L2 gains diagnostic probe rounds — extraordinary eval rounds on specific queries, with results flowing back to L2 for assessment.
+**Wave F** (§13 of spec): Per-query warning inventory tracks recurring pipeline warnings (e.g., `web_search:partial_scrape`) across rounds. `OptSearchPoint` unfrozen and consolidated as the single optimizer-state model. L2 gains diagnostic probe rounds. L2→L1 `l2_directive` bridge and Critique↔L2 context sharing close information flow gaps.
+
+**Wave G**: Replaced Pydantic node I/O wrappers with direct service calls + `observed_step`. Established the building block standard: `async def block(ctx) -> None` composable pattern, shared `llm_call` primitive across both repos. `optimizer_pipeline.json` declares node types + configs in same format as TermNorm's `pipeline.json`. See [`docs/building-blocks.md`](../building-blocks.md).
 
 **Entry criteria:** M6 exit gate passed (PipelineSchema + composite scoring active).
 
