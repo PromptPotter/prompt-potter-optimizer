@@ -918,7 +918,7 @@ The original plan to model the optimizer pipeline as a `PipelineSchema`/`Pipelin
 ### Mock patterns
 
 - **No pytest-mock plugin** — use `monkeypatch` for async service mocking, `unittest.mock.MagicMock` when needed
-- **Test helpers** in `tests/_helpers.py`: `apply_init_mock`, `apply_llm_mock`, `apply_grow_mock`, `apply_eval_mock`, `apply_critique_mock`
+- **Test helpers** in `tests/_helpers.py`: `apply_llm_mock`, `apply_grow_mock`, `apply_eval_mock`, `run_simple_cycle`
 - **`apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])`** — cycles through hit counts per round
 
 ### Key fixtures

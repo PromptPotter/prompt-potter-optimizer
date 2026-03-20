@@ -131,13 +131,11 @@ The feedback cycle is itself a 4-step pipeline, designed to be modeled using the
 
 **Critique and thinking styles are tools of `l1_evaluate`, not separate steps.** The critique agent runs *within* the evaluation step -- its output (`critique_text`) feeds the *next* round's `l1_generate`. Similarly, `sample_thinking_styles()` runs at the end of evaluation to prepare mutation guidance for the next round. Neither has an independent parameter surface or routing decision that would warrant a separate pipeline step.
 
-**`suggestion_generation` is legacy/optional.** Controlled by `generate_suggestions=False` (default), superseded by critique-guided generation. If re-enabled, it operates as a tool of `l1_evaluate`.
+This pipeline model enables step-level tracing, full reproducibility, and self-optimization. See the [M7 spec](specs/m7-optimizer-pipeline.md) for the tracing design, and [`docs/building-blocks.md`](building-blocks.md) for the building block standard.
 
-This pipeline model enables step-level tracing, full reproducibility, and self-optimization. See the [M7 spec](specs/m7-optimizer-pipeline.md) for the full design including `OPTIMIZER_PIPELINE_SCHEMA`, tracing design, and migration path.
+### Building Block Nodes (M7)
 
-### Node Wiring (M7)
-
-All four feedback cycle call sites route through optimizer nodes (`NodeBase.process()`): `L1GenerateNode`, `L1EvaluateNode`, `L2RefineNode`, `L3ModifyPlanNode`. Each node has typed Pydantic I/O models. Tracing is opt-in via `obs` + `trace_id` on the node constructor. `OptSearchPoint` checkpoints optimizer state (critique, thinking_styles, plan, context) per round.
+The optimizer steps are building block nodes declared in [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json): `l1_generate` (`llm/meta`), `l1_evaluate` (`evaluation`), `critique` (`agent`), `l2_refine_context` (`llm/meta`), `l3_modify_plan` (`llm/meta`). Each node's config (temperature, prompt_family, context_sources) is loaded via `get_node_config()` and LLM calls use the shared `llm_call()` primitive (`api/core/llm_call.py`). Step tracing uses `observed_step()`. `OptSearchPoint` checkpoints optimizer state (critique, thinking_styles, plan, context) per round.
 
 ### Experiment Dashboard
 

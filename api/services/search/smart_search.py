@@ -822,32 +822,6 @@ async def adaptive_search(
 
 
 # ---------------------------------------------------------------------------
-# Load scan results from plan store
-# ---------------------------------------------------------------------------
-
-
-def load_scan_results_from_plan(
-    store: ProjectStore,
-    backend_id: str,
-    plan_id: str,
-) -> pd.DataFrame | None:
-    """Load scan results DataFrame from a persisted smart search plan.
-
-    Returns ``None`` if no plan or no scan rows found.
-    """
-    import pandas as pd
-    from api.services.search.plan_persistence import deserialize_smart_search_plan
-
-    plan_data = store.smart_search.load(backend_id, plan_id)
-    if not plan_data:
-        return None
-    plan = deserialize_smart_search_plan(plan_data)
-    rows = (plan.get("scan_results") or {}).get("rows", [])
-    if not rows:
-        return None
-    return pd.DataFrame(rows)
-
-
 # ---------------------------------------------------------------------------
 # Diagnostic set resume / build
 # ---------------------------------------------------------------------------

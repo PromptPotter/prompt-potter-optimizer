@@ -50,18 +50,27 @@ register_node(MyNode)
     threshold: 0.7
 ```
 
-## Built-in Nodes
+## Workflow Scaffold Nodes (`api/nodes/`)
 
 | Node | File | Purpose |
 |------|------|---------|
 | `LLMNode` | `llm_node.py` | General LLM inference with `{{variable}}` templates |
 | `RankerNode` | `ranker_node.py` | LLM candidate ranking with scoring |
 | `PipelineConfigNode` | `pipeline_config_node.py` | Pipeline parameter assembly for backend forwarding |
-| `InitNode` | `optimizer_nodes.py` | Decompose instruction into Layer 1 fields → baseline PromptState |
-| `L1GenerateNode` | `optimizer_nodes.py` | Generate N candidate PromptState variants via LLM |
-| `L1EvaluateNode` | `optimizer_nodes.py` | Evaluate candidates via backend, select winner |
 
-All files under `api/nodes/`.
+These use `NodeBase` and are part of the workflow engine scaffold (future adoption).
+
+## Optimizer Building Block Nodes (`optimizer_pipeline.json`)
+
+The optimizer steps are building block nodes — service functions with config declared in [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json). They use `llm_call()` + `get_node_config()` instead of `NodeBase` wrappers. See [`docs/building-blocks.md`](building-blocks.md) for the type hierarchy.
+
+| Node | Type | Service function | Purpose |
+|------|------|-----------------|---------|
+| `l1_generate` | `llm/meta` | `prompt_optimizer.l1_generate()` | Generate N candidate PromptState variants |
+| `l1_evaluate` | `evaluation` | `prompt_optimizer.l1_evaluate()` | Evaluate candidates via backend, select winner |
+| `critique` | `agent` | `critique.run_critique()` | 5-field critique analysis |
+| `l2_refine_context` | `llm/meta` | `layer_transitions.refine_context()` | Refine task_context + meta-settings |
+| `l3_modify_plan` | `llm/meta` | `layer_transitions.modify_plan()` | Modify strategic plan |
 
 ## Config
 
@@ -87,9 +96,8 @@ Handled by `WorkflowRunner._resolve_input()`:
 
 ## Patterns
 
-- **Service wrapper** (InitNode, L1GenerateNode): lazy-import service functions inside `_execute()`, serialize Pydantic ↔ dict at boundaries
-- **LLM direct** (LLMNode, RankerNode): call `get_llm_client()`, parse structured JSON responses
-- **Multi-service orchestrator** (L1EvaluateNode): constructs infrastructure objects from config, supports both dict and flat-field input shapes for CWL compatibility
+- **Workflow scaffold** (`LLMNode`, `RankerNode`): `NodeBase._execute()` pattern — call `get_llm_client()`, parse structured JSON responses
+- **Optimizer building blocks** (`l1_generate`, `l2_refine_context`, etc.): service functions using `llm_call()` + `get_node_config()` from `optimizer_pipeline.json`. Step tracing via `observed_step()` context manager.
 
 ## Files
 
