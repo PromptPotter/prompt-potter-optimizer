@@ -309,7 +309,7 @@ def _apply_e2e_mocks(monkeypatch):
             current_ps.derive(
                 instruction=f"Match query to canonical drug name (variant {i})",
                 changes_description=f"e2e_candidate_{i}",
-            )
+            ).model_dump()
             for i in range(n)
         ]
 

@@ -94,20 +94,10 @@ def get_node_info_all() -> list[dict]:
 from .llm_node import LLMNode  # noqa: E402
 from .pipeline_config_node import PipelineConfigNode  # noqa: E402
 from .ranker_node import RankerNode  # noqa: E402
-from .optimizer_nodes import (  # noqa: E402
-    L1GenerateNode,
-    L1EvaluateNode,
-    L2RefineNode,
-    L3ModifyPlanNode,
-)
 
 register_node(LLMNode)
 register_node(PipelineConfigNode)
 register_node(RankerNode)
-register_node(L1GenerateNode)
-register_node(L1EvaluateNode)
-register_node(L2RefineNode)
-register_node(L3ModifyPlanNode)
 
 
 __all__ = [
@@ -120,8 +110,4 @@ __all__ = [
     "LLMNode",
     "PipelineConfigNode",
     "RankerNode",
-    "L1GenerateNode",
-    "L1EvaluateNode",
-    "L2RefineNode",
-    "L3ModifyPlanNode",
 ]

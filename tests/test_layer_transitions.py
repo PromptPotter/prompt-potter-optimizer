@@ -294,7 +294,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
             current_ps.derive(
                 instruction=f"variant_{i}",
                 changes_description=f"gen_{i}",
-            )
+            ).model_dump()
             for i in range(n)
         ]
 
@@ -354,7 +354,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
             current_ps.derive(
                 instruction=f"variant_{i}",
                 changes_description=f"gen_{i}",
-            )
+            ).model_dump()
             for i in range(n)
         ]
 

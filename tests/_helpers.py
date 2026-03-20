@@ -25,14 +25,14 @@ def apply_llm_mock(monkeypatch):
 
 
 def apply_grow_mock(monkeypatch):
-    """Mock generate_candidates to return deterministic variants."""
+    """Mock generate_candidates to return deterministic variants (as dicts)."""
     async def mock_generate(current_ps, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         return [
             current_ps.derive(
                 instruction=f"variant_{i}_acc{accuracy:.0%}",
                 changes_description=f"gen_{i}",
-            )
+            ).model_dump()
             for i in range(n)
         ]
 

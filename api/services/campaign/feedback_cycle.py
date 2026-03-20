@@ -25,9 +25,6 @@ from api.models.phase_event import PhaseEvent
 from api.models.prompt_state import PromptState, diff as prompt_diff
 from api.models.search_point import SearchPoint
 from api.models.opt_search_point import OptSearchPoint
-from api.nodes.optimizer_nodes import (
-    L1GenerateNode, L1EvaluateNode, L2RefineNode, L3ModifyPlanNode,
-)
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
 from api.services.constants import DATASET_NAME
@@ -35,6 +32,7 @@ from api.services.campaign.models import (
     CycleConfig, CycleResult, CycleRoundResult, _LoopState,
 )
 from api.services.campaign.critique import sample_thinking_styles
+from api.services.obs.step_tracer import observed_step
 from api.services.prompt_eval import EvalContext, compute_composite_score
 from api.services.query_utils import subsample_queries
 
@@ -344,26 +342,24 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    l1_gen_node = L1GenerateNode(
-        node_id=f"l1_generate_r{round_num}",
-        config={"model": config.model, "provider": config.provider,
-                "n_variants": _n_variants, "creativity": _creativity},
-        obs=obs, trace_id=trace_id,
-    )
-    gen_result = await l1_gen_node.process({
-        "prompt_state": current_ps.model_dump(),
-        "accuracy": state.current_accuracy,
-        "results": state.current_results,
-        "critique_text": state.opt_sp.critique_text,
-        "thinking_styles": state.opt_sp.thinking_styles,
-        "scan_context": config.scan_context,
-        "escalation_journal": state.opt_sp.escalation_journal,
-        "task_context": state.opt_sp.task_context or None,
-        "warning_inventory": state.opt_sp.query_failure_tracker or None,
-        "l2_directive": state.opt_sp.l2_directive,
-        "is_probe_round": state.probe_next_round,
-    })
-    candidates = gen_result.candidates
+    from api.services.prompt_optimizer import generate_candidates
+
+    client = _llm_client.get_llm_client(config.provider)
+    async with observed_step(f"l1_generate_r{round_num}", "L1Generate",
+                             obs=obs, trace_id=trace_id):
+        candidates = await generate_candidates(
+            current_ps, state.current_accuracy, state.current_results,
+            _n_variants, _creativity, client,
+            model=config.model,
+            scan_context=config.scan_context,
+            critique_text=state.opt_sp.critique_text,
+            thinking_styles=state.opt_sp.thinking_styles,
+            escalation_journal=state.opt_sp.escalation_journal,
+            task_context=state.opt_sp.task_context or None,
+            warning_inventory=state.opt_sp.query_failure_tracker or None,
+            l2_directive=state.opt_sp.l2_directive,
+            is_probe_round=state.probe_next_round,
+        )
 
     if campaign_store and cycle_id:
         campaign_store.save_round_candidates(
@@ -393,7 +389,7 @@ async def _evaluate_candidates(
     trace_id: str | None = None,
     escalation_checks: list | None = None,
 ) -> dict:
-    """Evaluate candidates via L1EvaluateNode, optionally generate suggestions."""
+    """Evaluate candidates, run critique, optionally generate suggestions."""
     _emit_phase(on_phase, "l1_evaluate", "enter", round=round_num,
                 n_candidates=len(candidates),
                 n_queries=len(round_eval_data),
@@ -410,67 +406,60 @@ async def _evaluate_candidates(
         "label": baseline_label,
     }
 
-    l1_eval_node = L1EvaluateNode(
-        node_id=f"l1_evaluate_r{round_num}",
-        config={
-            "eval_ctx": state.eval_ctx,
-            "improvement_threshold": config.improvement_threshold,
-            "on_candidate_eval": on_candidate_eval,
-            "on_query_eval": on_query_eval,
-            "model": config.model,
-            "provider": config.provider,
-            "enable_critique": config.enable_critique,
-            "critique_positive_threshold": config.critique_positive_threshold,
-            "thinking_styles_seed": config.seed + round_num + 1,
-            "escalation_checks": escalation_checks,
-            # Rich critique context
-            "round_history": [
-                {"round": r.round, "accuracy": r.accuracy,
-                 "composite": r.composite,
-                 "pipeline_params": r.pipeline_params,
-                 "degraded": getattr(r, "degraded_queries", 0),
-                 "n_candidates": len(r.candidate_scores)}
-                for r in state.rounds
-            ],
-            "current_round": round_num,
-            "stall_count": state.stall_count,
-            "best_accuracy": state.best_accuracy,
-            "best_round": state.best_round,
-            "scan_context": config.scan_context,
-            "pipeline_params": (
-                state.current_sp.pipeline_params if state.current_sp else None
-            ),
-            "warning_inventory": (
-                state.opt_sp.query_failure_tracker or None
-            ),
-            "task_context": (
-                state.opt_sp.task_context or None
-            ),
-        },
-        obs=obs, trace_id=trace_id,
-    )
-    eval_result = await l1_eval_node.process({
-        "candidates": candidates,
-        "eval_data": round_eval_data,
-        "current_best": current_best,
-    })
+    from api.services.prompt_optimizer import evaluate_and_select_winner
 
-    eval_out: dict = {
-        "winner": eval_result.winner,
-        "winner_prompt_state": eval_result.winner_prompt_state,
-        "winner_accuracy": eval_result.winner_accuracy,
-        "improved": eval_result.improved,
-        "next_action": eval_result.next_action,
-        "candidate_scores": eval_result.candidate_scores,
-        "winner_results": eval_result.winner_results,
-        "critique_text": eval_result.critique_text,
-        "thinking_styles": eval_result.thinking_styles,
-        "winner_composite": eval_result.winner_composite,
-        "winner_pipeline_params": eval_result.winner_pipeline_params,
-        "escalation_signal": eval_result.escalation_signal,
-        "degraded_queries": eval_result.degraded_queries,
-        "all_eval_results": eval_result.all_eval_results,
-    }
+    async with observed_step(f"l1_evaluate_r{round_num}", "L1Evaluate",
+                             obs=obs, trace_id=trace_id, obs_type="span"):
+        eval_out = await evaluate_and_select_winner(
+            candidates, round_eval_data, current_best, state.eval_ctx,
+            improvement_threshold=config.improvement_threshold,
+            on_candidate_eval=on_candidate_eval,
+            on_query_eval=on_query_eval,
+            escalation_checks=escalation_checks,
+        )
+
+        # Critique (was L1EvaluateNode._run_critique)
+        critique_text = ""
+        if config.enable_critique and eval_out.get("winner_results"):
+            from api.services.campaign.critique import CritiqueAgent
+            from api.services.campaign.critique_stats import CritiqueContext
+
+            crit_llm = _llm_client.get_llm_client(config.provider)
+            agent = CritiqueAgent(crit_llm, model=config.model,
+                                  positive_threshold=config.critique_positive_threshold)
+            cctx = CritiqueContext(
+                results=eval_out["winner_results"],
+                accuracy=eval_out["winner_accuracy"],
+                composite=eval_out.get("winner_composite", eval_out["winner_accuracy"]),
+                degraded_queries=eval_out.get("degraded_queries", 0),
+                round_history=[
+                    {"round": r.round, "accuracy": r.accuracy,
+                     "composite": r.composite,
+                     "pipeline_params": r.pipeline_params,
+                     "degraded": getattr(r, "degraded_queries", 0),
+                     "n_candidates": len(r.candidate_scores)}
+                    for r in state.rounds
+                ],
+                current_round=round_num,
+                stall_count=state.stall_count,
+                best_accuracy=state.best_accuracy,
+                best_round=state.best_round,
+                scan_context=config.scan_context,
+                pipeline_params=(
+                    state.current_sp.pipeline_params if state.current_sp else None
+                ),
+                warning_inventory=state.opt_sp.query_failure_tracker or None,
+                task_context=state.opt_sp.task_context or None,
+            )
+            critique_result = await agent.run(cctx)
+            from api.services.campaign.critique import format_critique_for_prompt
+            critique_text = format_critique_for_prompt(critique_result)
+
+        thinking_styles = sample_thinking_styles(
+            n=3, seed=config.seed + round_num + 1,
+        )
+        eval_out["critique_text"] = critique_text
+        eval_out["thinking_styles"] = thinking_styles
 
     # Suggestion generation stays in orchestrator (ADR-4)
     # Skip on escalation — immediate return to main loop for L2/L3 dispatch
@@ -711,7 +700,7 @@ async def _do_l2_transition(
     trace_id: str | None = None,
     escalation_context: dict | None = None,
 ) -> layer_transitions.TransitionResult:
-    """Perform L2 refine_context transition via L2RefineNode. Updates state in-place."""
+    """Perform L2 refine_context transition. Updates state in-place."""
     current_ps = state.current_sp.prompt_state
     current_pp = state.current_sp.pipeline_params
 
@@ -730,38 +719,22 @@ async def _do_l2_transition(
                 current_accuracy=state.current_accuracy,
                 best_accuracy=state.best_accuracy)
 
-    l2_node = L2RefineNode(
-        node_id=f"l2_refine_r{round_num}",
-        config={
-            "model": config.model,
-            "provider": config.provider,
-            "temperature": config.l2_temperature,
-            "pipeline_schema": config.pipeline_schema,
-        },
-        obs=obs, trace_id=trace_id,
-    )
-    l2_result = await l2_node.process({
-        "prompt_state": current_ps.model_dump(),
-        "stalled_rounds": stalled_rounds,
-        "eval_data": eval_data,
-        "pipeline_params": current_pp,
-        "escalation_context": escalation_context,
-        "escalation_journal": state.opt_sp.escalation_journal,
-        "task_context": state.opt_sp.task_context or None,
-        "warning_inventory": state.opt_sp.query_failure_tracker or None,
-        "critique_text": state.opt_sp.critique_text,
-        "prev_l2_directive": state.opt_sp.l2_directive,
-    })
-
-    new_ps = PromptState(**l2_result.prompt_state)
-    tr = layer_transitions.TransitionResult(
-        prompt_state=new_ps,
-        task_context=getattr(l2_result, "task_context", None),
-        l2_directive=getattr(l2_result, "l2_directive", ""),
-        action=getattr(l2_result, "action", "continue"),
-        debug_prompt=getattr(l2_result, "debug_prompt", ""),
-        debug_response=getattr(l2_result, "debug_response", None),
-    )
+    client = _llm_client.get_llm_client(config.provider)
+    async with observed_step(f"l2_refine_r{round_num}", "L2Refine",
+                             obs=obs, trace_id=trace_id):
+        tr = await layer_transitions.refine_context(
+            current_ps, stalled_rounds, eval_data, client,
+            model=config.model,
+            temperature=config.l2_temperature,
+            pipeline_params=current_pp,
+            pipeline_schema=config.pipeline_schema,
+            escalation_context=escalation_context,
+            escalation_journal=state.opt_sp.escalation_journal,
+            task_context=state.opt_sp.task_context or None,
+            warning_inventory=state.opt_sp.query_failure_tracker or None,
+            critique_text=state.opt_sp.critique_text,
+            prev_l2_directive=state.opt_sp.l2_directive,
+        )
     # Update task_context if L2 refined it
     if tr.task_context:
         state.opt_sp.task_context = tr.task_context
@@ -819,7 +792,7 @@ async def _do_l3_transition(
     obs: "ObsLogger | None" = None,
     trace_id: str | None = None,
 ) -> layer_transitions.TransitionResult:
-    """Perform L3 modify_plan transition via L3ModifyPlanNode. Updates state in-place."""
+    """Perform L3 modify_plan transition. Updates state in-place."""
     current_ps = state.current_sp.prompt_state
     current_pp = state.current_sp.pipeline_params
 
@@ -833,28 +806,16 @@ async def _do_l3_transition(
                 l2_stall_count=state.l2_stall_count,
                 current_plan_preview=str(current_ps.plan)[:120])
 
-    l3_node = L3ModifyPlanNode(
-        node_id=f"l3_modify_plan_r{round_num}",
-        config={
-            "model": config.model,
-            "provider": config.provider,
-            "temperature": config.l3_temperature,
-            "pipeline_schema": config.pipeline_schema,
-        },
-        obs=obs, trace_id=trace_id,
-    )
-    l3_result = await l3_node.process({
-        "prompt_state": current_ps.model_dump(),
-        "l2_history": l2_history,
-        "eval_data": eval_data,
-        "pipeline_params": current_pp,
-    })
-
-    new_ps = PromptState(**l3_result.prompt_state)
-    tr = layer_transitions.TransitionResult(
-        prompt_state=new_ps,
-        pipeline_params=l3_result.pipeline_params,
-    )
+    client = _llm_client.get_llm_client(config.provider)
+    async with observed_step(f"l3_modify_plan_r{round_num}", "L3ModifyPlan",
+                             obs=obs, trace_id=trace_id):
+        tr = await layer_transitions.modify_plan(
+            current_ps, l2_history, eval_data, client,
+            model=config.model,
+            temperature=config.l3_temperature,
+            pipeline_params=current_pp,
+            pipeline_schema=config.pipeline_schema,
+        )
     state.current_sp = state.current_sp.derive(
         prompt_state=tr.prompt_state,
         **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),

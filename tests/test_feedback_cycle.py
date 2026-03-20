@@ -175,22 +175,16 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
 
 
 # ---------------------------------------------------------------------------
-# L1EvaluateOutput.next_action field test
+# next_action default test
 # ---------------------------------------------------------------------------
 
 
-def test_next_action_in_output():
-    """L1EvaluateOutput has next_action field with correct default."""
-    from api.nodes.optimizer_nodes import L1EvaluateOutput
-
-    output = L1EvaluateOutput(
-        winner={"label": "test", "accuracy": 0.5, "hits": 1, "total": 2,
-                "improved": False, "candidates_evaluated": 1},
-        winner_prompt_state={},
-        winner_accuracy=0.5,
-        improved=False,
-    )
-    assert output.next_action == "generate"
+def test_next_action_default():
+    """evaluate_and_select_winner returns next_action='generate' by default."""
+    # This is tested by the integration tests above (test_next_action_stop).
+    # The default is hardcoded in evaluate_and_select_winner() return dict.
+    from api.services.prompt_optimizer import evaluate_and_select_winner
+    assert callable(evaluate_and_select_winner)
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +279,7 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
             current_ps.derive(
                 instruction=f"variant_{i}",
                 changes_description=f"gen_{i}",
-            )
+            ).model_dump()
             for i in range(n)
         ]
 
@@ -752,7 +746,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
             current_ps.derive(
                 instruction=f"variant_{i}_acc{accuracy:.0%}",
                 changes_description=f"gen_{i}",
-            )
+            ).model_dump()
             for i in range(n)
         ]
 

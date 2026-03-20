@@ -27,9 +27,13 @@ This is where 90% of implementation work happens. All core logic lives here.
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
 | `query_utils.py` | Shared query-parsing utilities |
 
-## Optimizer nodes (`api/nodes/`)
+## Step tracing (`api/services/obs/step_tracer.py`)
 
-`NodeBase[TInput, TOutput]` in `api/nodes/base.py` — Template Method pattern with Pydantic generics, opt-in observability. 5 optimizer nodes in `optimizer_nodes.py`: `InitNode`, `L1GenerateNode`, `L1EvaluateNode`, `L2RefineNode`, `L3ModifyPlanNode`. All wired into `feedback_cycle.py`. `OptSearchPoint` (`api/models/opt_search_point.py`) checkpoints optimizer state per round.
+`observed_step()` — async context manager for timing + observability. Replaces the former optimizer node I/O layer. Calls `obs.log_node_step_start/end()` for Langfuse-compatible tracing. The feedback cycle calls service functions directly (no Pydantic I/O wrappers).
+
+## Workflow scaffold nodes (`api/nodes/`)
+
+`NodeBase[TInput, TOutput]` in `api/nodes/base.py` — Template Method pattern with Pydantic generics, opt-in observability. 3 scaffold nodes: `LLMNode`, `PipelineConfigNode`, `RankerNode`. Used by the CWL-inspired workflow runner (future).
 
 ## Evaluation gateway
 
