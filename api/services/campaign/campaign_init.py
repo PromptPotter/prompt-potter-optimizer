@@ -513,11 +513,4 @@ def create_llm_client(
     from api.services.llm_client import get_llm_client
 
     eval_llm = campaign_config["eval_llm"]
-    url = eval_llm.get("provider_url", "")
-    if "anthropic.com" in url:
-        provider = "anthropic"
-    elif "openai.com" in url:
-        provider = "openai"
-    else:
-        provider = "groq"
-    return get_llm_client(provider), eval_llm.get("model", "")
+    return get_llm_client(eval_llm["provider"]), eval_llm["model"]

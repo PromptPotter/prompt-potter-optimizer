@@ -51,6 +51,9 @@ async def decompose_task_context(
     task_description: str,
     campaign_config: dict,
     svc: dict,
+    *,
+    llm_client: "LLMClientBase | None" = None,
+    model: str | None = None,
 ) -> dict:
     """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
 
@@ -68,7 +71,11 @@ async def decompose_task_context(
         print("  (no task description provided)")
         return {}
 
-    llm_client, llm_model = setup_llm(campaign_config)
+    if llm_client is None or model is None:
+        _client, _model = setup_llm(campaign_config)
+        llm_client = llm_client or _client
+        model = model or _model
+    llm_model = model
     store = svc.get("store")
     backend_id = svc.get("backend_id", "")
     improvement_areas = campaign_config.get("improvement_areas", "")
