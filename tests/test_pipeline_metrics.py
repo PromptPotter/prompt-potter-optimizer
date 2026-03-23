@@ -42,10 +42,6 @@ def _make_results(hits, total, *, terminated_at="llm_ranking", gt_in_candidates=
     return results
 
 
-# ---------------------------------------------------------------------------
-# Composite score tests
-# ---------------------------------------------------------------------------
-
 
 class TestComputeCompositeScore:
     def test_basic_with_no_schema(self):
@@ -94,10 +90,6 @@ class TestComputeCompositeScore:
         assert scores["composite"] > 0
 
 
-# ---------------------------------------------------------------------------
-# Node role tests
-# ---------------------------------------------------------------------------
-
 
 class TestNodeRole:
     def test_pipeline_step_has_node_role(self):
@@ -137,10 +129,6 @@ class TestIntermediateMetric:
         metrics = ROLE_METRIC_REGISTRY["candidate_source"]
         assert any(m.name == "source_recall" for m in metrics)
 
-
-# ---------------------------------------------------------------------------
-# derive_metrics tests
-# ---------------------------------------------------------------------------
 
 
 class TestDeriveMetrics:

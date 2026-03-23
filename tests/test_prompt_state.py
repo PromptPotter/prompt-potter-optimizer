@@ -47,7 +47,7 @@ def test_diff():
 
 
 def test_diff_no_redundant_few_shot_field_change():
-    """few_shot changes tracked only in dedicated fields, not in field_changes."""
+
     a = PromptState(instruction="same")
     b = PromptState(
         instruction="same",
@@ -60,7 +60,7 @@ def test_diff_no_redundant_few_shot_field_change():
 
 
 def test_diff_no_redundant_parameters_field_change():
-    """parameters changes tracked only in dedicated fields, not in field_changes."""
+
     a = PromptState(instruction="same", optimizer_params={"k": 1})
     b = PromptState(instruction="same", optimizer_params={"k": 2, "new_key": 3})
     result = diff(a, b)

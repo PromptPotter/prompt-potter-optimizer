@@ -7,14 +7,10 @@ from api.services.campaign.critique_stats import CritiqueContext
 from api.services.llm_client import MockLLMClient
 
 
-# ---------------------------------------------------------------------------
-# CritiqueAgent.run
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_critique_returns_dict():
-    """CritiqueAgent.run returns a dict with 5 critique fields."""
+
     agent = CritiqueAgent(MockLLMClient(), model=None)
     ctx = CritiqueContext(results=[], accuracy=0.5)
     result = await agent.run(ctx)
@@ -26,7 +22,7 @@ async def test_critique_returns_dict():
 
 @pytest.mark.asyncio
 async def test_critique_extracts_json_fields():
-    """When LLM returns JSON with critique fields, extracts them."""
+
     import json
     client = MockLLMClient(responses=[json.dumps({
         "summary": "Fix ranking",
@@ -45,7 +41,7 @@ async def test_critique_extracts_json_fields():
 
 @pytest.mark.asyncio
 async def test_critique_falls_through_on_non_json():
-    """When LLM returns non-JSON text, wraps in summary field."""
+
     client = MockLLMClient(responses=["Plain text critique about failures"])
     agent = CritiqueAgent(client, model=None)
     ctx = CritiqueContext(results=[], accuracy=0.3)
@@ -54,20 +50,16 @@ async def test_critique_falls_through_on_non_json():
     assert result["summary"] == "Plain text critique about failures"
 
 
-# ---------------------------------------------------------------------------
-# sample_thinking_styles
-# ---------------------------------------------------------------------------
-
 
 def test_sample_thinking_styles_returns_requested_count():
-    """Returns the requested number of non-empty styles."""
+
     styles = sample_thinking_styles(n=3, seed=42)
     assert len(styles) == 3
     assert all(s.strip() for s in styles)
 
 
 def test_sample_thinking_styles_no_empty():
-    """All returned styles are non-empty strings."""
+
     styles = sample_thinking_styles(n=5, seed=0)
     assert len(styles) == 5
     for s in styles:
@@ -76,14 +68,14 @@ def test_sample_thinking_styles_no_empty():
 
 
 def test_sample_thinking_styles_deterministic():
-    """Same seed → same result."""
+
     a = sample_thinking_styles(n=3, seed=99)
     b = sample_thinking_styles(n=3, seed=99)
     assert a == b
 
 
 def test_sample_thinking_styles_different_seeds():
-    """Different seeds → (likely) different results."""
+
     a = sample_thinking_styles(n=3, seed=1)
     b = sample_thinking_styles(n=3, seed=2)
     # Could coincidentally match, but very unlikely with 30+ styles

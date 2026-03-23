@@ -6,10 +6,6 @@ from api.models.search_point import SearchPoint
 from api.models.hashing import eval_content_hash
 
 
-# ---------------------------------------------------------------------------
-# Construction
-# ---------------------------------------------------------------------------
-
 
 def test_construct_with_defaults():
     ps = PromptState(instruction="Rank by relevance.")
@@ -33,10 +29,6 @@ def test_construct_with_all_fields():
     assert sp.pipeline_params == {"steps": ["llm_ranking"]}
 
 
-# ---------------------------------------------------------------------------
-# Frozen (immutable)
-# ---------------------------------------------------------------------------
-
 
 def test_frozen():
     ps = PromptState(instruction="test")
@@ -44,10 +36,6 @@ def test_frozen():
     with pytest.raises(Exception):
         sp.model = "new-model"
 
-
-# ---------------------------------------------------------------------------
-# render()
-# ---------------------------------------------------------------------------
 
 
 def test_render_delegates():
@@ -60,10 +48,6 @@ def test_render_delegates():
     assert "Expert" in sp.render()
     assert "Rank candidates." in sp.render()
 
-
-# ---------------------------------------------------------------------------
-# content_hash()
-# ---------------------------------------------------------------------------
 
 
 def test_content_hash_matches_eval_content_hash():
@@ -105,7 +89,7 @@ def test_content_hash_differs_with_temperature():
 
 
 def test_content_hash_includes_steps_in_pipeline_params():
-    """Different steps produce different hashes (steps affect backend behavior)."""
+
     ps = PromptState(instruction="Rank by relevance.")
     eval_data = [{"query": "q", "ground_truth": "a"}]
     sp_a = SearchPoint(prompt_state=ps, pipeline_params={"steps": ["llm_ranking"]})
@@ -118,7 +102,7 @@ def test_content_hash_includes_steps_in_pipeline_params():
 
 
 def test_content_hash_differs_with_non_steps_pipeline_params():
-    """Non-steps pipeline_params produce different hashes."""
+
     ps = PromptState(instruction="Rank by relevance.")
     eval_data = [{"query": "q", "ground_truth": "a"}]
     sp_a = SearchPoint(prompt_state=ps, pipeline_params={"ranking_temperature": 0.5})
@@ -128,13 +112,9 @@ def test_content_hash_differs_with_non_steps_pipeline_params():
     assert sp_a.content_hash(eval_data) != sp_none.content_hash(eval_data)
 
 
-# ---------------------------------------------------------------------------
-# derive()
-# ---------------------------------------------------------------------------
-
 
 def test_derive_prompt_state_field():
-    """PromptState fields route to prompt_state.derive()."""
+
     ps = PromptState(instruction="original", persona="")
     sp = SearchPoint(prompt_state=ps, model="llama-3", temperature=0.5)
     sp2 = sp.derive(instruction="modified")
@@ -145,7 +125,7 @@ def test_derive_prompt_state_field():
 
 
 def test_derive_search_point_field():
-    """SearchPoint-level fields are updated directly."""
+
     ps = PromptState(instruction="original")
     sp = SearchPoint(prompt_state=ps, model="llama-3", temperature=0.5)
     sp2 = sp.derive(model="gpt-4", temperature=0.9)
@@ -156,7 +136,7 @@ def test_derive_search_point_field():
 
 
 def test_derive_mixed_fields():
-    """Both PromptState and SearchPoint fields in one derive call."""
+
     ps = PromptState(instruction="original", persona="Expert")
     sp = SearchPoint(prompt_state=ps, model="llama-3", temperature=0.5)
     sp2 = sp.derive(instruction="modified", model="gpt-4")
@@ -167,7 +147,7 @@ def test_derive_mixed_fields():
 
 
 def test_derive_prompt_state_replacement():
-    """Passing prompt_state directly replaces it."""
+
     ps1 = PromptState(instruction="first")
     ps2 = PromptState(instruction="second")
     sp = SearchPoint(prompt_state=ps1, model="llama-3")

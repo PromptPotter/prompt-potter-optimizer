@@ -33,14 +33,10 @@ def _mock_client(response_dict: dict) -> MockLLMClient:
     return MockLLMClient(responses=[json.dumps(response_dict)])
 
 
-# ---------------------------------------------------------------------------
-# Unit tests: refine_context
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_refine_context_applies_parameters():
-    """refine_context merges LLM-recommended parameters onto current state."""
+
     client = _mock_client({
         "optimizer_params": {"creativity": 0.9, "n_variants": 8},
         "context": "",
@@ -67,7 +63,7 @@ async def test_refine_context_applies_parameters():
 
 @pytest.mark.asyncio
 async def test_refine_context_applies_task_context():
-    """refine_context updates task_context when LLM recommends it."""
+
     client = _mock_client({
         "optimizer_params": {},
         "task_context": {"domain": "pharmaceutical"},
@@ -86,7 +82,7 @@ async def test_refine_context_applies_task_context():
 
 @pytest.mark.asyncio
 async def test_refine_context_no_changes_returns_same():
-    """refine_context returns current PS unchanged when LLM suggests nothing."""
+
     client = _mock_client({
         "optimizer_params": {},
         "context": "",
@@ -102,14 +98,10 @@ async def test_refine_context_no_changes_returns_same():
     assert "L2:" in result.prompt_state.changes_description
 
 
-# ---------------------------------------------------------------------------
-# Unit tests: modify_plan
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_modify_plan_sets_new_plan():
-    """modify_plan applies a new strategic plan from LLM."""
+
     client = _mock_client({
         "plan": "Use chain-of-thought reasoning with explicit comparison steps.",
         "rationale": "Switch from direct ranking to comparative reasoning",
@@ -130,7 +122,7 @@ async def test_modify_plan_sets_new_plan():
 
 @pytest.mark.asyncio
 async def test_modify_plan_preserves_other_fields():
-    """modify_plan only changes plan and changes_description."""
+
     client = _mock_client({
         "plan": "New strategy",
         "rationale": "Strategic shift",
@@ -150,14 +142,10 @@ async def test_modify_plan_preserves_other_fields():
     assert result.prompt_state.plan == "New strategy"
 
 
-# ---------------------------------------------------------------------------
-# Integration: L1→L2 escalation in feedback cycle
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_l1_l2_escalation(monkeypatch, eval_data):
-    """When L1 stalls and enable_l2=True, cycle calls refine_context and continues."""
+
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
 
@@ -206,14 +194,10 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
     assert result.stop_reason == "l2_patience_exhausted"
 
 
-# ---------------------------------------------------------------------------
-# Integration: L2→L3 escalation in feedback cycle
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_l2_l3_escalation(monkeypatch, eval_data):
-    """Full L1→L2→L3 escalation chain when all levels stall."""
+
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[0])
@@ -273,14 +257,10 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
     assert result.stop_reason == "l3_patience_exhausted"
 
 
-# ---------------------------------------------------------------------------
-# L2 meta-param overrides
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_l2_meta_param_overrides(monkeypatch, eval_data):
-    """PromptState.optimizer_params override n_variants and creativity in generation."""
+
     apply_llm_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[3])  # perfect → stops after round 0
 
@@ -332,14 +312,10 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
     assert gen_calls[0]["creativity"] == 0.95
 
 
-# ---------------------------------------------------------------------------
-# PromptState.plan injection into meta-prompt
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
-    """PromptState.plan is appended to meta-prompt during candidate generation."""
+
     apply_llm_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=[3])  # perfect → stops
 
@@ -389,14 +365,10 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
     assert any("chain-of-thought" in (p or "") for p in captured_prompts)
 
 
-# ---------------------------------------------------------------------------
-# Pipeline params in TransitionResult
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_refine_context_ignores_pipeline_params():
-    """refine_context does NOT return pipeline_params (L1's job)."""
+
     client = _mock_client({
         "optimizer_params": {"creativity": 0.5},
         "context": "Updated context",
@@ -417,7 +389,7 @@ async def test_refine_context_ignores_pipeline_params():
 
 @pytest.mark.asyncio
 async def test_modify_plan_with_pipeline_params():
-    """modify_plan returns pipeline_params when LLM suggests them."""
+
     client = _mock_client({
         "plan": "Focus on fuzzy matching",
         "pipeline_params": {"fuzzy_matching": {"threshold": 0.6}},

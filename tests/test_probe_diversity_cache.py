@@ -7,10 +7,7 @@ from api.models.prompt_state import PromptState
 from api.services.prompt_optimizer import l1_generate
 from api.services.stores.dataset_run_store import DatasetRunStore
 
-
-# ---------------------------------------------------------------------------
-# Issue 1: Probe round enrichment
-# ---------------------------------------------------------------------------
+from _helpers import make_dataset_run
 
 
 def _capture_llm_prompts(monkeypatch):
@@ -31,7 +28,6 @@ def _capture_llm_prompts(monkeypatch):
 
 
 class TestProbeRoundEnrichment:
-    """l1_generate() with is_probe_round=True injects structured signal."""
 
     @pytest.fixture()
     def warning_inventory(self):
@@ -66,7 +62,6 @@ class TestProbeRoundEnrichment:
     async def test_probe_meta_prompt_contains_warning_summary(
         self, monkeypatch, warning_inventory,
     ):
-        """Probe round meta-prompt includes summarize_warning_inventory output."""
         captured = _capture_llm_prompts(monkeypatch)
 
         ps = PromptState(instruction="test prompt")
@@ -88,7 +83,6 @@ class TestProbeRoundEnrichment:
     async def test_probe_includes_escalation_journal(
         self, monkeypatch, warning_inventory, escalation_journal,
     ):
-        """Probe round includes tried configs from escalation journal."""
         captured = _capture_llm_prompts(monkeypatch)
 
         ps = PromptState(instruction="test prompt")
@@ -110,10 +104,8 @@ class TestProbeRoundEnrichment:
     async def test_probe_lowers_annotation_threshold(
         self, monkeypatch, warning_inventory,
     ):
-        """During probe, single-occurrence warnings are annotated on failure examples."""
         captured = _capture_llm_prompts(monkeypatch)
 
-        # Give aspirin a single-count warning
         inv = {
             "aspirin": {
                 "rounds_seen": 1, "hits": 0, "misses": 1,
@@ -138,7 +130,6 @@ class TestProbeRoundEnrichment:
     async def test_non_probe_does_not_annotate_single_occurrence(
         self, monkeypatch,
     ):
-        """Outside probe, single-occurrence warnings are NOT annotated."""
         captured = _capture_llm_prompts(monkeypatch)
 
         inv = {
@@ -162,17 +153,10 @@ class TestProbeRoundEnrichment:
         assert "[web_search:timeout" not in captured[0]
 
 
-# ---------------------------------------------------------------------------
-# Issue 3: Value diversity (template-driven, no rigid axis assignment)
-# ---------------------------------------------------------------------------
-
-
 class TestValueDiversity:
-    """Thinking style instructs LLM to maximize value diversity."""
 
     @pytest.mark.asyncio
     async def test_diversity_in_thinking_style(self, monkeypatch):
-        """Meta-prompt thinking_style includes value diversity instruction."""
         captured = _capture_llm_prompts(monkeypatch)
 
         ps = PromptState(instruction="test")
@@ -188,13 +172,7 @@ class TestValueDiversity:
         assert "Candidate 1 → focus on:" not in captured[0]
 
 
-# ---------------------------------------------------------------------------
-# Issue 2: SP-hash query caching (find_cached_queries)
-# ---------------------------------------------------------------------------
-
-
 class TestFindCachedQueries:
-    """DatasetRunStore.find_cached_queries returns per-query results by SP hash."""
 
     @pytest.fixture()
     def drs(self, tmp_path):
@@ -206,27 +184,22 @@ class TestFindCachedQueries:
              "hit": pred == gt, "score": 1.0 if pred == gt else 0.0, "error": None}
             for q, pred, gt in queries
         ]
-        run: dict = {
-            "run_id": run_id,
-            "name": run_id,
-            "content_hash": f"ch_{run_id}",
-            "prompt_state_id": "ps1",
-            "rendered_prompt_hash": "rph1",
-            "sp_hash": sp_hash,
-            "model": "m1",
-            "temperature": 0.5,
-            "item_count": len(items),
-            "scores": {"accuracy": 0.5, "hits": 1, "total": len(items)},
-            "source": "test",
-            "created_at": "2026-01-01T00:00:00Z",
-            "dataset_run_items": items,
-        }
+        hits = sum(1 for it in items if it.get("hit"))
+        total = len(items)
+        run = make_dataset_run(
+            run_id, accuracy=hits / total if total else 0.0,
+            items=items, content_hash=f"ch_{run_id}",
+        )
+        run["sp_hash"] = sp_hash
+        run["rendered_prompt_hash"] = "rph1"
+        run["model"] = "m1"
+        run["temperature"] = 0.5
+        run["source"] = "test"
         if pipeline_params:
             run["pipeline_params"] = pipeline_params
         return run
 
     def test_finds_queries_across_different_sample_sizes(self, drs):
-        """Runs with same SP hash but different sample sizes share queries."""
         run1 = self._make_run("r1", "sp_aaa", [("q1", "A", "A"), ("q2", "B", "B")])
         run2 = self._make_run("r2", "sp_aaa", [("q3", "C", "C"), ("q4", "D", "D")])
         drs.save("b1", "r1", run1)
@@ -236,7 +209,6 @@ class TestFindCachedQueries:
         assert set(results.keys()) == {"q1", "q2", "q3", "q4"}
 
     def test_different_sp_hash_no_match(self, drs):
-        """Different SP hash -> no results."""
         run = self._make_run("r1", "sp_aaa", [("q1", "A", "A")])
         drs.save("b1", "r1", run)
 
@@ -244,7 +216,6 @@ class TestFindCachedQueries:
         assert results == {}
 
     def test_later_run_overwrites_query(self, drs):
-        """Same query in later run overwrites earlier result."""
         run1 = self._make_run("r1", "sp_aaa", [("q1", "WRONG", "A")])
         run2 = self._make_run("r2", "sp_aaa", [("q1", "A", "A")])
         drs.save("b1", "r1", run1)
@@ -255,7 +226,6 @@ class TestFindCachedQueries:
 
 
 class TestEvaluatePromptBatchCaching:
-    """evaluate_prompt_batch skips backend calls for cached queries."""
 
     def test_cached_queries_skip_backend(self):
         from unittest.mock import MagicMock

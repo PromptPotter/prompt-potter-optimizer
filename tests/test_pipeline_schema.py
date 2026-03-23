@@ -12,13 +12,7 @@ from api.models.pipeline_schema import (
 from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA, parse_pipeline_response
 
 
-# ---------------------------------------------------------------------------
-# Derivation methods
-# ---------------------------------------------------------------------------
-
-
 def test_derivation_methods():
-    """step_param_keys, obs_extraction_map, langfuse_type_map, runtime filtering."""
     schema = PipelineSchema(
         name="test",
         steps=[
@@ -73,16 +67,9 @@ def test_derivation_methods():
     assert [s.name for s in schema.frontend_steps()] == ["cache"]
 
 
-# ---------------------------------------------------------------------------
-# Consistency with hardcoded constants
-# ---------------------------------------------------------------------------
-
-
 class TestTermNormConsistency:
-    """Verify TERMNORM_DEFAULT_SCHEMA matches every hardcoded constant."""
 
     def test_override_map_covers_param_keys(self):
-        """Every param_keys entry has a corresponding override_map entry."""
         for step in TERMNORM_DEFAULT_SCHEMA.steps:
             for pk in step.param_keys:
                 assert pk in step.override_map, (
@@ -104,19 +91,17 @@ class TestTermNormConsistency:
                 assert schema_f.output_field == orig.output_field
                 assert schema_f.is_llm == orig.is_llm
 
-    def test_required_step_matches(self):
+    def test_required_step_template_vars_dataset_name(self):
         from api.services.search.eval_dataset import REQUIRED_PIPELINE_KEY
-        assert TERMNORM_DEFAULT_SCHEMA.required_step == REQUIRED_PIPELINE_KEY
-
-    def test_template_variables(self):
-        expected = {"{{core_concept}}", "{{entity_profile_json}}", "{{matches}}"}
-        assert TERMNORM_DEFAULT_SCHEMA.template_variables == expected
-
-    def test_dataset_name_matches(self):
         from api.services.constants import DATASET_NAME
+
+        assert TERMNORM_DEFAULT_SCHEMA.required_step == REQUIRED_PIPELINE_KEY
+        assert TERMNORM_DEFAULT_SCHEMA.template_variables == {
+            "{{core_concept}}", "{{entity_profile_json}}", "{{matches}}",
+        }
         assert TERMNORM_DEFAULT_SCHEMA.dataset_name == DATASET_NAME
 
-    def test_langfuse_type_map_matches(self):
+    def test_langfuse_types_fuzzy_params_runtime(self):
         expected = {
             "web_search": "tool",
             "entity_profiling": "generation",
@@ -127,22 +112,15 @@ class TestTermNormConsistency:
         for step_name, expected_type in expected.items():
             assert lf_map[step_name] == expected_type
 
-    def test_fuzzy_matching_param_keys(self):
         fm = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "fuzzy_matching")
         assert fm.param_keys == {"fuzzy_threshold", "fuzzy_scorer"}
 
-    def test_runtime_classification(self):
         frontend = [s.name for s in TERMNORM_DEFAULT_SCHEMA.frontend_steps()]
         assert frontend == ["cache_lookup", "fuzzy_matching"]
         assert all(s.short_circuit for s in TERMNORM_DEFAULT_SCHEMA.frontend_steps())
 
         backend = [s.name for s in TERMNORM_DEFAULT_SCHEMA.backend_steps()]
         assert backend == ["web_search", "entity_profiling", "token_matching", "llm_ranking"]
-
-
-# ---------------------------------------------------------------------------
-# parse_pipeline_response
-# ---------------------------------------------------------------------------
 
 
 class TestParsePipelineResponse:
@@ -175,7 +153,6 @@ class TestParsePipelineResponse:
         assert step_a.param_keys == {"param1", "param2"}
 
     def test_top_level_resolved_unknown(self):
-        """New format: top-level resolved_schemas/resolved_prompts dicts."""
         data = {
             "name": "CustomNodes",
             "version": "1.0",
@@ -220,7 +197,6 @@ class TestParsePipelineResponse:
         assert schema.steps[1].output_schema is None
 
     def test_top_level_resolved_known_pipeline(self):
-        """Known pipeline with top-level resolved dicts merges metadata."""
         data = {
             "name": "TermNorm", "version": "v2.0",
             "nodes": {
@@ -256,13 +232,7 @@ class TestParsePipelineResponse:
         assert ws.prompt_meta.template_variables == ["query"]
 
 
-# ---------------------------------------------------------------------------
-# Default schema — no hardcoded registry metadata
-# ---------------------------------------------------------------------------
-
-
 def test_termnorm_default_no_hardcoded_metadata():
-    """LLM steps have structural fields but no registry-owned output_schema/prompt_meta."""
     ep = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "entity_profiling")
     lr = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "llm_ranking")
 
@@ -282,17 +252,7 @@ def test_termnorm_default_no_hardcoded_metadata():
     assert lr.langfuse_type == "generation"
 
 
-# ---------------------------------------------------------------------------
-# Live response metadata flow
-# ---------------------------------------------------------------------------
-
-
 def test_data_envelope_unwrap():
-    """TermNorm wraps response in {"status": "success", "data": {...}}.
-
-    parse_pipeline_response must unwrap the "data" envelope to find the
-    pipeline name, nodes, and resolved metadata.
-    """
     data = {
         "status": "success",
         "data": {
@@ -348,7 +308,6 @@ def test_data_envelope_unwrap():
 
 
 def test_unknown_pipeline_current_config():
-    """Unknown pipeline path captures all non-internal config keys as current_config."""
     data = {
         "name": "CustomPipeline",
         "version": "1.0",
@@ -386,7 +345,6 @@ def test_unknown_pipeline_current_config():
 
 
 def test_known_pipeline_metadata_from_live_response():
-    """Live response resolved metadata merges onto correct known-pipeline steps."""
     data = {
         "name": "TermNorm", "version": "2.0",
         "nodes": {

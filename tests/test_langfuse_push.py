@@ -23,13 +23,7 @@ from _helpers import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_run(run_id: str, accuracy: float, items: list[dict] | None = None):
-    """Build a minimal dataset_run dict."""
     if items is None:
         items = [
             {"query": "aspirin", "predicted": "Aspirin",
@@ -39,88 +33,8 @@ def _make_run(run_id: str, accuracy: float, items: list[dict] | None = None):
 
 
 def _seed_runs(store: ProjectStore, backend_id: str, runs: list[dict]):
-    """Save runs to the store so they appear in list_all / load_by_id."""
     for run in runs:
         store.dataset_runs.save(backend_id, run["run_id"], run)
-
-
-def _make_pipeline_items():
-    """Build items with pipeline_data for testing pipeline observations."""
-    return [
-        {
-            "query": "aspirin",
-            "predicted": "Aspirin",
-            "ground_truth": "Aspirin",
-            "hit": True,
-            "pipeline_data": {
-                "entity_profile": {
-                    "core_concept": "pain reliever",
-                    "entity_name": "Aspirin",
-                },
-                "token_matched_candidates": [
-                    ("Aspirin", 5), ("Aspirin Tablet", 3),
-                ],
-                "ranked_candidates": [
-                    {"candidate": "Aspirin", "relevance_score": 0.95},
-                    {"candidate": "Aspirin Tablet", "relevance_score": 0.70},
-                ],
-                "step_timings": {
-                    "entity_profiling": 1.2,
-                    "token_matching": 0.05,
-                    "llm_ranking": 0.8,
-                },
-                "llm_provider": "groq/llama-4",
-                "total_time": 2.1,
-                "web_search_status": "success",
-                "web_search_error": None,
-                "web_sources": [
-                    {"title": "Aspirin - Wikipedia", "url": "https://example.com/aspirin"},
-                ],
-                "pipeline_params": {
-                    "max_sites": 3,
-                    "ranking_temperature": 0.0,
-                    "max_token_candidates": 20,
-                },
-            },
-        },
-        {
-            "query": "ibuprofen",
-            "predicted": "Ibuprofen",
-            "ground_truth": "Ibuprofen",
-            "hit": True,
-            "pipeline_data": {
-                "entity_profile": {
-                    "core_concept": "NSAID",
-                    "entity_name": "Ibuprofen",
-                },
-                "token_matched_candidates": [
-                    ("Ibuprofen", 4),
-                ],
-                "ranked_candidates": [
-                    {"candidate": "Ibuprofen", "relevance_score": 0.9},
-                ],
-                "step_timings": {
-                    "entity_profiling": 1.0,
-                    "token_matching": 0.04,
-                    "llm_ranking": 0.6,
-                },
-                "llm_provider": "groq/llama-4",
-                "total_time": 1.7,
-                "web_search_status": "success",
-                "web_search_error": None,
-                "web_sources": [],
-                "pipeline_params": {
-                    "max_sites": 3,
-                    "ranking_temperature": 0.0,
-                },
-            },
-        },
-    ]
-
-
-# ---------------------------------------------------------------------------
-# classify_run_origin
-# ---------------------------------------------------------------------------
 
 
 class TestClassifyRunOrigin:
@@ -136,13 +50,7 @@ class TestClassifyRunOrigin:
         assert classify_run_origin(run_id, source=source) == expected
 
 
-# ---------------------------------------------------------------------------
-# push_run (single-run)
-# ---------------------------------------------------------------------------
-
-
 def test_push_run_basic_and_idempotent(tmp_path):
-    """push_run returns per-query trace IDs, second call returns None."""
     store = ProjectStore(tmp_path)
     backend_id = "test-backend"
 
@@ -167,7 +75,6 @@ def test_push_run_basic_and_idempotent(tmp_path):
 
 
 def test_push_run_with_dataset_linking(tmp_path):
-    """push_run links traces to dataset items when query_to_item_id given."""
     store = ProjectStore(tmp_path)
     backend_id = "test-backend"
 
@@ -183,193 +90,6 @@ def test_push_run_with_dataset_linking(tmp_path):
     assert link["dataset_item_id"] == "item_abc"
     assert link["run_name"] == "baseline_001"
     assert link["trace_id"].startswith("mock_trace_")
-
-
-# ---------------------------------------------------------------------------
-# push_all_runs (batch)
-# ---------------------------------------------------------------------------
-
-
-def test_push_all_dataset_registration(tmp_path, monkeypatch):
-    """push_all_runs registers dataset items and links per-query traces."""
-    store = ProjectStore(tmp_path)
-    backend_id = "test-backend"
-
-    items = [
-        {"query": "aspirin", "predicted": "Aspirin",
-         "ground_truth": "Aspirin", "hit": True},
-        {"query": "ibuprofen", "predicted": "wrong",
-         "ground_truth": "Ibuprofen", "hit": False},
-    ]
-    _seed_runs(store, backend_id, [_make_run("baseline_001", 0.5, items=items)])
-
-    mock = MockLangfuseLogger()
-    monkeypatch.setattr(LangfuseLogger, "get_instance", classmethod(lambda cls: mock))
-
-    push_all_runs(store, backend_id)
-
-    # Dataset created with items
-    assert len(mock.datasets_created) == 1
-    assert mock.datasets_created[0]["name"] == DATASET_NAME
-    assert len(mock.dataset_items_created) == 2
-    queries = {it["input"]["query"] for it in mock.dataset_items_created}
-    assert queries == {"aspirin", "ibuprofen"}
-
-    # Per-query traces created and linked
-    assert len(mock.traces) == 2
-    assert len(mock.dataset_run_links) == 2
-    for link in mock.dataset_run_links:
-        assert link["trace_id"].startswith("mock_trace_")
-
-
-def test_push_all_multi_query_run(tmp_path, monkeypatch):
-    """A run with N queries creates N traces."""
-    store = ProjectStore(tmp_path)
-    backend_id = "test-backend"
-
-    items = [
-        {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True},
-        {"query": "q2", "predicted": "wrong", "ground_truth": "p2", "hit": False},
-        {"query": "q3", "predicted": "p3", "ground_truth": "p3", "hit": True},
-    ]
-    _seed_runs(store, backend_id, [_make_run("baseline_001", 0.67, items=items)])
-
-    mock = MockLangfuseLogger()
-    monkeypatch.setattr(LangfuseLogger, "get_instance", classmethod(lambda cls: mock))
-    push_all_runs(store, backend_id)
-
-    assert len(mock.traces) == 3
-    assert len(mock.scores) == 3
-
-
-def test_push_all_idempotent_and_incremental(tmp_path, monkeypatch):
-    """Second call skips done runs; new runs get pushed incrementally."""
-    store = ProjectStore(tmp_path)
-    backend_id = "test-backend"
-
-    _seed_runs(store, backend_id, [_make_run("baseline_001", 0.5)])
-
-    mock = MockLangfuseLogger()
-    monkeypatch.setattr(LangfuseLogger, "get_instance", classmethod(lambda cls: mock))
-
-    stats1 = push_all_runs(store, backend_id)
-    assert stats1["new_runs"] == 1
-
-    # Add more runs
-    _seed_runs(store, backend_id, [_make_run("grid_001", 0.9)])
-
-    mock.traces.clear()
-    mock.spans.clear()
-    mock.scores.clear()
-    mock.trace_updates.clear()
-    mock.end_trace_calls.clear()
-
-    stats2 = push_all_runs(store, backend_id)
-    assert stats2["new_runs"] == 1
-    assert stats2["already_done"] == 1
-    assert len(mock.traces) == 1  # only the new run
-
-
-# ---------------------------------------------------------------------------
-# State file
-# ---------------------------------------------------------------------------
-
-
-def test_state_persisted(tmp_path, monkeypatch):
-    """backfill_state.json with per-run trace ID lists."""
-    store = ProjectStore(tmp_path)
-    backend_id = "test-backend"
-
-    _seed_runs(store, backend_id, [
-        _make_run("baseline_001", 0.5),
-        _make_run("scan_001", 0.7),
-    ])
-
-    mock = MockLangfuseLogger()
-    monkeypatch.setattr(LangfuseLogger, "get_instance", classmethod(lambda cls: mock))
-    push_all_runs(store, backend_id)
-
-    state_path = tmp_path / backend_id / "obs" / "langfuse" / "backfill_state.json"
-    assert state_path.exists()
-
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert set(state["backfilled_run_ids"]) == {"baseline_001", "scan_001"}
-    assert isinstance(state["langfuse_trace_ids"]["baseline_001"], list)
-    assert len(state["dataset_items"]) > 0
-
-
-# ---------------------------------------------------------------------------
-# Pipeline step observations
-# ---------------------------------------------------------------------------
-
-
-def test_pipeline_step_structure_and_types(tmp_path):
-    """Pipeline steps: child spans with correct names, types, and parent traces."""
-    store = ProjectStore(tmp_path)
-    backend_id = "test-backend"
-
-    _seed_runs(store, backend_id, [_make_run("baseline_001", 1.0, _make_pipeline_items())])
-
-    mock = MockLangfuseLogger()
-    result = push_run(mock, store, backend_id, "baseline_001")
-
-    # 2 rooted traces (one per query)
-    assert len(result) == 2
-    assert len(mock.traces) == 2
-
-    # 4 steps per query × 2 queries = 8 child spans
-    assert len(mock.spans) == 8
-    span_names = {s["name"] for s in mock.spans}
-    assert span_names == {"web_search", "entity_profiling", "token_matching", "llm_ranking"}
-
-    # All spans belong to a rooted trace
-    trace_ids = {t["id"] for t in mock.traces}
-    for s in mock.spans:
-        assert s["trace_id"] in trace_ids
-
-    # Correct as_type per step
-    for s in mock.spans:
-        if s["name"] == "web_search":
-            assert s["as_type"] == "tool"
-        elif s["name"] == "token_matching":
-            assert s["as_type"] == "retriever"
-        else:
-            assert s["as_type"] == "generation"
-
-
-def test_pipeline_step_content_and_scores(tmp_path):
-    """Pipeline step content, trace output, hit scores, and metadata."""
-    store = ProjectStore(tmp_path)
-    backend_id = "test-backend"
-
-    _seed_runs(store, backend_id, [_make_run("baseline_001", 1.0, _make_pipeline_items())])
-
-    mock = MockLangfuseLogger()
-    push_run(mock, store, backend_id, "baseline_001")
-
-    # Step content
-    entity_obs = [s for s in mock.spans if s["name"] == "entity_profiling"]
-    for s in entity_obs:
-        assert "core_concept" in s["output"]
-
-    ranking_obs = [s for s in mock.spans if s["name"] == "llm_ranking"]
-    for s in ranking_obs:
-        assert "candidates" in s["output"]
-        assert len(s["output"]["candidates"]) > 0
-
-    # Hit scores
-    assert len(mock.scores) == 2
-    assert all(s["name"] == "hit" and s["value"] == 1.0 for s in mock.scores)
-
-    # Trace output
-    assert len(mock.trace_updates) == 2
-    for tu in mock.trace_updates:
-        assert "predicted" in tu["output"]
-        assert "ground_truth" in tu["output"]
-
-    # Pipeline params in metadata
-    aspirin_trace = [t for t in mock.traces if t["input"]["query"] == "aspirin"][0]
-    assert aspirin_trace["metadata"]["pipeline_params"]["max_sites"] == 3
 
 
 def test_fallback_no_pipeline_data(tmp_path):
@@ -391,13 +111,97 @@ def test_fallback_no_pipeline_data(tmp_path):
     assert len(mock.spans) == 0  # no pipeline step spans
 
 
-# ---------------------------------------------------------------------------
-# Local obs finalization
-# ---------------------------------------------------------------------------
+class TestPushAllRuns:
+    """Tests for push_all_runs (batch push)."""
+
+    BACKEND_ID = "test-backend"
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.store = ProjectStore(tmp_path)
+        self.mock = MockLangfuseLogger()
+        monkeypatch.setattr(
+            LangfuseLogger, "get_instance", classmethod(lambda cls: self.mock),
+        )
+
+    def test_dataset_registration(self):
+        items = [
+            {"query": "aspirin", "predicted": "Aspirin",
+             "ground_truth": "Aspirin", "hit": True},
+            {"query": "ibuprofen", "predicted": "wrong",
+             "ground_truth": "Ibuprofen", "hit": False},
+        ]
+        _seed_runs(self.store, self.BACKEND_ID,
+                    [_make_run("baseline_001", 0.5, items=items)])
+
+        push_all_runs(self.store, self.BACKEND_ID)
+
+        # Dataset created with items
+        assert len(self.mock.datasets_created) == 1
+        assert self.mock.datasets_created[0]["name"] == DATASET_NAME
+        assert len(self.mock.dataset_items_created) == 2
+        queries = {it["input"]["query"] for it in self.mock.dataset_items_created}
+        assert queries == {"aspirin", "ibuprofen"}
+
+        # Per-query traces created and linked
+        assert len(self.mock.traces) == 2
+        assert len(self.mock.dataset_run_links) == 2
+        for link in self.mock.dataset_run_links:
+            assert link["trace_id"].startswith("mock_trace_")
+
+    def test_multi_query_run(self):
+        items = [
+            {"query": "q1", "predicted": "p1", "ground_truth": "p1", "hit": True},
+            {"query": "q2", "predicted": "wrong", "ground_truth": "p2", "hit": False},
+            {"query": "q3", "predicted": "p3", "ground_truth": "p3", "hit": True},
+        ]
+        _seed_runs(self.store, self.BACKEND_ID,
+                    [_make_run("baseline_001", 0.67, items=items)])
+
+        push_all_runs(self.store, self.BACKEND_ID)
+
+        assert len(self.mock.traces) == 3
+        assert len(self.mock.scores) == 3
+
+    def test_idempotent_and_incremental(self):
+        _seed_runs(self.store, self.BACKEND_ID, [_make_run("baseline_001", 0.5)])
+
+        stats1 = push_all_runs(self.store, self.BACKEND_ID)
+        assert stats1["new_runs"] == 1
+
+        # Add more runs
+        _seed_runs(self.store, self.BACKEND_ID, [_make_run("grid_001", 0.9)])
+
+        self.mock.traces.clear()
+        self.mock.spans.clear()
+        self.mock.scores.clear()
+        self.mock.trace_updates.clear()
+        self.mock.end_trace_calls.clear()
+
+        stats2 = push_all_runs(self.store, self.BACKEND_ID)
+        assert stats2["new_runs"] == 1
+        assert stats2["already_done"] == 1
+        assert len(self.mock.traces) == 1  # only the new run
+
+    def test_state_persisted(self):
+        _seed_runs(self.store, self.BACKEND_ID, [
+            _make_run("baseline_001", 0.5),
+            _make_run("scan_001", 0.7),
+        ])
+
+        push_all_runs(self.store, self.BACKEND_ID)
+
+        state_path = (self.store.base_dir / self.BACKEND_ID
+                      / "obs" / "langfuse" / "backfill_state.json")
+        assert state_path.exists()
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert set(state["backfilled_run_ids"]) == {"baseline_001", "scan_001"}
+        assert isinstance(state["langfuse_trace_ids"]["baseline_001"], list)
+        assert len(state["dataset_items"]) > 0
 
 
 def test_finalize_obs_with_explicit_obs(tmp_path):
-    """_finalize_observability logs to the provided ObsLogger without error."""
     from api.services.prompt_eval import _finalize_observability
     from api.services.obs.observability_logger import ObsLogger
 
@@ -418,14 +222,8 @@ def test_finalize_obs_with_explicit_obs(tmp_path):
     )
 
 
-# ---------------------------------------------------------------------------
-# Feedback-cycle Langfuse integration (merged from test_langfuse_integration)
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
-    """Full feedback cycle: campaign trace, per-round spans/scores, final output."""
     from api.services.campaign.models import CycleConfig
     from api.services.campaign.feedback_cycle import run_feedback_cycle
     from api.models.prompt_state import PromptState

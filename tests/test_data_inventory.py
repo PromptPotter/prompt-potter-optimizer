@@ -43,7 +43,7 @@ def _build_index(store, backend_id, runs):
 
 
 def test_single_axis_change_counted(tmp_store):
-    """Grid plan with one variant (persona changed) -> persona.n_prompts=1."""
+
     bl = _make_baseline()
     variant = bl.derive(persona="expert")
     _save_grid_plan(tmp_store, "b1", bl, [variant])
@@ -61,7 +61,7 @@ def test_single_axis_change_counted(tmp_store):
 
 
 def test_multi_axis_change_counted_per_axis(tmp_store):
-    """Variant with persona+task_intent changed -> both axes get +1."""
+
     bl = _make_baseline()
     variant = bl.derive(persona="expert", task_intent="new intent")
     _save_grid_plan(tmp_store, "b1", bl, [variant])
@@ -77,7 +77,7 @@ def test_multi_axis_change_counted_per_axis(tmp_store):
 
 
 def test_baseline_itself_counted(tmp_store):
-    """Plan baseline present in the index -> baseline_queries > 0."""
+
     bl = _make_baseline()
     _save_grid_plan(tmp_store, "b1", bl, [])
 
@@ -91,7 +91,7 @@ def test_baseline_itself_counted(tmp_store):
 
 
 def test_unmatched_prompts_tracked(tmp_store):
-    """Extra prompt in index not from any plan -> unmatched_prompts=1."""
+
     bl = _make_baseline()
     _save_grid_plan(tmp_store, "b1", bl, [])
 
@@ -108,7 +108,7 @@ def test_unmatched_prompts_tracked(tmp_store):
 
 
 def test_pipeline_params_from_smart_search(tmp_store):
-    """Smart search plan with pipeline_param axis_profiles -> pipeline_params."""
+
     bl = _make_baseline()
     plan_data = serialize_smart_search_plan(
         plan_id="ssplan_abc123",

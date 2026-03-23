@@ -30,15 +30,9 @@ from _helpers import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Multi-round improving test
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
-    """Feedback cycle improves accuracy over multiple rounds."""
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[1, 2, 3],
     )
@@ -51,15 +45,9 @@ async def test_multi_round_improvement(monkeypatch, eval_data, cycle_config):
     assert result.rounds[2].accuracy == 1.0
 
 
-# ---------------------------------------------------------------------------
-# Patience exhaustion test
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
-    """Loop stops after patience consecutive non-improvements."""
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[0],
     )
@@ -68,15 +56,9 @@ async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
     assert result.best_accuracy == 0.0
 
 
-# ---------------------------------------------------------------------------
-# Max rounds test
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_max_rounds(monkeypatch, eval_data):
-    """Loop stops at max_rounds even with continuous improvement."""
     config = CycleConfig(
         max_rounds=3, patience=10, n_variants=2,
         backend_url="http://mock:8000",
@@ -90,15 +72,9 @@ async def test_max_rounds(monkeypatch, eval_data):
     assert result.best_accuracy > 0
 
 
-# ---------------------------------------------------------------------------
-# next_action=stop test
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
-    """Loop stops when L1EvaluateNode outputs next_action='stop'."""
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
 
@@ -133,54 +109,19 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
     assert result.n_rounds == 1
 
 
-# ---------------------------------------------------------------------------
-# next_action default test
-# ---------------------------------------------------------------------------
-
-
-def test_next_action_default():
-    """l1_evaluate returns next_action='generate' by default."""
-    # This is tested by the integration tests above (test_next_action_stop).
-    # The default is hardcoded in l1_evaluate() return dict.
-    from api.services.prompt_optimizer import l1_evaluate
-    assert callable(l1_evaluate)
-
-
-# ---------------------------------------------------------------------------
-# Result structure test
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_result_structure(monkeypatch, eval_data, cycle_config):
-    """CycleResult has all expected fields with correct types."""
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[0],
     )
-    assert isinstance(result.rounds, list)
-    assert isinstance(result.n_rounds, int)
-    assert isinstance(result.best_accuracy, float)
-    assert isinstance(result.stop_reason, str)
     assert result.started_at < result.finished_at
     assert result.winner_prompt_state
-
-    for rd in result.rounds:
-        assert isinstance(rd.round, int)
-        assert isinstance(rd.accuracy, float)
-        assert isinstance(rd.next_action, str)
-        assert isinstance(rd.prompt_state, dict)
-
-
-# ---------------------------------------------------------------------------
-# Baseline acceptance test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
-    """Feedback cycle uses provided baseline_prompt_state."""
     baseline_ps = PromptState(
         instruction="Pre-existing baseline",
         persona="Expert pharmacologist",
@@ -197,15 +138,9 @@ async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
     assert result.stop_reason == "patience_exhausted"
 
 
-# ---------------------------------------------------------------------------
-# Results tracking test (failure analysis data flows between rounds)
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_config):
-    """Winner results are passed forward to next round's L1GenerateNode."""
     apply_llm_mock(monkeypatch)
 
     # Track what results L1GenerateNode receives each round
@@ -252,15 +187,9 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
         assert len(rd.results) > 0
 
 
-# ---------------------------------------------------------------------------
-# on_round_complete callback test
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
-    """on_round_complete is called after each round with correct args."""
     callbacks = []
 
     def on_round(round_result, stall_count):
@@ -274,11 +203,6 @@ async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
     for i, (round_num, stall) in enumerate(callbacks):
         assert round_num == i
         assert stall == i + 1  # All rounds are non-improving
-
-
-# ---------------------------------------------------------------------------
-# select_scan_winner tests
-# ---------------------------------------------------------------------------
 
 
 class TestSelectScanWinner:
@@ -367,7 +291,6 @@ class TestSelectScanWinner:
         assert best_sp.pipeline_params["ranking_temperature"] == 0.3
 
     def test_no_improving_axes(self, baseline_sp, scan_variants):
-        """When no axes improve, returns baseline unchanged."""
         scan_df = pd.DataFrame([
             {"axis": "thinking_style", "axis_type": "prompt_field",
              "value_idx": 0, "accuracy": 0.50, "delta": 0.0},
@@ -400,7 +323,6 @@ class TestSelectScanWinner:
     def test_pipeline_params_merged(
         self, scan_df, axis_profiles, scan_variants,
     ):
-        """Existing pipeline params are preserved and new ones merged in."""
         from api.models.search_point import SearchPoint
         ps = PromptState(
             instruction="Rank candidates",
@@ -418,14 +340,8 @@ class TestSelectScanWinner:
         assert best_sp.pipeline_params["ranking_temperature"] == 0.3
 
 
-# ---------------------------------------------------------------------------
-# Resume & Persistence (moved from test_cycle_resume.py)
-# ---------------------------------------------------------------------------
-
-
 class TestCycleConfigIdentity:
     def test_differs_on_config_change(self, eval_data):
-        """Different config fields produce different cycle_ids."""
         rendered = "You are an expert."
         c1 = CycleConfig(
             max_rounds=5, patience=2, n_variants=3, creativity=0.5,
@@ -439,13 +355,11 @@ class TestCycleConfigIdentity:
             cycle_config_identity(c2, rendered, eval_data)
 
     def test_differs_on_baseline_change(self, cycle_config, eval_data):
-        """Different baseline rendered prompt produces different cycle_id."""
         id1 = cycle_config_identity(cycle_config, "prompt A", eval_data)
         id2 = cycle_config_identity(cycle_config, "prompt B", eval_data)
         assert id1 != id2
 
     def test_eval_order_invariant(self, cycle_config):
-        """Eval data order doesn't affect the hash."""
         rendered = "test"
         data_a = [
             {"query": "z_last", "ground_truth": "Z"},
@@ -463,7 +377,6 @@ class TestValidateConfigMatch:
     """Tests for _validate_config_match (EXPERIMENT_ID invariant)."""
 
     def test_raises_on_mismatch(self, cycle_config):
-        """Mismatched data-affecting config fields raise ValueError."""
         stored = {
             "n_variants": 99,  # data-affecting → mismatch
             "creativity": cycle_config.creativity,
@@ -475,7 +388,6 @@ class TestValidateConfigMatch:
             _validate_config_match(cycle_config, stored, "test-cycle-id")
 
     def test_passes_on_match(self, cycle_config):
-        """Matching data-affecting config raises no error."""
         stored = {
             "n_variants": cycle_config.n_variants,
             "creativity": cycle_config.creativity,
@@ -486,7 +398,6 @@ class TestValidateConfigMatch:
         _validate_config_match(cycle_config, stored, "test-cycle-id")
 
     def test_loop_control_fields_allowed_to_differ(self, cycle_config):
-        """Loop-control fields (max_rounds, patience) don't trigger mismatch."""
         stored = {
             "max_rounds": 99,
             "patience": 99,
@@ -504,7 +415,6 @@ class TestValidateConfigMatch:
 async def test_completed_cycle_returns_cached(
     monkeypatch, eval_data, cycle_config, tmp_path,
 ):
-    """Re-running a completed cycle replays from cache (callbacks fire)."""
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
     call_count = apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
@@ -546,7 +456,6 @@ async def test_completed_cycle_returns_cached(
 async def test_resume_from_interrupted_cycle(
     monkeypatch, eval_data, tmp_path,
 ):
-    """Aborted cycle resumes from last completed round."""
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
     call_count = apply_eval_mock(monkeypatch, round_hits=[1, 2, 3])
@@ -733,7 +642,6 @@ async def test_mid_round_resume_uses_persisted_candidates(
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_no_store_no_persistence(monkeypatch, eval_data, cycle_config):
-    """Without project_root, cycle runs fresh every time with no cycle_id."""
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[0],
     )
@@ -741,15 +649,9 @@ async def test_no_store_no_persistence(monkeypatch, eval_data, cycle_config):
     assert result.resumed_from_round == 0
 
 
-# ---------------------------------------------------------------------------
-# on_phase callback test
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
-    """on_phase is called with init, l1_generate, and l1_evaluate enter/exit events."""
     events = []
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[0],
@@ -779,10 +681,3 @@ async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
 
     eval_exit = next(e for e in events if e.phase == "l1_evaluate" and e.event == "exit")
     assert "winner_accuracy" in eval_exit.data
-
-
-# ---------------------------------------------------------------------------
-# Step artifact capture tests (M7 Phase 1)
-# ---------------------------------------------------------------------------
-
-

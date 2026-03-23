@@ -29,13 +29,9 @@ def campaign(store):
     )
 
 
-# ---------------------------------------------------------------------------
-# CampaignStore CRUD
-# ---------------------------------------------------------------------------
-
 
 def test_create_and_load(store):
-    """Create a campaign and load it back."""
+
     data = store.campaigns.create_campaign(BACKEND_ID, name="My Campaign")
     assert data["campaign_id"].startswith("campaign_")
     assert data["name"] == "My Campaign"
@@ -48,7 +44,7 @@ def test_create_and_load(store):
 
 
 def test_add_trial_updates_index(store, campaign, baseline_ps):
-    """add_trial writes detail file and updates campaign index."""
+
     cid = campaign["campaign_id"]
     trial = store.campaigns.record_trial(
         BACKEND_ID, cid,
@@ -73,7 +69,7 @@ def test_add_trial_updates_index(store, campaign, baseline_ps):
 
 
 def test_multiple_trials_track_best(store, campaign, baseline_ps):
-    """Best accuracy tracked across multiple trials."""
+
     cid = campaign["campaign_id"]
 
     store.campaigns.record_trial(
@@ -107,7 +103,7 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
 
 
 def test_list_all(store):
-    """list_all returns summaries for all campaigns."""
+
     store.campaigns.create_campaign(BACKEND_ID, name="Campaign A")
     store.campaigns.create_campaign(BACKEND_ID, name="Campaign B")
 
@@ -118,7 +114,7 @@ def test_list_all(store):
 
 
 def test_delete(store, campaign):
-    """delete() removes campaign file and trial directory."""
+
     cid = campaign["campaign_id"]
     assert store.campaigns.delete(BACKEND_ID, cid) is True
     assert store.campaigns.load(BACKEND_ID, cid) is None
@@ -126,7 +122,7 @@ def test_delete(store, campaign):
 
 
 def test_record_campaign_rounds(store, campaign, baseline_ps):
-    """record_campaign_rounds bridges legacy round format to registry."""
+
     cid = campaign["campaign_id"]
 
     improved_ps = baseline_ps.derive(
@@ -158,13 +154,9 @@ def test_record_campaign_rounds(store, campaign, baseline_ps):
     assert loaded["baseline_accuracy"] == 0.67
 
 
-# ---------------------------------------------------------------------------
-# Lineage reconstruction
-# ---------------------------------------------------------------------------
-
 
 def test_lineage_chain(store, campaign, baseline_ps):
-    """get_lineage returns full parent chain."""
+
     cid = campaign["campaign_id"]
 
     r1_ps = baseline_ps.derive(instruction="r1", changes_description="round1")
@@ -193,10 +185,6 @@ def test_lineage_chain(store, campaign, baseline_ps):
     assert lineage[2]["parent_prompt_state_id"] == r1_ps.id
 
 
-# ---------------------------------------------------------------------------
-# API endpoint tests
-# ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def api_client(store, monkeypatch):
@@ -211,7 +199,7 @@ def api_client(store, monkeypatch):
 
 
 def test_api_crud_lifecycle(api_client, store, baseline_ps):
-    """Create, list, get detail, get trial via API."""
+
     c = store.campaigns.create_campaign(BACKEND_ID, name="API Test")
     cid = c["campaign_id"]
     store.campaigns.record_trial(
@@ -248,7 +236,7 @@ def test_api_crud_lifecycle(api_client, store, baseline_ps):
 
 
 def test_api_delete_removed(api_client, store):
-    """DELETE endpoint was removed; verify 405."""
+
     c = store.campaigns.create_campaign(BACKEND_ID, name="Delete Test")
     cid = c["campaign_id"]
 
@@ -261,10 +249,6 @@ def test_api_delete_removed(api_client, store):
     assert store.campaigns.delete(BACKEND_ID, cid) is True
     assert store.campaigns.load(BACKEND_ID, cid) is None
 
-
-# ---------------------------------------------------------------------------
-# E2E test: feedback cycle + campaign store (moved from test_e2e_optimization)
-# ---------------------------------------------------------------------------
 
 
 def _apply_e2e_mocks(monkeypatch):
@@ -326,7 +310,7 @@ def _apply_e2e_mocks(monkeypatch):
 async def test_e2e_feedback_cycle_with_registry(
     monkeypatch, store, eval_data,
 ):
-    """Feedback cycle results persist to campaign store."""
+
     _apply_e2e_mocks(monkeypatch)
 
     from api.services.campaign.models import CycleConfig

@@ -9,10 +9,6 @@ from api.services.search.eval_dataset import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers — build trace structures matching synced TermNorm format
-# ---------------------------------------------------------------------------
-
 def _make_obs(name: str, output: dict, metadata: dict | None = None) -> dict:
     obs = {"name": name, "output": output}
     if metadata is not None:
@@ -72,13 +68,9 @@ WEB_SEARCH_OUTPUT = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
 
 def test_full_trace_extracts_all_fields():
-    """All 4 observations present -> all pipeline_data keys extracted."""
+
     trace = _make_trace(
         query="STEEL-001 / hot rolled",
         observations=[
@@ -102,7 +94,7 @@ def test_full_trace_extracts_all_fields():
 
 
 def test_minimal_trace_only_required():
-    """Only entity_profiling present -> minimum viable extraction."""
+
     trace = _make_trace(
         query="STEEL-001 / hot rolled",
         observations=[
@@ -120,7 +112,7 @@ def test_minimal_trace_only_required():
 
 
 def test_optional_observations_missing():
-    """Missing optional observations (web_search, llm_ranking) produce no keys."""
+
     trace = _make_trace(
         query="STEEL-001 / hot rolled",
         observations=[
@@ -139,7 +131,7 @@ def test_optional_observations_missing():
 
 
 def test_missing_entity_profile_skips():
-    """Traces without the required observation are skipped."""
+
     trace = _make_trace(
         query="STEEL-001 / hot rolled",
         observations=[
@@ -152,7 +144,7 @@ def test_missing_entity_profile_skips():
 
 
 def test_llm_provider_extraction():
-    """LLM provider from metadata: first is_llm obs wins; absent when no metadata."""
+
     # Provider from first LLM obs
     trace = _make_trace(
         query="STEEL-001 / hot rolled",
@@ -178,7 +170,7 @@ def test_llm_provider_extraction():
 
 
 def test_total_time_from_scores():
-    """latency_ms score -> total_time in seconds."""
+
     trace = _make_trace(
         query="STEEL-001 / hot rolled",
         observations=[
@@ -193,7 +185,7 @@ def test_total_time_from_scores():
 
 
 def test_custom_schema_obs_mapping():
-    """Schema-driven extraction with a custom step works."""
+
     from api.models.pipeline_schema import ObservationMapping, PipelineSchema, PipelineStep
 
     custom_schema = PipelineSchema(
@@ -232,7 +224,7 @@ def test_custom_schema_obs_mapping():
 
 
 def test_load_eval_dataset():
-    """Full flow through load_eval_dataset() with mock store."""
+
     trace = _make_trace(
         query="STEEL-001 / hot rolled",
         observations=[

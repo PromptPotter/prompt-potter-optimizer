@@ -39,10 +39,7 @@ VARIANT_LIBRARY = {
 
 
 def test_full_coverage_all_prompt_fields_satisfied():
-    """All prompt-field variants have full query coverage -> all prompt axes satisfied.
-
-    Pipeline-param axes are never satisfied by index, so all_satisfied stays False.
-    """
+    # Pipeline-param axes are never satisfied by index, so all_satisfied stays False.
     baseline = _make_baseline()
     diag = _diagnostic(6)
     query_strings = [d["query"] for d in diag]
@@ -81,7 +78,7 @@ def test_full_coverage_all_prompt_fields_satisfied():
 
 
 def test_min_queries_threshold():
-    """Variant with 3/6 queries: not usable at min_queries=6, usable at min_queries=3."""
+
     baseline = _make_baseline()
     diag = _diagnostic(6)
     partial_queries = [d["query"] for d in diag[:3]]
@@ -112,7 +109,7 @@ def test_min_queries_threshold():
 
 
 def test_axis_requirements_partial():
-    """Require 2 of 3 persona values, have 2 -> satisfied."""
+
     baseline = _make_baseline()
     diag = _diagnostic(6)
     query_strings = [d["query"] for d in diag]
@@ -136,7 +133,7 @@ def test_axis_requirements_partial():
 
 
 def test_sufficient_axes_excluded_from_needed():
-    """When an axis becomes sufficient, its uncached calls drop from needed."""
+
     baseline = _make_baseline()
     diag = _diagnostic(6)
     query_strings = [d["query"] for d in diag]
@@ -168,7 +165,7 @@ def test_sufficient_axes_excluded_from_needed():
 
 
 def test_pipeline_param_historical_discovery():
-    """Pipeline-param axes report historical data with compatibility annotation."""
+
     baseline = _make_baseline()
     diag = _diagnostic(6)
     query_strings = [d["query"] for d in diag]
@@ -208,7 +205,7 @@ def test_pipeline_param_historical_discovery():
 
 
 def test_pipeline_param_no_historical_data():
-    """Pipeline-param axes with empty index report no historical data."""
+
     baseline = _make_baseline()
     diag = _diagnostic(6)
 
@@ -227,7 +224,7 @@ def test_pipeline_param_no_historical_data():
 
 
 def test_pipeline_param_partial_compatibility():
-    """Some results step-compatible, some not."""
+
     baseline = _make_baseline()
     diag = _diagnostic(6)
     query_strings = [d["query"] for d in diag]

@@ -15,7 +15,7 @@ def _mock_response(status_code: int, json_data: dict) -> httpx.Response:
 
 
 def test_run_match_auto_reinit_on_400():
-    """run_match re-initializes session and retries on 400."""
+
     client = BackendClient("http://mock:8000")
     client._session_terms = ["term_a", "term_b"]
 
@@ -45,7 +45,7 @@ def test_run_match_auto_reinit_on_400():
 
 
 def test_run_match_no_reinit_without_stored_terms():
-    """run_match does not retry when no session terms are stored."""
+
     client = BackendClient("http://mock:8000")
     assert client._session_terms is None
 
@@ -62,7 +62,7 @@ def test_run_match_no_reinit_without_stored_terms():
 
 
 def test_init_session_stores_terms():
-    """init_session saves terms for later auto-recovery."""
+
     client = BackendClient("http://mock:8000")
     assert client._session_terms is None
 

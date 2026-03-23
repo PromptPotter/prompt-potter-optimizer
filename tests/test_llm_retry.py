@@ -43,7 +43,7 @@ def llm_client():
 async def test_llm_retry_transient(
     llm_client, status_code, n_failures, expected_calls, succeeds,
 ):
-    """Retryable status codes are retried; exhaustion raises."""
+
     client, mock_async = llm_client
     call_count = [0]
 
@@ -73,7 +73,7 @@ async def test_llm_retry_transient(
 
 @pytest.mark.asyncio
 async def test_llm_no_retry_400(llm_client):
-    """400 errors raise immediately with no retry."""
+
     client, mock_async = llm_client
     call_count = [0]
 
