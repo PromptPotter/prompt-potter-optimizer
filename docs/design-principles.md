@@ -28,9 +28,15 @@ No shims, no dual-format readers, no fallback paths. Old data is regenerated, no
 
 `dict[key]` instead of `.get(key, fallback)` when a field is structurally guaranteed. Surfaces schema violations immediately rather than hiding them behind silent defaults.
 
-## Interruptible cells
+## Graceful interrupt & partial persistence
 
-Notebook cells are interruptible units of work. Disk writes (round checkpoints, campaign state) happen incrementally during execution. When interrupted — by `KeyboardInterrupt` or escalation signal — the cell skips all non-essential work (critique, suggestions, obs logging, cloud sync) and returns immediately. No data is lost because everything needed for resume is already on disk.
+Backend evaluation batches use a **signal-flag pattern**: the first Ctrl+C lets the in-flight backend call finish (its result is printed and saved), then stops the loop. A second Ctrl+C force-quits immediately. **No completed work is ever discarded.**
+
+Implementation: `evaluate_prompt_batch()` installs a temporary SIGINT handler that sets a `_stop_requested` flag on first press and raises `KeyboardInterrupt` on second press. The in-flight `await backend_reranker_eval()` runs to completion uninterrupted because the signal handler no longer raises. After the current query finishes and its result is appended + displayed, the loop checks the flag and exits cleanly.
+
+Partial runs are persisted to `dataset_runs/` with a `"partial": True` flag. On re-run, `find_cached_queries()` discovers individual query results by `sp_hash` and skips re-evaluation — only uncompleted queries hit the backend. When the full batch eventually completes, the partial entry is replaced automatically (same `content_hash`).
+
+All interrupt handlers must catch both `KeyboardInterrupt` and `asyncio.CancelledError`. Notebook cells are interruptible units of work. Disk writes happen incrementally. When interrupted, the cell skips non-essential work (critique, suggestions, obs logging, cloud sync) and returns immediately.
 
 ## Display parity
 

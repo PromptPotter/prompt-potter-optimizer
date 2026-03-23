@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import signal
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
@@ -30,6 +31,17 @@ if TYPE_CHECKING:
 _evaluator = ExactMatchEvaluator({"strip": True})
 
 logger = logging.getLogger(__name__)
+
+
+class _GracefulStop(Exception):
+    """Raised when a graceful interrupt (1st Ctrl+C) stops the eval loop.
+
+    Carries ``partial_results`` — the queries completed before the stop.
+    """
+
+    def __init__(self, results: list):
+        self.partial_results = results
+        super().__init__(f"Graceful stop with {len(results)} results")
 
 
 def _error_category(error: str | None) -> str | None:
@@ -288,14 +300,32 @@ async def evaluate_prompt_batch(
     """
     from api.services.campaign.escalation import EscalationError
 
-    results = []
+    results: list = []
     rendered = search_point.render()
     consecutive_errors = 0
     max_consecutive_errors = 3
     n_reused = 0
 
+    # -- Graceful interrupt: 1st Ctrl+C sets flag (current query finishes),
+    #    2nd Ctrl+C force-quits immediately. --
+    _stop_requested = False
+
+    def _graceful_handler(_signum: int, _frame: object) -> None:
+        nonlocal _stop_requested
+        if _stop_requested:
+            raise KeyboardInterrupt  # 2nd Ctrl+C = force quit
+        _stop_requested = True       # 1st Ctrl+C = finish current query
+
+    old_handler = signal.signal(signal.SIGINT, _graceful_handler)
     try:
         for i, qd in enumerate(eval_data):
+            if _stop_requested:
+                logger.info(
+                    "Graceful stop after query %d/%d.",
+                    len(results), len(eval_data),
+                )
+                break
+
             # Per-query cache reuse — skip backend call if result exists
             cached = (
                 cached_queries.get(qd["query"])
@@ -357,25 +387,33 @@ async def evaluate_prompt_batch(
                 for check in escalation_checks:
                     if not check.enabled:
                         continue
-                    signal = check.evaluate(
+                    esc_signal = check.evaluate(
                         results, candidate_idx, n_total_candidates,
                     )
-                    if signal:
-                        raise EscalationError(signal, results)
-    except KeyboardInterrupt:
+                    if esc_signal:
+                        raise EscalationError(esc_signal, results)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # Force quit (2nd Ctrl+C) or task cancellation
         logger.warning(
-            "Eval batch interrupted at query %d/%d. "
-            "This candidate will be re-evaluated on resume. "
-            "Completed candidates are cached.",
+            "Eval batch force-interrupted at query %d/%d.",
             len(results), len(eval_data),
         )
-        raise
+        exc = KeyboardInterrupt()
+        exc.partial_results = results  # type: ignore[attr-defined]
+        raise exc
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
 
     if n_reused:
         logger.info(
             "Per-query reuse: %d/%d queries from prior runs",
             n_reused, len(eval_data),
         )
+
+    # Graceful stop path — raise with partial results so caller can save
+    if _stop_requested:
+        raise _GracefulStop(results)
+
     return results
 
 
@@ -510,7 +548,7 @@ def _try_cached_lookup(
     """
     # Direct content-hash lookup
     existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
-    if existing:
+    if existing and not existing.get("partial"):
         results = existing["dataset_run_items"]
         # Skip all-error cached runs — let per-query cache retry
         if results and all(r.get("error") for r in results):
@@ -638,6 +676,27 @@ async def evaluate_prompt_cached(
             n_total_candidates=ctx.n_total_candidates,
             cached_queries=sp_cache,
         )
+    except (_GracefulStop, KeyboardInterrupt, asyncio.CancelledError) as exc:
+        # Graceful stop (1st Ctrl+C) or force quit (2nd / CancelledError).
+        # Save whatever queries completed so sp-hash cache can reuse them.
+        if isinstance(exc, _GracefulStop):
+            partial = exc.partial_results
+        else:
+            partial = getattr(exc, "partial_results", [])
+        if partial and store and backend_id:
+            partial_scores = compute_composite_score(partial, pipeline_schema)
+            run_data = build_dataset_run_data(
+                run_id, display_name, content_hash, search_point,
+                partial_scores, partial, source=source,
+                experiment_id=ctx.experiment_id,
+            )
+            run_data["partial"] = True
+            store.dataset_runs.save(backend_id, run_id, run_data)
+            logger.info(
+                "Saved partial run (%d/%d queries) for SP %s",
+                len(partial), len(eval_data), content_hash[:8],
+            )
+        raise KeyboardInterrupt() from None
     except _EscalationError as e:
         results = e.partial_results
         escalation_signal = e.signal
