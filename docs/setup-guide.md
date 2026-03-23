@@ -52,7 +52,6 @@ cd docker && docker-compose up --build
 | `GET /api/v1/backends/{id}/pipeline` | Dynamic pipeline view (30s cache) |
 | `GET /api/v1/campaigns` | List optimization campaigns |
 | `GET /api/v1/campaigns/{id}` | Campaign detail with trial summaries |
-| `POST /api/v1/workflows/execute` | Execute a workflow definition |
 | `GET /api/v1/health` | Service health check |
 
 ## Troubleshooting

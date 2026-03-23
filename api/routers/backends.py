@@ -55,18 +55,9 @@ class SyncResponse(BaseModel):
     synced_at: str
 
 
-class LocalNodeInfo(BaseModel):
-    type: str
-    input_model: str | None = None
-    output_model: str | None = None
-    doc: str | None = None
-    mapped_as_step: str | None = None  # future: pipeline step name
-
-
 class PipelineViewResponse(BaseModel):
     backend_id: str
     backend_pipeline: dict[str, Any]  # PipelineSchema.model_dump()
-    local_nodes: list[LocalNodeInfo]
     computed_steps: list[dict[str, Any]]  # PipelineStep dicts
     fetched_at: str
     source: str  # "live" | "cached" | "default"
@@ -226,7 +217,7 @@ async def get_experiment(backend_id: str, experiment_id: str):
 
 @router.get("/{backend_id}/pipeline", response_model=PipelineViewResponse)
 async def get_pipeline(backend_id: str):
-    """Dynamic pipeline view: backend pipeline + local workflow nodes."""
+    """Dynamic pipeline view from the backend."""
     store = _get_store()
     backend = _get_backend_or_404(backend_id, store)
     client = BackendClient(backend.base_url)
@@ -236,7 +227,6 @@ async def get_pipeline(backend_id: str):
     return PipelineViewResponse(
         backend_id=backend_id,
         backend_pipeline=view["backend_pipeline"],
-        local_nodes=[LocalNodeInfo(**n) for n in view["local_nodes"]],
         computed_steps=view["computed_steps"],
         fetched_at=view["fetched_at"],
         source=view["source"],

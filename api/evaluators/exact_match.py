@@ -4,12 +4,46 @@ Exact match evaluator.
 Compares expected and actual values for exact equality,
 with optional case-insensitive and whitespace-normalized modes.
 """
+from enum import Enum
 from typing import Any
 
-from .base import EvaluatorBase, EvaluationOutput, EvalResult
+from pydantic import BaseModel, Field
 
 
-class ExactMatchEvaluator(EvaluatorBase):
+class EvalResult(str, Enum):
+    """Evaluation result status."""
+    PASS = "pass"
+    FAIL = "fail"
+    ERROR = "error"
+
+
+class EvaluationOutput(BaseModel):
+    """Result of a single evaluation."""
+
+    result: EvalResult = Field(..., description="pass, fail, or error")
+    score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Evaluation score (0.0 = complete failure, 1.0 = perfect match)"
+    )
+    expected: Any = Field(..., description="Expected value")
+    actual: Any = Field(..., description="Actual value from workflow")
+    reason: str | None = Field(
+        None,
+        description="Explanation for the result"
+    )
+    field_results: dict[str, dict[str, Any]] | None = Field(
+        None,
+        description="Per-field evaluation results (for structured outputs)"
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional evaluation metadata"
+    )
+
+
+class ExactMatchEvaluator:
     """
     Evaluator that checks for exact equality.
 
@@ -20,7 +54,7 @@ class ExactMatchEvaluator(EvaluatorBase):
     """
 
     def __init__(self, config: dict[str, Any] | None = None):
-        super().__init__(config)
+        self.config = config or {}
         self.case_insensitive = self.config.get("case_insensitive", False)
         self.normalize_whitespace = self.config.get("normalize_whitespace", False)
         self.strip = self.config.get("strip", True)

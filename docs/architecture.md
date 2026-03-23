@@ -5,9 +5,9 @@
 Two entry points, shared service core:
 
 1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `notebooks/_campaign_lib/` (6 submodules) wrapping services with progress bars. No business logic in the notebook layer.
-2. **FastAPI API** (`api/main.py`) — REST at `/api/v1/`. Routers: `backends`, `campaigns`, `health`, `workflows`.
+2. **FastAPI API** (`api/main.py`) — REST at `/api/v1/`. Routers: `backends`, `campaigns`, `health`.
 
-All core logic in `api/services/`. See [`api/services/CLAUDE.md`](../api/services/CLAUDE.md).
+All core logic in `api/services/`.
 
 ## Two-Loop Architecture
 

@@ -4,7 +4,7 @@ Pipeline discovery: static defaults, factory, and dynamic pipeline view.
 Provides ``TERMNORM_DEFAULT_SCHEMA`` (the 6-step TermNorm pipeline),
 ``parse_pipeline_response()`` which parses a backend ``GET /pipeline``
 JSON response into a ``PipelineSchema``, and ``compute_pipeline_view()``
-which combines backend pipeline data with local workflow node info.
+which combines backend pipeline data with local node info.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from api.models.pipeline_schema import (
     StepOutputSchema,
     StepPromptMeta,
 )
-from api.nodes import get_node_info_all
 from api.services.constants import DATASET_NAME
 
 if TYPE_CHECKING:
@@ -90,7 +89,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
             ),
             param_keys={
                 "max_sites", "num_results", "content_char_limit",
-                "query_prefix", "query_suffix",
+                "query_prefix", "query_suffix", "url_fetch_multiplier",
             },
             param_descriptions={
                 "query_prefix": (
@@ -110,6 +109,11 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "content_char_limit": (
                     "Maximum characters of content to extract per web page"
                 ),
+                "url_fetch_multiplier": (
+                    "Multiplier applied to max_sites to determine how many "
+                    "URLs to fetch in parallel (e.g. max_sites=7, multiplier=4 "
+                    "→ 28 URLs fetched, keeping top 7)"
+                ),
             },
             override_map={
                 "max_sites": "max_sites",
@@ -117,6 +121,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "content_char_limit": "content_char_limit",
                 "query_prefix": "query_prefix",
                 "query_suffix": "query_suffix",
+                "url_fetch_multiplier": "url_fetch_multiplier",
             },
             default_config={
                 "query_prefix": "",
@@ -124,6 +129,7 @@ TERMNORM_DEFAULT_SCHEMA = PipelineSchema(
                 "num_results": 20,
                 "max_sites": 7,
                 "content_char_limit": 800,
+                "url_fetch_multiplier": 4,
             },
             observation_name="web_search",
             observation_mappings=[
@@ -489,14 +495,11 @@ def _set_cached(base_url: str, data: dict[str, Any]) -> None:
 
 async def compute_pipeline_view(
     backend_client: BackendClient,
-    *,
-    include_nodes: bool = True,
 ) -> dict[str, Any]:
-    """Build a combined view of backend pipeline + local workflow nodes.
+    """Build a view of the backend pipeline.
 
     Returns a dict with keys:
       backend_pipeline  — PipelineSchema.model_dump()
-      local_nodes       — list of node info dicts from api.nodes
       computed_steps    — pipeline steps as dicts (direct copy for now)
       fetched_at        — ISO timestamp
       source            — "live" | "cached" | "default"
@@ -530,17 +533,11 @@ async def compute_pipeline_view(
     else:
         schema = TERMNORM_DEFAULT_SCHEMA
 
-    # Local nodes
-    local_nodes: list[dict[str, Any]] = []
-    if include_nodes:
-        local_nodes = get_node_info_all()
-
     # Computed steps (direct copy from backend pipeline for now)
     computed_steps = [s.model_dump() for s in schema.steps]
 
     return {
         "backend_pipeline": schema.model_dump(),
-        "local_nodes": local_nodes,
         "computed_steps": computed_steps,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source": source,

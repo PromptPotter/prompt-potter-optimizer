@@ -31,11 +31,7 @@ cd docker && docker-compose up --build
 
 ### Service layer (`api/services/`)
 
-All core logic lives here. See [`api/services/CLAUDE.md`](api/services/CLAUDE.md) for the service catalog, evaluation gateway, and store layout.
-
-### Data model — two-layer tracing
-
-All optimization services follow: `f(SearchPoint, PipelineSchema, eval_data) → scores`. See [`api/models/CLAUDE.md`](api/models/CLAUDE.md) for field details.
+All core logic lives here.
 
 **Two layers must both be traced:**
 - **Target layer**: `SearchPoint` → `evaluate_prompt_cached()` → `dataset_runs/` (content-addressed, shared across all eval paths)
@@ -67,11 +63,13 @@ The human workflow is a repeatable loop:
 
 **Key principle:** Every backend evaluation writes to the same `dataset_runs` store with content-addressed deduplication. No data is siloed per campaign.
 
-### Workflow engine scaffold
+### Optimizer pipeline
 
-CWL-inspired workflow engine (`api/core/`, `api/nodes/`). The YAML-driven WorkflowRunner and REST endpoints are scaffold for future migration. See [`api/core/CLAUDE.md`](api/core/CLAUDE.md).
+The optimizer is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_context`, `l3_modify_plan`), declared in `api/config/optimizer_pipeline.json` using the building block format. **L1 Generate is the sole `pipeline_params` decider**; L2 refines situation context (`task_context`) + meta-settings (creativity, n_variants, sample_size); L3 modifies the strategic plan. Critique (part of L1 Evaluate) produces a 5-field analysis (`positive_critique`, `negative_critique`, `priority_fix`, `suggested_axes`, `summary`) fed to both L1 and L2. Pluggable `EscalationCheck`s (e.g., `DegradationCheck`) can short-circuit evaluation mid-round and route to L2/L3. See [`docs/critique-agent.md`](docs/critique-agent.md) for the full critique/escalation architecture, [`docs/building-blocks.md`](docs/building-blocks.md) for the building block standard, and [`docs/specs/m7-optimizer-pipeline.md`](docs/specs/m7-optimizer-pipeline.md) for the M7 spec.
 
-**Optimizer-as-pipeline** — The optimizer is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_context`, `l3_modify_plan`), declared in `api/config/optimizer_pipeline.json` using the same building block format as TermNorm's pipeline. **L1 Generate is the sole `pipeline_params` decider**; L2 refines situation context (`task_context`) + meta-settings (creativity, n_variants, sample_size); L3 modifies the strategic plan. Critique (part of L1 Evaluate) produces a 5-field analysis (`positive_critique`, `negative_critique`, `priority_fix`, `suggested_axes`, `summary`) fed to both L1 and L2. Pluggable `EscalationCheck`s (e.g., `DegradationCheck`) can short-circuit evaluation mid-round and route to L2/L3. See [`docs/critique-agent.md`](docs/critique-agent.md) for the full critique/escalation architecture, [`docs/building-blocks.md`](docs/building-blocks.md) for the building block standard, and [`docs/specs/m7-optimizer-pipeline.md`](docs/specs/m7-optimizer-pipeline.md) for the M7 spec.
+### Building block primitive (`api/core/llm_call.py`)
+
+`llm_call()` is the shared LLM interaction primitive. Config-driven from `api/config/optimizer_pipeline.json` with runtime overrides. Used by all optimizer building block nodes (`generate_candidates`, `refine_context`, `modify_plan`, `CritiqueAgent`).
 
 ### Milestones
 
@@ -80,6 +78,71 @@ Each milestone has an executable spec in `docs/specs/`. See [`docs/specs/CLAUDE.
 ### TermNorm reference patterns
 
 The TermNorm repo lives at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\`. See its `CLAUDE.md` for reference implementations (Langfuse, MLflow, prompt registry).
+
+## Data model reference
+
+All optimization services follow: `f(SearchPoint, PipelineSchema, eval_data) → scores`.
+
+### PromptState (`api/models/prompt_state.py`)
+
+Immutable prompt configuration organized into optimization layers:
+- **Layer 1 (Generate)**: persona, task_intent, thinking_style, answer_format, etc. — change every pass
+- **Layer 2 (Refine Context)**: optimizer_params — adjust when Layer 1 stalls. `task_context` lives on OptSearchPoint (not PromptState).
+- **Layer 3 (Modify Plan)**: plan — rarely changed (strategy defaults)
+
+### OptSearchPoint (`api/models/opt_search_point.py`)
+
+Optimizer-level search point — the optimizer's configuration at a moment in the feedback cycle. Cross-reference design: holds `content_hashes` linking to target-layer `dataset_runs`. Fields: `critique_text`, `thinking_styles`, `plan`, `optimizer_params`, `task_context`, `l2_directive`, `content_hashes`.
+
+### SearchPoint (`api/models/search_point.py`)
+
+Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_params`. `content_hash(eval_data)` is the dedup key for `evaluate_prompt_cached()`.
+
+## Service catalog
+
+| Service | Purpose |
+|---------|---------|
+| `prompt_eval.py` | Evaluate prompts against datasets via backend `/matches` endpoint |
+| `search/grid_core.py` | Grid search over Layer 1 prompt fields |
+| `prompt_optimizer.py` | LLM meta-prompt candidate generation and round winner selection |
+| `backend_client.py` | HTTP client for backend APIs (sync, replay, `fetch_pipeline()`) |
+| `pipeline_discovery.py` | Pipeline schema factory (`TERMNORM_DEFAULT_SCHEMA` + live metadata merging) |
+| `project_store.py` | Facade over focused store modules in `stores/` |
+| `campaign/feedback_cycle.py` | Iterative optimization: 3-loop escalation (L1→L2→L3) with patience-based stopping |
+| `campaign/layer_transitions.py` | L2 (context + meta-settings + l2_directive), L3 (plan) |
+| `dataset_builder.py` | Excel ground-truth loading and train/test splitting |
+| `campaign/campaign_init.py` | Campaign initialization, `resolve_experiment_id()`, `apply_experiment_overrides()` |
+| `search/smart_search.py` | Sensitivity scan (OAT), adaptive search, `filter_variant_library()` |
+| `search/scan_advisor.py` | LLM-driven scan recommendations |
+| `search/coverage.py` | Historical index, coverage advisor, scan variant diagnostics |
+| `obs/observability_logger.py` | File-based observability (Langfuse-compatible traces, MLflow) |
+| `obs/step_tracer.py` | `observed_step()` — async context manager for step-level timing + tracing |
+| `stores/` | Focused store modules: Backend, Execution, DatasetRun, Dataset, GridPlan, SmartSearch, Campaign |
+| `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
+
+### Evaluation gateway
+
+`evaluate_prompt_cached()` in `prompt_eval.py` is the **single entry point** for all eval persistence. All evaluation paths (grid search, smart search, feedback cycle) converge here.
+
+### Pipeline discovery — ownership principle
+
+**TermNorm owns all registry artifacts** (schemas, prompts). `TERMNORM_DEFAULT_SCHEMA` carries structural metadata only. Registry-owned metadata (`StepOutputSchema`, `StepPromptMeta`) comes from the live response. `parse_pipeline_response()` merges live metadata — **live always wins**.
+
+### ProjectStore disk layout
+
+```
+.promptpotter/projects/{backend_id}/
+  backend.json
+  sync/experiments/{id}.json
+  datasets/{name}.json
+  dataset_runs/{run_id}.json          # completed eval runs (shared across all eval paths)
+  dataset_runs.json                   # index (content_hash -> run_id)
+  grid_plans/{plan_id}.json
+  smart_search_plans/{plan_id}.json
+  campaigns/{campaign_id}.json
+  campaigns/{campaign_id}/trial_NNNN.json
+  obs/langfuse/events.jsonl
+```
 
 ## Project Conventions
 

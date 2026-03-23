@@ -14,8 +14,7 @@ from typing import TYPE_CHECKING, Callable
 
 import httpx
 
-from api.evaluators.base import EvalResult
-from api.evaluators.exact_match import ExactMatchEvaluator
+from api.evaluators.exact_match import EvalResult, ExactMatchEvaluator
 from api.models.hashing import HASH_TRUNCATE
 from api.models.prompt_state import PromptState
 from api.services.constants import NO_RESULT

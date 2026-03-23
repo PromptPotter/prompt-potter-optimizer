@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from scalar_fastapi import get_scalar_api_reference
 
 from api.config.settings import APP_VERSION, settings
-from api.routers import backends, campaigns, health, workflows
+from api.routers import backends, campaigns, health
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,5 @@ app.add_middleware(
 
 # Include routers
 app.include_router(health.router, prefix="/api/v1", tags=["Health"])
-app.include_router(workflows.router, prefix="/api/v1", tags=["Workflows"])
 app.include_router(backends.router, prefix="/api/v1", tags=["Backends"])
 app.include_router(campaigns.router, prefix="/api/v1", tags=["Campaigns"])

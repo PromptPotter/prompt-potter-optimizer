@@ -1,18 +1,12 @@
 """
-Evaluator module for workflow evaluation.
+Evaluator module.
 
 Provides ExactMatchEvaluator for hit@1 accuracy scoring.
 """
 
-from .base import (
-    EvaluatorBase,
-    EvaluationOutput,
-    EvalResult,
-)
-from .exact_match import ExactMatchEvaluator
+from .exact_match import ExactMatchEvaluator, EvalResult, EvaluationOutput
 
 __all__ = [
-    "EvaluatorBase",
     "EvaluationOutput",
     "EvalResult",
     "ExactMatchEvaluator",
