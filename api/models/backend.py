@@ -45,10 +45,6 @@ class ExecutionResultItem(BaseModel):
     status: str = "success"
     error: str | None = None
     timestamp: str | None = None
-    # Original variant data for comparison
-    variant_b_predicted: str | None = None
-    variant_b_latency_ms: float | None = None
-    variant_b_confidence: float | None = None
 
 
 class Execution(BaseModel):

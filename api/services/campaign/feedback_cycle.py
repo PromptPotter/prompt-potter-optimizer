@@ -507,7 +507,7 @@ def _log_round_obs(
             n_variants=config.n_variants,
             optimizer_templates=[
                 "meta_scan_aware",
-                "critique_negative", "critique_positive",
+                "critique_negative",
             ],
         )
     except (KeyboardInterrupt, asyncio.CancelledError):

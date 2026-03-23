@@ -69,7 +69,7 @@ The optimizer is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_con
 
 ### Building block primitive (`api/core/llm_call.py`)
 
-`llm_call()` is the shared LLM interaction primitive. Config-driven from `api/config/optimizer_pipeline.json` with runtime overrides. Used by all optimizer building block nodes (`generate_candidates`, `refine_context`, `modify_plan`, `CritiqueAgent`).
+`llm_call()` is the shared LLM interaction primitive. Config-driven from `api/config/optimizer_pipeline.json` with runtime overrides. Used by all optimizer building blocks (`l1_generate`, `refine_context`, `modify_plan`, `CritiqueAgent`).
 
 ### Milestones
 
@@ -154,5 +154,6 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
 - **Pipeline reproducibility**: The notebook MUST display the full pipeline configuration (all node configs, models, temperatures, schemas) via `GET /pipeline` before any evaluation. This is the experiment's parameter manifest.
 - **EXPERIMENT_ID is the single source of truth**: Every notebook cell operates within the scope of `EXPERIMENT_ID`. When set, config MUST match the stored experiment — mismatches raise `ValueError` demanding a new ID. When `None`, a new experiment is auto-created from the config hash. This invariant applies to feedback cycle, scan, grid search, and all data surfaces. No silent config drift between runs.
 - **Display parity**: Cached results must display identically to fresh results — no visible difference in output format between cached and computed data. The user should not be able to tell whether a result came from cache or a live backend call.
+- **Graceful interrupt**: Backend eval batches use a signal-flag pattern for Ctrl+C. First interrupt lets the in-flight backend call finish (result printed + saved), then stops. Second interrupt force-quits. Partial results are always saved to disk with `"partial": True` so the SP-hash query cache bridges them on re-run. All interrupt handlers must catch both `KeyboardInterrupt` and `asyncio.CancelledError`. **No completed work is ever discarded.**
 
 See [`docs/design-principles.md`](docs/design-principles.md) for the full principles catalog with rationale.
