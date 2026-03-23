@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from api.models.phase_event import PhaseEvent
 
 from ._display import (
-    BOLD, CYAN, DIM, GREEN, RESET, YELLOW,
+    BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW,
     _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
     _fmt_delta, _scoreboard,
 )
@@ -651,6 +651,28 @@ def _print_plan_exit(d: dict, state: _CycleDisplayState) -> None:
         print(f"    {desc}")
 
 
+def _print_backend_warning(d: dict, state: _CycleDisplayState) -> None:
+    msg = d.get("message", "")
+    advice = d.get("advice", "")
+    resets = d.get("degradation_reset_count", 0)
+    steps = d.get("problem_steps", [])
+    wtypes = d.get("persistent_warning_types", {})
+
+    print()
+    print(_dbox_top())
+    print(_dbox_line(f"{RED}{BOLD}BACKEND WARNING{RESET}"))
+    print(_dbox_sep())
+    print(_dbox_line(msg))
+    print(_dbox_line(""))
+    print(_dbox_line(advice))
+    print(_dbox_sep())
+    steps_str = ", ".join(steps) if steps else "unknown"
+    print(_dbox_line(f"Resets: {resets}  |  Steps: {steps_str}"))
+    for wt, count in wtypes.items():
+        print(_dbox_line(f"  {wt}: {count} occurrences"))
+    print(_dbox_bottom())
+
+
 # ---------------------------------------------------------------------------
 # Phase dispatch
 # ---------------------------------------------------------------------------
@@ -670,6 +692,7 @@ _PHASE_HANDLERS: dict[str, callable] = {
     "escalation:exit": _print_escalation_exit,
     "probe_round:enter": _print_probe_enter,
     "probe_round:exit": _print_probe_exit,
+    "backend_warning:notify": _print_backend_warning,
 }
 
 

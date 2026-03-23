@@ -71,6 +71,10 @@ class CycleConfig(BaseModel):
         0.4,
         description="Fraction of degraded queries to trigger escalation (0 = disabled)",
     )
+    backend_warning_threshold: int = Field(
+        2,
+        description="Degradation resets before emitting backend warning (0 = disabled)",
+    )
 
     @classmethod
     def from_campaign_config(
@@ -117,6 +121,7 @@ class CycleConfig(BaseModel):
             enable_critique=opt.get("enable_critique", True),
             critique_positive_threshold=opt.get("critique_positive_threshold", 0.7),
             degradation_threshold=opt.get("degradation_threshold", 0.4),
+            backend_warning_threshold=opt.get("backend_warning_threshold", 2),
         )
 
 

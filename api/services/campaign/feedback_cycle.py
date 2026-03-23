@@ -828,6 +828,50 @@ def _update_round_state(
         state.best_sp = state.current_sp
 
 
+def _maybe_emit_backend_warning(
+    state: _LoopState,
+    config: CycleConfig,
+    round_num: int,
+    on_phase: Callable[[PhaseEvent], None] | None,
+) -> None:
+    """Emit a one-shot backend warning after repeated degradation resets."""
+    opt = state.opt_sp
+    if opt.backend_warning_emitted or config.backend_warning_threshold <= 0:
+        return
+    if opt.degradation_reset_count < config.backend_warning_threshold:
+        return
+
+    opt.backend_warning_emitted = True
+    count = opt.degradation_reset_count
+
+    steps: set[str] = set()
+    wtypes: dict[str, int] = {}
+    for e in opt.escalation_journal:
+        if e.get("problem_step"):
+            steps.add(e["problem_step"])
+        for wt, n in e.get("warning_types", {}).items():
+            wtypes[wt] = wtypes.get(wt, 0) + n
+
+    _emit_phase(
+        on_phase, "backend_warning", "notify", round=round_num,
+        message=(
+            f"Repeated pipeline degradation \u2014 {count} investigation "
+            "cycles exhausted. Likely a backend server issue."
+        ),
+        advice=(
+            "Paste warnings + connector code into Claude Code "
+            "\u2192 docs/connectors"
+        ),
+        degradation_reset_count=count,
+        problem_steps=sorted(steps),
+        persistent_warning_types=wtypes,
+    )
+    logger.warning(
+        "Backend warning at round %d (%d resets, steps: %s)",
+        round_num, count, sorted(steps),
+    )
+
+
 async def _escalate_l2(
     state: _LoopState,
     config: CycleConfig,
@@ -871,6 +915,10 @@ async def _escalate_l2(
                     state.l3_stall_count = 0
                     state.l2_round = 0
                     state.l3_round = 0
+                    state.opt_sp.degradation_reset_count += 1
+                    _maybe_emit_backend_warning(
+                        state, config, round_num, on_phase,
+                    )
                     await _do_l2_transition(
                         state, config, round_num, eval_data, on_phase,
                         obs=obs, trace_id=trace_id,
@@ -896,11 +944,14 @@ async def _escalate_l2(
                 )
                 state.l2_stall_count = 0
                 state.l2_round = 0
+                state.opt_sp.degradation_reset_count += 1
+                _maybe_emit_backend_warning(
+                    state, config, round_num, on_phase,
+                )
                 await _do_l2_transition(
                     state, config, round_num, eval_data, on_phase,
                     obs=obs, trace_id=trace_id,
                     escalation_context=escalation_context,
-
                 )
                 return None  # continue
             logger.info(
