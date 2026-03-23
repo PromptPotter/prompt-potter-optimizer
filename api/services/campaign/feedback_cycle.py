@@ -346,7 +346,7 @@ async def _generate_or_load_candidates(
     from api.services.prompt_optimizer import l1_generate
 
     client = _llm_client.get_llm_client(config.provider)
-    async with observed_step(f"l1_generate_r{round_num}", "L1Generate",
+    async with observed_step(f"l1_generate_r{round_num}", "llm/meta",
                              obs=obs, trace_id=trace_id):
         candidates = await l1_generate(
             current_ps, state.current_accuracy, state.current_results,
@@ -409,7 +409,7 @@ async def _evaluate_candidates(
 
     from api.services.prompt_optimizer import l1_evaluate
 
-    async with observed_step(f"l1_evaluate_r{round_num}", "L1Evaluate",
+    async with observed_step(f"l1_evaluate_r{round_num}", "evaluation",
                              obs=obs, trace_id=trace_id, obs_type="span"):
         eval_out = await l1_evaluate(
             candidates, round_eval_data, current_best, state.eval_ctx,
@@ -690,7 +690,7 @@ async def _do_l2_transition(
                 best_accuracy=state.best_accuracy)
 
     client = _llm_client.get_llm_client(config.provider)
-    async with observed_step(f"l2_refine_r{round_num}", "L2Refine",
+    async with observed_step(f"l2_refine_r{round_num}", "llm/meta",
                              obs=obs, trace_id=trace_id):
         tr = await layer_transitions.refine_context(
             current_ps, stalled_rounds, eval_data, client,
@@ -777,7 +777,7 @@ async def _do_l3_transition(
                 current_plan_preview=str(current_ps.plan)[:120])
 
     client = _llm_client.get_llm_client(config.provider)
-    async with observed_step(f"l3_modify_plan_r{round_num}", "L3ModifyPlan",
+    async with observed_step(f"l3_modify_plan_r{round_num}", "llm/meta",
                              obs=obs, trace_id=trace_id):
         tr = await layer_transitions.modify_plan(
             current_ps, l2_history, eval_data, client,

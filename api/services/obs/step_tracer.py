@@ -5,7 +5,7 @@ calls the same ``ObsLogger.log_node_step_start/end`` methods.
 
 Usage::
 
-    async with observed_step("l1_generate_r3", "L1Generate", obs=obs, trace_id=tid) as step:
+    async with observed_step("l1_generate_r3", "llm/meta", obs=obs, trace_id=tid) as step:
         result = await some_service_function(...)
         step.output = {"n_items": len(result)}
 """

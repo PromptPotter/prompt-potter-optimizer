@@ -4,6 +4,11 @@ Node registry for workflow execution.
 Provides registration and discovery of node types.
 Nodes are registered by class name and can be looked up
 by the workflow runner.
+
+Building block type mapping (see ``docs/building-blocks.md``):
+  LLMNode             → ``llm``            (raw prompt → response)
+  RankerNode          → ``llm/structured``  (template + output schema)
+  PipelineConfigNode  → ``deterministic``   (pure function)
 """
 from __future__ import annotations
 

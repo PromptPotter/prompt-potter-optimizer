@@ -199,6 +199,16 @@ The `pipelines` dict composes named sequences from the node pool. The same node 
 - **`observed_step`** traces optimizer steps using the same observability infrastructure
 - Optimizer building block nodes — `generate_candidates` (`llm/meta`), `refine_context` (`llm/meta`), `modify_plan` (`llm/meta`), `CritiqueAgent` (`agent`) — use `llm_call()` with their declared config from `optimizer_pipeline.json`
 
+### Scaffold (deferred to M8)
+
+Existing infrastructure that will evolve into building block runtime:
+
+- **`api/nodes/NodeBase[TInput, TOutput]`** — typed dispatch base with Pydantic I/O validation and observability. Current scaffold nodes map to building block types: `LLMNode` → `llm`, `RankerNode` → `llm/structured`, `PipelineConfigNode` → `deterministic`. Future building block classes (`LLMMetaNode`, `LLMStructuredNode`, etc.) will evolve from or replace it.
+- **`api/core/workflow_runner.py`** — DAG engine with topological sort, YAML parsing, and input reference resolution. Future pipeline runner will compose building block nodes via it.
+- **`observed_step()`** (`api/services/obs/step_tracer.py`) — bridges the gap today: provides step-level tracing (timing + Langfuse observations) without requiring `NodeBase` dispatch. Callers use building block type names as `step_type` (e.g., `"llm/meta"`, `"evaluation"`).
+
+See [`api/core/CLAUDE.md`](../api/core/CLAUDE.md) for the full scaffold ↔ building block terminology mapping.
+
 ### Future (milestone TBD, post-ConnectorProtocol)
 
 - Extract building block types into a shared package importable by both repos
