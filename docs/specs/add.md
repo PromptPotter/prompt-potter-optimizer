@@ -41,7 +41,7 @@
           v      v        v        v       v       v
       Connector LLM    Langfuse  File   Evaluator  obs/
       Protocol Providers  SDK    System  Framework  (Langfuse
-      (M7)     (Groq,           (.pp/)  (api/       traces,
+      (M8)     (Groq,           (.pp/)  (api/       traces,
        |       OpenAI)                   evaluators/ MLflow
        v                                )           experiments,
    TermNorm                                         prompts)
@@ -71,9 +71,9 @@ The AI Loop is itself a 4-step pipeline, implemented by `feedback_cycle.py`:
 | **l2_refine_context** | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` |
 | **l3_modify_plan** | Strategic replanning on L2 stall | `modify_plan()` in `layer_transitions.py` |
 
-These 4 steps are designed to be modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend, enabling step-level tracing, full reproducibility, and self-optimization. The existing scaffold nodes (`InitNode`, `GrowFilterNode`, `AnalysisEvalNode` in `api/nodes/optimizer_nodes.py`) are thin wrappers around the same service functions. See the [M8 spec](m8-optimizer-pipeline.md) for the full optimizer-as-pipeline design.
+These 4 steps are modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend, enabling step-level tracing, full reproducibility, and self-optimization. The nodes (`L1GenerateNode`, `L1EvaluateNode`, `L2RefineNode`, `L3ModifyPlanNode` in `api/nodes/optimizer_nodes.py`) are thin wrappers around the same service functions. `OptSearchPoint` (`api/models/opt_search_point.py`) captures the optimizer's configuration at each round — critique, thinking styles, task context, escalation journal, and per-query warning inventory — checkpointed in trial JSON for traceability and resume. See the [M7 spec](m7-optimizer-pipeline.md) for the full design including the warning inventory (§13) and L2 diagnostic probe rounds.
 
-Each round runs l1_generate then l1_evaluate. Stopping: `max_rounds`, `patience`, `next_action == "stop"`, or perfect accuracy. On L1 stall, escalates to l2_refine_context; on L2 stall, to l3_modify_plan.
+Each round runs l1_generate then l1_evaluate. Stopping: `max_rounds`, `patience`, `next_action == "stop"`, or perfect accuracy. On L1 stall, escalates to l2_refine_context; on L2 stall, to l3_modify_plan. Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (bypassing patience).
 
 ---
 
@@ -106,7 +106,7 @@ See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full servic
 | **Optimizer nodes as thin wrappers** | Nodes wrap existing service functions. Service logic is independently testable. |
 | **Notebook-first HITL** | Campaign config as editable JSON, manual round control, LLM suggestions -- natural fit for HITL. Feedback cycle is also callable from any Python context. |
 
-> **Cross-reference:** [Observability](../observability.md) covers M5 data exploration. Milestone specs [M6](m6-pipeline-composability.md) (pipeline composability) and [M7](m7-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
+> **Cross-reference:** [Observability](../observability.md) covers M5 data exploration. Milestone specs [M6](m6-pipeline-composability.md) (pipeline composability) and [M8](m8-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
 
 ---
 
@@ -122,4 +122,4 @@ See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full servic
 | File-based observability | Langfuse trace JSON + MLflow FileStore YAML in `obs/` | Implemented |
 | PipelineSchema | Backend-agnostic pipeline description, derivation methods | Implemented ([M6](m6-pipeline-composability.md) WP 6.1) |
 | CWL workflow engine | `WorkflowRunner` with `runtime_config`, YAML workflow definitions | Planned ([M6](m6-pipeline-composability.md)) |
-| ConnectorProtocol | `typing.Protocol` abstraction over backend connectors | Planned ([M7](m7-multi-connector.md)) |
+| ConnectorProtocol | `typing.Protocol` abstraction over backend connectors | Planned ([M8](m8-multi-connector.md)) |

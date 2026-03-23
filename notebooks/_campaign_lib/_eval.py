@@ -18,10 +18,7 @@ from api.services.prompt_eval import load_baseline_prompt
 from api.services.search.coverage import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
 )
-from api.services.prompt_optimizer import (
-    generate_candidates,
-    generate_suggestions,
-)
+from api.services.prompt_optimizer import l1_generate as generate_candidates
 from api.services.search import (
     load_eval_dataset as _load_eval_dataset,
 )
@@ -34,7 +31,7 @@ __all__ = [
     "analyze_candidate_coverage", "load_eval_dataset",
     "run_coverage_diagnostic",
     # Candidates & suggestions
-    "generate_candidates", "generate_suggestions",
+    "generate_candidates",
     # Entity profiles
     "show_entity_profiles",
 ]
@@ -173,7 +170,7 @@ def run_coverage_diagnostic(
 # ---------------------------------------------------------------------------
 
 
-async def run_baseline_eval(
+def run_baseline_eval(
     baseline: PromptState,
     eval_data: list,
     campaign_config: dict,
@@ -200,7 +197,7 @@ async def run_baseline_eval(
     _obs = ObsLogger(svc["store"].base_dir, svc.get("backend_id", ""), langfuse=None)
 
     try:
-        campaign_rounds, baseline_results = await _run_baseline_eval(
+        campaign_rounds, baseline_results = _run_baseline_eval(
             baseline, eval_data, svc.get("backend_client"),
             pipeline_params=campaign_config.get("pipeline_params"),
             store=svc.get("store"), backend_id=svc.get("backend_id", ""),

@@ -10,6 +10,7 @@ Fields are organized into three optimization layers:
   Layer 3 (Modify Plan)     — optimization strategy, ideally left at defaults
 """
 import difflib
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -31,7 +32,7 @@ LAYER_FIELDS: dict[str, list[str]] = {
         "answer_format",
         "few_shot_examples",
     ],
-    "refine_context": ["context", "parameters"],
+    "refine_context": ["optimizer_params"],
     "modify_plan": ["plan"],
 }
 
@@ -79,8 +80,8 @@ class PromptState(BaseModel):
     few_shot_examples: list[FewShotExample] = Field(default_factory=list)
 
     # Layer 2: Refine Context (adjust when generation stalls)
-    context: str = ""
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    # task_context lives on _LoopState/OptSearchPoint (structured dict)
+    optimizer_params: dict[str, Any] = Field(default_factory=dict)
 
     # Layer 3: Modify Plan (outermost, ideally at defaults)
     plan: str = ""
@@ -106,6 +107,26 @@ class PromptState(BaseModel):
             parts.append("\n".join(examples_lines))
 
         return "\n\n".join(parts)
+
+    def compile(self, **kwargs: str) -> str:
+        """Render and substitute ``{{variable}}`` placeholders with runtime values.
+
+        Uses Langfuse-compatible double-brace syntax: ``{{var}}`` is substituted,
+        single ``{braces}`` are literal.  Raises :class:`KeyError` if any
+        *template-defined* ``{{var}}`` remains unsubstituted.
+
+        Variables introduced by substituted *values* (e.g., a user prompt
+        containing ``{{core_concept}}``) are ignored — only variables present
+        in the original rendered template are validated.
+        """
+        text = self.render()
+        expected = set(re.findall(r"\{\{(\w+)\}\}", text))
+        for key, value in kwargs.items():
+            text = text.replace("{{" + key + "}}", str(value))
+        missing = expected - set(kwargs.keys())
+        if missing:
+            raise KeyError(f"Unsubstituted template variables: {sorted(missing)}")
+        return text
 
     def derive(self, **changes: Any) -> "PromptState":
         """Create a child state with modifications.
@@ -150,9 +171,9 @@ class PromptStateDiff(BaseModel):
     # Preserved detailed sub-diffs
     few_shot_added: list[FewShotExample] = Field(default_factory=list)
     few_shot_removed: list[FewShotExample] = Field(default_factory=list)
-    parameters_added: dict[str, Any] = Field(default_factory=dict)
-    parameters_removed: dict[str, str] = Field(default_factory=dict)
-    parameters_changed: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    optimizer_params_added: dict[str, Any] = Field(default_factory=dict)
+    optimizer_params_removed: dict[str, str] = Field(default_factory=dict)
+    optimizer_params_changed: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
@@ -171,14 +192,7 @@ def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
                 new=new_val,
             ))
 
-    # Compare Layer 2 context
-    if a.context != b.context:
-        field_changes.append(FieldChange(
-            field="context",
-            layer="refine_context",
-            old=a.context,
-            new=b.context,
-        ))
+    # Layer 2 context: task_context tracked on _LoopState/OptSearchPoint, not here
 
     # Compare Layer 3 plan
     if a.plan != b.plan:
@@ -195,15 +209,15 @@ def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
     fs_added = [FewShotExample(**ex) for ex in b_examples if ex not in a_examples]
     fs_removed = [FewShotExample(**ex) for ex in a_examples if ex not in b_examples]
 
-    # Parameters (dedicated fields only, no redundant FieldChange)
-    a_keys = set(a.parameters)
-    b_keys = set(b.parameters)
-    params_added = {k: b.parameters[k] for k in b_keys - a_keys}
-    params_removed = {k: str(a.parameters[k]) for k in a_keys - b_keys}
+    # Optimizer params (dedicated fields only, no redundant FieldChange)
+    a_keys = set(a.optimizer_params)
+    b_keys = set(b.optimizer_params)
+    params_added = {k: b.optimizer_params[k] for k in b_keys - a_keys}
+    params_removed = {k: str(a.optimizer_params[k]) for k in a_keys - b_keys}
     params_changed = {}
     for k in a_keys & b_keys:
-        if a.parameters[k] != b.parameters[k]:
-            params_changed[k] = {"old": a.parameters[k], "new": b.parameters[k]}
+        if a.optimizer_params[k] != b.optimizer_params[k]:
+            params_changed[k] = {"old": a.optimizer_params[k], "new": b.optimizer_params[k]}
 
     # Layer flags — check both field_changes and dedicated sub-diffs
     generate_changed = (
@@ -211,8 +225,7 @@ def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
         or bool(fs_added) or bool(fs_removed)
     )
     context_changed = (
-        any(fc.layer == "refine_context" for fc in field_changes)
-        or bool(params_added) or bool(params_removed) or bool(params_changed)
+        bool(params_added) or bool(params_removed) or bool(params_changed)
     )
     plan_changed = any(fc.layer == "modify_plan" for fc in field_changes)
 
@@ -239,7 +252,7 @@ def diff(a: PromptState, b: PromptState) -> PromptStateDiff:
         rendered_diff=rendered_diff,
         few_shot_added=fs_added,
         few_shot_removed=fs_removed,
-        parameters_added=params_added,
-        parameters_removed=params_removed,
-        parameters_changed=params_changed,
+        optimizer_params_added=params_added,
+        optimizer_params_removed=params_removed,
+        optimizer_params_changed=params_changed,
     )

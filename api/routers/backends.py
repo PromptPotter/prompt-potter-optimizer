@@ -166,7 +166,7 @@ async def sync_experiments(backend_id: str):
     client = BackendClient(backend.base_url)
 
     try:
-        count = await client.sync_experiments(store, backend_id)
+        count = client.sync_experiments(store, backend_id)
     except Exception as e:
         raise HTTPException(
             status_code=502,

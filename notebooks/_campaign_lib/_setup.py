@@ -5,10 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from api.models.prompt_state import PromptState
 from api.services.backend_client import load_pipeline_config
-from api.services.llm_client import LLMClientBase, get_llm_client
 from api.services.project_store import ProjectStore
 
-from api.services.campaign.campaign_init import init_services as _init_services
+from api.services.campaign.campaign_init import (
+    init_services as _init_services,
+    build_all_session_terms,
+    create_llm_client as setup_llm,
+    save_campaign_winner,
+)
 from api.services.dataset_builder import (
     load_excel_ground_truth as _load_excel_gt,
     train_test_split as _train_test_split,
@@ -28,11 +32,82 @@ __all__ = [
     "configure_pipeline",
     # Pipeline snapshot
     "show_pipeline_snapshot",
+    # Task context
+    "decompose_task_context",
     # Notebook-facing wrappers
     "smoke_test_override",
     # Re-exports
     "save_campaign_winner",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Task context decomposition
+# ---------------------------------------------------------------------------
+
+TASK_CONTEXT_FIELDS = ("domain", "pipeline_purpose", "data_characteristics",
+                       "optimization_goals", "key_challenges")
+
+
+async def decompose_task_context(
+    task_description: str,
+    campaign_config: dict,
+    svc: dict,
+) -> dict:
+    """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
+
+    Calls ``restructure_context_cached()`` and extracts the ``task_context``
+    sub-dict. Prints the decomposed fields for visibility.
+
+    Returns:
+        Dict with keys: domain, pipeline_purpose, data_characteristics,
+        optimization_goals, key_challenges.
+    """
+    import hashlib
+    from api.services.search.context import restructure_context_cached
+
+    if not task_description:
+        print("  (no task description provided)")
+        return {}
+
+    llm_client, llm_model = setup_llm(campaign_config)
+    store = svc.get("store")
+    backend_id = svc.get("backend_id", "")
+    improvement_areas = campaign_config.get("improvement_areas", "")
+
+    # Content-hash for caching
+    rp_hash = hashlib.sha256(
+        f"task_ctx:{task_description}".encode(),
+    ).hexdigest()[:16]
+
+    result, was_cached = await restructure_context_cached(
+        task_description, llm_client,
+        model=llm_model,
+        improvement_areas=improvement_areas,
+        store_base_dir=store.base_dir if store else None,
+        backend_id=backend_id,
+        rp_hash=rp_hash,
+    )
+
+    task_context = result.get("task_context", {})
+    task_context["raw_description"] = task_description
+    cache_tag = " (cached)" if was_cached else ""
+
+    print(f"{'=' * 70}")
+    print(f"TASK CONTEXT DECOMPOSITION{cache_tag}")
+    print(f"{'=' * 70}")
+    for field in TASK_CONTEXT_FIELDS:
+        val = task_context.get(field, "")
+        if val:
+            print(f"  {field}: {val}")
+        else:
+            print(f"  {field}: (empty)")
+
+    if result.get("consultation"):
+        print(f"\n  Consultation: {result['consultation']}")
+    print(f"{'=' * 70}")
+
+    return task_context
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +153,7 @@ async def smoke_test_override(
     bc = svc["backend_client"]
     query = eval_data[0]["query"] if eval_data else "Stahl S235"
 
-    await bc.init_session(svc.get("session_terms", []))
+    bc.init_session(svc.get("session_terms", []))
 
     schema = copy.deepcopy(
         pipeline_config["resolved_schemas"][schema_ref]["json_schema"],
@@ -87,9 +162,9 @@ async def smoke_test_override(
         schema["properties"][name] = {"type": "string", "description": desc}
         schema.setdefault("required", []).append(name)
 
-    result = await bc.run_match(
+    result = bc.run_match(
         query,
-        pipeline_params={"node_config": {step: {"output_schema": schema}}},
+        pipeline_params={step: {"output_schema": schema}},
     )
 
     data = result.get("data", {})
@@ -113,63 +188,12 @@ async def smoke_test_override(
 # ---------------------------------------------------------------------------
 
 
-def _url_to_provider(url: str) -> str:
-    """Map a provider base URL to a provider name for get_llm_client()."""
-    if "anthropic.com" in url:
-        return "anthropic"
-    if "openai.com" in url:
-        return "openai"
-    return "groq"
+
+# setup_llm and save_campaign_winner are now imported from
+# api.services.campaign.campaign_init (see imports above)
 
 
-def setup_llm(campaign_config: dict) -> tuple[LLMClientBase, str]:
-    """Create LLM client + model from campaign_config['eval_llm']."""
-    eval_llm = campaign_config["eval_llm"]
-    provider = _url_to_provider(eval_llm.get("provider_url", ""))
-    return get_llm_client(provider), eval_llm.get("model", "")
-
-
-def save_campaign_winner(
-    campaign_rounds: list,
-    campaign_config: dict,
-    store: "ProjectStore",
-    backend_id: str,
-) -> dict:
-    """Find best round, save to store. Returns save_data dict."""
-    from datetime import datetime, timezone
-
-    winner = campaign_rounds[-1]["prompt_state"]
-    winner_acc = campaign_rounds[-1]["accuracy"]
-
-    for rd in campaign_rounds:
-        if rd["accuracy"] > winner_acc:
-            winner = rd["prompt_state"]
-            winner_acc = rd["accuracy"]
-
-    baseline_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else None
-    save_data = {
-        "winner": winner.model_dump(),
-        "accuracy": winner_acc,
-        "campaign_rounds": len(campaign_rounds),
-        "baseline_accuracy": baseline_acc,
-        "improvement": (winner_acc - baseline_acc) if baseline_acc is not None else None,
-        "config": campaign_config,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
-    store.backends.save_sync(backend_id, filename, save_data)
-
-    print(f"Winner saved: {filename} (acc={winner_acc:.1%})")
-    return {
-        **save_data,
-        "winner_id": winner.id,
-        "filename": filename,
-        "backend_id": backend_id,
-    }
-
-
-async def show_pipeline_snapshot(svc: dict) -> dict:
+def show_pipeline_snapshot(svc: dict) -> dict:
     """Fetch and display full pipeline config from backend.
 
     Prints: pipeline name/version, node list, resolved schemas/prompts,
@@ -177,7 +201,7 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     """
     import json
 
-    pipeline_raw = await svc["backend_client"].fetch_pipeline()
+    pipeline_raw = svc["backend_client"].fetch_pipeline()
     config = pipeline_raw.get("data", pipeline_raw)
 
     name = config.get("name", "?")
@@ -224,9 +248,10 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
     # Apply overrides via schema if available
     if overrides and pipeline_schema:
         for flat_name, value in overrides.items():
-            node_config = pipeline_schema.resolve_flat_param(flat_name)
-            if node_config:
-                pipeline_params.update(node_config)
+            resolved = pipeline_schema.resolve_flat_param(flat_name)
+            if resolved:
+                node, wire_key = resolved
+                pipeline_params.setdefault(node, {})[wire_key] = value
             else:
                 pipeline_params[flat_name] = value
     elif overrides:
@@ -246,7 +271,7 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def init_services(
+def init_services(
     backend_url: str = "http://127.0.0.1:8000",
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
@@ -259,7 +284,7 @@ async def init_services(
     """
     project_root = Path(__file__).resolve().parent.parent.parent
 
-    svc = await _init_services(
+    svc = _init_services(
         backend_url=backend_url,
         backend_id=backend_id,
         experiment_id=experiment_id,
@@ -302,12 +327,12 @@ async def init_services(
 # ---------------------------------------------------------------------------
 
 
-async def show_backend_status(client) -> dict:
+def show_backend_status(client) -> dict:
     """Call backend /status and display formatted status table.
 
     Returns the raw status dict (or error dict).
     """
-    status = await client.check_status()
+    status = client.check_status()
 
     st = status.get("status", "")
     if st == "unreachable":
@@ -349,7 +374,7 @@ async def show_backend_status(client) -> dict:
     return status
 
 
-async def prepare_eval_context(
+def prepare_eval_context(
     svc: dict,
     train_data: list[dict] | None,
 ) -> tuple[PromptState, list[dict], dict]:
@@ -361,31 +386,15 @@ async def prepare_eval_context(
     from api.services.prompt_eval import load_baseline_prompt
     baseline = load_baseline_prompt(svc["exp_data"])
     eval_data = train_data or []
-    backend_status = await show_backend_status(svc["backend_client"])
+    backend_status = show_backend_status(svc["backend_client"])
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
     return baseline, eval_data, backend_status
 
 
-def build_all_session_terms(
-    store: "ProjectStore",
-    backend_id: str,
-) -> list[str]:
-    """Unique ground_truth identifiers across all stored datasets (train + test).
 
-    For /match to work correctly, the session must contain ALL identifiers:
-    - Train: query->ground_truth mappings (used for optimization evaluation)
-    - Test: ground_truth only (identifiers in candidate pool, no query mapping)
-    """
-    gt_set: set[str] = set()
-    for name in ("train", "test_processes", "test_material"):
-        ds = store.datasets.load(backend_id, name)
-        if ds and ds.get("items"):
-            for item in ds["items"]:
-                gt = item.get("ground_truth", "").strip()
-                if gt:
-                    gt_set.add(gt)
-    return sorted(gt_set)
+# build_all_session_terms is now imported from
+# api.services.campaign.campaign_init (see imports above)
 
 
 def show_dataset_summary(store: "ProjectStore", backend_id: str) -> dict:

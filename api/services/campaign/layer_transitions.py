@@ -14,6 +14,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from api.config.optimizer_prompt_loader import load_optimizer_prompt
+from api.core.llm_call import get_node_config, llm_call
 from api.models.prompt_state import PromptState
 
 if TYPE_CHECKING:
@@ -35,6 +37,11 @@ class TransitionResult:
 
     prompt_state: PromptState
     pipeline_params: dict | None = None
+    task_context: dict | None = None
+    l2_directive: str = ""
+    action: str = "continue"  # "continue" | "probe" (extensible)
+    debug_prompt: str = ""
+    debug_response: dict | None = None
 
 
 async def refine_context(
@@ -46,6 +53,12 @@ async def refine_context(
     temperature: float = 0.3,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
+    escalation_context: dict | None = None,
+    escalation_journal: list[dict] | None = None,
+    task_context: dict | None = None,
+    warning_inventory: dict | None = None,
+    critique_text: str = "",
+    prev_l2_directive: str = "",
 ) -> TransitionResult:
     """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
 
@@ -73,64 +86,124 @@ async def refine_context(
     )
 
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
+    escalation_section = _build_escalation_prompt_section(
+        escalation_context, escalation_journal, pipeline_params,
+        pipeline_schema=pipeline_schema,
+    )
 
-    prompt = (
-        "You are a prompt optimization expert. The L1 inner optimization loop "
-        "has stalled — candidates are no longer improving.\n\n"
-        f"ROUND HISTORY (stalled):\n{round_summary}\n\n"
-        f"CURRENT PROMPT:\n---\n{current_ps.render()}\n---\n\n"
-        f"FAILURE EXAMPLES:\n{chr(10).join(failure_lines[:15])}\n\n"
-        f"CURRENT PARAMETERS: {json.dumps(current_ps.parameters)}\n"
-        f"CURRENT CONTEXT: {current_ps.context[:200] if current_ps.context else '(empty)'}\n\n"
-        f"{pipeline_section}"
-        "Analyze WHY L1 is stuck and recommend:\n"
-        "1. Parameter adjustments (creativity, n_variants, variant_strategy)\n"
-        "2. Context text changes (domain grounding, constraints)\n"
-    )
-    if pipeline_section:
-        prompt += "3. Pipeline parameter adjustments (see available params above)\n"
-    prompt += (
-        "\nReturn a JSON object with:\n"
-        '  "parameters": dict of parameter changes to apply\n'
-        '  "context": new context string (or empty to keep current)\n'
-    )
-    if pipeline_section:
-        prompt += (
-            '  "pipeline_params": dict of pipeline parameter changes '
-            "(param_name -> new value)\n"
+    task_context_section = ""
+    if task_context:
+        task_context_section = (
+            "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
+            + json.dumps(task_context, indent=2)
         )
-    prompt += '  "rationale": 1-2 sentence explanation'
 
-    response = await llm_client.chat(
+    # Inject cross-round warning inventory
+    warning_section = ""
+    if warning_inventory:
+        from api.services.campaign.critique_stats import summarize_warning_inventory
+        warning_section = summarize_warning_inventory(warning_inventory)
+        if warning_section:
+            warning_section = "\n\n" + warning_section + "\n"
+
+    # Inject previous critique so L2 builds on it rather than re-analyzing
+    critique_section = ""
+    if critique_text:
+        critique_section = (
+            "\n\nPREVIOUS CRITIQUE (build on this analysis, don't repeat it):\n"
+            + critique_text
+        )
+
+    # Sliding window: L2 sees only its own previous directive (window=1)
+    prev_directive_section = ""
+    if prev_l2_directive:
+        prev_directive_section = (
+            "\n\nYOUR PREVIOUS DIRECTIVE (evolve or supersede — do not repeat verbatim):\n"
+            + prev_l2_directive
+        )
+
+    response_schema_suffix = (
+        "\nReturn a JSON object with:\n"
+        '  "optimizer_params": dict of meta-setting changes '
+        "(creativity, n_variants, sample_size — or {} to keep current)\n"
+        '  "task_context": dict of refined domain fields (or {} to keep current)\n'
+        '  "action": "continue" (normal L1 cycle) or "probe" '
+        "(test warned queries with new settings first)\n"
+        '  "directive": 2-3 sentence instruction for the next candidate '
+        "generator — what to focus on and why (this will be injected into "
+        "the generation prompt as additional guidance)\n"
+        '  "rationale": 1-2 sentence explanation\n'
+        "\nNote: L1 Generate makes the final decision on pipeline_params. "
+        "Your job is to refine the "
+        "situation context and meta-settings so L1 makes better choices.\n"
+        "Use your judgment on when to set action to \"probe\" vs \"continue\" "
+        "based on the data above."
+    )
+
+    prompt = load_optimizer_prompt("l2_refine_context").compile(
+        round_summary=round_summary,
+        rendered_prompt=current_ps.render(),
+        failure_lines=chr(10).join(failure_lines[:15]),
+        current_params=json.dumps(current_ps.optimizer_params),
+        task_context_section=task_context_section,
+        pipeline_section=pipeline_section,
+        escalation_section=escalation_section + warning_section,
+        critique_section=critique_section,
+        prev_directive_section=prev_directive_section,
+        response_schema_suffix=response_schema_suffix,
+    )
+
+    response = await llm_call(
+        llm_client,
         messages=[{"role": "user", "content": prompt}],
+        config=get_node_config("l2_refine_context"),
         model=model,
         temperature=temperature,
-        max_tokens=2048,
-        output_format="json",
     )
     result = response.parsed or json.loads(response.content)
 
     changes: dict = {}
-    if result.get("parameters"):
-        new_params = {**current_ps.parameters, **result["parameters"]}
-        changes["parameters"] = new_params
-    if result.get("context"):
-        changes["context"] = result["context"]
-
+    if result.get("optimizer_params"):
+        new_params = {**current_ps.optimizer_params, **result["optimizer_params"]}
+        changes["optimizer_params"] = new_params
     rationale = result.get("rationale", "L2 refine_context transition")
     changes["changes_description"] = f"L2: {rationale[:80]}"
 
-    new_pipeline_params = _parse_pipeline_params(result, pipeline_params)
+    # Parse refined task_context (merge with current, only non-empty updates)
+    new_task_context = None
+    if result.get("task_context") and isinstance(result["task_context"], dict):
+        merged = {**(task_context or {}), **result["task_context"]}
+        if merged != (task_context or {}):
+            new_task_context = merged
+
+    # Parse action classification
+    action = result.get("action", "continue")
+    if action not in ("continue", "probe"):
+        action = "continue"
+
+    # Extract L2 directive for L1 injection
+    l2_directive = result.get("directive", "")
+    if not isinstance(l2_directive, str):
+        l2_directive = ""
 
     logger.info(
-        "L2 refine_context: %d param changes, context %s, pipeline_params %s",
-        len(result.get("parameters", {})),
-        "updated" if result.get("context") else "unchanged",
-        "updated" if new_pipeline_params else "unchanged",
+        "L2 refine_context: %d param changes, task_context %s, "
+        "action=%s, directive=%d chars",
+        len(result.get("optimizer_params", {})),
+        "updated" if new_task_context else "unchanged",
+        action,
+        len(l2_directive),
     )
 
     new_ps = current_ps.derive(**changes) if changes else current_ps
-    return TransitionResult(prompt_state=new_ps, pipeline_params=new_pipeline_params)
+    return TransitionResult(
+        prompt_state=new_ps,
+        task_context=new_task_context,
+        l2_directive=l2_directive,
+        action=action,
+        debug_prompt=prompt,
+        debug_response=result,
+    )
 
 
 async def modify_plan(
@@ -161,38 +234,28 @@ async def modify_plan(
 
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
 
-    prompt = (
-        "You are an expert optimization strategist. Both the inner prompt "
-        "generation loop (L1) and the parameter tuning loop (L2) have stalled.\n\n"
-        f"CURRENT PLAN: {current_ps.plan or '(none — default strategy)'}\n\n"
-        f"L2 ADJUSTMENT HISTORY:\n{l2_summary}\n\n"
-        f"CURRENT PROMPT:\n---\n{current_ps.render()}\n---\n\n"
-        f"{pipeline_section}"
-        "The current approach is not working. Suggest a fundamentally different "
-        "optimization strategy. Consider:\n"
-        "- Different prompting paradigms (chain-of-thought, few-shot, etc.)\n"
-        "- Different evaluation focus areas\n"
-        "- Structural changes to how the prompt is organized\n"
-    )
-    if pipeline_section:
-        prompt += "- Pipeline parameter changes (see available params above)\n"
-    prompt += (
+    response_schema_suffix = (
         "\nReturn a JSON object with:\n"
         '  "plan": new strategy text for guiding future optimization\n'
+        '  "pipeline_params": {"step_name": {"param": value}} '
+        "(or {} for no changes)\n"
+        '  "rationale": 1-2 sentence explanation of the strategic shift'
     )
-    if pipeline_section:
-        prompt += (
-            '  "pipeline_params": dict of pipeline parameter changes '
-            "(param_name -> new value)\n"
-        )
-    prompt += '  "rationale": 1-2 sentence explanation of the strategic shift'
 
-    response = await llm_client.chat(
+    prompt = load_optimizer_prompt("l3_modify_plan").compile(
+        current_plan=current_ps.plan or "(none — default strategy)",
+        l2_summary=l2_summary,
+        rendered_prompt=current_ps.render(),
+        pipeline_section=pipeline_section,
+        response_schema_suffix=response_schema_suffix,
+    )
+
+    response = await llm_call(
+        llm_client,
         messages=[{"role": "user", "content": prompt}],
+        config=get_node_config("l3_modify_plan"),
         model=model,
         temperature=temperature,
-        max_tokens=2048,
-        output_format="json",
     )
     result = response.parsed or json.loads(response.content)
 
@@ -209,7 +272,10 @@ async def modify_plan(
         plan=new_plan,
         changes_description=f"L3: {rationale[:80]}",
     )
-    return TransitionResult(prompt_state=new_ps, pipeline_params=new_pipeline_params)
+    return TransitionResult(
+        prompt_state=new_ps,
+        pipeline_params=new_pipeline_params,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -231,8 +297,8 @@ def _build_pipeline_prompt_section(
     param_keys = pipeline_schema.step_param_keys()
     if not param_keys:
         return ""
-    lines = ["AVAILABLE PIPELINE PARAMETERS (you may suggest value changes):\n"]
-    for step_name, keys in sorted(param_keys.items()):
+    lines = ["AVAILABLE PIPELINE PARAMETERS (in pipeline execution order):\n"]
+    for step_name, keys in param_keys.items():
         current_vals = {}
         if pipeline_params:
             step_cfg = pipeline_params.get(step_name, {})
@@ -241,6 +307,74 @@ def _build_pipeline_prompt_section(
         lines.append(f"  {step_name}: {', '.join(sorted(keys))}")
         if current_vals:
             lines.append(f"    current: {json.dumps(current_vals)}")
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _build_escalation_prompt_section(
+    escalation_context: dict | None,
+    escalation_journal: list[dict] | None,
+    pipeline_params: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
+) -> str:
+    """Build the escalation diagnostics section for L2 prompts.
+
+    Returns an empty string when no escalation context is available,
+    keeping the normal L2 prompt unchanged.  When present, the section
+    shows a data-driven stability map of tried configs so the LLM can
+    figure out what to change.
+    """
+    if not escalation_context:
+        return ""
+
+    dominant = escalation_context.get("dominant_warning", "unknown")
+    step_name = dominant.split(":")[0] if ":" in dominant else "unknown"
+    rate = escalation_context.get("degraded_rate", 0)
+
+    wt = escalation_context.get("warning_types", {})
+    wt_str = ", ".join(f"{k} ({v})" for k, v in sorted(wt.items(), key=lambda x: -x[1]))
+
+    lines = [
+        f"PIPELINE STABILITY REPORT ({step_name}):\n",
+        f"  Current degradation: {rate:.0%} of queries ({wt_str})",
+    ]
+
+    # Show current web_search config
+    step_cfg = (pipeline_params or {}).get(step_name, {})
+    if isinstance(step_cfg, dict) and step_cfg:
+        lines.append(f"  Current {step_name} config: {json.dumps(step_cfg)}")
+
+    lines.append("")
+
+    if escalation_journal:
+        lines.append("  Tried configs and stability:")
+        for entry in escalation_journal:
+            step = entry.get("problem_step", "unknown")
+            step_cfg = entry.get("step_config", {})
+            prev_rate = entry.get("degraded_rate", 0)
+            outcome = entry.get("outcome_degraded_rate")
+            outcome_str = f" -> {outcome:.0%}" if outcome is not None else ""
+            cfg_parts = [f"{k}={v!r}" for k, v in sorted(step_cfg.items())]
+            lines.append(
+                f"    Round {entry.get('round', '?')}: "
+                f"{step} [{', '.join(cfg_parts) or 'defaults'}]"
+                f" | {prev_rate:.0%} degraded{outcome_str}"
+            )
+        lines.append("")
+
+    # Surface the problem step's configurable axes
+    if pipeline_schema:
+        all_keys = pipeline_schema.step_param_keys()
+        step_keys = all_keys.get(step_name, set())
+        if step_keys:
+            lines.append(
+                f"  Available {step_name} parameters: {', '.join(sorted(step_keys))}"
+            )
+
+    lines.append(
+        "  The configurations above are all unstable. Suggest different "
+        "parameter values to stabilize the pipeline."
+    )
     lines.append("")
     return "\n".join(lines) + "\n"
 

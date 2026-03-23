@@ -177,7 +177,7 @@ async def test_scan_rows_include_errors():
     import api.services.search.smart_search as _ss
     _orig = _ss.evaluate_prompt_cached
 
-    async def _mock_eval(search_point, data, client, **kw):
+    def _mock_eval(search_point, data, client, **kw):
         ps = search_point.prompt_state
         if ps.persona != baseline.persona:
             return (
@@ -238,7 +238,7 @@ async def test_scan_skips_all_error_axis():
     import api.services.search.smart_search as _ss
     _orig = _ss.evaluate_prompt_cached
 
-    async def _mock_eval(search_point, data, client, **kw):
+    def _mock_eval(search_point, data, client, **kw):
         ps = search_point.prompt_state
         # persona variants all error out
         if ps.persona != baseline.persona:
@@ -296,7 +296,7 @@ async def test_scan_aborts_on_baseline_all_errors():
     import api.services.search.smart_search as _ss
     _orig = _ss.evaluate_prompt_cached
 
-    async def _mock_eval(search_point, data, client, **kw):
+    def _mock_eval(search_point, data, client, **kw):
         nonlocal call_count
         call_count += 1
         return (
@@ -339,7 +339,7 @@ async def test_scan_aborts_after_consecutive_all_error_variants():
     import api.services.search.smart_search as _ss
     _orig = _ss.evaluate_prompt_cached
 
-    async def _mock_eval(search_point, data, client, **kw):
+    def _mock_eval(search_point, data, client, **kw):
         nonlocal call_count
         call_count += 1
         ps = search_point.prompt_state
@@ -391,7 +391,7 @@ async def test_scan_baseline_row_reflects_actual_errors():
     import api.services.search.smart_search as _ss
     _orig = _ss.evaluate_prompt_cached
 
-    async def _mock_eval(search_point, data, client, **kw):
+    def _mock_eval(search_point, data, client, **kw):
         ps = search_point.prompt_state
         if ps.persona == baseline.persona:
             return (

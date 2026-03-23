@@ -309,16 +309,16 @@ def _apply_e2e_mocks(monkeypatch):
             current_ps.derive(
                 instruction=f"Match query to canonical drug name (variant {i})",
                 changes_description=f"e2e_candidate_{i}",
-            )
+            ).model_dump()
             for i in range(n)
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
+        "api.services.prompt_optimizer.l1_generate",
         mock_generate,
     )
 
-    async def mock_eval(search_point, data, ctx=None, **kwargs):
+    def mock_eval(search_point, data, ctx=None, **kwargs):
         label = kwargs.get("label", "")
         if label == "candidate_0":
             results, scores = build_eval_results(data, hits=3)
@@ -354,13 +354,15 @@ async def test_e2e_feedback_cycle_with_registry(
         patience=2,
         n_variants=2,
         backend_url="http://mock:8000",
-        generate_suggestions=False,
     )
 
     result = await run_feedback_cycle(
         instruction="Normalize drug names.",
         eval_data=eval_data,
         config=config,
+        baseline_prompt_state=PromptState(instruction="Normalize drug names.").model_dump(),
+        baseline_accuracy=0.0,
+        baseline_results=[],
     )
 
     assert result.n_rounds > 0

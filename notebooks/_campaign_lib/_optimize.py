@@ -1,103 +1,43 @@
-"""Optimization rounds, feedback cycle, and Langfuse integration."""
+"""Feedback cycle notebook wrapper: preflight, callbacks, run loop."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from api.models.pipeline_schema import PipelineSchema
+    from api.services.project_store import ProjectStore
 
 from api.models.prompt_state import PromptState
-from api.services.project_store import ProjectStore
 
 from ._display import (
-    BOLD, CYAN, GREEN, MAGENTA, RED, RESET, YELLOW,
+    BOLD, CYAN, GREEN, RED, RESET, YELLOW,
     _box_bottom, _box_line, _box_top,
     _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
-    _dotted_line, _fmt_delta, _fmt_query_result, _scoreboard,
+    _fmt_delta, _fmt_query_result,
     display_progress,
 )
 from ._stats import (
-    fmt_ci, fmt_pvalue, min_detectable_effect, proportion_test, wilson_ci,
+    fmt_ci, wilson_ci,
 )
+from ._phase_display import (
+    _CycleDisplayState, _dispatch_phase, _pp_val,
+    _node_bottom, _node_line, _node_top,
+)
+from api.services.campaign.campaign_init import resolve_experiment_id as _resolve_experiment_id
 
 # Phase event printer for feedback cycle observability
 from api.models.phase_event import PhaseEvent
 
-
-# ---------------------------------------------------------------------------
-# Display state — tracks cycle metadata across callbacks (display-only)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class _CycleDisplayState:
-    """Mutable display state threaded through phase/callback closures.
-
-    Populated exclusively from PhaseEvent data — never touches services.
-    """
-    max_rounds: int = 0
-    patience: int = 0
-    stall_count: int = 0
-    round_num: int = 0
-    baseline_accuracy: float = 0.0
-    baseline_total: int = 0  # sample count for significance tests
-    best_in_round: tuple[str, float] | None = None  # (label, accuracy)
-    scan_context: dict | None = None  # cached for scan reasoning display
-    candidates_meta: list = field(default_factory=list)  # from growth_exit
-
 __all__ = [
-    # Campaign
-    "show_feedback_preflight", "run_feedback_cycle_notebook",
-    "display_progress", "run_manual_round",
-    # Langfuse
-    "push_langfuse", "sync_langfuse",
+    "show_feedback_preflight",
+    "run_feedback_cycle_notebook",
+    "display_progress",
 ]
 
 
 # ---------------------------------------------------------------------------
-# Optimization rounds (thin wrappers over prompt_optimizer)
-# ---------------------------------------------------------------------------
-
-
-async def run_manual_round(
-    campaign_rounds: list,
-    eval_data: list,
-    campaign_config: dict,
-    svc: dict,
-) -> dict | None:
-    """Run a single manual optimization round via feedback cycle.
-
-    Returns:
-        The round entry dict (also appended to campaign_rounds), or None
-        if interrupted before any round completed.
-    """
-    # Override max_rounds=1 for single-round behaviour
-    override = dict(campaign_config)
-    override.setdefault("optimization", {})
-    override["optimization"] = {**override["optimization"], "max_rounds": 1, "patience": 1}
-
-    initial_len = len(campaign_rounds)
-
-    await run_feedback_cycle_notebook(
-        campaign_rounds, eval_data, override,
-        store=svc.get("store"),
-        backend_id=svc.get("backend_id", ""),
-        backend_url=svc["backend_client"].base_url
-        if svc.get("backend_client") else "http://127.0.0.1:8000",
-        pipeline_params=campaign_config.get("pipeline_params"),
-        session_terms=svc.get("session_terms"),
-    )
-
-    display_progress(campaign_rounds)
-
-    if len(campaign_rounds) > initial_len:
-        return campaign_rounds[-1]
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Feedback cycle (M3 node-based optimization)
+# Feedback cycle (preflight + run)
 # ---------------------------------------------------------------------------
 
 
@@ -141,6 +81,7 @@ def show_feedback_preflight(
     campaign_config: dict,
     *,
     pipeline_params: "dict | None" = None,
+    pipeline_schema: "PipelineSchema | None" = None,
     scan_df=None,
     axis_profiles=None,
     scan_variants=None,
@@ -182,6 +123,7 @@ def show_feedback_preflight(
     config = CycleConfig.from_campaign_config(
         campaign_config, pipeline_params=pipeline_params,
         scan_context=scan_context,
+        pipeline_schema=pipeline_schema,
     )
 
     bl = _extract_campaign_baseline(campaign_rounds)
@@ -382,292 +324,8 @@ def _print_preflight_sections(config, bl, eval_data,
 
 
 # ---------------------------------------------------------------------------
-# Phase-specific display formatters
+# Feedback cycle notebook runner
 # ---------------------------------------------------------------------------
-
-
-def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
-    state.max_rounds = d.get("max_rounds", 0)
-    state.patience = d.get("patience", 0)
-    state.baseline_accuracy = d.get("baseline_accuracy", 0.0)
-
-    model = d.get("model", "(default)")
-    l2 = "enabled" if d.get("enable_l2") else "disabled"
-    l3 = "enabled" if d.get("enable_l3") else "disabled"
-    scan = "YES" if d.get("has_scan_context") else "NO"
-
-    print()
-    print(_dbox_top())
-    print(_dbox_line(f"{BOLD}FEEDBACK CYCLE STARTING{RESET}"))
-    print(_dbox_sep())
-    print(_dbox_line(
-        f"Baseline       {d.get('baseline_accuracy', 0):.1%}"))
-    print(_dbox_line(
-        f"Max rounds     {state.max_rounds:<15d}"
-        f"Patience    {state.patience}"))
-    print(_dbox_line(
-        f"Candidates     {d.get('n_variants', 0)}"))
-    sample = d.get("sample_size", 0)
-    total = d.get("eval_data_count", 0)
-    eff_n = sample if sample else total
-    state.baseline_total = eff_n
-    sample_label = f"{sample} of {total}" if sample else f"all {total}"
-    mde = min_detectable_effect(eff_n)
-    print(_dbox_line(f"Sample size    {sample_label}"))
-    print(_dbox_line(
-        f"Min detectable {YELLOW}\u00b1{mde:.1%}{RESET} (\u03b1=0.05, 80% power)"))
-    print(_dbox_line(f"Model          {model}"))
-    print(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
-    print(_dbox_line(f"Scan context   {scan}"))
-    critique = "enabled" if d.get("enable_critique") else "disabled"
-    print(_dbox_line(f"Critique       {critique}"))
-    print(_dbox_bottom())
-
-
-def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
-    cycle_id = d.get("cycle_id", "?")[:12]
-    samples = d.get("sample_count", "?")
-    obs = "ON" if d.get("obs_enabled") else "OFF"
-    print(f"  {GREEN}✓{RESET} Initialized  cycle={cycle_id}"
-          f"  samples={samples}  obs={obs}")
-    crit = d.get("critique_text", "")
-    if crit:
-        preview = crit.replace("\n", " ").strip()
-        if len(preview) > 80:
-            preview = preview[:77] + "..."
-        print(f"    {CYAN}Bootstrap critique:{RESET} {preview}")
-    resumed = d.get("resumed_from_round", 0)
-    if resumed > 0:
-        print(f"    Resumed from round {resumed} ({resumed} rounds cached)")
-    else:
-        print("    Starting fresh (no prior rounds for this cycle)")
-
-
-def _print_growth_enter(d: dict, state: _CycleDisplayState) -> None:
-    acc = d.get("current_accuracy", 0.0)
-    preview = d.get("prompt_preview", "").replace("\n", " ").strip()
-    if len(preview) > 50:
-        preview = preview[:47] + "..."
-    if not preview:
-        preview = "(no baseline -- seed from scan or provide instruction)"
-    n = d.get("n_variants", 0)
-    model = (d.get("model") or "(default)")
-    creativity = d.get("creativity", 0.7)
-    scan = "YES" if d.get("has_scan_context") else "NO"
-
-    r_label = f"Round {state.round_num + 1}/{state.max_rounds}"
-    p_label = f"patience {state.stall_count}/{state.patience}"
-
-    print()
-    print(_box_top(r_label, p_label))
-    print(_box_line(f"{CYAN}{BOLD}GENERATING CANDIDATES{RESET}"))
-    print(_box_line(f"Current best    {acc:.1%}"))
-    print(_box_line(f"Prompt          {preview}"))
-    crit = "YES" if d.get("has_critique") else "NO"
-    print(_box_line(
-        f"Candidates      {n}   Creativity: {creativity}   Scan: {scan}"
-        f"   Critique: {crit}"))
-    print(_box_line(f"Model           {model}"))
-    print(_box_bottom())
-
-    # Scan reasoning: show what the LLM was told to focus on
-    if state.scan_context and d.get("has_scan_context"):
-        axes = state.scan_context.get("improving_axes", [])
-        bl_acc = state.scan_context.get("baseline_accuracy", 0.0)
-        if axes:
-            print(f"  {CYAN}Scan focus:{RESET} {len(axes)} improving axes"
-                  f" [{', '.join(axes)}]")
-        if bl_acc > 0:
-            print(f"  {CYAN}Scan baseline:{RESET} {bl_acc:.1%}")
-
-
-def _print_growth_exit(d: dict, state: _CycleDisplayState) -> None:
-    n = d.get("n_candidates", 0)
-    source = "loaded from disk" if d.get("loaded_from_disk") else "from LLM"
-    n_eval = d.get("n_eval_queries", 0)
-    state.candidates_meta = d.get("candidates", [])
-
-    print(f"  {GREEN}✓{RESET} {n} candidates generated ({source})")
-
-    for c in d.get("candidates", []):
-        idx = c.get("idx", 0)
-        desc = c.get("changes_description", "") or "(no description)"
-        if len(desc) > 50:
-            desc = desc[:47] + "..."
-        fields = c.get("changed_fields", [])
-        fields_tag = f" [{', '.join(fields)}]" if fields else ""
-        pp = c.get("pipeline_params_override")
-        if pp:
-            keys = list(pp.keys())
-            if len(keys) > 3:
-                pp_tag = f" pp=[{', '.join(keys[:3])}, +{len(keys) - 3}]"
-            else:
-                pp_tag = f" pp=[{', '.join(keys)}]"
-        else:
-            pp_tag = ""
-        print(f"    C{int(idx) + 1}: {desc}{fields_tag}{pp_tag}")
-
-    print(f"  Evaluating {n} x {n_eval} = {n * n_eval} backend calls")
-
-
-def _print_eval_enter(d: dict, state: _CycleDisplayState) -> None:
-    n_cand = d.get("n_candidates", 0)
-    n_q = d.get("n_queries", 0)
-    best = d.get("current_best_accuracy", 0.0)
-    thresh = d.get("improvement_threshold", 0.01)
-    print(f"\n  {CYAN}{BOLD}EVALUATING{RESET}  {n_cand} candidates"
-          f" x {n_q} queries  |  beat {best:.1%} + {thresh:.1%}")
-
-
-def _print_eval_exit(d: dict, state: _CycleDisplayState) -> None:
-    w_acc = d.get("winner_accuracy", 0.0)
-    w_comp = d.get("winner_composite")
-    improved = d.get("improved", False)
-    action = d.get("next_action", "?")
-    scores = d.get("candidate_scores", [])
-
-    # Normalize labels to C{i+1} for display (service uses candidate_id)
-    for i, s in enumerate(scores):
-        s["label"] = f"C{i + 1}"
-    best_s = max(scores, key=lambda s: (
-        s.get("composite", s["accuracy"]), s["accuracy"]
-    )) if scores else {}
-    winner = best_s.get("label", "?")
-
-    # Scoreboard (with CI column)
-    board = _scoreboard(scores, winner, state.baseline_accuracy)
-    if board:
-        print(board)
-
-    # Composite suffix (only when it differs from accuracy)
-    comp_tag = ""
-    if w_comp is not None and w_comp != w_acc:
-        comp_tag = f"  composite={w_comp:.4f}"
-
-    # Significance test
-    winner_hits = best_s.get("hits", 0)
-    winner_total = best_s.get("total", 0)
-
-    # Result line
-    if improved:
-        delta = w_acc - state.baseline_accuracy
-        bl_hits = round(state.baseline_accuracy * winner_total)
-        p = proportion_test(winner_hits, winner_total, bl_hits, winner_total)
-        sig_tag = f"  {fmt_pvalue(p)}"
-        print(f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {w_acc:.1%}"
-              f" (was {state.baseline_accuracy:.1%},"
-              f" {_fmt_delta(delta)}){comp_tag}{sig_tag}"
-              f"  ->  next: {action}")
-        state.baseline_accuracy = w_acc
-    else:
-        print(f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}"
-              f"  best candidate {w_acc:.1%}{comp_tag}"
-              f"  ->  patience {state.stall_count + 1}/{state.patience}")
-
-    # Critique preview (fed forward to next round's growth)
-    crit = d.get("critique_text", "")
-    if crit:
-        preview = crit.replace("\n", " ").strip()
-        if len(preview) > 90:
-            preview = preview[:87] + "..."
-        print(f"  {CYAN}Critique:{RESET} {preview}")
-
-
-def _print_refine_enter(d: dict, state: _CycleDisplayState) -> None:
-    l2r = d.get("l2_round", "?")
-    stalls = d.get("stall_count", "?")
-    acc = d.get("current_accuracy", 0.0)
-    best = d.get("best_accuracy", 0.0)
-    params = d.get("current_params", {})
-    print(f"\n  {MAGENTA}{_dotted_line('L2 REFINE CONTEXT')}{RESET}")
-    print(f"  L2 round {l2r}  |  L1 stalled {stalls} rounds"
-          f"  |  acc={acc:.1%}  best={best:.1%}")
-    if params:
-        parts = []
-        for k, v in list(params.items())[:5]:
-            vs = str(v)
-            if len(vs) > 30:
-                vs = vs[:27] + "..."
-            parts.append(f"{k}={vs}")
-        extra = len(params) - 5
-        params_str = ", ".join(parts)
-        if extra > 0:
-            params_str += f", +{extra} more"
-        print(f"  Current params: {params_str}")
-    else:
-        print("  Current params: (none)")
-    print("  LLM analyzing failure patterns for context refinement...")
-
-
-def _print_refine_exit(d: dict, state: _CycleDisplayState) -> None:
-    n_changes = d.get("param_changes_count", 0)
-    ctx = "context updated" if d.get("context_changed") else "context unchanged"
-    desc = d.get("changes_description", "")
-    print(f"  {GREEN}✓{RESET} L2 decision: {n_changes} param changes, {ctx}")
-    if desc:
-        print(f"    {desc}")
-    print(f"  {MAGENTA}{_dotted_line()}{RESET}")
-
-
-def _print_plan_enter(d: dict, state: _CycleDisplayState) -> None:
-    l3r = d.get("l3_round", "?")
-    l2_stalls = d.get("l2_stall_count", "?")
-    plan = d.get("current_plan_preview", "")
-    if len(plan) > 55:
-        plan = plan[:52] + "..."
-    print(f"\n  {MAGENTA}{_dotted_line('L3 MODIFY PLAN')}{RESET}")
-    print(f"  L3 round {l3r}  |  L2 stalled {l2_stalls} rounds")
-    print(f"  Current plan: {plan}")
-    print("  LLM designing new strategy...")
-
-
-def _print_plan_exit(d: dict, state: _CycleDisplayState) -> None:
-    new_plan = d.get("new_plan_preview", "")
-    if len(new_plan) > 55:
-        new_plan = new_plan[:52] + "..."
-    desc = d.get("changes_description", "")
-    print(f"  {GREEN}✓{RESET} New plan: {new_plan}")
-    if desc:
-        print(f"    {desc}")
-    print(f"  {MAGENTA}{_dotted_line()}{RESET}")
-
-
-# Phase dispatch table
-_PHASE_HANDLERS: dict[str, callable] = {
-    "init:enter": _print_init_enter,
-    "init:exit": _print_init_exit,
-    "growth:enter": _print_growth_enter,
-    "growth:exit": _print_growth_exit,
-    "analysis_eval:enter": _print_eval_enter,
-    "analysis_eval:exit": _print_eval_exit,
-    "refine_context:enter": _print_refine_enter,
-    "refine_context:exit": _print_refine_exit,
-    "modify_plan:enter": _print_plan_enter,
-    "modify_plan:exit": _print_plan_exit,
-}
-
-
-def _dispatch_phase(event: PhaseEvent, state: _CycleDisplayState) -> None:
-    """Route a PhaseEvent to its phase-specific formatter."""
-    if event.round is not None:
-        state.round_num = event.round
-    key = f"{event.phase}:{event.event}"
-    handler = _PHASE_HANDLERS.get(key)
-    if handler:
-        handler(event.data, state)
-    else:
-        # Fallback for unknown phases
-        print(f"  [{event.phase.upper()} {event.event}]"
-              f" {event.data}")
-
-
-def _round_result_to_dict(rr, round_idx: int) -> dict:
-    """Convert CycleRoundResult to campaign_rounds entry."""
-    d = rr.model_dump()
-    ps_raw = d.get("prompt_state", {})
-    d["prompt_state"] = PromptState(**ps_raw) if isinstance(ps_raw, dict) else ps_raw
-    d["round"] = round_idx
-    return d
 
 
 async def run_feedback_cycle_notebook(
@@ -679,9 +337,13 @@ async def run_feedback_cycle_notebook(
     backend_id: str = "",
     backend_url: str = "http://127.0.0.1:8000",
     pipeline_params: "dict | None" = None,
+    pipeline_schema: "PipelineSchema | None" = None,
     session_terms: "list[str] | None" = None,
     langfuse_session_id: str | None = None,
     scan_context: "dict | None" = None,
+    experiment_id: str | None = None,
+    svc: dict | None = None,
+    task_context: "dict | None" = None,
 ) -> list:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
@@ -697,6 +359,14 @@ async def run_feedback_cycle_notebook(
     from api.services.campaign.models import CycleConfig
     from api.services.campaign.feedback_cycle import run_feedback_cycle
 
+    # svc shorthand
+    if svc is not None:
+        store = store or svc.get("store")
+        backend_id = backend_id or svc.get("backend_id", "")
+        backend_url = backend_url or svc["backend_client"].base_url
+        session_terms = session_terms or svc.get("session_terms")
+        pipeline_schema = pipeline_schema or svc.get("pipeline_schema")
+
     config = CycleConfig.from_campaign_config(
         campaign_config,
         backend_url=backend_url,
@@ -705,6 +375,8 @@ async def run_feedback_cycle_notebook(
         pipeline_params=pipeline_params,
         session_terms=session_terms,
         scan_context=scan_context,
+        pipeline_schema=pipeline_schema,
+        task_context=task_context,
     )
 
     bl = _extract_campaign_baseline(campaign_rounds)
@@ -728,6 +400,10 @@ async def run_feedback_cycle_notebook(
 
     def _on_phase(event: PhaseEvent) -> None:
         _dispatch_phase(event, _ds)
+        # Reset query counter on escalation exit (on_round is skipped)
+        if event.phase == "escalation" and event.event == "exit":
+            _query_counter[0] = 0
+            _ds.best_in_round = None
         # On resume: clear stale optimization rounds before replay re-appends them
         if event.phase == "init" and event.event == "exit":
             resumed = event.data.get("resumed_from_round", 0)
@@ -761,7 +437,7 @@ async def run_feedback_cycle_notebook(
         acc_tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
         print(f"\n  {_box_top(f'{label}/{total}', acc_tag, width=w)}")
 
-        # Line 1: description + pp from growth_exit metadata
+        # Line 1: description + pp from l1_generate exit metadata
         meta = {}
         if idx < len(_ds.candidates_meta):
             meta = _ds.candidates_meta[idx]
@@ -770,17 +446,31 @@ async def run_feedback_cycle_notebook(
             desc = desc[:42] + "..."
         pp = meta.get("pipeline_params_override")
         if pp:
-            keys = list(pp.keys())
-            if len(keys) > 2:
-                pp_str = f"pp=[{', '.join(keys[:2])}, +{len(keys) - 2}]"
-            else:
-                pp_str = f"pp=[{', '.join(keys)}]"
-            desc = f"{desc}  {pp_str}" if desc else pp_str
+            base_pp = _ds.current_pipeline_params or {}
+            parts = []
+            for k, v in pp.items():
+                old = base_pp.get(k)
+                if old is not None and old != v:
+                    parts.append(f"{k}: {_pp_val(old)}\u2192{_pp_val(v)}")
+                else:
+                    parts.append(f"{k}: {_pp_val(v)}")
+            pp_line = "  ".join(parts)
+            if len(pp_line) > 55:
+                keys = list(pp.keys())
+                pp_line = f"pp=[{', '.join(keys[:3])}]"
+                if len(keys) > 3:
+                    pp_line += f" +{len(keys) - 3}"
+            desc = f"{desc}  {pp_line}" if desc else pp_line
         if desc:
             print(f"  {_box_line(desc, width=w)}")
 
         # Line 2: hits/total + composite + delta + degraded
-        stats = f"{hits}/{n} hits"
+        if scores.get("escalation_aborted"):
+            eval_q = scores.get("eval_queries", n)
+            expected_q = scores.get("expected_queries", n)
+            stats = f"{hits}/{eval_q} hits  {YELLOW}⚠ aborted at {eval_q}/{expected_q}{RESET}"
+        else:
+            stats = f"{hits}/{n} hits"
         if comp is not None and comp != acc:
             stats += f"  composite={comp:.4f}"
         degraded = scores.get("degraded_queries", 0)
@@ -802,24 +492,160 @@ async def run_feedback_cycle_notebook(
         _ds.stall_count = stall_count
         _ds.best_in_round = None
 
-        round_entry = _round_result_to_dict(round_result, len(campaign_rounds))
+        round_entry = round_result.model_dump()
+        ps_raw = round_entry.get("prompt_state", {})
+        round_entry["prompt_state"] = PromptState(**ps_raw) if isinstance(ps_raw, dict) else ps_raw
+        round_entry["round"] = len(campaign_rounds)
         campaign_rounds.append(round_entry)
 
         rn = _ds.round_num + 1
-        print(f"\n├─ Round {rn} complete "
-              f"{'─' * (70 - 20 - len(str(rn)))}┤")
-        display_progress(campaign_rounds)
-        print(f"  hits: {round_result.hits}/{round_result.total}"
-              f"  |  evaluated: {round_result.candidates_evaluated} candidates")
 
-        if round_result.improved:
-            print(f"  {GREEN}✓ Improvement detected, auto-continuing...{RESET}")
+        # --- ROUND SUMMARY node ---
+        print()
+        print(_node_top(f"ROUND {rn} SUMMARY"))
+
+        # Inline progress table (same logic as display_progress)
+        _accs = []
+        has_comp = any(
+            rd.get("composite") is not None and rd.get("composite") != rd["accuracy"]
+            for rd in campaign_rounds
+        )
+        if has_comp:
+            print(_node_line(
+                f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
+                f" {'Rolling Avg':>13s} {'Trend':>8s}"))
         else:
-            print(f"  {YELLOW}⚠ No improvement"
-                  f" ({stall_count}/{config.patience} patience){RESET}")
+            print(_node_line(
+                f"{'Round':<7s} {'Accuracy':>9s}"
+                f" {'Rolling Avg':>13s} {'Trend':>8s}"))
+
+        for rd in campaign_rounds:
+            acc = rd["accuracy"]
+            _accs.append(acc)
+            n_a = len(_accs)
+            window_slice = _accs[-8:]
+            rolling = sum(window_slice) / len(window_slice)
+            if n_a <= 1:
+                trend = "-"
+            else:
+                d = acc - _accs[-2]
+                if abs(d) < 0.001:
+                    trend = "+0.0%  <-- plateau"
+                elif d > 0:
+                    trend = f"+{d:.1%}"
+                else:
+                    trend = f"{d:.1%}"
+            rl = str(rd["round"])
+            if rd.get("round") == "grid":
+                rl = "G"
+            if has_comp:
+                comp = rd.get("composite", acc)
+                print(_node_line(
+                    f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f}"
+                    f" {rolling:>12.1%}  {trend}"))
+            else:
+                print(_node_line(
+                    f"  {rl:<5s} {acc:>8.1%}"
+                    f" {rolling:>12.1%}  {trend}"))
+
+        # Plateau detection
+        if len(_accs) >= 3:
+            recent = _accs[-3:]
+            recent_avg = sum(recent) / len(recent)
+            if all(abs(a - recent_avg) < 0.005 for a in recent):
+                print(_node_line(
+                    f"{YELLOW}-- Plateau: rolling avg stable at"
+                    f" {recent_avg:.1%} for 3 rounds{RESET}"))
+
+        print(_node_line(""))
+
+        # Hits / evaluated
+        _rr_hits = round_result.hits
+        _rr_total = round_result.total
+        if _rr_total == 0 and round_result.candidate_scores:
+            best_cs = max(round_result.candidate_scores,
+                          key=lambda s: s.get("accuracy", 0))
+            _rr_hits = best_cs.get("hits", 0)
+            _rr_total = best_cs.get("total", 0)
+        print(_node_line(
+            f"hits: {_rr_hits}/{_rr_total}"
+            f"  |  evaluated: {round_result.candidates_evaluated} candidates"))
+
+        # Per-round pipeline health stats
+        if round_result.results:
+            try:
+                from collections import Counter
+                from api.services.campaign.critique_stats import _find_rank, _get_candidates
+
+                _results = round_result.results
+                _total = len(_results)
+                _td: Counter[str] = Counter()
+                _deg = 0
+                for _r in _results:
+                    _pd = _r.get("pipeline_data") or {}
+                    _td[_pd.get("terminated_at", "unknown")] += 1
+                    if (_pd.get("diagnostics") or {}).get("warnings"):
+                        _deg += 1
+
+                if _td:
+                    print(_node_line(
+                        f"Pipeline: {' | '.join(f'{k}:{v}' for k, v in _td.most_common())}"))
+                if _deg > 0:
+                    print(_node_line(f"Degradation: {_deg / _total:.0%}"))
+
+                _valid = [
+                    _r for _r in _results if not _r.get("error")
+                ]
+                if _valid:
+                    def _recall_at_k(k):
+                        return sum(
+                            1 for _r in _valid
+                            if (_rk := _find_rank(
+                                _get_candidates(_r),
+                                _r.get("ground_truth", ""),
+                            )) is not None and _rk <= k
+                        ) / len(_valid)
+
+                    print(_node_line(
+                        f"Recall: top-1={_recall_at_k(1):.0%}"
+                        f" top-5={_recall_at_k(5):.0%}"))
+            except Exception:
+                pass  # stats are best-effort
+
+        # Improvement / patience status
+        if round_result.improved:
+            print(_node_line(
+                f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}"))
+        else:
+            print(_node_line(
+                f"{YELLOW}⚠ No improvement"
+                f" ({stall_count}/{config.patience} patience){RESET}"))
             if stall_count >= config.patience:
-                print(f"  {RED}Stopping: patience exhausted"
-                      f" ({config.patience} consecutive stalls){RESET}")
+                print(_node_line(
+                    f"{RED}Stopping: patience exhausted"
+                    f" ({config.patience} consecutive stalls){RESET}"))
+
+        print(_node_bottom())
+
+    # Resolve explicit experiment_id to full cycle_id
+    resolved_cycle_id = None
+    if experiment_id and store:
+        resolved_cycle_id = _resolve_experiment_id(store, backend_id, experiment_id)
+        if resolved_cycle_id is None:
+            print(f"  No campaign matching '{experiment_id}' — starting fresh")
+        else:
+            # Load stored baseline to prevent stale notebook state from
+            # overriding the original experiment's baseline accuracy.
+            stored = store.campaigns.load(backend_id, resolved_cycle_id)
+            if stored:
+                stored_bl = stored.get("baseline_accuracy")
+                if stored_bl is not None and stored_bl != baseline_acc:
+                    print(f"  {YELLOW}Using stored baseline {stored_bl:.1%}"
+                          f" (notebook had {baseline_acc:.1%}){RESET}")
+                    baseline_acc = stored_bl
+
+    print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
+    print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
     result = await run_feedback_cycle(
         instruction=instruction,
@@ -833,6 +659,9 @@ async def run_feedback_cycle_notebook(
         on_query_eval=_on_query,
         on_phase=_on_phase,
         langfuse_session_id=langfuse_session_id,
+        cycle_id=resolved_cycle_id,
+        experiment_id=experiment_id or "",
+        backend_client=svc["backend_client"] if svc else None,
     )
 
     # --- Final summary ---
@@ -865,143 +694,3 @@ async def run_feedback_cycle_notebook(
     print(_dbox_bottom())
 
     return campaign_rounds
-
-
-# ---------------------------------------------------------------------------
-# Langfuse push / configure
-# ---------------------------------------------------------------------------
-
-
-def configure_langfuse(
-    *,
-    enabled: bool | None = None,
-    host: str | None = None,
-    public_key: str | None = None,
-    secret_key: str | None = None,
-) -> None:
-    """Configure Langfuse settings at runtime from a notebook cell.
-
-    Mutates the global settings singleton and resets the LangfuseLogger
-    singleton so the next call picks up new credentials.
-
-    Args:
-        enabled: Override ``LANGFUSE_ENABLED``.
-        host: Override ``LANGFUSE_HOST``.
-        public_key: Override ``LANGFUSE_PUBLIC_KEY``.
-        secret_key: Override ``LANGFUSE_SECRET_KEY``.
-    """
-    from api.config.settings import settings
-    from api.services.obs.langfuse_client import LangfuseLogger
-
-    changed = False
-    if enabled is not None:
-        settings.LANGFUSE_ENABLED = enabled
-        changed = True
-    if host is not None:
-        settings.LANGFUSE_HOST = host
-        changed = True
-    if public_key is not None:
-        settings.LANGFUSE_PUBLIC_KEY = public_key
-        changed = True
-    if secret_key is not None:
-        settings.LANGFUSE_SECRET_KEY = secret_key
-        changed = True
-
-    if changed:
-        LangfuseLogger.reset_instance()
-        lf = LangfuseLogger.get_instance()
-        status = "enabled" if lf.enabled else "disabled"
-        print(f"Langfuse reconfigured: {status}")
-
-
-def sync_langfuse(
-    store: "ProjectStore",
-    backend_id: str,
-    *,
-    dataset_name: str = "termnorm_ground_truth",
-    backfill: bool = True,
-    reset: bool = False,
-) -> dict | None:
-    """Configure Langfuse dataset name and optionally push all runs.
-
-    Combines dataset name configuration, state reset, and backfill push
-    into a single call.
-
-    Returns:
-        Push stats dict, or None if backfill was skipped.
-    """
-    import api.services.obs.langfuse_push as _lfp
-    _lfp.DATASET_NAME = dataset_name
-
-    if not backfill:
-        print(f"Langfuse dataset: {dataset_name} (backfill disabled)")
-        return None
-
-    if reset:
-        from api.services.obs.langfuse_push import _fresh_state, _save_state
-        _save_state(store, backend_id, _fresh_state())
-        print("Langfuse push state reset -- will re-push all runs.")
-
-    n_runs = len(store.dataset_runs.list_all(backend_id))
-    if n_runs == 0:
-        print("No completed dataset runs yet -- skipping Langfuse backfill (run after eval).")
-        return None
-
-    return push_langfuse(store, backend_id)
-
-
-def push_langfuse(store: "ProjectStore", backend_id: str) -> dict:
-    """Push all historical dataset_runs to cloud Langfuse (dataset-first).
-
-    Creates dataset items with ground truth, then one trace per run linked
-    to dataset items. Re-running is safe -- already-pushed runs are skipped.
-    Old-format state is automatically reset.
-
-    Returns:
-        Stats dict from ``push_all_runs()``.
-    """
-    from api.services.obs.langfuse_push import push_all_runs
-
-    summaries = store.dataset_runs.list_all(backend_id)
-
-    print("=" * 70)
-    print("  LANGFUSE PUSH (dataset-first)")
-    print("=" * 70)
-    print(f"Found {len(summaries)} completed dataset runs for '{backend_id}'")
-
-    stats = push_all_runs(store, backend_id, on_progress=print)
-
-    if "error" in stats:
-        print(f"\nPush aborted: {stats['error']}")
-        return stats
-
-    new_runs = stats["new_runs"]
-    already = stats["already_done"]
-
-    if new_runs == 0:
-        print(f"\nAll {already} runs already pushed. Nothing to do.")
-    else:
-        print(f"\nPush complete: {new_runs} runs pushed to Langfuse")
-        print(f"Session: {stats['session_id']}")
-
-    print("=" * 70)
-    print("  PUSH SUMMARY")
-    print("=" * 70)
-    print(f"  Total runs on disk:  {stats['total_on_disk']}")
-    print(f"  Newly pushed:        {new_runs}")
-    print(f"  Already done:        {already}")
-    print(f"  Dataset:             {stats.get('dataset_name', 'N/A')}")
-    print(f"  Dataset items:       {stats.get('dataset_items', 0)}")
-
-    for origin, info in stats.get("origins", {}).items():
-        n = info["n_runs"]
-        items = info["total_items"]
-        best = info["best_accuracy"]
-        avg = info["avg_accuracy"]
-        print(f"\n  {origin}:")
-        print(f"    Runs: {n}, Items: {items}")
-        print(f"    Best accuracy: {best:.1%}, Avg: {avg:.1%}")
-
-    print("=" * 70)
-
-    return stats

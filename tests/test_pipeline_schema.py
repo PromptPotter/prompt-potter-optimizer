@@ -81,9 +81,9 @@ def test_derivation_methods():
 class TestTermNormConsistency:
     """Verify TERMNORM_DEFAULT_SCHEMA matches every hardcoded constant."""
 
-    def test_flat_to_node_config(self):
-        """flat_to_node_config() returns expected mapping from TERMNORM_DEFAULT_SCHEMA."""
-        mapping = TERMNORM_DEFAULT_SCHEMA.flat_to_node_config()
+    def test_flat_to_pipeline_params(self):
+        """flat_to_pipeline_params() returns expected mapping from TERMNORM_DEFAULT_SCHEMA."""
+        mapping = TERMNORM_DEFAULT_SCHEMA.flat_to_pipeline_params()
         # Spot-check key entries
         assert mapping["ranking_temperature"] == ("llm_ranking", "temperature")
         assert mapping["profiling_prompt"] == ("entity_profiling", "prompt")

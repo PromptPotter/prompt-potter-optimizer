@@ -27,3 +27,11 @@ No shims, no dual-format readers, no fallback paths. Old data is regenerated, no
 ## Direct field access for guaranteed fields
 
 `dict[key]` instead of `.get(key, fallback)` when a field is structurally guaranteed. Surfaces schema violations immediately rather than hiding them behind silent defaults.
+
+## Interruptible cells
+
+Notebook cells are interruptible units of work. Disk writes (round checkpoints, campaign state) happen incrementally during execution. When interrupted — by `KeyboardInterrupt` or escalation signal — the cell skips all non-essential work (critique, suggestions, obs logging, cloud sync) and returns immediately. No data is lost because everything needed for resume is already on disk.
+
+## Display parity
+
+Cached and fresh results use the same output format (fields, layout, ordering). A provenance indicator (📖 for cached, no marker for live) distinguishes data source for transparency — the user should know whether results are replayed or freshly computed. All other formatting (accuracy, CI, delta, hit/miss) is identical regardless of source.

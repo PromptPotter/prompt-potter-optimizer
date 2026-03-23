@@ -161,7 +161,7 @@ def _make_eval_fn(
             prompt_state=ps,
             pipeline_params=pp or get_params(),
         )
-        results, scores, cached = await evaluate_prompt_cached(
+        results, scores, cached = evaluate_prompt_cached(
             sp, eval_data, ctx,
             label="scan",
             on_result=on_result,
@@ -358,6 +358,18 @@ def filter_variant_library(
     return result
 
 
+def load_filtered_variant_library(
+    pipeline_params: dict | None = None,
+    pipeline_schema: "PipelineSchema | None" = None,
+) -> dict:
+    """Load variant library, filtering to active pipeline steps when possible."""
+    from api.config.settings import load_variant_library
+    lib = load_variant_library()
+    if pipeline_params and pipeline_schema:
+        lib = filter_variant_library(lib, pipeline_params, schema=pipeline_schema)
+    return lib
+
+
 # ---------------------------------------------------------------------------
 # Sensitivity scan
 # ---------------------------------------------------------------------------
@@ -375,6 +387,7 @@ async def sensitivity_scan(
     pipeline_schema: "PipelineSchema | None" = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
     on_result: Callable | None = None,
+    experiment_id: str = "",
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -418,6 +431,7 @@ async def sensitivity_scan(
         model=baseline.model,
         temperature=baseline.temperature,
         pipeline_params=baseline.pipeline_params,
+        experiment_id=experiment_id,
     )
 
     # Classify axes: prompt_field vs pipeline_param
@@ -429,7 +443,7 @@ async def sensitivity_scan(
         axes.append((name, axis_type, values))
 
     # Evaluate baseline
-    baseline_results, baseline_scores, baseline_cached = await evaluate_prompt_cached(
+    baseline_results, baseline_scores, baseline_cached = evaluate_prompt_cached(
         baseline, eval_data, scan_ctx,
         label="scan",
         on_result=on_result,
@@ -504,7 +518,7 @@ async def sensitivity_scan(
                     pipeline_params={**(baseline.pipeline_params or {}), axis_name: value},
                 )
 
-            results, scores, cached = await evaluate_prompt_cached(
+            results, scores, cached = evaluate_prompt_cached(
                 perturbed, eval_data, scan_ctx,
                 label="scan",
                 on_result=on_result,
@@ -586,6 +600,7 @@ async def adaptive_search(
     progress_cb: Callable[[ScanEvent], None] | None = None,
     plan_id: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
+    experiment_id: str = "",
 ) -> tuple[PromptState, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.
 
@@ -618,7 +633,7 @@ async def adaptive_search(
     _cb = progress_cb or (lambda _e: None)
 
     if session_terms:
-        await backend_client.init_session(session_terms)
+        backend_client.init_session(session_terms)
 
     # Filter variant library to active pipeline steps
     variant_library = filter_variant_library(
@@ -643,6 +658,7 @@ async def adaptive_search(
         pipeline_schema=pipeline_schema,
         source="adaptive_search",
         pipeline_params=pipeline_params,
+        experiment_id=experiment_id,
     )
     _eval_ps = _make_eval_fn(
         eval_data, _scan_ctx,
@@ -806,32 +822,6 @@ async def adaptive_search(
 
 
 # ---------------------------------------------------------------------------
-# Load scan results from plan store
-# ---------------------------------------------------------------------------
-
-
-def load_scan_results_from_plan(
-    store: ProjectStore,
-    backend_id: str,
-    plan_id: str,
-) -> pd.DataFrame | None:
-    """Load scan results DataFrame from a persisted smart search plan.
-
-    Returns ``None`` if no plan or no scan rows found.
-    """
-    import pandas as pd
-    from api.services.search.plan_persistence import deserialize_smart_search_plan
-
-    plan_data = store.smart_search.load(backend_id, plan_id)
-    if not plan_data:
-        return None
-    plan = deserialize_smart_search_plan(plan_data)
-    rows = (plan.get("scan_results") or {}).get("rows", [])
-    if not rows:
-        return None
-    return pd.DataFrame(rows)
-
-
 # ---------------------------------------------------------------------------
 # Diagnostic set resume / build
 # ---------------------------------------------------------------------------

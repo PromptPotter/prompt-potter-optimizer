@@ -24,6 +24,7 @@ class CloudObsBackend:
         self._active_trace_id: str | None = None
         self._active_session_id: str | None = None
         self._active_round_obs_id: str | None = None
+        self._active_step_obs_ids: dict[str, str] = {}  # node_id → cloud obs_id
 
     def on_dataset_registered(
         self,
@@ -106,6 +107,8 @@ class CloudObsBackend:
         improved: bool,
         next_action: str,
         candidate_scores: list[dict],
+        *,
+        optimizer_templates: list[str] | None = None,
     ) -> None:
         """Close the round span, attach score."""
         cloud_trace_id = self._trace_ids.get(campaign_id)
@@ -114,6 +117,12 @@ class CloudObsBackend:
             return
         try:
             if self._active_round_obs_id:
+                meta: dict = {
+                    "round": round_num,
+                    "candidates_evaluated": len(candidate_scores),
+                }
+                if optimizer_templates:
+                    meta["optimizer_templates"] = optimizer_templates
                 self._lf.end_observation(
                     self._active_round_obs_id,
                     output={
@@ -122,10 +131,7 @@ class CloudObsBackend:
                         "next_action": next_action,
                         "candidates_evaluated": len(candidate_scores),
                     },
-                    metadata={
-                        "round": round_num,
-                        "candidates_evaluated": len(candidate_scores),
-                    },
+                    metadata=meta,
                 )
             self._lf.create_score(
                 trace_id=cloud_trace_id,
@@ -214,6 +220,56 @@ class CloudObsBackend:
             )
         except Exception:
             logger.debug("Cloud Langfuse prompt_version failed", exc_info=True)
+
+    def on_node_step_start(
+        self,
+        trace_id: str,
+        node_id: str,
+        node_type: str,
+        obs_type: str,
+        input_data: dict,
+        metadata: dict | None = None,
+    ) -> None:
+        """Open a Langfuse observation for a node step, nested under active round."""
+        if not self._active_trace_id:
+            return
+        try:
+            as_type = obs_type if obs_type in ("generation", "span") else "span"
+            obs_id = self._lf.start_span(
+                trace_id=self._active_trace_id,
+                name=node_id,
+                input=input_data,
+                metadata={"node_type": node_type, **(metadata or {})},
+                parent_observation_id=self._active_round_obs_id,
+                as_type=as_type,
+            )
+            if obs_id:
+                self._active_step_obs_ids[node_id] = obs_id
+        except Exception:
+            logger.debug("Cloud Langfuse node_step_start failed", exc_info=True)
+
+    def on_node_step_end(
+        self,
+        node_id: str,
+        output_data: dict | None = None,
+        metrics: dict | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Close a node step observation."""
+        obs_id = self._active_step_obs_ids.pop(node_id, None)
+        if not obs_id:
+            return
+        try:
+            meta: dict = {}
+            if metrics:
+                meta["metrics"] = metrics
+            if error:
+                meta["error"] = error
+            self._lf.end_observation(
+                obs_id, output=output_data, metadata=meta or None,
+            )
+        except Exception:
+            logger.debug("Cloud Langfuse node_step_end failed", exc_info=True)
 
     def on_campaign_end(
         self,

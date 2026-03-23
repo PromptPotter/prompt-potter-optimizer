@@ -5,7 +5,7 @@ from api.models.prompt_state import FewShotExample, PromptState, diff
 def test_create_and_derive():
     parent = PromptState(
         instruction="Classify: {{text}}",
-        parameters={"temperature": 0.7},
+        optimizer_params={"temperature": 0.7},
     )
     assert parent.parent_id is None
 
@@ -18,7 +18,7 @@ def test_create_and_derive():
     assert child.id != parent.id
     assert child.instruction == "Improved: {{text}}"
     assert child.persona == "Expert"
-    assert child.parameters == {"temperature": 0.7}  # inherited
+    assert child.optimizer_params == {"temperature": 0.7}  # inherited
 
 
 def test_render():
@@ -26,7 +26,6 @@ def test_render():
         persona="You are an expert.",
         instruction="Classify: {{text}}",
         thinking_style="Think step by step.",
-        context="Should not appear",
         plan="Should not appear",
     )
     rendered = state.render()
@@ -38,13 +37,13 @@ def test_render():
 
 
 def test_diff():
-    a = PromptState(instruction="Version A", context="ctx1", parameters={"k": 1})
-    b = PromptState(instruction="Version B", context="ctx2", parameters={"k": 2})
+    a = PromptState(instruction="Version A", optimizer_params={"k": 1})
+    b = PromptState(instruction="Version B", optimizer_params={"k": 2})
     result = diff(a, b)
     assert result.generate_changed is True
-    assert result.context_changed is True
+    assert result.context_changed is True  # optimizer_params changed
     assert any(fc.field == "instruction" for fc in result.field_changes)
-    assert result.parameters_changed == {"k": {"old": 1, "new": 2}}
+    assert result.optimizer_params_changed == {"k": {"old": 1, "new": 2}}
 
 
 def test_diff_no_redundant_few_shot_field_change():
@@ -62,10 +61,10 @@ def test_diff_no_redundant_few_shot_field_change():
 
 def test_diff_no_redundant_parameters_field_change():
     """parameters changes tracked only in dedicated fields, not in field_changes."""
-    a = PromptState(instruction="same", parameters={"k": 1})
-    b = PromptState(instruction="same", parameters={"k": 2, "new_key": 3})
+    a = PromptState(instruction="same", optimizer_params={"k": 1})
+    b = PromptState(instruction="same", optimizer_params={"k": 2, "new_key": 3})
     result = diff(a, b)
     assert result.context_changed is True
-    assert result.parameters_changed == {"k": {"old": 1, "new": 2}}
-    assert result.parameters_added == {"new_key": 3}
-    assert not any(fc.field == "parameters" for fc in result.field_changes)
+    assert result.optimizer_params_changed == {"k": {"old": 1, "new": 2}}
+    assert result.optimizer_params_added == {"new_key": 3}
+    assert not any(fc.field == "optimizer_params" for fc in result.field_changes)

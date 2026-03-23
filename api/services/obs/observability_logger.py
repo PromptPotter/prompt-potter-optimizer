@@ -519,6 +519,98 @@ class ObsLogger:
             )
             return None
 
+    def get_file_trace_id(self, campaign_id: str) -> str | None:
+        """Return file trace ID for a campaign, or None."""
+        return self._campaign_traces.get(campaign_id)
+
+    def log_node_step_start(
+        self,
+        trace_id: str,
+        node_id: str,
+        node_type: str,
+        obs_type: str,
+        input_data: dict,
+        metadata: dict | None = None,
+    ) -> str | None:
+        """Open an observation for a node step. Returns obs_id for closing later.
+
+        Reuses ``_write_observation()`` for file, ``_log_event()`` for events,
+        and ``CloudObsBackend.on_node_step_start()`` for Langfuse cloud.
+        """
+        if not self._enabled:
+            return None
+        try:
+            obs_id = self._write_observation(
+                trace_id=trace_id,
+                obs_type=obs_type,
+                name=node_id,
+                input_data=input_data,
+                metadata={"node_type": node_type, **(metadata or {})},
+            )
+
+            self._log_event({
+                "event": "node_step_start",
+                "trace_id": trace_id,
+                "obs_id": obs_id,
+                "node_id": node_id,
+                "node_type": node_type,
+            })
+
+            if self._cloud:
+                self._cloud.on_node_step_start(
+                    trace_id, node_id, node_type, obs_type, input_data, metadata,
+                )
+
+            return obs_id
+        except Exception:
+            logger.warning("ObsLogger.log_node_step_start failed", exc_info=True)
+            return None
+
+    def log_node_step_end(
+        self,
+        obs_id: str,
+        trace_id: str,
+        node_id: str,
+        output_data: dict | None = None,
+        metrics: dict | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Close a node step observation with output and metrics.
+
+        Updates the file observation JSON in place, appends to events.jsonl,
+        and delegates to ``CloudObsBackend.on_node_step_end()``.
+        """
+        if not self._enabled:
+            return
+        try:
+            # Update file observation with output + end_time
+            obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
+            obs_path = obs_dir / f"{obs_id}.json"
+            if obs_path.exists():
+                obs_data = json.loads(obs_path.read_text(encoding="utf-8"))
+                obs_data["output"] = output_data
+                obs_data["end_time"] = _utcnow_iso()
+                if metrics:
+                    obs_data.setdefault("metadata", {})["metrics"] = metrics
+                if error:
+                    obs_data.setdefault("metadata", {})["error"] = error
+                _write_json(obs_path, obs_data)
+
+            self._log_event({
+                "event": "node_step_end",
+                "trace_id": trace_id,
+                "obs_id": obs_id,
+                "node_id": node_id,
+                "error": error,
+            })
+
+            if self._cloud:
+                self._cloud.on_node_step_end(
+                    node_id, output_data, metrics, error,
+                )
+        except Exception:
+            logger.warning("ObsLogger.log_node_step_end failed", exc_info=True)
+
     def log_round_start(
         self,
         campaign_id: str,
@@ -559,6 +651,7 @@ class ObsLogger:
         model: str = "",
         temperature: float = 0.0,
         n_variants: int = 0,
+        optimizer_templates: list[str] | None = None,
     ) -> Path | None:
         """Close a round: file observation + score + MLflow run + events.jsonl + cloud.
 
@@ -586,7 +679,11 @@ class ObsLogger:
                         "next_action": next_action,
                         "winner_prompt_state_id": winner_prompt_state_id,
                     },
-                    metadata={"candidate_scores": candidate_scores},
+                    metadata={
+                        "candidate_scores": candidate_scores,
+                        **({"optimizer_templates": optimizer_templates}
+                           if optimizer_templates else {}),
+                    },
                 )
                 self._write_score(trace_id, "accuracy", accuracy)
 
@@ -627,12 +724,15 @@ class ObsLogger:
                 "improved": improved,
                 "next_action": next_action,
                 "winner_prompt_state_id": winner_prompt_state_id,
+                **({"optimizer_templates": optimizer_templates}
+                   if optimizer_templates else {}),
             })
 
             if self._cloud:
                 self._cloud.on_round_end(
                     campaign_id, round_num, accuracy,
                     improved, next_action, candidate_scores,
+                    optimizer_templates=optimizer_templates,
                 )
 
             obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
@@ -655,6 +755,7 @@ class ObsLogger:
         model: str = "",
         temperature: float = 0.0,
         n_variants: int = 0,
+        optimizer_templates: list[str] | None = None,
     ) -> Path | None:
         """Fire-and-forget round log (start + end in one call).
 
@@ -666,6 +767,7 @@ class ObsLogger:
             campaign_id, round_num, accuracy, hits, total,
             improved, next_action, winner_prompt_state_id,
             candidate_scores, model, temperature, n_variants,
+            optimizer_templates=optimizer_templates,
         )
 
     def log_prompt_version(

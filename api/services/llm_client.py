@@ -178,6 +178,13 @@ class OpenAICompatibleClient(LLMClientBase):
                 break
             except Exception as exc:
                 status = getattr(exc, "status_code", None)
+                if status == 404:
+                    model_name = request_params.get("model", "unknown")
+                    raise ValueError(
+                        f"Model '{model_name}' not found on {self._provider_name}. "
+                        f"Update campaign_config['eval_llm']['model'] or "
+                        f"set EXPERIMENT_ID = None to use current config."
+                    ) from exc
                 is_connection = "Connection" in type(exc).__name__
                 if status in _RETRY_STATUSES or is_connection:
                     last_exc = exc

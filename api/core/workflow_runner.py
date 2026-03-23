@@ -258,19 +258,19 @@ class WorkflowRunner:
                     )
 
                 # Merge step config with metadata config
-                node_config = step.config or {}
+                step_config = step.config or {}
                 if step.metadata:
                     if step.metadata.model:
-                        node_config.setdefault("model", step.metadata.model)
+                        step_config.setdefault("model", step.metadata.model)
                     if step.metadata.temperature is not None:
-                        node_config.setdefault("temperature", step.metadata.temperature)
+                        step_config.setdefault("temperature", step.metadata.temperature)
                     if step.metadata.max_tokens:
-                        node_config.setdefault("max_tokens", step.metadata.max_tokens)
+                        step_config.setdefault("max_tokens", step.metadata.max_tokens)
                     if step.metadata.algorithm_params:
-                        node_config.update(step.metadata.algorithm_params)
+                        step_config.update(step.metadata.algorithm_params)
 
                 # Instantiate node
-                node = node_class(node_id=step_id, config=node_config)
+                node = node_class(node_id=step_id, config=step_config)
 
                 # Resolve inputs
                 step_inputs = self._resolve_step_inputs(step, context)
@@ -299,7 +299,7 @@ class WorkflowRunner:
                         langfuse.create_generation(
                             trace_id=context.langfuse_trace_id,
                             name=step_id,
-                            model=node_config.get("model", "unknown"),
+                            model=step_config.get("model", "unknown"),
                             input=step_inputs,
                             output=output_dict,
                             usage=usage,

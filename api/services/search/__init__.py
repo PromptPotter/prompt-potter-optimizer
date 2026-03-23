@@ -26,7 +26,7 @@ _SUBMODULE_MAP: dict[str, str] = {
     "adaptive_search": "api.services.search.smart_search",
     "build_diagnostic_set": "api.services.search.smart_search",
     "filter_variant_library": "api.services.search.smart_search",
-    "load_scan_results_from_plan": "api.services.search.smart_search",
+    "load_filtered_variant_library": "api.services.search.smart_search",
     "resume_or_build_diagnostic": "api.services.search.smart_search",
     "select_scan_winner": "api.services.search.scan_winner",
     "sensitivity_scan": "api.services.search.smart_search",
@@ -35,7 +35,6 @@ _SUBMODULE_MAP: dict[str, str] = {
     "build_data_inventory": "api.services.search.coverage",
     "build_prompt_result_index": "api.services.search.coverage",
     "diagnose_scan_variants": "api.services.search.coverage",
-    "summarize_historical_data": "api.services.search.coverage",
     # eval_dataset
     "load_eval_dataset": "api.services.search.eval_dataset",
     # context

@@ -16,21 +16,6 @@ from api.models.hashing import HASH_TRUNCATE
 # ---------------------------------------------------------------------------
 
 
-def apply_init_mock(monkeypatch):
-    """Mock restructure_context for InitNode."""
-    async def mock_restructure(context_input, llm_client, **kwargs):
-        return {
-            "persona": "Expert",
-            "instruction": "Rank by relevance",
-            "thinking_style": "Step by step",
-        }
-
-    monkeypatch.setattr(
-        "api.services.search.context.restructure_context",
-        mock_restructure,
-    )
-
-
 def apply_llm_mock(monkeypatch):
     """Mock get_llm_client to return a MockLLMClient."""
     monkeypatch.setattr(
@@ -40,32 +25,20 @@ def apply_llm_mock(monkeypatch):
 
 
 def apply_grow_mock(monkeypatch):
-    """Mock generate_candidates to return deterministic variants."""
+    """Mock l1_generate to return deterministic variants (as dicts)."""
     async def mock_generate(current_ps, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         return [
             current_ps.derive(
                 instruction=f"variant_{i}_acc{accuracy:.0%}",
                 changes_description=f"gen_{i}",
-            )
+            ).model_dump()
             for i in range(n)
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.generate_candidates",
+        "api.services.prompt_optimizer.l1_generate",
         mock_generate,
-    )
-
-
-def apply_critique_mock(monkeypatch):
-    """Mock CritiqueAgent.run to return deterministic critique text."""
-    async def mock_run(self, results, accuracy, threshold=0.7):
-        path = "positive" if accuracy >= threshold else "negative"
-        return f"Mock {path} critique: accuracy={accuracy:.1%}"
-
-    monkeypatch.setattr(
-        "api.services.campaign.critique.CritiqueAgent.run",
-        mock_run,
     )
 
 
@@ -79,7 +52,7 @@ def apply_eval_mock(monkeypatch, round_hits=None):
         round_hits = [1, 2, 3]
     call_count = [0]
 
-    async def mock_eval(search_point, data, ctx=None, **kwargs):
+    def mock_eval(search_point, data, ctx=None, **kwargs):
         idx = min(call_count[0], len(round_hits) - 1)
         target_hits = round_hits[idx]
         label = kwargs.get("label", "")
@@ -410,3 +383,25 @@ def build_eval_results(data: list[dict], hits: int):
 def make_http_error(status_code: int, message: str = "error"):
     """Create a mock HTTP error class with the given status_code."""
     return type(f"Mock{status_code}Error", (Exception,), {"status_code": status_code})(message)
+
+
+async def run_simple_cycle(
+    monkeypatch, eval_data, config, *, round_hits, **kwargs,
+):
+    """Apply standard mocks and run a feedback cycle. Returns CycleResult."""
+    from api.services.campaign.feedback_cycle import run_feedback_cycle
+
+    apply_llm_mock(monkeypatch)
+    apply_grow_mock(monkeypatch)
+    apply_eval_mock(monkeypatch, round_hits=round_hits)
+
+    defaults = dict(
+        instruction="Rank candidates.",
+        eval_data=eval_data,
+        config=config,
+        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
+        baseline_accuracy=0.0,
+        baseline_results=[],
+    )
+    defaults.update(kwargs)
+    return await run_feedback_cycle(**defaults)

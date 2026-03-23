@@ -21,11 +21,6 @@ if TYPE_CHECKING:
 from api.models.prompt_state import LAYER1_STRING_FIELDS, PromptState
 from api.services.llm_client import LLMClientBase
 from api.services.project_store import ProjectStore
-from api.services.prompt_eval import (
-    backend_reranker_eval,
-    build_dataset_run_data,
-    compute_composite_score,
-)
 from api.services.search.smart_search import MIN_DIAGNOSTIC_QUERIES
 
 if TYPE_CHECKING:
@@ -324,70 +319,50 @@ def resolve_point_evals(
 # ---------------------------------------------------------------------------
 
 
-async def _load_or_compute_point(
+def _load_or_compute_point(
     info: PointEvalInfo,
     state_lookup: dict,
     backend_client: Any,
-    request_delay: float,
     store: ProjectStore | None,
     backend_id: str,
     pipeline_params: dict | None,
     on_query_done: Callable | None,
     pipeline_schema: "PipelineSchema | None" = None,
+    experiment_id: str = "",
 ) -> tuple[dict[str, Any], bool]:
     """Evaluate (or load from cache) a single grid point.
 
-    Handles two cases in order:
-    1. Full cache hit — return stored scores immediately.
-    2. Fresh evaluation — run all queries through the backend.
+    Delegates to ``evaluate_prompt_cached()`` for unified caching,
+    scoring, and persistence.
 
     Returns:
         Tuple of (scores dict, was_cached bool).
     """
-    import asyncio
-
     from api.models.search_point import SearchPoint
+    from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
 
     ps = state_lookup[info.ps_id]
-    rendered = ps.render()
     sp = SearchPoint(prompt_state=ps, pipeline_params=pipeline_params)
 
-    # Case 1: full cache hit
-    if store and backend_id:
-        existing_run = store.dataset_runs.load_by_hash(
-            backend_id, info.content_hash,
-        )
-        if existing_run:
-            return existing_run["scores"], True
-
-    # Case 2: evaluate all queries
-    run_id = f"{GRID_PREFIX}{info.content_hash[:8]}"
-    results = []
-    for qi, qd in enumerate(info.point_eval):
-        result = await backend_reranker_eval(
-            qd, backend_client, rendered,
-            pipeline_params=pipeline_params,
-            pipeline_schema=pipeline_schema,
-        )
-        results.append(result)
-
+    def _on_result(result: dict, index: int, total: int) -> None:
         if on_query_done is not None:
-            on_query_done(info.point_idx, qi, len(info.point_eval), result)
+            on_query_done(info.point_idx, index, total, result)
 
-        if request_delay > 0:
-            await asyncio.sleep(request_delay)
+    ctx = EvalContext(
+        backend_client=backend_client,
+        store=store,
+        backend_id=backend_id,
+        pipeline_schema=pipeline_schema,
+        source="grid_search",
+        experiment_id=experiment_id,
+    )
 
-    acc = compute_composite_score(results, pipeline_schema)
-
-    # Finalize: save complete run
-    if store and backend_id:
-        run_data = build_dataset_run_data(
-            run_id, f"grid_point_{info.point_idx}", info.content_hash,
-            sp, acc, results, source="grid_search",
-        )
-        store.dataset_runs.save(backend_id, run_id, run_data)
-
-    return acc, False
+    _results, scores, was_cached = evaluate_prompt_cached(
+        sp, info.point_eval, ctx,
+        label=f"grid_point_{info.point_idx}",
+        on_result=_on_result,
+    )
+    return scores, was_cached
 
 
 async def run_grid_search(
@@ -408,6 +383,7 @@ async def run_grid_search(
     seed: int = 42,
     plan_id: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
+    experiment_id: str = "",
 ) -> pd.DataFrame:
     """Evaluate each grid point on eval_data via the backend.
 
@@ -429,17 +405,18 @@ async def run_grid_search(
             for info in eval_plan
         )
         if needs_eval:
-            await backend_client.init_session(session_terms)
+            backend_client.init_session(session_terms)
     elif session_terms:
-        await backend_client.init_session(session_terms)
+        backend_client.init_session(session_terms)
 
     rows = []
     try:
         for info in eval_plan:
-            acc, was_cached = await _load_or_compute_point(
-                info, state_lookup, backend_client, request_delay,
+            acc, was_cached = _load_or_compute_point(
+                info, state_lookup, backend_client,
                 store, backend_id, pipeline_params, on_query_done,
                 pipeline_schema=pipeline_schema,
+                experiment_id=experiment_id,
             )
 
             row = dict(info.coord_dict)

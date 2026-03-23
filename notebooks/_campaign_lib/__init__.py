@@ -10,6 +10,8 @@ from ._setup import *      # noqa: F403
 from ._eval import *       # noqa: F403
 from ._grid import *       # noqa: F403
 from ._search import *     # noqa: F403
+from ._campaigns import *  # noqa: F403
+from ._langfuse import *   # noqa: F403
 from ._optimize import *   # noqa: F403
 
 # Private names used by tests (not exported by *)
@@ -21,7 +23,7 @@ __all__ = [  # noqa: F405
     # Constants
     "RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
     # Service init
-    "init_services", "setup_llm", "load_variant_library",
+    "init_services", "setup_llm", "load_variant_library", "decompose_task_context",
     # Backend status & datasets
     "show_backend_status", "show_dataset_summary", "build_all_session_terms",
     "load_or_create_datasets", "load_stored_dataset", "prepare_datasets",
@@ -32,7 +34,7 @@ __all__ = [  # noqa: F405
     "analyze_candidate_coverage", "load_eval_dataset",
     "run_coverage_diagnostic",
     # Candidates & suggestions
-    "generate_candidates", "generate_suggestions", "display_suggestions",
+    "generate_candidates",
     # Grid search
     "validate_grid_config", "build_grid_points", "run_grid_search",
     "display_grid_results", "select_grid_winner", "analyze_grid_results",
@@ -51,7 +53,9 @@ __all__ = [  # noqa: F405
     "prepare_scan_baseline", "preview_advisor_prompt", "display_variant_library",
     # Campaign
     "show_feedback_preflight", "run_feedback_cycle_notebook", "save_campaign_winner",
-    "display_progress", "run_manual_round",
+    "display_progress",
+    "list_campaigns", "diff_campaign_config", "show_experiment_dashboard",
+    "load_experiment_config", "apply_experiment_overrides",
     "select_and_seed_grid_winner",
     # Notebook-facing wrappers
     "show_grid_overview", "smoke_test_override",

@@ -199,17 +199,8 @@ class TestLoadByAlias:
         result = drs.load_by_alias("b1", "hash_b", "wrong_model", 0.5, None, 3)
         assert result is None
 
-    def test_steps_only_difference_matches(self, drs):
-        """Alias matches and only 'steps' differs -> hit (steps-blind)."""
-        drs.save("b1", "r1", _make_alias_run("r1", "hash_a", pipeline_params={"steps": ["a"]}))
-        drs.register_alias("b1", "hash_a", "hash_b")
-
-        result = drs.load_by_alias("b1", "hash_b", "m1", 0.5, {"steps": ["b"]}, 3)
-        assert result is not None
-        assert result["run_id"] == "r1"
-
-    def test_non_steps_pipeline_params_mismatch(self, drs):
-        """Alias matches but non-steps pipeline_params differ -> None."""
+    def test_pipeline_params_must_match_exactly(self, drs):
+        """Alias matches but pipeline_params differ -> None."""
         drs.save("b1", "r1", _make_alias_run(
             "r1", "hash_a", pipeline_params={"steps": ["a"], "ranking_temperature": 0.5},
         ))

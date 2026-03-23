@@ -14,6 +14,35 @@ import json
 HASH_TRUNCATE = 16
 
 
+def sp_identity_hash(
+    rendered_prompt_hash: str,
+    model: str,
+    temperature: float,
+    pipeline_params: dict | None = None,
+) -> str:
+    """SearchPoint identity hash — hashes only dimensions that affect the result.
+
+    When ``pipeline_params`` has a ``steps`` list that excludes ``llm_ranking``,
+    the prompt is never executed by the backend.  In that case the prompt is
+    excluded from the hash so that different prompt variants with the same
+    pipeline config share the same SP hash.
+
+    Uses ``rendered_prompt_hash`` (not the full prompt text) so the hash
+    can be computed from stored index data without loading detail files.
+    """
+    pp = pipeline_params or {}
+    steps = pp.get("steps")
+    prompt_matters = steps is None or "llm_ranking" in steps
+
+    blob_dict: dict = {"model": model, "temperature": temperature}
+    if prompt_matters:
+        blob_dict["rp_hash"] = rendered_prompt_hash
+    if pipeline_params:
+        blob_dict["pipeline_params"] = pipeline_params
+    blob = json.dumps(blob_dict, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
+
+
 def eval_content_hash(
     rendered_prompt: str,
     eval_data: list,
@@ -38,8 +67,6 @@ def eval_content_hash(
         "model": model, "temperature": temperature,
     }
     if pipeline_params:
-        pp = {k: v for k, v in pipeline_params.items() if k != "steps"}
-        if pp:
-            blob_dict["pipeline_params"] = pp
+        blob_dict["pipeline_params"] = pipeline_params
     blob = json.dumps(blob_dict, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]

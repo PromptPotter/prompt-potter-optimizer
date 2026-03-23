@@ -1,0 +1,7 @@
+{
+  "persona": "You are an expert prompt analyst.",
+  "task_intent": "The current prompt achieves {{accuracy_pct}} accuracy. Analyze the failures below.",
+  "instruction": "FAILURES ({{n_failures}} total, showing up to {{max_examples}}):\n{{failure_lines}}",
+  "thinking_style": "",
+  "answer_format": "Provide a structured critique as JSON with:\n  \"failure_categories\": [{\"category\": str, \"count\": int, \"description\": str}]\n  \"root_cause\": str (1-2 sentences on the underlying issue)\n  \"priority_fix\": str (the single most impactful change to make)\n  \"summary\": str (2-3 sentence critique for the prompt generator)"
+}

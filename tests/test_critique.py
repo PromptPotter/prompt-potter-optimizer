@@ -3,73 +3,55 @@
 import pytest
 
 from api.services.campaign.critique import CritiqueAgent, sample_thinking_styles
+from api.services.campaign.critique_stats import CritiqueContext
 from api.services.llm_client import MockLLMClient
 
 
 # ---------------------------------------------------------------------------
-# CritiqueAgent routing
+# CritiqueAgent.run
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_negative_critique_below_threshold():
-    """Routes to negative_critique when accuracy < threshold."""
+async def test_critique_returns_dict():
+    """CritiqueAgent.run returns a dict with 5 critique fields."""
     agent = CritiqueAgent(MockLLMClient(), model=None)
-    routed_tool = []
-
-    async def fake_neg(results, accuracy):
-        routed_tool.append("negative_critique")
-        return "negative feedback"
-
-    async def fake_pos(results, accuracy):
-        routed_tool.append("positive_critique")
-        return "positive feedback"
-
-    agent.tools["negative_critique"] = fake_neg
-    agent.tools["positive_critique"] = fake_pos
-
-    result = await agent.run([], 0.5, threshold=0.7)
-    assert routed_tool == ["negative_critique"]
-    assert result == "negative feedback"
+    ctx = CritiqueContext(results=[], accuracy=0.5)
+    result = await agent.run(ctx)
+    assert isinstance(result, dict)
+    assert "summary" in result
+    assert "positive_critique" in result
+    assert "negative_critique" in result
 
 
 @pytest.mark.asyncio
-async def test_positive_critique_above_threshold():
-    """Routes to positive_critique when accuracy >= threshold."""
-    agent = CritiqueAgent(MockLLMClient(), model=None)
-    routed_tool = []
-
-    async def fake_neg(results, accuracy):
-        routed_tool.append("negative_critique")
-        return "negative feedback"
-
-    async def fake_pos(results, accuracy):
-        routed_tool.append("positive_critique")
-        return "positive feedback"
-
-    agent.tools["negative_critique"] = fake_neg
-    agent.tools["positive_critique"] = fake_pos
-
-    result = await agent.run([], 0.7, threshold=0.7)
-    assert routed_tool == ["positive_critique"]
-    assert result == "positive feedback"
+async def test_critique_extracts_json_fields():
+    """When LLM returns JSON with critique fields, extracts them."""
+    import json
+    client = MockLLMClient(responses=[json.dumps({
+        "summary": "Fix ranking",
+        "positive_critique": "Good recall",
+        "negative_critique": "Poor precision",
+        "priority_fix": "Adjust prefix",
+        "suggested_axes": ["query_prefix"],
+    })])
+    agent = CritiqueAgent(client, model=None)
+    ctx = CritiqueContext(results=[], accuracy=0.3)
+    result = await agent.run(ctx)
+    assert result["summary"] == "Fix ranking"
+    assert result["positive_critique"] == "Good recall"
+    assert result["suggested_axes"] == ["query_prefix"]
 
 
 @pytest.mark.asyncio
-async def test_positive_critique_at_exact_threshold():
-    """Boundary: exactly at threshold routes to positive."""
-    agent = CritiqueAgent(MockLLMClient(), model=None)
-    routed_tool = []
-
-    async def fake_pos(results, accuracy):
-        routed_tool.append("positive_critique")
-        return "positive"
-
-    agent.tools["positive_critique"] = fake_pos
-    agent.tools["negative_critique"] = lambda r, a: None
-
-    await agent.run([], 0.7, threshold=0.7)
-    assert routed_tool == ["positive_critique"]
+async def test_critique_falls_through_on_non_json():
+    """When LLM returns non-JSON text, wraps in summary field."""
+    client = MockLLMClient(responses=["Plain text critique about failures"])
+    agent = CritiqueAgent(client, model=None)
+    ctx = CritiqueContext(results=[], accuracy=0.3)
+    result = await agent.run(ctx)
+    assert isinstance(result, dict)
+    assert result["summary"] == "Plain text critique about failures"
 
 
 # ---------------------------------------------------------------------------

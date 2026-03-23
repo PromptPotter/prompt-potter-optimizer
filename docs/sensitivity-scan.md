@@ -32,7 +32,7 @@ scan_variants = {
 }
 ```
 
-### Coverage Diagnostic
+### Scan Baseline & Coverage
 
 Before evaluation, `prepare_scan_baseline()` reports per-axis coverage from historical data — which values are cached vs new. Uses the `dataset_runs` index for instant lookups.
 

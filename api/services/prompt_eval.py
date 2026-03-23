@@ -6,10 +6,9 @@ and evaluates reranker prompts via the TermNorm backend's /matches endpoint.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
@@ -37,7 +36,7 @@ class EvalContext:
 
     Pure infrastructure — does NOT carry a SearchPoint.  The search-space
     dimensions (model, temperature, pipeline_params) live here so that
-    ``evaluate_and_select_winner`` can build per-candidate SearchPoints.
+    ``l1_evaluate`` can build per-candidate SearchPoints.
     """
 
     backend_client: BackendClient
@@ -45,12 +44,15 @@ class EvalContext:
     backend_id: str = ""
     pipeline_schema: PipelineSchema | None = None
     obs: ObsLogger | None = None
-    dataset_name: str | None = None
-    dataset_item_map: dict[str, str] | None = field(default=None)
     source: str = ""
     model: str = ""
     temperature: float = 0.0
     pipeline_params: dict | None = None
+    experiment_id: str = ""
+    # Escalation checks (passed through to evaluate_prompt_batch)
+    escalation_checks: list | None = None
+    candidate_idx: int = 0
+    n_total_candidates: int = 1
 
 
 def build_dataset_run_data(
@@ -62,6 +64,7 @@ def build_dataset_run_data(
     results: list,
     *,
     source: str = "",
+    experiment_id: str = "",
 ) -> dict:
     """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
     rendered_prompt = search_point.render()
@@ -81,8 +84,11 @@ def build_dataset_run_data(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "dataset_run_items": results,
     }
+    data["sp_hash"] = search_point.sp_hash()
     if search_point.pipeline_params:
         data["pipeline_params"] = search_point.pipeline_params
+    if experiment_id:
+        data["experiment_id"] = experiment_id
     return data
 
 
@@ -157,7 +163,7 @@ def _extract_pipeline_data(
     return pd
 
 
-async def backend_reranker_eval(
+def backend_reranker_eval(
     query_data: dict,
     backend_client: BackendClient,
     rendered_prompt: str,
@@ -188,7 +194,7 @@ async def backend_reranker_eval(
         steps = pp.get("steps")
         include_ranking = steps is None or "llm_ranking" in steps
 
-        resp = await backend_client.run_match(
+        resp = backend_client.run_match(
             query,
             pipeline_params=pipeline_params,
             ranking_prompt=rendered_prompt if include_ranking else None,
@@ -221,12 +227,16 @@ async def backend_reranker_eval(
         }
 
 
-async def evaluate_prompt_batch(
+def evaluate_prompt_batch(
     search_point: "SearchPoint",
     eval_data: list,
     backend_client: "BackendClient",
     on_result: Callable | None = None,
     pipeline_schema: "PipelineSchema | None" = None,
+    escalation_checks: list | None = None,
+    candidate_idx: int = 0,
+    n_total_candidates: int = 1,
+    cached_queries: dict[str, dict] | None = None,
 ) -> list:
     """Evaluate a prompt on all eval_data queries via the backend.
 
@@ -236,25 +246,49 @@ async def evaluate_prompt_batch(
         backend_client: BackendClient with ``run_match()`` method.
         on_result: Optional callback ``(result, index, total)`` called after
             each query evaluation.
+        escalation_checks: Optional list of ``EscalationCheck`` instances.
+            Checked after each query result — raises ``EscalationError``
+            on threshold breach to abort immediately.
+        cached_queries: Optional ``{query_string: result_dict}`` from prior
+            runs with the same SearchPoint.  Matching queries skip the
+            backend call.
 
     Returns:
         List of result dicts from backend_reranker_eval.
+
+    Raises:
+        EscalationError: If an escalation check triggers mid-batch.
     """
+    from api.services.campaign.escalation import EscalationError
+
     results = []
     rendered = search_point.render()
     consecutive_errors = 0
     max_consecutive_errors = 3
+    n_reused = 0
 
     try:
         for i, qd in enumerate(eval_data):
-            result = await backend_reranker_eval(
-                qd, backend_client, rendered,
-                pipeline_params=search_point.pipeline_params,
-                pipeline_schema=pipeline_schema,
+            # Per-query cache reuse — skip backend call if result exists
+            cached = (
+                cached_queries.get(qd["query"])
+                if cached_queries else None
             )
+            if cached is not None:
+                result = {**cached, "cached": True}
+                n_reused += 1
+            else:
+                result = backend_reranker_eval(
+                    qd, backend_client, rendered,
+                    pipeline_params=search_point.pipeline_params,
+                    pipeline_schema=pipeline_schema,
+                )
             results.append(result)
 
-            if result.get("error"):
+            if cached is not None:
+                # Cached results don't count toward consecutive error tracking
+                pass
+            elif result.get("error"):
                 consecutive_errors += 1
                 if consecutive_errors >= max_consecutive_errors:
                     logger.warning(
@@ -278,14 +312,31 @@ async def evaluate_prompt_batch(
 
             if on_result is not None:
                 on_result(result, i, len(eval_data))
-    except (KeyboardInterrupt, asyncio.CancelledError):
+
+            # Escalation checks — run after display
+            if escalation_checks:
+                for check in escalation_checks:
+                    if not check.enabled:
+                        continue
+                    signal = check.evaluate(
+                        results, candidate_idx, n_total_candidates,
+                    )
+                    if signal:
+                        raise EscalationError(signal, results)
+    except KeyboardInterrupt:
         logger.warning(
             "Eval batch interrupted at query %d/%d. "
-            "Results so far are lost — re-run to restart.",
+            "This candidate will be re-evaluated on resume. "
+            "Completed candidates are cached.",
             len(results), len(eval_data),
         )
         raise
 
+    if n_reused:
+        logger.info(
+            "Per-query reuse: %d/%d queries from prior runs",
+            n_reused, len(eval_data),
+        )
     return results
 
 
@@ -445,7 +496,7 @@ def _try_cached_lookup(
     return None
 
 
-async def evaluate_prompt_cached(
+def evaluate_prompt_cached(
     search_point: "SearchPoint",
     eval_data: list,
     ctx: EvalContext,
@@ -492,28 +543,70 @@ async def evaluate_prompt_cached(
             search_point, eval_data, pipeline_schema, on_result,
         )
         if cached is not None:
+            # Run escalation checks on cached results too — the per-query
+            # check in evaluate_prompt_batch only fires on live calls.
+            if ctx.escalation_checks:
+                results, scores, was_cached = cached
+                for check in ctx.escalation_checks:
+                    if not check.enabled:
+                        continue
+                    signal = check.evaluate(
+                        results, ctx.candidate_idx, ctx.n_total_candidates,
+                    )
+                    if signal:
+                        scores["escalation_signal"] = signal.to_dict()
+                        break
+                return results, scores, was_cached
             return cached
 
     # --- evaluate via backend ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
-
-    def _on_result(result: dict, index: int, total: int) -> None:
-        if on_result is not None:
-            on_result(result, index, len(eval_data))
-
-    results = await evaluate_prompt_batch(
-        search_point, eval_data, backend_client,
-        on_result=_on_result,
-        pipeline_schema=pipeline_schema,
+    # Prefix display name with experiment_id for discoverability
+    display_name = (
+        f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id
+        else safe_label
     )
+
+    from api.services.campaign.escalation import EscalationError as _EscalationError
+
+    # SP-hash query cache: find individual query results from prior runs
+    # with the same SearchPoint (prompt + model + temp + pipeline_params).
+    # Bridges different sample sizes automatically.
+    sp_cache: dict[str, dict] | None = None
+    if store and backend_id:
+        sp_h = search_point.sp_hash()
+        sp_cache = store.dataset_runs.find_cached_queries(backend_id, sp_h)
+        if sp_cache:
+            logger.info(
+                "SP cache: %d cached queries for %d eval queries",
+                len(sp_cache), len(eval_data),
+            )
+
+    escalation_signal = None
+    try:
+        results = evaluate_prompt_batch(
+            search_point, eval_data, backend_client,
+            on_result=on_result,
+            pipeline_schema=pipeline_schema,
+            escalation_checks=ctx.escalation_checks,
+            candidate_idx=ctx.candidate_idx,
+            n_total_candidates=ctx.n_total_candidates,
+            cached_queries=sp_cache,
+        )
+    except _EscalationError as e:
+        results = e.partial_results
+        escalation_signal = e.signal
     scores = compute_composite_score(results, pipeline_schema)
+    if escalation_signal:
+        scores["escalation_signal"] = escalation_signal.to_dict()
 
     # --- finalize: save complete run + observability ---
     if store and backend_id:
         run_data = build_dataset_run_data(
-            run_id, label, content_hash, search_point,
+            run_id, display_name, content_hash, search_point,
             scores, results, source=source,
+            experiment_id=ctx.experiment_id,
         )
         store.dataset_runs.save(backend_id, run_id, run_data)
 

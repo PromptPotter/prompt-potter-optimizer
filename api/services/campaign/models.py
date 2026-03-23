@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from api.models.opt_search_point import OptSearchPoint
 from api.models.pipeline_schema import PipelineSchema
 from api.models.search_point import SearchPoint
 
@@ -23,7 +24,7 @@ class CycleConfig(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    max_rounds: int = Field(10, description="Maximum optimization rounds")
+    max_rounds: int | None = Field(10, description="Maximum optimization rounds (None = unlimited)")
     patience: int = Field(3, description="Stop after N consecutive non-improvements")
     n_variants: int = Field(5, description="Candidates per round")
     creativity: float = Field(0.7, description="Temperature for candidate generation")
@@ -33,7 +34,6 @@ class CycleConfig(BaseModel):
     backend_url: str = Field(..., description="Backend URL for evaluation")
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
-    generate_suggestions: bool = Field(False, description="LLM suggestions each round")
     pipeline_params: dict | None = Field(None, description="Pipeline parameter overrides")
     session_terms: list[str] | None = Field(None, description="Backend session terms")
     temperature: float = Field(0.0, description="Temperature for content hash")
@@ -51,16 +51,30 @@ class CycleConfig(BaseModel):
     # Scan-aware optimization
     scan_context: dict | None = Field(None, description="Scan analytics context for candidate gen")
 
-    # L2/L3 escalation
-    enable_l2: bool = Field(False, description="Enable L2 refine_context loop")
-    enable_l3: bool = Field(False, description="Enable L3 modify_plan loop")
-    l2_patience: int = Field(2, description="L2 stalls before escalating to L3")
-    l3_patience: int = Field(1, description="L3 stalls before stopping")
+    # Structured domain context (from TASK_DESCRIPTION decomposition)
+    task_context: dict | None = Field(
+        None, description="Structured domain context for L1 gen and L2 refinement",
+    )
 
-    # Configurable temperatures for L2/L3/suggestions
+    # L2/L3 escalation
+    enable_l2: bool = Field(True, description="Enable L2 refine_context loop")
+    enable_l3: bool = Field(True, description="Enable L3 modify_plan loop")
+    l2_patience: int | None = Field(2, description="L2 stalls before L3 (None=unlimited)")
+    l3_patience: int | None = Field(1, description="L3 stalls before stop (None=unlimited)")
+
+    # Configurable temperatures for L2/L3
     l2_temperature: float = Field(0.3, description="Temperature for L2 refine_context LLM call")
     l3_temperature: float = Field(0.5, description="Temperature for L3 modify_plan LLM call")
-    suggestion_temperature: float = Field(0.0, description="Temperature for suggestion generation")
+
+    # Escalation
+    degradation_threshold: float = Field(
+        0.4,
+        description="Fraction of degraded queries to trigger escalation (0 = disabled)",
+    )
+    backend_warning_threshold: int = Field(
+        2,
+        description="Degradation resets before emitting backend warning (0 = disabled)",
+    )
 
     @classmethod
     def from_campaign_config(
@@ -74,6 +88,7 @@ class CycleConfig(BaseModel):
         session_terms: list[str] | None = None,
         pipeline_schema: PipelineSchema | None = None,
         scan_context: dict | None = None,
+        task_context: dict | None = None,
     ) -> CycleConfig:
         """Build from the notebook's ``campaign_config`` dict."""
         opt = campaign_config.get("optimization", {})
@@ -89,7 +104,6 @@ class CycleConfig(BaseModel):
             backend_url=backend_url,
             backend_id=backend_id,
             project_root=project_root,
-            generate_suggestions=False,
             pipeline_params=pipeline_params,
             session_terms=session_terms,
             temperature=eval_llm.get("temperature", 0.0),
@@ -97,15 +111,17 @@ class CycleConfig(BaseModel):
             seed=42,
             pipeline_schema=pipeline_schema,
             scan_context=scan_context,
-            enable_l2=opt.get("enable_l2", False),
-            enable_l3=opt.get("enable_l3", False),
+            task_context=task_context,
+            enable_l2=opt.get("enable_l2", True),
+            enable_l3=opt.get("enable_l3", True),
             l2_patience=opt.get("l2_patience", 2),
             l3_patience=opt.get("l3_patience", 1),
             l2_temperature=opt.get("l2_temperature", 0.3),
             l3_temperature=opt.get("l3_temperature", 0.5),
-            suggestion_temperature=opt.get("suggestion_temperature", 0.0),
             enable_critique=opt.get("enable_critique", True),
             critique_positive_threshold=opt.get("critique_positive_threshold", 0.7),
+            degradation_threshold=opt.get("degradation_threshold", 0.4),
+            backend_warning_threshold=opt.get("backend_warning_threshold", 2),
         )
 
 
@@ -125,6 +141,8 @@ class CycleRoundResult(BaseModel):
     results: list[dict] = Field(default_factory=list)
     candidates_evaluated: int
     candidate_scores: list[dict] = Field(default_factory=list)
+    degraded_queries: int = 0
+    escalation_signal: dict | None = None
 
 
 class CycleResult(BaseModel):
@@ -147,7 +165,13 @@ class CycleResult(BaseModel):
 
 @dataclass
 class _LoopState:
-    """Mutable state threaded through the feedback cycle round loop."""
+    """Mutable state threaded through the feedback cycle round loop.
+
+    Optimizer-level state (critique, thinking_styles, task_context,
+    escalation_journal, query_failure_tracker) lives on ``opt_sp``
+    — a mutable ``OptSearchPoint`` that is serialized at checkpoint
+    time and hydrated on resume.
+    """
 
     rounds: list[CycleRoundResult] = field(default_factory=list)
     current_sp: SearchPoint | None = None
@@ -161,9 +185,11 @@ class _LoopState:
     stall_count: int = 0
     eval_ctx: EvalContext | None = None
 
-    # Critique + thinking styles (meta-level, fed forward between rounds)
-    critique_text: str = ""
-    thinking_styles: list[str] = field(default_factory=list)
+    # Optimizer state — single source of truth for all meta-level fields
+    opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
+
+    # Probe round flag (set by L2 action="probe", reset after probe round)
+    probe_next_round: bool = False
 
     # L2/L3 state
     l2_stall_count: int = 0

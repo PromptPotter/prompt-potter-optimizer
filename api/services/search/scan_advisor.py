@@ -157,11 +157,14 @@ def _build_advisor_prompt(
     llm_context: list[dict],
     prompt_field_axes: list[str],
     pipeline_description: str,
-    task_description: str = "",
+    task_description: str | dict = "",
 ) -> str:
     """Build the LLM prompt for scan configuration advice.
 
     Uses progressive pipeline disclosure: overview → tunable params → LLM details.
+
+    Args:
+        task_description: Raw string or structured task_context dict.
     """
     # --- conditional sections ---
     constraints_section = (
@@ -171,7 +174,11 @@ def _build_advisor_prompt(
     )
 
     task_context_section = ""
-    if task_description:
+    if isinstance(task_description, dict) and task_description:
+        tc_lines = "\n".join(f"- **{k}**: {v}" for k, v in task_description.items() if v)
+        if tc_lines:
+            task_context_section = f"\n## Task Context\n{tc_lines}\n"
+    elif task_description:
         task_context_section = f"""
 ## Task Context
 {task_description}
@@ -272,7 +279,7 @@ def preview_advisor_prompt(
     pipeline_schema: PipelineSchema | None = None,
     variant_library: dict | None = None,
     pipeline_params: dict | None = None,
-    task_description: str = "",
+    task_description: str | dict = "",
     exclude_steps: list[str] | None = None,
 ) -> str:
     """Return the advisor prompt — with real data when available, else placeholders.
@@ -432,7 +439,7 @@ async def advise_scan_config(
     model: str = "",
     max_tokens: int = 2000,
     pipeline_params: dict | None = None,
-    task_description: str = "",
+    task_description: str | dict = "",
     exclude_steps: list[str] | None = None,
 ) -> dict:
     """Generate LLM-powered scan configuration advice.
@@ -445,8 +452,8 @@ async def advise_scan_config(
         max_tokens: Maximum response tokens for the LLM call.
         pipeline_params: Pipeline params dict with ``steps`` key. Excluded
             steps are derived by diffing schema steps vs active steps.
-        task_description: Domain context for the advisor LLM (e.g. input patterns,
-            matching challenges). Helps generate domain-specific value suggestions.
+        task_description: Domain context for the advisor LLM. Either a raw
+            string or a structured task_context dict.
         exclude_steps: Explicit list of steps to exclude. When provided,
             overrides the automatic schema-vs-pipeline_params diff.
 

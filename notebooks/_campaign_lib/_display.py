@@ -15,13 +15,13 @@ def _visible_len(text: str) -> int:
 
 __all__ = [
     # Constants
-    "RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
+    "RESET", "BOLD", "DIM", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
     # Box-drawing helpers
     "_box_top", "_box_bottom", "_box_line",
     "_dbox_top", "_dbox_bottom", "_dbox_line", "_dbox_sep",
     "_dotted_line", "_fmt_delta", "_scoreboard",
     # Display functions
-    "display_progress", "display_suggestions", "display_axis_profiles",
+    "display_progress", "display_axis_profiles",
     # Scan analytics
     "show_scan_leaderboard", "show_scan_query_difficulty",
     # Campaign results display
@@ -33,6 +33,7 @@ __all__ = [
 # ANSI foreground colors
 RESET   = "\033[0m"
 BOLD    = "\033[1m"
+DIM     = "\033[2m"
 RED     = "\033[31m"
 GREEN   = "\033[32m"
 YELLOW  = "\033[33m"
@@ -159,8 +160,11 @@ def _scoreboard(
         ci_str = fmt_ci(ci_lo, ci_hi)
         delta = acc - baseline_accuracy
         delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
-        is_winner = label == winner_label
+        aborted = s.get("escalation_aborted", False)
+        is_winner = label == winner_label and not aborted
         winner_mark = f"  {GREEN}{BOLD}*{RESET}" if is_winner else ""
+        if aborted:
+            winner_mark = f"  {YELLOW}(aborted){RESET}"
 
         if has_composite:
             comp = s.get("composite", acc)
@@ -274,7 +278,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
         else:
             tag = "MISS"
 
-    cache_marker = " \u26a1" if cached else ""
+    cache_marker = " \U0001f4d6" if cached else ""
     step = f"{step}{cache_marker}"
 
     indent = prefix if prefix else "        "
@@ -358,38 +362,6 @@ def display_progress(campaign_rounds: list, window: int = 8) -> None:
             print(f"  {YELLOW}-- Plateau: rolling avg stable at"
                   f" {recent_avg:.1%} for 3 rounds{RESET}")
 
-
-def display_suggestions(suggestions: dict, round_num: int) -> None:
-    """Pretty-print failure patterns, parameter suggestions, and prompt phrases."""
-    print(f"\n{'=' * 70}")
-    print(f"LLM SUGGESTIONS FOR ROUND {round_num}")
-    print(f"{'=' * 70}")
-
-    print(f"\nSUMMARY: {suggestions.get('summary', '')}")
-
-    print("\n--- FAILURE PATTERNS ---")
-    for fp in suggestions.get("failure_patterns", []):
-        print(
-            f"  [{fp.get('category', '?')}] ~{fp.get('count', '?')} queries: "
-            f"{fp.get('description', '')}"
-        )
-        for ex in fp.get("examples", [])[:2]:
-            print(f"    e.g. {ex[:60]}")
-
-    print("\n--- PARAMETER CHANGE SUGGESTIONS ---")
-    for ps in suggestions.get("parameter_suggestions", []):
-        print(
-            f"  {ps.get('parameter', '?')}: "
-            f"{ps.get('current_value', '?')} -> {ps.get('suggested_value', '?')}"
-        )
-        print(f"    Rationale: {ps.get('rationale', '')}")
-
-    print("\n--- PROMPT PHRASE FRAGMENTS ---")
-    for pf in suggestions.get("prompt_phrase_fragments", []):
-        print(f"  [{pf.get('action', '?')}]")
-        print(f"    Text: \"{pf.get('text', '')}\"")
-        print(f"    Rationale: {pf.get('rationale', '')}")
-        print()
 
 
 def display_axis_profiles(profiles: list[dict]) -> None:

@@ -9,7 +9,7 @@ from pathlib import Path
 from api.models.pipeline_schema import PipelineSchema
 from api.models.prompt_state import LAYER1_STRING_FIELDS
 
-from api.config.settings import load_variant_library, load_variant_library_rich
+from api.config.settings import load_variant_library_rich
 from api.services.search import (
     build_diagnostic_set,
     sensitivity_scan as _sensitivity_scan,
@@ -21,12 +21,12 @@ from api.services.search import (
     build_data_inventory as _build_data_inventory,
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
     advise_scan_config as _advise_scan_config,
-    filter_variant_library as _filter_variant_library,
     preview_advisor_prompt as _preview_advisor_prompt,
     build_pipeline_overview,
     build_tunable_params,
     build_llm_context,
     restructure_context_cached as _restructure_context_cached,
+    load_filtered_variant_library as _load_filtered_variants,
 )
 
 from ._display import (
@@ -51,20 +51,6 @@ __all__ = [
 ]
 
 
-# ── Variant library helpers ───────────────────────────────────────────────
-
-
-def _load_filtered_variants(
-    pipeline_params: dict | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-) -> dict:
-    """Load variant library, filtering to active pipeline steps when possible."""
-    lib = load_variant_library()
-    if pipeline_params and pipeline_schema:
-        lib = _filter_variant_library(lib, pipeline_params, schema=pipeline_schema)
-    return lib
-
-
 # ── Variant library & advisor prompt ──────────────────────────────────────
 
 
@@ -72,7 +58,7 @@ def preview_advisor_prompt(
     campaign_config: dict | None = None,
     svc: dict | None = None,
     *,
-    task_description: str = "",
+    task_description: str | dict = "",
     raw: bool = False,
 ) -> None:
     """Display the scan advisor prompt — with real data when svc is provided.
@@ -204,6 +190,7 @@ async def prepare_scan_baseline(
     backend_id: str = "",
     scan_variants: dict | None = None,
     force_restructure: bool = False,
+    svc: dict | None = None,
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
@@ -218,6 +205,11 @@ async def prepare_scan_baseline(
     """
     import hashlib
     from api.models.search_point import SearchPoint
+
+    # svc shorthand: extract store/backend_id if provided
+    if svc is not None:
+        store = store or svc.get("store")
+        backend_id = backend_id or svc.get("backend_id", "")
 
     llm_client, llm_model = setup_llm(campaign_config)
 
@@ -260,23 +252,24 @@ async def prepare_scan_baseline(
     print(f"  Search baseline: {search_baseline.id[:12]} "
           f"(render: {len(search_baseline.render())} chars)")
 
-    # Historical data diagnostic with alias groups
+    # Historical data diagnostic via sp_hash matching
+    baseline_sp = SearchPoint(
+        prompt_state=search_baseline,
+        pipeline_params=pipeline_params,
+    )
+
     if can_cache:
         from api.services.search.coverage import (
             build_prompt_result_index,
             diagnose_scan_variants,
         )
 
+        # Register semantic equivalence (still useful for Layer 1 content-hash dedup)
         restructured_hash = hashlib.sha256(
             search_baseline.render().encode(),
         ).hexdigest()[:16]
-
-        # Register semantic equivalence
         store.dataset_runs.register_alias(
             backend_id, original_hash, restructured_hash,
-        )
-        alias_group = store.dataset_runs.resolve_aliases(
-            backend_id, restructured_hash,
         )
 
         prompt_index = build_prompt_result_index(store, backend_id)
@@ -284,19 +277,14 @@ async def prepare_scan_baseline(
         scan_diag = None
         if scan_variants:
             scan_diag = diagnose_scan_variants(
-                store, backend_id, scan_variants, alias_group, prompt_index,
+                store, backend_id, scan_variants, baseline_sp,
             )
 
         _print_historical_diagnostic(
-            prompt_index, alias_group,
-            original_hash, restructured_hash,
-            scan_diagnosis=scan_diag,
+            prompt_index, scan_diagnosis=scan_diag,
         )
 
-    return SearchPoint(
-        prompt_state=search_baseline,
-        pipeline_params=pipeline_params,
-    )
+    return baseline_sp, scan_diag
 
 
 # ── Coverage & data inventory ────────────────────────────────────────────
@@ -304,13 +292,10 @@ async def prepare_scan_baseline(
 
 def _print_historical_diagnostic(
     prompt_index: dict[str, dict[str, dict]],
-    alias_group: set[str],
-    original_hash: str,
-    restructured_hash: str,
     *,
     scan_diagnosis: dict | None = None,
 ) -> None:
-    """Print historical data diagnostic with alias group + scan coverage."""
+    """Print historical data diagnostic with sp_hash scan coverage."""
     n_prompts = len(prompt_index)
     n_results = sum(len(v) for v in prompt_index.values())
     if n_results == 0:
@@ -319,35 +304,21 @@ def _print_historical_diagnostic(
 
     print(f"\n  Historical data: {n_results} results across {n_prompts} unique prompts")
 
-    # Alias group info
-    alias_list = sorted(alias_group)
-    if len(alias_list) > 1:
-        short = [h[:8] for h in alias_list]
-        print(f"  Baseline alias group: {' \u2194 '.join(short)} "
-              f"({len(alias_list)} prompts linked)")
-    else:
-        print(f"  Baseline: {original_hash[:12]}")
-
-    # Matching results from alias group
-    n_alias_results = 0
-    n_alias_runs = 0
-    for h in alias_group:
-        n_alias_results += len(prompt_index.get(h, {}))
     if scan_diagnosis:
-        n_alias_runs = scan_diagnosis["n_matching_runs"]
-    print(f"  Matching runs: {n_alias_runs}, "
-          f"{n_alias_results} cached results")
+        n_matching = scan_diagnosis["n_matching_runs"]
+        n_cached = scan_diagnosis["n_matching_results"]
+        print(f"  Matching runs (sp_hash): {n_matching}, {n_cached} cached results")
 
     # Scan variant coverage
     if scan_diagnosis and scan_diagnosis["axes"]:
-        print(f"\n  Scan variant coverage ({n_alias_runs} matching runs):")
+        n_matching = scan_diagnosis["n_matching_runs"]
+        print(f"\n  Scan variant coverage ({n_matching} matching runs):")
         for axis_name, info in scan_diagnosis["axes"].items():
             values = info["values"]
             n_covered = sum(1 for c in values.values() if c > 0)
             n_total = len(values)
 
             if n_total <= 5:
-                # Show per-value counts
                 parts = []
                 for key, count in values.items():
                     if count > 0:
@@ -358,13 +329,11 @@ def _print_historical_diagnostic(
             else:
                 detail = f"{n_covered}/{n_total} values tested"
 
-            other = info.get("other_count", 0)
-            other_str = f"  (+{other} other)" if other else ""
             label = f"    {axis_name:<24s}"
             if n_covered == 0:
                 print(f"{label} (not tested)")
             else:
-                print(f"{label} {detail}{other_str}")
+                print(f"{label} {detail}")
 
 
 async def resume_or_build_diagnostic(
@@ -713,7 +682,7 @@ async def scan_advisor(
     campaign_config: dict,
     svc: dict,
     *,
-    task_description: str = "",
+    task_description: str | dict = "",
 ) -> dict:
     """LLM-powered scan configuration advice.
 
@@ -745,7 +714,12 @@ async def scan_advisor(
     if user_excluded:
         print(f"  Excluded: {user_excluded}")
     if task_description:
-        print(f"  Task context: {task_description[:80].strip()}...")
+        if isinstance(task_description, dict):
+            domain = task_description.get('domain', '?')
+            purpose = task_description.get('pipeline_purpose', '?')[:60]
+            print(f"  Task context: {domain} — {purpose}")
+        else:
+            print(f"  Task context: {task_description[:80].strip()}...")
     print(f"  Calling {model or '?'} ...")
     print()
 
@@ -859,7 +833,7 @@ async def run_scan_advisor(
     campaign_config: dict,
     svc: dict,
     *,
-    task_description: str = "",
+    task_description: str | dict = "",
 ) -> tuple[dict, dict, dict]:
     """Run scan advisor + extract/display proposed variants.
 
@@ -944,12 +918,14 @@ async def sensitivity_scan(
     baseline,
     scan_variants: dict[str, list],
     eval_data: list,
-    backend_client,
+    backend_client=None,
     *,
     sample_size: int = 0,
     store=None,
     backend_id: str = "",
     pipeline_schema=None,
+    experiment_id: str = "",
+    svc: dict | None = None,
 ) -> tuple:
     """Run a sensitivity scan with progress output.
 
@@ -958,6 +934,13 @@ async def sensitivity_scan(
 
     Returns (per_variant_df, axis_profiles).
     """
+    # svc shorthand: extract infrastructure params if provided
+    if svc is not None:
+        backend_client = backend_client or svc.get("backend_client")
+        store = store or svc.get("store")
+        backend_id = backend_id or svc.get("backend_id", "")
+        pipeline_schema = pipeline_schema or svc.get("pipeline_schema")
+
     # Print scan overview
     print("Running sensitivity scan...")
     print("\n  Baseline field values:")
@@ -980,12 +963,6 @@ async def sensitivity_scan(
           f"queries/variant: {n_eval}, cached results: {n_cached}")
     print(f"  Estimated calls: ~{n_configs * n_eval}")
 
-    # Ensure backend session is initialized (required for /matches)
-    if backend_client is not None:
-        terms = sorted({d["ground_truth"] for d in eval_data if d.get("ground_truth")})
-        if terms:
-            await backend_client.init_session(terms)
-
     cb, on_result_cb = _make_scan_progress_cb()
 
     _httpx_log = logging.getLogger("httpx")
@@ -1004,6 +981,7 @@ async def sensitivity_scan(
             pipeline_schema=pipeline_schema,
             progress_cb=cb,
             on_result=on_result_cb,
+            experiment_id=experiment_id,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         _print_interrupt_banner(
@@ -1110,8 +1088,8 @@ async def adaptive_search(
     baseline_ps,
     variant_library: dict,
     eval_data: list,
-    backend_client,
-    axis_profiles: list[dict],
+    backend_client=None,
+    axis_profiles: list[dict] | None = None,
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
     store=None,
@@ -1119,12 +1097,21 @@ async def adaptive_search(
     pipeline_params: dict | None = None,
     session_terms: list | None = None,
     plan_id: str = "",
+    experiment_id: str = "",
+    svc: dict | None = None,
 ) -> tuple:
     """Run adaptive coordinate descent search with progress output.
 
     Returns (best_ps, best_pipeline_params, search_log_df).
     """
-    active = [p for p in axis_profiles if p["exploration_budget"] != "skip"]
+    # svc shorthand
+    if svc is not None:
+        backend_client = backend_client or svc.get("backend_client")
+        store = store or svc.get("store")
+        backend_id = backend_id or svc.get("backend_id", "")
+        session_terms = session_terms or svc.get("session_terms")
+
+    active = [p for p in (axis_profiles or []) if p["exploration_budget"] != "skip"]
     print(f"Adaptive search: {len(active)} active axes, max {max_rounds} rounds")
     for p in active:
         print(
@@ -1151,6 +1138,7 @@ async def adaptive_search(
             session_terms=session_terms,
             progress_cb=cb,
             plan_id=plan_id,
+            experiment_id=experiment_id,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         import pandas as _pd
@@ -1326,7 +1314,15 @@ def seed_campaign_from_scan(
         if "steps" in existing_pp:
             merged["steps"] = existing_pp["steps"]
         campaign_config["pipeline_params"] = merged
-        print(f"Updated pipeline_params: {merged}")
+        # Summarize — avoid dumping full JSON schemas
+        display_pp = {}
+        for k, v in merged.items():
+            if isinstance(v, dict) and len(str(v)) > 100:
+                n_keys = len(v.get("properties", v))
+                display_pp[k] = f"<{n_keys} fields>"
+            else:
+                display_pp[k] = v
+        print(f"Updated pipeline_params: {display_pp}")
 
     # Get scan baseline accuracy as fallback when campaign_rounds is empty
     scan_baseline_acc = 0.0

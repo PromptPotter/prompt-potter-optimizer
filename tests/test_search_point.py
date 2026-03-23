@@ -104,17 +104,17 @@ def test_content_hash_differs_with_temperature():
     assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
 
 
-def test_content_hash_ignores_steps_in_pipeline_params():
-    """Steps-only difference produces same hash (steps are routing constants)."""
+def test_content_hash_includes_steps_in_pipeline_params():
+    """Different steps produce different hashes (steps affect backend behavior)."""
     ps = PromptState(instruction="Rank by relevance.")
     eval_data = [{"query": "q", "ground_truth": "a"}]
     sp_a = SearchPoint(prompt_state=ps, pipeline_params={"steps": ["llm_ranking"]})
     sp_b = SearchPoint(prompt_state=ps, pipeline_params={"steps": ["fuzzy_matching"]})
     sp_none = SearchPoint(prompt_state=ps)
-    # steps-only → same hash
-    assert sp_a.content_hash(eval_data) == sp_b.content_hash(eval_data)
-    # steps-only pp is equivalent to no pp
-    assert sp_a.content_hash(eval_data) == sp_none.content_hash(eval_data)
+    # Different steps → different hash
+    assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
+    # steps pp differs from no pp
+    assert sp_a.content_hash(eval_data) != sp_none.content_hash(eval_data)
 
 
 def test_content_hash_differs_with_non_steps_pipeline_params():

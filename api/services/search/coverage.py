@@ -3,17 +3,23 @@
 assess_scan_coverage checks whether historical data covers OAT scan needs.
 build_data_inventory summarizes what the historical index contains.
 build_prompt_result_index builds the cross-run query lookup.
-diagnose_scan_variants checks scan variant coverage via prompt alias groups.
+diagnose_scan_variants checks scan variant coverage via sp_hash matching.
 """
+from __future__ import annotations
 
 import hashlib
 import json
 import logging
 import statistics
 from collections import defaultdict
+from typing import TYPE_CHECKING
+
 from api.models.pipeline_schema import PipelineSchema, is_result_step_compatible
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
+
+if TYPE_CHECKING:
+    from api.models.search_point import SearchPoint
 from api.services.search.plan_persistence import (
     deserialize_grid_plan,
     deserialize_smart_search_plan,
@@ -87,141 +93,87 @@ def analyze_candidate_coverage(replay_results: list) -> dict:
     }
 
 
-def summarize_historical_data(
-    store: ProjectStore,
-    backend_id: str,
-    baseline_rp_hash: str = "",
-) -> dict:
-    """Lightweight historical data summary from the index file only.
-
-    Reads ``store.dataset_runs.list_all()`` (single JSON file) — does NOT
-    load individual detail files.
-
-    Returns dict with ``n_runs``, ``n_results``, ``n_unique_prompts``,
-    ``n_baseline_matches``, ``pipeline_configs``, and ``n_legacy``.
-    """
-    summaries = store.dataset_runs.list_all(backend_id)
-    if not summaries:
-        return {
-            "n_runs": 0, "n_results": 0, "n_unique_prompts": 0,
-            "n_baseline_matches": 0, "pipeline_configs": [], "n_legacy": 0,
-        }
-
-    n_results = 0
-    n_baseline = 0
-    n_legacy = 0
-    prompt_hashes: set[str] = set()
-    # pipeline_params key -> {runs, results}
-    pp_groups: dict[str, dict] = defaultdict(lambda: {"runs": 0, "results": 0})
-
-    for entry in summaries:
-        item_count = entry.get("item_count", 0)
-        n_results += item_count
-
-        rp_hash = entry.get("rendered_prompt_hash", "")
-        pp = entry.get("pipeline_params")
-
-        if not rp_hash:
-            n_legacy += 1
-        else:
-            prompt_hashes.add(rp_hash)
-            if baseline_rp_hash and rp_hash == baseline_rp_hash:
-                n_baseline += 1
-
-        # Group by pipeline config
-        if pp and isinstance(pp, dict):
-            steps = pp.get("steps", [])
-            key = ", ".join(sorted(steps)) if steps else "(custom params)"
-        elif rp_hash:
-            key = "(default)"
-        else:
-            key = "(default / legacy)"
-        pp_groups[key]["runs"] += 1
-        pp_groups[key]["results"] += item_count
-
-    pipeline_configs = [
-        {"label": k, "runs": v["runs"], "results": v["results"]}
-        for k, v in sorted(pp_groups.items(), key=lambda x: -x[1]["results"])
-    ]
-
-    return {
-        "n_runs": len(summaries),
-        "n_results": n_results,
-        "n_unique_prompts": len(prompt_hashes),
-        "n_baseline_matches": n_baseline,
-        "pipeline_configs": pipeline_configs,
-        "n_legacy": n_legacy,
-    }
-
-
 def diagnose_scan_variants(
     store: ProjectStore,
     backend_id: str,
     scan_variants: dict[str, list],
-    baseline_rp_hashes: set[str],
-    prompt_result_index: dict[str, dict[str, dict]] | None = None,
+    baseline_sp: "SearchPoint",
 ) -> dict:
-    """Check scan variant coverage against historical runs via alias groups.
+    """Check scan variant coverage using sp_hash matching.
 
-    ``baseline_rp_hashes`` is the expanded alias set (original + restructured).
-    Filters index to runs whose ``rendered_prompt_hash`` is in the alias set,
-    then counts per-axis coverage for each scan variant value.
+    For each axis value, derives a perturbed SearchPoint, computes its
+    sp_hash, and counts matching runs in the index.  Uses the same
+    matching logic as the eval cache — no false positives from different
+    pipeline configs.
 
     Returns dict with ``n_matching_runs``, ``n_matching_results``,
-    ``alias_hashes``, and per-axis ``axes`` detail.
+    and per-axis ``axes`` detail.
     """
+    # Ensure sp_hashes are backfilled
+    store.dataset_runs._ensure_sp_hashes(backend_id)
+
     summaries = store.dataset_runs.list_all(backend_id)
+    # Build sp_hash → [entries] index for fast lookup
+    sp_index: dict[str, list[dict]] = {}
+    for entry in summaries:
+        sp_h = entry.get("sp_hash", "")
+        if sp_h:
+            sp_index.setdefault(sp_h, []).append(entry)
 
-    # Filter to runs matching the alias group
-    matching = [
-        e for e in summaries
-        if e.get("rendered_prompt_hash", "") in baseline_rp_hashes
-    ]
-
-    # Compute cached results from prompt_result_index
-    n_cached_results = 0
-    if prompt_result_index:
-        for h in baseline_rp_hashes:
-            n_cached_results += len(prompt_result_index.get(h, {}))
+    # Baseline sp_hash → matching runs
+    baseline_hash = baseline_sp.sp_hash()
+    baseline_entries = sp_index.get(baseline_hash, [])
+    n_baseline_results = sum(e.get("item_count", 0) for e in baseline_entries)
 
     # Per-axis coverage
     axes: dict[str, dict] = {}
+    all_matching: set[str] = set()  # run_ids that match any variant
+
     for axis_name, values in scan_variants.items():
         value_counts: dict[str, int] = {}
-        other_values: set[str] = set()
-        # Canonical keys for matching (JSON for dicts, str for scalars)
-        target_keys = {}
+        value_scores: dict[str, dict] = {}
+
         for v in values:
             key = json.dumps(v, sort_keys=True) if isinstance(v, dict) else str(v)
-            target_keys[key] = v
-            value_counts[key] = 0
-
-        for entry in matching:
-            pp = entry.get("pipeline_params") or {}
-            hist_val = pp.get(axis_name)
-            if hist_val is None:
-                continue
-            hist_key = (
-                json.dumps(hist_val, sort_keys=True)
-                if isinstance(hist_val, dict) else str(hist_val)
+            # Derive perturbed SP for this variant
+            perturbed = baseline_sp.derive(
+                pipeline_params={**(baseline_sp.pipeline_params or {}), axis_name: v},
             )
-            if hist_key in value_counts:
-                value_counts[hist_key] += 1
-            else:
-                other_values.add(hist_key)
+            sp_h = perturbed.sp_hash()
+            entries = sp_index.get(sp_h, [])
+            value_counts[key] = len(entries)
+
+            for e in entries:
+                all_matching.add(e.get("run_id", ""))
+                if key not in value_scores:
+                    scores = e.get("scores", {})
+                    if scores:
+                        value_scores[key] = scores
 
         axes[axis_name] = {
             "values": value_counts,
-            "other_count": len(other_values),
+            "value_scores": value_scores,
+            "other_count": 0,  # sp_hash is exact — no "other" values
             "total_matching": sum(value_counts.values()),
         }
 
+    # Add baseline runs to matching set
+    for e in baseline_entries:
+        all_matching.add(e.get("run_id", ""))
+
+    # Baseline scores
+    baseline_scores = None
+    if baseline_entries:
+        first_scores = baseline_entries[0].get("scores", {})
+        if first_scores:
+            baseline_scores = first_scores
+
     return {
         "n_total_runs": len(summaries),
-        "n_matching_runs": len(matching),
-        "n_matching_results": n_cached_results,
-        "alias_hashes": sorted(baseline_rp_hashes),
+        "n_matching_runs": len(all_matching),
+        "n_matching_results": n_baseline_results,
         "axes": axes,
+        "baseline_scores": baseline_scores,
     }
 
 

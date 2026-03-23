@@ -100,7 +100,7 @@ class CampaignStore:
         if not campaigns_dir.exists():
             return []
         results = []
-        for path in sorted(campaigns_dir.glob("campaign_*.json")):
+        for path in sorted(campaigns_dir.glob("*.json")):
             data = read_json(path)
             results.append({
                 "campaign_id": data["campaign_id"],
@@ -344,6 +344,21 @@ class CampaignStore:
             self._trial_dir(backend_id, campaign_id)
             / f"round_{round_num:04d}_candidates.json",
         )
+
+    def delete_round_candidates(
+        self, backend_id: str, campaign_id: str, round_num: int,
+    ) -> None:
+        """Delete persisted candidates for a round (forces fresh generation)."""
+        path = (
+            self._trial_dir(backend_id, campaign_id)
+            / f"round_{round_num:04d}_candidates.json"
+        )
+        if path.exists():
+            path.unlink()
+            logger.info(
+                "Deleted cached candidates for round %d (escalation invalidation)",
+                round_num,
+            )
 
     def get_lineage(
         self, backend_id: str, campaign_id: str,
