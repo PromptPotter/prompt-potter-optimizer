@@ -2,8 +2,10 @@
 
 **Version:** 1.1.0
 **Date:** 2026-03-19
-**Status:** Reset for re-implementation (v2 branch). v1 implementation (`feat/m8-optimizer-pipeline`) retained as code reference.
+**Status:** Waves A-F complete, Wave G active. v1 node classes (NodeBase, L1GenerateNode, etc.) were implemented in Waves A-D then **replaced in Wave G** by the building block approach: direct service calls + `observed_step()` + `optimizer_pipeline.json`. The `api/nodes/` directory has been deleted.
 **Depends on:** [M6 PipelineSchema](m6-pipeline-composability.md), [ADD v0.10.0](add.md)
+
+> **Reading note:** Sections below referencing `NodeBase`, `L1GenerateNode`, `L1EvaluateNode`, `L2RefineNode`, `L3ModifyPlanNode`, or `api/nodes/` describe the superseded v1 design. The current implementation uses `observed_step()` (in `api/services/obs/step_tracer.py`) wrapping direct service calls, configured via `api/config/optimizer_pipeline.json`. ADR decisions remain valid — only the vehicle changed from node classes to service calls.
 
 ---
 

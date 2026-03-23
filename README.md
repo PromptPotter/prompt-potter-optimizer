@@ -95,6 +95,5 @@ The notebook uses `notebooks/_campaign_lib/` wrapping services with progress bar
 - [Sensitivity Scan & Grid Search](docs/sensitivity-scan.md) — Exploration tools: OAT scanning, grid search, coverage diagnostic
 - [Optimization](docs/optimization.md) — Feedback cycle, 3-layer optimization model, config reference
 - [Observability](docs/observability.md) — Langfuse integration, MLflow, data exploration
-- [Node Development](docs/node-development.md) — Building workflow nodes
 - [Connector: TermNorm](docs/connectors/termnorm.md) — TermNorm-specific pipeline details
 - [Specs](docs/specs/) — Project charter, PRD, ADD, WBS, roadmap

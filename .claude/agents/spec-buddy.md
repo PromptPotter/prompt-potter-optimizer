@@ -156,7 +156,7 @@ INTERVIEW BRIEF (if available):
 STEPS:
 1. Read CLAUDE.md to understand the project and current milestone.
 2. Read ALL spec files in docs/specs/.
-3. Scan the codebase: read api/main.py, check api/models/, api/routers/, api/nodes/, api/evaluators/ for what's implemented.
+3. Scan the codebase: read api/main.py, check api/models/, api/routers/, api/evaluators/ for what's implemented.
 4. Run your review checklist against the target spec(s).
 
 REVIEW CHECKLIST:
@@ -231,11 +231,8 @@ STEPS:
    - Glob for api/**/*.py to map all modules
    - Read api/main.py for mounted routers and endpoints
    - Read api/models/*.py for data models
-   - Read api/nodes/*.py for registered node types
    - Read api/evaluators/*.py for evaluator types
-   - Check apps/*.py for Streamlit apps
    - Check tests/ for test coverage
-   - Check workflows/ for workflow definitions
 4. Build a complete picture of what EXISTS (in code) vs what's SPECIFIED (in specs).
 
 ANALYSIS CATEGORIES:

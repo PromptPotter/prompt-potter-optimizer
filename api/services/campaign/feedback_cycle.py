@@ -427,7 +427,7 @@ async def _evaluate_candidates(
             escalation_checks=escalation_checks,
         )
 
-        # Critique (was L1EvaluateNode._run_critique)
+        # Critique analysis
         critique_text = ""
         if config.enable_critique and eval_out.get("winner_results"):
             from api.services.campaign.critique import CritiqueAgent

@@ -143,7 +143,7 @@ async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
 async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_config):
     apply_llm_mock(monkeypatch)
 
-    # Track what results L1GenerateNode receives each round
+    # Track what results generate_candidates receives each round
     grow_results_received = []
 
     async def mock_generate(current_ps, accuracy, results, n, creativity,
@@ -573,7 +573,7 @@ async def test_interrupt_writes_interrupted_status(
 async def test_mid_round_resume_uses_persisted_candidates(
     monkeypatch, eval_data, tmp_path,
 ):
-    """Abort mid-round, re-run -> L1GenerateNode skipped, same candidates used."""
+    """Abort mid-round, re-run -> candidate generation skipped, same candidates used."""
     apply_llm_mock(monkeypatch)
 
     grow_calls = [0]

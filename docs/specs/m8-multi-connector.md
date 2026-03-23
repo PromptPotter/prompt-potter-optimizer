@@ -11,7 +11,7 @@
 
 ## Context
 
-**Current state:** All evaluation paths take `BackendClient` (a concrete TermNorm HTTP client) directly. The class is instantiated in `feedback_cycle.py` and `optimizer_nodes.py` with a `base_url`. The connector contract is already documented in `docs/connectors/termnorm.md`, but no abstraction exists — every service that evaluates prompts is hardcoded to TermNorm's `/matches` endpoint.
+**Current state:** All evaluation paths take `BackendClient` (a concrete TermNorm HTTP client) directly. The class is instantiated in `feedback_cycle.py` with a `base_url`. The connector contract is already documented in `docs/connectors/termnorm.md`, but no abstraction exists — every service that evaluates prompts is hardcoded to TermNorm's `/matches` endpoint.
 
 **Goal:** Abstract `BackendClient` into a `ConnectorProtocol` (structural subtyping via `typing.Protocol`). The existing `BackendClient` satisfies the protocol without code changes. A `MockConnector` provides a test double and serves as a reference for future connectors.
 
@@ -19,7 +19,7 @@
 
 ## Current BackendClient Interface
 
-Methods derived from actual usage across `prompt_eval.py`, `feedback_cycle.py`, and `optimizer_nodes.py`:
+Methods derived from actual usage across `prompt_eval.py` and `feedback_cycle.py`:
 
 | Method | Signature | Used by |
 |--------|-----------|---------|
@@ -70,7 +70,7 @@ The protocol defines 6 methods. Two tiers: **core** (required for eval) and **sy
 | 3 | `api/services/connector_registry.py` | CREATE | `ConnectorRegistry` — register/get connectors by ID, default to BackendClient |
 | 4 | `api/services/prompt_eval.py` | MODIFY | Change `backend_client: BackendClient` → `backend_client: ConnectorProtocol` in function signatures |
 | 5 | `api/services/feedback_cycle.py` | MODIFY | Change `BackendClient` import → `ConnectorProtocol` type annotation |
-| 6 | `api/nodes/optimizer_nodes.py` | MODIFY | Change `BackendClient` instantiation to use `ConnectorRegistry` or accept from `runtime_config` |
+| 6 | `api/services/campaign/feedback_cycle.py` | MODIFY | Change `BackendClient` instantiation to use `ConnectorRegistry` or accept connector |
 | 7 | `docs/connectors/connector-protocol.md` | CREATE | Developer guide: how to implement a new connector |
 | 8 | `tests/test_connector_protocol.py` | CREATE | Protocol conformance tests, MockConnector tests, registry tests |
 
@@ -228,8 +228,8 @@ async def backend_reranker_eval(
 | 8.0 | Write M8 spec | 1 | — | This document |
 | 8.1 | ConnectorProtocol + MockConnector | 1 | 8.0 | Create `connector_protocol.py` and `mock_connector.py`. Protocol conformance tests verifying BackendClient satisfies protocol. MockConnector unit tests. |
 | 8.2 | ConnectorRegistry | 1 | 8.1 | Create `connector_registry.py`. Register/get/list connectors. Integration with `runtime_config` from M6. |
-| 8.3 | Service migration | 1 | 8.1 | Change type annotations in `prompt_eval.py`, `feedback_cycle.py`, `optimizer_nodes.py`. Update node instantiation to use registry or runtime_config connector. |
-| 8.4 | Docs + integration test | 1 | 8.2, 8.3 | Write `docs/connectors/connector-protocol.md`. Integration test: run feedback cycle with MockConnector through WorkflowRunner. |
+| 8.3 | Service migration | 1 | 8.1 | Change type annotations in `prompt_eval.py`, `feedback_cycle.py`. Update connector instantiation to use registry. |
+| 8.4 | Docs + integration test | 1 | 8.2, 8.3 | Write `docs/connectors/connector-protocol.md`. Integration test: run feedback cycle with MockConnector. |
 | 8.5 | OPTIMIZER_PIPELINE_SCHEMA | 1 | 8.1 | Describe the optimizer's own 4-step pipeline as a `PipelineSchema` instance (moved from M7 Wave E2). Enables `GET /optimizer/pipeline` for L4 self-optimization. |
 
 ### Reading list per work package
@@ -237,8 +237,8 @@ async def backend_reranker_eval(
 | WP | Read first |
 |----|-----------|
 | 7.1 | `api/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
-| 7.2 | `api/services/llm_client.py` (singleton pattern reference: `get_llm_client()`), `api/core/workflow_runner.py` (runtime_config from M6) |
-| 7.3 | `api/services/prompt_eval.py` (backend_reranker_eval, evaluate_prompt_cached), `api/services/feedback_cycle.py` (BackendClient usage), `api/nodes/optimizer_nodes.py` (L1EvaluateNode BackendClient instantiation) |
+| 7.2 | `api/services/llm_client.py` (singleton pattern reference: `get_llm_client()`) |
+| 7.3 | `api/services/prompt_eval.py` (backend_reranker_eval, evaluate_prompt_cached), `api/services/campaign/feedback_cycle.py` (BackendClient usage) |
 | 7.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_campaign_registry.py` (E2E test pattern) |
 
 ---

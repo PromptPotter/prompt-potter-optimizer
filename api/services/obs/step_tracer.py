@@ -1,7 +1,6 @@
 """Lightweight step-level timing + observability for optimizer pipeline steps.
 
-Replaces the NodeBase I/O ceremony with a simple async context manager that
-calls the same ``ObsLogger.log_node_step_start/end`` methods.
+Async context manager wrapping ``ObsLogger.log_node_step_start/end``.
 
 Usage::
 

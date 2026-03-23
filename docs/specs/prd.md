@@ -55,7 +55,7 @@ P0.1–P0.6: All implemented (M1–M2). Backend evaluation with content-addresse
 
 ## P1 -- Should Have (M3 Optimization Infrastructure)
 
-P1.1–P1.9: All implemented (M1–M3). Optimizer nodes, feedback cycling with 3-path routing, campaign registry, Langfuse per-trial tracing, discovery protocol, ablation comparison, parameter passthrough, sensitivity scan, shared data loop. See `api/services/` and `api/nodes/` for implementations.
+P1.1–P1.9: All implemented (M1–M3). Optimizer pipeline, feedback cycling with 3-path routing, campaign registry, Langfuse per-trial tracing, discovery protocol, ablation comparison, parameter passthrough, sensitivity scan, shared data loop. See `api/services/` for implementations.
 
 ---
 

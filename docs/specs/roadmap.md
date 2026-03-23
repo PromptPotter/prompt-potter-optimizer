@@ -66,8 +66,8 @@ The optimizer itself is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_ref
 
 | Wave | Scope | Status |
 |------|-------|--------|
-| A | Leaf modules: prompt templates, OptSearchPoint, NodeBase, I/O models | Complete |
-| B | Node implementations: L1Generate, L1Evaluate, L2Refine, L3ModifyPlan | Complete |
+| A | Leaf modules: prompt templates, OptSearchPoint | Complete |
+| B | Node implementations (superseded by Wave G building blocks) | Complete → Superseded |
 | C | Observability plumbing: ObsLogger + CloudObsBackend node step methods | Complete |
 | D | Orchestrator migration: swap call sites in feedback_cycle.py | Complete |
 | E | EscalationCheck framework, end-to-end Langfuse tracing | Complete (E1); E2 replaced by building block approach |

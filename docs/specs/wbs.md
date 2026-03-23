@@ -95,15 +95,15 @@ See [M7 spec](m7-optimizer-pipeline.md) for full details (§1-§13).
 |----|-------------|--------|
 | 7.A1 | Prompt templates + optimizer_prompt_loader.py | Complete |
 | 7.A2 | OptSearchPoint model | Complete |
-| 7.A3 | NodeBase in base.py | Complete |
-| 7.A4 | Node I/O Pydantic models | Complete |
-| 7.B2 | L1GenerateNode implementation | Complete |
-| 7.B3 | L1EvaluateNode implementation | Complete |
-| 7.B4 | L2RefineNode + L3ModifyPlanNode | Complete |
-| 7.B5 | Node tests | Complete |
+| 7.A3 | NodeBase in base.py | Complete (superseded by Wave G building blocks) |
+| 7.A4 | Node I/O Pydantic models | Complete (superseded by Wave G building blocks) |
+| 7.B2 | L1GenerateNode implementation | Complete (superseded by Wave G building blocks) |
+| 7.B3 | L1EvaluateNode implementation | Complete (superseded by Wave G building blocks) |
+| 7.B4 | L2RefineNode + L3ModifyPlanNode | Complete (superseded by Wave G building blocks) |
+| 7.B5 | Node tests | Complete (superseded by Wave G building blocks) |
 | 7.C1 | ObsLogger node step methods | Complete |
 | 7.C2 | CloudObsBackend node step support | Complete |
-| 7.C3 | Wire NodeBase tracing hooks | Complete |
+| 7.C3 | Wire NodeBase tracing hooks | Complete (superseded — tracing now via `observed_step()`) |
 | 7.D1 | Sync httpx client for notebook path | Complete |
 | 7.D2 | Swap L1Generate call site | Complete |
 | 7.D3 | Swap L1Evaluate call site | Complete |
