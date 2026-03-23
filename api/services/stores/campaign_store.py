@@ -181,23 +181,6 @@ class CampaignStore:
             self._trial_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json",
         )
 
-    def export(
-        self, backend_id: str, campaign_id: str,
-    ) -> dict[str, Any] | None:
-        """Full campaign export: metadata + all trial details."""
-        campaign = self.load(backend_id, campaign_id)
-        if campaign is None:
-            return None
-
-        trial_dir = self._trial_dir(backend_id, campaign_id)
-        full_trials = []
-        if trial_dir.exists():
-            for path in sorted(trial_dir.glob("trial_*.json")):
-                full_trials.append(read_json(path))
-
-        campaign["trials_detail"] = full_trials
-        return campaign
-
     def delete(self, backend_id: str, campaign_id: str) -> bool:
         """Delete a campaign and its trial directory.  Returns True if deleted."""
         import shutil

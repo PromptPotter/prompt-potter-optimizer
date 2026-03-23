@@ -7,14 +7,12 @@ instead of hardcoding TermNorm-specific constants.
 
 Derivation methods:
   step_param_keys()       → step name → param keys
-  flat_to_pipeline_params()   → flat param → (node, wire_key)
   obs_extraction_map()    → observation name → extraction rules
   langfuse_type_map()     → step name → Langfuse as_type
   backend_steps()         → runtime filtering
   frontend_steps()        → runtime filtering
 """
 
-from collections.abc import Iterable
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -182,17 +180,6 @@ class PipelineSchema(BaseModel):
                 return step
         return None
 
-    def flat_to_pipeline_params(self) -> dict[str, tuple[str, str]]:
-        """Build a flat_param_name → (node_name, wire_key) mapping.
-
-        Aggregates ``override_map`` from every step.
-        """
-        result: dict[str, tuple[str, str]] = {}
-        for step in self.steps:
-            for flat_key, wire_key in step.override_map.items():
-                result[flat_key] = (step.name, wire_key)
-        return result
-
     def resolve_flat_param(self, flat_key: str) -> tuple[str, str] | None:
         """Resolve a single flat param name to ``(node_name, wire_key)``.
 
@@ -234,37 +221,6 @@ class PipelineSchema(BaseModel):
             for step in self.steps
             if step.param_keys
         }
-
-    def group_flat_params(self, flat_keys: Iterable[str]) -> list[tuple[str, list[str]]]:
-        """Group flat param names by pipeline step in execution order.
-
-        Returns ``(step_name, [keys])`` pairs.  Keys not mapped to any
-        step go into a trailing group with ``step_name=""``.
-        Handles dot-notation children (e.g. ``profiling_schema.entity_name``).
-        """
-        step_keys = self.step_param_keys()
-        # Reverse map: flat_key → step_name
-        key_to_step: dict[str, str] = {}
-        for sname, keys in step_keys.items():
-            for k in keys:
-                key_to_step[k] = sname
-
-        flat_keys = list(flat_keys)
-        # Map dot-notation children to their parent step
-        for k in flat_keys:
-            if k not in key_to_step:
-                base = k.split(".")[0]
-                if base in key_to_step:
-                    key_to_step[k] = key_to_step[base]
-
-        # Group by step in execution order
-        groups: dict[str, list[str]] = {sname: [] for sname in step_keys}
-        groups[""] = []
-        for k in flat_keys:
-            sname = key_to_step.get(k, "")
-            groups.setdefault(sname, []).append(k)
-
-        return [(sname, sorted(keys)) for sname, keys in groups.items() if keys]
 
     def obs_extraction_map(self) -> dict[str, list[ObservationMapping]]:
         """Map observation name → extraction rules.

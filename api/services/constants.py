@@ -11,3 +11,7 @@ DATASET_NAME: str = "termnorm_ground_truth"
 # -- Evaluation ---------------------------------------------------------------
 
 NO_RESULT: str = "NO_RESULT"
+
+# -- Display ------------------------------------------------------------------
+
+DISPLAY_TRUNCATE: int = 60

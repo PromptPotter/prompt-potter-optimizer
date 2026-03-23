@@ -14,6 +14,7 @@ import statistics
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+from api.models.hashing import HASH_TRUNCATE
 from api.models.pipeline_schema import PipelineSchema, is_result_step_compatible
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
@@ -257,7 +258,7 @@ def assess_scan_coverage(
 
     # --- Baseline coverage ---
     baseline_rendered = baseline_ps.render()
-    baseline_rp_hash = hashlib.sha256(baseline_rendered.encode()).hexdigest()[:16]
+    baseline_rp_hash = hashlib.sha256(baseline_rendered.encode()).hexdigest()[:HASH_TRUNCATE]
     baseline_cached = prompt_result_index.get(baseline_rp_hash, {})
     baseline_hits = sum(1 for q in diag_query_strings if q in baseline_cached)
 
@@ -283,7 +284,7 @@ def assess_scan_coverage(
         for value in non_baseline:
             perturbed = baseline_ps.derive(**{axis_name: value})
             rendered = perturbed.render()
-            rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:16]
+            rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
             cached = prompt_result_index.get(rp_hash, {})
             n_cached = sum(1 for q in diag_query_strings if q in cached)
             is_usable = n_cached >= min_queries
@@ -318,7 +319,7 @@ def assess_scan_coverage(
     target_steps = set(base_params.get("steps", []))
     baseline_rp_hash = hashlib.sha256(
         baseline_ps.render().encode(),
-    ).hexdigest()[:16]
+    ).hexdigest()[:HASH_TRUNCATE]
     for axis_name, values in pipeline_param_defs.items():
         current_val = base_params.get(axis_name)
         non_baseline = [v for v in values if v != current_val]
@@ -446,11 +447,11 @@ def build_data_inventory(
         if not plan_data:
             continue
         (_, state_lookup, _, _, _, baseline_ps) = deserialize_grid_plan(plan_data)
-        bl_hash = hashlib.sha256(baseline_ps.render().encode()).hexdigest()[:16]
+        bl_hash = hashlib.sha256(baseline_ps.render().encode()).hexdigest()[:HASH_TRUNCATE]
         baseline_rp_hashes.add(bl_hash)
         rp_to_ps.setdefault(bl_hash, (baseline_ps, baseline_ps))
         for ps in state_lookup.values():
-            h = hashlib.sha256(ps.render().encode()).hexdigest()[:16]
+            h = hashlib.sha256(ps.render().encode()).hexdigest()[:HASH_TRUNCATE]
             rp_to_ps.setdefault(h, (ps, baseline_ps))
 
     # Smart search plans
@@ -464,7 +465,7 @@ def build_data_inventory(
             continue
         ss = deserialize_smart_search_plan(plan_data)
         search_bl = ss["search_baseline_ps"]
-        bl_hash = hashlib.sha256(search_bl.render().encode()).hexdigest()[:16]
+        bl_hash = hashlib.sha256(search_bl.render().encode()).hexdigest()[:HASH_TRUNCATE]
         baseline_rp_hashes.add(bl_hash)
         rp_to_ps.setdefault(bl_hash, (search_bl, search_bl))
 

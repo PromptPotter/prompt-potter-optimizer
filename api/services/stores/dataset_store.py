@@ -69,19 +69,3 @@ class DatasetStore:
             self._datasets_dir(backend_id) / f"{name}.json",
         )
 
-    def list_all(self, backend_id: str) -> list[dict[str, Any]]:
-        """Return summary metadata for all stored datasets."""
-        ds_dir = self._datasets_dir(backend_id)
-        if not ds_dir.exists():
-            return []
-        summaries: list[dict[str, Any]] = []
-        for path in sorted(ds_dir.glob("*.json")):
-            data = read_json_optional(path)
-            if data:
-                summaries.append({
-                    "name": data.get("name", path.stem),
-                    "row_count": data.get("row_count", 0),
-                    "created_at": data.get("created_at", ""),
-                    "source_file": data.get("source_file", ""),
-                })
-        return summaries

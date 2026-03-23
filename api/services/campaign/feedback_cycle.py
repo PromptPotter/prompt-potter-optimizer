@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from api.models.hashing import HASH_TRUNCATE
 from api.models.phase_event import PhaseEvent
 from api.models.prompt_state import PromptState, diff as prompt_diff
 from api.models.search_point import SearchPoint
@@ -1117,10 +1118,10 @@ def _init_cycle_state(
 
     # Alias: raw instruction ↔ restructured baseline
     if _store and config.backend_id and instruction:
-        _raw_hash = hashlib.sha256(instruction.encode()).hexdigest()[:16]
+        _raw_hash = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
         _restructured_hash = hashlib.sha256(
             current_ps.render().encode(),
-        ).hexdigest()[:16]
+        ).hexdigest()[:HASH_TRUNCATE]
         if _raw_hash != _restructured_hash:
             _store.dataset_runs.register_alias(
                 config.backend_id, _raw_hash, _restructured_hash,

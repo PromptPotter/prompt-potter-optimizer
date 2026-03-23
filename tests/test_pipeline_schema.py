@@ -81,16 +81,6 @@ def test_derivation_methods():
 class TestTermNormConsistency:
     """Verify TERMNORM_DEFAULT_SCHEMA matches every hardcoded constant."""
 
-    def test_flat_to_pipeline_params(self):
-        """flat_to_pipeline_params() returns expected mapping from TERMNORM_DEFAULT_SCHEMA."""
-        mapping = TERMNORM_DEFAULT_SCHEMA.flat_to_pipeline_params()
-        # Spot-check key entries
-        assert mapping["ranking_temperature"] == ("llm_ranking", "temperature")
-        assert mapping["profiling_prompt"] == ("entity_profiling", "prompt")
-        assert mapping["fuzzy_threshold"] == ("fuzzy_matching", "threshold")
-        assert mapping["max_sites"] == ("web_search", "max_sites")
-        assert mapping["max_token_candidates"] == ("token_matching", "max_token_candidates")
-
     def test_override_map_covers_param_keys(self):
         """Every param_keys entry has a corresponding override_map entry."""
         for step in TERMNORM_DEFAULT_SCHEMA.steps:

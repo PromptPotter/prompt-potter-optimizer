@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
+from api.services.constants import DISPLAY_TRUNCATE
 from api.core.llm_call import get_node_config, llm_call
 from api.models.prompt_state import PromptState
 
@@ -24,7 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DISPLAY_TRUNCATE = 60
 
 
 @dataclass

@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
+from api.services.constants import DISPLAY_TRUNCATE
 from api.models.prompt_state import PromptState
 from api.core.llm_call import get_node_config, llm_call
 from api.services.campaign.critique_stats import summarize_warning_inventory
@@ -23,7 +24,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MAX_FAILURES_GENERATE = 15
-DISPLAY_TRUNCATE = 60
 
 
 # ---------------------------------------------------------------------------

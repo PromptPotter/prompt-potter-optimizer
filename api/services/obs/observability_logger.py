@@ -20,7 +20,7 @@ Usage::
     obs = ObsLogger(project_root, backend_id)
     obs.log_dataset_run(run_id, content_hash, accuracy, ...)
     obs.log_campaign_start(campaign_id, config, baseline_accuracy)
-    obs.log_round(campaign_id, round_num, accuracy, ...)
+    obs.log_round_start(campaign_id, round_num)
     obs.log_prompt_version(prompt_state_id, rendered_prompt, layer1_fields)
 """
 
@@ -740,35 +740,6 @@ class ObsLogger:
         except Exception:
             logger.warning("ObsLogger.log_round_end failed", exc_info=True)
             return None
-
-    def log_round(
-        self,
-        campaign_id: str,
-        round_num: int,
-        accuracy: float,
-        hits: int,
-        total: int,
-        improved: bool,
-        next_action: str,
-        winner_prompt_state_id: str,
-        candidate_scores: list[dict],
-        model: str = "",
-        temperature: float = 0.0,
-        n_variants: int = 0,
-        optimizer_templates: list[str] | None = None,
-    ) -> Path | None:
-        """Fire-and-forget round log (start + end in one call).
-
-        Preserves the original API for non-campaign callers. Internally
-        delegates to ``log_round_start()`` + ``log_round_end()``.
-        """
-        self.log_round_start(campaign_id, round_num)
-        return self.log_round_end(
-            campaign_id, round_num, accuracy, hits, total,
-            improved, next_action, winner_prompt_state_id,
-            candidate_scores, model, temperature, n_variants,
-            optimizer_templates=optimizer_templates,
-        )
 
     def log_prompt_version(
         self,

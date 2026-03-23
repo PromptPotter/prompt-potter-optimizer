@@ -117,23 +117,6 @@ def test_list_all(store):
     assert names == {"Campaign A", "Campaign B"}
 
 
-def test_export_includes_trial_details(store, campaign, baseline_ps):
-    """export() includes full trial detail files."""
-    cid = campaign["campaign_id"]
-
-    store.campaigns.record_trial(
-        BACKEND_ID, cid, round_num=0,
-        prompt_state=baseline_ps.model_dump(),
-        accuracy=0.67, hits=2, total=3, label="baseline",
-        results=[{"query": "q1", "hit": True}],
-    )
-
-    export = store.campaigns.export(BACKEND_ID, cid)
-    assert export is not None
-    assert len(export["trials_detail"]) == 1
-    assert export["trials_detail"][0]["results"] == [{"query": "q1", "hit": True}]
-
-
 def test_delete(store, campaign):
     """delete() removes campaign file and trial directory."""
     cid = campaign["campaign_id"]

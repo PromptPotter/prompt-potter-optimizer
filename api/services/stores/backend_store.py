@@ -1,7 +1,6 @@
 """
 Backend CRUD and sync storage.
 """
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -50,14 +49,6 @@ class BackendStore:
             if cfg.exists():
                 backends.append(BackendConnection(**read_json(cfg)))
         return backends
-
-    def delete(self, backend_id: str) -> bool:
-        """Delete a backend and all its data. Returns True if it existed."""
-        d = self._backend_dir(backend_id)
-        if not d.exists():
-            return False
-        shutil.rmtree(d)
-        return True
 
     def update(self, backend: BackendConnection) -> None:
         """Overwrite backend.json with updated data."""

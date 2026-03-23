@@ -9,7 +9,6 @@ from api.services.stores.base import (
     read_json,
     read_json_optional,
     validate_path_component,
-    write_json,
 )
 
 
@@ -24,14 +23,6 @@ class ExecutionStore:
         return self._base_dir / backend_id / "executions"
 
     # -- read / write ---------------------------------------------------------
-
-    def save(self, execution: Execution) -> Path:
-        """Save an execution result."""
-        path = self._executions_dir(execution.backend_id) / (
-            f"{execution.execution_id}.json"
-        )
-        write_json(path, execution.model_dump())
-        return path
 
     def load(self, backend_id: str, execution_id: str) -> Execution | None:
         """Load an execution by ID. Returns None if not found."""

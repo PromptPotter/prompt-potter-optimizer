@@ -436,9 +436,3 @@ def get_llm_client(provider: str | None = None) -> LLMClientBase:
             _llm_client = MockLLMClient()
 
     return _llm_client
-
-
-def set_llm_client(client: LLMClientBase) -> None:
-    """Set a custom LLM client (useful for testing)."""
-    global _llm_client
-    _llm_client = client

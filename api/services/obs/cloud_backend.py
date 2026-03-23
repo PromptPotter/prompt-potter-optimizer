@@ -145,22 +145,6 @@ class CloudObsBackend:
         finally:
             self._active_round_obs_id = None
 
-    def on_round(
-        self,
-        campaign_id: str,
-        round_num: int,
-        accuracy: float,
-        improved: bool,
-        next_action: str,
-        candidate_scores: list[dict],
-    ) -> None:
-        """Fire-and-forget round: open + close immediately (legacy path)."""
-        self.on_round_start(campaign_id, round_num)
-        self.on_round_end(
-            campaign_id, round_num, accuracy,
-            improved, next_action, candidate_scores,
-        )
-
     def on_dataset_run(
         self,
         run_id: str,

@@ -8,13 +8,10 @@ pipeline queries. All API responses stored verbatim.
 from __future__ import annotations
 
 import logging
-import time
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from api.services.constants import NO_RESULT
 from api.services.query_utils import parse_bom_material
 
 if TYPE_CHECKING:
@@ -96,56 +93,6 @@ def build_pipeline_params(
         params.update(overrides)
 
     return params
-
-
-# TermNorm-specific query fields extracted from query_data.
-# M8: replace with ConnectorProtocol.extract_query_fields()
-_TERMNORM_QUERY_FIELDS = ("bom_material", "process")
-_TERMNORM_VARIANT_B_FIELDS = {
-    "variant_b_predicted": ("original_predicted", ""),
-    "variant_b_latency_ms": ("original_latency_ms", 0),
-    "variant_b_confidence": ("original_confidence", 0),
-}
-
-
-def _build_result_dict(
-    query_data: dict[str, Any],
-    *,
-    predicted: str,
-    confidence: float,
-    ranked_candidates: list,
-    latency_ms: float,
-    status: str,
-    pipeline_data: dict | None = None,
-    error: str | None = None,
-) -> dict[str, Any]:
-    """Build an ExecutionResultItem-compatible dict.
-
-    Centralizes the field assembly shared between success and error
-    paths in ``replay_queries()``.
-    """
-    result: dict[str, Any] = {
-        "query": query_data["query"],
-        "ground_truth": query_data["ground_truth"],
-        "predicted": predicted,
-        "confidence": confidence,
-        "ranked_candidates": ranked_candidates,
-        "latency_ms": latency_ms,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "status": status,
-    }
-    # TermNorm-specific fields (M8: move to connector)
-    for f in _TERMNORM_QUERY_FIELDS:
-        result[f] = query_data[f]
-    result["query_fields"] = {f: query_data[f] for f in _TERMNORM_QUERY_FIELDS}
-    for dest, (src, default) in _TERMNORM_VARIANT_B_FIELDS.items():
-        result[dest] = query_data.get(src, default)
-    if pipeline_data is not None:
-        result["pipeline_data"] = pipeline_data
-        result["web_search_status"] = pipeline_data.get("web_search_status")
-    if error is not None:
-        result["error"] = error
-    return result
 
 
 class BackendClient:
@@ -403,63 +350,3 @@ class BackendClient:
 
         return queries
 
-    def replay_queries(
-        self,
-        queries: list[dict[str, Any]],
-        terms: list[str],
-        delay_between: float = 0.0,
-        on_result: Callable[[dict[str, Any], int, int], Any] | None = None,
-        pipeline_params: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Replay queries sequentially against the backend.
-
-        Initializes a session with ``terms``, then runs each query.
-        Returns a list of result dicts compatible with ExecutionResultItem.
-
-        If ``on_result`` is provided, it is called after each query completes
-        with ``(result_dict, index, total_count)``.
-        """
-        self.init_session(terms)
-
-        results: list[dict[str, Any]] = []
-        total = len(queries)
-        for i, q in enumerate(queries):
-            start = time.time()
-            try:
-                response = self.run_match(
-                    q["query"],
-                    pipeline_params=pipeline_params,
-                )
-                elapsed = time.time() - start
-                data = response.get("data", {})
-                ranked = data.get("ranked_candidates", [])
-                top = ranked[0] if ranked else {}
-
-                results.append(_build_result_dict(
-                    q,
-                    predicted=top.get("candidate", NO_RESULT),
-                    confidence=top.get("relevance_score", 0),
-                    ranked_candidates=ranked[:20],
-                    latency_ms=round(elapsed * 1000, 1),
-                    status="success",
-                    pipeline_data=data,
-                ))
-            except Exception as e:
-                elapsed = time.time() - start
-                results.append(_build_result_dict(
-                    q,
-                    predicted="ERROR",
-                    confidence=0.0,
-                    ranked_candidates=[],
-                    latency_ms=round(elapsed * 1000, 1),
-                    status="error",
-                    error=str(e),
-                ))
-
-            if on_result is not None:
-                on_result(results[-1], i, total)
-
-            if delay_between and i < len(queries) - 1:
-                time.sleep(delay_between)
-
-        return results
