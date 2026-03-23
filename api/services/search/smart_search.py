@@ -170,6 +170,8 @@ def _make_eval_fn(
     async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
         sp = SearchPoint(
             prompt_state=ps,
+            model=ctx.model,
+            temperature=ctx.temperature,
             pipeline_params=pp or get_params(),
         )
         results, scores, cached = evaluate_prompt_cached(

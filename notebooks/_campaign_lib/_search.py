@@ -191,6 +191,8 @@ async def prepare_scan_baseline(
     scan_variants: dict | None = None,
     force_restructure: bool = False,
     svc: dict | None = None,
+    model: str = "",
+    temperature: float = 0.0,
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
@@ -255,6 +257,8 @@ async def prepare_scan_baseline(
     # Historical data diagnostic via sp_hash matching
     baseline_sp = SearchPoint(
         prompt_state=search_baseline,
+        model=model,
+        temperature=temperature,
         pipeline_params=pipeline_params,
     )
 
@@ -874,6 +878,9 @@ async def run_scan_advisor(
             print(f"    {axis!r}: {values!r},")
     print("}")
 
+    n_diag = advisory.get("suggested_n_diagnostic", 10)
+    print(f"\nscan_sample_size = {n_diag}  # queries per variant (advisor recommendation)")
+
     return advisory, proposed if proposed else {}, schema_labels
 
 
@@ -940,6 +947,9 @@ async def sensitivity_scan(
         store = store or svc.get("store")
         backend_id = backend_id or svc.get("backend_id", "")
         pipeline_schema = pipeline_schema or svc.get("pipeline_schema")
+        session_terms = svc.get("session_terms")
+        if session_terms and backend_client:
+            backend_client.init_session(session_terms)
 
     # Print scan overview
     print("Running sensitivity scan...")

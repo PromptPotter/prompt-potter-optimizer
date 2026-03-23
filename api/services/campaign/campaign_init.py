@@ -317,6 +317,11 @@ def run_baseline_eval(
         backend_client.init_session(session_terms)
         _wait_session_ready(backend_client)
         _verify_matches_liveness(backend_client, probe_query=session_terms[0])
+    else:
+        logger.warning(
+            "No session terms available — /matches calls will fail. "
+            "Load datasets first (Excel ground truth → DatasetStore)."
+        )
 
     # Register dataset items in obs if available
     if obs and eval_data:

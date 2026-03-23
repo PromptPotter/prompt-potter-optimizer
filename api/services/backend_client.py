@@ -193,6 +193,9 @@ class BackendClient:
         same terms.  Stores ``terms`` internally so that ``run_match()``
         can auto-reinitialize the session if the backend restarts.
         """
+        if not terms:
+            logger.warning("init_session called with empty terms — session won't support /matches")
+            return {"status": "skipped", "terms_count": 0}
         if self._session_terms == terms:
             return {"status": "already_initialized", "terms_count": len(terms)}
         resp = self._get_http().post(
@@ -245,17 +248,29 @@ class BackendClient:
             timeout=MATCH_TIMEOUT,
         )
 
-        # Auto-reinitialize session on 400 (lost after backend restart)
-        if resp.status_code == 400 and self._session_terms:
-            logger.warning("Got 400 from /matches — re-initializing session")
-            terms = self._session_terms
-            self._session_terms = None  # clear so idempotency guard re-sends
-            self.init_session(terms)
-            resp = client.post(
-                f"{self.base_url}/matches",
-                json=payload,
-                timeout=MATCH_TIMEOUT,
-            )
+        # Auto-reinitialize session on 400 "no session" errors
+        if resp.status_code == 400:
+            try:
+                detail = resp.json().get("detail", "")
+            except Exception:
+                detail = ""
+            is_session_error = "session" in detail.lower()
+
+            if is_session_error and self._session_terms:
+                logger.warning("Got 400 (no session) — re-initializing")
+                terms = self._session_terms
+                self._session_terms = None  # clear so idempotency guard re-sends
+                self.init_session(terms)
+                resp = client.post(
+                    f"{self.base_url}/matches",
+                    json=payload,
+                    timeout=MATCH_TIMEOUT,
+                )
+            elif is_session_error:
+                logger.error(
+                    "Backend requires session but no terms available. "
+                    "Call init_session() with terms before running matches."
+                )
 
         resp.raise_for_status()
         return resp.json()

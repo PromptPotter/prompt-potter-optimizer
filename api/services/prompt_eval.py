@@ -65,6 +65,10 @@ class EvalContext:
     candidate_idx: int = 0
     n_total_candidates: int = 1
 
+    def __post_init__(self):
+        if not self.model:
+            logger.debug("EvalContext created with empty model — content hashes will use default")
+
 
 def build_dataset_run_data(
     run_id: str,
@@ -535,6 +539,9 @@ def _try_cached_lookup(
     existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
     if existing:
         results = existing["dataset_run_items"]
+        # Skip all-error cached runs — let per-query cache retry
+        if results and all(r.get("error") for r in results):
+            return None
         scores = compute_composite_score(results, pipeline_schema)
         if on_result is not None:
             for i, r in enumerate(results):
@@ -549,6 +556,8 @@ def _try_cached_lookup(
     )
     if alias_match:
         results = alias_match["dataset_run_items"]
+        if results and all(r.get("error") for r in results):
+            return None
         scores = compute_composite_score(results, pipeline_schema)
         if on_result is not None:
             for i, r in enumerate(results):

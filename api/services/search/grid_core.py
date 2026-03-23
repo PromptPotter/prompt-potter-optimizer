@@ -261,6 +261,8 @@ def resolve_point_evals(
     shared_queries: bool = True,
     seed: int = 42,
     pipeline_params: dict | None = None,
+    model: str = "",
+    temperature: float = 0.0,
 ) -> list[PointEvalInfo]:
     """Compute per-point eval query sets and content hashes.
 
@@ -305,7 +307,10 @@ def resolve_point_evals(
         else:
             point_eval = eval_data
 
-        sp = SearchPoint(prompt_state=ps, pipeline_params=pipeline_params)
+        sp = SearchPoint(
+            prompt_state=ps, model=model, temperature=temperature,
+            pipeline_params=pipeline_params,
+        )
         content_hash = sp.content_hash(point_eval)
         result.append(PointEvalInfo(
             point_idx, coord_dict, ps_id, point_eval, content_hash,
@@ -329,6 +334,8 @@ def _load_or_compute_point(
     on_query_done: Callable | None,
     pipeline_schema: "PipelineSchema | None" = None,
     experiment_id: str = "",
+    model: str = "",
+    temperature: float = 0.0,
 ) -> tuple[dict[str, Any], bool]:
     """Evaluate (or load from cache) a single grid point.
 
@@ -342,7 +349,10 @@ def _load_or_compute_point(
     from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
 
     ps = state_lookup[info.ps_id]
-    sp = SearchPoint(prompt_state=ps, pipeline_params=pipeline_params)
+    sp = SearchPoint(
+        prompt_state=ps, model=model, temperature=temperature,
+        pipeline_params=pipeline_params,
+    )
 
     def _on_result(result: dict, index: int, total: int) -> None:
         if on_query_done is not None:
@@ -355,6 +365,8 @@ def _load_or_compute_point(
         pipeline_schema=pipeline_schema,
         source="grid_search",
         experiment_id=experiment_id,
+        model=model,
+        temperature=temperature,
     )
 
     _results, scores, was_cached = evaluate_prompt_cached(
@@ -384,6 +396,8 @@ async def run_grid_search(
     plan_id: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
     experiment_id: str = "",
+    model: str = "",
+    temperature: float = 0.0,
 ) -> pd.DataFrame:
     """Evaluate each grid point on eval_data via the backend.
 
@@ -396,6 +410,8 @@ async def run_grid_search(
         grid_points, state_lookup, eval_data,
         sample_size, shared_queries, seed,
         pipeline_params=pipeline_params,
+        model=model,
+        temperature=temperature,
     )
 
     # Only init backend session if there are uncached points that need evaluation
@@ -417,6 +433,8 @@ async def run_grid_search(
                 store, backend_id, pipeline_params, on_query_done,
                 pipeline_schema=pipeline_schema,
                 experiment_id=experiment_id,
+                model=model,
+                temperature=temperature,
             )
 
             row = dict(info.coord_dict)
@@ -692,6 +710,8 @@ def load_grid_plan_results(
     shared_queries: bool = True,
     seed: int = 42,
     pipeline_params: dict | None = None,
+    model: str = "",
+    temperature: float = 0.0,
 ) -> pd.DataFrame | None:
     """Load stored eval results for a grid plan and return a results DataFrame.
 
@@ -715,6 +735,8 @@ def load_grid_plan_results(
         grid_points, state_lookup, eval_data,
         sample_size, shared_queries, seed,
         pipeline_params=pipeline_params,
+        model=model,
+        temperature=temperature,
     )
     rows = []
     for info in eval_plan:

@@ -185,8 +185,13 @@ class OpenAICompatibleClient(LLMClientBase):
                         f"Update campaign_config['eval_llm']['model'] or "
                         f"set EXPERIMENT_ID = None to use current config."
                     ) from exc
+                # Groq JSON mode: empty/invalid generation — transient, retry
+                is_json_validate_failed = (
+                    status == 400
+                    and "json_validate_failed" in str(exc)
+                )
                 is_connection = "Connection" in type(exc).__name__
-                if status in _RETRY_STATUSES or is_connection:
+                if status in _RETRY_STATUSES or is_connection or is_json_validate_failed:
                     last_exc = exc
                     if attempt < _MAX_APP_RETRIES:
                         delay = _BASE_DELAY * (2 ** attempt)

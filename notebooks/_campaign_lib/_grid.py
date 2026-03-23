@@ -81,12 +81,16 @@ def load_grid_plan_results(
     shared_queries: bool = True,
     seed: int = 42,
     pipeline_params: dict | None = None,
+    model: str = "",
+    temperature: float = 0.0,
 ) -> "pd.DataFrame | None":
     """Load stored eval results for a grid plan and return a results DataFrame."""
     df = _load_grid_plan_results(
         store, backend_id, plan_id, eval_data,
         sample_size, shared_queries, seed,
         pipeline_params=pipeline_params,
+        model=model,
+        temperature=temperature,
     )
     if df is not None:
         plan_data = store.grid_plans.load(backend_id, plan_id)
@@ -266,10 +270,14 @@ async def run_grid_search(
         )
 
     # Count stored results for resume display
+    _model = eval_llm.get("model", "")
+    _temperature = eval_llm.get("temperature", 0.0)
     eval_plan = _resolve_point_evals(
         grid_points, state_lookup, eval_data,
         sample_size, shared_queries, grid_seed,
         pipeline_params=pipeline_params,
+        model=_model,
+        temperature=_temperature,
     )
     n_stored = 0
     if store and backend_id:
@@ -324,6 +332,8 @@ async def run_grid_search(
             seed=grid_seed,
             plan_id=plan_id,
             experiment_id=experiment_id,
+            model=_model,
+            temperature=_temperature,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         import pandas as _pd
