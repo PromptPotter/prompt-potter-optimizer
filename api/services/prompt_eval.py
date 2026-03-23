@@ -6,6 +6,7 @@ and evaluates reranker prompts via the TermNorm backend's /matches endpoint.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -177,25 +178,35 @@ def _extract_pipeline_data(
     return pd
 
 
-def backend_reranker_eval(
+def _error_result(query: str, ground_truth: str, error_msg: str) -> dict:
+    """Build a standard error result dict."""
+    return {
+        "query": query,
+        "predicted": "ERROR",
+        "ground_truth": ground_truth,
+        "hit": False,
+        "score": 0.0,
+        "error": error_msg,
+        "pipeline_data": None,
+    }
+
+
+def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
+    """Classify an HTTP error into a tagged message."""
+    code = exc.response.status_code
+    if 400 <= code < 500:
+        return f"[CLIENT] HTTP {code}: {exc} — Check pipeline configuration and request parameters."
+    return f"[SERVER] HTTP {code}: {exc} — Backend may be experiencing issues."
+
+
+async def backend_reranker_eval(
     query_data: dict,
     backend_client: BackendClient,
     rendered_prompt: str,
     pipeline_params: dict | None = None,
     pipeline_schema: "PipelineSchema | None" = None,
 ) -> dict:
-    """Evaluate a reranker prompt on a single query via the backend /matches endpoint.
-
-    Args:
-        query_data: Dict with ``query`` and ``ground_truth`` keys.
-        backend_client: BackendClient with ``run_match()`` method.
-        rendered_prompt: Fully rendered ranking prompt to pass as ``ranking_prompt``.
-        pipeline_params: Optional pipeline parameter overrides forwarded to
-            the backend's ``/matches`` endpoint.
-
-    Returns:
-        Dict with keys: query, predicted, ground_truth, hit, score, error.
-    """
+    """Evaluate a reranker prompt on a single query via the backend /matches endpoint."""
     query = query_data["query"]
     ground_truth = query_data["ground_truth"]
 
@@ -208,7 +219,7 @@ def backend_reranker_eval(
         steps = pp.get("steps")
         include_ranking = steps is None or "llm_ranking" in steps
 
-        resp = backend_client.run_match(
+        resp = await backend_client.run_match(
             query,
             pipeline_params=pipeline_params,
             ranking_prompt=rendered_prompt if include_ranking else None,
@@ -229,50 +240,21 @@ def backend_reranker_eval(
             "pipeline_data": _extract_pipeline_data(data, ranked, pipeline_schema),
         }
     except httpx.HTTPStatusError as exc:
-        code = exc.response.status_code
-        if 400 <= code < 500:
-            tag = "CLIENT"
-            advice = "Check pipeline configuration and request parameters."
-        else:
-            tag = "SERVER"
-            advice = "Backend may be experiencing issues."
-        error_msg = f"[{tag}] HTTP {code}: {exc} — {advice}"
-        logger.warning("backend_reranker_eval %s for %s: %s", tag, query[:60], error_msg)
-        return {
-            "query": query,
-            "predicted": "ERROR",
-            "ground_truth": ground_truth,
-            "hit": False,
-            "score": 0.0,
-            "error": error_msg,
-            "pipeline_data": None,
-        }
+        error_msg = _classify_http_error(exc)
+        logger.warning("backend_reranker_eval for %s: %s", query[:60], error_msg)
+        return _error_result(query, ground_truth, error_msg)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         error_msg = f"[CONNECTION] {exc} — Backend may be down or unreachable."
         logger.warning("backend_reranker_eval CONNECTION for %s: %s", query[:60], error_msg)
-        return {
-            "query": query,
-            "predicted": "ERROR",
-            "ground_truth": ground_truth,
-            "hit": False,
-            "score": 0.0,
-            "error": error_msg,
-            "pipeline_data": None,
-        }
+        return _error_result(query, ground_truth, error_msg)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
     except Exception as exc:
         logger.warning("backend_reranker_eval failed for %s: %s", query[:60], exc)
-        return {
-            "query": query,
-            "predicted": "ERROR",
-            "ground_truth": ground_truth,
-            "hit": False,
-            "score": 0.0,
-            "error": str(exc),
-            "pipeline_data": None,
-        }
+        return _error_result(query, ground_truth, str(exc))
 
 
-def evaluate_prompt_batch(
+async def evaluate_prompt_batch(
     search_point: "SearchPoint",
     eval_data: list,
     backend_client: "BackendClient",
@@ -323,7 +305,7 @@ def evaluate_prompt_batch(
                 result = {**cached, "cached": True}
                 n_reused += 1
             else:
-                result = backend_reranker_eval(
+                result = await backend_reranker_eval(
                     qd, backend_client, rendered,
                     pipeline_params=search_point.pipeline_params,
                     pipeline_schema=pipeline_schema,
@@ -344,15 +326,11 @@ def evaluate_prompt_batch(
                         i + 1, len(eval_data) - i - 1,
                     )
                     for remaining_qd in eval_data[i + 1:]:
-                        results.append({
-                            "query": remaining_qd["query"],
-                            "predicted": "ERROR",
-                            "ground_truth": remaining_qd.get("ground_truth", ""),
-                            "hit": False,
-                            "score": 0.0,
-                            "error": "skipped_after_client_error",
-                            "pipeline_data": None,
-                        })
+                        results.append(_error_result(
+                            remaining_qd["query"],
+                            remaining_qd.get("ground_truth", ""),
+                            "skipped_after_client_error",
+                        ))
                     break
                 consecutive_errors += 1
                 if consecutive_errors >= max_consecutive_errors:
@@ -362,15 +340,11 @@ def evaluate_prompt_batch(
                         consecutive_errors, len(eval_data) - i - 1,
                     )
                     for remaining_qd in eval_data[i + 1:]:
-                        results.append({
-                            "query": remaining_qd["query"],
-                            "predicted": "ERROR",
-                            "ground_truth": remaining_qd.get("ground_truth", ""),
-                            "hit": False,
-                            "score": 0.0,
-                            "error": "skipped_after_consecutive_errors",
-                            "pipeline_data": None,
-                        })
+                        results.append(_error_result(
+                            remaining_qd["query"],
+                            remaining_qd.get("ground_truth", ""),
+                            "skipped_after_consecutive_errors",
+                        ))
                     break
             else:
                 consecutive_errors = 0
@@ -566,7 +540,7 @@ def _try_cached_lookup(
     return None
 
 
-def evaluate_prompt_cached(
+async def evaluate_prompt_cached(
     search_point: "SearchPoint",
     eval_data: list,
     ctx: EvalContext,
@@ -655,7 +629,7 @@ def evaluate_prompt_cached(
 
     escalation_signal = None
     try:
-        results = evaluate_prompt_batch(
+        results = await evaluate_prompt_batch(
             search_point, eval_data, backend_client,
             on_result=on_result,
             pipeline_schema=pipeline_schema,

@@ -176,6 +176,8 @@ class OpenAICompatibleClient(LLMClientBase):
             try:
                 response = await client.chat.completions.create(**request_params)
                 break
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise
             except Exception as exc:
                 status = getattr(exc, "status_code", None)
                 if status == 404:

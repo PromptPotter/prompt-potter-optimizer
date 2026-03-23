@@ -109,7 +109,7 @@ async def test_scan_rows_include_errors(scan_eval_mock):
     scan_variants = {"persona": ["default_persona", "expert"]}
     eval_data = _make_eval_data(4)
 
-    def _mock_eval(search_point, data, client, **kw):
+    async def _mock_eval(search_point, data, client, **kw):
         ps = search_point.prompt_state
         if ps.persona != baseline.persona:
             return (
@@ -158,7 +158,7 @@ async def test_scan_skips_all_error_axis(scan_eval_mock):
     }
     eval_data = _make_eval_data(4)
 
-    def _mock_eval(search_point, data, client, **kw):
+    async def _mock_eval(search_point, data, client, **kw):
         ps = search_point.prompt_state
         # persona variants all error out
         if ps.persona != baseline.persona:
@@ -205,7 +205,7 @@ async def test_scan_aborts_on_baseline_all_errors(scan_eval_mock):
 
     call_count = 0
 
-    def _mock_eval(search_point, data, client, **kw):
+    async def _mock_eval(search_point, data, client, **kw):
         nonlocal call_count
         call_count += 1
         return (
@@ -239,7 +239,7 @@ async def test_scan_aborts_after_consecutive_all_error_variants(scan_eval_mock):
 
     call_count = 0
 
-    def _mock_eval(search_point, data, client, **kw):
+    async def _mock_eval(search_point, data, client, **kw):
         nonlocal call_count
         call_count += 1
         ps = search_point.prompt_state
@@ -281,7 +281,7 @@ async def test_scan_baseline_row_reflects_actual_errors(scan_eval_mock):
     scan_variants = {"persona": ["default_persona", "expert"]}
     eval_data = _make_eval_data(4)
 
-    def _mock_eval(search_point, data, client, **kw):
+    async def _mock_eval(search_point, data, client, **kw):
         ps = search_point.prompt_state
         if ps.persona == baseline.persona:
             return (
@@ -407,7 +407,7 @@ async def test_scan_baseline_client_error_message(scan_eval_mock):
 
     events: list[dict] = []
 
-    def _mock_eval(search_point, data, client, **kw):
+    async def _mock_eval(search_point, data, client, **kw):
         return (
             [{"hit": False, "query": d["query"],
               "error": "[CLIENT] HTTP 400: bad"} for d in data],
@@ -439,7 +439,7 @@ async def test_batch_fast_abort_on_client_error(monkeypatch):
 
     call_count = 0
 
-    def _counting_eval(query_data, backend_client, rendered, **kw):
+    async def _counting_eval(query_data, backend_client, rendered, **kw):
         nonlocal call_count
         call_count += 1
         return {
@@ -458,7 +458,7 @@ async def test_batch_fast_abort_on_client_error(monkeypatch):
     sp = SearchPoint(prompt_state=ps)
     eval_data = _make_eval_data(10)
 
-    results = _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    results = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
     # Only 1 actual backend call — the rest are skipped
     assert call_count == 1
     assert len(results) == 10
@@ -479,7 +479,7 @@ async def test_batch_server_errors_use_consecutive_threshold(monkeypatch):
 
     call_count = 0
 
-    def _server_error_eval(query_data, backend_client, rendered, **kw):
+    async def _server_error_eval(query_data, backend_client, rendered, **kw):
         nonlocal call_count
         call_count += 1
         return {
@@ -498,7 +498,7 @@ async def test_batch_server_errors_use_consecutive_threshold(monkeypatch):
     sp = SearchPoint(prompt_state=ps)
     eval_data = _make_eval_data(10)
 
-    results = _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    results = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
     # 3 actual calls (consecutive threshold), then 7 skipped
     assert call_count == 3
     assert len(results) == 10

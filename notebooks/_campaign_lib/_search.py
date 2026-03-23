@@ -949,7 +949,7 @@ async def sensitivity_scan(
         pipeline_schema = pipeline_schema or svc.get("pipeline_schema")
         session_terms = svc.get("session_terms")
         if session_terms and backend_client:
-            backend_client.init_session(session_terms)
+            await backend_client.init_session(session_terms)
 
     # Print scan overview
     print("Running sensitivity scan...")

@@ -7,6 +7,7 @@ pipeline queries. All API responses stored verbatim.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -96,29 +97,29 @@ def build_pipeline_params(
 
 
 class BackendClient:
-    """HTTP client for a single backend instance."""
+    """Async HTTP client for a single backend instance."""
 
     def __init__(self, base_url: str, timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._session_terms: list[str] | None = None
-        self._http: httpx.Client | None = None
+        self._http: httpx.AsyncClient | None = None
 
-    def _get_http(self) -> httpx.Client:
-        """Return a shared httpx client, creating lazily on first use."""
+    def _get_http(self) -> httpx.AsyncClient:
+        """Return a shared async httpx client, creating lazily on first use."""
         if self._http is None or self._http.is_closed:
-            self._http = httpx.Client(timeout=self.timeout)
+            self._http = httpx.AsyncClient(timeout=self.timeout)
         return self._http
 
-    def close(self) -> None:
-        """Close the shared HTTP client (sync — never hangs)."""
+    async def aclose(self) -> None:
+        """Close the shared HTTP client."""
         if self._http and not self._http.is_closed:
-            self._http.close()
+            await self._http.aclose()
             self._http = None
 
     # -- status check -------------------------------------------------------
 
-    def check_status(self) -> dict[str, Any]:
+    async def check_status(self) -> dict[str, Any]:
         """GET /status — returns backend health/state info.
 
         Returns parsed JSON on success, or a dict with:
@@ -127,7 +128,7 @@ class BackendClient:
         - ``"status": "unreachable"`` for connection errors
         """
         try:
-            resp = self._get_http().get(f"{self.base_url}/status")
+            resp = await self._get_http().get(f"{self.base_url}/status")
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as exc:
@@ -142,31 +143,33 @@ class BackendClient:
         except httpx.ConnectError as exc:
             logger.warning("Backend unreachable: %s", exc)
             return {"status": "unreachable", "error": str(exc)}
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
         except Exception as exc:
             logger.warning("Backend status check failed: %s", exc)
             return {"status": "error", "error": str(exc)}
 
     # -- pipeline config ---------------------------------------------------
 
-    def fetch_pipeline(self) -> dict[str, Any]:
+    async def fetch_pipeline(self) -> dict[str, Any]:
         """GET /pipeline — returns full pipeline configuration.
 
         Includes node configs, models, temperatures, and resolved schema/prompt
         registry data (if the backend supports enrichment).
         """
-        resp = self._get_http().get(f"{self.base_url}/pipeline")
+        resp = await self._get_http().get(f"{self.base_url}/pipeline")
         resp.raise_for_status()
         return resp.json()
 
     # -- sync operations (fetch verbatim API responses) -------------------
 
-    def fetch_experiments(self) -> dict[str, Any]:
+    async def fetch_experiments(self) -> dict[str, Any]:
         """GET /experiments — returns full response verbatim."""
-        resp = self._get_http().get(f"{self.base_url}/experiments")
+        resp = await self._get_http().get(f"{self.base_url}/experiments")
         resp.raise_for_status()
         return resp.json()
 
-    def fetch_experiment(
+    async def fetch_experiment(
         self, experiment_id: str, include_traces: bool = True,
     ) -> dict[str, Any]:
         """GET /experiments/{id}/mappings — returns full response verbatim.
@@ -177,7 +180,7 @@ class BackendClient:
         params: dict[str, str] = {}
         if include_traces:
             params["include_traces"] = "true"
-        resp = self._get_http().get(
+        resp = await self._get_http().get(
             f"{self.base_url}/experiments/{experiment_id}/mappings",
             params=params,
         )
@@ -186,7 +189,7 @@ class BackendClient:
 
     # -- replay operations ------------------------------------------------
 
-    def init_session(self, terms: list[str]) -> dict[str, Any]:
+    async def init_session(self, terms: list[str]) -> dict[str, Any]:
         """POST /sessions with terms array.
 
         Idempotent: skips the HTTP call if already initialized with the
@@ -194,11 +197,13 @@ class BackendClient:
         can auto-reinitialize the session if the backend restarts.
         """
         if not terms:
-            logger.warning("init_session called with empty terms — session won't support /matches")
+            logger.warning(
+                "init_session called with empty terms — session won't support /matches",
+            )
             return {"status": "skipped", "terms_count": 0}
         if self._session_terms == terms:
             return {"status": "already_initialized", "terms_count": len(terms)}
-        resp = self._get_http().post(
+        resp = await self._get_http().post(
             f"{self.base_url}/sessions",
             json={"terms": terms},
         )
@@ -206,7 +211,7 @@ class BackendClient:
         self._session_terms = terms
         return resp.json()
 
-    def run_match(
+    async def run_match(
         self,
         query: str,
         pipeline_params: dict[str, Any] | None = None,
@@ -242,7 +247,7 @@ class BackendClient:
             payload["node_config"] = wire_overrides
 
         client = self._get_http()
-        resp = client.post(
+        resp = await client.post(
             f"{self.base_url}/matches",
             json=payload,
             timeout=MATCH_TIMEOUT,
@@ -252,6 +257,8 @@ class BackendClient:
         if resp.status_code == 400:
             try:
                 detail = resp.json().get("detail", "")
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise
             except Exception:
                 detail = ""
             is_session_error = "session" in detail.lower()
@@ -260,8 +267,8 @@ class BackendClient:
                 logger.warning("Got 400 (no session) — re-initializing")
                 terms = self._session_terms
                 self._session_terms = None  # clear so idempotency guard re-sends
-                self.init_session(terms)
-                resp = client.post(
+                await self.init_session(terms)
+                resp = await client.post(
                     f"{self.base_url}/matches",
                     json=payload,
                     timeout=MATCH_TIMEOUT,
@@ -277,19 +284,19 @@ class BackendClient:
 
     # -- high-level sync --------------------------------------------------
 
-    def sync_experiments(
+    async def sync_experiments(
         self, store: ProjectStore, backend_id: str,
         include_traces: bool = True,
     ) -> int:
         """Fetch all experiments and store verbatim. Returns count."""
-        data = self.fetch_experiments()
+        data = await self.fetch_experiments()
         store.backends.save_sync(backend_id, "experiments.json", data)
 
         experiments = data.get("experiments", [])
         for exp in experiments:
             exp_id = exp.get("experiment_id", exp.get("id", ""))
             if exp_id:
-                detail = self.fetch_experiment(
+                detail = await self.fetch_experiment(
                     exp_id, include_traces=include_traces,
                 )
                 store.backends.save_sync(
@@ -297,15 +304,17 @@ class BackendClient:
                 )
         return len(experiments)
 
-    def sync_experiment(
+    async def sync_experiment(
         self, store: ProjectStore, backend_id: str, experiment_id: str,
         include_traces: bool = True,
     ) -> dict[str, Any]:
         """Fetch one experiment and store verbatim."""
-        detail = self.fetch_experiment(
+        detail = await self.fetch_experiment(
             experiment_id, include_traces=include_traces,
         )
-        store.backends.save_sync(backend_id, f"experiments/{experiment_id}.json", detail)
+        store.backends.save_sync(
+            backend_id, f"experiments/{experiment_id}.json", detail,
+        )
         return detail
 
     # -- replay helpers ---------------------------------------------------

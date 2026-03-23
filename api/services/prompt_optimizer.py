@@ -424,7 +424,7 @@ async def l1_evaluate(
             pipeline_params=pp,
         )
         ctx.candidate_idx = idx
-        results, scores, cached = evaluate_prompt_cached(
+        results, scores, cached = await evaluate_prompt_cached(
             sp, eval_data, ctx,
             label=f"candidate_{idx}",
             on_result=_on_result,

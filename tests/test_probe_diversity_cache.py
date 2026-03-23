@@ -227,8 +227,9 @@ class TestFindCachedQueries:
 
 class TestEvaluatePromptBatchCaching:
 
-    def test_cached_queries_skip_backend(self):
-        from unittest.mock import MagicMock
+    @pytest.mark.asyncio
+    async def test_cached_queries_skip_backend(self):
+        from unittest.mock import AsyncMock
         from api.models.prompt_state import PromptState
         from api.models.search_point import SearchPoint
         from api.services.prompt_eval import evaluate_prompt_batch
@@ -236,7 +237,7 @@ class TestEvaluatePromptBatchCaching:
         ps = PromptState(instruction="test")
         sp = SearchPoint(prompt_state=ps, model="m1", temperature=0.0)
 
-        backend = MagicMock()
+        backend = AsyncMock()
         backend.run_match.return_value = {
             "data": {
                 "ranked_candidates": [{"candidate": "Aspirin"}],
@@ -257,7 +258,7 @@ class TestEvaluatePromptBatchCaching:
             },
         }
 
-        results = evaluate_prompt_batch(
+        results = await evaluate_prompt_batch(
             sp, eval_data, backend,
             cached_queries=cached,
         )

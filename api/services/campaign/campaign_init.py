@@ -5,8 +5,8 @@ evaluates baselines, and returns a services dict ready for use.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def init_services(
+async def init_services(
     backend_url: str = "http://127.0.0.1:8000",
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
@@ -81,10 +81,12 @@ def init_services(
     pipeline_schema = None
     try:
         from api.services.pipeline_discovery import parse_pipeline_response
-        pipeline_resp = client.fetch_pipeline()
+        pipeline_resp = await client.fetch_pipeline()
         pipeline_schema = parse_pipeline_response(pipeline_resp)
         logger.info("Pipeline schema loaded: %s v%s", pipeline_schema.name, pipeline_schema.version)
         _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.steps)} steps)")
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
     except Exception as exc:
         logger.info("Could not fetch pipeline schema: %s", exc)
         _status("Pipeline: unavailable")
@@ -134,11 +136,13 @@ def init_services(
         logger.info("%s — syncing from %s ...", reason, backend_url)
         _status(f"Syncing experiment {experiment_id} ...")
         try:
-            exp_data = client.sync_experiment(
+            exp_data = await client.sync_experiment(
                 store, backend_id, experiment_id, include_traces=True,
             )
             synced = True
             _status("Sync complete")
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
         except Exception as exc:
             logger.warning("Auto-sync failed: %s", exc)
             _status(f"Sync failed: {exc}")
@@ -190,7 +194,7 @@ def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
     return queries
 
 
-def _wait_session_ready(
+async def _wait_session_ready(
     backend_client: BackendClient,
     max_attempts: int = 5,
     delay: float = 1.0,
@@ -201,7 +205,7 @@ def _wait_session_ready(
     Logs a warning if the session never becomes ready.
     """
     for attempt in range(1, max_attempts + 1):
-        status = backend_client.check_status()
+        status = await backend_client.check_status()
         data = status.get("data", {})
         if data.get("session_active") and data.get("terms_loaded", 0) > 0:
             logger.info(
@@ -215,7 +219,7 @@ def _wait_session_ready(
             data.get("session_active"), data.get("terms_loaded"),
         )
         if attempt < max_attempts:
-            time.sleep(delay)
+            await asyncio.sleep(delay)
 
     logger.warning(
         "Session not ready after %d attempts — evaluation may produce errors. "
@@ -223,7 +227,7 @@ def _wait_session_ready(
     )
 
 
-def _verify_matches_liveness(
+async def _verify_matches_liveness(
     backend_client: BackendClient,
     probe_query: str,
     max_attempts: int = 3,
@@ -236,7 +240,7 @@ def _verify_matches_liveness(
     """
     for attempt in range(1, max_attempts + 1):
         try:
-            backend_client.run_match(probe_query)
+            await backend_client.run_match(probe_query)
             logger.info(
                 "Matches liveness probe succeeded (attempt %d/%d)",
                 attempt, max_attempts,
@@ -248,13 +252,15 @@ def _verify_matches_liveness(
                     "Matches probe got 400 (attempt %d/%d), retrying in %.0fs",
                     attempt, max_attempts, delay,
                 )
-                time.sleep(delay)
+                await asyncio.sleep(delay)
             else:
                 logger.warning(
                     "Matches liveness probe failed (attempt %d/%d): %s",
                     attempt, max_attempts, exc,
                 )
                 return
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
         except Exception as exc:
             logger.warning(
                 "Matches liveness probe failed (attempt %d/%d): %s",
@@ -263,7 +269,7 @@ def _verify_matches_liveness(
             return
 
 
-def run_baseline_eval(
+async def run_baseline_eval(
     baseline: "PromptState",
     eval_data: list,
     backend_client: BackendClient,
@@ -314,9 +320,9 @@ def run_baseline_eval(
 
     # Initialize backend session so /matches doesn't 400
     if session_terms:
-        backend_client.init_session(session_terms)
-        _wait_session_ready(backend_client)
-        _verify_matches_liveness(backend_client, probe_query=session_terms[0])
+        await backend_client.init_session(session_terms)
+        await _wait_session_ready(backend_client)
+        await _verify_matches_liveness(backend_client, probe_query=session_terms[0])
     else:
         logger.warning(
             "No session terms available — /matches calls will fail. "
@@ -327,6 +333,8 @@ def run_baseline_eval(
     if obs and eval_data:
         try:
             obs.register_dataset(DATASET_NAME, eval_data)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
         except Exception:
             logger.warning("Dataset registration in run_baseline_eval failed", exc_info=True)
 
@@ -346,7 +354,7 @@ def run_baseline_eval(
         temperature=temperature,
         pipeline_params=pipeline_params,
     )
-    baseline_results, scores, _cached = evaluate_prompt_cached(
+    baseline_results, scores, _cached = await evaluate_prompt_cached(
         sp, eval_data, ctx,
         label="Baseline",
         on_result=on_result,
@@ -459,6 +467,8 @@ def save_campaign_winner(
                     "winner_accuracy": winner_acc,
                     "winner_filename": filename,
                 })
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise
             except Exception:
                 pass  # campaign may not exist yet
 

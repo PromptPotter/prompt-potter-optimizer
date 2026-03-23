@@ -80,6 +80,8 @@ def _candidate_summaries(
             candidate_ps = PromptState(**c_clean)
             delta = prompt_diff(current_ps, candidate_ps)
             changed_fields = [fc.field for fc in delta.field_changes]
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
         except Exception:
             logger.debug("Failed to diff candidate %d", i, exc_info=True)
             changed_fields = []
@@ -148,6 +150,8 @@ def _init_obs(
     if config.project_root and config.backend_id:
         try:
             obs = ObsLogger(config.project_root, config.backend_id)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
         except Exception:
             logger.warning("Failed to create ObsLogger", exc_info=True)
 
@@ -163,6 +167,8 @@ def _init_obs(
             baseline_accuracy=baseline_accuracy,
             session_id=langfuse_session_id,
         )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
     except Exception:
         logger.warning("ObsLogger.log_campaign_start failed", exc_info=True)
 
@@ -174,6 +180,8 @@ def _init_obs(
                 "Registered %d dataset items for '%s'",
                 len(dataset_item_map), dataset_name,
             )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
     except Exception:
         logger.warning("Dataset registration failed", exc_info=True)
         dataset_item_map = None
@@ -502,6 +510,8 @@ def _log_round_obs(
                 "critique_negative", "critique_positive",
             ],
         )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
     except Exception:
         logger.warning("ObsLogger.log_round_end failed", exc_info=True)
 
@@ -519,6 +529,8 @@ def _log_round_obs(
             },
             parent_id=winner_ps.parent_id,
         )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
     except Exception:
         logger.warning("ObsLogger.log_prompt_version failed", exc_info=True)
 
@@ -542,6 +554,8 @@ async def _execute_round(
     if obs:
         try:
             obs.log_round_start(obs_campaign_id, round_num)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
         except Exception:
             logger.warning("ObsLogger.log_round_start failed", exc_info=True)
 
@@ -634,6 +648,8 @@ def _finalize_campaign(
                 "n_rounds": len(state.rounds),
                 "finished_at": finished_at,
             })
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
         except Exception:
             logger.warning("Campaign completion update failed", exc_info=True)
 
@@ -649,6 +665,8 @@ def _finalize_campaign(
             )
             obs.flush()
             cloud_trace_id = obs.get_cloud_trace_id(obs_campaign_id)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
         except Exception:
             logger.warning("ObsLogger campaign end failed", exc_info=True)
 
@@ -873,6 +891,24 @@ def _maybe_emit_backend_warning(
     )
 
 
+def _degradation_reset(
+    state: _LoopState,
+    config: CycleConfig,
+    round_num: int,
+    on_phase: Callable[[PhaseEvent], None] | None,
+    *,
+    reset_l3: bool = False,
+) -> None:
+    """Reset L2 (and optionally L3) counters during degradation investigation."""
+    state.l2_stall_count = 0
+    state.l2_round = 0
+    if reset_l3:
+        state.l3_stall_count = 0
+        state.l3_round = 0
+    state.opt_sp.degradation_reset_count += 1
+    _maybe_emit_backend_warning(state, config, round_num, on_phase)
+
+
 async def _escalate_l2(
     state: _LoopState,
     config: CycleConfig,
@@ -890,83 +926,53 @@ async def _escalate_l2(
     When *from_degradation* is True, L2/L3 patience exhaustion resets counters
     instead of stopping — the degradation investigation loop continues.
     """
-    # Check if L2 itself has stalled (no improvement since last L2 entry)
+    _l2_kwargs = dict(obs=obs, trace_id=trace_id, escalation_context=escalation_context)
+
+    # Track L2 stall
     l2_improved = state.best_composite > state.best_composite_at_l2_entry
-    if not l2_improved and state.l2_round > 0:
-        state.l2_stall_count += 1
-    else:
-        state.l2_stall_count = 0
+    state.l2_stall_count = 0 if l2_improved or state.l2_round == 0 else state.l2_stall_count + 1
 
-    # L2 stalled → check L3
-    if config.l2_patience is not None and state.l2_stall_count >= config.l2_patience:
-        if config.enable_l3:
-            l3_improved = state.best_composite > state.best_composite_at_l3_entry
-            if not l3_improved and state.l3_round > 0:
-                state.l3_stall_count += 1
-            else:
-                state.l3_stall_count = 0
+    # Not stalled → plain L2 transition
+    l2_stalled = config.l2_patience is not None and state.l2_stall_count >= config.l2_patience
+    if not l2_stalled:
+        await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
+        return None
 
-            if config.l3_patience is not None and state.l3_stall_count >= config.l3_patience:
-                if from_degradation:
-                    logger.info(
-                        "L3 patience exhausted during degradation — "
-                        "resetting L2/L3 counters at round %d", round_num,
-                    )
-                    state.l2_stall_count = 0
-                    state.l3_stall_count = 0
-                    state.l2_round = 0
-                    state.l3_round = 0
-                    state.opt_sp.degradation_reset_count += 1
-                    _maybe_emit_backend_warning(
-                        state, config, round_num, on_phase,
-                    )
-                    await _do_l2_transition(
-                        state, config, round_num, eval_data, on_phase,
-                        obs=obs, trace_id=trace_id,
-                        escalation_context=escalation_context,
-                    )
-                    return None  # continue
-                logger.info(
-                    "L3 patience exhausted (%d stalls) at round %d",
-                    state.l3_stall_count, round_num,
-                )
-                return "l3_patience_exhausted"
-
-            await _do_l3_transition(
-                state, config, round_num, eval_data, on_phase,
-                obs=obs, trace_id=trace_id,
-            )
-            return None  # continue
-        else:
-            if from_degradation:
-                logger.info(
-                    "L2 patience exhausted during degradation — "
-                    "resetting L2 counters at round %d", round_num,
-                )
-                state.l2_stall_count = 0
-                state.l2_round = 0
-                state.opt_sp.degradation_reset_count += 1
-                _maybe_emit_backend_warning(
-                    state, config, round_num, on_phase,
-                )
-                await _do_l2_transition(
-                    state, config, round_num, eval_data, on_phase,
-                    obs=obs, trace_id=trace_id,
-                    escalation_context=escalation_context,
-                )
-                return None  # continue
+    # L2 stalled, L3 disabled → exhaust or reset
+    if not config.enable_l3:
+        if from_degradation:
             logger.info(
-                "L2 patience exhausted (%d stalls) at round %d",
-                state.l2_stall_count, round_num,
+                "L2 patience exhausted during degradation — resetting at round %d", round_num,
             )
-            return "l2_patience_exhausted"
+            _degradation_reset(state, config, round_num, on_phase)
+            await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
+            return None
+        logger.info(
+            "L2 patience exhausted (%d stalls) at round %d", state.l2_stall_count, round_num,
+        )
+        return "l2_patience_exhausted"
 
-    await _do_l2_transition(
-        state, config, round_num, eval_data, on_phase,
-        obs=obs, trace_id=trace_id,
-        escalation_context=escalation_context,
-    )
-    return None  # continue
+    # L2 stalled, L3 enabled — track L3 stall
+    l3_improved = state.best_composite > state.best_composite_at_l3_entry
+    state.l3_stall_count = 0 if l3_improved or state.l3_round == 0 else state.l3_stall_count + 1
+
+    l3_exhausted = config.l3_patience is not None and state.l3_stall_count >= config.l3_patience
+    if not l3_exhausted:
+        await _do_l3_transition(
+            state, config, round_num, eval_data, on_phase, obs=obs, trace_id=trace_id,
+        )
+        return None
+
+    # L3 exhausted → exhaust or reset
+    if from_degradation:
+        logger.info(
+            "L3 patience exhausted during degradation — resetting L2/L3 at round %d", round_num,
+        )
+        _degradation_reset(state, config, round_num, on_phase, reset_l3=True)
+        await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
+        return None
+    logger.info("L3 patience exhausted (%d stalls) at round %d", state.l3_stall_count, round_num)
+    return "l3_patience_exhausted"
 
 
 # ---------------------------------------------------------------------------
@@ -974,7 +980,7 @@ async def _escalate_l2(
 # ---------------------------------------------------------------------------
 
 
-def _init_cycle_state(
+async def _init_cycle_state(
     instruction: str,
     eval_data: list[dict[str, Any]],
     config: CycleConfig,
@@ -1014,7 +1020,7 @@ def _init_cycle_state(
 
     _bc = backend_client or BackendClient(config.backend_url)
     if config.session_terms:
-        _bc.init_session(config.session_terms)
+        await _bc.init_session(config.session_terms)
 
     round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
 
@@ -1175,7 +1181,7 @@ async def run_feedback_cycle(
 
     # -- Init --
     (state, campaign_store, cycle_id, obs_campaign_id,
-     round_eval_data, escalation_checks, resumed_from_round) = _init_cycle_state(
+     round_eval_data, escalation_checks, resumed_from_round) = await _init_cycle_state(
         instruction, eval_data, config,
         baseline_prompt_state, baseline_accuracy, baseline_results,
         on_phase, langfuse_session_id, cycle_id, experiment_id,
@@ -1377,6 +1383,8 @@ async def run_feedback_cycle(
                         "l3_round": state.l3_round,
                         "opt_search_point": state.opt_sp.model_dump(),
                     })
+                except (KeyboardInterrupt, asyncio.CancelledError):
+                    raise
                 except Exception:
                     logger.warning("Round checkpoint failed", exc_info=True)
 
@@ -1436,6 +1444,8 @@ async def run_feedback_cycle(
                     "n_rounds": len(state.rounds),
                     "finished_at": finished_at,
                 })
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise
             except Exception:
                 logger.warning("Campaign interrupt update failed", exc_info=True)
         cloud_trace_id = None

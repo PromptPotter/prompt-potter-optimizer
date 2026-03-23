@@ -324,7 +324,7 @@ def resolve_point_evals(
 # ---------------------------------------------------------------------------
 
 
-def _load_or_compute_point(
+async def _load_or_compute_point(
     info: PointEvalInfo,
     state_lookup: dict,
     backend_client: Any,
@@ -369,7 +369,7 @@ def _load_or_compute_point(
         temperature=temperature,
     )
 
-    _results, scores, was_cached = evaluate_prompt_cached(
+    _results, scores, was_cached = await evaluate_prompt_cached(
         sp, info.point_eval, ctx,
         label=f"grid_point_{info.point_idx}",
         on_result=_on_result,
@@ -421,14 +421,14 @@ async def run_grid_search(
             for info in eval_plan
         )
         if needs_eval:
-            backend_client.init_session(session_terms)
+            await backend_client.init_session(session_terms)
     elif session_terms:
-        backend_client.init_session(session_terms)
+        await backend_client.init_session(session_terms)
 
     rows = []
     try:
         for info in eval_plan:
-            acc, was_cached = _load_or_compute_point(
+            acc, was_cached = await _load_or_compute_point(
                 info, state_lookup, backend_client,
                 store, backend_id, pipeline_params, on_query_done,
                 pipeline_schema=pipeline_schema,

@@ -153,7 +153,7 @@ async def smoke_test_override(
     bc = svc["backend_client"]
     query = eval_data[0]["query"] if eval_data else "Stahl S235"
 
-    bc.init_session(svc.get("session_terms", []))
+    await bc.init_session(svc.get("session_terms", []))
 
     schema = copy.deepcopy(
         pipeline_config["resolved_schemas"][schema_ref]["json_schema"],
@@ -162,7 +162,7 @@ async def smoke_test_override(
         schema["properties"][name] = {"type": "string", "description": desc}
         schema.setdefault("required", []).append(name)
 
-    result = bc.run_match(
+    result = await bc.run_match(
         query,
         pipeline_params={step: {"output_schema": schema}},
     )
@@ -193,7 +193,7 @@ async def smoke_test_override(
 # api.services.campaign.campaign_init (see imports above)
 
 
-def show_pipeline_snapshot(svc: dict) -> dict:
+async def show_pipeline_snapshot(svc: dict) -> dict:
     """Fetch and display full pipeline config from backend.
 
     Prints: pipeline name/version, node list, resolved schemas/prompts,
@@ -201,7 +201,7 @@ def show_pipeline_snapshot(svc: dict) -> dict:
     """
     import json
 
-    pipeline_raw = svc["backend_client"].fetch_pipeline()
+    pipeline_raw = await svc["backend_client"].fetch_pipeline()
     config = pipeline_raw.get("data", pipeline_raw)
 
     name = config.get("name", "?")
@@ -271,7 +271,7 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def init_services(
+async def init_services(
     backend_url: str = "http://127.0.0.1:8000",
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
@@ -284,7 +284,7 @@ def init_services(
     """
     project_root = Path(__file__).resolve().parent.parent.parent
 
-    svc = _init_services(
+    svc = await _init_services(
         backend_url=backend_url,
         backend_id=backend_id,
         experiment_id=experiment_id,
@@ -327,12 +327,12 @@ def init_services(
 # ---------------------------------------------------------------------------
 
 
-def show_backend_status(client) -> dict:
+async def show_backend_status(client) -> dict:
     """Call backend /status and display formatted status table.
 
     Returns the raw status dict (or error dict).
     """
-    status = client.check_status()
+    status = await client.check_status()
 
     st = status.get("status", "")
     if st == "unreachable":
@@ -374,7 +374,7 @@ def show_backend_status(client) -> dict:
     return status
 
 
-def prepare_eval_context(
+async def prepare_eval_context(
     svc: dict,
     train_data: list[dict] | None,
 ) -> tuple[PromptState, list[dict], dict]:
@@ -386,7 +386,7 @@ def prepare_eval_context(
     from api.services.prompt_eval import load_baseline_prompt
     baseline = load_baseline_prompt(svc["exp_data"])
     eval_data = train_data or []
-    backend_status = show_backend_status(svc["backend_client"])
+    backend_status = await show_backend_status(svc["backend_client"])
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
     return baseline, eval_data, backend_status

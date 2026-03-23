@@ -52,7 +52,7 @@ def apply_eval_mock(monkeypatch, round_hits=None):
         round_hits = [1, 2, 3]
     call_count = [0]
 
-    def mock_eval(search_point, data, ctx=None, **kwargs):
+    async def mock_eval(search_point, data, ctx=None, **kwargs):
         idx = min(call_count[0], len(round_hits) - 1)
         target_hits = round_hits[idx]
         label = kwargs.get("label", "")

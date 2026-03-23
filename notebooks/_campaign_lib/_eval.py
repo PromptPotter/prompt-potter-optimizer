@@ -170,7 +170,7 @@ def run_coverage_diagnostic(
 # ---------------------------------------------------------------------------
 
 
-def run_baseline_eval(
+async def run_baseline_eval(
     baseline: PromptState,
     eval_data: list,
     campaign_config: dict,
@@ -197,7 +197,7 @@ def run_baseline_eval(
     _obs = ObsLogger(svc["store"].base_dir, svc.get("backend_id", ""), langfuse=None)
 
     try:
-        campaign_rounds, baseline_results = _run_baseline_eval(
+        campaign_rounds, baseline_results = await _run_baseline_eval(
             baseline, eval_data, svc.get("backend_client"),
             pipeline_params=campaign_config.get("pipeline_params"),
             store=svc.get("store"), backend_id=svc.get("backend_id", ""),
