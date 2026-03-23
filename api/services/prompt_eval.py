@@ -223,8 +223,8 @@ async def backend_reranker_eval(
     ground_truth = query_data["ground_truth"]
 
     if pipeline_schema is None:
-        from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
-        pipeline_schema = TERMNORM_DEFAULT_SCHEMA
+        from api.models.pipeline_schema import PipelineSchema
+        pipeline_schema = PipelineSchema()
 
     try:
         pp = pipeline_params or {}

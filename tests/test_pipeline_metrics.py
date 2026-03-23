@@ -83,9 +83,13 @@ class TestComputeCompositeScore:
         assert scores["composite"] == 0.0
 
     def test_with_pipeline_schema(self):
-        from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
+        schema = PipelineSchema(steps=[
+            PipelineStep(name="cache_lookup", node_role="cache"),
+            PipelineStep(name="token_matching", node_role="candidate_source"),
+            PipelineStep(name="llm_ranking", node_role="ranker"),
+        ])
         results = _make_results(3, 5)
-        scores = compute_composite_score(results, TERMNORM_DEFAULT_SCHEMA)
+        scores = compute_composite_score(results, schema)
         assert "composite" in scores
         assert scores["composite"] > 0
 
@@ -100,9 +104,16 @@ class TestNodeRole:
         step = PipelineStep(name="test")
         assert step.node_role == ""
 
-    def test_termnorm_default_schema_has_roles(self):
-        from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
-        roles = {s.name: s.node_role for s in TERMNORM_DEFAULT_SCHEMA.steps}
+    def test_schema_roles(self):
+        schema = PipelineSchema(steps=[
+            PipelineStep(name="cache_lookup", node_role="cache"),
+            PipelineStep(name="fuzzy_matching", node_role="candidate_source"),
+            PipelineStep(name="web_search", node_role="enricher"),
+            PipelineStep(name="entity_profiling", node_role="enricher"),
+            PipelineStep(name="token_matching", node_role="candidate_source"),
+            PipelineStep(name="llm_ranking", node_role="ranker"),
+        ])
+        roles = {s.name: s.node_role for s in schema.steps}
         assert roles["cache_lookup"] == "cache"
         assert roles["fuzzy_matching"] == "candidate_source"
         assert roles["web_search"] == "enricher"

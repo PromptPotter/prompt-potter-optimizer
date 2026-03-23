@@ -159,8 +159,8 @@ def load_eval_dataset(
 
     if exp_data:
         if schema is None:
-            from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
-            schema = TERMNORM_DEFAULT_SCHEMA
+            from api.models.pipeline_schema import PipelineSchema
+            schema = PipelineSchema()
         eval_data = _extract_eval_from_traces(exp_data, schema=schema)
         if eval_data:
             if sample_size > 0 and len(eval_data) > sample_size:

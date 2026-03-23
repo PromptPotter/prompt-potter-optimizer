@@ -698,10 +698,8 @@ async def scan_advisor(
         Advisory dict with priority_axes, suggested_n_diagnostic,
         axes_to_skip, budget_breakdown, and reasoning.
     """
-    from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
-
     # --- Internalized prep (matches resume_or_build_diagnostic pattern) ---
-    pipeline_schema = svc.get("pipeline_schema") or TERMNORM_DEFAULT_SCHEMA
+    pipeline_schema = svc.get("pipeline_schema")
     pipeline_params = campaign_config.get("pipeline_params")
     user_excluded = campaign_config.get("exclude_steps", [])
 
@@ -896,13 +894,12 @@ def resolve_scan_variants(
     ``_resolve_schema_axes`` and prints a summary.
 
     If *pipeline_schema* is ``None`` and *svc* is provided, falls back to
-    ``svc["pipeline_schema"]`` then ``TERMNORM_DEFAULT_SCHEMA``.
+    ``svc["pipeline_schema"]``.
 
     Returns ``(resolved_variants, schema_labels)``.
     """
     if pipeline_schema is None and svc is not None:
-        from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
-        pipeline_schema = svc.get("pipeline_schema") or TERMNORM_DEFAULT_SCHEMA
+        pipeline_schema = svc.get("pipeline_schema")
 
     resolved, schema_labels = _resolve_schema_axes(scan_variants, pipeline_schema)
 

@@ -1,7 +1,7 @@
 """Tests for PipelineSchema model and pipeline discovery.
 
-Verifies derivation methods, consistency with hardcoded constants,
-parse_pipeline_response factory, and registry metadata flow.
+Verifies derivation methods, parse_pipeline_response factory,
+and registry metadata flow.
 """
 
 from api.models.pipeline_schema import (
@@ -9,7 +9,7 @@ from api.models.pipeline_schema import (
     PipelineSchema,
     PipelineStep,
 )
-from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA, parse_pipeline_response
+from api.services.pipeline_discovery import parse_pipeline_response
 
 
 def test_derivation_methods():
@@ -67,72 +67,117 @@ def test_derivation_methods():
     assert [s.name for s in schema.frontend_steps()] == ["cache"]
 
 
-class TestTermNormConsistency:
-
-    def test_override_map_covers_param_keys(self):
-        for step in TERMNORM_DEFAULT_SCHEMA.steps:
-            for pk in step.param_keys:
-                assert pk in step.override_map, (
-                    f"Step '{step.name}': param_key '{pk}' missing from override_map"
-                )
-
-    def test_obs_extraction_map_matches(self):
-        from api.services.search.eval_dataset import OBS_EXTRACTION_MAP
-
-        schema_map = TERMNORM_DEFAULT_SCHEMA.obs_extraction_map()
-        assert set(schema_map.keys()) == set(OBS_EXTRACTION_MAP.keys())
-
-        for obs_name in OBS_EXTRACTION_MAP:
-            original_fields = OBS_EXTRACTION_MAP[obs_name]
-            schema_fields = schema_map[obs_name]
-            assert len(schema_fields) == len(original_fields)
-            for orig, schema_f in zip(original_fields, schema_fields):
-                assert schema_f.pipeline_key == orig.pipeline_key
-                assert schema_f.output_field == orig.output_field
-                assert schema_f.is_llm == orig.is_llm
-
-    def test_required_step_template_vars_dataset_name(self):
-        from api.services.search.eval_dataset import REQUIRED_PIPELINE_KEY
-        from api.services.constants import DATASET_NAME
-
-        assert TERMNORM_DEFAULT_SCHEMA.required_step == REQUIRED_PIPELINE_KEY
-        assert TERMNORM_DEFAULT_SCHEMA.template_variables == {
-            "{{core_concept}}", "{{entity_profile_json}}", "{{matches}}",
-        }
-        assert TERMNORM_DEFAULT_SCHEMA.dataset_name == DATASET_NAME
-
-    def test_langfuse_types_fuzzy_params_runtime(self):
-        expected = {
-            "web_search": "tool",
-            "entity_profiling": "generation",
-            "token_matching": "retriever",
-            "llm_ranking": "generation",
-        }
-        lf_map = TERMNORM_DEFAULT_SCHEMA.langfuse_type_map()
-        for step_name, expected_type in expected.items():
-            assert lf_map[step_name] == expected_type
-
-        fm = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "fuzzy_matching")
-        assert fm.param_keys == {"fuzzy_threshold", "fuzzy_scorer"}
-
-        frontend = [s.name for s in TERMNORM_DEFAULT_SCHEMA.frontend_steps()]
-        assert frontend == ["cache_lookup", "fuzzy_matching"]
-        assert all(s.short_circuit for s in TERMNORM_DEFAULT_SCHEMA.frontend_steps())
-
-        backend = [s.name for s in TERMNORM_DEFAULT_SCHEMA.backend_steps()]
-        assert backend == ["web_search", "entity_profiling", "token_matching", "llm_ranking"]
-
-
 class TestParsePipelineResponse:
-    def test_known_pipeline(self):
-        data = {"config": {"name": "TermNorm", "version": "2.0", "description": "Updated"}}
+    def test_pipeline_with_optimizer_metadata(self):
+        """Test parsing a self-describing pipeline with optimizer metadata."""
+        data = {
+            "config": {
+                "name": "TermNorm",
+                "version": "2.0",
+                "description": "Test pipeline",
+                "required_step": "entity_profile",
+                "template_variables": ["{{core_concept}}", "{{matches}}"],
+                "dataset_name": "termnorm_ground_truth",
+                "available_models": ["model-a"],
+                "nodes": {
+                    "cache_lookup": {
+                        "type": "cache",
+                        "runtime": "frontend",
+                        "short_circuit": True,
+                        "node_role": "cache",
+                        "description": "Cache step",
+                        "config": {},
+                        "optimizer": {"langfuse_type": "span"},
+                    },
+                    "web_search": {
+                        "type": "tool",
+                        "runtime": "backend",
+                        "node_role": "enricher",
+                        "description": "Web search step",
+                        "config": {
+                            "max_sites": 7,
+                            "num_results": 20,
+                            "query_prefix": "",
+                        },
+                        "optimizer": {
+                            "param_keys": ["max_sites", "num_results"],
+                            "param_descriptions": {
+                                "max_sites": "Max pages to fetch",
+                                "num_results": "Search results count",
+                            },
+                            "override_map": {
+                                "max_sites": "max_sites",
+                                "num_results": "num_results",
+                            },
+                            "observation_name": "web_search",
+                            "observation_mappings": [
+                                {"pipeline_key": "web_sources", "output_field": "sources"},
+                            ],
+                            "langfuse_type": "tool",
+                        },
+                    },
+                    "llm_ranking": {
+                        "type": "generation",
+                        "runtime": "backend",
+                        "node_role": "ranker",
+                        "description": "LLM ranking step",
+                        "config": {
+                            "temperature": 0.0,
+                            "model": "model-a",
+                        },
+                        "optimizer": {
+                            "param_keys": ["ranking_temperature"],
+                            "override_map": {"ranking_temperature": "temperature"},
+                            "langfuse_type": "generation",
+                        },
+                    },
+                },
+                "pipelines": {
+                    "default": ["cache_lookup", "web_search", "llm_ranking"],
+                },
+            },
+        }
         schema = parse_pipeline_response(data)
+
         assert schema.name == "termnorm"
         assert schema.version == "2.0"
-        assert len(schema.steps) == 6
-        assert "web_search" in schema.step_param_keys()
+        assert schema.required_step == "entity_profile"
+        assert schema.dataset_name == "termnorm_ground_truth"
+        assert schema.available_models == ["model-a"]
+        assert len(schema.steps) == 3
 
-    def test_unknown_pipeline(self):
+        # Step order matches pipelines.default
+        assert [s.name for s in schema.steps] == ["cache_lookup", "web_search", "llm_ranking"]
+
+        # Cache step
+        cache = schema.steps[0]
+        assert cache.runtime == "frontend"
+        assert cache.short_circuit is True
+        assert cache.node_role == "cache"
+        assert cache.langfuse_type == "span"
+
+        # Web search step — full optimizer metadata
+        ws = schema.steps[1]
+        assert ws.runtime == "backend"
+        assert ws.node_role == "enricher"
+        assert ws.param_keys == {"max_sites", "num_results"}
+        assert ws.override_map == {"max_sites": "max_sites", "num_results": "num_results"}
+        assert ws.observation_name == "web_search"
+        assert len(ws.observation_mappings) == 1
+        assert ws.observation_mappings[0].pipeline_key == "web_sources"
+        assert ws.langfuse_type == "tool"
+        # default_config only includes param_keys
+        assert ws.default_config == {"max_sites": 7, "num_results": 20}
+        assert "query_prefix" not in ws.default_config
+
+        # LLM ranking step
+        lr = schema.steps[2]
+        assert lr.node_role == "ranker"
+        assert lr.param_keys == {"ranking_temperature"}
+        assert lr.override_map == {"ranking_temperature": "temperature"}
+
+    def test_unknown_pipeline_no_optimizer(self):
+        """Unknown pipelines without optimizer metadata still work."""
         data = {
             "config": {
                 "name": "CustomPipeline",
@@ -149,10 +194,11 @@ class TestParsePipelineResponse:
         schema = parse_pipeline_response(data)
         assert schema.name == "custompipeline"
         assert len(schema.steps) == 2
+        # Without optimizer, param_keys is empty
         step_a = next(s for s in schema.steps if s.name == "step_a")
-        assert step_a.param_keys == {"param1", "param2"}
+        assert step_a.param_keys == set()
 
-    def test_top_level_resolved_unknown(self):
+    def test_resolved_metadata_merged(self):
         data = {
             "name": "CustomNodes",
             "version": "1.0",
@@ -196,211 +242,85 @@ class TestParsePipelineResponse:
 
         assert schema.steps[1].output_schema is None
 
-    def test_top_level_resolved_known_pipeline(self):
+    def test_data_envelope_unwrap(self):
         data = {
-            "name": "TermNorm", "version": "v2.0",
-            "nodes": {
-                "web_search": {
-                    "type": "ExternalService",
-                    "config": {
-                        "schema_family": "search_results", "schema_version": 1,
-                        "prompt_family": "search_prompt", "prompt_version": 1,
+            "status": "success",
+            "data": {
+                "name": "TestPipeline",
+                "version": "2.0",
+                "nodes": {
+                    "entity_profiling": {
+                        "type": "LLMGeneration",
+                        "runtime": "backend",
+                        "config": {
+                            "schema_family": "entity_profile", "schema_version": 1,
+                            "temperature": 0.3,
+                        },
+                        "optimizer": {
+                            "param_keys": ["profiling_temperature"],
+                            "override_map": {"profiling_temperature": "temperature"},
+                            "langfuse_type": "generation",
+                        },
                     },
                 },
-            },
-            "resolved_schemas": {
-                "search_results/1": {
-                    "family": "search_results", "version": 1, "fields": ["sources"],
-                    "json_schema": {"properties": {
-                        "sources": {"type": "array", "description": "URLs found"},
-                    }},
-                },
-            },
-            "resolved_prompts": {
-                "search_prompt/1": {
-                    "family": "search_prompt", "version": 1,
-                    "template_variables": ["query"],
+                "resolved_schemas": {
+                    "entity_profile/1": {
+                        "family": "entity_profile", "version": 1,
+                        "fields": ["entity_name", "core_concept"],
+                        "json_schema": {"properties": {
+                            "entity_name": {"type": "string", "description": "Canonical name"},
+                            "core_concept": {"type": "string", "description": "Conceptual essence"},
+                        }},
+                    },
                 },
             },
         }
         schema = parse_pipeline_response(data)
-        assert len(schema.steps) == 6
-        ws = next(s for s in schema.steps if s.name == "web_search")
-        assert ws.output_schema is not None
-        assert ws.output_schema.family == "search_results"
-        assert ws.prompt_meta is not None
-        assert ws.prompt_meta.template_variables == ["query"]
 
+        assert schema.name == "testpipeline"
+        assert len(schema.steps) == 1
 
-def test_termnorm_default_no_hardcoded_metadata():
-    ep = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "entity_profiling")
-    lr = next(s for s in TERMNORM_DEFAULT_SCHEMA.steps if s.name == "llm_ranking")
+        ep = schema.steps[0]
+        assert ep.output_schema is not None
+        assert ep.output_schema.fields == ["entity_name", "core_concept"]
 
-    # No hardcoded registry metadata
-    assert ep.output_schema is None
-    assert ep.prompt_meta is None
-    assert lr.prompt_meta is None
+    def test_empty_response(self):
+        schema = parse_pipeline_response({})
+        assert schema.name == ""
+        assert len(schema.steps) == 0
 
-    # Structural fields preserved
-    assert ep.langfuse_type == "generation"
-    assert ep.observation_name == "entity_profiling"
-    assert len(ep.observation_mappings) == 1
-    assert ep.param_keys == {
-        "raw_content_limit", "profiling_temperature", "profiling_max_tokens",
-        "profiling_prompt", "profiling_schema", "profiling_model",
-    }
-    assert lr.langfuse_type == "generation"
-
-
-def test_data_envelope_unwrap():
-    data = {
-        "status": "success",
-        "data": {
-            "name": "TermNorm",
-            "version": "2.0",
+    def test_step_order_from_pipelines_default(self):
+        data = {
+            "name": "Test",
             "nodes": {
-                "entity_profiling": {
-                    "type": "LLMGeneration",
-                    "config": {
-                        "schema_family": "entity_profile", "schema_version": 1,
-                        "profiling_temperature": 0.3,
-                        "profiling_model": "llama-4-maverick",
-                        "raw_content_limit": 4000,
-                        "_internal_flag": True,
+                "step_c": {"type": "tool", "config": {}},
+                "step_a": {"type": "tool", "config": {}},
+                "step_b": {"type": "tool", "config": {}},
+            },
+            "pipelines": {"default": ["step_a", "step_b", "step_c"]},
+        }
+        schema = parse_pipeline_response(data)
+        assert [s.name for s in schema.steps] == ["step_a", "step_b", "step_c"]
+
+    def test_observation_mappings_with_is_llm(self):
+        data = {
+            "name": "Test",
+            "nodes": {
+                "llm_step": {
+                    "type": "generation",
+                    "config": {},
+                    "optimizer": {
+                        "observation_name": "llm_step",
+                        "observation_mappings": [
+                            {"pipeline_key": "output", "output_field": "result", "is_llm": True},
+                        ],
+                        "langfuse_type": "generation",
                     },
                 },
             },
-            "resolved_schemas": {
-                "entity_profile/1": {
-                    "family": "entity_profile", "version": 1,
-                    "fields": ["entity_name", "core_concept"],
-                    "json_schema": {"properties": {
-                        "entity_name": {"type": "string", "description": "Canonical name"},
-                        "core_concept": {"type": "string", "description": "Conceptual essence"},
-                    }},
-                },
-            },
-        },
-    }
-    schema = parse_pipeline_response(data)
-
-    # Must match known pipeline (not "unknown pipeline ''")
-    assert schema.name == "termnorm"
-    assert len(schema.steps) == 6
-
-    # Resolved metadata must be merged
-    ep = next(s for s in schema.steps if s.name == "entity_profiling")
-    assert ep.output_schema is not None
-    assert ep.output_schema.fields == ["entity_name", "core_concept"]
-    assert ep.output_schema.field_descriptions == {
-        "entity_name": "Canonical name", "core_concept": "Conceptual essence",
-    }
-
-    # current_config populated from node config, filtered to param_keys only
-    assert ep.current_config == {
-        "profiling_temperature": 0.3,
-        "profiling_model": "llama-4-maverick",
-        "raw_content_limit": 4000,
-    }
-    # Internal keys and non-param keys excluded
-    assert "_internal_flag" not in ep.current_config
-    assert "schema_family" not in ep.current_config
-
-
-def test_unknown_pipeline_current_config():
-    data = {
-        "name": "CustomPipeline",
-        "version": "1.0",
-        "nodes": {
-            "my_llm": {
-                "type": "LLMGeneration",
-                "config": {
-                    "temperature": 0.5,
-                    "model": "gpt-4",
-                    "max_tokens": 1000,
-                    "_cache_key": "abc",
-                },
-            },
-            "my_retriever": {
-                "type": "Retriever",
-                "config": {
-                    "top_k": 10,
-                    "threshold": 0.8,
-                },
-            },
-        },
-    }
-    schema = parse_pipeline_response(data)
-
-    llm_step = next(s for s in schema.steps if s.name == "my_llm")
-    assert llm_step.current_config == {
-        "temperature": 0.5,
-        "model": "gpt-4",
-        "max_tokens": 1000,
-    }
-    assert "_cache_key" not in llm_step.current_config
-
-    ret_step = next(s for s in schema.steps if s.name == "my_retriever")
-    assert ret_step.current_config == {"top_k": 10, "threshold": 0.8}
-
-
-def test_known_pipeline_metadata_from_live_response():
-    data = {
-        "name": "TermNorm", "version": "2.0",
-        "nodes": {
-            "entity_profiling": {
-                "type": "LLMGeneration",
-                "config": {
-                    "schema_family": "entity_profile", "schema_version": 1,
-                    "prompt_family": "entity_profiling", "prompt_version": 1,
-                },
-            },
-            "llm_ranking": {
-                "type": "LLMGeneration",
-                "config": {
-                    "prompt_family": "llm_ranking", "prompt_version": 1,
-                },
-            },
-        },
-        "resolved_schemas": {
-            "entity_profile/1": {
-                "family": "entity_profile", "version": 1,
-                "fields": ["entity_name", "core_concept"],
-                "json_schema": {"properties": {
-                    "entity_name": {"type": "string", "description": "Canonical name"},
-                    "core_concept": {"type": "string", "description": "Conceptual essence"},
-                }},
-            },
-        },
-        "resolved_prompts": {
-            "entity_profiling/1": {
-                "family": "entity_profiling", "version": 1,
-                "template_variables": ["query", "format_string", "combined_text"],
-            },
-            "llm_ranking/1": {
-                "family": "llm_ranking", "version": 1,
-                "template_variables": ["core_concept", "entity_profile_json", "matches"],
-            },
-        },
-    }
-    schema = parse_pipeline_response(data)
-
-    # entity_profiling gets both
-    ep = next(s for s in schema.steps if s.name == "entity_profiling")
-    assert ep.output_schema is not None
-    assert ep.output_schema.fields == ["entity_name", "core_concept"]
-    assert ep.output_schema.field_descriptions == {
-        "entity_name": "Canonical name", "core_concept": "Conceptual essence",
-    }
-    assert ep.prompt_meta is not None
-    assert ep.prompt_meta.template_variables == ["query", "format_string", "combined_text"]
-
-    # llm_ranking gets prompt_meta
-    lr = next(s for s in schema.steps if s.name == "llm_ranking")
-    assert lr.prompt_meta is not None
-    assert "core_concept" in lr.prompt_meta.template_variables
-
-    # Other steps unaffected
-    ws = next(s for s in schema.steps if s.name == "web_search")
-    assert ws.output_schema is None
-    assert ws.prompt_meta is None
+        }
+        schema = parse_pipeline_response(data)
+        step = schema.steps[0]
+        assert step.observation_name == "llm_step"
+        assert len(step.observation_mappings) == 1
+        assert step.observation_mappings[0].is_llm is True

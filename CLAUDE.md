@@ -106,7 +106,7 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
 | `search/grid_core.py` | Grid search over Layer 1 prompt fields |
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation and round winner selection |
 | `backend_client.py` | HTTP client for backend APIs (sync, replay, `fetch_pipeline()`) |
-| `pipeline_discovery.py` | Pipeline schema factory (`TERMNORM_DEFAULT_SCHEMA` + live metadata merging) |
+| `pipeline_discovery.py` | Pipeline schema factory (parses `GET /pipeline` response into `PipelineSchema`) |
 | `project_store.py` | Facade over focused store modules in `stores/` |
 | `campaign/feedback_cycle.py` | Iterative optimization: 3-loop escalation (L1→L2→L3) with patience-based stopping |
 | `campaign/layer_transitions.py` | L2 (context + meta-settings + l2_directive), L3 (plan) |
@@ -126,7 +126,9 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
 
 ### Pipeline discovery — ownership principle
 
-**TermNorm owns all registry artifacts** (schemas, prompts). `TERMNORM_DEFAULT_SCHEMA` carries structural metadata only. Registry-owned metadata (`StepOutputSchema`, `StepPromptMeta`) comes from the live response. `parse_pipeline_response()` merges live metadata — **live always wins**.
+**TermNorm owns all pipeline metadata** — step descriptions, param mappings, observation config, node roles — served via `GET /pipeline`. `parse_pipeline_response()` builds `PipelineSchema` entirely from the live response (no hardcoded fallback). Each node carries an `optimizer` sub-object with PromptPotter-consumed metadata (param_keys, override_map, observation_mappings). Registry-owned metadata (`StepOutputSchema`, `StepPromptMeta`) is resolved from `resolved_schemas`/`resolved_prompts` in the response.
+
+**No backend-specific constants in PromptPotter code.** Do NOT add hardcoded pipeline schemas, step names, param keys, or any other backend-specific knowledge to PromptPotter services or notebooks. All pipeline structure must come from the live `GET /pipeline` response. The only exception is tests, which may use inline test schemas. If PromptPotter needs new metadata from a backend, add it to the backend's `pipeline.json` → `optimizer` section and consume it generically via `parse_pipeline_response()`.
 
 ### ProjectStore disk layout
 

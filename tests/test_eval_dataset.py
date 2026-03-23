@@ -2,10 +2,53 @@
 
 from unittest.mock import MagicMock
 
-from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
+from api.models.pipeline_schema import ObservationMapping, PipelineSchema, PipelineStep
 from api.services.search.eval_dataset import (
     _extract_eval_from_traces,
     load_eval_dataset,
+)
+
+
+# Minimal test schema matching TermNorm's observation structure
+_TEST_SCHEMA = PipelineSchema(
+    name="test",
+    required_step="entity_profile",
+    steps=[
+        PipelineStep(
+            name="web_search",
+            observation_name="web_search",
+            observation_mappings=[
+                ObservationMapping(pipeline_key="web_sources", output_field="sources"),
+                ObservationMapping(pipeline_key="web_search_status", output_field="status"),
+            ],
+        ),
+        PipelineStep(
+            name="entity_profiling",
+            observation_name="entity_profiling",
+            observation_mappings=[
+                ObservationMapping(pipeline_key="entity_profile", is_llm=True),
+            ],
+        ),
+        PipelineStep(
+            name="token_matching",
+            observation_name="token_matching",
+            observation_mappings=[
+                ObservationMapping(
+                    pipeline_key="token_matched_candidates", output_field="candidates",
+                ),
+            ],
+        ),
+        PipelineStep(
+            name="llm_ranking",
+            observation_name="llm_ranking",
+            observation_mappings=[
+                ObservationMapping(
+                    pipeline_key="ranked_candidates",
+                    output_field="ranked_candidates", is_llm=True,
+                ),
+            ],
+        ),
+    ],
 )
 
 
@@ -82,7 +125,7 @@ def test_full_trace_extracts_all_fields():
             _make_obs("web_search", WEB_SEARCH_OUTPUT),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=_TEST_SCHEMA)
 
     assert len(result) == 1
     pd = result[0]["pipeline_data"]
@@ -101,7 +144,7 @@ def test_minimal_trace_only_required():
             _make_obs("entity_profiling", ENTITY_PROFILE_OUTPUT),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=_TEST_SCHEMA)
 
     assert len(result) == 1
     pd = result[0]["pipeline_data"]
@@ -120,7 +163,7 @@ def test_optional_observations_missing():
             _make_obs("token_matching", TOKEN_MATCHING_OUTPUT),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=_TEST_SCHEMA)
 
     pd = result[0]["pipeline_data"]
     assert "web_sources" not in pd
@@ -139,7 +182,7 @@ def test_missing_entity_profile_skips():
             _make_obs("web_search", WEB_SEARCH_OUTPUT),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=_TEST_SCHEMA)
     assert len(result) == 0
 
 
@@ -155,7 +198,7 @@ def test_llm_provider_extraction():
                       metadata={"model": "model-b"}),
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=_TEST_SCHEMA)
     assert result[0]["pipeline_data"]["llm_provider"] == "model-a"
 
     # No metadata -> no llm_provider
@@ -165,7 +208,7 @@ def test_llm_provider_extraction():
             _make_obs("entity_profiling", ENTITY_PROFILE_OUTPUT),
         ],
     )
-    result2 = _extract_eval_from_traces(_make_exp([trace2]), schema=TERMNORM_DEFAULT_SCHEMA)
+    result2 = _extract_eval_from_traces(_make_exp([trace2]), schema=_TEST_SCHEMA)
     assert "llm_provider" not in result2[0]["pipeline_data"]
 
 
@@ -180,13 +223,11 @@ def test_total_time_from_scores():
             {"name": "latency_ms", "value": 1500},
         ],
     )
-    result = _extract_eval_from_traces(_make_exp([trace]), schema=TERMNORM_DEFAULT_SCHEMA)
+    result = _extract_eval_from_traces(_make_exp([trace]), schema=_TEST_SCHEMA)
     assert result[0]["pipeline_data"]["total_time"] == 1.5
 
 
 def test_custom_schema_obs_mapping():
-
-    from api.models.pipeline_schema import ObservationMapping, PipelineSchema, PipelineStep
 
     custom_schema = PipelineSchema(
         name="custom",
@@ -238,7 +279,7 @@ def test_load_eval_dataset():
     mock_store.backends.load_sync.return_value = exp_data
     mock_store.executions.list_all.return_value = []
 
-    result = load_eval_dataset(mock_store, "backend-1", "exp-1")
+    result = load_eval_dataset(mock_store, "backend-1", "exp-1", schema=_TEST_SCHEMA)
 
     assert len(result) == 1
     assert result[0]["query"] == "STEEL-001 / hot rolled"

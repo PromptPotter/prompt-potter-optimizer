@@ -187,6 +187,7 @@ def push_run(
     backend_id: str,
     run_id: str,
     *,
+    schema: Any | None = None,
     query_to_item_id: dict[str, str] | None = None,
     session_id: str | None = None,
     _state: dict[str, Any] | None = None,
@@ -257,9 +258,8 @@ def push_run(
         if not trace_id:
             continue
 
-        if pipeline:
-            from api.services.pipeline_discovery import TERMNORM_DEFAULT_SCHEMA
-            nodes = extract_pipeline_nodes(pipeline, query, schema=TERMNORM_DEFAULT_SCHEMA)
+        if pipeline and schema:
+            nodes = extract_pipeline_nodes(pipeline, query, schema=schema)
             for node in nodes:
                 lf.create_span(
                     trace_id, node.name, node.input, node.output, node.metadata,
