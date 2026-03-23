@@ -5,10 +5,12 @@ import pandas as pd
 import pytest
 
 from api.config.settings import load_variant_library
+from api.services.prompt_eval import _error_category
 from api.services.search import select_grid_winner
 from api.services.search.smart_search import (
     sensitivity_scan,
     _profiles_from_rows,
+    _dominant_error_category,
 )
 from api.services.pipeline_discovery import parse_pipeline_response
 
@@ -334,3 +336,171 @@ def test_parse_pipeline_response_no_available_models():
     }
     schema = parse_pipeline_response(response)
     assert schema.available_models == []
+
+
+# ---------------------------------------------------------------------------
+# Error classification tests
+# ---------------------------------------------------------------------------
+
+class TestErrorCategory:
+    def test_client_prefix(self):
+        assert _error_category("[CLIENT] HTTP 400: bad request") == "CLIENT"
+
+    def test_server_prefix(self):
+        assert _error_category("[SERVER] HTTP 500: internal") == "SERVER"
+
+    def test_connection_prefix(self):
+        assert _error_category("[CONNECTION] timeout") == "CONNECTION"
+
+    def test_no_prefix(self):
+        assert _error_category("some old-style error") is None
+
+    def test_none_input(self):
+        assert _error_category(None) is None
+
+    def test_empty_string(self):
+        assert _error_category("") is None
+
+
+class TestDominantErrorCategory:
+    def test_all_client(self):
+        results = [
+            {"error": "[CLIENT] HTTP 400: bad"},
+            {"error": "[CLIENT] HTTP 400: bad"},
+            {"error": "skipped_after_client_error"},
+        ]
+        assert _dominant_error_category(results) == "CLIENT"
+
+    def test_mixed_with_connection_dominant(self):
+        results = [
+            {"error": "[CONNECTION] timeout"},
+            {"error": "[CONNECTION] timeout"},
+            {"error": "[SERVER] HTTP 500: err"},
+        ]
+        assert _dominant_error_category(results) == "CONNECTION"
+
+    def test_no_categorized_errors(self):
+        results = [
+            {"error": "skipped_after_consecutive_errors"},
+            {"error": "skipped_after_consecutive_errors"},
+        ]
+        assert _dominant_error_category(results) is None
+
+    def test_no_errors(self):
+        results = [{"error": None}, {"error": None}]
+        assert _dominant_error_category(results) is None
+
+
+@pytest.mark.asyncio
+async def test_scan_baseline_client_error_message(scan_eval_mock):
+    """Baseline all-CLIENT-errors should mention config, not 'backend down'."""
+    from api.models.prompt_state import PromptState
+    from api.models.search_point import SearchPoint
+
+    baseline = PromptState(instruction="test", persona="default_persona")
+    sp = SearchPoint(
+        prompt_state=baseline,
+        pipeline_params={"steps": ["llm_ranking"]},
+    )
+    scan_variants = {"persona": ["default_persona", "expert"]}
+    eval_data = _make_eval_data(4)
+
+    events: list[dict] = []
+
+    def _mock_eval(search_point, data, client, **kw):
+        return (
+            [{"hit": False, "query": d["query"],
+              "error": "[CLIENT] HTTP 400: bad"} for d in data],
+            {"accuracy": 0.0, "hits": 0, "total": 4, "errors": 4},
+            False,
+        )
+
+    scan_eval_mock(_mock_eval)
+
+    df, profiles = await sensitivity_scan(
+        sp, scan_variants, eval_data, backend_client=None,
+        progress_cb=events.append,
+    )
+    assert df.empty
+    abort_events = [e for e in events if e.get("type") == "scan_aborted"]
+    assert len(abort_events) == 1
+    reason = abort_events[0]["reason"]
+    assert "client errors" in reason.lower()
+    assert "backend may be down" not in reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_batch_fast_abort_on_client_error(monkeypatch):
+    """evaluate_prompt_batch should abort after first CLIENT error."""
+    from api.models.prompt_state import PromptState
+    from api.models.search_point import SearchPoint
+
+    import api.services.prompt_eval as _pe
+
+    call_count = 0
+
+    def _counting_eval(query_data, backend_client, rendered, **kw):
+        nonlocal call_count
+        call_count += 1
+        return {
+            "query": query_data["query"],
+            "predicted": "ERROR",
+            "ground_truth": query_data.get("ground_truth", ""),
+            "hit": False,
+            "score": 0.0,
+            "error": "[CLIENT] HTTP 400: Bad Request",
+            "pipeline_data": None,
+        }
+
+    monkeypatch.setattr(_pe, "backend_reranker_eval", _counting_eval)
+
+    ps = PromptState(instruction="test")
+    sp = SearchPoint(prompt_state=ps)
+    eval_data = _make_eval_data(10)
+
+    results = _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    # Only 1 actual backend call — the rest are skipped
+    assert call_count == 1
+    assert len(results) == 10
+    assert results[0]["error"] == "[CLIENT] HTTP 400: Bad Request"
+    assert all(
+        r["error"] == "skipped_after_client_error"
+        for r in results[1:]
+    )
+
+
+@pytest.mark.asyncio
+async def test_batch_server_errors_use_consecutive_threshold(monkeypatch):
+    """Server errors should still require 3 consecutive failures before abort."""
+    from api.models.prompt_state import PromptState
+    from api.models.search_point import SearchPoint
+
+    import api.services.prompt_eval as _pe
+
+    call_count = 0
+
+    def _server_error_eval(query_data, backend_client, rendered, **kw):
+        nonlocal call_count
+        call_count += 1
+        return {
+            "query": query_data["query"],
+            "predicted": "ERROR",
+            "ground_truth": query_data.get("ground_truth", ""),
+            "hit": False,
+            "score": 0.0,
+            "error": "[SERVER] HTTP 500: Internal Server Error",
+            "pipeline_data": None,
+        }
+
+    monkeypatch.setattr(_pe, "backend_reranker_eval", _server_error_eval)
+
+    ps = PromptState(instruction="test")
+    sp = SearchPoint(prompt_state=ps)
+    eval_data = _make_eval_data(10)
+
+    results = _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    # 3 actual calls (consecutive threshold), then 7 skipped
+    assert call_count == 3
+    assert len(results) == 10
+    skipped = [r for r in results if r["error"] == "skipped_after_consecutive_errors"]
+    assert len(skipped) == 7

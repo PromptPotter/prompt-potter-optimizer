@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
+import httpx
+
 from api.evaluators.base import EvalResult
 from api.evaluators.exact_match import ExactMatchEvaluator
 from api.models.hashing import HASH_TRUNCATE
@@ -28,6 +30,15 @@ if TYPE_CHECKING:
 _evaluator = ExactMatchEvaluator({"strip": True})
 
 logger = logging.getLogger(__name__)
+
+
+def _error_category(error: str | None) -> str | None:
+    """Extract error category from a ``[TAG] ...`` prefixed error string."""
+    if error and error.startswith("["):
+        bracket_end = error.find("]")
+        if bracket_end > 0:
+            return error[1:bracket_end]
+    return None
 
 
 @dataclass
@@ -214,6 +225,37 @@ def backend_reranker_eval(
             "error": None,
             "pipeline_data": _extract_pipeline_data(data, ranked, pipeline_schema),
         }
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        if 400 <= code < 500:
+            tag = "CLIENT"
+            advice = "Check pipeline configuration and request parameters."
+        else:
+            tag = "SERVER"
+            advice = "Backend may be experiencing issues."
+        error_msg = f"[{tag}] HTTP {code}: {exc} — {advice}"
+        logger.warning("backend_reranker_eval %s for %s: %s", tag, query[:60], error_msg)
+        return {
+            "query": query,
+            "predicted": "ERROR",
+            "ground_truth": ground_truth,
+            "hit": False,
+            "score": 0.0,
+            "error": error_msg,
+            "pipeline_data": None,
+        }
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        error_msg = f"[CONNECTION] {exc} — Backend may be down or unreachable."
+        logger.warning("backend_reranker_eval CONNECTION for %s: %s", query[:60], error_msg)
+        return {
+            "query": query,
+            "predicted": "ERROR",
+            "ground_truth": ground_truth,
+            "hit": False,
+            "score": 0.0,
+            "error": error_msg,
+            "pipeline_data": None,
+        }
     except Exception as exc:
         logger.warning("backend_reranker_eval failed for %s: %s", query[:60], exc)
         return {
@@ -274,7 +316,7 @@ def evaluate_prompt_batch(
                 cached_queries.get(qd["query"])
                 if cached_queries else None
             )
-            if cached is not None:
+            if cached is not None and not cached.get("error"):
                 result = {**cached, "cached": True}
                 n_reused += 1
             else:
@@ -289,6 +331,26 @@ def evaluate_prompt_batch(
                 # Cached results don't count toward consecutive error tracking
                 pass
             elif result.get("error"):
+                cat = _error_category(result["error"])
+                if cat == "CLIENT":
+                    # Client errors are deterministic — same config will
+                    # fail for every query.  Abort immediately.
+                    logger.warning(
+                        "Aborting eval: client error (4xx) on query %d. "
+                        "Marking remaining %d queries as errors.",
+                        i + 1, len(eval_data) - i - 1,
+                    )
+                    for remaining_qd in eval_data[i + 1:]:
+                        results.append({
+                            "query": remaining_qd["query"],
+                            "predicted": "ERROR",
+                            "ground_truth": remaining_qd.get("ground_truth", ""),
+                            "hit": False,
+                            "score": 0.0,
+                            "error": "skipped_after_client_error",
+                            "pipeline_data": None,
+                        })
+                    break
                 consecutive_errors += 1
                 if consecutive_errors >= max_consecutive_errors:
                     logger.warning(

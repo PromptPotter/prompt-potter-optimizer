@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from api.models.prompt_state import PromptState
 from api.models.search_point import SearchPoint, _PROMPT_STATE_FIELDS
 from api.services.project_store import ProjectStore
-from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
+from api.services.prompt_eval import EvalContext, evaluate_prompt_cached, _error_category
 from api.services.search.utils import preview as _preview
 
 if TYPE_CHECKING:
@@ -25,6 +25,17 @@ if TYPE_CHECKING:
     from api.services.backend_client import BackendClient
 
 logger = logging.getLogger(__name__)
+
+
+def _dominant_error_category(results: list) -> str | None:
+    """Return the most common error category across errored results."""
+    from collections import Counter
+    cats = [_error_category(r.get("error")) for r in results if r.get("error")]
+    cats = [c for c in cats if c]
+    if not cats:
+        return None
+    return Counter(cats).most_common(1)[0][0]
+
 
 # ---------------------------------------------------------------------------
 # Progress event types
@@ -462,10 +473,23 @@ async def sensitivity_scan(
     # Circuit breaker: abort if baseline eval is all-errors
     baseline_errors = baseline_scores.get("errors", 0)
     if baseline_errors == baseline_scores["total"] > 0:
-        reason = (
-            f"Baseline eval failed: all {baseline_scores['total']} queries errored. "
-            "Backend may be down."
-        )
+        dominant = _dominant_error_category(baseline_results)
+        if dominant == "CLIENT":
+            reason = (
+                f"Baseline eval failed: all {baseline_scores['total']} queries "
+                "returned client errors (HTTP 4xx). "
+                "Check pipeline configuration and request parameters."
+            )
+        elif dominant == "CONNECTION":
+            reason = (
+                f"Baseline eval failed: all {baseline_scores['total']} queries "
+                "failed to connect. Backend may be down or unreachable."
+            )
+        else:
+            reason = (
+                f"Baseline eval failed: all {baseline_scores['total']} queries "
+                "errored. Backend may be experiencing issues."
+            )
         logger.error("Aborting scan: %s", reason)
         _cb({"type": "scan_aborted", "reason": reason})
         return pd.DataFrame(), []
@@ -554,9 +578,16 @@ async def sensitivity_scan(
             if not cached and variant_errors == scores["total"] > 0:
                 _consecutive_all_error += 1
                 if _consecutive_all_error >= 2:
+                    dominant = _dominant_error_category(results)
+                    if dominant == "CLIENT":
+                        detail = "Client errors (HTTP 4xx). Check pipeline configuration."
+                    elif dominant == "CONNECTION":
+                        detail = "Backend may be down or unreachable."
+                    else:
+                        detail = "Backend may be experiencing issues."
                     reason = (
                         f"Aborting scan: {_consecutive_all_error} consecutive "
-                        "variant evals returned all errors. Backend may be down."
+                        f"variant evals returned all errors. {detail}"
                     )
                     logger.error(reason)
                     profiles = _profiles_from_rows(rows, axes, len(eval_data))
