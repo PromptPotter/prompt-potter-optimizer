@@ -66,8 +66,8 @@ The AI Loop is itself a 4-step pipeline, implemented by `feedback_cycle.py`:
 
 | Step | Purpose | Wraps |
 |------|---------|-------|
-| **l1_generate** | Candidate generation (also init mode) | `generate_candidates()` / `restructure_context()` |
-| **l1_evaluate** | Eval + winner selection + critique + styles | `evaluate_and_select_winner()` + `CritiqueAgent.run()` + `sample_thinking_styles()` |
+| **l1_generate** | Candidate generation (also init mode) | `l1_generate()` / `restructure_context()` in `prompt_optimizer.py` |
+| **l1_evaluate** | Eval + winner selection + critique + styles | `l1_evaluate()` + `CritiqueAgent.run()` + `sample_thinking_styles()` |
 | **l2_refine_context** | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` |
 | **l3_modify_plan** | Strategic replanning on L2 stall | `modify_plan()` in `layer_transitions.py` |
 
@@ -85,7 +85,7 @@ See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full servic
 
 ## Data Model
 
-**SearchPoint** bundles `PromptState` + `model` + `temperature` + `pipeline_params` — the four search-space dimensions for one evaluation. **PipelineSchema** (what pipeline) provides the structural context: `f(SearchPoint, PipelineSchema, eval_data) → scores`. See [`api/models/CLAUDE.md`](../../api/models/CLAUDE.md) for field details, derivation methods, and factory patterns.
+**SearchPoint** bundles `PromptState` + `model` + `temperature` + `pipeline_params` — the four search-space dimensions for one evaluation. **PipelineSchema** (what pipeline) provides the structural context: `f(SearchPoint, PipelineSchema, eval_data) → scores`. See `api/models/search_point.py` and `api/models/pipeline_schema.py` for field details, derivation methods, and factory patterns.
 
 **ProjectStore** file layout and store module breakdown: see [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) § "Store layout".
 

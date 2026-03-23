@@ -108,8 +108,8 @@ The feedback cycle is itself a 4-step pipeline, designed to be modeled using the
 
 | Step | Purpose | Function | Sub-tools |
 |------|---------|----------|-----------|
-| `l1_generate` | Candidate generation | `generate_candidates()` in `prompt_optimizer.py` | Scan context enrichment (optional) |
-| `l1_evaluate` | Eval + winner selection | `evaluate_and_select_winner()` in `prompt_optimizer.py` | `CritiqueAgent.run()`, `sample_thinking_styles()` |
+| `l1_generate` | Candidate generation | `l1_generate()` in `prompt_optimizer.py` | Scan context enrichment (optional) |
+| `l1_evaluate` | Eval + winner selection | `l1_evaluate()` in `prompt_optimizer.py` | `CritiqueAgent.run()`, `sample_thinking_styles()` |
 | `l2_refine_context` | Context/parameter/task_context tuning on L1 stall | `refine_context()` in `layer_transitions.py` | Pipeline param adjustment (with schema), task_context refinement |
 | `l3_modify_plan` | Strategic replanning on L2 stall or escalation | `modify_plan()` in `layer_transitions.py` | Pipeline param adjustment, escalation context |
 

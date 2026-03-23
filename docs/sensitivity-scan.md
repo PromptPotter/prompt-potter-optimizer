@@ -78,7 +78,7 @@ Explores a cartesian product of prompt field variants with distance-weighted sam
 
 ### Grid Axes
 
-Default to `load_variant_library()["prompt_fields"]` from `variant_library.yaml`. Override with `custom_axes`:
+Default to `load_variant_library()["prompt_fields"]` from `api/config/prompt_variants.json`. Override with `custom_axes`:
 
 ```python
 grid_config = {

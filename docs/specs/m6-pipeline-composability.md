@@ -71,7 +71,7 @@ Gaps A-J identified and resolved during planning. Key decisions: `FeedbackCycleN
 
 ## Deliverables
 
-**Waves 0-3 (complete):** See [`docs/connectors/termnorm.md`](../connectors/termnorm.md) for the pipeline config contract. PipelineSchema model and factory: [`api/models/pipeline_schema.py`](../../api/models/pipeline_schema.py), [`api/services/pipeline_discovery.py`](../../api/services/pipeline_discovery.py). See [`api/models/CLAUDE.md`](../../api/models/CLAUDE.md) for field details.
+**Waves 0-3 (complete):** See [`docs/connectors/termnorm.md`](../connectors/termnorm.md) for the pipeline config contract. PipelineSchema model and factory: [`api/models/pipeline_schema.py`](../../api/models/pipeline_schema.py), [`api/services/pipeline_discovery.py`](../../api/services/pipeline_discovery.py).
 
 **Wave 4: Workflow Nodes** — Deferred to M8. See Work Packages section below.
 

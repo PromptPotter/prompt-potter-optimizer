@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Modernized all type hints to PEP 604 (`X | None`, `list[str]`, `dict[K, V]`) across 12 files
-- Replaced `print()` with `logger.warning()` in `api/evaluators/base.py`
+- Replaced `print()` with `logger.warning()` in evaluators
 - Fixed all 12 ruff lint errors (E501 line length, E402 import order)
 - Added project metadata to `pyproject.toml` (license, authors, keywords, classifiers, URLs)
 - Standardized `api/services/stores/` facade pattern in `ProjectStore`

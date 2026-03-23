@@ -43,7 +43,7 @@ All core logic in `api/services/`.
 
 **OptSearchPoint** — optimizer-level checkpoint per round. Bundles critique_text, thinking_styles, plan, optimizer_params, `task_context` (structured domain context refinable by L2), and content_hashes linking to target evaluation data.
 
-**EvalContext** — groups infrastructure for evaluation. See [`api/models/CLAUDE.md`](../api/models/CLAUDE.md).
+**EvalContext** — groups infrastructure for evaluation (defined in `api/services/prompt_eval.py`).
 
 ## Evaluation Flow
 
@@ -71,8 +71,8 @@ The optimizer itself is a 4-step pipeline, designed to be modeled using the same
 
 | Step | Purpose | Current function | Trigger |
 |------|---------|------------------|---------|
-| `l1_generate` | Candidate generation (sole pipeline_params decider) | `generate_candidates()` in `prompt_optimizer.py` | Every round (also init mode via `restructure_context()`) |
-| `l1_evaluate` | Eval + winner selection + critique | `evaluate_and_select_winner()` in `prompt_optimizer.py` | Every round |
+| `l1_generate` | Candidate generation (sole pipeline_params decider) | `l1_generate()` in `prompt_optimizer.py` | Every round (also init mode via `restructure_context()`) |
+| `l1_evaluate` | Eval + winner selection + critique | `l1_evaluate()` in `prompt_optimizer.py` | Every round |
 | `l2_refine_context` | Situation context + meta-settings (creativity, n_variants, sample_size) | `refine_context()` in `layer_transitions.py` | L1 patience exhausted or degradation escalation |
 | `l3_modify_plan` | Strategic replanning | `modify_plan()` in `layer_transitions.py` | L2 patience exhausted OR `EscalationCheck(target="l3")`  |
 

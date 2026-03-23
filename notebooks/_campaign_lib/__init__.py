@@ -58,7 +58,7 @@ __all__ = [  # noqa: F405
     "load_experiment_config", "apply_experiment_overrides",
     "select_and_seed_grid_winner",
     # Notebook-facing wrappers
-    "show_grid_overview", "smoke_test_override",
+    "show_grid_overview",
     # Pipeline snapshot
     "show_pipeline_snapshot",
     # Scan analytics
