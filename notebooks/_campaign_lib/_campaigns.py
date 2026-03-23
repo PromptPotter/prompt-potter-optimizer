@@ -20,6 +20,7 @@ __all__ = [
     "load_experiment_config",
     "show_experiment_dashboard",
     "apply_experiment_overrides",
+    "load_and_apply_experiment",
 ]
 
 
@@ -181,6 +182,28 @@ def load_experiment_config(
     if not campaign:
         return None
     return campaign.get("config", {})
+
+
+def load_and_apply_experiment(
+    svc: dict,
+    campaign_config: dict,
+    experiment_id: str,
+    pipeline_params: dict | None = None,
+) -> dict | None:
+    """Load stored experiment config, apply overrides, return pipeline_params.
+
+    Convenience wrapper used by the notebook's experiment dashboard cell.
+    Returns updated *pipeline_params* (or the original if nothing changed).
+    """
+    stored_cfg = load_experiment_config(
+        svc["store"], svc["backend_id"], experiment_id,
+    )
+    if stored_cfg:
+        pp_override = apply_experiment_overrides(campaign_config, stored_cfg)
+        if pp_override:
+            pipeline_params = pp_override
+        print(f"  Loaded config from experiment {experiment_id}")
+    return pipeline_params
 
 
 def show_experiment_dashboard(
