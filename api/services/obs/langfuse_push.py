@@ -35,7 +35,6 @@ logger = logging.getLogger(__name__)
 # Fixed ordering for origin groups
 ORIGIN_ORDER = [
     "baseline",
-    "grid_search",
     "sensitivity_scan",
     "feedback_cycle",
     "smart_search_winner",

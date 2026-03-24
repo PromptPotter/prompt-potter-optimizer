@@ -8,7 +8,6 @@ interactive notebook use.
 from ._display import *    # noqa: F403
 from ._setup import *      # noqa: F403
 from ._eval import *       # noqa: F403
-from ._grid import *       # noqa: F403
 from ._search import *     # noqa: F403
 from ._campaigns import *  # noqa: F403
 from ._langfuse import *   # noqa: F403
@@ -35,12 +34,6 @@ __all__ = [  # noqa: F405
     "run_coverage_diagnostic",
     # Candidates & suggestions
     "generate_candidates",
-    # Grid search
-    "validate_grid_config", "build_grid_points", "run_grid_search",
-    "display_grid_results", "select_grid_winner", "analyze_grid_results",
-    "resume_or_build_grid", "merge_grid_results",
-    # Grid plan discovery
-    "list_grid_plans", "load_grid_plan_results",
     # Pipeline config
     "configure_pipeline",
     # Smart search
@@ -48,7 +41,7 @@ __all__ = [  # noqa: F405
     "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
     "advisory_to_scan_variants", "resolve_scan_variants",
     "select_scan_winner_notebook", "build_historical_index", "load_task_description",
-    "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
+    "show_scan_coverage", "show_data_inventory",
     "audit_historical_data", "run_scan_advisor", "seed_campaign_from_scan",
     "prepare_scan_baseline", "preview_advisor_prompt", "display_variant_library",
     # Campaign
@@ -56,9 +49,6 @@ __all__ = [  # noqa: F405
     "display_progress",
     "list_campaigns", "diff_campaign_config", "show_experiment_dashboard",
     "load_experiment_config", "apply_experiment_overrides", "load_and_apply_experiment",
-    "select_and_seed_grid_winner",
-    # Notebook-facing wrappers
-    "show_grid_overview",
     # Pipeline snapshot
     "show_pipeline_snapshot",
     # Scan analytics

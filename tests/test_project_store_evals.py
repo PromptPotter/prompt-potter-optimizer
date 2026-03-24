@@ -126,11 +126,11 @@ def test_build_dataset_run_data_omits_empty_pipeline_params():
 
 def test_source_persisted_in_index(tmp_store):
     data = _make_run_data()
-    data["source"] = "grid_search"
+    data["source"] = "sensitivity_scan"
     tmp_store.dataset_runs.save("b1", data["run_id"], data)
 
     entries = tmp_store.dataset_runs.list_all("b1")
-    assert entries[0]["source"] == "grid_search"
+    assert entries[0]["source"] == "sensitivity_scan"
 
 
 def _make_alias_run(run_id, rp_hash, model="m1", temperature=0.5,

@@ -21,10 +21,7 @@ from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
     from api.models.search_point import SearchPoint
-from api.services.search.plan_persistence import (
-    deserialize_grid_plan,
-    deserialize_smart_search_plan,
-)
+from api.services.search.plan_persistence import deserialize_smart_search_plan
 from api.services.search.smart_search import DEFAULT_DIAGNOSTIC_QUERIES
 from api.services.search.utils import preview as _preview
 
@@ -426,7 +423,7 @@ def build_data_inventory(
 ) -> dict:
     """Summarise what the historical index contains, organised by axis.
 
-    Discovers plan baselines from stored grid / smart-search plans, then
+    Discovers plan baselines from stored smart-search plans, then
     for every indexed prompt that belongs to a plan, compares it to **its
     own plan baseline** and tallies which Layer 1 axes were changed.
 
@@ -437,22 +434,6 @@ def build_data_inventory(
     #    rp_hash -> (PromptState, plan_baseline_ps)
     rp_to_ps: dict[str, tuple[PromptState, PromptState]] = {}
     baseline_rp_hashes: set[str] = set()
-
-    # Grid plans
-    for summary in store.grid_plans.list_all(backend_id):
-        plan_id = summary.get("plan_id", "")
-        if not plan_id:
-            continue
-        plan_data = store.grid_plans.load(backend_id, plan_id)
-        if not plan_data:
-            continue
-        (_, state_lookup, _, _, _, baseline_ps) = deserialize_grid_plan(plan_data)
-        bl_hash = hashlib.sha256(baseline_ps.render().encode()).hexdigest()[:HASH_TRUNCATE]
-        baseline_rp_hashes.add(bl_hash)
-        rp_to_ps.setdefault(bl_hash, (baseline_ps, baseline_ps))
-        for ps in state_lookup.values():
-            h = hashlib.sha256(ps.render().encode()).hexdigest()[:HASH_TRUNCATE]
-            rp_to_ps.setdefault(h, (ps, baseline_ps))
 
     # Smart search plans
     pipeline_params: dict[str, dict] = {}

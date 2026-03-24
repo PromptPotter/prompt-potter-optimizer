@@ -139,7 +139,7 @@ The optimizer steps are building block nodes declared in [`api/config/optimizer_
 
 ### Experiment Dashboard
 
-`show_experiment_dashboard()` is the notebook entry point for experiment management. Shows all campaigns with inline config, dataset_run summary by source, and active campaign detection. `EXPERIMENT_ID` set in the dashboard controls all downstream cells — scan, grid, feedback cycle, manual round, save winner.
+`show_experiment_dashboard()` is the notebook entry point for experiment management. Shows all campaigns with inline config, dataset_run summary by source, and active campaign detection. `EXPERIMENT_ID` set in the dashboard controls all downstream cells — scan, feedback cycle, manual round, save winner.
 
 ### Phase Events
 
@@ -163,7 +163,6 @@ Each event: `phase` (str), `event` ("enter"/"exit"), `round` (int or None), `dat
 ```python
 campaign_config = {
     "sample_size": 35,              # queries per eval step (0 = all)
-    "exploration_rate": 0.5,        # grid search: 0.0=conservative, 1.0=aggressive
     "exclude_steps": ["llm_ranking"],  # pipeline steps to skip
     "optimization": {
         "n_variants": 5,
@@ -185,14 +184,6 @@ campaign_config = {
         "critique": None,          # override bootstrap critique (str)
     },
     "eval_llm": { ... },
-    "grid_search": {
-        "grid_budget": 35,
-        "sample_size": 1,
-        "shared_queries": False,
-        "seed": 42,
-        "top_k": 5,
-        "use_defaults": True,
-    },
 }
 ```
 

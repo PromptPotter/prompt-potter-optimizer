@@ -42,7 +42,6 @@ class TestClassifyRunOrigin:
         ("unknown_run_xyz", "", "other"),
         ("", "", "other"),
         ("grid_00230b37", "baseline", "baseline"),
-        ("grid_00230b37", "grid_search", "grid_search"),
         ("any_id", "sensitivity_scan", "sensitivity_scan"),
         ("any_id", "feedback_cycle", "feedback_cycle"),
     ])

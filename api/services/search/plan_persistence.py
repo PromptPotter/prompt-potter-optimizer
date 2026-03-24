@@ -1,105 +1,15 @@
-"""Grid plan and smart search plan persistence.
+"""Smart search plan persistence.
 
 Stable identity hashing, serialization, and deserialization for
-grid search and smart search plans.
+smart search plans.
 """
 
 import hashlib
 import json
-from typing import Any
 
 from api.models.prompt_state import PromptState
 
-GRIDPLAN_PREFIX = "gridplan_"
 SSPLAN_PREFIX = "ssplan_"
-
-
-# ---------------------------------------------------------------------------
-# Grid plan persistence
-# ---------------------------------------------------------------------------
-
-
-def grid_plan_identity(
-    grid_axes: dict,
-    baseline_instruction: str,
-    context_input: Any,
-    grid_budget: int,
-    exploration_rate: float,
-    seed: int,
-) -> str:
-    """Compute a stable identity hash for a grid search plan.
-
-    The hash covers user-controlled inputs only so the same config
-    produces the same plan ID across kernel restarts.
-    """
-    payload = json.dumps(
-        {
-            "grid_axes": grid_axes,
-            "baseline_instruction": baseline_instruction,
-            "context_input": context_input
-            if isinstance(context_input, str)
-            else json.dumps(context_input, sort_keys=True),
-            "grid_budget": grid_budget,
-            "exploration_rate": exploration_rate,
-            "seed": seed,
-        },
-        sort_keys=True,
-    )
-    digest = hashlib.sha256(payload.encode()).hexdigest()[:12]
-    return f"{GRIDPLAN_PREFIX}{digest}"
-
-
-def serialize_grid_plan(
-    plan_id: str,
-    grid_axes: dict,
-    baseline_ps: PromptState,
-    layer1_fields: dict,
-    grid_points: list,
-    state_lookup: dict,
-    sampling_meta: dict,
-) -> dict:
-    """Serialize a grid search plan to a JSON-safe dict."""
-    return {
-        "plan_id": plan_id,
-        "status": "in_progress",
-        "grid_axes": grid_axes,
-        "baseline_ps": baseline_ps.model_dump(),
-        "layer1_fields": layer1_fields,
-        "grid_points": grid_points,
-        "state_lookup": {
-            ps_id: ps.model_dump() for ps_id, ps in state_lookup.items()
-        },
-        "sampling_meta": sampling_meta,
-    }
-
-
-def deserialize_grid_plan(
-    plan_data: dict,
-) -> tuple:
-    """Reconstruct grid plan objects from saved data.
-
-    Returns:
-        (grid_points, state_lookup, sampling_meta, grid_axes,
-         layer1_fields, baseline_ps)
-    """
-    baseline_ps = PromptState(**plan_data["baseline_ps"])
-    state_lookup = {
-        ps_id: PromptState(**ps_data)
-        for ps_id, ps_data in plan_data["state_lookup"].items()
-    }
-    return (
-        plan_data["grid_points"],
-        state_lookup,
-        plan_data["sampling_meta"],
-        plan_data["grid_axes"],
-        plan_data["layer1_fields"],
-        baseline_ps,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Smart search plan persistence
-# ---------------------------------------------------------------------------
 
 
 def smart_search_plan_identity(

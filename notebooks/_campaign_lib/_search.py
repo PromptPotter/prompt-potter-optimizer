@@ -16,7 +16,6 @@ from api.services.search import (
     adaptive_search as _adaptive_search,
     select_scan_winner as _select_scan_winner,
     build_prompt_result_index as build_historical_index,
-    synthesize_sensitivity_from_grid as synthesize_sensitivity,
     assess_scan_coverage as _assess_scan_coverage,
     build_data_inventory as _build_data_inventory,
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
@@ -42,7 +41,7 @@ __all__ = [
     "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
     "advisory_to_scan_variants", "resolve_scan_variants",
     "select_scan_winner_notebook", "build_historical_index", "load_task_description",
-    "synthesize_sensitivity", "show_scan_coverage", "show_data_inventory",
+    "show_scan_coverage", "show_data_inventory",
     "audit_historical_data", "preview_advisor_prompt",
     # Notebook-facing wrappers
     "prepare_scan_baseline", "run_scan_advisor", "seed_campaign_from_scan",
@@ -537,27 +536,13 @@ def show_data_inventory(
 def audit_historical_data(
     store,
     backend_id: str,
-    diagnostic: list,
-    cached_profiles: list,
-) -> tuple[dict, list]:
-    """Build historical index, try sensitivity synthesis, and display inventory.
-
-    Combines the historical-data audit and data-inventory display into one call.
+) -> dict:
+    """Build historical index and display data inventory.
 
     Returns:
-        (prompt_index, cached_profiles) -- profiles may be updated from synthesis.
+        prompt_index -- the historical prompt result index.
     """
     prompt_index = build_historical_index(store, backend_id)
-
-    # Try to synthesize sensitivity from grid data
-    if not cached_profiles:
-        synth = synthesize_sensitivity(
-            store, backend_id, prompt_index, diagnostic,
-        )
-        if synth:
-            _scan_df, axis_profiles = synth
-            cached_profiles = axis_profiles
-            print("Sensitivity derived from grid data -- scan may be skippable.")
 
     # Display data inventory
     inv = _build_data_inventory(prompt_index, store, backend_id)
@@ -606,7 +591,7 @@ def audit_historical_data(
     print(f"  Unmatched:  {up} prompts ({ur} queries)")
     print("=" * 70)
 
-    return prompt_index, cached_profiles
+    return prompt_index
 
 
 # ── Scan advisor (LLM-driven recommendations) ───────────────────────────

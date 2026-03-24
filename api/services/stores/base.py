@@ -88,7 +88,7 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Base class for plan-like stores (grid plans, smart search plans, …)
+# Base class for plan-like stores (smart search plans, …)
 # ---------------------------------------------------------------------------
 
 class _BasePlanStore:
@@ -96,8 +96,8 @@ class _BasePlanStore:
 
     Subclasses set two class attributes:
 
-    - ``_subdir``: directory name under ``{backend_id}/`` (e.g. ``"grid_plans"``)
-    - ``_glob_prefix``: filename prefix for ``list_all`` (e.g. ``"gridplan_"``)
+    - ``_subdir``: directory name under ``{backend_id}/`` (e.g. ``"smart_search_plans"``)
+    - ``_glob_prefix``: filename prefix for ``list_all`` (e.g. ``"ssplan_"``)
     """
 
     _subdir: str  # set by subclass

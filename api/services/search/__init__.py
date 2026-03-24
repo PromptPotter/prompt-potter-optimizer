@@ -1,26 +1,14 @@
-"""Search package — grid search, smart search, and supporting modules.
+"""Search package — smart search and supporting modules.
 
 Re-exports entry-point functions so callers use one import path::
 
-    from api.services.search import run_grid_search, sensitivity_scan, ...
+    from api.services.search import sensitivity_scan, adaptive_search, ...
 
 Submodules are imported lazily to avoid pulling in heavy dependencies
 (e.g. pandas) at package-import time.
 """
 
 _SUBMODULE_MAP: dict[str, str] = {
-    # grid_core
-    "analyze_grid_results": "api.services.search.grid_core",
-    "build_combined_state_lookup": "api.services.search.grid_core",
-    "build_grid_analysis_prompt": "api.services.search.grid_core",
-    "build_grid_points": "api.services.search.grid_core",
-    "load_grid_plan_results": "api.services.search.grid_core",
-    "merge_grid_results": "api.services.search.grid_core",
-    "resolve_point_evals": "api.services.search.grid_core",
-    "resume_or_build_grid": "api.services.search.grid_core",
-    "run_grid_search": "api.services.search.grid_core",
-    "select_grid_winner": "api.services.search.grid_core",
-    "validate_grid_config": "api.services.search.grid_core",
     # smart_search
     "ScanEvent": "api.services.search.smart_search",
     "adaptive_search": "api.services.search.smart_search",
@@ -46,8 +34,6 @@ _SUBMODULE_MAP: dict[str, str] = {
     "build_pipeline_overview": "api.services.search.scan_advisor",
     "build_tunable_params": "api.services.search.scan_advisor",
     "preview_advisor_prompt": "api.services.search.scan_advisor",
-    # synthesis
-    "synthesize_sensitivity_from_grid": "api.services.search.synthesis",
     # scan_seeding
     "prepare_scan_context": "api.services.search.scan_seeding",
 }

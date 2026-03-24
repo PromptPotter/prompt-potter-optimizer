@@ -2,7 +2,7 @@
 
 ## What This Is
 
-PromptPotter Optimizer is a backend-first prompt optimization service. It connects to LLM application backends (currently TermNorm), syncs experiment data, replays pipelines with different configurations, and runs optimization campaigns (grid search, iterative candidate generation) to improve prompt accuracy. The primary evaluation mode is **backend evaluation** — calling the backend's `/matches` endpoint with `ranking_prompt` overrides.
+PromptPotter Optimizer is a backend-first prompt optimization service. It connects to LLM application backends (currently TermNorm), syncs experiment data, replays pipelines with different configurations, and runs optimization campaigns (sensitivity scan, iterative candidate generation) to improve prompt accuracy. The primary evaluation mode is **backend evaluation** — calling the backend's `/matches` endpoint with `ranking_prompt` overrides.
 
 ## Commands
 
@@ -43,7 +43,7 @@ All core logic lives here.
 
 Two core mechanisms that work together (both actively evolving):
 
-- **Prompt decomposition** — PromptPotter decomposes a backend's monolithic prompt into internal fields (`persona`, `task_intent`, `thinking_style`, `answer_format`, `problem_description`) via LLM restructure. A variant library (`api/config/prompt_variants.json`) provides per-field alternatives for scan and grid search.
+- **Prompt decomposition** — PromptPotter decomposes a backend's monolithic prompt into internal fields (`persona`, `task_intent`, `thinking_style`, `answer_format`, `problem_description`) via LLM restructure. A variant library (`api/config/prompt_variants.json`) provides per-field alternatives for sensitivity scan.
 - **Prompt alias groups** — `register_alias` / `resolve_aliases` link semantically equivalent prompt hashes so historical evaluations are discoverable across forms. Resolution is transitive.
 
 ### Pipeline composability
@@ -56,7 +56,7 @@ The human workflow is a repeatable loop:
 
 0. **Pipeline snapshot** — display full pipeline JSON before any evaluation (experiment parameter manifest)
 1. **Generate data** — sync from backend, build eval dataset, run baseline eval
-2. **Explore** — sensitivity scan and/or grid search map the accuracy landscape
+2. **Explore** — sensitivity scan maps the accuracy landscape
 3. **Optimize** — critique-guided feedback cycle with L1→L2→L3 escalation
 4. **Harvest** — human reviews results
 5. **Reuse** — coverage advisor discovers all stored `dataset_runs` regardless of source
@@ -103,7 +103,6 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
 | Service | Purpose |
 |---------|---------|
 | `prompt_eval.py` | Evaluate prompts against datasets via backend `/matches` endpoint |
-| `search/grid_core.py` | Grid search over Layer 1 prompt fields |
 | `prompt_optimizer.py` | LLM meta-prompt candidate generation and round winner selection |
 | `backend_client.py` | HTTP client for backend APIs (sync, replay, `fetch_pipeline()`) |
 | `pipeline_discovery.py` | Pipeline schema factory (parses `GET /pipeline` response into `PipelineSchema`) |
@@ -117,12 +116,12 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
 | `search/coverage.py` | Historical index, coverage advisor, scan variant diagnostics |
 | `obs/observability_logger.py` | File-based observability (Langfuse-compatible traces, MLflow) |
 | `obs/step_tracer.py` | `observed_step()` — async context manager for step-level timing + tracing |
-| `stores/` | Focused store modules: Backend, Execution, DatasetRun, Dataset, GridPlan, SmartSearch, Campaign |
+| `stores/` | Focused store modules: Backend, Execution, DatasetRun, Dataset, SmartSearch, Campaign |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
 
 ### Evaluation gateway
 
-`evaluate_prompt_cached()` in `prompt_eval.py` is the **single entry point** for all eval persistence. All evaluation paths (grid search, smart search, feedback cycle) converge here.
+`evaluate_prompt_cached()` in `prompt_eval.py` is the **single entry point** for all eval persistence. All evaluation paths (smart search, feedback cycle) converge here.
 
 ### Pipeline discovery — ownership principle
 
@@ -139,7 +138,6 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
   datasets/{name}.json
   dataset_runs/{run_id}.json          # completed eval runs (shared across all eval paths)
   dataset_runs.json                   # index (content_hash -> run_id)
-  grid_plans/{plan_id}.json
   smart_search_plans/{plan_id}.json
   campaigns/{campaign_id}.json
   campaigns/{campaign_id}/trial_NNNN.json
@@ -154,7 +152,7 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
 - **`sample_size`**: Universal eval sampling parameter across all services (0 = use all). No synonyms (`max_queries`, `eval_queries_per_point`, etc.).
 - **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields. Surfaces schema violations immediately.
 - **Pipeline reproducibility**: The notebook MUST display the full pipeline configuration (all node configs, models, temperatures, schemas) via `GET /pipeline` before any evaluation. This is the experiment's parameter manifest.
-- **EXPERIMENT_ID is the single source of truth**: Every notebook cell operates within the scope of `EXPERIMENT_ID`. When set, config MUST match the stored experiment — mismatches raise `ValueError` demanding a new ID. When `None`, a new experiment is auto-created from the config hash. This invariant applies to feedback cycle, scan, grid search, and all data surfaces. No silent config drift between runs.
+- **EXPERIMENT_ID is the single source of truth**: Every notebook cell operates within the scope of `EXPERIMENT_ID`. When set, config MUST match the stored experiment — mismatches raise `ValueError` demanding a new ID. When `None`, a new experiment is auto-created from the config hash. This invariant applies to feedback cycle, scan, and all data surfaces. No silent config drift between runs.
 - **Display parity**: Cached results must display identically to fresh results — no visible difference in output format between cached and computed data. The user should not be able to tell whether a result came from cache or a live backend call.
 - **Graceful interrupt**: Backend eval batches use a signal-flag pattern for Ctrl+C. First interrupt lets the in-flight backend call finish (result printed + saved), then stops. Second interrupt force-quits. Partial results are always saved to disk with `"partial": True` so the SP-hash query cache bridges them on re-run. All interrupt handlers must catch both `KeyboardInterrupt` and `asyncio.CancelledError`. **No completed work is ever discarded.**
 

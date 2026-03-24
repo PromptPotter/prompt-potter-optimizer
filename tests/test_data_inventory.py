@@ -2,10 +2,7 @@
 
 from api.models.prompt_state import PromptState
 from api.services.search import build_data_inventory
-from api.services.search.plan_persistence import (
-    serialize_grid_plan,
-    serialize_smart_search_plan,
-)
+from api.services.search.plan_persistence import serialize_smart_search_plan
 
 from _helpers import make_baseline_ps, make_dataset_run
 
@@ -21,90 +18,11 @@ def _fake_run(run_id: str, rendered_prompt: str, n_queries: int = 3) -> dict:
     )
 
 
-def _save_grid_plan(store, backend_id, baseline_ps, variants):
-    state_lookup = {ps.id: ps for ps in [baseline_ps, *variants]}
-    plan_data = serialize_grid_plan(
-        plan_id="gridplan_test1",
-        grid_axes={"persona": ["default persona", "expert"]},
-        baseline_ps=baseline_ps,
-        layer1_fields={},
-        grid_points=[],
-        state_lookup=state_lookup,
-        sampling_meta={"total_space": 1},
-    )
-    store.grid_plans.save(backend_id, "gridplan_test1", plan_data)
-
-
 def _build_index(store, backend_id, runs):
     for run in runs:
         store.dataset_runs.save(backend_id, run["run_id"], run)
     from api.services.search import build_prompt_result_index
     return build_prompt_result_index(store, backend_id)
-
-
-def test_single_axis_change_counted(tmp_store):
-
-    bl = _make_baseline()
-    variant = bl.derive(persona="expert")
-    _save_grid_plan(tmp_store, "b1", bl, [variant])
-
-    index = _build_index(tmp_store, "b1", [
-        _fake_run("r1", variant.render(), n_queries=2),
-    ])
-    inv = build_data_inventory(index, tmp_store, "b1")
-
-    assert inv["total_prompts"] == 1
-    assert inv["matched_prompts"] == 1
-    assert "persona" in inv["axes"]
-    assert inv["axes"]["persona"]["n_prompts"] == 1
-    assert inv["axes"]["persona"]["n_queries"] == 2
-
-
-def test_multi_axis_change_counted_per_axis(tmp_store):
-
-    bl = _make_baseline()
-    variant = bl.derive(persona="expert", task_intent="new intent")
-    _save_grid_plan(tmp_store, "b1", bl, [variant])
-
-    index = _build_index(tmp_store, "b1", [
-        _fake_run("r1", variant.render(), n_queries=4),
-    ])
-    inv = build_data_inventory(index, tmp_store, "b1")
-
-    assert inv["matched_prompts"] == 1
-    assert "persona" in inv["axes"]
-    assert "task_intent" in inv["axes"]
-
-
-def test_baseline_itself_counted(tmp_store):
-
-    bl = _make_baseline()
-    _save_grid_plan(tmp_store, "b1", bl, [])
-
-    index = _build_index(tmp_store, "b1", [
-        _fake_run("r1", bl.render(), n_queries=5),
-    ])
-    inv = build_data_inventory(index, tmp_store, "b1")
-
-    assert inv["baseline_prompts"] == 1
-    assert inv["baseline_queries"] == 5
-
-
-def test_unmatched_prompts_tracked(tmp_store):
-
-    bl = _make_baseline()
-    _save_grid_plan(tmp_store, "b1", bl, [])
-
-    unknown_ps = PromptState(instruction="totally different prompt")
-    index = _build_index(tmp_store, "b1", [
-        _fake_run("r1", bl.render(), n_queries=3),
-        _fake_run("r2", unknown_ps.render(), n_queries=2),
-    ])
-    inv = build_data_inventory(index, tmp_store, "b1")
-
-    assert inv["total_prompts"] == 2
-    assert inv["matched_prompts"] == 1
-    assert inv["unmatched_prompts"] == 1
 
 
 def test_pipeline_params_from_smart_search(tmp_store):

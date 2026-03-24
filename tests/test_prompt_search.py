@@ -1,12 +1,8 @@
 """Tests for smart prompt search: diagnostic set, axis classification, variant library."""
-import logging
-
-import pandas as pd
 import pytest
 
 from api.config.settings import load_variant_library
 from api.services.prompt_eval import _error_category
-from api.services.search import select_grid_winner
 from api.services.search.smart_search import (
     sensitivity_scan,
     _profiles_from_rows,
@@ -44,25 +40,6 @@ def scan_eval_mock(monkeypatch):
         monkeypatch.setattr(_ss, "evaluate_prompt_cached", mock_eval)
 
     return _apply
-
-
-def test_select_grid_winner_warns_small_sample(caplog):
-    from api.models.prompt_state import PromptState
-
-    ps = PromptState(instruction="test")
-    grid_df = pd.DataFrame([{
-        "prompt_state_id": ps.id,
-        "accuracy": 0.5,
-        "hits": 1,
-        "total": 2,
-        "errors": 0,
-    }])
-
-    with caplog.at_level(logging.WARNING, logger="api.services.search.grid_core"):
-        result = select_grid_winner(grid_df, {ps.id: ps})
-
-    assert result["accuracy"] == 0.5
-    assert any("only 2 queries" in r.message for r in caplog.records)
 
 
 def test_load_variant_library():

@@ -1,6 +1,6 @@
-# Sensitivity Scan & Grid Search
+# Sensitivity Scan
 
-Exploration tools for understanding the parameter landscape before optimization.
+Exploration tool for understanding the parameter landscape before optimization.
 
 ---
 
@@ -52,39 +52,3 @@ If the backend restarts mid-scan, `BackendClient` auto-reinitializes the session
 |-----------|---------|-------------|
 | `sample_size` | 30 | Queries per variant (0 = all) |
 
----
-
-## Grid Search
-
-Explores a cartesian product of prompt field variants with distance-weighted sampling.
-
-### Control Parameters
-
-| Parameter | Purpose |
-|-----------|---------|
-| `exploration_rate` (0.0-1.0) | Biases sampling: 0.0=conservative (few changes), 1.0=aggressive (many changes) |
-| `grid_budget` | Exact number of grid points to evaluate (0 = full grid) |
-| `sample_size` | Queries per grid point (0 = all eval_data) |
-| `shared_queries` | `False`=different random queries per point, `True`=same set for rigorous comparison |
-
-```python
-"grid_search": {
-    "grid_budget": 35,
-    "sample_size": 1,
-    "shared_queries": False,
-    "seed": 42,
-}
-```
-
-### Grid Axes
-
-Default to `load_variant_library()["prompt_fields"]` from `api/config/prompt_variants.json`. Override with `custom_axes`:
-
-```python
-grid_config = {
-    "persona": ["", "You are a medical terminology expert."],
-    "thinking_style": ["", "Think step by step.", "Consider semantic similarity."],
-}
-```
-
-**Grid search takes too long** — Reduce `grid_budget` or `sample_size`.

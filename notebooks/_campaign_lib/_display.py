@@ -339,8 +339,6 @@ def display_progress(campaign_rounds: list, window: int = 8) -> None:
                 trend_str = f"{delta:.1%}"
 
         round_label = str(rd["round"])
-        if rd.get("round") == "grid":
-            round_label = "G"
 
         if has_composite:
             comp = rd.get("composite", acc)
