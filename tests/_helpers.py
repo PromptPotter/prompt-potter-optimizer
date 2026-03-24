@@ -26,10 +26,11 @@ def apply_llm_mock(monkeypatch):
 
 def apply_grow_mock(monkeypatch):
     """Mock l1_generate to return deterministic variants (as dicts)."""
-    async def mock_generate(current_ps, accuracy, results, n, creativity,
+    async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
+        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            current_ps.derive(
+            base_ps.derive(
                 instruction=f"variant_{i}_acc{accuracy:.0%}",
                 changes_description=f"gen_{i}",
             ).model_dump()

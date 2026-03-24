@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import DISPLAY_TRUNCATE
+from api.models.opt_search_point import OptSearchPoint
 from api.models.prompt_state import PromptState
 from api.core.llm_call import get_node_config, llm_call
 from api.services.campaign.critique_stats import summarize_warning_inventory
@@ -203,7 +204,7 @@ def _format_context_sections(
 
 
 async def l1_generate(
-    current_ps: PromptState,
+    osp: OptSearchPoint,
     current_accuracy: float,
     current_results: list,
     n_variants: int,
@@ -211,28 +212,23 @@ async def l1_generate(
     llm_client: LLMClientBase,
     model: str | None = None,
     scan_context: dict | None = None,
-    critique_text: str = "",
-    thinking_styles: list[str] | None = None,
-    escalation_journal: list[dict] | None = None,
-    task_context: dict | None = None,
-    warning_inventory: dict | None = None,
-    l2_directive: str = "",
     is_probe_round: bool = False,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
-    Single LLM call using the ``meta_scan_aware`` template with all
-    context injected as template variables.
+    All optimizer context (critique, thinking_styles, task_context, plan,
+    escalation_journal, warning_inventory, l2_directive) is read from the
+    ``OptSearchPoint`` — no need to pass them individually.
 
     Returns:
-        List of candidate dicts (PromptState dumps with optional
+        List of candidate dicts (prompt field dumps with optional
         ``__pipeline_params_override__``).
     """
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
     failure_examples = _format_failure_examples(
-        current_results, warning_inventory, is_probe_round,
+        current_results, osp.warning_inventory or None, is_probe_round,
     )
     instruction_spec = (
         '  - "instruction": full prompt template text '
@@ -243,14 +239,15 @@ async def l1_generate(
         n_variants=n_variants,
         accuracy_pct=f"{current_accuracy:.1%}",
         n_queries=len(current_results),
-        rendered_prompt=current_ps.render(),
+        rendered_prompt=osp.render_prompt(),
         failure_examples=failure_examples,
         scan_analytics=_format_scan_analytics(scan_context),
-        focus_note=_format_focus_note(escalation_journal),
+        focus_note=_format_focus_note(osp.escalation_journal or None),
         context_sections=_format_context_sections(
-            task_context, critique_text, l2_directive,
-            thinking_styles, current_ps.plan or "",
-            warning_inventory, escalation_journal, is_probe_round,
+            osp.task_context or None, osp.critique_text, osp.l2_directive,
+            osp.thinking_styles or None, osp.plan or "",
+            osp.warning_inventory or None, osp.escalation_journal or None,
+            is_probe_round,
         ),
         instruction_spec=instruction_spec,
     )
@@ -269,6 +266,8 @@ async def l1_generate(
     else:
         variants_list = generated
 
+    # Build candidates — still uses PromptState.derive() during migration
+    current_ps = PromptState(**osp.prompt_field_dict())
     candidates: list[dict] = []
     for v in variants_list[:n_variants]:
         instr = v.get("instruction", "")

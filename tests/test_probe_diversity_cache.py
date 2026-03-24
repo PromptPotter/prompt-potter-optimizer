@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 from api.services.l1_optimizer import l1_generate
 from api.services.stores.dataset_run_store import DatasetRunStore
 
@@ -64,13 +64,13 @@ class TestProbeRoundEnrichment:
     ):
         captured = _capture_llm_prompts(monkeypatch)
 
-        ps = PromptState(instruction="test prompt")
+        osp = OptSearchPoint(instruction="test prompt",
+                              warning_inventory=warning_inventory)
         await l1_generate(
-            ps, 0.5, [
+            osp, 0.5, [
                 {"query": "aspirin", "predicted": "wrong", "ground_truth": "Aspirin", "hit": False},
             ],
             n_variants=1, creativity=0.5, llm_client=None,
-            warning_inventory=warning_inventory,
             is_probe_round=True,
         )
 
@@ -85,14 +85,14 @@ class TestProbeRoundEnrichment:
     ):
         captured = _capture_llm_prompts(monkeypatch)
 
-        ps = PromptState(instruction="test prompt")
+        osp = OptSearchPoint(instruction="test prompt",
+                              warning_inventory=warning_inventory,
+                              escalation_journal=escalation_journal)
         await l1_generate(
-            ps, 0.5, [
+            osp, 0.5, [
                 {"query": "aspirin", "predicted": "wrong", "ground_truth": "Aspirin", "hit": False},
             ],
             n_variants=1, creativity=0.5, llm_client=None,
-            warning_inventory=warning_inventory,
-            escalation_journal=escalation_journal,
             is_probe_round=True,
         )
 
@@ -114,13 +114,13 @@ class TestProbeRoundEnrichment:
             },
         }
 
-        ps = PromptState(instruction="test prompt")
+        osp = OptSearchPoint(instruction="test prompt",
+                              warning_inventory=inv)
         await l1_generate(
-            ps, 0.5, [
+            osp, 0.5, [
                 {"query": "aspirin", "predicted": "wrong", "ground_truth": "Aspirin", "hit": False},
             ],
             n_variants=1, creativity=0.5, llm_client=None,
-            warning_inventory=inv,
             is_probe_round=True,
         )
 
@@ -140,13 +140,13 @@ class TestProbeRoundEnrichment:
             },
         }
 
-        ps = PromptState(instruction="test prompt")
+        osp = OptSearchPoint(instruction="test prompt",
+                              warning_inventory=inv)
         await l1_generate(
-            ps, 0.5, [
+            osp, 0.5, [
                 {"query": "aspirin", "predicted": "wrong", "ground_truth": "Aspirin", "hit": False},
             ],
             n_variants=1, creativity=0.5, llm_client=None,
-            warning_inventory=inv,
             is_probe_round=False,
         )
 
@@ -159,9 +159,9 @@ class TestValueDiversity:
     async def test_diversity_in_thinking_style(self, monkeypatch):
         captured = _capture_llm_prompts(monkeypatch)
 
-        ps = PromptState(instruction="test")
+        osp = OptSearchPoint(instruction="test")
         await l1_generate(
-            ps, 0.5, [
+            osp, 0.5, [
                 {"query": "q", "predicted": "w", "ground_truth": "g",
                  "hit": False},
             ],

@@ -334,8 +334,7 @@ async def _generate_or_load_candidates(
     """Load persisted candidates or generate fresh ones via LLM."""
     _n_variants = n_variants if n_variants is not None else config.n_variants
     _creativity = creativity if creativity is not None else config.creativity
-    current_ps = state.current_sp.prompt_state
-    prompt_preview = current_ps.render()[:120]
+    prompt_preview = state.opt_sp.render_prompt()[:120]
 
     _emit_phase(on_phase, "l1_generate", "enter", round=round_num,
                 current_accuracy=state.current_accuracy,
@@ -373,16 +372,10 @@ async def _generate_or_load_candidates(
     async with observed_step(f"l1_generate_r{round_num}", "llm/meta",
                              obs=obs, trace_id=trace_id):
         candidates = await l1_generate(
-            current_ps, state.current_accuracy, state.current_results,
+            state.opt_sp, state.current_accuracy, state.current_results,
             _n_variants, _creativity, client,
             model=config.model,
             scan_context=config.scan_context,
-            critique_text=state.opt_sp.critique_text,
-            thinking_styles=state.opt_sp.thinking_styles,
-            escalation_journal=state.opt_sp.escalation_journal,
-            task_context=state.opt_sp.task_context or None,
-            warning_inventory=state.opt_sp.warning_inventory or None,
-            l2_directive=state.opt_sp.l2_directive,
             is_probe_round=state.probe_next_round,
         )
 
@@ -572,10 +565,10 @@ async def _execute_round(
         except Exception:
             logger.warning("ObsLogger.log_round_start failed", exc_info=True)
 
-    # Resolve L2 meta-param overrides from PromptState.optimizer_params
-    ps_params = state.current_sp.prompt_state.optimizer_params
-    n_variants = ps_params.get("n_variants", config.n_variants)
-    creativity = ps_params.get("creativity", config.creativity)
+    # Resolve L2 meta-param overrides from OptSearchPoint.optimizer_params
+    opt_params = state.opt_sp.optimizer_params
+    n_variants = opt_params.get("n_variants", config.n_variants)
+    creativity = opt_params.get("creativity", config.creativity)
 
     candidates = await _generate_or_load_candidates(
         round_num, state, config, campaign_store, cycle_id, on_phase,
@@ -833,6 +826,10 @@ def _update_round_state(
     if rr.pipeline_params is not None:
         derive_kwargs["pipeline_params"] = rr.pipeline_params
     state.current_sp = state.current_sp.derive(**derive_kwargs)
+    # Sync prompt fields to OptSearchPoint so l1_generate reads them
+    for f in ("persona", "task_intent", "problem_description", "instruction",
+              "thinking_style", "answer_format"):
+        setattr(state.opt_sp, f, getattr(winner_ps, f, ""))
     state.current_accuracy = rr.accuracy
     state.current_composite = rr.composite
     state.current_results = list(rr.results)
@@ -1067,7 +1064,18 @@ async def _init_cycle_state(
         best_accuracy=baseline_accuracy,
         best_composite=_bl_composite,
         best_sp=baseline_sp,
-        opt_sp=OptSearchPoint(task_context=config.task_context or {}),
+        opt_sp=OptSearchPoint(
+            task_context=config.task_context or {},
+            # Sync prompt fields from baseline PromptState
+            persona=current_ps.persona,
+            task_intent=current_ps.task_intent,
+            problem_description=current_ps.problem_description,
+            instruction=current_ps.instruction,
+            thinking_style=current_ps.thinking_style,
+            answer_format=current_ps.answer_format,
+            plan=current_ps.plan,
+            optimizer_params=dict(current_ps.optimizer_params),
+        ),
     )
 
     # Restore optimizer state on resume

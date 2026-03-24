@@ -270,10 +270,12 @@ def _apply_e2e_mocks(monkeypatch):
         mock_restructure,
     )
 
-    async def mock_generate(current_ps, accuracy, results, n, creativity,
+    async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
+        from api.models.prompt_state import PromptState
+        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            current_ps.derive(
+            base_ps.derive(
                 instruction=f"Match query to canonical drug name (variant {i})",
                 changes_description=f"e2e_candidate_{i}",
             ).model_dump()

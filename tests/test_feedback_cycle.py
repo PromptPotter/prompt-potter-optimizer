@@ -146,11 +146,12 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
     # Track what results l1_generate receives each round
     grow_results_received = []
 
-    async def mock_generate(current_ps, accuracy, results, n, creativity,
+    async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         grow_results_received.append(list(results))
+        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            current_ps.derive(
+            base_ps.derive(
                 instruction=f"variant_{i}",
                 changes_description=f"gen_{i}",
             ).model_dump()
@@ -578,11 +579,12 @@ async def test_mid_round_resume_uses_persisted_candidates(
 
     grow_calls = [0]
 
-    async def mock_generate(current_ps, accuracy, results, n, creativity,
+    async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         grow_calls[0] += 1
+        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            current_ps.derive(
+            base_ps.derive(
                 instruction=f"variant_{i}_acc{accuracy:.0%}",
                 changes_description=f"gen_{i}",
             ).model_dump()

@@ -267,11 +267,12 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
     # Track what l1_generate receives
     gen_calls = []
 
-    async def mock_generate(current_ps, accuracy, results, n, creativity,
+    async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         gen_calls.append({"n": n, "creativity": creativity})
+        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            current_ps.derive(
+            base_ps.derive(
                 instruction=f"variant_{i}",
                 changes_description=f"gen_{i}",
             ).model_dump()
@@ -322,12 +323,13 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
     # Track what meta-prompt l1_generate builds
     captured_prompts = []
 
-    async def mock_generate(current_ps, accuracy, results, n, creativity,
+    async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
-        # The plan should have been injected by now — capture the PS
-        captured_prompts.append(current_ps.plan)
+        # The plan should have been injected by now — capture from OptSearchPoint
+        captured_prompts.append(osp.plan)
+        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            current_ps.derive(
+            base_ps.derive(
                 instruction=f"variant_{i}",
                 changes_description=f"gen_{i}",
             ).model_dump()
