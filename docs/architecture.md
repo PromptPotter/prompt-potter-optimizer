@@ -54,7 +54,7 @@ All paths converge on `evaluate_prompt_cached()` — single gateway for eval per
 ## Caching & Crash Recovery
 
 - **Content-hash dedup** — same configuration returns cached results instantly
-- **Shared store** — grid search, sensitivity scan, and feedback cycle all write to `dataset_runs`; coverage advisor discovers all cached results
+- **Shared store** — sensitivity scan and feedback cycle all write to `dataset_runs`; coverage advisor discovers all cached results
 - **Write with experiment_id, read by config similarity** — all dataset_runs are tagged with `experiment_id` for provenance, but reads use alias groups + pipeline_param matching to find results by config similarity, not experiment scope. This means data is shared across experiments via content-addressed dedup.
 
 ## Pipeline Composability
@@ -104,12 +104,12 @@ This model enables optimizer-level tracing (each step as a Langfuse observation)
 `EXPERIMENT_ID` is the single source of truth for the notebook. When set, config MUST match the stored experiment — mismatches raise `ValueError`. When `None`, a new experiment is auto-created from the config hash.
 
 - **Writing**: all dataset_runs, campaign data, Langfuse traces are tagged with experiment_id
-- **Reading**: scan/grid results are found by **config similarity** (alias groups + pipeline_param matching), not experiment_id — data is shared across experiments via content-addressed dedup
+- **Reading**: scan results are found by **config similarity** (alias groups + pipeline_param matching), not experiment_id — data is shared across experiments via content-addressed dedup
 - **Dashboard**: `show_experiment_dashboard()` loads stored config, overrides notebook variables, shows resume status
 
 ## Further Reading
 
 - [Design Principles](design-principles.md) — Core patterns
-- [Sensitivity Scan & Grid Search](sensitivity-scan.md) — Exploration tools
+- [Sensitivity Scan](sensitivity-scan.md) — Exploration tools
 - [Optimization](optimization.md) — Feedback cycle, 3-layer model, config reference
 - [Observability](observability.md) — Langfuse, MLflow, data exploration

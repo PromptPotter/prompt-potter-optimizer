@@ -16,7 +16,7 @@
 | P0.3 | Candidate Generation | P0 | Implemented (M2) |
 | P0.4 | Optimization Loop | P0 | Implemented (M2) |
 | P0.5 | PROMPT_STATE Tracking | P0 | Implemented (M1) |
-| P0.6 | Grid Search Exploration | P0 | Implemented (M2) |
+| P0.6 | Sensitivity Scan Exploration | P0 | Implemented (M2) |
 | P1.1 | Optimizer Nodes | P1 | Implemented (M3) |
 | P1.2 | Iterative Feedback Cycling | P1 | Implemented (M3) |
 | P1.3 | Campaign Registry | P1 | Implemented (M3) |
@@ -49,7 +49,7 @@
 
 ## P0 -- Must Have (Core Optimizer)
 
-P0.1–P0.6: All implemented (M1–M2). Backend evaluation with content-addressed dedup and crash recovery, failure analysis, LLM candidate generation, optimization loop with patience-based stopping, immutable 3-layer PromptState, grid search with sampling and plan persistence. See `api/services/` for implementations.
+P0.1–P0.6: All implemented (M1–M2). Backend evaluation with content-addressed dedup and crash recovery, failure analysis, LLM candidate generation, optimization loop with patience-based stopping, immutable 3-layer PromptState, sensitivity scan with sampling and plan persistence. See `api/services/` for implementations.
 
 ---
 
@@ -106,7 +106,7 @@ P1.1–P1.9: All implemented (M1–M3). Optimizer pipeline, feedback cycling wit
 | P0.3 Candidate Generation | x | | | | x | | | |
 | P0.4 Optimization Loop | x | x | | x | x | | | |
 | P0.5 PROMPT_STATE | | x | | | | | | |
-| P0.6 Grid Search | x | x | | x | x | | | |
+| P0.6 Sensitivity Scan | x | x | | x | x | | | |
 | P1.1 Optimizer Nodes | | | | | | x | | |
 | P1.2 Feedback Cycling | x | x | x | | | | | |
 | P1.3 Campaign Registry | | x | x | | | | | |

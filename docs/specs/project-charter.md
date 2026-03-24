@@ -14,7 +14,6 @@
 | **Trial** | One iteration within a campaign, testing a candidate against the eval dataset. |
 | **PROMPT_STATE** | Immutable, versioned prompt snapshot in three layers: Layer 1 (Generate) structured fields, Layer 2 (Refine Context), Layer 3 (Modify Plan). |
 | **Evaluation dataset** | Labeled input/expected-output pairs owned by the consuming project. |
-| **Grid Search** | Cartesian product sweep of Layer 1 variants with sampling and dedup. |
 | **Sensitivity Scan** | OAT perturbation scanning that classifies axes by accuracy impact. |
 | **Feedback Cycle** | The AI loop: generate candidates -> evaluate -> select winner -> route next action. |
 | **Data Loop** | Every evaluation writes to shared `dataset_runs`, making all prior data available to the coverage advisor. |
@@ -50,7 +49,7 @@ Near-term (M1-M4) focuses on core optimization and single-user workflows. Public
 
 - Iterative prompt optimization via feedback cycle orchestrator
 - Sensitivity scan with axis classification
-- Grid search exploration with plan persistence
+- Sensitivity scan exploration with plan persistence
 - Backend evaluation via `/matches` with content-addressed caching and crash recovery
 - Campaign registry with Langfuse/MLflow-compatible data format
 - Data loop: all eval data feeds back via shared `dataset_runs` store

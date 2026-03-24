@@ -63,7 +63,7 @@ Gaps A-J identified and resolved during planning. Key decisions: `FeedbackCycleN
 | `DatasetLoadNode` | Makes YAML self-contained | Workflow can reference experiment ID instead of requiring pre-built eval data |
 | `ScanNode` | New node wrapping `sensitivity_scan()` | Enables scan → optimize workflows entirely in YAML |
 | `runtime_config` pattern | Dict passed to `execute()`, merged into node configs | Simple, explicit. Nodes declare what they need; runner provides it. Carries `PipelineSchema` alongside `BackendClient`. |
-| TermNorm default schema | Static `TERMNORM_DEFAULT_SCHEMA` in `pipeline_discovery.py` | Offline use without backend. Factory also parses live `GET /pipeline` response. |
+| TermNorm default schema | ~~Static `TERMNORM_DEFAULT_SCHEMA`~~ (deleted — pipeline built entirely from live `GET /pipeline` response) | Self-describing pipeline; no offline fallback. |
 | Full pipeline in schema | `PipelineStep` gets `runtime` and `short_circuit` fields | Frontend steps (cache, fuzzy) become first-class; PipelineSchema describes the complete pipeline |
 | Unified tracing | One trace per query, all steps as observations | Enables fuzzy hit rate analysis, full pipeline latency breakdown, and end-to-end reproducibility |
 
@@ -429,7 +429,7 @@ Default composite for TermNorm: `0.9 * accuracy + 0.05 * source_recall + 0.05 * 
 
 ### Prerequisites
 
-1. **`GET /pipeline` exposes `node_role`** — Either TermNorm adds `node_role` to each step config, or PromptPotter infers it via the `TERMNORM_DEFAULT_SCHEMA` (structural metadata already maps step names to roles).
+1. **`GET /pipeline` exposes `node_role`** — TermNorm adds `node_role` to each step's `optimizer` sub-object in `pipeline.json`, consumed via `parse_pipeline_response()`.
 2. **Per-step I/O in `pipeline_data`** — Already available via `OBS_EXTRACTION_MAP` / `obs_extraction_map()`. Token matching outputs `token_matched_candidates`, LLM ranking outputs `ranked_candidates`.
 3. **Wave 5 composite** — Proves the formula shape works before auto-wiring generalizes the metric sources.
 
@@ -441,7 +441,7 @@ Wave 6 resolves chokepoint #7 ("Hit@1 exact match" → `schema.eval_config`). Th
 
 | ID | Work Package | Sessions | Depends on | Description |
 |----|-------------|:--------:|------------|-------------|
-| 6.8 | IntermediateMetric model + PipelineStep.node_role | 1 | 6.7 | Add `node_role` field to `PipelineStep`. Create `IntermediateMetric` model + role-to-metric registry. Update `TERMNORM_DEFAULT_SCHEMA` with role assignments. |
+| 6.8 | IntermediateMetric model + PipelineStep.node_role | 1 | 6.7 | Add `node_role` field to `PipelineStep`. Create `IntermediateMetric` model + role-to-metric registry. Role assignments come from `GET /pipeline` response. |
 | 6.9 | `derive_metrics()` + composite scoring | 1 | 6.8 | Implement `PipelineSchema.derive_metrics()`. Replace hardcoded composite from Wave 5 with auto-wired version. |
 | 6.10 | Wire through eval/search/feedback paths | 1 | 6.9 | Update `evaluate_prompt_cached()`, sensitivity scan, and feedback cycle to use composite scores from `derive_metrics()`. |
 
@@ -449,7 +449,7 @@ Wave 6 resolves chokepoint #7 ("Hit@1 exact match" → `schema.eval_config`). Th
 
 | WP | Read first |
 |----|-----------|
-| 6.8 | `api/models/pipeline_schema.py` (PipelineStep fields), `api/services/pipeline_discovery.py` (TERMNORM_DEFAULT_SCHEMA) |
+| 6.8 | `api/models/pipeline_schema.py` (PipelineStep fields), `api/services/pipeline_discovery.py` (parse_pipeline_response) |
 | 6.9 | `api/services/prompt_eval.py` (compute_accuracy, compute_composite_score from Wave 5), `api/services/search/smart_search.py` (axis ranking) |
 | 6.10 | `api/services/prompt_optimizer.py` (_select_round_winner), `api/services/campaign/feedback_cycle.py` (winner selection), `notebooks/_campaign_lib.py` (display) |
 
@@ -463,7 +463,7 @@ Wave 6 resolves chokepoint #7 ("Hit@1 exact match" → `schema.eval_config`). Th
 
 ## Unified Query Result Output Format
 
-All evaluation paths (baseline eval, sensitivity scan, grid search, adaptive search, feedback cycle) use `_fmt_query_result()` in `notebooks/_campaign_lib.py` as the single formatting function. Every query result line shows:
+All evaluation paths (baseline eval, sensitivity scan, adaptive search, feedback cycle) use `_fmt_query_result()` in `notebooks/_campaign_lib.py` as the single formatting function. Every query result line shows:
 
 1. **HIT/MISS** — whether the prediction matched ground truth
 2. **Pipeline termination step** — which step resolved the query (e.g. `[fuzzy]`, `[llm]`, `[token]`), via `_step_tag()`. Critical signal: shows whether a query was resolved by cache, fuzzy match, or went all the way to LLM ranking.

@@ -8,7 +8,7 @@ What's genuinely distinctive about how PromptPotter works.
 
 Backends have monolithic prompts — one big string. PromptPotter decomposes that into independent fields (`persona`, `task_intent`, `thinking_style`, `answer_format`, `problem_description`) via LLM restructure, then perturbs each field independently using a default library of text-string variants (`api/config/prompt_variants.json`).
 
-This is the core architectural move. It turns one opaque prompt into a combinatorial search space where sensitivity scan can measure each axis independently, grid search can explore the cross-product, and the feedback cycle can mutate specific fields. Without decomposition, optimization is blind rewriting of a monolith.
+This is the core architectural move. It turns one opaque prompt into a combinatorial search space where sensitivity scan can measure each axis independently and the feedback cycle can mutate specific fields. Without decomposition, optimization is blind rewriting of a monolith.
 
 ## SearchPoint as atomic unit
 

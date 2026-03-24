@@ -13,7 +13,7 @@
 |-----------|-------|--------|
 | M0 | Specifications | Complete |
 | M1 | Foundation (PromptState, ProjectStore, comparison, CI) | Complete |
-| M2 | Core Optimizer (eval, grid search, prompt optimizer, notebook) | Complete |
+| M2 | Core Optimizer (eval, sensitivity scan, prompt optimizer, notebook) | Complete |
 | M3 | Optimization Infrastructure | Complete |
 | M4 | Integration and Polish (reclassified — absorbed into M3-M5) | Complete |
 | M5 | Observability Layer | Complete |
@@ -25,7 +25,7 @@
 
 ## M3: Optimization Infrastructure -- Complete
 
-Optimizer nodes, feedback cycle (3-path routing, patience), CampaignStore, Langfuse tracing, sensitivity scan + coverage, grid refactor, campaign init, notebook integration, data loop. ~1,300 LOC removed across 4 cleanup passes.
+Optimizer nodes, feedback cycle (3-path routing, patience), CampaignStore, Langfuse tracing, sensitivity scan + coverage, scan refactor, campaign init, notebook integration, data loop. ~1,300 LOC removed across 4 cleanup passes.
 
 ---
 
@@ -67,16 +67,16 @@ The optimizer itself is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_ref
 | Wave | Scope | Status |
 |------|-------|--------|
 | A | Leaf modules: prompt templates, OptSearchPoint | Complete |
-| B | Node implementations (superseded by Wave G building blocks) | Complete → Superseded |
+| B | Node implementations (superseded by Wave G node standard) | Complete → Superseded |
 | C | Observability plumbing: ObsLogger + CloudObsBackend node step methods | Complete |
 | D | Orchestrator migration: swap call sites in feedback_cycle.py | Complete |
-| E | EscalationCheck framework, end-to-end Langfuse tracing | Complete (E1); E2 replaced by building block approach |
+| E | EscalationCheck framework, end-to-end Langfuse tracing | Complete (E1); E2 replaced by node standard approach |
 | F | Warning inventory, OptSearchPoint consolidation, L2 probe rounds, l2_directive bridge, Critique↔L2 context sharing | Complete |
-| G | Node I/O removal + building block standard | Active |
+| G | Node I/O removal + node standard | Active |
 
 **Wave F** (§13 of spec): Per-query warning inventory tracks recurring pipeline warnings (e.g., `web_search:partial_scrape`) across rounds. `OptSearchPoint` unfrozen and consolidated as the single optimizer-state model. L2 gains diagnostic probe rounds. L2→L1 `l2_directive` bridge and Critique↔L2 context sharing close information flow gaps.
 
-**Wave G**: Replaced Pydantic node I/O wrappers with direct service calls + `observed_step`. Established the building block standard: `async def block(ctx) -> None` composable pattern, shared `llm_call` primitive across both repos. `optimizer_pipeline.json` declares node types + configs in same format as TermNorm's `pipeline.json`. See [`docs/building-blocks.md`](../building-blocks.md).
+**Wave G**: Replaced Pydantic node I/O wrappers with direct service calls + `observed_step`. Established the node standard: `async def node(ctx) -> None` composable pattern, shared `llm_call` primitive across both repos. `optimizer_pipeline.json` declares node types + configs in same format as TermNorm's `pipeline.json`. See [`docs/building-blocks.md`](../building-blocks.md).
 
 **Entry criteria:** M6 exit gate passed (PipelineSchema + composite scoring active).
 

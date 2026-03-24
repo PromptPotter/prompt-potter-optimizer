@@ -29,13 +29,13 @@
 
 ## Phase 2: Core Optimizer (M2) -- Complete
 
-9 packages, all Complete. HITL campaign notebook, grid search, prompt eval, prompt optimizer, backend-only evaluation, per-point sampling, spec rewrite, TermNorm `GET /pipeline`, discovery protocol.
+9 packages, all Complete. HITL campaign notebook, sensitivity scan, prompt eval, prompt optimizer, backend-only evaluation, per-point sampling, spec rewrite, TermNorm `GET /pipeline`, discovery protocol.
 
 ---
 
 ## Phase 3: Optimization Infrastructure (M3) -- Complete
 
-11 packages, all Complete. Optimizer nodes, feedback cycle, CampaignStore, Langfuse tracing, sensitivity scan + coverage, grid refactor, campaign init, notebook integration, data loop verification, service cleanup, spec rewrite.
+11 packages, all Complete. Optimizer nodes, feedback cycle, CampaignStore, Langfuse tracing, sensitivity scan + coverage, scan refactor, campaign init, notebook integration, data loop verification, service cleanup, spec rewrite.
 
 ---
 
@@ -95,12 +95,12 @@ See [M7 spec](m7-optimizer-pipeline.md) for full details (§1-§13).
 |----|-------------|--------|
 | 7.A1 | Prompt templates + optimizer_prompt_loader.py | Complete |
 | 7.A2 | OptSearchPoint model | Complete |
-| 7.A3 | NodeBase in base.py | Complete (superseded by Wave G building blocks) |
-| 7.A4 | Node I/O Pydantic models | Complete (superseded by Wave G building blocks) |
-| 7.B2 | L1GenerateNode implementation | Complete (superseded by Wave G building blocks) |
-| 7.B3 | L1EvaluateNode implementation | Complete (superseded by Wave G building blocks) |
-| 7.B4 | L2RefineNode + L3ModifyPlanNode | Complete (superseded by Wave G building blocks) |
-| 7.B5 | Node tests | Complete (superseded by Wave G building blocks) |
+| 7.A3 | NodeBase in base.py | Complete (superseded by Wave G node standard) |
+| 7.A4 | Node I/O Pydantic models | Complete (superseded by Wave G node standard) |
+| 7.B2 | L1GenerateNode implementation | Complete (superseded by Wave G node standard) |
+| 7.B3 | L1EvaluateNode implementation | Complete (superseded by Wave G node standard) |
+| 7.B4 | L2RefineNode + L3ModifyPlanNode | Complete (superseded by Wave G node standard) |
+| 7.B5 | Node tests | Complete (superseded by Wave G node standard) |
 | 7.C1 | ObsLogger node step methods | Complete |
 | 7.C2 | CloudObsBackend node step support | Complete |
 | 7.C3 | Wire NodeBase tracing hooks | Complete (superseded — tracing now via `observed_step()`) |
@@ -179,7 +179,7 @@ See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depe
 | P0.3 Candidate Generation | 2.1, 2.4 | M2 | Complete |
 | P0.4 Optimization Loop | 2.1, 3.2 | M2, M3 | Complete |
 | P0.5 PROMPT_STATE Tracking | 1.1 | M1 | Complete |
-| P0.6 Grid Search | 2.2, 2.6, 3.6 | M2, M3 | Complete |
+| P0.6 Sensitivity Scan | 2.2, 2.6, 3.6 | M2, M3 | Complete |
 | P1.1 Optimizer Nodes | 3.1 | M3 | Complete |
 | P1.2 Feedback Cycling | 3.2, 3.8 | M3 | Complete |
 | P1.3 Campaign Registry | 3.3 | M3 | Complete |

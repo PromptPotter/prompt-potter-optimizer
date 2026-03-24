@@ -155,7 +155,7 @@ class PipelineSchema(BaseModel):
     """Full description of a backend pipeline.
 
     Carries enough information for all PromptPotter services to operate
-    generically: evaluation, grid search, observability, and Langfuse push.
+    generically: evaluation, sensitivity scan, observability, and Langfuse push.
     """
 
     model_config = {"frozen": True}

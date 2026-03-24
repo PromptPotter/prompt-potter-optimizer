@@ -27,7 +27,7 @@ Future: non-parametric significance tests and confidence intervals on accuracy d
 
 **The AI Loop (Potter)** — From that starting point, a **critique-guided** feedback cycle iterates: each evaluation produces a structured **critique** of failures (or successes), which feeds forward into the next round's candidate generation alongside sampled **thinking styles** as mutation guidance. This separates failure analysis from candidate generation (inspired by [PromptWizard](https://arxiv.org/abs/2405.18369)'s critique-and-refine pattern). Candidates are evaluated against the backend and winners selected by composite score. 3-layer PromptState escalation: Layer 1 (prompt fields) changes every round, Layer 2 (context) adjusts when Layer 1 stalls, Layer 3 (strategy) rarely changes. The critique and thinking styles operate at the **optimizer agent** level (guiding the eval LLM that generates candidates) — they are not injected into the pipeline prompt being optimized.
 
-**Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [variant library](api/config/prompt_variants.json) that includes building blocks from published research (e.g. PromptWizard's 40 thinking styles). Each variant carries provenance metadata (source, year) for traceability. This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
+**Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [variant library](api/config/prompt_variants.json) that includes variants from published research (e.g. PromptWizard's 40 thinking styles). Each variant carries provenance metadata (source, year) for traceability. This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
 
 Every evaluation point is a **SearchPoint** — an immutable bundle of prompt + model + temperature + pipeline params. All mutations via `.derive()`. Content-hashable, so every evaluation is stored once and discoverable by any workflow.
 
@@ -61,7 +61,7 @@ Every evaluation point is a **SearchPoint** — an immutable bundle of prompt + 
 │                     │  sync   │                      │
 │  - Experiments      │  replay │  - Sensitivity scan  │
 │  - Pipeline API     │  eval   │  - Feedback cycle    │
-│  - Evaluation data  │         │  - Grid search       │
+│  - Evaluation data  │         │  - Coverage advisor   │
 └─────────────────────┘         └──────────────────────┘
 ```
 
@@ -84,7 +84,7 @@ See the [Setup Guide](docs/setup-guide.md) for prerequisites, configuration, and
 
 The notebook uses `notebooks/_campaign_lib/` wrapping services with progress bars and IPython display:
 - Pipeline config fetch, dataset loading (Excel + trace-based)
-- Scan advisor → sensitivity scan → coverage advisor → grid search
+- Scan advisor → sensitivity scan → coverage advisor
 - Feedback cycle with patience, campaign rounds, Langfuse sync
 
 ## Documentation
@@ -92,7 +92,7 @@ The notebook uses `notebooks/_campaign_lib/` wrapping services with progress bar
 - [Setup Guide](docs/setup-guide.md) — Prerequisites, installation, configuration
 - [Architecture](docs/architecture.md) — System overview, two-loop design, data model
 - [Design Principles](docs/design-principles.md) — Core patterns and conventions
-- [Sensitivity Scan & Grid Search](docs/sensitivity-scan.md) — Exploration tools: OAT scanning, grid search, coverage diagnostic
+- [Sensitivity Scan](docs/sensitivity-scan.md) — OAT scanning, coverage diagnostic
 - [Optimization](docs/optimization.md) — Feedback cycle, 3-layer optimization model, config reference
 - [Observability](docs/observability.md) — Langfuse integration, MLflow, data exploration
 - [Connector: TermNorm](docs/connectors/termnorm.md) — TermNorm-specific pipeline details

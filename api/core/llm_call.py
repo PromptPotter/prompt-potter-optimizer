@@ -1,5 +1,5 @@
 """
-Shared LLM call primitive — the building block standard's execution layer.
+Shared LLM call primitive — the node standard's execution layer.
 
 ``llm_call()`` is a thin wrapper over ``LLMClientBase.chat()`` that reads
 defaults from a config dict (typically from ``optimizer_pipeline.json``)

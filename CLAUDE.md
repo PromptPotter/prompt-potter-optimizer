@@ -65,11 +65,11 @@ The human workflow is a repeatable loop:
 
 ### Optimizer pipeline
 
-The optimizer is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_context`, `l3_modify_plan`), declared in `api/config/optimizer_pipeline.json` using the building block format. **L1 Generate is the sole `pipeline_params` decider**; L2 refines situation context (`task_context`) + meta-settings (creativity, n_variants, sample_size); L3 modifies the strategic plan. Critique (part of L1 Evaluate) produces a 5-field analysis (`positive_critique`, `negative_critique`, `priority_fix`, `suggested_axes`, `summary`) fed to both L1 and L2. Pluggable `EscalationCheck`s (e.g., `DegradationCheck`) can short-circuit evaluation mid-round and route to L2/L3. See [`docs/critique-agent.md`](docs/critique-agent.md) for the full critique/escalation architecture, [`docs/building-blocks.md`](docs/building-blocks.md) for the building block standard, and [`docs/specs/m7-optimizer-pipeline.md`](docs/specs/m7-optimizer-pipeline.md) for the M7 spec.
+The optimizer is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_context`, `l3_modify_plan`), declared in `api/config/optimizer_pipeline.json` using the node format. **L1 Generate is the sole `pipeline_params` decider**; L2 refines situation context (`task_context`) + meta-settings (creativity, n_variants, sample_size); L3 modifies the strategic plan. Critique (part of L1 Evaluate) produces a 5-field analysis (`positive_critique`, `negative_critique`, `priority_fix`, `suggested_axes`, `summary`) fed to both L1 and L2. Pluggable `EscalationCheck`s (e.g., `DegradationCheck`) can short-circuit evaluation mid-round and route to L2/L3. See [`docs/critique-agent.md`](docs/critique-agent.md) for the full critique/escalation architecture, [`docs/building-blocks.md`](docs/building-blocks.md) for the node standard, and [`docs/specs/m7-optimizer-pipeline.md`](docs/specs/m7-optimizer-pipeline.md) for the M7 spec.
 
-### Building block primitive (`api/core/llm_call.py`)
+### Node primitive (`api/core/llm_call.py`)
 
-`llm_call()` is the shared LLM interaction primitive. Config-driven from `api/config/optimizer_pipeline.json` with runtime overrides. Used by all optimizer building blocks (`l1_generate`, `refine_context`, `modify_plan`, `CritiqueAgent`).
+`llm_call()` is the shared LLM interaction primitive. Config-driven from `api/config/optimizer_pipeline.json` with runtime overrides. Used by all optimizer nodes (`l1_generate`, `refine_context`, `modify_plan`, `CritiqueAgent`).
 
 ### Milestones
 

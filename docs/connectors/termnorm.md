@@ -433,31 +433,31 @@ This replaces any hardcoded knowledge of TermNorm's pipeline structure with runt
 
 ### Evaluation Mode
 
-All evaluation (grid search and optimization campaigns) runs via the TermNorm backend. The backend runs the **full pipeline** for every query: web search → LLM1 (entity profiling) → token matching (database) → LLM2 (reranking with candidate prompt). PromptPotter passes the candidate prompt via the `ranking_prompt` parameter.
+All evaluation (sensitivity scan and optimization campaigns) runs via the TermNorm backend. The backend runs the **full pipeline** for every query: web search → LLM1 (entity profiling) → token matching (database) → LLM2 (reranking with candidate prompt). PromptPotter passes the candidate prompt via the `ranking_prompt` parameter.
 
 ```
-PromptPotter grid_search.py
+PromptPotter prompt_eval.py
   │
-  ├─ POST /sessions (once per grid search run)
+  ├─ POST /sessions (once per eval batch)
   │
-  └─ for each combo × query:
+  └─ for each configuration × query:
        POST /matches { query, steps: [...], ranking_prompt: ps.render() }
          ├─ Web search → entity_profile       (re-runs every time)
          ├─ Token matching against DB          (re-runs every time)
          └─ LLM2 reranking with ranking_prompt (only step that varies)
 ```
 
-**Cost:** ~10-30s per query (web search + LLM1 + token matching + LLM2). For 35 queries × 34 combos = ~1,190 calls.
+**Cost:** ~10-30s per query (web search + LLM1 + token matching + LLM2).
 
 **Crash protection:** Incremental writes to `.partial.jsonl` after each query. On restart, resumes from last completed query. Completed combos are cached via content-addressed hashing and skipped on re-run.
 
-### Future Optimization: Cached Intermediates in Grid Search
+### Future Optimization: Cached Intermediates
 
-The backend eval mode is accurate but wasteful: steps 1-3 (web search → LLM1 → token matching) produce identical results for the same query regardless of the ranking prompt. Only LLM2 varies between grid search combos.
+The backend eval mode is accurate but wasteful: steps 1-3 (web search → LLM1 → token matching) produce identical results for the same query regardless of the ranking prompt. Only LLM2 varies between configurations.
 
 Since `/matches` already accepts pre-computed `entity_profile` + `token_matched_candidates`, PromptPotter can cache these after the first full pipeline run and pass them on subsequent calls for the same query:
 
 1. Run full pipeline once per query to get `entity_profile` + candidates (~10-30s × N queries)
-2. For each grid combo, call `/matches` with the cached intermediates + candidate prompt (~2s × N queries × M combos)
+2. For each configuration, call `/matches` with the cached intermediates + candidate prompt (~2s × N queries × M configs)
 
-This reduces grid search time from O(N × M × 20s) to O(N × 20s + N × M × 2s) — a ~10x speedup for typical grid sizes. PromptPotter-side change only.
+This reduces evaluation time from O(N × M × 20s) to O(N × 20s + N × M × 2s) — a ~10x speedup for typical scan sizes. PromptPotter-side change only.

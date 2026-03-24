@@ -1,34 +1,32 @@
 # Milestone 7: Optimizer-as-Pipeline
 
-**Version:** 1.1.0
-**Date:** 2026-03-19
-**Status:** Waves A-F complete, Wave G active. v1 node classes (NodeBase, L1GenerateNode, etc.) were implemented in Waves A-D then **replaced in Wave G** by the building block approach: direct service calls + `observed_step()` + `optimizer_pipeline.json`. The `api/nodes/` directory has been deleted.
+**Version:** 2.0.0
+**Date:** 2026-03-24
+**Status:** Complete. All optimizer nodes operational, tracing active, pipeline declaration stable.
 **Depends on:** [M6 PipelineSchema](m6-pipeline-composability.md), [ADD v0.10.0](add.md)
-
-> **Reading note:** Sections below referencing `NodeBase`, `L1GenerateNode`, `L1EvaluateNode`, `L2RefineNode`, `L3ModifyPlanNode`, or `api/nodes/` describe the superseded v1 design. The current implementation uses `observed_step()` (in `api/services/obs/step_tracer.py`) wrapping direct service calls, configured via `api/config/optimizer_pipeline.json`. ADR decisions remain valid — only the vehicle changed from node classes to service calls.
 
 ---
 
 ## 1. Context & Motivation
 
-PromptPotter optimizes workflow pipelines (currently TermNorm's 6-step terminology normalization pipeline). The optimizer itself is a workflow pipeline with 4 LLM-driven steps (+ L4 meta-optimization as a future conceptual extension). These steps share the same structural properties as any target backend pipeline:
+PromptPotter optimizes workflow pipelines (currently TermNorm's 6-step terminology normalization pipeline). The optimizer itself is a pipeline with 5 nodes organized into 4 named sequences. These nodes share the same structural properties as any target backend pipeline:
 
-- Each step has defined **inputs and outputs**
-- Each step has a **parameter surface** (model, temperature, max_tokens, etc.)
-- Each step involves **LLM calls** with specific prompts
-- Steps form a **loop topology** with conditional escalation
+- Each node has defined **inputs and outputs**
+- Each node has a **parameter surface** (model, temperature, max_tokens, etc.)
+- Each node involves **LLM calls** with specific prompts (or backend calls for evaluation)
+- Nodes form a **loop topology** with conditional escalation
 
-Modeling the optimizer using the same `PipelineSchema`/`PipelineStep` architecture solves three problems by design:
+Modeling the optimizer as a pipeline solves three problems:
 
-1. **Tracing** — Optimizer steps get the same Langfuse tracing infrastructure. `critique_text`, `thinking_styles`, L2/L3 transition rationale, escalation signals, and meta-prompts are captured per step.
-2. **Reproducibility** — Every meta-optimizer decision traced with full I/O. Given a trial JSON, you can reconstruct every LLM call.
-3. **Self-optimization** — A meta-PromptPotter instance can optimize the optimizer's own prompts via `GET /optimizer/pipeline`. L4 completes the escalation hierarchy.
+1. **Tracing** — Optimizer nodes get the same Langfuse tracing infrastructure as target pipeline steps. `critique_text`, `thinking_styles`, L2/L3 transition rationale, escalation signals, and meta-prompts are captured per node.
+2. **Reproducibility** — Every meta-optimizer decision is traced with full I/O. Given a trial JSON, you can reconstruct every LLM call.
+3. **Self-optimization** — A meta-PromptPotter instance can optimize the optimizer's own prompts. L4 completes the escalation hierarchy.
 
 ### The Tracing Gap (pre-M7)
 
 Artifacts not persisted (lost after each cycle):
 
-| Artifact | Where it lives | Persistence |
+| Artifact | Where it lived | Persistence |
 |----------|---------------|-------------|
 | `critique_text` | `_LoopState.critique_text` | Memory only — overwritten each round |
 | `thinking_styles` | `_LoopState.thinking_styles` | Memory only — resampled each round |
@@ -41,21 +39,21 @@ Artifacts not persisted (lost after each cycle):
 | Candidate generation prompt | `_build_*_meta_prompt()` | Not logged |
 | Scan context enrichment | `prepare_scan_context()` output | Lost after feeding to meta-prompt |
 
-**Phase 0.5 of v1 solved:** critique_text, thinking_styles, plan, task_context, optimizer_params — via `OptSearchPoint` checkpointing in trial JSON + node-level Langfuse tracing via `NodeBase`.
+**M7 solved all of these** via `OptSearchPoint` checkpointing in trial JSON + node-level Langfuse tracing via `observed_step()`.
 
 ---
 
 ## 2. Architectural Decisions Log
 
-Seven key design choices from the v1 implementation with rationale. These MUST be preserved in v2.
+Eight key design choices made during M7 development. Some reference intermediate implementations (Pydantic node wrapper classes) that were built then deleted — the decisions themselves remain valid.
 
-### ADR-1: Critique inside L1EvaluateNode, not orchestrator
+### ADR-1: Critique inside l1_evaluate, not orchestrator
 
-**Decision:** `CritiqueAgent.run()` and `sample_thinking_styles()` execute inside `L1EvaluateNode._execute()`, producing `critique_text` and `thinking_styles` as output fields.
+**Decision:** `CritiqueAgent.run()` and `sample_thinking_styles()` execute inside the l1_evaluate phase of `_evaluate_candidates()`, producing `critique_text` and `thinking_styles` as output fields.
 
-**Rationale:** Critique output feeds the *next* round's generation — it's part of L1Evaluate's output contract. Keeping it in the node means Langfuse traces capture the critique LLM call as a child of the evaluate span, and the node's output model documents the full data contract.
+**Rationale:** Critique output feeds the *next* round's generation — it is part of l1_evaluate's output contract. Keeping it in the evaluate phase means Langfuse traces capture the critique LLM call as a child of the evaluate span, and the output documents the full data contract.
 
-**Alternative rejected:** Running critique in the orchestrator after `L1EvaluateNode.process()`. This splits the observation across two trace locations and requires the orchestrator to know about critique internals.
+**Alternative rejected:** Running critique in the orchestrator after evaluation. This splits the observation across two trace locations and requires the orchestrator to know about critique internals.
 
 ### ADR-2: `baseline_rendered` INCLUDED in `cycle_config_identity()`
 
@@ -65,32 +63,33 @@ Seven key design choices from the v1 implementation with rationale. These MUST b
 
 **Fields included:** `max_rounds`, `patience`, `n_variants`, `creativity`, `improvement_threshold`, `model`, `provider`, `temperature`, `sample_size`, `seed`, `baseline_rendered`, sorted `eval_data_pairs`.
 
-### ADR-3: `scan_context` as node input, not config
+### ADR-3: `scan_context` as runtime input, not node config
 
-**Decision:** `scan_context` is a field on `L1GenerateInput`, not a config key on the node.
+**Decision:** `scan_context` is passed as a runtime argument to `l1_generate()`, not a config key in `optimizer_pipeline.json`.
 
-**Rationale:** Scan context can change between rounds (e.g., after L2 transition changes the pipeline). Node config is set at construction time; input data varies per invocation. The orchestrator resolves scan context and passes it as input.
+**Rationale:** Scan context can change between rounds (e.g., after L2 transition changes the pipeline). Node config is set at declaration time; input data varies per invocation. The orchestrator resolves scan context and passes it as input.
 
-**Implementation note:** `CycleConfig.scan_context` carries the initial value. The orchestrator forwards it to `L1GenerateNode` via input, not via `node.config`.
+**Implementation:** `CycleConfig.scan_context` carries the initial value. The orchestrator forwards it to `l1_generate()` via function arguments.
 
 ### ADR-4: Suggestion generation stays in orchestrator
 
-**Decision:** `generate_suggestions()` is NOT wrapped in a node. It runs in `_evaluate_candidates()` after the L1EvaluateNode returns.
+**Decision:** `generate_suggestions()` is NOT a pipeline node. It runs in `_evaluate_candidates()` after l1_evaluate returns.
 
 **Rationale:** Suggestions require accumulated round history (`state.rounds`) and the campaign config — both orchestrator-level state. Making this a node would require threading the entire history through the node interface, which adds complexity without tracing benefit (suggestions are a secondary output).
 
-### ADR-5: `_node_obs_type()` override pattern
+### ADR-5: Observation type per node
 
-**Decision:** `NodeBase._node_obs_type()` returns `"generation"` by default. `L1EvaluateNode` overrides to return `"span"`.
+**Decision:** Each node declares its Langfuse observation type. Most nodes are `"generation"` (single LLM call). l1_evaluate is `"span"` (composite operation).
 
-**Rationale:** Most nodes (L1GenerateNode, L2RefineNode, L3ModifyPlanNode) make a single LLM call — a Langfuse `generation` observation. L1EvaluateNode is a composite operation with nested children (N candidate evaluations + optional critique) — a Langfuse `span` that contains child observations.
+**Rationale:** Most nodes (`l1_generate`, `l2_refine_context`, `l3_modify_plan`) make a single LLM call — a Langfuse `generation` observation. l1_evaluate is a composite operation with nested children (N candidate evaluations + optional critique) — a Langfuse `span` that contains child observations.
 
-| Node | `_node_obs_type()` | Why |
-|------|--------------------|-----|
-| `L1GenerateNode` | `"generation"` | Single `generate_candidates()` LLM call |
-| `L1EvaluateNode` | `"span"` | N eval calls + optional critique agent |
-| `L2RefineNode` | `"generation"` | Single `refine_context()` LLM call |
-| `L3ModifyPlanNode` | `"generation"` | Single `modify_plan()` LLM call |
+| Node | obs_type | Why |
+|------|----------|-----|
+| `l1_generate` | `"generation"` | Single `l1_generate()` LLM call |
+| `l1_evaluate` | `"span"` | N eval calls + optional critique agent |
+| `critique` | `"generation"` | Single `CritiqueAgent.run()` LLM call |
+| `l2_refine_context` | `"generation"` | Single `refine_context()` LLM call |
+| `l3_modify_plan` | `"generation"` | Single `modify_plan()` LLM call |
 
 ### ADR-6: OptSearchPoint as cross-reference, not container
 
@@ -102,203 +101,250 @@ Seven key design choices from the v1 implementation with rationale. These MUST b
 
 **Decision:** Optimizer prompt templates use `{{variable}}` syntax (double braces), rendered via `PromptState.compile(**kwargs)`.
 
-**Rationale:** Single `{braces}` conflict with JSON examples in prompt text. Double braces are Python `.format()`-escaped for literal braces, then `.compile()` does a second pass replacing `{{var}}` → value. This keeps templates readable as both raw text and PromptState JSON.
+**Rationale:** Single `{braces}` conflict with JSON examples in prompt text. Double braces are Python `.format()`-escaped for literal braces, then `.compile()` does a second pass replacing `{{var}}` with values. This keeps templates readable as both raw text and PromptState JSON.
+
+### ADR-8: OptSearchPoint is mutable, not frozen
+
+**Decision:** `OptSearchPoint` is a mutable `BaseModel` (not frozen). Unlike `SearchPoint` which is content-addressed (identity = hash), `OptSearchPoint` is a checkpoint snapshot written once per round.
+
+**Rationale:** Freezing forces unnecessary full reconstruction each round. The mutable design enables in-place updates during the feedback cycle (e.g., `state.opt_sp.critique_text = ...`), then a single `model_dump()` at checkpoint time. All optimizer-state fields that were previously scattered across `_LoopState` are consolidated on `OptSearchPoint`.
 
 ---
 
-## 3. Node I/O Contracts
+## 3. Pipeline Architecture
 
-All node classes live in `api/nodes/optimizer_nodes.py` and extend `NodeBase[TInput, TOutput]` from `api/nodes/base.py`.
+### 3.1 Pipeline Declaration
 
-### NodeBase
+The optimizer pipeline is declared in `api/config/optimizer_pipeline.json`. Five nodes, four named sequences:
 
-Template Method pattern with Pydantic generics. Key interface:
-
-```python
-class NodeBase(ABC, Generic[TInput, TOutput]):
-    def __init__(self, node_id: str, config: dict | None = None,
-                 *, obs: ObsLogger | None = None, trace_id: str | None = None)
-
-    async def process(self, input_data: TInput | dict) -> TOutput  # public entry
-    async def _execute(self, input_data: TInput) -> TOutput         # override this
-
-    def _node_obs_type(self) -> str          # "generation" (default) or "span"
-    def _start_observation(self, ...) -> str  # auto-called by process()
-    def _end_observation(self, ...)           # auto-called by process()
+```json
+{
+  "name": "PromptPotter Optimizer",
+  "version": "v1.0",
+  "nodes": {
+    "l1_generate":       { "type": "llm/meta",   "config": { ... } },
+    "l1_evaluate":       { "type": "evaluation",  "config": { ... } },
+    "critique":          { "type": "agent",       "config": { ... } },
+    "l2_refine_context": { "type": "llm/meta",   "config": { ... } },
+    "l3_modify_plan":    { "type": "llm/meta",   "config": { ... } }
+  },
+  "pipelines": {
+    "l1_round":                ["l1_generate", "l1_evaluate"],
+    "l1_round_with_critique":  ["l1_generate", "l1_evaluate", "critique"],
+    "l2_escalation":           ["l2_refine_context", "l1_generate", "l1_evaluate", "critique"],
+    "l3_escalation":           ["l3_modify_plan", "l2_refine_context", "l1_generate", "l1_evaluate", "critique"]
+  }
+}
 ```
 
-`process()` handles: input validation → obs start → `_execute()` → output validation → metrics → obs end. Observability is opt-in (pass `obs` + `trace_id`).
+### 3.2 Node Catalog
 
-### NodeMetrics
-
-```python
-class NodeMetrics(BaseModel):
-    node_id: str
-    node_type: str          # class name
-    start_time: str         # ISO timestamp
-    end_time: str
-    duration_ms: float
-    input_tokens: int | None
-    output_tokens: int | None
-    model: str | None
-    error: str | None
-    metadata: dict[str, Any]
-```
-
-### InitNode (removed)
-
-InitNode was removed in the M7 v2 audit. Baseline decomposition is now handled by `decompose_task_context()` at campaign init time, before the feedback cycle starts. The `task_context` dict produced by decomposition flows to `OptSearchPoint` and is used by L1 Generate and L2 Refine. See §6.1 for details.
-
-### L1GenerateNode
+#### l1_generate (type: `llm/meta`)
 
 Generates N candidate PromptState variants via LLM meta-prompt.
 
-**Config:** `model`, `provider`, `n_variants` (default: 5), `creativity` (default: 0.7)
+**Config defaults:** `temperature: 0.7`, `max_tokens: 8192`, `output_format: "json"`, `prompt_family: "meta_scan_aware"`, `context_sources: ["scan_context", "critique", "task_context", "escalation_journal"]`, `response_parser: "candidate_list"`
+
+**Implementation:** `l1_generate()` in `api/services/prompt_optimizer.py`. Assembles a meta-prompt from scan analytics, critique, task context, L2 directive, thinking styles, escalation journal, and warning inventory. Returns a list of candidate dicts (PromptState dumps with optional `__pipeline_params_override__`).
+
+**Key inputs:** `current_ps`, `current_accuracy`, `current_results`, `n_variants`, `creativity`, `scan_context`, `critique_text`, `thinking_styles`, `escalation_journal`, `task_context`, `warning_inventory`, `l2_directive`, `is_probe_round`
+
+**Key output:** `list[dict]` — candidate PromptState dicts
+
+#### l1_evaluate (type: `evaluation`)
+
+Evaluates candidates via backend `/matches` endpoint, selects winner, runs critique.
+
+**Config defaults:** `improvement_threshold: 0.01`
+
+**Implementation:** `l1_evaluate()` in `api/services/prompt_optimizer.py` (winner selection) + `_evaluate_candidates()` in `api/services/campaign/feedback_cycle.py` (orchestration wrapper that adds critique + thinking style sampling).
+
+**Key inputs:** `candidates`, `round_eval_data`, `current_best` (accuracy + prompt_state + results), `eval_ctx`, `improvement_threshold`, `escalation_checks`
+
+**Key output:** Dict with `winner`, `winner_accuracy`, `winner_prompt_state`, `improved`, `next_action`, `candidate_scores`, `winner_results`, `critique_text`, `critique`, `thinking_styles`, `winner_composite`, `winner_pipeline_params`, `escalation_signal`
+
+**Observation type:** `"span"` (composite operation containing per-candidate evals + critique)
+
+#### critique (type: `agent`)
+
+CritiqueAgent produces a 5-field analysis dict fed to both l1_generate (next round) and l2_refine_context (on escalation).
+
+**Config defaults:** `temperature: 0.3`, `max_tokens: 4096`, `agent_class: "CritiqueAgent"`, `positive_threshold: 0.7`
+
+**Implementation:** `CritiqueAgent` class in `api/services/campaign/critique.py`. Routes to positive path (accuracy >= threshold: extend what works) or negative path (accuracy < threshold: diagnose root causes). Uses pre-computed stats from `critique_stats.py` (pipeline health, rank analysis, round evolution, query categories, anomaly flags).
+
+**Output fields:**
+
+| Field | Description |
+|-------|-------------|
+| `positive_critique` | What's working — patterns to extend |
+| `negative_critique` | What's failing — root causes and blockers |
+| `priority_fix` | Single most impactful change to make |
+| `suggested_axes` | Parameter axes to explore (e.g., `["query_prefix", "max_sites"]`) |
+| `summary` | 2-3 sentence actionable critique |
+
+**Note:** In the current implementation, critique runs *inside* `_evaluate_candidates()` (the l1_evaluate orchestration wrapper), not as a separately-invoked pipeline node. This is per ADR-1. The `critique` node in `optimizer_pipeline.json` declares its config; the orchestrator reads the config via `get_node_config("critique")` but invokes `CritiqueAgent` directly.
+
+#### l2_refine_context (type: `llm/meta`)
+
+Refines task_context + meta-settings (creativity, n_variants, sample_size) when L1 stalls.
+
+**Config defaults:** `temperature: 0.3`, `max_tokens: 2048`, `output_format: "json"`, `prompt_family: "l2_refine_context"`, `context_sources: ["critique", "task_context", "l2_directive"]`, `response_parser: "transition_result"`
+
+**Implementation:** `refine_context()` in `api/services/campaign/layer_transitions.py`. Receives stalled round summaries, failure examples, pipeline params, escalation context, escalation journal, warning inventory, critique text, and previous L2 directive.
+
+**Returns:** `TransitionResult` with:
+- `prompt_state` — new PromptState with updated optimizer_params
+- `task_context` — refined domain context dict (or None if unchanged)
+- `l2_directive` — 2-3 sentence instruction for l1_generate (sliding window of 1)
+- `action` — `"continue"` (normal L1 cycle) or `"probe"` (probe round)
+- `debug_prompt` / `debug_response` — for observability
+
+**Responsibility boundary:** L2 does NOT set `pipeline_params` — that is l1_generate's job. L2 refines the *situation context* and *meta-settings* so l1_generate makes better choices.
+
+#### l3_modify_plan (type: `llm/meta`)
+
+Modifies the strategic optimization plan when L2 stalls.
+
+**Config defaults:** `temperature: 0.5`, `max_tokens: 2048`, `output_format: "json"`, `prompt_family: "l3_modify_plan"`, `context_sources: ["critique", "task_context", "plan", "escalation_journal"]`, `response_parser: "transition_result"`
+
+**Implementation:** `modify_plan()` in `api/services/campaign/layer_transitions.py`. Receives L2 adjustment history, current plan, pipeline params + schema.
+
+**Returns:** `TransitionResult` with:
+- `prompt_state` — new PromptState with updated `plan`
+- `pipeline_params` — optional new pipeline params (L3 can suggest broad strategy shifts)
+
+### 3.3 Node Type Hierarchy
+
+Shared vocabulary between TermNorm and PromptPotter pipelines:
 
 ```
-L1GenerateInput:
-    prompt_state: dict        # Current best PromptState (serialized)
-    accuracy: float           # Current accuracy (0.0-1.0)
-    results: list             # Previous eval results for failure analysis (default: [])
-    critique_text: str        # Critique from previous round (default: "")
-    thinking_styles: list[str]  # Sampled mutation guidance (default: [])
-    scan_context: dict | None # Pipeline-aware context from scan analytics (default: None)
-
-L1GenerateOutput:
-    candidates: list[dict]    # Candidate PromptStates (serialized)
-    n_generated: int          # Number of candidates generated
+llm                  <- raw prompt -> response
++-- llm/structured   <- + prompt template + output schema (TermNorm nodes)
+|   +-- llm/meta     <- + multi-source assembly + context parsing (optimizer nodes)
++-- agent            <- + multi-step loop (CritiqueAgent)
+web_search           <- external HTTP service
+deterministic        <- pure function
+evaluation           <- backend call + comparison
 ```
 
-### L1EvaluateNode
+**Key insight:** `llm/meta` inherits from `llm/structured` which inherits from `llm`. The LLM call is always the same internally — subtypes add prompt assembly and response parsing around it. A new node = configure which subtype + `prompt_family` + `response_parser`.
 
-Evaluates candidates via backend, selects winner, runs critique.
+### 3.4 Shared Primitive: `llm_call()`
 
-**Config:** `eval_ctx` (EvalContext, required), `improvement_threshold` (default: 0.01), `on_candidate_eval` (callback), `on_query_eval` (callback), `model`, `provider`, `enable_critique` (default: false), `critique_positive_threshold` (default: 0.7), `thinking_styles_seed` (default: 42)
+`llm_call()` in `api/core/llm_call.py` is the shared LLM interaction primitive. Config-driven from `optimizer_pipeline.json` with runtime overrides.
 
-**`_node_obs_type()` → `"span"`** (composite operation)
-
-```
-L1EvaluateInput:
-    candidates: list[dict]    # Candidate PromptStates (serialized)
-    eval_data: list           # Evaluation query dicts
-    current_best: dict        # {accuracy, prompt_state, results, label}
-
-L1EvaluateOutput:
-    winner: dict              # Winner round entry dict
-    winner_prompt_state: dict # Winner PromptState (serialized)
-    winner_accuracy: float
-    improved: bool
-    next_action: str          # "generate" or "stop" (default: "generate")
-    candidate_scores: list[dict]
-    winner_results: list[dict]
-    critique_text: str        # Critique for next round (default: "")
-    thinking_styles: list[str]  # Sampled styles for next round (default: [])
-    winner_composite: float   # Composite score (default: 0.0)
-    winner_pipeline_params: dict | None  # Pipeline params from winner (default: None)
+```python
+async def llm_call(
+    llm_client: LLMClientBase,
+    messages: list[dict[str, str]],
+    config: dict,          # from optimizer_pipeline.json node config
+    **overrides,           # runtime: model, temperature, max_tokens
+) -> LLMResponse
 ```
 
-### L2RefineNode
+`get_node_config(node_name)` loads a node's config dict from `optimizer_pipeline.json` (cached after first call). All optimizer nodes use this instead of calling `chat()` directly.
 
-L2 refine_context transition: adjust parameters and context.
+**Callers:**
+- `l1_generate()` in `prompt_optimizer.py` — `llm_call(..., config=get_node_config("l1_generate"), temperature=creativity)`
+- `CritiqueAgent.run()` in `critique.py` — `llm_call(..., config=get_node_config("critique"))`
+- `refine_context()` in `layer_transitions.py` — `llm_call(..., config=get_node_config("l2_refine_context"))`
+- `modify_plan()` in `layer_transitions.py` — `llm_call(..., config=get_node_config("l3_modify_plan"))`
 
-**Config:** `model`, `provider`, `temperature` (default: 0.3), `pipeline_schema`
+### 3.5 Tracing: `observed_step()`
 
+`observed_step()` in `api/services/obs/step_tracer.py` is an async context manager wrapping each node execution with timing + Langfuse observations.
+
+```python
+async with observed_step("l1_generate_r3", "llm/meta", obs=obs, trace_id=tid) as step:
+    result = await l1_generate(...)
+    step.output = {"n_candidates": len(result)}
 ```
-L2RefineInput:
-    prompt_state: dict        # Current PromptState (serialized)
-    stalled_rounds: list[dict]  # Recent stalled round summaries
-    eval_data: list[dict]     # Evaluation query dicts
-    pipeline_params: dict | None  # Current pipeline parameters (default: None)
 
-L2RefineOutput:
-    prompt_state: dict        # New PromptState (serialized)
-    pipeline_params: dict | None  # Updated pipeline params (default: None)
-    changes_description: str  # Description of changes (default: "")
-```
+Yields a `StepTrace` with `.output` (set by caller), `.duration_ms`, `.error`. Tracing is opt-in: only active when `obs` + `trace_id` are provided. Non-fatal: observability failures are logged as warnings and never crash the caller.
 
-### L3ModifyPlanNode
+**Usage in feedback_cycle.py:**
 
-L3 modify_plan transition: change strategic optimization plan.
+| Call site | step_id pattern | step_type | obs_type |
+|-----------|----------------|-----------|----------|
+| `_generate_or_load_candidates()` | `l1_generate_r{N}` | `"llm/meta"` | `"generation"` (default) |
+| `_evaluate_candidates()` | `l1_evaluate_r{N}` | `"evaluation"` | `"span"` |
+| `_do_l2_transition()` | `l2_refine_r{N}` | `"llm/meta"` | `"generation"` (default) |
+| `_do_l3_transition()` | `l3_modify_plan_r{N}` | `"llm/meta"` | `"generation"` (default) |
 
-**Config:** `model`, `provider`, `temperature` (default: 0.5), `pipeline_schema`
+### 3.6 Responsibility Matrix
 
-```
-L3ModifyPlanInput:
-    prompt_state: dict        # Current PromptState (serialized)
-    l2_history: list[dict]    # L2 adjustment history summaries
-    eval_data: list[dict]     # Evaluation query dicts
-    pipeline_params: dict | None  # Current pipeline parameters (default: None)
-
-L3ModifyPlanOutput:
-    prompt_state: dict        # New PromptState (serialized)
-    pipeline_params: dict | None  # Updated pipeline params (default: None)
-    changes_description: str  # Description of changes (default: "")
-```
+| Node | Decides | Does NOT decide |
+|------|---------|-----------------|
+| **l1_generate** | `pipeline_params` (query_prefix, max_sites, schema, temperature, ...) | context, meta-settings |
+| **critique** | what to focus on (suggested_axes, priority_fix) | pipeline_params values |
+| **l2_refine_context** | context, meta-settings (creativity, n_variants, sample_size), task_context, l2_directive | pipeline_params |
+| **l3_modify_plan** | strategic plan, broad pipeline_params shifts | context, meta-settings |
 
 ---
 
 ## 4. Orchestrator Flow
 
-### State Machine
+### 4.1 State Machine
 
 ```
-                    ┌──────────────────────────┐
-                    │  Campaign Init           │  (decompose_task_context + restructure)
-                    └──────────┬───────────────┘
-                               │ baseline PromptState + task_context
-                               ▼
-             ┌──── Resume Detection ────┐
-             │  CampaignStore lookup    │
-             │  Obs setup               │
-             │  EvalContext build        │
-             │  Bootstrap critique      │
-             └──────────┬───────────────┘
-                        │
-    ┌───────────────────▼────────────────────┐
-    │            Round Loop                  │
-    │  ┌─────────────────────────────────┐   │
-    │  │ L1GenerateNode                  │   │
-    │  │  (or load from disk if resume)  │   │
-    │  └──────────────┬──────────────────┘   │
-    │                 │ candidates            │
-    │  ┌──────────────▼──────────────────┐   │
-    │  │ L1EvaluateNode                  │   │
-    │  │  eval → winner → critique       │   │
-    │  │  → thinking_styles              │   │
-    │  └──────────────┬──────────────────┘   │
-    │                 │ round_result          │
-    │  ┌──────────────▼──────────────────┐   │
-    │  │ State Update                    │   │
-    │  │  - Update current_sp, accuracy  │   │
-    │  │  - Track best_sp               │   │
-    │  │  - Increment stall_count       │   │
-    │  │  - Checkpoint OptSearchPoint    │   │
-    │  └──────────────┬──────────────────┘   │
-    │                 │                      │
-    │  ┌──────────────▼──────────────────┐   │
-    │  │ Stopping Conditions             │   │
-    │  │  ✓ perfect_score (acc >= 1.0)   │   │
-    │  │  ✓ next_action_stop             │   │
-    │  │  ✓ patience_exhausted           │   │
-    │  │  ✓ max_rounds                   │   │
-    │  │  ✓ l2/l3_patience_exhausted     │   │
-    │  └──────────────┬──────────────────┘   │
-    │                 │ stall_count >= patience│
-    │  ┌──────────────▼──────────────────┐   │
-    │  │ Escalation (if enable_l2)       │   │
-    │  │  L2RefineNode → reset stall     │   │
-    │  │    └─ if L2 stalls:             │   │
-    │  │       L3ModifyPlanNode          │   │
-    │  │       → reset L2 + L1 stall     │   │
-    │  └─────────────────────────────────┘   │
-    └────────────────────────────────────────┘
-                        │
-                        ▼
+                    +------------------------------+
+                    |  Campaign Init               |  (decompose_task_context + restructure)
+                    +--------------+---------------+
+                                   | baseline PromptState + task_context
+                                   v
+             +---- Resume Detection ----+
+             |  CampaignStore lookup    |
+             |  Obs setup               |
+             |  EvalContext build        |
+             |  Bootstrap critique      |
+             +----------+---------------+
+                        |
+    +-------------------v--------------------+
+    |            Round Loop                  |
+    |  +-----------------------------------+ |
+    |  | l1_generate                       | |
+    |  |  (or load from disk if resume)    | |
+    |  +----------------+------------------+ |
+    |                   | candidates          |
+    |  +----------------v------------------+ |
+    |  | l1_evaluate                       | |
+    |  |  eval -> winner -> critique       | |
+    |  |  -> thinking_styles               | |
+    |  +----------------+------------------+ |
+    |                   | round_result        |
+    |  +----------------v------------------+ |
+    |  | State Update                      | |
+    |  |  - Update current_sp, accuracy    | |
+    |  |  - Track best_sp                  | |
+    |  |  - Increment stall_count          | |
+    |  |  - Checkpoint OptSearchPoint      | |
+    |  +----------------+------------------+ |
+    |                   |                    |
+    |  +----------------v------------------+ |
+    |  | Stopping Conditions               | |
+    |  |  * perfect_score (acc >= 1.0)     | |
+    |  |  * next_action_stop               | |
+    |  |  * patience_exhausted             | |
+    |  |  * max_rounds                     | |
+    |  |  * l2/l3_patience_exhausted       | |
+    |  +----------------+------------------+ |
+    |                   | stall_count >= patience
+    |  +----------------v------------------+ |
+    |  | Escalation (if enable_l2)         | |
+    |  |  l2_refine_context -> reset stall | |
+    |  |    +- if L2 stalls:               | |
+    |  |       l3_modify_plan              | |
+    |  |       -> reset L2 + L1 stall      | |
+    |  +-----------------------------------+ |
+    +----------------------------------------+
+                        |
+                        v
                    Finalize
                    (CampaignStore, Obs, CycleResult)
 ```
 
-### `_LoopState` threading
+### 4.2 `_LoopState` structure
 
 ```python
 @dataclass
@@ -314,9 +360,12 @@ class _LoopState:
     best_sp: SearchPoint | None       # overall best
     stall_count: int                  # consecutive non-improving rounds
 
-    # Critique + thinking styles (fed forward between rounds)
-    critique_text: str
-    thinking_styles: list[str]
+    # Optimizer state — single OptSearchPoint (mutable, checkpointed per round)
+    opt_sp: OptSearchPoint            # critique, thinking_styles, task_context,
+                                      # escalation_journal, warning_inventory, etc.
+
+    # Probe round flag (set by L2 action="probe", reset after probe round)
+    probe_next_round: bool
 
     # L2/L3 escalation tracking
     l2_stall_count: int
@@ -331,84 +380,116 @@ class _LoopState:
     eval_ctx: EvalContext | None      # shared across all rounds
 ```
 
-### Round execution flow
+**Key design:** All optimizer-level state lives on `opt_sp: OptSearchPoint`. Loop-mechanics fields (`current_sp`, `stall_count`, `l2_stall_count`, etc.) stay on `_LoopState`. On resume, `opt_sp` is hydrated from the latest trial JSON in one shot: `state.opt_sp = OptSearchPoint(**stored_osp)`.
+
+### 4.3 Round execution flow
 
 Each round in `_execute_round()`:
 
-1. Resolve L2 meta-param overrides from `OptSearchPoint.optimizer_params` (n_variants, creativity)
-2. `_generate_or_load_candidates()` — check disk first, then `L1GenerateNode.process()`
-3. `_evaluate_candidates()` — `L1EvaluateNode.process()` + optional suggestions
-4. Pop critique_text/thinking_styles from eval output → store in `_LoopState`
+1. Resolve L2 meta-param overrides from `PromptState.optimizer_params` (n_variants, creativity)
+2. `_generate_or_load_candidates()` — check disk cache first, then call `l1_generate()` wrapped in `observed_step()`
+3. `_evaluate_candidates()` — call `l1_evaluate()` wrapped in `observed_step()` + run CritiqueAgent + sample thinking styles
+4. Pop critique_text/thinking_styles/critique from eval output into `state.opt_sp`
 5. Build `CycleRoundResult`
-6. Log round to ObsLogger (round_end + prompt_version)
+6. Update per-query warning inventory from all candidate results
+7. Log round to ObsLogger (round_end + prompt_version)
 
-### Escalation routing
+### 4.4 Escalation routing
 
 ```
 stall_count >= patience
-    └─ enable_l2?
-        ├─ YES → _escalate_l2()
-        │        └─ l2_improved?
-        │            ├─ YES → l2_stall_count = 0, continue L1
-        │            └─ NO  → l2_stall_count++
-        │                     └─ l2_stall_count >= l2_patience?
-        │                         ├─ enable_l3?
-        │                         │   ├─ YES → L3ModifyPlanNode
-        │                         │   │        l3_stall_count check → continue or stop
-        │                         │   └─ NO  → stop_reason="l2_patience_exhausted"
-        │                         └─ continue L1
-        └─ NO  → stop_reason="patience_exhausted"
+    +- enable_l2?
+        +- YES -> _escalate_l2()
+        |        +- l2_improved?
+        |            +- YES -> l2_stall_count = 0, continue L1
+        |            +- NO  -> l2_stall_count++
+        |                     +- l2_stall_count >= l2_patience?
+        |                         +- enable_l3?
+        |                         |   +- YES -> l3_modify_plan
+        |                         |   |        l3_stall_count check -> continue or stop
+        |                         |   +- NO  -> stop_reason="l2_patience_exhausted"
+        |                         +- continue L1
+        +- NO  -> stop_reason="patience_exhausted"
 ```
 
 L2 transition: resets L1 stall_count, increments l2_round, snapshots best_accuracy_at_l2_entry.
 L3 transition: resets L2 stall_count + l2_round + L1 stall_count, increments l3_round.
 
+### 4.5 Degradation escalation path
+
+When `DegradationCheck` fires mid-evaluation (degraded query fraction exceeds threshold):
+
+1. Evaluation aborted, `EscalationSignal` bubbled up via `escalation_signal` on round result
+2. Orchestrator dispatches to L2 with `from_degradation=True` and `escalation_context`
+3. L2/L3 patience exhaustion during degradation *resets counters* instead of stopping — investigation continues
+4. Escalation journal entry recorded (tried config, degradation rate, outcome)
+5. Degradation rounds do not count toward `max_rounds` (hard cap: 100)
+
 ---
 
 ## 5. Prompt Template Inventory
 
-All templates are `PromptState` JSON with 5 Layer 1 fields (`persona`, `task_intent`, `instruction`, `thinking_style`, `answer_format`). Placeholders use `{{variable}}` syntax.
+All templates are PromptState JSON with 5 Layer 1 fields (`persona`, `task_intent`, `instruction`, `thinking_style`, `answer_format`). Placeholders use `{{variable}}` syntax.
 
 | Template | Variables | Consumer |
 |----------|-----------|----------|
-| `meta_freeform.json` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `failure_examples` | `generate_candidates()` — default generation mode |
-| `meta_constrained.json` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `failure_examples`, `library_desc`, `response_schema` | `generate_candidates()` — constrained by variant library |
-| `meta_scan_aware.json` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `failure_examples`, `leaderboard_text`, `sensitivity_text`, `difficulty_text`, `tested_values`, `focus_note`, `instruction_spec` | `generate_candidates()` — uses scan analytics |
-| `critique_negative.json` | `accuracy_pct`, `n_failures`, `max_examples`, `failure_lines` | `CritiqueAgent._negative_critique()` — below threshold |
-| `critique_positive.json` | `accuracy_pct`, `n_successes`, `max_examples`, `success_lines`, `n_failures`, `failure_lines` | `CritiqueAgent._positive_critique()` — above threshold |
-| `l2_refine_context.json` | `round_summary`, `rendered_prompt`, `failure_lines`, `current_params`, `current_context`, `pipeline_section`, `response_schema_suffix` | `refine_context()` in `layer_transitions.py` |
-| `l3_modify_plan.json` | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `response_schema_suffix` | `modify_plan()` in `layer_transitions.py` |
-| `suggestions.json` | `history_lines`, `accuracy_pct`, `rendered_prompt`, `campaign_config`, `n_failures`, `n_queries`, `failure_detail` | `generate_suggestions()` — post-round analysis |
+| `meta_scan_aware.json` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `failure_examples`, `scan_analytics`, `focus_note`, `context_sections`, `instruction_spec` | `l1_generate()` — primary generation mode |
+| `critique_negative.json` | `accuracy_pct`, `n_failures`, `max_examples`, `failure_lines` | `CritiqueAgent` — below threshold |
+| `critique_positive.json` | `accuracy_pct`, `n_successes`, `max_examples`, `success_lines`, `n_failures`, `failure_lines` | `CritiqueAgent` — above threshold |
+| `l2_refine_context.json` | `round_summary`, `rendered_prompt`, `failure_lines`, `current_params`, `task_context_section`, `pipeline_section`, `escalation_section`, `critique_section`, `prev_directive_section`, `response_schema_suffix` | `refine_context()` |
+| `l3_modify_plan.json` | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `response_schema_suffix` | `modify_plan()` |
+| `suggestions.json` | `history_lines`, `accuracy_pct`, `rendered_prompt`, `campaign_config`, `n_failures`, `n_queries`, `failure_detail` | `generate_suggestions()` |
 | `restructure.json` | `consultation_instruction` | `restructure_context()` — campaign init decomposition |
 
-**Loading:** `load_optimizer_prompt(name)` in `api/config/optimizer_prompt_loader.py`. Resolution order: Langfuse prompt registry (opt-in, by `production` label, SDK-cached) → local JSON in `api/config/optimizer_prompts/`. LRU-cached for local files. Push via `push_all_to_langfuse()`.
+**Loading:** `load_optimizer_prompt(name)` in `api/config/optimizer_prompt_loader.py`. Resolution order: Langfuse prompt registry (opt-in, by `production` label, SDK-cached) -> local JSON in `api/config/optimizer_prompts/`. LRU-cached for local files. Push via `push_all_to_langfuse()`.
 
 ---
 
 ## 6. OptSearchPoint & L4 Path
 
-### Model
+### 6.1 Model
 
 ```python
 class OptSearchPoint(BaseModel):
     """Optimizer-level search point — the optimizer's configuration at a moment."""
+
     critique_text: str = ""
+    critique: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Full 5-field critique dict (positive_critique, negative_critique, "
+        "priority_fix, suggested_axes, summary).",
+    )
     thinking_styles: list[str] = Field(default_factory=list)
     plan: str = ""
-    optimizer_params: dict = Field(default_factory=dict)
-    task_context: dict = Field(
+    optimizer_params: dict[str, Any] = Field(default_factory=dict)
+    task_context: dict[str, Any] = Field(
         default_factory=dict,
         description="Structured domain context (domain, pipeline_purpose, "
         "data_characteristics, optimization_goals, key_challenges). "
         "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
     )
+    escalation_journal: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Cross-round degradation investigation memory.",
+    )
+    warning_inventory: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Per-query warning inventory across rounds.",
+    )
+    l2_directive: str = Field(
+        default="",
+        description="L2's diagnostic reasoning + action guidance for L1. "
+        "Sliding window of 1.",
+    )
     content_hashes: list[str] = Field(
         default_factory=list,
         description="Content hashes of dataset_runs produced under this config",
     )
+    degradation_reset_count: int = Field(0)
+    backend_warning_emitted: bool = Field(False)
 ```
 
-### Persistence
+### 6.2 Persistence
 
 Checkpointed in trial JSON after each round:
 
@@ -417,8 +498,18 @@ Checkpointed in trial JSON after each round:
   "trial_id": "round_0",
   "round": 0,
   "accuracy": 0.67,
+  "stall_count": 0,
+  "l2_round": 0,
+  "l3_round": 0,
   "opt_search_point": {
-    "critique_text": "...",
+    "critique_text": "Strengths: ...\nWeaknesses: ...",
+    "critique": {
+      "positive_critique": "...",
+      "negative_critique": "...",
+      "priority_fix": "...",
+      "suggested_axes": ["query_prefix"],
+      "summary": "..."
+    },
     "thinking_styles": ["analytical", "comparative", "systematic"],
     "plan": "",
     "optimizer_params": {},
@@ -429,16 +520,34 @@ Checkpointed in trial JSON after each round:
       "optimization_goals": "...",
       "key_challenges": "..."
     },
-    "content_hashes": []
+    "escalation_journal": [],
+    "warning_inventory": {},
+    "l2_directive": "",
+    "content_hashes": [],
+    "degradation_reset_count": 0,
+    "backend_warning_emitted": false
   }
 }
 ```
 
-### L4 path
+### 6.3 Resume simplification
 
-L4 meta-optimization searches over `OptSearchPoint`s the same way L1-L3 search over `SearchPoint`s. The join key is `content_hashes` — linking optimizer config to target-layer evaluation outcomes without duplicating data. *Design note: the recursive closure (L4 — optimizing the optimizer's own prompts) was recognized from inception as an inherent property of the architecture.*
+On resume, the entire optimizer state is hydrated in one shot:
 
-### Task context decomposition
+```python
+state.opt_sp = OptSearchPoint(**{
+    k: v for k, v in stored_osp.items()
+    if k in OptSearchPoint.model_fields
+})
+```
+
+`escalation_journal`, `warning_inventory`, `l2_directive`, and `degradation_reset_count` all survive kernel restarts for free.
+
+### 6.4 L4 path
+
+L4 meta-optimization searches over `OptSearchPoint`s the same way L1-L3 search over `SearchPoint`s. The join key is `content_hashes` — linking optimizer config to target-layer evaluation outcomes without duplicating data.
+
+### 6.5 Task context decomposition
 
 `decompose_task_context()` (in `notebooks/_campaign_lib/_setup.py`) runs at campaign init, before the feedback cycle. It calls `restructure_context_cached()` with `TASK_DESCRIPTION` to produce a structured domain context dict.
 
@@ -446,8 +555,8 @@ L4 meta-optimization searches over `OptSearchPoint`s the same way L1-L3 search o
 
 | Field | Description |
 |-------|-------------|
-| `domain` | Domain of the backend pipeline (e.g. "Life Cycle Assessment") |
-| `pipeline_purpose` | What the pipeline does (e.g. "Normalize terminology...") |
+| `domain` | Domain of the backend pipeline (e.g., "Life Cycle Assessment") |
+| `pipeline_purpose` | What the pipeline does |
 | `data_characteristics` | Nature of the input data |
 | `optimization_goals` | What success looks like |
 | `key_challenges` | Known difficulties |
@@ -455,53 +564,66 @@ L4 meta-optimization searches over `OptSearchPoint`s the same way L1-L3 search o
 
 **Flow:**
 
-1. Campaign init → `decompose_task_context()` → structured dict
+1. Campaign init -> `decompose_task_context()` -> structured dict
 2. Stored on `OptSearchPoint.task_context`
-3. Flows to L1 candidate generation meta-prompt (via `scan_context` or direct injection)
+3. Flows to l1_generate meta-prompt (via `context_sections`)
 4. L2 `refine_context()` can update `task_context` fields when escalation fires
-5. `PromptState.context` auto-synced from `task_context` — one source of truth
+5. `PromptState.context` auto-synced from `task_context`
 
 ---
 
 ## 7. Tracing Architecture
 
-### NodeBase hooks
-
-Every node's `process()` call:
-
-1. `_start_observation(input_data)` → calls `obs.log_node_step_start()` → returns `obs_id`
-2. `_execute(input_data)` → node logic
-3. `_end_observation(obs_id, output_data, error)` → calls `obs.log_node_step_end()`
-
-Tracing is opt-in: only active when `obs` + `trace_id` are passed at construction. When omitted, steps 1 and 3 are silently skipped.
-
-### Nesting hierarchy
+### 7.1 Nesting hierarchy
 
 ```
 Campaign trace (feedback_cycle)
-├── round_0 (span)
-│   ├── l1_generate_r0 (generation)    ← L1GenerateNode
-│   ├── l1_evaluate_r0 (span)          ← L1EvaluateNode
-│   │   ├── eval_abc123 (tool)         ← per-candidate dataset_run
-│   │   ├── eval_def456 (tool)
-│   │   └── [critique] (generation)    ← CritiqueAgent (if enabled)
-│   └── prompt_version (tool)          ← winner prompt registration
-├── round_1 (span)
-│   ├── l1_generate_r1 (generation)
-│   ├── l1_evaluate_r1 (span)
-│   └── prompt_version (tool)
-└── [l2_refine_r2] (generation)        ← if escalation triggered
++-- round_0 (span)
+|   +-- l1_generate_r0 (generation)       <- observed_step wrapping l1_generate()
+|   +-- l1_evaluate_r0 (span)             <- observed_step wrapping _evaluate_candidates()
+|   |   +-- eval_abc123 (tool)            <- per-candidate dataset_run
+|   |   +-- eval_def456 (tool)
+|   |   +-- [critique] (generation)       <- CritiqueAgent (if enabled)
+|   +-- prompt_version (tool)             <- winner prompt registration
++-- round_1 (span)
+|   +-- l1_generate_r1 (generation)
+|   +-- l1_evaluate_r1 (span)
+|   +-- prompt_version (tool)
++-- [l2_refine_r2] (generation)           <- if escalation triggered
++-- [l3_modify_plan_r2] (generation)      <- if L2 stalls
 ```
 
-### Dual-write (file + cloud)
+### 7.2 Dual-write (file + cloud)
 
 `ObsLogger` writes to disk first, then delegates to `CloudObsBackend`:
 
 - **File:** `obs/langfuse/observations/{trace_id}/{obs_id}.json` — created at start, updated with output/metrics at end
-- **Cloud:** `CloudObsBackend.on_node_step_start()` → `lf.start_span()`, `on_node_step_end()` → `lf.end_observation()`
+- **Cloud:** `CloudObsBackend.on_node_step_start()` -> `lf.start_span()`, `on_node_step_end()` -> `lf.end_observation()`
 - **Events:** `events.jsonl` gets `node_step_start` and `node_step_end` entries
 
 Cloud failures never crash the main flow — circuit breaker trips on first error.
+
+### 7.3 Tracing gap resolution
+
+| Artifact | Pre-M7 | After M7 |
+|----------|--------|----------|
+| `critique_text` | Lost | OptSearchPoint in trial JSON |
+| `critique` (full 5-field dict) | Lost | OptSearchPoint in trial JSON |
+| `thinking_styles` | Lost | OptSearchPoint in trial JSON |
+| `plan` | Buried in prompt_state | OptSearchPoint in trial JSON |
+| `task_context` | Not tracked | OptSearchPoint in trial JSON |
+| `optimizer_params` | Not tracked | OptSearchPoint in trial JSON |
+| `escalation_journal` | Lost on restart | OptSearchPoint in trial JSON |
+| `warning_inventory` | N/A | OptSearchPoint in trial JSON |
+| `l2_directive` | Lost | OptSearchPoint in trial JSON |
+| L2 transition rationale | Lost | `observed_step()` Langfuse observation |
+| L3 transition rationale | Lost | `observed_step()` Langfuse observation |
+| L2/L3 transition inputs | Lost | `observed_step()` Langfuse observation |
+| Candidate generation prompt | Lost | `observed_step()` Langfuse observation |
+| Scan context enrichment | Lost | l1_generate input via `observed_step()` |
+| Escalation signals | Not indexed | `EscalationSignal` in round result + journal |
+| Per-round Langfuse scores | Partial | `log_round_end()` with full metrics |
+| Phase events (display) | N/A | `_emit_phase()` callbacks |
 
 ---
 
@@ -511,7 +633,7 @@ Cloud failures never crash the main flow — circuit breaker trips on first erro
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_rounds` | int | 10 | Maximum optimization rounds |
+| `max_rounds` | int \| None | 10 | Maximum optimization rounds (None = unlimited) |
 | `patience` | int | 3 | Stop after N consecutive non-improvements |
 | `n_variants` | int | 5 | Candidates per round |
 | `creativity` | float | 0.7 | Temperature for candidate generation |
@@ -555,363 +677,154 @@ Cloud failures never crash the main flow — circuit breaker trips on first erro
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `scan_context` | dict \| None | None | Scan analytics context for candidate gen |
+| `task_context` | dict \| None | None | Structured domain context for L1 gen and L2 refinement |
 
 ### L2/L3 escalation
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enable_l2` | bool | False | Enable L2 refine_context loop |
-| `enable_l3` | bool | False | Enable L3 modify_plan loop |
-| `l2_patience` | int | 2 | L2 stalls before escalating to L3 |
-| `l3_patience` | int | 1 | L3 stalls before stopping |
+| `enable_l2` | bool | True | Enable L2 refine_context loop |
+| `enable_l3` | bool | True | Enable L3 modify_plan loop |
+| `l2_patience` | int \| None | 2 | L2 stalls before escalating to L3 (None = unlimited) |
+| `l3_patience` | int \| None | 1 | L3 stalls before stopping (None = unlimited) |
 | `l2_temperature` | float | 0.3 | Temperature for L2 LLM call |
 | `l3_temperature` | float | 0.5 | Temperature for L3 LLM call |
+| `degradation_threshold` | float | 0.4 | Fraction of degraded queries to trigger escalation (0 = disabled) |
+| `backend_warning_threshold` | int | 2 | Degradation resets before emitting backend warning (0 = disabled) |
 
 ---
 
-## 9. Jupyter Kernel Hang: Root Cause & Recommendations
+## 9. Jupyter Kernel Hang: Root Cause Analysis
 
-The v1 implementation has an unresolvable Jupyter kernel hang bug: cell interrupt (Ctrl+C) hangs the kernel on Windows. This section documents root causes and recommendations for v2.
+The original Pydantic node wrapper implementation (v1, now deleted) surfaced a Windows kernel hang bug. This section documents the root causes and permanent design rules that emerged.
 
 ### Root causes
 
 **RC-1: httpx async client `aclose()`** — When `KeyboardInterrupt` fires during an active httpx request, the async client's `__aexit__` calls `aclose()` which tries to gracefully close HTTP/2 connections. On Windows, this blocks indefinitely because the event loop is already corrupted by the interrupt.
 
-**RC-2: Langfuse SDK thread join** — `langfuse.shutdown()` calls `thread.join()` on its background flush thread. If the thread is mid-HTTP-request when interrupt fires, the join blocks indefinitely. The `CloudObsBackend.shutdown()` workaround (ThreadPoolExecutor with 5s timeout) partially mitigates this but doesn't prevent the root hang.
+**RC-2: Langfuse SDK thread join** — `langfuse.shutdown()` calls `thread.join()` on its background flush thread. If the thread is mid-HTTP-request when interrupt fires, the join blocks indefinitely.
 
-**RC-3: asyncio corruption on Windows** — `KeyboardInterrupt` during `await` corrupts the `ProactorEventLoop` state. Subsequent async operations (including cleanup) hang. This is a known CPython issue on Windows — the event loop's internal `_poll()` method doesn't handle interrupts cleanly.
+**RC-3: asyncio corruption on Windows** — `KeyboardInterrupt` during `await` corrupts the `ProactorEventLoop` state. Subsequent async operations (including cleanup) hang. This is a known CPython issue.
 
-**RC-4: Langfuse SDK lazy Langfuse init in hot path** — `LangfuseLogger.get_instance()` is called repeatedly. If Langfuse SDK is initializing its background threads when interrupt fires, thread state becomes inconsistent.
+**RC-4: Langfuse SDK lazy init in hot path** — `LangfuseLogger.get_instance()` called repeatedly. If Langfuse SDK is initializing its background threads when interrupt fires, thread state becomes inconsistent.
 
-### Root cause found (v2 bisect)
+**RC-5 (root cause found via bisect): `self.config.copy()` in metrics collection.** When the v1 `L1EvaluateNode` was interrupted mid-httpx-request, Python ran the `finally` block which did `metadata=self.config.copy()`. For l1_evaluate, `self.config` contained `eval_ctx` — an `EvalContext` holding a `BackendClient` with a live httpx `AsyncClient`. Copying this object on a corrupted event loop triggered httpx internals that hang indefinitely. l1_generate never hung because its config was plain primitives.
 
-**RC-5: `self.config.copy()` in `NodeBase.process()` finally block.**
+### Design rules (permanent)
 
-When `L1EvaluateNode` is interrupted mid-httpx-request, Python runs the `finally` block in `process()`. The original code did `metadata=self.config.copy()` to capture config in `NodeMetrics`. For L1EvaluateNode, `self.config` contains `eval_ctx` — an `EvalContext` holding a `BackendClient` with a live httpx `AsyncClient`. Copying this object on a corrupted event loop triggers httpx internals (connection pool inspection, `__repr__`, or `__deepcopy__`) that hang indefinitely.
-
-**Why L1GenerateNode didn't hang:** Its config is plain primitives (`{"model": "...", "n_variants": 5}`) — no live I/O objects.
-
-**Fix (applied):** `NodeMetrics.metadata` filters to JSON-safe primitives only:
-```python
-safe_meta = {
-    k: v for k, v in self.config.items()
-    if isinstance(v, (str, int, float, bool, list, type(None)))
-}
-```
-
-This is a permanent design rule, not a workaround: metrics metadata must never reference live infrastructure objects. The full config remains on `self.config` for runtime use.
-
-### Failed fixes (v1)
-
-| Fix attempted | Why it failed |
-|---------------|---------------|
-| `asyncio.shield()` around eval calls | Shield doesn't protect against `CancelledError` propagation in httpx internals |
-| `signal.signal(SIGINT, ...)` handler | Jupyter captures SIGINT before user handlers; doesn't reach our code |
-| `concurrent.futures.ThreadPoolExecutor` timeout on flush/shutdown | Mitigates Langfuse hang but not httpx hang |
-| `obs.shutdown()` in `finally` block | The shutdown itself hangs because Langfuse thread is stuck |
-| `asyncio.get_event_loop().stop()` | Can't call from within a hung event loop |
-| Skip `_end_observation()` on `KeyboardInterrupt` flag | Wrong target — the hang was in `self.config.copy()`, not obs cleanup |
-
-### Additional recommendations
-
-**R-1: No live objects in node config metadata** — ENFORCED. `NodeMetrics.metadata` uses primitive filter. This prevents future regressions if new nodes pass complex objects via config.
+**R-1: No live objects in metrics metadata** — Metrics metadata must never reference live infrastructure objects. The current `observed_step()` implementation avoids this entirely by yielding a plain `StepTrace` dataclass.
 
 **R-2: Daemon threads for Langfuse SDK** — Ensure all Langfuse-spawned threads are daemon threads so they don't prevent interpreter exit on interrupt.
 
 **R-3: No `asyncio.shield` in eval path** — Shield creates more problems than it solves in interrupt scenarios. Let `KeyboardInterrupt` propagate naturally and rely on checkpointing for resume.
 
-**R-4: Lazy Langfuse init** — Initialize `LangfuseLogger` once at campaign start, not on-demand. Store the initialized instance in `EvalContext` or `_LoopState`. This avoids thread initialization races during interrupt.
+**R-4: Lazy Langfuse init** — Initialize `LangfuseLogger` once at campaign start, not on-demand.
 
 ---
 
-## 10. Phased Execution Plan — Strangler Fig Migration
+## 10. Warning Inventory & L2 Probe Rounds
 
-Each wave swaps ONE piece while the system stays working. `feedback_cycle.py` (highest risk, most dependencies) is touched LAST. Tests pass after every wave.
+### 10.1 Problem
 
-### Wave A — Leaf modules (zero risk to feedback_cycle.py)
+The optimizer treats every query failure identically — whether the query failed because the prompt was bad or because `web_search` returned no content. Consequences:
 
-#### A1: Prompt templates + `optimizer_prompt_loader.py`
+1. **Wasted eval budget**: Same queries fail every round for the same pipeline reason.
+2. **False escalation loops**: `DegradationCheck` fires every round because the same queries always degrade.
+3. **No cross-round memory**: Nobody tracks "Query X has had `web_search:partial_scrape` warnings for 3 consecutive rounds."
 
-**Files added:**
-- `api/config/optimizer_prompts/*.json` (9 template files)
-- `api/config/optimizer_prompt_loader.py`
+### 10.2 Per-Query Warning Inventory
 
-**What it does:** Creates the 9 optimizer prompt templates as PromptState JSON files. Implements `load_optimizer_prompt()`, `push_all_to_langfuse()`, `list_optimizer_prompts()` with LRU cache and Langfuse fallback.
+A cross-round per-query warning inventory on `OptSearchPoint.warning_inventory`. Updated after each round's eval results via `update_query_tracker()`.
 
-**Verify:** `from api.config.optimizer_prompt_loader import load_optimizer_prompt; ps = load_optimizer_prompt("critique_negative"); assert ps.render()`
-
-**Rollback:** Delete the 2 new paths. No existing code references them.
-
-#### A2: `OptSearchPoint` model
-
-**Files added:**
-- `api/models/opt_search_point.py`
-
-**What it does:** Defines `OptSearchPoint` Pydantic model with 6 fields: `critique_text`, `thinking_styles`, `plan`, `optimizer_params`, `task_context`, `content_hashes`.
-
-**Verify:** `from api.models.opt_search_point import OptSearchPoint; osp = OptSearchPoint(critique_text="test"); assert osp.content_hashes == []`
-
-**Rollback:** Delete file. No existing code references it.
-
-#### A3: `NodeBase` in `base.py`
-
-**Files added:**
-- `api/nodes/base.py`
-
-**What it does:** Abstract base class with Template Method pattern. Typed I/O via Pydantic generics. Opt-in observability hooks (`_start_observation`, `_end_observation`). `NodeMetrics` model.
-
-**Verify:** Import succeeds. Create a trivial subclass, call `process()`, check `get_last_metrics()`.
-
-⚠️ **WARNING:** `api/nodes/__init__.py` may need updating for node registration. Check existing `__init__.py` structure before adding.
-
-**Rollback:** Delete `base.py`. No existing code depends on it.
-
-#### A4: Node I/O Pydantic models only (no logic)
-
-**Files added:**
-- `api/nodes/optimizer_nodes.py` (with all 10 Input/Output models, but node classes can be stubs)
-
-**What it does:** Defines `InitNodeInput`, `InitNodeOutput`, `L1GenerateInput`, `L1GenerateOutput`, `L1EvaluateInput`, `L1EvaluateOutput`, `L2RefineInput`, `L2RefineOutput`, `L3ModifyPlanInput`, `L3ModifyPlanOutput`.
-
-**Verify:** All 10 models importable and constructible with valid data.
-
-**Rollback:** Delete file.
-
-### Wave B — Node implementations (still no feedback_cycle.py changes)
-
-#### B1: `InitNode` implementation — REMOVED
-
-InitNode was removed in the M7 v2 audit. Decomposition now happens at campaign init via `decompose_task_context()`.
-
-#### B2: `L1GenerateNode` implementation
-
-**What it does:** Wraps `generate_candidates()`. Config: `model`, `provider`, `n_variants`, `creativity`.
-
-**Verify:** `test_grow_filter_node`, `test_l1_generate_forwards_critique` pass.
-
-#### B3: `L1EvaluateNode` implementation
-
-**What it does:** Wraps `evaluate_and_select_winner()` + optional `CritiqueAgent.run()` + `sample_thinking_styles()`. Override: `_node_obs_type()` → `"span"`.
-
-**Verify:** `test_l1_evaluate_node`, `test_node_obs_types` pass.
-
-#### B4: `L2RefineNode` + `L3ModifyPlanNode`
-
-**What it does:** Wrap `refine_context()` and `modify_plan()` respectively.
-
-**Verify:** `test_l2_refine_node`, `test_l3_modify_plan_node` pass.
-
-#### B5: Node tests
-
-**Files added:**
-- `tests/test_optimizer_nodes.py`
-
-**What it does:** Tests for all 4 nodes: registration, I/O contracts, critique forwarding, obs type, step tracing (opt-in), error tracing.
-
-⚠️ **WARNING:** Node tests require mocking `restructure_context`, `generate_candidates`, `evaluate_and_select_winner`, `refine_context`, `modify_plan`. Use `monkeypatch` on the import paths inside the node modules (e.g., `"api.services.search.context.restructure_context"`).
-
-**Verify:** `pytest tests/test_optimizer_nodes.py -v` — all pass.
-
-**Rollback:** Delete test file + `optimizer_nodes.py` node classes. Wave A models remain valid.
-
-### Wave C — Observability plumbing (still no feedback_cycle.py changes)
-
-#### C1: `ObsLogger` node step methods
-
-**Files modified:**
-- `api/services/obs/observability_logger.py` — add `log_node_step_start()`, `log_node_step_end()`
-
-**What it does:**
-- `log_node_step_start(trace_id, node_id, node_type, obs_type, input_data, metadata)` → returns `obs_id`
-- `log_node_step_end(obs_id, trace_id, node_id, output_data, metrics, error)` → updates file observation
-
-⚠️ **WARNING:** These are NEW methods on an existing class. Ensure no signature conflicts with existing methods. The methods follow the same pattern as `log_round_start`/`log_round_end`.
-
-**Verify:** Unit test with mock ObsLogger — call start/end, verify file written.
-
-**Rollback:** Remove the two new methods. No existing code calls them yet.
-
-#### C2: `CloudObsBackend` node step support
-
-**Files modified:**
-- `api/services/obs/cloud_backend.py` — add `on_node_step_start()`, `on_node_step_end()`
-
-**What it does:**
-- `on_node_step_start()` → `lf.start_span()` nested under active round, stores obs_id in `_active_step_obs_ids[node_id]`
-- `on_node_step_end()` → pops obs_id, calls `lf.end_observation()`
-
-**Verify:** Unit test with mock Langfuse client.
-
-**Rollback:** Remove the two new methods.
-
-#### C3: Wire NodeBase tracing hooks to ObsLogger
-
-**What it does:** NodeBase's `_start_observation()` calls `self.obs.log_node_step_start(...)` and `_end_observation()` calls `self.obs.log_node_step_end(...)`. This is already in the NodeBase code from Wave A3, but now ObsLogger actually has the methods.
-
-**Verify:** `test_node_tracing_opt_in`, `test_node_tracing_on_error` pass (from B5 tests, now with real ObsLogger mock).
-
-**Rollback:** Tracing gracefully degrades — if obs methods are missing, the warning is logged and nodes work identically.
-
-### Wave D — Orchestrator migration (feedback_cycle.py — controlled swap)
-
-This is the highest-risk wave. Each sub-wave modifies ONE call site in `feedback_cycle.py`. Run the full test suite after each.
-
-#### D1: Sync httpx client for notebook path
-
-**Files modified:**
-- `api/services/backend_client.py` — add sync `match_sync()` method alongside async `match()`
-
-**What it does:** Fixes the kernel hang root cause (RC-1) by providing a sync HTTP path. Uses `httpx.Client` (sync) instead of `httpx.AsyncClient`. `BackendClient` gains a `_sync_client` property.
-
-⚠️ **WARNING:** This changes `BackendClient` which is used by ALL eval paths (grid search, smart search, feedback cycle). The sync method is additive — existing async `match()` is untouched.
-
-**Verify:** `pytest -v --tb=short` — all existing tests pass. Manual test in notebook: interrupt during eval no longer hangs kernel.
-
-**Rollback:** Remove `match_sync()` and `_sync_client`. Existing code unchanged.
-
-#### D2: Swap L1Generate call site → `L1GenerateNode.process()`
-
-**Files modified:**
-- `api/services/campaign/feedback_cycle.py` — replace direct `generate_candidates()` call in `_generate_or_load_candidates()` with `L1GenerateNode` instantiation + `.process()`
-
-**What changes:**
-```python
-# Before:
-candidates = await generate_candidates(current_ps, ...)
-
-# After:
-l1_gen_node = L1GenerateNode(
-    node_id=f"l1_generate_r{round_num}",
-    config={"model": config.model, "provider": config.provider,
-            "n_variants": _n_variants, "creativity": _creativity},
-    obs=obs, trace_id=trace_id,
-)
-gen_result = await l1_gen_node.process({...})
-candidates = gen_result.candidates
-```
-
-⚠️ **WARNING:** The `generate_candidates()` import can be removed from feedback_cycle.py. The node handles it internally via lazy import. Verify that `critique_text`, `thinking_styles`, and `scan_context` are correctly forwarded.
-
-**Verify:** `pytest tests/test_feedback_cycle.py -v` — all pass. Check `test_results_tracked_across_rounds` specifically (results flow).
-
-**Rollback:** Revert `_generate_or_load_candidates()` to direct `generate_candidates()` call.
-
-#### D3: Swap L1Evaluate call site → `L1EvaluateNode.process()`
-
-**Files modified:**
-- `api/services/campaign/feedback_cycle.py` — replace direct `evaluate_and_select_winner()` call in `_evaluate_candidates()` with `L1EvaluateNode` instantiation + `.process()`
-
-**What changes:**
-- `L1EvaluateNode` receives `eval_ctx` via config, not positional arg
-- Output includes `critique_text` and `thinking_styles` — orchestrator pops them into `_LoopState`
-- `enable_critique` flag forwarded from `CycleConfig`
-
-⚠️ **WARNING:** The `evaluate_and_select_winner()` import remains needed by `L1EvaluateNode._execute()` internally. Don't remove it from the module yet. Verify that `thinking_styles_seed` is correctly computed as `config.seed + round_num + 1`.
-
-**Verify:** `pytest tests/test_feedback_cycle.py -v` — all pass. Check `test_on_phase_callback` (phase events must still fire).
-
-**Rollback:** Revert `_evaluate_candidates()` to direct `evaluate_and_select_winner()` call.
-
-#### D4: Swap L2/L3 escalation → `L2RefineNode`/`L3ModifyPlanNode`
-
-**Files modified:**
-- `api/services/campaign/feedback_cycle.py` — replace direct `refine_context()`/`modify_plan()` calls in `_do_l2_transition()` and `_do_l3_transition()` with node instantiation
-
-**What changes:**
-```python
-# Before (in _do_l2_transition):
-tr = await refine_context(ps, stalled_rounds, eval_data, client, ...)
-
-# After:
-l2_node = L2RefineNode(
-    node_id=f"l2_refine_r{round_num}",
-    config={"model": config.model, "provider": config.provider,
-            "temperature": config.l2_temperature,
-            "pipeline_schema": config.pipeline_schema},
-    obs=obs, trace_id=trace_id,
-)
-l2_result = await l2_node.process({...})
-tr = TransitionResult(prompt_state=PromptState(**l2_result.prompt_state), ...)
-```
-
-⚠️ **WARNING:** L2/L3 nodes receive `pipeline_schema` via config (not input), because it's session-stable. The `TransitionResult` reconstruction from node output adds a conversion step.
-
-**Verify:** L2/L3 escalation tests (if any). Run full suite: `pytest -v --tb=short`.
-
-**Rollback:** Revert `_do_l2_transition()` and `_do_l3_transition()`.
-
-#### D5: Add OptSearchPoint checkpointing to round loop
-
-**Files modified:**
-- `api/services/campaign/feedback_cycle.py` — after each round, build `OptSearchPoint` from `_LoopState` and include in trial checkpoint
-
-**What changes:**
-```python
-opt_sp = OptSearchPoint(
-    critique_text=state.critique_text,
-    thinking_styles=state.thinking_styles,
-    plan=state.current_sp.prompt_state.plan,
-    optimizer_params={},  # populated from CycleConfig meta-settings
-    task_context=state.task_context,
-)
-campaign_store.add_trial(config.backend_id, cycle_id, {
-    ...,
-    "opt_search_point": opt_sp.model_dump(),
-})
-```
-
-**Verify:** Run a cycle with `project_root` set, inspect trial JSON for `opt_search_point` key.
-
-**Rollback:** Remove the `OptSearchPoint` construction + `opt_search_point` key from trial dict.
-
-#### D6: Verify `cycle_config_identity()` (baseline_rendered stays in hash)
-
-**Files modified:**
-- `api/services/campaign/feedback_cycle.py` — verified `cycle_config_identity()` includes `baseline_rendered`
-
-**What it does:** Verified: `baseline_rendered` stays in hash (campaign continuity). Removing it would orphan existing campaign data by changing cycle_id. See ADR-2.
-
-**Verify:** `TestCycleConfigIdentity` — all 3 tests pass.
-
-### Wave E — New capabilities (after full migration)
-
-#### E1: EscalationCheck framework — IMPLEMENTED
-
-**Files:**
-- `api/services/campaign/escalation.py` — `EscalationCheck`, `EscalationSignal`, `DegradationCheck`
-
-**Status:** Fully implemented with 7 passing tests. Pluggable mid-evaluation escalation. `EscalationCheck.evaluate()` runs after each candidate eval. `DegradationCheck` fires when degraded queries exceed threshold.
+**Data shape:**
 
 ```python
-@dataclass
-class EscalationSignal:
-    check_name: str         # "degradation", "error_rate", etc.
-    target: str             # "l3" | "l2" | "abort"
-    context: dict           # check-specific data
-    candidate_idx: int
-    candidates_evaluated: int
-    candidates_skipped: int
-
-class EscalationCheck(BaseModel):
-    name: str
-    target: str = "l3"
-    enabled: bool = True
-    def evaluate(self, scores, candidate_idx, n_total) -> EscalationSignal | None: ...
-
-class DegradationCheck(EscalationCheck):
-    name: str = "degradation"
-    threshold: float = 0.3
+{
+    "PA 66 25% GF V0 RAL 7012/0": {
+        "rounds_seen": 3,
+        "hits": 0,
+        "misses": 3,
+        "warnings": {
+            "web_search:partial_scrape": 3,
+            "web_search:low_content": 2,
+        },
+        "last_terminated_at": "web_search",
+    },
+    "Aspirin powder": {
+        "rounds_seen": 3,
+        "hits": 3,
+        "misses": 0,
+        "warnings": {},
+        "last_terminated_at": "llm_ranking",
+    },
+}
 ```
 
-#### E2: OPTIMIZER_PIPELINE_SCHEMA — REPLACED BY BUILDING BLOCK APPROACH
+**Pure functions** in `critique_stats.py`:
 
-The original plan to model the optimizer pipeline as a `PipelineSchema`/`PipelineStep` instance has been replaced by the building block standard. Instead of reusing `PipelineSchema` (which is tightly coupled to target backend pipeline semantics), the optimizer declares its nodes in `api/config/optimizer_pipeline.json` using the same JSON format as TermNorm's `GET /pipeline` but with building block type annotations (`llm/meta`, `agent`, `evaluation`). See §14 and [`docs/building-blocks.md`](../building-blocks.md).
+- **`update_query_tracker(tracker, results)`** — merges current round's per-query results into the inventory
+- **`summarize_warning_inventory(tracker)`** — produces text summary grouped by warning type for prompt injection
 
-#### E3: End-to-end Langfuse tracing
+### 10.3 Context Injection
 
-**What it does:** Wire all nodes through the tracing hooks. Campaign trace → round spans → node observations → dataset_run tools. The nesting hierarchy from Section 7 is fully realized.
+The warning inventory summary is injected into three consumers:
 
-**Verify:** Run a cycle with Langfuse credentials, check trace in Langfuse UI.
+| Consumer | Injection point | Purpose |
+|----------|----------------|---------|
+| **Critique** | `## RECURRING PIPELINE WARNINGS` section in `assemble_critique_prompt()` | Distinguish prompt failures from pipeline failures |
+| **L2 refine_context** | Alongside escalation section in the L2 prompt | See which queries have recurring warnings |
+| **L1 generate** | Warning annotations on `failure_examples` + probe round context | Know which failures have recurring pipeline issues |
+
+Failure examples in `prompt_optimizer.py` are annotated with warning history:
+
+```
+Query: PA 66 25%... | Predicted: Glass fibre... | GT: Polyamide...  [web_search:partial_scrape 3/3 rounds]
+```
+
+### 10.4 L2 Action Classification & Probe Rounds
+
+L2's structured output includes an `"action"` classification field:
+
+| Action | Meaning |
+|--------|---------|
+| `"continue"` | Default — normal L1 cycle continues with random subsample |
+| `"probe"` | Next L1 round is a probe round — specialized eval batch + no degradation abort |
+
+**Probe round = specialized L1 round**, not a separate mini-eval:
+
+- **Eval batch**: All queries with warnings from the tracker, not the random subsample
+- **No degradation abort**: `DegradationCheck` disabled — we expect degradation
+- **Normal L1 flow**: Generate -> evaluate -> winner selection proceeds as usual
+- **Counts toward `max_rounds`**: Probe rounds are regular rounds with a different eval batch
+- **L2 follows**: After a probe round completes, L2 fires to assess results and decide next action
+
+**Flow:**
+
+```
+Round N: 8/20 queries degraded (recurring web_search warnings)
+  -> Escalation fires, L2 runs
+  -> L2 sees warning inventory: "PA 66 25%... (3/4 rounds, 0 hits)"
+  -> L2 returns {"action": "probe", ...}
+  -> state.probe_next_round = True
+
+Round N+1 (probe round):
+  -> round_eval_data = all warned queries from tracker
+  -> escalation_checks disabled for this round
+  -> L1 generates candidates (with warning inventory context)
+  -> Evaluate candidates against warned queries only
+  -> Winner selection, tracker updated
+  -> L2 fires to assess probe results
+    -> action="continue": resume normal L1 with random subsample
+    -> action="probe": another probe round
+```
+
+### 10.5 L2->L1 Information Bridge (l2_directive)
+
+L2 produces a 2-3 sentence directive (diagnostic reasoning + action guidance) injected into l1_generate's meta-prompt as primary signal. Sliding window of 1 — set after L2 runs, cleared when the round improves (L2 doesn't fire).
+
+L2 also receives:
+- `critique_text` — builds on the critique rather than re-analyzing
+- `prev_l2_directive` — evolves or supersedes its own previous directive
 
 ---
 
@@ -936,304 +849,77 @@ The original plan to model the optimizer pipeline as a `PipelineSchema`/`Pipelin
 
 **`test_interrupt_writes_interrupted_status` MUST be last in `test_feedback_cycle.py`** — `KeyboardInterrupt` inside asyncio corrupts the event loop on Windows, causing subsequent async tests to hang.
 
-### Node tests
-
-- **Registration:** All 4 nodes discoverable via `get_node_class()`
-- **I/O contracts:** Process with valid input → correct output types
-- **Critique forwarding:** `L1GenerateNode` forwards `critique_text`, `thinking_styles`, `scan_context`
-- **Obs type:** Each node returns correct `_node_obs_type()`
-- **Step tracing:** When `obs` + `trace_id` set, `log_node_step_start/end` called
-- **Error tracing:** When `_execute` raises, `log_node_step_end` called with error
-
 ### Feedback cycle tests
 
-- **Multi-round improvement:** Hits improve 1→2→3, stops at perfect_score
+- **Multi-round improvement:** Hits improve 1->2->3, stops at perfect_score
 - **Patience exhaustion:** All 0% hits, stops after patience rounds
 - **Max rounds:** Slow improvement, stops at max_rounds
 - **next_action stop:** Analysis signals stop after 1 round
-- **Baseline acceptance:** Skip InitNode when baseline provided
 - **Results tracking:** Winner results flow between rounds
 - **on_round_complete callback:** Fires with correct stall_count
 - **on_phase callback:** Phase events for init, l1_generate, l1_evaluate
 - **Resume:** Completed cycle replays from cache; interrupted cycle resumes
-- **Mid-round resume:** Persisted candidates reused, L1GenerateNode skipped
+- **Mid-round resume:** Persisted candidates reused, l1_generate skipped
 - **Interrupt:** KeyboardInterrupt writes status="interrupted"
 - **cycle_config_identity:** Stable across restarts, differs on config change, order-invariant
 
 ---
 
-## 12. Tracing Gap Table
+## 12. Escalation Framework
 
-Status after v1 Phase 0.5 (to be re-achieved by Wave D5):
+### EscalationCheck
 
-| Artifact | Pre-M7 | After Phase 0.5 | After Wave |
-|----------|--------|-----------------|------------|
-| `critique_text` | Lost | ✅ OptSearchPoint in trial | D5 |
-| `thinking_styles` | Lost | ✅ OptSearchPoint in trial | D5 |
-| `plan` | Buried | ✅ OptSearchPoint in trial | D5 |
-| `task_context` | Not tracked | ✅ OptSearchPoint in trial | D5 |
-| `optimizer_params` | Not tracked | ✅ OptSearchPoint in trial | D5 |
-| L2 transition rationale | Lost | ✅ Node I/O in Langfuse | C3 + D4 |
-| L3 transition rationale | Lost | ✅ Node I/O in Langfuse | C3 + D4 |
-| L2/L3 transition inputs | Lost | ✅ Node input in Langfuse | C3 + D4 |
-| Candidate generation prompt | Lost | ✅ Node I/O in Langfuse | C3 + D2 |
-| Scan context enrichment | Lost | ✅ L1Generate input | D2 |
-| Escalation signals | Not indexed | ❌ Phase 1 (Wave E1) | E1 |
-| `OPTIMIZER_PIPELINE_SCHEMA` | N/A | ✅ Replaced by `optimizer_pipeline.json` + building block standard | G |
-| Per-round Langfuse scores | Partial | ✅ Obs round_end | Already present |
-| Phase events (display) | N/A | ✅ `_emit_phase()` callbacks | Already present |
-| `escalation_journal` | Lost on restart | ❌ Move to OptSearchPoint | F1 |
-| `critique` (full dict) | Lost (only text) | ❌ Move to OptSearchPoint | F1 |
-| `warning_inventory` | N/A | ❌ New in Wave F | F1 |
+Pluggable mid-evaluation checks that can abort evaluation and route to L2/L3.
+
+```python
+class EscalationCheck(ABC):
+    name: str = ""
+    enabled: bool = True
+
+    @abstractmethod
+    def evaluate(
+        self,
+        results_so_far: list[dict],
+        candidate_idx: int,
+        n_total_candidates: int,
+    ) -> EscalationSignal | None: ...
+
+@dataclass
+class EscalationSignal:
+    check_name: str           # "degradation", "error_rate", etc.
+    target: str               # "retry" | "l2" | "l3" | "abort"
+    context: dict[str, Any]
+    candidate_idx: int
+    candidates_evaluated: int
+    candidates_skipped: int
+```
+
+### DegradationCheck
+
+Triggers when degraded query fraction exceeds `degradation_threshold`. Default routing via `DEFAULT_STRATEGIES` (e.g., `"web_search:partial_scrape"` -> L2).
+
+### Backend Warning
+
+After repeated degradation resets (configurable via `backend_warning_threshold`), a one-shot backend warning is emitted via phase event, advising the user that the issue is likely a backend server problem rather than a prompt problem.
 
 ---
 
-## 13. Warning Inventory & L2 Probe Rounds
-
-### 13.1 Problem
-
-The optimizer treats every query failure identically — whether the query failed because the prompt was bad or because `web_search` returned no content (e.g., "3 of 14 fetched URLs returned content"). Consequences:
-
-1. **Wasted eval budget**: Same queries fail every round for the same pipeline reason. L1 generates prompt variants trying to fix unfixable-by-prompt queries.
-2. **False escalation loops**: `DegradationCheck` fires every round because the same queries always degrade, even when the prompt is improving on other queries.
-3. **No cross-round memory**: Critique sees per-query `pipeline_data` (warnings, `terminated_at`) within a single round, but nobody tracks "Query X has had `web_search:partial_scrape` warnings for 3 consecutive rounds."
-
-### 13.2 OptSearchPoint Consolidation
-
-**ADR-8: OptSearchPoint is mutable, not frozen.**
-
-`OptSearchPoint` was `frozen=True`, modeled after `SearchPoint`'s content-addressed design. But `OptSearchPoint` serves a different role — it's a **checkpoint snapshot** written once per round, not a content-addressed identity used for dedup. Freezing forces unnecessary full reconstruction each round.
-
-**Decision:** Remove `model_config = {"frozen": True}`. Add missing optimizer-state fields that were scattered on `_LoopState`:
-
-```python
-class OptSearchPoint(BaseModel):
-    # Existing fields
-    critique_text: str = ""
-    thinking_styles: list[str] = Field(default_factory=list)
-    plan: str = ""
-    optimizer_params: dict[str, Any] = Field(default_factory=dict)
-    task_context: dict[str, Any] = Field(default_factory=dict)
-    content_hashes: list[str] = Field(default_factory=list)
-
-    # New fields (Wave F1)
-    critique: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Full 5-field critique dict (positive_critique, negative_critique, "
-        "priority_fix, suggested_axes, summary). Currently only critique_text persists.",
-    )
-    escalation_journal: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Cross-round degradation investigation memory. "
-        "Currently on _LoopState only — lost on kernel restart.",
-    )
-    warning_inventory: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        description="Per-query warning inventory across rounds. "
-        "Keyed by query text, values are warning counters.",
-    )
-```
-
-**`_LoopState` consolidation:** Replace 5 scattered optimizer-state fields (`critique_text`, `critique`, `thinking_styles`, `task_context`, `escalation_journal`) with single `opt_sp: OptSearchPoint`. Loop-mechanics fields (`current_sp`, `stall_count`, `l2_stall_count`, etc.) stay on `_LoopState`.
-
-| Before (`_LoopState`) | After (`_LoopState`) |
-|---|---|
-| `critique_text: str` | `opt_sp: OptSearchPoint` |
-| `critique: dict` | *(26 references in feedback_cycle.py migrate to `state.opt_sp.X`)* |
-| `thinking_styles: list[str]` | |
-| `task_context: dict` | |
-| `escalation_journal: list[dict]` | |
-
-**Checkpoint simplification:**
-
-```python
-# Before: construct new frozen OSP from scattered fields
-opt_sp = OptSearchPoint(critique_text=state.critique_text, ...)
-
-# After: direct serialization (opt_sp already up-to-date)
-state.opt_sp.plan = state.current_sp.prompt_state.plan
-state.opt_sp.optimizer_params = state.current_sp.prompt_state.optimizer_params
-campaign_store.add_trial(..., "opt_search_point": state.opt_sp.model_dump())
-```
-
-**Resume simplification:** `state.opt_sp = OptSearchPoint(**_osp)` — one-shot hydration. `escalation_journal` and `warning_inventory` now survive kernel restarts for free.
-
-**Scope boundary:** Node I/O models (`L1GenerateInput.critique_text`, etc.) are wire-format fields — unchanged. The orchestrator passes `state.opt_sp.critique_text` into node input dicts.
-
-### 13.3 Per-Query Warning Inventory
-
-A cross-round per-query warning inventory on `OptSearchPoint.warning_inventory`. Updated after each round's eval results. Simple counters, no complex classification.
-
-**Data shape:**
-
-```python
-{
-    "PA 66 25% GF V0 RAL 7012/0": {
-        "rounds_seen": 3,
-        "hits": 0,
-        "misses": 3,
-        "warnings": {
-            "web_search:partial_scrape": 3,
-            "web_search:low_content": 2,
-        },
-        "last_terminated_at": "web_search",
-    },
-    "Kingfa NPG25": {
-        "rounds_seen": 3,
-        "hits": 1,
-        "misses": 2,
-        "warnings": {"web_search:partial_scrape": 2},
-        "last_terminated_at": "llm_ranking",
-    },
-    "Aspirin powder": {
-        "rounds_seen": 3,
-        "hits": 3,
-        "misses": 0,
-        "warnings": {},
-        "last_terminated_at": "llm_ranking",
-    },
-}
-```
-
-**Pure functions** in `critique_stats.py`:
-
-- **`update_query_tracker(tracker, results)`** — merges current round's per-query results into the inventory. Increments `rounds_seen`, `hits`/`misses`, warning type counts, updates `last_terminated_at`.
-- **`summarize_warning_inventory(tracker)`** — produces a text summary grouped by warning type for prompt injection. Returns empty string when no warnings tracked.
-
-Output example:
-```
-## RECURRING PIPELINE WARNINGS (across 5 rounds)
-  web_search:partial_scrape — 3 queries affected:
-    PA 66 25% GF V0 RAL 7012/0  (3/3 rounds, 0 hits)
-    Kingfa NPG25  (2/3 rounds, 1 hit)
-    BASF Ultramid  (2/3 rounds, 0 hits)
-  entity_profiling:timeout — 1 query affected:
-    Specialty resin XR-200  (2/5 rounds, 2 hits)
-```
-
-### 13.4 Context Injection
-
-The warning inventory summary is injected into three consumers (only when tracker has data, typically round 2+):
-
-| Consumer | Injection point | Purpose |
-|----------|----------------|---------|
-| **Critique** | New `## RECURRING PIPELINE WARNINGS` section in `assemble_critique_prompt()` | Critique can distinguish prompt failures from pipeline failures |
-| **L2 refine_context** | Alongside existing escalation section in the L2 prompt | L2 sees which queries have recurring warnings, can reason about targeted fixes |
-| **L1 generate** | `focus_note` in scan-aware meta-prompt | L1 knows which failures have recurring pipeline issues |
-
-Additionally, `failure_examples` in `prompt_optimizer.py` annotated with warning history:
-
-```
-Query: PA 66 25%... | Predicted: Glass fibre... | GT: Polyamide...  [⚠ web_search:partial_scrape 3/3 rounds]
-```
-
-### 13.5 DegradationCheck — Unchanged
-
-`DegradationCheck` in `escalation.py` stays exactly as-is. It fires when degradation rate exceeds threshold, triggering L2. The improvement is that **L2 now has the warning inventory context** to make better decisions instead of blindly trying query prefix changes.
-
-### 13.6 L2 Action Classification & Probe Rounds
-
-L2's structured output includes an `"action"` classification field:
-
-| Action | Meaning |
-|--------|---------|
-| `"continue"` | Default — normal L1 cycle continues with random subsample |
-| `"probe"` | Next L1 round is a **probe round** — specialized eval batch + no degradation abort |
-
-Extensible — future actions (e.g., `"skip_warned"`, `"retry"`) can be added without schema changes.
-
-**Design principle:** L2 decides WHETHER to probe based on the warning inventory data (per-query warning counts across rounds). Low counts in early rounds → L2 naturally ignores them. As counts grow, L2 classifies the situation as needing a probe.
-
-**Probe round = specialized L1 round**, not a separate mini-eval:
-
-- **Eval batch**: All queries with warnings from the tracker (looked up in full `eval_data`), not the random subsample
-- **No degradation abort**: `DegradationCheck` disabled — we expect degradation, that's the point of probing
-- **Normal L1 flow**: Generate → evaluate → winner selection proceeds as usual
-- **Counts toward `max_rounds`**: Probe rounds are regular rounds with a different eval batch, not exempt from accounting
-- **L2 follows**: After a probe round completes, L2 fires to assess probe results and decide next action (continue, probe again, etc.)
-
-**Flow:**
-
-```
-Round N: 8/20 queries degraded (recurring web_search warnings)
-  → Escalation fires, L2 runs
-  → L2 sees warning inventory: "PA 66 25%... (3/4 rounds, 0 hits)"
-  → L2 returns {"action": "probe", "optimizer_params": {...}, ...}
-  → state.probe_next_round = True
-
-Round N+1 (probe round):
-  → round_eval_data = all warned queries from tracker (via full eval_data)
-  → escalation_checks disabled for this round
-  → L1 generates candidates (with warning inventory context)
-  → Evaluate candidates against warned queries only
-  → Winner selection, tracker updated
-  → L2 fires to assess probe results
-    → action="continue": resume normal L1 with random subsample
-    → action="probe": another probe round
-```
-
-**Implementation:**
-
-1. `TransitionResult.action: str = "continue"` — parsed from L2 JSON response
-2. `_LoopState.probe_next_round: bool = False` — set by orchestrator when `action == "probe"`
-3. Main loop: if `probe_next_round`, override `round_eval_data` with warned queries, pass `escalation_checks=None`
-4. After probe round: reset flag, force L2 to fire
-
-### 13.7 Wave F — Execution Plan
-
-#### F1: OptSearchPoint consolidation
-
-- `api/models/opt_search_point.py` — remove frozen, add 3 new fields
-- `api/services/campaign/models.py` — replace 5 scattered fields with `opt_sp: OptSearchPoint`
-- `api/services/campaign/feedback_cycle.py` — migrate 26 `state.X` → `state.opt_sp.X`; simplify checkpoint/resume
-
-#### F2: Warning inventory
-
-- `api/services/campaign/critique_stats.py` — `update_query_tracker()`, `summarize_warning_inventory()`
-- `api/services/campaign/feedback_cycle.py` — call `update_query_tracker()` after each round
-- `api/services/campaign/critique_stats.py` — add inventory section to `assemble_critique_prompt()`
-
-#### F3: Context injection
-
-- `api/services/prompt_optimizer.py` — annotate failure_examples with `[⚠ warning_type N/M rounds]`
-- `api/services/campaign/feedback_cycle.py` — wire inventory into L2 and L1-gen prompts
-
-#### F4: L2 probe rounds
-
-- `api/services/campaign/layer_transitions.py` — `TransitionResult.probe_queries`; parse from L2 response
-- `api/config/optimizer_prompts/l2_refine_context.json` — probe instruction in L2 prompt
-- `api/services/campaign/feedback_cycle.py` — probe round orchestration logic
-
----
-
-## 14. Building Block Standard
-
-**Wave G** replaced the Pydantic node I/O wrappers (Waves A-D) with direct service calls + `observed_step` tracing. This simplification revealed a more fundamental pattern: both TermNorm and PromptPotter use the same primitives (LLM calls, web search, deterministic functions) and should share a common vocabulary for declaring and composing them.
-
-### Type hierarchy
-
-Every node is self-contained: prompt assembly + execution + response parsing in one unit.
-
-```
-llm                  ← raw prompt → response
-├── llm/structured   ← + prompt template + output schema (TermNorm nodes)
-│   └── llm/meta     ← + multi-source assembly + context parsing (optimizer nodes)
-└── agent            ← + multi-step loop (CritiqueAgent)
-web_search           ← external HTTP service
-deterministic        ← pure function
-evaluation           ← backend call + comparison
-```
-
-### Composability pattern
-
-Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx, writes to ctx. Pipelines are lists of nodes; the runner just loops.
-
-### `optimizer_pipeline.json`
-
-Declares the optimizer's nodes using the same JSON format as TermNorm's `GET /pipeline`. Located at `api/config/optimizer_pipeline.json`. Defines 5 nodes (`l1_generate`, `l1_evaluate`, `critique`, `l2_refine_context`, `l3_modify_plan`) and 4 pipeline sequences (`l1_round`, `l1_round_with_critique`, `l2_escalation`, `l3_escalation`).
-
-### Current scope
-
-`llm_call()` primitive is implemented (`api/core/llm_call.py`); all optimizer pipeline nodes use it. The shared cross-repo library extraction is future work, dependent on ConnectorProtocol readiness.
-
-**Full reference:** [`docs/building-blocks.md`](../building-blocks.md)
+## 13. Key Files Reference
+
+| File | Role |
+|------|------|
+| `api/config/optimizer_pipeline.json` | Pipeline declaration: 5 nodes, 4 sequences |
+| `api/core/llm_call.py` | `llm_call()` primitive + `get_node_config()` |
+| `api/services/obs/step_tracer.py` | `observed_step()` async context manager |
+| `api/services/campaign/feedback_cycle.py` | Orchestrator: round loop, escalation, checkpointing |
+| `api/services/campaign/models.py` | `CycleConfig`, `CycleRoundResult`, `CycleResult`, `_LoopState` |
+| `api/services/prompt_optimizer.py` | `l1_generate()`, `l1_evaluate()`, `generate_suggestions()` |
+| `api/services/campaign/layer_transitions.py` | `refine_context()` (L2), `modify_plan()` (L3), `TransitionResult` |
+| `api/services/campaign/critique.py` | `CritiqueAgent`, `format_critique_for_prompt()`, `sample_thinking_styles()` |
+| `api/services/campaign/critique_stats.py` | Pre-computed stats, anomaly detection, warning inventory, prompt assembly |
+| `api/services/campaign/escalation.py` | `EscalationCheck`, `DegradationCheck`, `EscalationSignal` |
+| `api/models/opt_search_point.py` | `OptSearchPoint` model |
+| `api/models/search_point.py` | `SearchPoint` model (target layer) |
+| `api/config/optimizer_prompts/*.json` | Prompt templates (7 files) |
+| `api/config/optimizer_prompt_loader.py` | `load_optimizer_prompt()` with Langfuse fallback |
+| `docs/critique-agent.md` | Critique architecture reference |

@@ -1,16 +1,16 @@
-# Building Block Standard
+# Node Standard
 
-**Version:** 0.1.0
-**Date:** 2026-03-20
+**Version:** 0.2.0
+**Date:** 2026-03-24
 **Status:** Established — `llm_call()` primitive + `optimizer_pipeline.json` config implemented; shared library extraction is future work
 
 ---
 
 ## Overview
 
-Both TermNorm and PromptPotter use the same primitives — LLM calls, web search, deterministic functions — but each wires them ad-hoc. The building block standard defines a shared vocabulary where the LLM interaction primitive is the same everywhere.
+Both TermNorm and PromptPotter use the same primitives — LLM calls, web search, deterministic functions — but each wires them ad-hoc. The node standard defines a shared vocabulary where the LLM interaction primitive is the same everywhere.
 
-Each node type is self-contained: prompt assembly + execution + response parsing in one plug-and-play unit. Optimizer steps (L1/L2/L3) do extra deterministic work around their LLM calls, but the LLM part uses the same structure as TermNorm's `llm_ranking` or `entity_profiling`.
+Each node type is self-contained: prompt assembly + execution + response parsing in one plug-and-play unit. Optimizer nodes (L1/L2/L3) do extra deterministic work around their LLM calls, but the LLM part uses the same structure as TermNorm's `llm_ranking` or `entity_profiling`.
 
 ---
 
@@ -120,7 +120,7 @@ Subtype of `llm`. LLM call + analysis loop + tool use. The CritiqueAgent is an e
 
 ### `evaluation` — Backend evaluation node
 
-Calls external backend, compares results. The `l1_evaluate` step.
+Calls external backend, compares results. The `l1_evaluate` node.
 
 ```json
 {
@@ -174,13 +174,13 @@ Both TermNorm and PromptPotter declare their pipelines using the same JSON forma
   "name": "Pipeline Name",
   "version": "v1.0",
   "nodes": {
-    "step_name": {
+    "node_name": {
       "type": "llm|llm/structured|llm/meta|agent|deterministic|evaluation|web_search",
       "config": { ... }
     }
   },
   "pipelines": {
-    "pipeline_name": ["step1", "step2", "step3"]
+    "pipeline_name": ["node1", "node2", "node3"]
   }
 }
 ```
@@ -191,21 +191,17 @@ The `pipelines` dict composes named sequences from the node pool. The same node 
 
 ## Current State vs Future
 
-### Now (M7 Wave G)
+### Now (M7)
 
-- **`llm_call()`** (`api/core/llm_call.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline steps use it.
+- **`llm_call()`** (`api/core/llm_call.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline nodes use it.
 - **`get_node_config()`** — loads node configs from `optimizer_pipeline.json` (cached)
 - **`optimizer_pipeline.json`** declares optimizer nodes with the same config shape as TermNorm's pipeline
-- **`observed_step`** traces optimizer steps using the same observability infrastructure
-- Optimizer building block nodes — `generate_candidates` (`llm/meta`), `refine_context` (`llm/meta`), `modify_plan` (`llm/meta`), `CritiqueAgent` (`agent`) — use `llm_call()` with their declared config from `optimizer_pipeline.json`
-
-### Runtime tracing
-
-- **`observed_step()`** (`api/services/obs/step_tracer.py`) — provides step-level tracing (timing + Langfuse observations). Callers use building block type names as `step_type` (e.g., `"llm/meta"`, `"evaluation"`).
+- **`observed_step()`** (`api/services/obs/step_tracer.py`) — traces node execution with timing + Langfuse observations. Callers use node type names as `step_type` (e.g., `"llm/meta"`, `"evaluation"`).
+- Optimizer nodes — `l1_generate` (`llm/meta`), `l1_evaluate` (`evaluation`), `critique` (`agent`), `l2_refine_context` (`llm/meta`), `l3_modify_plan` (`llm/meta`) — use `llm_call()` with their declared config from `optimizer_pipeline.json`
 
 ### Future (milestone TBD, post-ConnectorProtocol)
 
-- Extract building block types into a shared package importable by both repos
+- Extract node types into a shared package importable by both repos
 - Shared `PipelineContext`, config resolution, and runner
 
 ---
@@ -214,5 +210,5 @@ The `pipelines` dict composes named sequences from the node pool. The same node 
 
 - **TermNorm pipeline config:** `GET /pipeline` endpoint (see [`docs/connectors/termnorm.md`](connectors/termnorm.md))
 - **Optimizer pipeline config:** [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json)
-- **M7 spec §14:** [`docs/specs/m7-optimizer-pipeline.md`](specs/m7-optimizer-pipeline.md) §14
-- **Observability:** [`docs/observability.md`](observability.md) — step tracing via `observed_step`
+- **M7 spec:** [`docs/specs/m7-optimizer-pipeline.md`](specs/m7-optimizer-pipeline.md)
+- **Observability:** [`docs/observability.md`](observability.md) — node tracing via `observed_step`
