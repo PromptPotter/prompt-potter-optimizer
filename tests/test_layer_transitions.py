@@ -13,6 +13,7 @@ import json
 
 import pytest
 
+from api.models.opt_search_point import OptSearchPoint
 from api.models.prompt_state import PromptState
 from api.services.campaign.models import CycleConfig
 from api.services.campaign.feedback_cycle import run_feedback_cycle
@@ -43,7 +44,7 @@ async def test_refine_context_applies_parameters():
         "rationale": "Increase diversity to escape local minimum",
     })
 
-    ps = PromptState(instruction="Rank candidates", optimizer_params={"creativity": 0.5})
+    osp = OptSearchPoint(instruction="Rank candidates", optimizer_params={"creativity": 0.5})
     stalled_rounds = [
         {"round": 0, "accuracy": 0.4, "results": [
             {"query": "aspirin", "ground_truth": "Aspirin", "predicted": "WRONG", "hit": False},
@@ -51,10 +52,9 @@ async def test_refine_context_applies_parameters():
         {"round": 1, "accuracy": 0.4, "results": []},
     ]
 
-    result = await refine_context(ps, stalled_rounds, [], client)
+    result = await refine_context(osp, stalled_rounds, [], client)
 
     assert isinstance(result, TransitionResult)
-    assert result.prompt_state.parent_id == ps.id
     assert result.prompt_state.optimizer_params["creativity"] == 0.9
     assert result.prompt_state.optimizer_params["n_variants"] == 8
     assert "L2:" in result.prompt_state.changes_description
@@ -70,14 +70,14 @@ async def test_refine_context_applies_task_context():
         "rationale": "Add domain grounding",
     })
 
-    _ps = PromptState(instruction="Rank candidates")
+    _osp = OptSearchPoint(instruction="Rank candidates",
+                           task_context={"domain": "generic"})
     result = await refine_context(
-        _ps, [{"round": 0, "accuracy": 0.3, "results": []}], [], client,
-        task_context={"domain": "generic"},
+        _osp, [{"round": 0, "accuracy": 0.3, "results": []}], [], client,
     )
 
     assert result.task_context == {"domain": "pharmaceutical"}
-    assert result.prompt_state.parent_id == _ps.id
+    assert result.prompt_state.parent_id is not None
 
 
 @pytest.mark.asyncio
@@ -89,12 +89,12 @@ async def test_refine_context_no_changes_returns_same():
         "rationale": "No changes needed",
     })
 
-    ps = PromptState(instruction="Rank candidates")
+    osp = OptSearchPoint(instruction="Rank candidates")
 
-    result = await refine_context(ps, [{"round": 0, "accuracy": 0.5, "results": []}], [], client)
+    result = await refine_context(osp, [{"round": 0, "accuracy": 0.5, "results": []}], [], client)
 
     # Still derives because changes_description is always added
-    assert result.prompt_state.parent_id == ps.id
+    assert result.prompt_state.parent_id is not None
     assert "L2:" in result.prompt_state.changes_description
 
 
@@ -107,15 +107,15 @@ async def test_modify_plan_sets_new_plan():
         "rationale": "Switch from direct ranking to comparative reasoning",
     })
 
-    ps = PromptState(instruction="Rank candidates", plan="")
+    osp = OptSearchPoint(instruction="Rank candidates", plan="")
     l2_history = [{"l2_round": 1, "optimizer_params": {}, "accuracy_change": 0.0}]
 
-    result = await modify_plan(ps, l2_history, [], client)
+    result = await modify_plan(osp, l2_history, [], client)
 
     assert isinstance(result, TransitionResult)
     expected_plan = "Use chain-of-thought reasoning with explicit comparison steps."
     assert result.prompt_state.plan == expected_plan
-    assert result.prompt_state.parent_id == ps.id
+    assert result.prompt_state.parent_id is not None
     assert "L3:" in result.prompt_state.changes_description
     assert result.pipeline_params is None
 
@@ -128,17 +128,17 @@ async def test_modify_plan_preserves_other_fields():
         "rationale": "Strategic shift",
     })
 
-    ps = PromptState(
+    osp = OptSearchPoint(
         instruction="Rank candidates",
         persona="Expert pharmacologist",
         optimizer_params={"creativity": 0.8},
     )
 
-    result = await modify_plan(ps, [], [], client)
+    result = await modify_plan(osp, [], [], client)
 
-    assert result.prompt_state.instruction == ps.instruction
-    assert result.prompt_state.persona == ps.persona
-    assert result.prompt_state.optimizer_params == ps.optimizer_params
+    assert result.prompt_state.instruction == osp.instruction
+    assert result.prompt_state.persona == osp.persona
+    assert result.prompt_state.optimizer_params == osp.optimizer_params
     assert result.prompt_state.plan == "New strategy"
 
 
@@ -156,9 +156,13 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
     # Mock refine_context to return a slightly modified PS
     l2_calls = []
 
-    async def mock_refine_context(current_ps, stalled_rounds, eval_d, llm_client, **kwargs):
-        l2_calls.append({"ps_id": current_ps.id, "n_stalled": len(stalled_rounds)})
-        return TransitionResult(prompt_state=current_ps.derive(
+    async def mock_refine_context(osp, stalled_rounds, eval_d, llm_client, **kwargs):
+        base_ps = PromptState(
+            **osp.prompt_field_dict(),
+            optimizer_params=osp.optimizer_params, plan=osp.plan,
+        )
+        l2_calls.append({"n_stalled": len(stalled_rounds)})
+        return TransitionResult(prompt_state=base_ps.derive(
             optimizer_params={"creativity": 0.9},
             changes_description="L2: mock refine",
         ))
@@ -205,16 +209,24 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
     l2_calls = []
     l3_calls = []
 
-    async def mock_refine_context(current_ps, stalled_rounds, eval_d, llm_client, **kwargs):
-        l2_calls.append(current_ps.id)
-        return TransitionResult(prompt_state=current_ps.derive(
+    async def mock_refine_context(osp, stalled_rounds, eval_d, llm_client, **kwargs):
+        base_ps = PromptState(
+            **osp.prompt_field_dict(),
+            optimizer_params=osp.optimizer_params, plan=osp.plan,
+        )
+        l2_calls.append(True)
+        return TransitionResult(prompt_state=base_ps.derive(
             optimizer_params={"creativity": 0.9},
             changes_description="L2: mock",
         ))
 
-    async def mock_modify_plan(current_ps, l2_history, eval_d, llm_client, **kwargs):
-        l3_calls.append(current_ps.id)
-        return TransitionResult(prompt_state=current_ps.derive(
+    async def mock_modify_plan(osp, l2_history, eval_d, llm_client, **kwargs):
+        base_ps = PromptState(
+            **osp.prompt_field_dict(),
+            optimizer_params=osp.optimizer_params, plan=osp.plan,
+        )
+        l3_calls.append(True)
+        return TransitionResult(prompt_state=base_ps.derive(
             plan="New strategy",
             changes_description="L3: mock",
         ))
@@ -378,9 +390,9 @@ async def test_refine_context_ignores_pipeline_params():
         "rationale": "L2 focuses on context, not pipeline_params",
     })
 
-    ps = PromptState(instruction="Rank candidates")
+    osp = OptSearchPoint(instruction="Rank candidates")
     result = await refine_context(
-        ps, [{"round": 0, "accuracy": 0.4, "results": []}], [], client,
+        osp, [{"round": 0, "accuracy": 0.4, "results": []}], [], client,
         pipeline_params={"llm_ranking": {"temperature": 0.3}},
     )
 
@@ -398,9 +410,9 @@ async def test_modify_plan_with_pipeline_params():
         "rationale": "Lower fuzzy threshold",
     })
 
-    ps = PromptState(instruction="Rank candidates")
+    osp = OptSearchPoint(instruction="Rank candidates")
     result = await modify_plan(
-        ps, [], [], client,
+        osp, [], [], client,
         pipeline_params={"fuzzy_matching": {"threshold": 0.8}},
     )
 

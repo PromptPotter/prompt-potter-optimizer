@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import DISPLAY_TRUNCATE
 from api.core.llm_call import get_node_config, llm_call
+from api.models.opt_search_point import OptSearchPoint
 from api.models.prompt_state import PromptState
 from api.services.campaign.critique_stats import summarize_warning_inventory
 
@@ -46,7 +47,7 @@ class TransitionResult:
 
 
 async def refine_context(
-    current_ps: PromptState,
+    osp: OptSearchPoint,
     stalled_rounds: list[dict],
     eval_data: list[dict],
     llm_client: LLMClientBase,
@@ -55,11 +56,6 @@ async def refine_context(
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
     escalation_context: dict | None = None,
-    escalation_journal: list[dict] | None = None,
-    task_context: dict | None = None,
-    warning_inventory: dict | None = None,
-    critique_text: str = "",
-    prev_l2_directive: str = "",
 ) -> TransitionResult:
     """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
 
@@ -88,38 +84,38 @@ async def refine_context(
 
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
     escalation_section = _build_escalation_prompt_section(
-        escalation_context, escalation_journal, pipeline_params,
+        escalation_context, osp.escalation_journal or None, pipeline_params,
         pipeline_schema=pipeline_schema,
     )
 
     task_context_section = ""
-    if task_context:
+    if osp.task_context:
         task_context_section = (
             "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
-            + json.dumps(task_context, indent=2)
+            + json.dumps(osp.task_context, indent=2)
         )
 
     # Inject cross-round warning inventory
     warning_section = ""
-    if warning_inventory:
-        warning_section = summarize_warning_inventory(warning_inventory)
+    if osp.warning_inventory:
+        warning_section = summarize_warning_inventory(osp.warning_inventory)
         if warning_section:
             warning_section = "\n\n" + warning_section + "\n"
 
     # Inject previous critique so L2 builds on it rather than re-analyzing
     critique_section = ""
-    if critique_text:
+    if osp.critique_text:
         critique_section = (
             "\n\nPREVIOUS CRITIQUE (build on this analysis, don't repeat it):\n"
-            + critique_text
+            + osp.critique_text
         )
 
     # Sliding window: L2 sees only its own previous directive (window=1)
     prev_directive_section = ""
-    if prev_l2_directive:
+    if osp.l2_directive:
         prev_directive_section = (
             "\n\nYOUR PREVIOUS DIRECTIVE (evolve or supersede — do not repeat verbatim):\n"
-            + prev_l2_directive
+            + osp.l2_directive
         )
 
     response_schema_suffix = (
@@ -140,11 +136,11 @@ async def refine_context(
         "based on the data above."
     )
 
-    prompt = load_optimizer_prompt("l2_refine_context").compile(
+    prompt = load_optimizer_prompt("l2_refine_context").compile_prompt(
         round_summary=round_summary,
-        rendered_prompt=current_ps.render(),
+        rendered_prompt=osp.render_prompt(),
         failure_lines=chr(10).join(failure_lines[:15]),
-        current_params=json.dumps(current_ps.optimizer_params),
+        current_params=json.dumps(osp.optimizer_params),
         task_context_section=task_context_section,
         pipeline_section=pipeline_section,
         escalation_section=escalation_section + warning_section,
@@ -164,7 +160,7 @@ async def refine_context(
 
     changes: dict = {}
     if result.get("optimizer_params"):
-        new_params = {**current_ps.optimizer_params, **result["optimizer_params"]}
+        new_params = {**osp.optimizer_params, **result["optimizer_params"]}
         changes["optimizer_params"] = new_params
     rationale = result.get("rationale", "L2 refine_context transition")
     changes["changes_description"] = f"L2: {rationale[:80]}"
@@ -172,8 +168,8 @@ async def refine_context(
     # Parse refined task_context (merge with current, only non-empty updates)
     new_task_context = None
     if result.get("task_context") and isinstance(result["task_context"], dict):
-        merged = {**(task_context or {}), **result["task_context"]}
-        if merged != (task_context or {}):
+        merged = {**(osp.task_context or {}), **result["task_context"]}
+        if merged != (osp.task_context or {}):
             new_task_context = merged
 
     # Parse action classification
@@ -195,6 +191,9 @@ async def refine_context(
         len(l2_directive),
     )
 
+    current_ps = PromptState(**osp.prompt_field_dict(),
+                              optimizer_params=osp.optimizer_params,
+                              plan=osp.plan)
     new_ps = current_ps.derive(**changes) if changes else current_ps
     return TransitionResult(
         prompt_state=new_ps,
@@ -207,7 +206,7 @@ async def refine_context(
 
 
 async def modify_plan(
-    current_ps: PromptState,
+    osp: OptSearchPoint,
     l2_history: list[dict],
     eval_data: list[dict],
     llm_client: LLMClientBase,
@@ -242,10 +241,10 @@ async def modify_plan(
         '  "rationale": 1-2 sentence explanation of the strategic shift'
     )
 
-    prompt = load_optimizer_prompt("l3_modify_plan").compile(
-        current_plan=current_ps.plan or "(none — default strategy)",
+    prompt = load_optimizer_prompt("l3_modify_plan").compile_prompt(
+        current_plan=osp.plan or "(none — default strategy)",
         l2_summary=l2_summary,
-        rendered_prompt=current_ps.render(),
+        rendered_prompt=osp.render_prompt(),
         pipeline_section=pipeline_section,
         response_schema_suffix=response_schema_suffix,
     )
@@ -259,7 +258,7 @@ async def modify_plan(
     )
     result = response.parsed or json.loads(response.content)
 
-    new_plan = result.get("plan", current_ps.plan)
+    new_plan = result.get("plan", osp.plan)
     rationale = result.get("rationale", "L3 modify_plan transition")
 
     new_pipeline_params = _parse_pipeline_params(result, pipeline_params)
@@ -268,6 +267,9 @@ async def modify_plan(
                 rationale[:100],
                 "updated" if new_pipeline_params else "unchanged")
 
+    current_ps = PromptState(**osp.prompt_field_dict(),
+                              optimizer_params=osp.optimizer_params,
+                              plan=osp.plan)
     new_ps = current_ps.derive(
         plan=new_plan,
         changes_description=f"L3: {rationale[:80]}",

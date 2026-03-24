@@ -179,7 +179,7 @@ def _init_obs(
     try:
         obs.log_campaign_start(
             campaign_id=obs_campaign_id,
-            config=config.model_dump(),
+            config=config.model_dump(mode="json"),
             baseline_accuracy=baseline_accuracy,
             session_id=langfuse_session_id,
         )
@@ -284,7 +284,7 @@ def _resume_or_create_campaign(
                         "max_rounds", "patience", "l2_patience",
                         "l3_patience", "degradation_threshold",
                     ]
-                    current_cfg = config.model_dump()
+                    current_cfg = config.model_dump(mode="json")
                     cfg_updated = False
                     for k in _LOOP_CONTROL_KEYS:
                         if stored_cfg.get(k) != current_cfg.get(k):
@@ -305,7 +305,7 @@ def _resume_or_create_campaign(
             resumed_from = 0
             campaign_store.create(config.backend_id, cycle_id, {
                 "type": "feedback_cycle",
-                "config": config.model_dump(),
+                "config": config.model_dump(mode="json"),
                 "baseline_accuracy": baseline_accuracy,
             })
 
@@ -689,7 +689,6 @@ async def _do_l2_transition(
     escalation_context: dict | None = None,
 ) -> layer_transitions.TransitionResult:
     """Perform L2 refine_context transition. Updates state in-place."""
-    current_ps = state.current_sp.prompt_state
     current_pp = state.current_sp.pipeline_params
 
     stalled_rounds = [
@@ -703,7 +702,7 @@ async def _do_l2_transition(
     _emit_phase(on_phase, "refine_context", "enter", round=round_num,
                 l2_round=state.l2_round,
                 stall_count=state.stall_count,
-                current_params=current_ps.optimizer_params,
+                current_params=state.opt_sp.optimizer_params,
                 current_accuracy=state.current_accuracy,
                 best_accuracy=state.best_accuracy)
 
@@ -711,17 +710,12 @@ async def _do_l2_transition(
     async with observed_step(f"l2_refine_r{round_num}", "llm/meta",
                              obs=obs, trace_id=trace_id):
         tr = await layer_transitions.refine_context(
-            current_ps, stalled_rounds, eval_data, client,
+            state.opt_sp, stalled_rounds, eval_data, client,
             model=config.model,
             temperature=config.l2_temperature,
             pipeline_params=current_pp,
             pipeline_schema=config.pipeline_schema,
             escalation_context=escalation_context,
-            escalation_journal=state.opt_sp.escalation_journal,
-            task_context=state.opt_sp.task_context or None,
-            warning_inventory=state.opt_sp.warning_inventory or None,
-            critique_text=state.opt_sp.critique_text,
-            prev_l2_directive=state.opt_sp.l2_directive,
         )
     # Update task_context if L2 refined it
     if tr.task_context:
@@ -770,24 +764,23 @@ async def _do_l3_transition(
     trace_id: str | None = None,
 ) -> layer_transitions.TransitionResult:
     """Perform L3 modify_plan transition. Updates state in-place."""
-    current_ps = state.current_sp.prompt_state
     current_pp = state.current_sp.pipeline_params
 
     l2_history = [{
         "l2_round": state.l2_round,
-        "optimizer_params": current_ps.optimizer_params,
+        "optimizer_params": state.opt_sp.optimizer_params,
         "accuracy_change": state.best_composite - state.best_composite_at_l3_entry,
     }]
     _emit_phase(on_phase, "modify_plan", "enter", round=round_num,
                 l3_round=state.l3_round,
                 l2_stall_count=state.l2_stall_count,
-                current_plan_preview=str(current_ps.plan)[:120])
+                current_plan_preview=str(state.opt_sp.plan)[:120])
 
     client = _llm_client.get_llm_client(config.provider)
     async with observed_step(f"l3_modify_plan_r{round_num}", "llm/meta",
                              obs=obs, trace_id=trace_id):
         tr = await layer_transitions.modify_plan(
-            current_ps, l2_history, eval_data, client,
+            state.opt_sp, l2_history, eval_data, client,
             model=config.model,
             temperature=config.l3_temperature,
             pipeline_params=current_pp,

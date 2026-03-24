@@ -235,7 +235,7 @@ async def l1_generate(
         "(keep template variables)\n"
     )
 
-    meta_prompt = load_optimizer_prompt("meta_scan_aware").compile(
+    meta_prompt = load_optimizer_prompt("meta_scan_aware").compile_prompt(
         n_variants=n_variants,
         accuracy_pct=f"{current_accuracy:.1%}",
         n_queries=len(current_results),

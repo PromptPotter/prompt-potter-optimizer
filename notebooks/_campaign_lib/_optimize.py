@@ -165,7 +165,8 @@ def _print_preflight_sections(config, bl, eval_data,
         _pipeline_label = "(default pipeline)"
         _steps_detail = None
 
-    _est_calls = config.max_rounds * config.n_variants * _eff_queries
+    _est_calls = (config.max_rounds * config.n_variants * _eff_queries
+                  if config.max_rounds is not None else None)
 
     _l2_label = (f"enabled, patience={config.l2_patience}"
                  if config.enable_l2 else "disabled")
@@ -182,7 +183,7 @@ def _print_preflight_sections(config, bl, eval_data,
     print(f"  Baseline accuracy      : {baseline_acc:.1%}")
     print(f"  Baseline prompt        : {_instr_preview}")
     print("  " + "-" * 66)
-    print(f"  Max rounds             : {config.max_rounds}")
+    print(f"  Max rounds             : {config.max_rounds or 'unlimited'}")
     print(f"  Candidates per round   : {config.n_variants}")
     print(f"  Queries per eval       : {_queries_label}")
     print(f"  Improvement threshold  : {config.improvement_threshold:.1%}")
@@ -271,9 +272,14 @@ def _print_preflight_sections(config, bl, eval_data,
           f"L2: {_l2_label}  |  L3: {_l3_label}")
 
     print("  " + "-" * 66)
-    print(f"  Est. backend calls     : {_est_calls}"
-          f"  ({config.max_rounds}r x {config.n_variants}c"
-          f" x {_eff_queries}q)")
+    if _est_calls is not None:
+        print(f"  Est. backend calls     : {_est_calls}"
+              f"  ({config.max_rounds}r x {config.n_variants}c"
+              f" x {_eff_queries}q)")
+    else:
+        print(f"  Est. backend calls     : unlimited"
+              f"  (no max_rounds x {config.n_variants}c"
+              f" x {_eff_queries}q)")
 
     # ── Section 3: Scan Context Preview ──
     if scan_context:

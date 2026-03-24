@@ -73,7 +73,7 @@ async def restructure_context(
             "fields that don't apply. Be concise and actionable."
         )
 
-    system_prompt = load_optimizer_prompt("restructure").compile(
+    system_prompt = load_optimizer_prompt("restructure").compile_prompt(
         consultation_instruction=consultation_instruction,
     )
 
