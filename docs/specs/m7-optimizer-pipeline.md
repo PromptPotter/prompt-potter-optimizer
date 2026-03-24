@@ -922,4 +922,4 @@ After repeated degradation resets (configurable via `backend_warning_threshold`)
 | `api/models/search_point.py` | `SearchPoint` model (target layer) |
 | `api/config/optimizer_prompts/*.json` | Prompt templates (7 files) |
 | `api/config/optimizer_prompt_loader.py` | `load_optimizer_prompt()` with Langfuse fallback |
-| `docs/critique-agent.md` | Critique architecture reference |
+| `docs/optimization.md` | Critique architecture reference (merged) |

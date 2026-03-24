@@ -2,12 +2,13 @@
 Shared LLM call primitive — the node standard's execution layer.
 
 ``llm_call()`` is a thin wrapper over ``LLMClientBase.chat()`` that reads
-defaults from a config dict (typically from ``optimizer_pipeline.json``)
-and allows runtime overrides.  Every optimizer pipeline step uses this
+defaults from a config dict (typically from a ``PipelineNode.current_config``)
+and allows runtime overrides.  Every optimizer pipeline node uses this
 instead of calling ``chat()`` directly.
 
-``get_node_config(node_name)`` loads node configs from the optimizer
-pipeline declaration (``api/config/optimizer_pipeline.json``).
+``get_optimizer_schema()`` loads the optimizer pipeline declaration as a
+``PipelineSchema`` — the same model used for target pipelines. This unifies
+the twin: both TermNorm and optimizer pipelines parse into PipelineSchema.
 """
 
 import json
@@ -22,21 +23,36 @@ logger = logging.getLogger(__name__)
 # Pipeline config loading (cached)
 # ---------------------------------------------------------------------------
 
-_PIPELINE: dict | None = None
+_OPTIMIZER_SCHEMA = None
 
 
-def get_optimizer_pipeline() -> dict:
-    """Load optimizer_pipeline.json (cached after first call)."""
-    global _PIPELINE  # noqa: PLW0603
-    if _PIPELINE is None:
+def get_optimizer_schema():
+    """Load optimizer_pipeline.json as PipelineSchema (cached)."""
+    global _OPTIMIZER_SCHEMA  # noqa: PLW0603
+    if _OPTIMIZER_SCHEMA is None:
+        from api.models.pipeline_schema import load_pipeline_from_dict
         path = Path(__file__).resolve().parents[1] / "config" / "optimizer_pipeline.json"
-        _PIPELINE = json.loads(path.read_text())
-    return _PIPELINE
+        data = json.loads(path.read_text())
+        _OPTIMIZER_SCHEMA = load_pipeline_from_dict(data)
+    return _OPTIMIZER_SCHEMA
 
 
 def get_node_config(node_name: str) -> dict:
-    """Get a node's config dict from the optimizer pipeline."""
-    return get_optimizer_pipeline()["nodes"][node_name]["config"]
+    """Get a node's config dict from the optimizer pipeline.
+
+    Returns ``PipelineNode.current_config`` for the named node.
+    """
+    node = get_optimizer_schema().get_step(node_name)
+    if node is None:
+        raise KeyError(f"Unknown optimizer node: {node_name}")
+    return node.current_config
+
+
+# Backward compat alias
+def get_optimizer_pipeline() -> dict:
+    """Load optimizer_pipeline.json as raw dict (legacy — prefer get_optimizer_schema)."""
+    path = Path(__file__).resolve().parents[1] / "config" / "optimizer_pipeline.json"
+    return json.loads(path.read_text())
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +71,7 @@ async def llm_call(
     Args:
         llm_client: The LLM client instance.
         messages: Chat messages (role/content dicts).
-        config: Node config dict from ``optimizer_pipeline.json``.
+        config: Node config dict (from ``PipelineNode.current_config``).
             Provides defaults for model, temperature, max_tokens, output_format.
         **overrides: Runtime overrides — any key present here wins over config.
             Common: ``model``, ``temperature``.

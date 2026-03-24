@@ -2,7 +2,7 @@
 
 ## What This Is
 
-PromptPotter Optimizer is a backend-first prompt optimization service. It connects to LLM application backends (currently TermNorm), syncs experiment data, replays pipelines with different configurations, and runs optimization campaigns (sensitivity scan, iterative candidate generation) to improve prompt accuracy. The primary evaluation mode is **backend evaluation** — calling the backend's `/matches` endpoint with `ranking_prompt` overrides.
+PromptPotter Optimizer is a backend-first prompt optimization service. It connects to LLM application backends (currently TermNorm), syncs experiment data, replays pipelines with different configurations, and runs L1/L2/L3 optimization campaigns to improve prompt accuracy.
 
 ## Commands
 
@@ -20,140 +20,93 @@ ruff check api/ tests/
 cd docker && docker-compose up --build
 ```
 
-## Architecture
+## Mental Model
 
-### Two entry points, shared core
+Two entry points (FastAPI API + Jupyter notebook), one service core in `api/services/`. The notebook (`notebooks/optimization_campaign.ipynb`) is the primary interface; `_campaign_lib` wraps services with display only.
 
-1. **FastAPI API** (`api/main.py`)
-2. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` is the **primary working interface** at this stage. Uses `notebooks/_campaign_lib/`.
+**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided feedback cycle (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup.
 
-`_campaign_lib` never implements business logic — it only wraps service functions with UI output. `tests/test_campaign_registry.py` is the testable E2E proxy for the notebook workflow.
+**Two-layer tracing:** Target layer (SearchPoint → dataset_runs/) and optimizer layer (OptSearchPoint → campaign trials). Both independently reconstructable from disk.
 
-### Service layer (`api/services/`)
+**Pipeline composability:** `pipeline_params` (nested dicts keyed by node name) throughout PromptPotter. `node_config` only at the TermNorm wire boundary.
 
-All core logic lives here.
+See [`docs/architecture.md`](docs/architecture.md) for diagrams, caching, pipeline discovery, and disk layout.
 
-**Two layers must both be traced:**
-- **Target layer**: `SearchPoint` → `evaluate_prompt_cached()` → `dataset_runs/` (content-addressed, shared across all eval paths)
-- **Optimizer layer**: `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint). Captures critique, thinking_styles, task_context, escalation_journal, warning_inventory, plan, optimizer_params.
+## Data Model Reference
 
-`OptSearchPoint` is the optimizer-layer analogue of `SearchPoint`. All optimizer state flows through it — check existing fields before proposing new data structures. Both layers must be independently reconstructable from disk.
-
-### Prompt decomposition & alias groups
-
-Two core mechanisms that work together (both actively evolving):
-
-- **Prompt decomposition** — PromptPotter decomposes a backend's monolithic prompt into internal fields (`persona`, `task_intent`, `thinking_style`, `answer_format`, `problem_description`) via LLM restructure. A variant library (`api/config/prompt_variants.json`) provides per-field alternatives for sensitivity scan.
-- **Prompt alias groups** — `register_alias` / `resolve_aliases` link semantically equivalent prompt hashes so historical evaluations are discoverable across forms. Resolution is transitive.
-
-### Pipeline composability
-
-PromptPotter uses **`pipeline_params`** format throughout — nested dicts keyed by step name (e.g. `{"llm_ranking": {"temperature": 0.5}}`). `BackendClient.run_match()` translates to the `node_config` wire-format key at the TermNorm boundary. No flat param names, no translation layer.
-
-### North star workflow (HITL optimization cycle)
-
-The human workflow is a repeatable loop:
-
-0. **Pipeline snapshot** — display full pipeline JSON before any evaluation (experiment parameter manifest)
-1. **Generate data** — sync from backend, build eval dataset, run baseline eval
-2. **Explore** — sensitivity scan maps the accuracy landscape
-3. **Optimize** — critique-guided feedback cycle with L1→L2→L3 escalation
-4. **Harvest** — human reviews results
-5. **Reuse** — coverage advisor discovers all stored `dataset_runs` regardless of source
-
-**Key principle:** Every backend evaluation writes to the same `dataset_runs` store with content-addressed deduplication. No data is siloed per campaign.
-
-### Optimizer pipeline
-
-The optimizer is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_context`, `l3_modify_plan`), declared in `api/config/optimizer_pipeline.json` using the node format. **L1 Generate is the sole `pipeline_params` decider**; L2 refines situation context (`task_context`) + meta-settings (creativity, n_variants, sample_size); L3 modifies the strategic plan. Critique (part of L1 Evaluate) produces a 5-field analysis (`positive_critique`, `negative_critique`, `priority_fix`, `suggested_axes`, `summary`) fed to both L1 and L2. Pluggable `EscalationCheck`s (e.g., `DegradationCheck`) can short-circuit evaluation mid-round and route to L2/L3. See [`docs/critique-agent.md`](docs/critique-agent.md) for the full critique/escalation architecture, [`docs/node-standard.md`](docs/node-standard.md) for the node standard, and [`docs/specs/m7-optimizer-pipeline.md`](docs/specs/m7-optimizer-pipeline.md) for the M7 spec.
-
-### Node primitive (`api/core/llm_call.py`)
-
-`llm_call()` is the shared LLM interaction primitive. Config-driven from `api/config/optimizer_pipeline.json` with runtime overrides. Used by all optimizer nodes (`l1_generate`, `l2_refine_context`, `l3_modify_plan`, `critique`).
-
-### Milestones
-
-Each milestone has an executable spec in `docs/specs/`. See [`docs/specs/CLAUDE.md`](docs/specs/CLAUDE.md) for the process and milestone table.
-
-### TermNorm reference patterns
-
-The TermNorm repo lives at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\`. See its `CLAUDE.md` for reference implementations (Langfuse, MLflow, prompt registry).
-
-## Data model reference
-
-All optimization services follow: `f(SearchPoint, PipelineSchema, eval_data) → scores`.
-
-### PromptState (`api/models/prompt_state.py`)
-
-Immutable prompt configuration organized into optimization layers:
-- **Layer 1 (Generate)**: persona, task_intent, thinking_style, answer_format, etc. — change every pass
-- **Layer 2 (Refine Context)**: optimizer_params — adjust when Layer 1 stalls. `task_context` lives on OptSearchPoint (not PromptState).
-- **Layer 3 (Modify Plan)**: plan — rarely changed (strategy defaults)
-
-### OptSearchPoint (`api/models/opt_search_point.py`)
-
-Optimizer-level search point — the optimizer's configuration at a moment in the feedback cycle. Cross-reference design: holds `content_hashes` linking to target-layer `dataset_runs`. Fields: `critique_text`, `thinking_styles`, `plan`, `optimizer_params`, `task_context`, `l2_directive`, `content_hashes`.
+All services follow: `f(SearchPoint, PipelineSchema, eval_data) → scores`.
 
 ### SearchPoint (`api/models/search_point.py`)
 
-Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_params`. `content_hash(eval_data)` is the dedup key for `evaluate_prompt_cached()`.
+Flat, frozen, content-hashable target evaluation specification. Fields: `model` + `temperature` + `pipeline_params`. The rendered prompt lives inside `pipeline_params` as a node config value (e.g., `{"llm_ranking": {"prompt": "..."}}`). The lightweight twin. Methods: `render()`, `content_hash(eval_data)`, `sp_hash()`, `derive()`.
 
-## Service catalog
+### OptSearchPoint (`api/models/opt_search_point.py`)
+
+The more capable twin — full optimizer working state:
+- **Prompt decomposition** (L1): `persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`, `few_shot_examples`
+- **L2 state**: `optimizer_params`, `task_context`
+- **L3 state**: `plan`
+- **Optimization memory**: `critique_text`, `critique`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`, `content_hashes`
+
+Key methods: `render_prompt()` assembles prompt fields into a string. `to_search_point()` projects into a SearchPoint by injecting the rendered prompt into `pipeline_params`. `compile_prompt()` substitutes `{{variables}}`.
+
+### PipelineSchema / PipelineNode (`api/models/pipeline_schema.py`)
+
+Describes a pipeline — target or optimizer. Both TermNorm's `GET /pipeline` response and `optimizer_pipeline.json` parse into PipelineSchema. `PipelineNode` (formerly PipelineStep) carries node type, config, param_keys, override_map.
+
+### EvalContext (`api/services/prompt_eval.py`)
+
+Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema`, `obs`, `model`, `temperature`, `pipeline_params`.
+
+## Service Catalog
 
 | Service | Purpose |
 |---------|---------|
-| `prompt_eval.py` | Evaluate prompts against datasets via backend `/matches` endpoint |
+| `prompt_eval.py` | Evaluate prompts via backend `/matches` — single eval gateway |
 | `l1_optimizer.py` | L1 candidate generation (`l1_generate`) and winner selection (`l1_evaluate`) |
 | `backend_client.py` | HTTP client for backend APIs (sync, replay, `fetch_pipeline()`) |
-| `pipeline_discovery.py` | Pipeline schema factory (parses `GET /pipeline` response into `PipelineSchema`) |
+| `pipeline_discovery.py` | Parses `GET /pipeline` response into `PipelineSchema` |
 | `project_store.py` | Facade over focused store modules in `stores/` |
-| `campaign/feedback_cycle.py` | Iterative optimization: 3-loop escalation (L1→L2→L3) with patience-based stopping |
-| `campaign/layer_transitions.py` | L2 (context + meta-settings + l2_directive), L3 (plan) |
-| `dataset_builder.py` | Excel ground-truth loading and train/test splitting |
-| `campaign/campaign_init.py` | Campaign initialization, `resolve_experiment_id()`, `apply_experiment_overrides()` |
-| `search/smart_search.py` | Sensitivity scan (OAT), adaptive search, `filter_variant_library()` |
+| `campaign/feedback_cycle.py` | L1→L2→L3 escalation loop with patience-based stopping |
+| `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
+| `campaign/campaign_init.py` | Campaign init, `resolve_experiment_id()`, experiment overrides |
+| `search/smart_search.py` | Sensitivity scan (OAT), adaptive search |
 | `search/scan_advisor.py` | LLM-driven scan recommendations |
-| `search/coverage.py` | Historical index, coverage advisor, scan variant diagnostics |
-| `obs/observability_logger.py` | File-based observability (Langfuse-compatible traces, MLflow) |
-| `obs/step_tracer.py` | `observed_step()` — async context manager for step-level timing + tracing |
-| `stores/` | Focused store modules: Backend, Execution, DatasetRun, Dataset, SmartSearch, Campaign |
+| `search/coverage.py` | Historical index, coverage advisor |
+| `obs/observability_logger.py` | Langfuse-compatible traces, MLflow |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
 
 ### Evaluation gateway
 
-`evaluate_prompt_cached()` in `prompt_eval.py` is the **single entry point** for all eval persistence. All evaluation paths (smart search, feedback cycle) converge here.
+`evaluate_prompt_cached()` in `prompt_eval.py` is the **single entry point** for all eval persistence. All evaluation paths converge here.
 
 ### Pipeline discovery — ownership principle
 
-**DO:** All pipeline metadata comes from `GET /pipeline`. `parse_pipeline_response()` builds `PipelineSchema` from the live response. Each node carries an `optimizer` sub-object (param_keys, override_map, observation_mappings). Registry metadata (`StepOutputSchema`, `StepPromptMeta`) resolved from `resolved_schemas`/`resolved_prompts`.
+**DO:** All target pipeline metadata from `GET /pipeline`. `parse_pipeline_response()` builds `PipelineSchema` from the live response. Optimizer pipeline from `api/config/optimizer_pipeline.json` via `load_pipeline_from_dict()`.
 
-**DON'T:** No hardcoded pipeline schemas, step names, or param keys in PromptPotter code. Need new metadata? Add it to the backend's `pipeline.json` → `optimizer` section. Tests may use inline test schemas.
-
-### ProjectStore disk layout
-
-```
-.promptpotter/projects/{backend_id}/
-  backend.json
-  sync/experiments/{id}.json
-  datasets/{name}.json
-  dataset_runs/{run_id}.json          # completed eval runs (shared across all eval paths)
-  dataset_runs.json                   # index (content_hash -> run_id)
-  smart_search_plans/{plan_id}.json
-  campaigns/{campaign_id}.json
-  campaigns/{campaign_id}/trial_NNNN.json
-  obs/langfuse/events.jsonl
-```
+**DON'T:** No hardcoded pipeline schemas, node names, or param keys in PromptPotter code. Tests may use inline test schemas.
 
 ## Project Conventions
 
-- **No backward compatibility** — freely break signatures, rename, restructure. No compat shims, no dual-format readers.
-- **Type hints**: PEP 604 (`X | None`, not `Optional[X]`), lowercase generics (`list[str]`, not `List[str]`)
-- **Logging**: `logging` module (no `print()` in non-notebook code). Setup in `api/config/logging.py`.
-- **`sample_size`**: Universal eval sampling parameter across all services (0 = use all). No synonyms (`max_queries`, `eval_queries_per_point`, etc.).
-- **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields. Surfaces schema violations immediately.
-- **Pipeline reproducibility**: The notebook MUST display the full pipeline configuration (all node configs, models, temperatures, schemas) via `GET /pipeline` before any evaluation. This is the experiment's parameter manifest.
-- **EXPERIMENT_ID is the single source of truth**: Every notebook cell operates within the scope of `EXPERIMENT_ID`. When set, config MUST match the stored experiment — mismatches raise `ValueError` demanding a new ID. When `None`, a new experiment is auto-created from the config hash. This invariant applies to feedback cycle, scan, and all data surfaces. No silent config drift between runs.
-- **Display parity**: Cached results must display identically to fresh results — no visible difference in output format between cached and computed data. The user should not be able to tell whether a result came from cache or a live backend call.
-- **Graceful interrupt**: Signal-flag pattern — first Ctrl+C finishes the in-flight call and saves, second force-quits. Partial results persisted with `"partial": True`; SP-hash cache bridges them on re-run. Catch both `KeyboardInterrupt` and `asyncio.CancelledError`. **No completed work is ever discarded.**
+- **No backward compatibility** — freely break signatures, rename, restructure.
+- **Type hints**: PEP 604 (`X | None`), lowercase generics (`list[str]`)
+- **Logging**: `logging` module (no `print()` in services). Setup in `api/config/logging.py`.
+- **`sample_size`**: Universal eval sampling parameter (0 = all). No synonyms.
+- **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
+- **Pipeline reproducibility**: Notebook displays full pipeline config via `GET /pipeline` before any evaluation.
+- **EXPERIMENT_ID**: Single source of truth. Config must match stored experiment when set.
+- **Display parity**: Cached results display identically to fresh results.
+- **Graceful interrupt**: Signal-flag pattern. No completed work is ever discarded.
 
-See [`docs/design-principles.md`](docs/design-principles.md) for the full principles catalog with rationale.
+See [`docs/design-principles.md`](docs/design-principles.md) for the full principles catalog.
+
+## Navigation Guide
+
+1. **This file** — overview, commands, data models, conventions, service catalog
+2. [`docs/architecture.md`](docs/architecture.md) — system design, two-loop diagram, two-layer tracing, caching, pipeline discovery, disk layout
+3. [`docs/optimization.md`](docs/optimization.md) — L1/L2/L3 feedback cycle, critique agent, escalation, configuration
+4. [`docs/node-standard.md`](docs/node-standard.md) — node type hierarchy, `llm_call()` primitive, pipeline declaration format
+5. [`docs/sensitivity-scan.md`](docs/sensitivity-scan.md) — OAT scan workflow, coverage, circuit breaker
+6. [`docs/observability.md`](docs/observability.md) — Langfuse, MLflow, events.jsonl
+7. [`docs/setup-guide.md`](docs/setup-guide.md) — installation, quick start, REST API
+8. [`docs/specs/`](docs/specs/CLAUDE.md) — milestone specs

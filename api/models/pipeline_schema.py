@@ -78,8 +78,10 @@ class StepPromptMeta(BaseModel):
 # Pipeline step
 # ---------------------------------------------------------------------------
 
-class PipelineStep(BaseModel):
-    """One step in a backend pipeline."""
+
+
+class PipelineNode(BaseModel):
+    """One node in a pipeline (target or optimizer)."""
 
     model_config = {"frozen": True}
 
@@ -163,7 +165,7 @@ class PipelineSchema(BaseModel):
     name: str = ""
     version: str = ""
     description: str = ""
-    steps: list[PipelineStep] = Field(default_factory=list)
+    steps: list[PipelineNode] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
     required_step: str | None = None
     template_variables: set[str] = Field(default_factory=set)
@@ -173,7 +175,7 @@ class PipelineSchema(BaseModel):
     # Lookup helpers
     # -------------------------------------------------------------------
 
-    def get_step(self, name: str) -> PipelineStep | None:
+    def get_step(self, name: str) -> PipelineNode | None:
         """Find a step by name, or None if not found."""
         for step in self.steps:
             if step.name == name:
@@ -240,11 +242,11 @@ class PipelineSchema(BaseModel):
         """
         return {step.name: step.langfuse_type for step in self.steps}
 
-    def backend_steps(self) -> list[PipelineStep]:
+    def backend_steps(self) -> list[PipelineNode]:
         """Steps that run on the backend."""
         return [s for s in self.steps if s.runtime == "backend"]
 
-    def frontend_steps(self) -> list[PipelineStep]:
+    def frontend_steps(self) -> list[PipelineNode]:
         """Steps that run on the frontend."""
         return [s for s in self.steps if s.runtime == "frontend"]
 
@@ -270,7 +272,7 @@ class PipelineSchema(BaseModel):
         metric_values: dict[str, float] = {}
 
         # Collect steps by role (namespace when >1 step shares a role)
-        role_steps: dict[str, list[PipelineStep]] = {}
+        role_steps: dict[str, list[PipelineNode]] = {}
         for step in self.steps:
             if step.node_role and step.node_role in ROLE_METRIC_REGISTRY:
                 role_steps.setdefault(step.node_role, []).append(step)
@@ -316,7 +318,7 @@ class PipelineSchema(BaseModel):
     @staticmethod
     def _compute_role_metric(
         metric_def: "IntermediateMetric",
-        step: "PipelineStep",
+        step: "PipelineNode",
         results: list[dict],
     ) -> float:
         """Compute a single role-based metric value."""
@@ -347,7 +349,7 @@ def is_result_step_compatible(
     return terminated_at in target
 
 
-def _compute_source_recall(step: PipelineStep, results: list[dict]) -> float:
+def _compute_source_recall(step: PipelineNode, results: list[dict]) -> float:
     """Fraction of queries where GT appears in the candidate source output."""
     scoped = [r for r in results if _step_ran(step.name, r) and not r.get("error")]
     if not scoped:
@@ -365,7 +367,7 @@ def _compute_source_recall(step: PipelineStep, results: list[dict]) -> float:
     return found / len(scoped)
 
 
-def _compute_candidate_recall(step: PipelineStep, results: list[dict]) -> float:
+def _compute_candidate_recall(step: PipelineNode, results: list[dict]) -> float:
     """Fraction of LLM-ranked queries where GT was in the candidate list."""
     scoped = [r for r in results if _step_ran(step.name, r) and not r.get("error")]
     if not scoped:
@@ -383,7 +385,7 @@ def _compute_candidate_recall(step: PipelineStep, results: list[dict]) -> float:
     return found / len(scoped)
 
 
-def _compute_cache_hit_rate(step: PipelineStep, results: list[dict]) -> float:
+def _compute_cache_hit_rate(step: PipelineNode, results: list[dict]) -> float:
     """Fraction of queries resolved by cache (non-null cache timing)."""
     if not results:
         return 0.0
@@ -407,3 +409,35 @@ def _step_ran(step_name: str, result: dict) -> bool:
         return True
     timings = pd.get("step_timings") or {}
     return timings.get(step_name) is not None
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility alias
+# ---------------------------------------------------------------------------
+
+PipelineStep = PipelineNode
+
+
+# ---------------------------------------------------------------------------
+# Unified pipeline loading
+# ---------------------------------------------------------------------------
+
+def load_pipeline_from_dict(data: dict) -> PipelineSchema:
+    """Load a PipelineSchema from a raw dict (e.g., optimizer_pipeline.json).
+
+    Accepts the standard ``{nodes: {...}, pipelines: {...}}`` format used
+    by both TermNorm and the optimizer pipeline declarations.
+    """
+    nodes = []
+    for name, node_data in data.get("nodes", {}).items():
+        nodes.append(PipelineNode(
+            name=name,
+            type=node_data.get("type", ""),
+            current_config=node_data.get("config", {}),
+            default_config=node_data.get("config", {}),
+        ))
+    return PipelineSchema(
+        name=data.get("name", ""),
+        version=data.get("version", ""),
+        steps=nodes,
+    )

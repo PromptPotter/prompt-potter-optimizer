@@ -208,7 +208,7 @@ The `pipelines` dict composes named sequences from the node pool. The same node 
 
 ## Reference
 
-- **TermNorm pipeline config:** `GET /pipeline` endpoint (see [`docs/connectors/termnorm.md`](connectors/termnorm.md))
+- **TermNorm pipeline config:** `GET /pipeline` endpoint (see TermNorm repo)
 - **Optimizer pipeline config:** [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json)
 - **M7 spec:** [`docs/specs/m7-optimizer-pipeline.md`](specs/m7-optimizer-pipeline.md)
 - **Observability:** [`docs/observability.md`](observability.md) — node tracing via `observed_step`

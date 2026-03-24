@@ -1,33 +1,39 @@
-"""SearchPoint — a point in the optimization search space.
+"""SearchPoint — a point in the target evaluation space.
 
-From mathematical optimization literature: a *search point* is a specific
-point in the search space being evaluated.  Standard across optimization
-subdisciplines.
+Flat, frozen, content-hashable. The lightweight twin of OptSearchPoint.
 
-Bundles the four dimensions that fully specify an evaluation:
-  - PromptState    — the prompt configuration (layers 1-3)
+Bundles the dimensions that fully specify a target evaluation:
   - model          — LLM model identifier
   - temperature    — LLM inference temperature
-  - pipeline_params — backend pipeline overrides
+  - pipeline_params — backend pipeline overrides (rendered prompt lives here)
+
+The rendered prompt is a value inside ``pipeline_params`` (e.g.,
+``{"llm_ranking": {"prompt": "..."}}``) — not a separate field. This
+means the prompt is just another tunable pipeline parameter.
 
 Related objects:
-  - ``EvalContext`` carries infrastructure (backend_client, store, obs,
-    model, temperature, pipeline_params) for running evaluations.
-  - ``_LoopState`` tracks ``current_sp`` and ``best_sp`` SearchPoints
-    as the feedback cycle evolves through optimization rounds.
-  - ``CycleConfig`` configures the feedback loop parameters.
+  - ``OptSearchPoint`` is the more capable twin — holds prompt decomposition
+    fields, optimizer state, and produces SearchPoints via ``to_search_point()``.
+  - ``EvalContext`` carries infrastructure (backend_client, store, obs)
+    for running evaluations.
+
+Migration note: ``prompt_state`` field is retained temporarily while
+consumers are migrated to the flat pattern. It will be removed once all
+services use ``OptSearchPoint.to_search_point()`` or construct SearchPoint
+with prompt already baked into ``pipeline_params``.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel
-
-from api.models.prompt_state import LAYER_FIELDS, PromptState
 import hashlib
+
+from pydantic import BaseModel, Field
 
 from api.models.hashing import HASH_TRUNCATE, eval_content_hash, sp_identity_hash
 
 
-# All PromptState field names (used by derive to route kwargs)
+# Kept for backward compat during migration — will be removed
+from api.models.prompt_state import LAYER_FIELDS, PromptState
+
 _PROMPT_STATE_FIELDS = set()
 for _fields in LAYER_FIELDS.values():
     _PROMPT_STATE_FIELDS.update(_fields)
@@ -35,7 +41,7 @@ _PROMPT_STATE_FIELDS |= {"id", "parent_id", "changes_description", "created_at"}
 
 
 class SearchPoint(BaseModel):
-    """A point in the optimization search space.
+    """A point in the target evaluation space.
 
     Frozen (immutable). Use ``derive()`` to create variants.
 
@@ -44,23 +50,31 @@ class SearchPoint(BaseModel):
 
     model_config = {"frozen": True}
 
-    prompt_state: PromptState
+    # --- Legacy field (migration) ---
+    prompt_state: PromptState = Field(default_factory=PromptState)
+
+    # --- Core fields ---
     model: str = ""
     temperature: float = 0.0
     pipeline_params: dict | None = None
 
     def render(self) -> str:
-        """Delegate to ``prompt_state.render()``."""
+        """Render the prompt string.
+
+        Prefers prompt from pipeline_params if set, falls back to
+        prompt_state.render() for backward compat during migration.
+        """
+        # New path: prompt in pipeline_params
+        pp = self.pipeline_params or {}
+        for node_config in pp.values():
+            if isinstance(node_config, dict) and "prompt" in node_config:
+                return node_config["prompt"]
+        # Legacy path
         return self.prompt_state.render()
 
     def sp_hash(self) -> str:
-        """SearchPoint identity hash — eval_data independent.
-
-        Two SearchPoints with the same prompt, model, temperature, and
-        pipeline_params produce the same hash regardless of which queries
-        are evaluated.
-        """
-        rendered = self.prompt_state.render()
+        """SearchPoint identity hash — eval_data independent."""
+        rendered = self.render()
         rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
         return sp_identity_hash(
             rp_hash,
@@ -70,13 +84,9 @@ class SearchPoint(BaseModel):
         )
 
     def content_hash(self, eval_data: list) -> str:
-        """Content-addressed hash for evaluation deduplication.
-
-        Delegates to ``eval_content_hash()`` with this point's parameters,
-        including ``pipeline_params`` when non-empty.
-        """
+        """Content-addressed hash for evaluation deduplication."""
         return eval_content_hash(
-            self.prompt_state.render(),
+            self.render(),
             eval_data,
             self.model,
             self.temperature,
@@ -86,9 +96,8 @@ class SearchPoint(BaseModel):
     def derive(self, **changes) -> SearchPoint:
         """Create a new SearchPoint with modifications.
 
-        PromptState fields are routed to ``prompt_state.derive()``.
-        SearchPoint-level fields (model, temperature, pipeline_params)
-        are updated directly.
+        PromptState fields are routed to prompt_state.derive() (legacy).
+        SearchPoint-level fields updated directly.
         """
         ps_changes = {}
         sp_changes = {}
