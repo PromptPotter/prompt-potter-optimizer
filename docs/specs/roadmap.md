@@ -3,7 +3,7 @@
 **Version:** 0.11.0
 **Date:** 2026-03-19
 **Status:** Active
-**Depends on:** [WBS v0.10.0](wbs.md)
+**Depends on:** [WBS v0.10.0](work-breakdown.md)
 
 ---
 
@@ -76,7 +76,7 @@ The optimizer itself is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_ref
 
 **Wave F** (§13 of spec): Per-query warning inventory tracks recurring pipeline warnings (e.g., `web_search:partial_scrape`) across rounds. `OptSearchPoint` unfrozen and consolidated as the single optimizer-state model. L2 gains diagnostic probe rounds. L2→L1 `l2_directive` bridge and Critique↔L2 context sharing close information flow gaps.
 
-**Wave G**: Replaced Pydantic node I/O wrappers with direct service calls + `observed_step`. Established the node standard: `async def node(ctx) -> None` composable pattern, shared `llm_call` primitive across both repos. `optimizer_pipeline.json` declares node types + configs in same format as TermNorm's `pipeline.json`. See [`docs/building-blocks.md`](../building-blocks.md).
+**Wave G**: Replaced Pydantic node I/O wrappers with direct service calls + `observed_step`. Established the node standard: `async def node(ctx) -> None` composable pattern, shared `llm_call` primitive across both repos. `optimizer_pipeline.json` declares node types + configs in same format as TermNorm's `pipeline.json`. See [`docs/node-standard.md`](../node-standard.md).
 
 **Entry criteria:** M6 exit gate passed (PipelineSchema + composite scoring active).
 

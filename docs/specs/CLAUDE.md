@@ -6,7 +6,7 @@ Each milestone has an executable spec in `docs/specs/`. One Claude Code session 
 
 **Steps:**
 1. Read the milestone spec (`docs/specs/m{N}-*.md`) -- scope decisions, deliverables, API sketches
-2. Read `docs/specs/wbs.md` to find your work package ID and dependencies
+2. Read `docs/specs/work-breakdown.md` to find your work package ID and dependencies
 3. Read the service files listed in the deliverables table
 4. Check the "Reading list per work package" table in the milestone spec for WP-specific files
 

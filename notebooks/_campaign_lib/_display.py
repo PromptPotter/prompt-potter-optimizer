@@ -21,7 +21,7 @@ __all__ = [
     "_dbox_top", "_dbox_bottom", "_dbox_line", "_dbox_sep",
     "_dotted_line", "_fmt_delta", "_scoreboard",
     # Display functions
-    "display_progress", "display_axis_profiles",
+    "show_progress", "show_axis_profiles",
     # Scan analytics
     "show_scan_leaderboard", "show_scan_query_difficulty",
     # Campaign results display
@@ -300,7 +300,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     return line
 
 
-def display_progress(campaign_rounds: list, window: int = 8) -> None:
+def show_progress(campaign_rounds: list, window: int = 8) -> None:
     """Print training-style progress summary after each round."""
     if not campaign_rounds:
         print("No rounds to display.")
@@ -362,7 +362,7 @@ def display_progress(campaign_rounds: list, window: int = 8) -> None:
 
 
 
-def display_axis_profiles(profiles: list[dict]) -> None:
+def show_axis_profiles(profiles: list[dict]) -> None:
     """Display axis profiles as a formatted table."""
     if not profiles:
         print("No axis profiles to display.")

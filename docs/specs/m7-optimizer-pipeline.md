@@ -3,7 +3,7 @@
 **Version:** 2.0.0
 **Date:** 2026-03-24
 **Status:** Complete. All optimizer nodes operational, tracing active, pipeline declaration stable.
-**Depends on:** [M6 PipelineSchema](m6-pipeline-composability.md), [ADD v0.10.0](add.md)
+**Depends on:** [M6 PipelineSchema](m6-pipeline-composability.md), [ADD v0.10.0](architecture-design.md)
 
 ---
 

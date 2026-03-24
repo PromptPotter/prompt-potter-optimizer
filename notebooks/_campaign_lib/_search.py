@@ -29,7 +29,7 @@ from api.services.search import (
 )
 
 from ._display import (
-    _fmt_query_result, _print_interrupt_banner, display_axis_profiles, display_progress,
+    _fmt_query_result, _print_interrupt_banner, show_axis_profiles, show_progress,
 )
 from ._setup import setup_llm
 
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     # Smart search
     "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
-    "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
+    "show_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
     "advisory_to_scan_variants", "resolve_scan_variants",
     "select_scan_winner_notebook", "build_historical_index", "load_task_description",
     "show_scan_coverage", "show_data_inventory",
@@ -46,7 +46,7 @@ __all__ = [
     # Notebook-facing wrappers
     "prepare_scan_baseline", "run_scan_advisor", "seed_campaign_from_scan",
     "build_pipeline_overview", "build_tunable_params", "build_llm_context",
-    "display_variant_library",
+    "show_variant_library",
 ]
 
 
@@ -96,7 +96,7 @@ def preview_advisor_prompt(
 # ---------------------------------------------------------------------------
 
 
-def display_variant_library(
+def show_variant_library(
     svc: dict | None = None,
     *,
     axes: list[str] | None = None,
@@ -992,7 +992,7 @@ async def sensitivity_scan(
         return None, []
 
     print(f"\nSensitivity scan complete: {len(df)} variants evaluated")
-    display_axis_profiles(profiles)
+    show_axis_profiles(profiles)
 
     return df, profiles
 
@@ -1333,6 +1333,6 @@ def seed_campaign_from_scan(
         "total": bl.get("total", 0),
         "results": bl.get("results", []),
     })
-    display_progress(campaign_rounds)
+    show_progress(campaign_rounds)
 
     return best_sp

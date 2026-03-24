@@ -3,7 +3,7 @@
 **Version:** 0.10.0
 **Date:** 2026-03-05
 **Status:** Active
-**Depends on:** [Project Charter v0.7.0](project-charter.md), [PRD v0.9.0](prd.md)
+**Depends on:** [Project Charter v0.7.0](project-charter.md), [PRD v0.9.0](product-requirements.md)
 
 ---
 

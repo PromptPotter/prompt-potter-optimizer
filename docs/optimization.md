@@ -131,7 +131,7 @@ The feedback cycle is itself a 4-step pipeline, designed to be modeled using the
 
 **Critique and thinking styles are tools of `l1_evaluate`, not separate steps.** The critique agent runs *within* the evaluation step -- its output (`critique_text`) feeds the *next* round's `l1_generate`. Similarly, `sample_thinking_styles()` runs at the end of evaluation to prepare mutation guidance for the next round. Neither has an independent parameter surface or routing decision that would warrant a separate pipeline step.
 
-This pipeline model enables step-level tracing, full reproducibility, and self-optimization. See the [M7 spec](specs/m7-optimizer-pipeline.md) for the tracing design, and the [node standard](building-blocks.md) for the type hierarchy.
+This pipeline model enables step-level tracing, full reproducibility, and self-optimization. See the [M7 spec](specs/m7-optimizer-pipeline.md) for the tracing design, and the [node standard](node-standard.md) for the type hierarchy.
 
 ### Optimizer Nodes (M7)
 

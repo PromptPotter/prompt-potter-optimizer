@@ -211,7 +211,7 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
     return f"[SERVER] HTTP {code}: {exc} — Backend may be experiencing issues."
 
 
-async def backend_reranker_eval(
+async def backend_reranker_evaluate(
     query_data: dict,
     backend_client: BackendClient,
     rendered_prompt: str,
@@ -253,16 +253,16 @@ async def backend_reranker_eval(
         }
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)
-        logger.warning("backend_reranker_eval for %s: %s", query[:60], error_msg)
+        logger.warning("backend_reranker_evaluate for %s: %s", query[:60], error_msg)
         return _error_result(query, ground_truth, error_msg)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         error_msg = f"[CONNECTION] {exc} — Backend may be down or unreachable."
-        logger.warning("backend_reranker_eval CONNECTION for %s: %s", query[:60], error_msg)
+        logger.warning("backend_reranker_evaluate CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(query, ground_truth, error_msg)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception as exc:
-        logger.warning("backend_reranker_eval failed for %s: %s", query[:60], exc)
+        logger.warning("backend_reranker_evaluate failed for %s: %s", query[:60], exc)
         return _error_result(query, ground_truth, str(exc))
 
 
@@ -293,7 +293,7 @@ async def evaluate_prompt_batch(
             backend call.
 
     Returns:
-        List of result dicts from backend_reranker_eval.
+        List of result dicts from backend_reranker_evaluate.
 
     Raises:
         EscalationError: If an escalation check triggers mid-batch.
@@ -335,7 +335,7 @@ async def evaluate_prompt_batch(
                 result = {**cached, "cached": True}
                 n_reused += 1
             else:
-                result = await backend_reranker_eval(
+                result = await backend_reranker_evaluate(
                     qd, backend_client, rendered,
                     pipeline_params=search_point.pipeline_params,
                     pipeline_schema=pipeline_schema,

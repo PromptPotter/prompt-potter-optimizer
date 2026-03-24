@@ -3,7 +3,7 @@
 **Version:** 0.10.0
 **Date:** 2026-03-05
 **Status:** Waves 0-3, 5, 7 complete; Wave 6 mostly complete; Wave 4 deferred to M8
-**Depends on:** [Roadmap M6](roadmap.md), [ADD v0.10.0](add.md), [PRD P1.12, P1.14](prd.md)
+**Depends on:** [Roadmap M6](roadmap.md), [ADD v0.10.0](architecture-design.md), [PRD P1.12, P1.14](product-requirements.md)
 
 ---
 

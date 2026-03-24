@@ -38,15 +38,15 @@ __all__ = [  # noqa: F405
     "configure_pipeline",
     # Smart search
     "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
-    "display_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
+    "show_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
     "advisory_to_scan_variants", "resolve_scan_variants",
     "select_scan_winner_notebook", "build_historical_index", "load_task_description",
     "show_scan_coverage", "show_data_inventory",
     "audit_historical_data", "run_scan_advisor", "seed_campaign_from_scan",
-    "prepare_scan_baseline", "preview_advisor_prompt", "display_variant_library",
+    "prepare_scan_baseline", "preview_advisor_prompt", "show_variant_library",
     # Campaign
     "show_feedback_preflight", "run_feedback_cycle_notebook", "save_campaign_winner",
-    "display_progress",
+    "show_progress",
     "list_campaigns", "diff_campaign_config", "show_experiment_dashboard",
     "load_experiment_config", "apply_experiment_overrides", "load_and_apply_experiment",
     # Pipeline snapshot

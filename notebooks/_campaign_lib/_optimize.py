@@ -15,7 +15,7 @@ from ._display import (
     _box_bottom, _box_line, _box_top,
     _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
     _fmt_delta, _fmt_query_result,
-    display_progress,
+    show_progress,
 )
 from ._stats import (
     fmt_ci, wilson_ci,
@@ -32,7 +32,7 @@ from api.models.phase_event import PhaseEvent
 __all__ = [
     "show_feedback_preflight",
     "run_feedback_cycle_notebook",
-    "display_progress",
+    "show_progress",
 ]
 
 
@@ -504,7 +504,7 @@ async def run_feedback_cycle_notebook(
         print()
         print(_node_top(f"ROUND {rn} SUMMARY"))
 
-        # Inline progress table (same logic as display_progress)
+        # Inline progress table (same logic as show_progress)
         _accs = []
         has_comp = any(
             rd.get("composite") is not None and rd.get("composite") != rd["accuracy"]

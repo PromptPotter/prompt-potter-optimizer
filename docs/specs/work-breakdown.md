@@ -3,7 +3,7 @@
 **Version:** 0.11.0
 **Date:** 2026-03-19
 **Status:** Active
-**Depends on:** [PRD v0.9.0](prd.md), [ADD v0.10.0](add.md)
+**Depends on:** [PRD v0.9.0](product-requirements.md), [ADD v0.10.0](architecture-design.md)
 
 ---
 

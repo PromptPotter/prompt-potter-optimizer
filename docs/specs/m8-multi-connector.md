@@ -3,7 +3,7 @@
 **Version:** 0.9.0
 **Date:** 2026-02-27
 **Status:** Planned
-**Depends on:** [Roadmap M8](roadmap.md), [ADD v0.10.0](add.md), [M6 Pipeline Composability](m6-pipeline-composability.md), [PRD P1.13](prd.md)
+**Depends on:** [Roadmap M8](roadmap.md), [ADD v0.10.0](architecture-design.md), [M6 Pipeline Composability](m6-pipeline-composability.md), [PRD P1.13](product-requirements.md)
 
 > **Staleness note:** Written against ADD v0.9.0 (2026-02-27), before the ADD/WBS v0.10.0 rewrite. Verify `BackendClient` signatures against current code before implementing.
 
@@ -24,7 +24,7 @@ Methods derived from actual usage across `prompt_eval.py` and `feedback_cycle.py
 | Method | Signature | Used by |
 |--------|-----------|---------|
 | `init_session` | `async (terms: list[str]) -> dict[str, Any]` | `feedback_cycle.py`, `prompt_eval.py` |
-| `run_match` | `async (query: str, pipeline_params: dict \| None, ranking_prompt: str \| None) -> dict[str, Any]` | `prompt_eval.py` (via `backend_reranker_eval`) |
+| `run_match` | `async (query: str, pipeline_params: dict \| None, ranking_prompt: str \| None) -> dict[str, Any]` | `prompt_eval.py` (via `backend_reranker_evaluate`) |
 | `fetch_experiments` | `async () -> dict[str, Any]` | `backend_client.py` (sync operations) |
 | `fetch_experiment` | `async (experiment_id: str, include_traces: bool) -> dict[str, Any]` | `backend_client.py` (sync operations) |
 | `extract_session_terms` | `@staticmethod (experiment_data: dict) -> list[str]` | `feedback_cycle.py`, `_campaign_lib.py` |
@@ -201,7 +201,7 @@ The type annotation change is mechanical and non-breaking:
 # Before (M6)
 from api.services.backend_client import BackendClient
 
-async def backend_reranker_eval(
+async def backend_reranker_evaluate(
     query_data: dict,
     backend_client: BackendClient,   # concrete type
     ...
@@ -210,7 +210,7 @@ async def backend_reranker_eval(
 # After (M8)
 from api.services.connector_protocol import ConnectorProtocol
 
-async def backend_reranker_eval(
+async def backend_reranker_evaluate(
     query_data: dict,
     backend_client: ConnectorProtocol,  # structural type
     ...
@@ -238,7 +238,7 @@ async def backend_reranker_eval(
 |----|-----------|
 | 7.1 | `api/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
 | 7.2 | `api/services/llm_client.py` (singleton pattern reference: `get_llm_client()`) |
-| 7.3 | `api/services/prompt_eval.py` (backend_reranker_eval, evaluate_prompt_cached), `api/services/campaign/feedback_cycle.py` (BackendClient usage) |
+| 7.3 | `api/services/prompt_eval.py` (backend_reranker_evaluate, evaluate_prompt_cached), `api/services/campaign/feedback_cycle.py` (BackendClient usage) |
 | 7.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_campaign_registry.py` (E2E test pattern) |
 
 ---
@@ -270,6 +270,6 @@ async def backend_reranker_eval(
 | `test_mock_connector_set_responses` | Unit | `set_responses()` maps queries to results |
 | `test_registry_register_get` | Unit | Register and retrieve connectors by ID |
 | `test_registry_missing_connector` | Unit | `get()` raises `KeyError` for unknown ID |
-| `test_eval_with_mock_connector` | Integration | `backend_reranker_eval()` works with `MockConnector` |
+| `test_eval_with_mock_connector` | Integration | `backend_reranker_evaluate()` works with `MockConnector` |
 | `test_feedback_cycle_with_mock` | Integration | `run_feedback_cycle()` completes with `MockConnector` |
 | `test_workflow_with_mock` | Integration | `optimization_campaign.yaml` runs with `MockConnector` via registry |

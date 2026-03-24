@@ -343,4 +343,4 @@ After every Reviewer run, check its output:
 - **Surface conflicts.** If Reviewer disagrees with Drafter, show both sides.
 - **Run independent agents in parallel** (e.g., Gap Analyzer + Reviewer in "full" mode).
 - **Batch all questions.** Never ask the user one question at a time. Collect everything and ask once.
-- **Doc type mapping:** charter → project-charter.md, prd → prd.md, add → add.md, wbs → wbs.md, roadmap → roadmap.md
+- **Doc type mapping:** charter → project-charter.md, prd → product-requirements.md, add → architecture-design.md, wbs → work-breakdown.md, roadmap → roadmap.md

@@ -429,7 +429,7 @@ async def test_batch_fast_abort_on_client_error(monkeypatch):
             "pipeline_data": None,
         }
 
-    monkeypatch.setattr(_pe, "backend_reranker_eval", _counting_eval)
+    monkeypatch.setattr(_pe, "backend_reranker_evaluate", _counting_eval)
 
     ps = PromptState(instruction="test")
     sp = SearchPoint(prompt_state=ps)
@@ -469,7 +469,7 @@ async def test_batch_server_errors_use_consecutive_threshold(monkeypatch):
             "pipeline_data": None,
         }
 
-    monkeypatch.setattr(_pe, "backend_reranker_eval", _server_error_eval)
+    monkeypatch.setattr(_pe, "backend_reranker_evaluate", _server_error_eval)
 
     ps = PromptState(instruction="test")
     sp = SearchPoint(prompt_state=ps)

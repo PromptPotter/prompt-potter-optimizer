@@ -23,7 +23,7 @@ from api.services.search import (
     load_eval_dataset as _load_eval_dataset,
 )
 
-from ._display import _fmt_query_result, _print_interrupt_banner, display_progress
+from ._display import _fmt_query_result, _print_interrupt_banner, show_progress
 
 __all__ = [
     # Baseline & eval
@@ -218,7 +218,7 @@ async def run_baseline_eval(
     finally:
         pbar.close()
 
-    display_progress(campaign_rounds)
+    show_progress(campaign_rounds)
 
     failures = [r for r in baseline_results if not r["hit"] and not r.get("error")]
     for r in failures[:5]:
