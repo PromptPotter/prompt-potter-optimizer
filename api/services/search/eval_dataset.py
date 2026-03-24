@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from api.services.project_store import ProjectStore
-from api.services.query_utils import parse_bom_material
+from api.services.backend_client import parse_bom_material
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema

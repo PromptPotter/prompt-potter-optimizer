@@ -9,7 +9,7 @@ description = "Backend-first prompt optimization service"
 readme = "README.md"
 license = "MIT"
 authors = [{name = "PromptPotter Contributors"}]
-keywords = ["prompt-optimization", "llm", "fastapi", "evaluation", "grid-search"]
+keywords = ["prompt-optimization", "llm", "fastapi", "evaluation"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: FastAPI",

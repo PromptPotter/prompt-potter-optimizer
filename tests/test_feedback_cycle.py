@@ -143,7 +143,7 @@ async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
 async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_config):
     apply_llm_mock(monkeypatch)
 
-    # Track what results generate_candidates receives each round
+    # Track what results l1_generate receives each round
     grow_results_received = []
 
     async def mock_generate(current_ps, accuracy, results, n, creativity,

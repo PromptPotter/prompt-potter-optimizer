@@ -15,7 +15,7 @@
 | Helper | Purpose |
 |--------|---------|
 | `apply_llm_mock(monkeypatch)` | Mocks `get_llm_client` to return `MockLLMClient` |
-| `apply_grow_mock(monkeypatch)` | Mocks `generate_candidates` with deterministic variants |
+| `apply_grow_mock(monkeypatch)` | Mocks `l1_generate` with deterministic variants |
 | `apply_eval_mock(monkeypatch, round_hits)` | Mocks `evaluate_prompt_cached`; returns `call_count` list for tracking |
 | `run_simple_cycle(monkeypatch, eval_data, config, *, round_hits, **kwargs)` | Apply standard mocks + run feedback cycle; returns `CycleResult` |
 | `MockLangfuseLogger` | Records all Langfuse calls (traces, spans, scores, generations, dataset API) |

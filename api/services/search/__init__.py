@@ -16,7 +16,7 @@ _SUBMODULE_MAP: dict[str, str] = {
     "filter_variant_library": "api.services.search.smart_search",
     "load_filtered_variant_library": "api.services.search.smart_search",
     "resume_or_build_diagnostic": "api.services.search.smart_search",
-    "select_scan_winner": "api.services.search.scan_winner",
+    "select_scan_winner": "api.services.search.smart_search",
     "sensitivity_scan": "api.services.search.smart_search",
     # coverage
     "assess_scan_coverage": "api.services.search.coverage",
@@ -35,7 +35,7 @@ _SUBMODULE_MAP: dict[str, str] = {
     "build_tunable_params": "api.services.search.scan_advisor",
     "preview_advisor_prompt": "api.services.search.scan_advisor",
     # scan_seeding
-    "prepare_scan_context": "api.services.search.scan_seeding",
+    "prepare_scan_context": "api.services.search.smart_search",
 }
 
 __all__ = list(_SUBMODULE_MAP)

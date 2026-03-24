@@ -15,7 +15,7 @@ import httpx
 
 from api.models.backend import BackendConnection
 from api.services.backend_client import BackendClient
-from api.services.constants import DATASET_NAME
+from api.config.settings import DATASET_NAME
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:

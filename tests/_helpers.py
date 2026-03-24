@@ -195,13 +195,6 @@ class MockLangfuseLogger:
             "top_level": True, "trace_params": trace_params,
         }
         self.top_level_observations.append(record)
-        # Also record in spans for backward compat with existing count assertions
-        self.spans.append({
-            "trace_id": trace_id, "name": name,
-            "input": input, "output": output, "metadata": metadata,
-            "as_type": as_type, "parent_observation_id": None,
-            "top_level": True,
-        })
         return f"tl_{name}"
 
     def create_generation(self, trace_id, name, model, input, output,

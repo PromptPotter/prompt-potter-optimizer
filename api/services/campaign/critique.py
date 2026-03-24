@@ -21,15 +21,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_EMPTY_CRITIQUE: dict[str, str | list] = {
-    "positive_critique": "",
-    "negative_critique": "",
-    "priority_fix": "",
-    "suggested_axes": [],
-    "summary": "",
-}
-
-
 class CritiqueAgent:
     """Analyzes eval results via pipeline-aware critique stats.
 
@@ -42,11 +33,9 @@ class CritiqueAgent:
         self,
         llm_client: "LLMClientBase",
         model: str | None = None,
-        positive_threshold: float = 0.7,
     ):
         self.llm_client = llm_client
         self.model = model
-        self.positive_threshold = positive_threshold
 
     async def run(self, ctx: "CritiqueContext") -> dict:
         """Build critique from pipeline stats + LLM analysis.
@@ -84,7 +73,13 @@ def _parse_critique(content: str) -> dict:
             "summary": result.get("summary", content),
         }
     except (json.JSONDecodeError, TypeError):
-        return {**_EMPTY_CRITIQUE, "summary": content}
+        return {
+            "positive_critique": "",
+            "negative_critique": "",
+            "priority_fix": "",
+            "suggested_axes": [],
+            "summary": content,
+        }
 
 
 def format_critique_for_prompt(critique: dict) -> str:

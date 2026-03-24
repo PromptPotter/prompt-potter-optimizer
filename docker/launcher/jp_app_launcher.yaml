@@ -4,7 +4,7 @@
 
 # Notebooks
 - title: Optimization Campaign
-  description: Baseline evaluation, sensitivity scan, grid search, feedback cycle optimization
+  description: Baseline evaluation, sensitivity scan, feedback cycle optimization
   type: notebook
   source: notebooks/optimization_campaign.ipynb
   catalog: PromptPotter

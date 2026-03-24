@@ -14,18 +14,108 @@ import statistics
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+from typing import Any
+
 from api.models.hashing import HASH_TRUNCATE
-from api.models.pipeline_schema import PipelineSchema, is_result_step_compatible
+from api.models.pipeline_schema import is_result_step_compatible
 from api.models.prompt_state import PromptState
 from api.services.project_store import ProjectStore
 
+from api.config.settings import DEFAULT_DIAGNOSTIC_QUERIES
+
 if TYPE_CHECKING:
     from api.models.search_point import SearchPoint
-from api.services.search.plan_persistence import deserialize_smart_search_plan
-from api.services.search.smart_search import DEFAULT_DIAGNOSTIC_QUERIES
-from api.services.search.utils import preview as _preview
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Preview utility (was search/utils.py)
+# ---------------------------------------------------------------------------
+
+
+def preview(value: Any, max_len: int = 40) -> str:
+    """Truncated preview of a variant value."""
+    if isinstance(value, dict) and "properties" in value:
+        n = len(value["properties"])
+        return f"schema({n} fields)"
+    s = str(value)
+    if not s:
+        return "(empty)"
+    return s[:max_len] + ("..." if len(s) > max_len else "")
+
+
+# ---------------------------------------------------------------------------
+# Plan persistence (was search/plan_persistence.py)
+# ---------------------------------------------------------------------------
+
+SSPLAN_PREFIX = "ssplan_"
+
+
+def smart_search_plan_identity(
+    baseline_instruction: str,
+    variant_library: dict,
+    smart_search_config: dict,
+    improvement_areas: str,
+    seed: int = 42,
+) -> str:
+    """Compute a stable identity hash for a smart search plan."""
+    payload = json.dumps(
+        {
+            "baseline_instruction": baseline_instruction,
+            "variant_library": variant_library,
+            "n_diagnostic": smart_search_config.get("n_diagnostic", 6),
+            "max_rounds": smart_search_config.get("max_rounds", 3),
+            "stop_threshold": smart_search_config.get("stop_threshold", 0.0),
+            "improvement_areas": improvement_areas,
+            "seed": seed,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    digest = hashlib.sha256(payload.encode()).hexdigest()[:12]
+    return f"{SSPLAN_PREFIX}{digest}"
+
+
+def serialize_smart_search_plan(
+    plan_id: str,
+    config: dict,
+    baseline_ps: PromptState,
+    search_baseline_ps: PromptState,
+    layer1_fields: dict,
+    diagnostic: list,
+    diag_summary: dict,
+    variant_library_hash: str,
+) -> dict:
+    """Serialize a smart search plan to a JSON-safe dict."""
+    return {
+        "plan_id": plan_id,
+        "status": "diagnostic_built",
+        "config": config,
+        "baseline_ps": baseline_ps.model_dump(),
+        "search_baseline_ps": search_baseline_ps.model_dump(),
+        "layer1_fields": layer1_fields,
+        "diagnostic": diagnostic,
+        "diag_summary": diag_summary,
+        "variant_library_hash": variant_library_hash,
+    }
+
+
+def deserialize_smart_search_plan(plan_data: dict) -> dict:
+    """Reconstruct smart search plan objects from saved data."""
+    return {
+        "plan_id": plan_data["plan_id"],
+        "status": plan_data["status"],
+        "config": plan_data.get("config", {}),
+        "baseline_ps": PromptState(**plan_data["baseline_ps"]),
+        "search_baseline_ps": PromptState(**plan_data["search_baseline_ps"]),
+        "layer1_fields": plan_data.get("layer1_fields", {}),
+        "diagnostic": plan_data.get("diagnostic", []),
+        "diag_summary": plan_data.get("diag_summary", {}),
+        "variant_library_hash": plan_data.get("variant_library_hash", ""),
+        "scan_results": plan_data.get("scan_results"),
+        "search_results": plan_data.get("search_results"),
+    }
 
 
 def analyze_candidate_coverage(replay_results: list) -> dict:
@@ -227,7 +317,6 @@ def assess_scan_coverage(
     pipeline_params: dict | None = None,
     min_queries: int = DEFAULT_DIAGNOSTIC_QUERIES,
     axis_requirements: dict[str, int] | None = None,
-    pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Check whether the historical index already covers the OAT scan needs.
 
@@ -290,7 +379,7 @@ def assess_scan_coverage(
             axis_saved += n_cached
             axis_needed += max(0, n_diagnostic - n_cached)
             variants_detail.append({
-                "value_preview": _preview(value),
+                "value_preview": preview(value),
                 "n_cached": n_cached,
                 "usable": is_usable,
             })

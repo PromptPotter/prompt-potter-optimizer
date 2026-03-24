@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
-from api.services.constants import DISPLAY_TRUNCATE
+from api.config.settings import DISPLAY_TRUNCATE
 from api.core.llm_call import get_node_config, llm_call
 from api.models.prompt_state import PromptState
 from api.services.campaign.critique_stats import summarize_warning_inventory

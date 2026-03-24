@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
-from api.services.constants import DISPLAY_TRUNCATE
+from api.config.settings import DISPLAY_TRUNCATE
 from api.models.prompt_state import PromptState
 from api.core.llm_call import get_node_config, llm_call
 from api.services.campaign.critique_stats import summarize_warning_inventory
@@ -265,18 +265,16 @@ async def l1_generate(
     generated = response.parsed or json.loads(response.content)
 
     if isinstance(generated, dict):
-        variants_list = generated.get("variants", generated.get("prompts", []))
+        variants_list = generated.get("variants", [])
     else:
         variants_list = generated
 
     candidates: list[dict] = []
     for v in variants_list[:n_variants]:
-        instr = v.get("instruction", v.get("prompt_text", ""))
+        instr = v.get("instruction", "")
         ps = current_ps.derive(
             **({"instruction": instr} if instr else {}),
-            changes_description=v.get(
-                "changes_description", v.get("variant_name", ""),
-            ),
+            changes_description=v.get("changes_description", ""),
         )
         c_dict = ps.model_dump()
         pp_override = v.get("pipeline_params_override")

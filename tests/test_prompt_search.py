@@ -2,11 +2,10 @@
 import pytest
 
 from api.config.settings import load_variant_library
-from api.services.prompt_eval import _error_category
+from api.services.prompt_eval import _error_category, _dominant_error_category
 from api.services.search.smart_search import (
     sensitivity_scan,
     _profiles_from_rows,
-    _dominant_error_category,
 )
 from api.services.pipeline_discovery import parse_pipeline_response
 

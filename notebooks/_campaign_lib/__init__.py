@@ -33,7 +33,7 @@ __all__ = [  # noqa: F405
     "analyze_candidate_coverage", "load_eval_dataset",
     "run_coverage_diagnostic",
     # Candidates & suggestions
-    "generate_candidates",
+    "l1_generate",
     # Pipeline config
     "configure_pipeline",
     # Smart search

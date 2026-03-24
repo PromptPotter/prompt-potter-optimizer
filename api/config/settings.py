@@ -9,6 +9,13 @@ from pydantic_settings import BaseSettings
 
 APP_VERSION: str = "0.6.1"
 
+# -- Shared constants ---------------------------------------------------------
+
+DATASET_NAME: str = "termnorm_ground_truth"
+NO_RESULT: str = "NO_RESULT"
+DISPLAY_TRUNCATE: int = 60
+DEFAULT_DIAGNOSTIC_QUERIES: int = 6
+
 
 class Settings(BaseSettings):
     """Application configuration settings."""

@@ -13,8 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from api.services.query_utils import parse_bom_material
-
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
     from api.services.project_store import ProjectStore
@@ -22,6 +20,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MATCH_TIMEOUT = 120.0
+
+
+def parse_bom_material(query: str) -> tuple[str, str]:
+    """Split a query string into (bom_material, process).
+
+    TermNorm queries use the format ``bom_material / process``.
+    If no slash is present, process is an empty string.
+    """
+    if "/" in query:
+        last_slash = query.rfind("/")
+        bom_material = query[:last_slash].strip()
+        process = query[last_slash + 1:].strip()
+    else:
+        bom_material = query.strip()
+        process = ""
+    return bom_material, process
 
 
 def extract_pipeline_config(exp_data: dict) -> dict:

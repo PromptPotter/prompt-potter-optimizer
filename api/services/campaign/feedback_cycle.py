@@ -28,7 +28,7 @@ from api.models.search_point import SearchPoint
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
-from api.services.constants import DATASET_NAME
+from api.config.settings import DATASET_NAME
 from api.services.campaign.models import (
     CycleConfig, CycleResult, CycleRoundResult, _LoopState,
 )
@@ -42,7 +42,7 @@ from api.services.campaign.critique_stats import (
 # so that test monkeypatching on api.services.l1_optimizer takes effect.
 from api.services.obs.step_tracer import observed_step
 from api.services.prompt_eval import EvalContext, compute_composite_score
-from api.services.query_utils import subsample_queries
+from api.services.prompt_eval import subsample_queries
 
 # Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client
@@ -448,8 +448,7 @@ async def _evaluate_candidates(
         critique_text = ""
         if config.enable_critique and eval_out.get("winner_results"):
             crit_llm = _llm_client.get_llm_client(config.provider)
-            agent = CritiqueAgent(crit_llm, model=config.model,
-                                  positive_threshold=config.critique_positive_threshold)
+            agent = CritiqueAgent(crit_llm, model=config.model)
             cctx = CritiqueContext(
                 results=eval_out["winner_results"],
                 accuracy=eval_out["winner_accuracy"],

@@ -19,7 +19,7 @@ import httpx
 from api.evaluators.exact_match import EvalResult, ExactMatchEvaluator
 from api.models.hashing import HASH_TRUNCATE
 from api.models.prompt_state import PromptState
-from api.services.constants import NO_RESULT
+from api.config.settings import NO_RESULT
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -51,6 +51,32 @@ def _error_category(error: str | None) -> str | None:
         if bracket_end > 0:
             return error[1:bracket_end]
     return None
+
+
+def _dominant_error_category(results: list) -> str | None:
+    """Return the most common error category across errored results."""
+    from collections import Counter
+    cats = [_error_category(r.get("error")) for r in results if r.get("error")]
+    cats = [c for c in cats if c]
+    if not cats:
+        return None
+    return Counter(cats).most_common(1)[0][0]
+
+
+def subsample_queries(
+    eval_data: list[dict],
+    sample_size: int,
+    seed: int = 42,
+) -> list[dict]:
+    """Deterministic subsample of eval queries.
+
+    Returns the full list unchanged if ``sample_size <= 0`` or the dataset
+    is already small enough.
+    """
+    if sample_size > 0 and len(eval_data) > sample_size:
+        import random
+        return random.Random(seed).sample(eval_data, sample_size)
+    return eval_data
 
 
 @dataclass
@@ -546,18 +572,20 @@ def _try_cached_lookup(
 
     Returns (results, scores, True) on cache hit, or None on miss.
     """
-    # Direct content-hash lookup
-    existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
-    if existing and not existing.get("partial"):
-        results = existing["dataset_run_items"]
-        # Skip all-error cached runs — let per-query cache retry
+    def _use_cached(run: dict) -> tuple[list, dict, bool] | None:
+        results = run["dataset_run_items"]
         if results and all(r.get("error") for r in results):
-            return None
+            return None  # all-error — let per-query cache retry
         scores = compute_composite_score(results, pipeline_schema)
         if on_result is not None:
             for i, r in enumerate(results):
                 on_result({**r, "cached": True}, i, len(results))
         return results, scores, True
+
+    # Direct content-hash lookup
+    existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
+    if existing and not existing.get("partial"):
+        return _use_cached(existing)
 
     # Alias-group fallback (semantically equivalent prompt forms)
     rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
@@ -566,14 +594,7 @@ def _try_cached_lookup(
         search_point.pipeline_params, len(eval_data),
     )
     if alias_match:
-        results = alias_match["dataset_run_items"]
-        if results and all(r.get("error") for r in results):
-            return None
-        scores = compute_composite_score(results, pipeline_schema)
-        if on_result is not None:
-            for i, r in enumerate(results):
-                on_result({**r, "cached": True}, i, len(results))
-        return results, scores, True
+        return _use_cached(alias_match)
 
     return None
 
