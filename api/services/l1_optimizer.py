@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import DISPLAY_TRUNCATE
 from api.models.opt_search_point import OptSearchPoint
-from api.models.prompt_state import PromptState
 from api.core.llm_call import get_node_config, llm_call
 from api.services.campaign.critique_stats import summarize_warning_inventory
 from api.services.llm_client import LLMClientBase
@@ -239,7 +238,7 @@ async def l1_generate(
         n_variants=n_variants,
         accuracy_pct=f"{current_accuracy:.1%}",
         n_queries=len(current_results),
-        rendered_prompt=osp.render_prompt(),
+        rendered_prompt=osp.render(),
         failure_examples=failure_examples,
         scan_analytics=_format_scan_analytics(scan_context),
         focus_note=_format_focus_note(osp.escalation_journal or None),
@@ -266,16 +265,17 @@ async def l1_generate(
     else:
         variants_list = generated
 
-    # Build candidates — still uses PromptState.derive() during migration
-    current_ps = PromptState(**osp.prompt_field_dict())
     candidates: list[dict] = []
     for v in variants_list[:n_variants]:
         instr = v.get("instruction", "")
-        ps = current_ps.derive(
+        child = osp.derive_candidate(
             **({"instruction": instr} if instr else {}),
             changes_description=v.get("changes_description", ""),
         )
-        c_dict = ps.model_dump()
+        c_dict = child.prompt_field_dict()
+        c_dict["id"] = child.id
+        c_dict["parent_id"] = child.parent_id
+        c_dict["changes_description"] = child.changes_description
         pp_override = v.get("pipeline_params_override")
         if pp_override and isinstance(pp_override, dict):
             c_dict["__pipeline_params_override__"] = pp_override
@@ -290,7 +290,7 @@ async def l1_generate(
 
 
 def _select_round_winner(
-    candidates: list[PromptState],
+    candidates: list[OptSearchPoint],
     all_candidate_results: dict[str, list[dict]],
     current_best: dict[str, Any],
     improvement_threshold: float,
@@ -377,7 +377,6 @@ async def l1_evaluate(
         Dict with keys: winner, winner_prompt_state, winner_accuracy,
         improved, next_action, candidate_scores, winner_results.
     """
-    from api.models.search_point import SearchPoint
     from api.services.prompt_eval import evaluate_prompt_cached
 
     _sp_model = ctx.model
@@ -396,29 +395,28 @@ async def l1_evaluate(
             candidate_pp.append(None)
             clean_candidates.append(c.model_dump() if hasattr(c, "model_dump") else c)
 
-    ps_candidates = [PromptState(**c) for c in clean_candidates]
+    osp_candidates = [OptSearchPoint.from_prompt_fields(c) for c in clean_candidates]
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []
 
     escalation_signal = None
     ctx.escalation_checks = escalation_checks
-    ctx.n_total_candidates = len(ps_candidates)
+    ctx.n_total_candidates = len(osp_candidates)
 
-    for idx, c in enumerate(ps_candidates):
+    for idx, c in enumerate(osp_candidates):
         _on_result = None
         if on_query_eval:
-            def _on_result(result, qi, qt, _ci=idx, _ct=len(ps_candidates)):
+            def _on_result(result, qi, qt, _ci=idx, _ct=len(osp_candidates)):
                 on_query_eval(_ci, _ct, qi, qt, result)
 
         if candidate_pp[idx]:
             pp = {**(_sp_pipeline_params or {}), **candidate_pp[idx]}
         else:
             pp = _sp_pipeline_params
-        sp = SearchPoint(
-            prompt_state=c,
+        sp = c.to_job_search_point(
             model=_sp_model,
             temperature=_sp_temperature,
-            pipeline_params=pp,
+            base_pipeline_params=pp,
         )
         ctx.candidate_idx = idx
         results, scores, cached = await evaluate_prompt_cached(
@@ -446,17 +444,17 @@ async def l1_evaluate(
             scores["escalation_aborted"] = aborted
             scores["eval_queries"] = len(results)
             scores["expected_queries"] = len(eval_data)
-            on_candidate_eval(idx, len(ps_candidates), scores)
+            on_candidate_eval(idx, len(osp_candidates), scores)
 
         if escalation_signal:
             break
 
     cb = dict(current_best)
     if isinstance(cb.get("prompt_state"), dict):
-        cb["prompt_state"] = PromptState(**cb["prompt_state"])
+        cb["prompt_state"] = OptSearchPoint.from_prompt_fields(cb["prompt_state"])
 
     evaluated_candidates = [
-        c for c in ps_candidates
+        c for c in osp_candidates
         if c.id in all_candidate_results
         and not any(
             cs.get("escalation_aborted") and cs["candidate_id"] == c.id
@@ -474,7 +472,16 @@ async def l1_evaluate(
     else:
         winner_pp = _sp_pipeline_params
 
-    winner_ps = winner_entry["prompt_state"]
+    winner_osp = winner_entry["prompt_state"]
+    # Serialize winner as prompt field dict (compatible with CycleRoundResult.prompt_state)
+    winner_dict = (
+        winner_osp.prompt_field_dict()
+        if isinstance(winner_osp, OptSearchPoint)
+        else winner_osp if isinstance(winner_osp, dict) else winner_osp.model_dump()
+    )
+    winner_dict["id"] = getattr(winner_osp, "id", "")
+    winner_dict["parent_id"] = getattr(winner_osp, "parent_id", None)
+    winner_dict["changes_description"] = getattr(winner_osp, "changes_description", "")
     return {
         "winner": {
             "label": winner_entry["label"],
@@ -485,7 +492,7 @@ async def l1_evaluate(
             "improved": winner_entry["improved"],
             "candidates_evaluated": winner_entry["candidates_evaluated"],
         },
-        "winner_prompt_state": winner_ps.model_dump(),
+        "winner_prompt_state": winner_dict,
         "winner_pipeline_params": winner_pp,
         "winner_accuracy": winner_entry["accuracy"],
         "winner_composite": winner_entry.get("composite", winner_entry["accuracy"]),

@@ -1,6 +1,6 @@
 """Layer transition functions for the 3-loop feedback cycle.
 
-L2 (refine_context): Analyzes L1 failure patterns and adjusts PromptState
+L2 (refine_context): Analyzes L1 failure patterns and adjusts OptSearchPoint
     parameters and context to improve generation quality.
 
 L3 (modify_plan): Analyzes why L2 adjustments didn't help and suggests
@@ -18,7 +18,6 @@ from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import DISPLAY_TRUNCATE
 from api.core.llm_call import get_node_config, llm_call
 from api.models.opt_search_point import OptSearchPoint
-from api.models.prompt_state import PromptState
 from api.services.campaign.critique_stats import summarize_warning_inventory
 
 if TYPE_CHECKING:
@@ -33,11 +32,11 @@ logger = logging.getLogger(__name__)
 class TransitionResult:
     """Return value from L2/L3 transitions.
 
-    Bundles the new PromptState with optional pipeline_params changes,
+    Bundles the new OptSearchPoint with optional pipeline_params changes,
     keeping both dimensions of the search space in one result.
     """
 
-    prompt_state: PromptState
+    opt_search_point: OptSearchPoint
     pipeline_params: dict | None = None
     task_context: dict | None = None
     l2_directive: str = ""
@@ -65,7 +64,7 @@ async def refine_context(
     when a pipeline schema is available.
 
     Returns:
-        TransitionResult with derived PromptState and optional pipeline_params.
+        TransitionResult with derived OptSearchPoint and optional pipeline_params.
     """
     failure_lines = []
     for rd in stalled_rounds[-3:]:
@@ -138,7 +137,7 @@ async def refine_context(
 
     prompt = load_optimizer_prompt("l2_refine_context").compile_prompt(
         round_summary=round_summary,
-        rendered_prompt=osp.render_prompt(),
+        rendered_prompt=osp.render(),
         failure_lines=chr(10).join(failure_lines[:15]),
         current_params=json.dumps(osp.optimizer_params),
         task_context_section=task_context_section,
@@ -191,12 +190,9 @@ async def refine_context(
         len(l2_directive),
     )
 
-    current_ps = PromptState(**osp.prompt_field_dict(),
-                              optimizer_params=osp.optimizer_params,
-                              plan=osp.plan)
-    new_ps = current_ps.derive(**changes) if changes else current_ps
+    new_osp = osp.derive_candidate(**changes) if changes else osp
     return TransitionResult(
-        prompt_state=new_ps,
+        opt_search_point=new_osp,
         task_context=new_task_context,
         l2_directive=l2_directive,
         action=action,
@@ -218,11 +214,11 @@ async def modify_plan(
     """LLM-driven L3 adjustment: suggest a new strategic plan.
 
     Analyzes why L2 context/parameter adjustments didn't help and proposes
-    a fundamentally different optimization strategy via ``PromptState.plan``,
+    a fundamentally different optimization strategy via ``OptSearchPoint.plan``,
     and optionally new pipeline_params when a pipeline schema is available.
 
     Returns:
-        TransitionResult with derived PromptState and optional pipeline_params.
+        TransitionResult with derived OptSearchPoint and optional pipeline_params.
     """
     l2_summary = "\n".join(
         f"  L2 round {rd.get('l2_round', '?')}: "
@@ -244,7 +240,7 @@ async def modify_plan(
     prompt = load_optimizer_prompt("l3_modify_plan").compile_prompt(
         current_plan=osp.plan or "(none — default strategy)",
         l2_summary=l2_summary,
-        rendered_prompt=osp.render_prompt(),
+        rendered_prompt=osp.render(),
         pipeline_section=pipeline_section,
         response_schema_suffix=response_schema_suffix,
     )
@@ -267,15 +263,12 @@ async def modify_plan(
                 rationale[:100],
                 "updated" if new_pipeline_params else "unchanged")
 
-    current_ps = PromptState(**osp.prompt_field_dict(),
-                              optimizer_params=osp.optimizer_params,
-                              plan=osp.plan)
-    new_ps = current_ps.derive(
+    new_osp = osp.derive_candidate(
         plan=new_plan,
         changes_description=f"L3: {rationale[:80]}",
     )
     return TransitionResult(
-        prompt_state=new_ps,
+        opt_search_point=new_osp,
         pipeline_params=new_pipeline_params,
     )
 

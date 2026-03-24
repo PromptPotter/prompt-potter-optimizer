@@ -5,8 +5,8 @@ Covers:
 - modify_plan() — L3 strategic plan change with mock LLM
 - L1→L2 escalation in feedback cycle
 - L2→L3 escalation in feedback cycle
-- L2 meta-param overrides (n_variants, creativity from PromptState.optimizer_params)
-- PromptState.plan injection into meta-prompt
+- L2 meta-param overrides (n_variants, creativity from OptSearchPoint.optimizer_params)
+- OptSearchPoint.plan injection into meta-prompt
 """
 
 import json
@@ -14,7 +14,6 @@ import json
 import pytest
 
 from api.models.opt_search_point import OptSearchPoint
-from api.models.prompt_state import PromptState
 from api.services.campaign.models import CycleConfig
 from api.services.campaign.feedback_cycle import run_feedback_cycle
 from api.services.campaign.layer_transitions import (
@@ -55,9 +54,9 @@ async def test_refine_context_applies_parameters():
     result = await refine_context(osp, stalled_rounds, [], client)
 
     assert isinstance(result, TransitionResult)
-    assert result.prompt_state.optimizer_params["creativity"] == 0.9
-    assert result.prompt_state.optimizer_params["n_variants"] == 8
-    assert "L2:" in result.prompt_state.changes_description
+    assert result.opt_search_point.optimizer_params["creativity"] == 0.9
+    assert result.opt_search_point.optimizer_params["n_variants"] == 8
+    assert "L2:" in result.opt_search_point.changes_description
     assert result.pipeline_params is None
 
 
@@ -77,7 +76,7 @@ async def test_refine_context_applies_task_context():
     )
 
     assert result.task_context == {"domain": "pharmaceutical"}
-    assert result.prompt_state.parent_id is not None
+    assert result.opt_search_point.parent_id is not None
 
 
 @pytest.mark.asyncio
@@ -94,8 +93,8 @@ async def test_refine_context_no_changes_returns_same():
     result = await refine_context(osp, [{"round": 0, "accuracy": 0.5, "results": []}], [], client)
 
     # Still derives because changes_description is always added
-    assert result.prompt_state.parent_id is not None
-    assert "L2:" in result.prompt_state.changes_description
+    assert result.opt_search_point.parent_id is not None
+    assert "L2:" in result.opt_search_point.changes_description
 
 
 
@@ -114,9 +113,9 @@ async def test_modify_plan_sets_new_plan():
 
     assert isinstance(result, TransitionResult)
     expected_plan = "Use chain-of-thought reasoning with explicit comparison steps."
-    assert result.prompt_state.plan == expected_plan
-    assert result.prompt_state.parent_id is not None
-    assert "L3:" in result.prompt_state.changes_description
+    assert result.opt_search_point.plan == expected_plan
+    assert result.opt_search_point.parent_id is not None
+    assert "L3:" in result.opt_search_point.changes_description
     assert result.pipeline_params is None
 
 
@@ -136,10 +135,10 @@ async def test_modify_plan_preserves_other_fields():
 
     result = await modify_plan(osp, [], [], client)
 
-    assert result.prompt_state.instruction == osp.instruction
-    assert result.prompt_state.persona == osp.persona
-    assert result.prompt_state.optimizer_params == osp.optimizer_params
-    assert result.prompt_state.plan == "New strategy"
+    assert result.opt_search_point.instruction == osp.instruction
+    assert result.opt_search_point.persona == osp.persona
+    assert result.opt_search_point.optimizer_params == osp.optimizer_params
+    assert result.opt_search_point.plan == "New strategy"
 
 
 
@@ -157,12 +156,8 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
     l2_calls = []
 
     async def mock_refine_context(osp, stalled_rounds, eval_d, llm_client, **kwargs):
-        base_ps = PromptState(
-            **osp.prompt_field_dict(),
-            optimizer_params=osp.optimizer_params, plan=osp.plan,
-        )
         l2_calls.append({"n_stalled": len(stalled_rounds)})
-        return TransitionResult(prompt_state=base_ps.derive(
+        return TransitionResult(opt_search_point=osp.derive_candidate(
             optimizer_params={"creativity": 0.9},
             changes_description="L2: mock refine",
         ))
@@ -187,7 +182,7 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -210,23 +205,15 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
     l3_calls = []
 
     async def mock_refine_context(osp, stalled_rounds, eval_d, llm_client, **kwargs):
-        base_ps = PromptState(
-            **osp.prompt_field_dict(),
-            optimizer_params=osp.optimizer_params, plan=osp.plan,
-        )
         l2_calls.append(True)
-        return TransitionResult(prompt_state=base_ps.derive(
+        return TransitionResult(opt_search_point=osp.derive_candidate(
             optimizer_params={"creativity": 0.9},
             changes_description="L2: mock",
         ))
 
     async def mock_modify_plan(osp, l2_history, eval_d, llm_client, **kwargs):
-        base_ps = PromptState(
-            **osp.prompt_field_dict(),
-            optimizer_params=osp.optimizer_params, plan=osp.plan,
-        )
         l3_calls.append(True)
-        return TransitionResult(prompt_state=base_ps.derive(
+        return TransitionResult(opt_search_point=osp.derive_candidate(
             plan="New strategy",
             changes_description="L3: mock",
         ))
@@ -256,7 +243,7 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -282,12 +269,11 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
     async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         gen_calls.append({"n": n, "creativity": creativity})
-        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            base_ps.derive(
+            osp.derive_candidate(
                 instruction=f"variant_{i}",
                 changes_description=f"gen_{i}",
-            ).model_dump()
+            ).prompt_field_dict()
             for i in range(n)
         ]
 
@@ -297,7 +283,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
     )
 
     # Provide baseline with L2 meta-param overrides
-    baseline_ps = PromptState(
+    baseline_ps = OptSearchPoint(
         instruction="Rank candidates",
         optimizer_params={"n_variants": 7, "creativity": 0.95},
     )
@@ -320,7 +306,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
         baseline_accuracy=0.0,
     )
 
-    # Should use PromptState.optimizer_params overrides, not config defaults
+    # Should use OptSearchPoint.optimizer_params overrides, not config defaults
     assert gen_calls[0]["n"] == 7
     assert gen_calls[0]["creativity"] == 0.95
 
@@ -339,12 +325,11 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
                             llm_client, **kwargs):
         # The plan should have been injected by now — capture from OptSearchPoint
         captured_prompts.append(osp.plan)
-        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            base_ps.derive(
+            osp.derive_candidate(
                 instruction=f"variant_{i}",
                 changes_description=f"gen_{i}",
-            ).model_dump()
+            ).prompt_field_dict()
             for i in range(n)
         ]
 
@@ -353,7 +338,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
         mock_generate,
     )
 
-    baseline_ps = PromptState(
+    baseline_ps = OptSearchPoint(
         instruction="Rank candidates",
         plan="Use chain-of-thought with explicit comparison steps.",
     )
@@ -375,7 +360,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
         baseline_accuracy=0.0,
     )
 
-    # The plan should be present on the PromptState passed to l1_generate
+    # The plan should be present on the OptSearchPoint passed to l1_generate
     assert any("chain-of-thought" in (p or "") for p in captured_prompts)
 
 
@@ -398,7 +383,7 @@ async def test_refine_context_ignores_pipeline_params():
 
     # L2 no longer sets pipeline_params — only context + meta-settings
     assert result.pipeline_params is None
-    assert result.prompt_state.optimizer_params.get("creativity") == 0.5
+    assert result.opt_search_point.optimizer_params.get("creativity") == 0.5
 
 
 @pytest.mark.asyncio
@@ -416,6 +401,6 @@ async def test_modify_plan_with_pipeline_params():
         pipeline_params={"fuzzy_matching": {"threshold": 0.8}},
     )
 
-    assert result.prompt_state.plan == "Focus on fuzzy matching"
+    assert result.opt_search_point.plan == "Focus on fuzzy matching"
     assert result.pipeline_params is not None
     assert result.pipeline_params["fuzzy_matching"]["threshold"] == 0.6

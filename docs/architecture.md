@@ -38,20 +38,26 @@ All core logic lives in `api/services/`.
 
 Every piece of state is traced at both layers, independently reconstructable from disk:
 
-- **Target layer**: `SearchPoint` → `evaluate_prompt_cached()` → `dataset_runs/` (content-addressed, shared across all eval paths)
+- **Target layer**: `JobSearchPoint` → `evaluate_prompt_cached()` → `dataset_runs/` (content-addressed, shared across all eval paths)
 - **Optimizer layer**: `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint)
 
 ## Data Models
 
-**SearchPoint** — flat, frozen, content-hashable target evaluation specification: `model` + `temperature` + `pipeline_params` (the rendered prompt lives inside `pipeline_params` as a node config value). The lightweight twin.
+```
+SearchPoint (base)           — abstract base, "a point in a search space"
+    ├── JobSearchPoint       — user's job: model + temp + pipeline_params (frozen)
+    └── OptSearchPoint       — optimizer state: prompt fields + L2/L3 + memory (mutable)
+```
 
-**OptSearchPoint** — the more capable twin: prompt decomposition fields (`persona`, `task_intent`, etc.) + L2 state (`optimizer_params`, `task_context`) + L3 state (`plan`) + optimization memory (`critique`, `thinking_styles`, `escalation_journal`). Mutable. `render_prompt()` assembles fields; `to_search_point()` projects into SearchPoint for evaluation.
+**JobSearchPoint** — flat, frozen, content-hashable target evaluation specification: `model` + `temperature` + `pipeline_params` (the rendered prompt lives inside `pipeline_params` as a node config value).
+
+**OptSearchPoint** — inherits from SearchPoint. Prompt decomposition fields (`persona`, `task_intent`, etc.) + lineage (`id`, `parent_id`, `changes_description`) + L2 state (`optimizer_params`, `task_context`) + L3 state (`plan`) + optimization memory (`critique`, `thinking_styles`, `escalation_journal`). Mutable. `render_prompt()` assembles fields; `to_job_search_point()` projects into JobSearchPoint for evaluation.
 
 **PipelineSchema** / **PipelineNode** — describes a pipeline (target or optimizer). Both TermNorm and the optimizer pipeline parse into PipelineSchema.
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, etc.).
 
-Universal contract: `f(SearchPoint, PipelineSchema, eval_data) → scores`.
+Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 
 ## Evaluation Flow
 
@@ -59,7 +65,7 @@ All paths converge on `evaluate_prompt_cached()` — single gateway for eval per
 
 ## Caching & Crash Recovery
 
-- **Content-hash dedup** — same SearchPoint + eval data returns cached results instantly
+- **Content-hash dedup** — same JobSearchPoint + eval data returns cached results instantly
 - **Shared store** — sensitivity scan and feedback cycle both write to `dataset_runs/`; coverage advisor discovers all cached results regardless of source
 - **Write by experiment_id, read by config similarity** — provenance tagged, but reads use alias groups + `pipeline_params` matching. Data shared across experiments.
 - **Graceful interrupt** — first Ctrl+C finishes in-flight call and saves (`"partial": True`); content-hash cache bridges partial results on re-run

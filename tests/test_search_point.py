@@ -1,165 +1,119 @@
-"""Tests for SearchPoint model."""
+"""Tests for JobSearchPoint model."""
 import pytest
 
-from api.models.prompt_state import PromptState
-from api.models.search_point import SearchPoint
+from api.models.opt_search_point import OptSearchPoint
+from api.models.search_point import JobSearchPoint
 from api.models.hashing import eval_content_hash
 
 
+def _make_jsp(instruction: str = "Rank by relevance.", **kwargs) -> JobSearchPoint:
+    """Helper: build a JobSearchPoint from an instruction string."""
+    osp = OptSearchPoint(instruction=instruction)
+    return osp.to_job_search_point(
+        model=kwargs.get("model", ""),
+        temperature=kwargs.get("temperature", 0.0),
+        base_pipeline_params=kwargs.get("pipeline_params"),
+    )
+
 
 def test_construct_with_defaults():
-    ps = PromptState(instruction="Rank by relevance.")
-    sp = SearchPoint(prompt_state=ps)
-    assert sp.prompt_state is ps
+    sp = JobSearchPoint()
     assert sp.model == ""
     assert sp.temperature == 0.0
     assert sp.pipeline_params is None
 
 
 def test_construct_with_all_fields():
-    ps = PromptState(instruction="Rank by relevance.")
-    sp = SearchPoint(
-        prompt_state=ps,
+    sp = JobSearchPoint(
         model="llama-3",
         temperature=0.5,
-        pipeline_params={"steps": ["llm_ranking"]},
+        pipeline_params={"llm_ranking": {"prompt": "Rank by relevance."}},
     )
     assert sp.model == "llama-3"
     assert sp.temperature == 0.5
-    assert sp.pipeline_params == {"steps": ["llm_ranking"]}
-
+    assert sp.render() == "Rank by relevance."
 
 
 def test_frozen():
-    ps = PromptState(instruction="test")
-    sp = SearchPoint(prompt_state=ps)
+    sp = JobSearchPoint()
     with pytest.raises(Exception):
         sp.model = "new-model"
 
 
-
-def test_render_delegates():
-    ps = PromptState(
-        persona="Expert",
-        instruction="Rank candidates.",
+def test_render_extracts_prompt():
+    sp = JobSearchPoint(
+        pipeline_params={"llm_ranking": {"prompt": "Expert\n\nRank candidates."}},
     )
-    sp = SearchPoint(prompt_state=ps)
-    assert sp.render() == ps.render()
     assert "Expert" in sp.render()
     assert "Rank candidates." in sp.render()
 
 
-
 def test_content_hash_matches_eval_content_hash():
-    ps = PromptState(instruction="Rank by relevance.")
-    sp = SearchPoint(prompt_state=ps, model="llama-3", temperature=0.5)
+    sp = _make_jsp("Rank by relevance.", model="llama-3", temperature=0.5)
     eval_data = [
         {"query": "aspirin", "ground_truth": "Aspirin"},
         {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
     ]
-    expected = eval_content_hash(ps.render(), eval_data, "llama-3", 0.5)
+    expected = eval_content_hash(sp.render(), eval_data, "llama-3", 0.5, sp.pipeline_params)
     assert sp.content_hash(eval_data) == expected
 
 
 def test_content_hash_matches_eval_content_hash_with_pipeline_params():
-    ps = PromptState(instruction="Rank by relevance.")
-    pp = {"steps": ["llm_ranking"], "ranking_temperature": 0.5}
-    sp = SearchPoint(prompt_state=ps, model="llama-3", temperature=0.5, pipeline_params=pp)
+    osp = OptSearchPoint(instruction="Rank by relevance.")
+    pp = {"llm_ranking": {"prompt": osp.render()}, "ranking_temperature": 0.5}
+    sp = JobSearchPoint(model="llama-3", temperature=0.5, pipeline_params=pp)
     eval_data = [
         {"query": "aspirin", "ground_truth": "Aspirin"},
     ]
-    expected = eval_content_hash(ps.render(), eval_data, "llama-3", 0.5, pp)
+    expected = eval_content_hash(sp.render(), eval_data, "llama-3", 0.5, pp)
     assert sp.content_hash(eval_data) == expected
 
 
 def test_content_hash_differs_with_model():
-    ps = PromptState(instruction="Rank by relevance.")
     eval_data = [{"query": "q", "ground_truth": "a"}]
-    sp_a = SearchPoint(prompt_state=ps, model="model-a")
-    sp_b = SearchPoint(prompt_state=ps, model="model-b")
+    sp_a = _make_jsp(model="model-a")
+    sp_b = _make_jsp(model="model-b")
     assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
 
 
 def test_content_hash_differs_with_temperature():
-    ps = PromptState(instruction="Rank by relevance.")
     eval_data = [{"query": "q", "ground_truth": "a"}]
-    sp_a = SearchPoint(prompt_state=ps, temperature=0.0)
-    sp_b = SearchPoint(prompt_state=ps, temperature=0.7)
+    sp_a = _make_jsp(temperature=0.0)
+    sp_b = _make_jsp(temperature=0.7)
     assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
 
 
-def test_content_hash_includes_steps_in_pipeline_params():
-
-    ps = PromptState(instruction="Rank by relevance.")
+def test_content_hash_includes_pipeline_params():
     eval_data = [{"query": "q", "ground_truth": "a"}]
-    sp_a = SearchPoint(prompt_state=ps, pipeline_params={"steps": ["llm_ranking"]})
-    sp_b = SearchPoint(prompt_state=ps, pipeline_params={"steps": ["fuzzy_matching"]})
-    sp_none = SearchPoint(prompt_state=ps)
-    # Different steps → different hash
+    sp_a = JobSearchPoint(pipeline_params={"steps": ["llm_ranking"]})
+    sp_b = JobSearchPoint(pipeline_params={"steps": ["fuzzy_matching"]})
+    sp_none = JobSearchPoint()
+    # Different steps -> different hash
     assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
     # steps pp differs from no pp
     assert sp_a.content_hash(eval_data) != sp_none.content_hash(eval_data)
 
 
 def test_content_hash_differs_with_non_steps_pipeline_params():
-
-    ps = PromptState(instruction="Rank by relevance.")
     eval_data = [{"query": "q", "ground_truth": "a"}]
-    sp_a = SearchPoint(prompt_state=ps, pipeline_params={"ranking_temperature": 0.5})
-    sp_b = SearchPoint(prompt_state=ps, pipeline_params={"ranking_temperature": 0.9})
-    sp_none = SearchPoint(prompt_state=ps)
+    sp_a = JobSearchPoint(pipeline_params={"ranking_temperature": 0.5})
+    sp_b = JobSearchPoint(pipeline_params={"ranking_temperature": 0.9})
+    sp_none = JobSearchPoint()
     assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
     assert sp_a.content_hash(eval_data) != sp_none.content_hash(eval_data)
 
 
-
-def test_derive_prompt_state_field():
-
-    ps = PromptState(instruction="original", persona="")
-    sp = SearchPoint(prompt_state=ps, model="llama-3", temperature=0.5)
-    sp2 = sp.derive(instruction="modified")
-    assert sp2.prompt_state.instruction == "modified"
-    assert sp2.prompt_state.parent_id == ps.id
-    assert sp2.model == "llama-3"
-    assert sp2.temperature == 0.5
-
-
-def test_derive_search_point_field():
-
-    ps = PromptState(instruction="original")
-    sp = SearchPoint(prompt_state=ps, model="llama-3", temperature=0.5)
+def test_derive_model_and_temperature():
+    sp = _make_jsp(model="llama-3", temperature=0.5)
     sp2 = sp.derive(model="gpt-4", temperature=0.9)
     assert sp2.model == "gpt-4"
     assert sp2.temperature == 0.9
-    assert sp2.prompt_state.instruction == "original"
-    assert sp2.prompt_state.id == ps.id  # same PromptState, not derived
-
-
-def test_derive_mixed_fields():
-
-    ps = PromptState(instruction="original", persona="Expert")
-    sp = SearchPoint(prompt_state=ps, model="llama-3", temperature=0.5)
-    sp2 = sp.derive(instruction="modified", model="gpt-4")
-    assert sp2.prompt_state.instruction == "modified"
-    assert sp2.prompt_state.parent_id == ps.id
-    assert sp2.model == "gpt-4"
-    assert sp2.temperature == 0.5  # unchanged
-
-
-def test_derive_prompt_state_replacement():
-
-    ps1 = PromptState(instruction="first")
-    ps2 = PromptState(instruction="second")
-    sp = SearchPoint(prompt_state=ps1, model="llama-3")
-    sp2 = sp.derive(prompt_state=ps2)
-    assert sp2.prompt_state.id == ps2.id
-    assert sp2.prompt_state.instruction == "second"
-    assert sp2.model == "llama-3"
+    # Original prompt preserved
+    assert sp2.render() == sp.render()
 
 
 def test_derive_pipeline_params():
-    sp = SearchPoint(
-        prompt_state=PromptState(instruction="test"),
+    sp = JobSearchPoint(
         pipeline_params={"steps": ["llm_ranking"]},
     )
     sp2 = sp.derive(pipeline_params={"steps": ["fuzzy_matching"]})
@@ -168,7 +122,7 @@ def test_derive_pipeline_params():
 
 
 def test_derive_returns_new_frozen_instance():
-    sp = SearchPoint(prompt_state=PromptState(instruction="test"))
+    sp = JobSearchPoint()
     sp2 = sp.derive(model="new-model")
     assert sp is not sp2
     with pytest.raises(Exception):

@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 if TYPE_CHECKING:
     import pandas as pd
 
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 from api.services.project_store import ProjectStore
 
 from api.services.campaign.campaign_init import run_baseline_eval as _run_baseline_eval
@@ -171,7 +171,7 @@ def run_coverage_diagnostic(
 
 
 async def run_baseline_eval(
-    baseline: PromptState,
+    baseline: OptSearchPoint,
     eval_data: list,
     campaign_config: dict,
     svc: dict,

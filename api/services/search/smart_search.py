@@ -15,8 +15,8 @@ if TYPE_CHECKING:
     import pandas as pd
 
 from api.config.settings import DEFAULT_DIAGNOSTIC_QUERIES
-from api.models.prompt_state import PromptState
-from api.models.search_point import SearchPoint, _PROMPT_STATE_FIELDS
+from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS
+from api.models.search_point import JobSearchPoint
 from api.services.project_store import ProjectStore
 from api.services.prompt_eval import EvalContext, evaluate_prompt_cached, _dominant_error_category
 from api.services.search.coverage import preview as _preview
@@ -154,15 +154,13 @@ def _make_eval_fn(
     get_params: Callable[[], dict],
     on_result: Callable | None = None,
 ) -> Callable:
-    """Factory for the ``_eval_ps`` closure used by scan and adaptive search."""
-    from api.models.search_point import SearchPoint
+    """Factory for the ``_eval_opt`` closure used by scan and adaptive search."""
 
-    async def _eval_ps(ps: PromptState, pp: dict | None = None) -> dict:
-        sp = SearchPoint(
-            prompt_state=ps,
+    async def _eval_opt(opt: OptSearchPoint, pp: dict | None = None) -> dict:
+        sp = opt.to_job_search_point(
             model=ctx.model,
             temperature=ctx.temperature,
-            pipeline_params=pp or get_params(),
+            base_pipeline_params=pp or get_params(),
         )
         results, scores, cached = await evaluate_prompt_cached(
             sp, eval_data, ctx,
@@ -170,7 +168,7 @@ def _make_eval_fn(
             on_result=on_result,
         )
         return {**scores, "results": results, "cached": cached}
-    return _eval_ps
+    return _eval_opt
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +308,7 @@ def filter_variant_library(
 
     - Keeps only ``pipeline_params`` axes whose owning step is active.
     - Drops all ``prompt_fields`` when ``llm_ranking`` is not active
-      (``PromptState.render()`` produces ``ranking_prompt`` consumed only
+      (``OptSearchPoint.render()`` produces the prompt consumed only
       by that step).
 
     Args:
@@ -379,11 +377,12 @@ def load_filtered_variant_library(
 
 
 async def sensitivity_scan(
-    baseline: SearchPoint,
+    baseline: JobSearchPoint,
     scan_variants: dict[str, list],
     eval_data: list,
     backend_client: BackendClient,
     *,
+    baseline_opt: OptSearchPoint | None = None,
     sample_size: int = 0,
     store: ProjectStore | None = None,
     backend_id: str = "",
@@ -399,12 +398,14 @@ async def sensitivity_scan(
     and an axis profile sorted by sensitivity.
 
     Args:
-        baseline: Baseline SearchPoint (prompt_state + pipeline_params).
+        baseline: Baseline JobSearchPoint (model + temperature + pipeline_params).
         scan_variants: Flat dict mapping axis names to value lists.
-            Prompt fields (in ``_PROMPT_STATE_FIELDS``) and pipeline
+            Prompt fields (in ``PROMPT_STRING_FIELDS``) and pipeline
             params are auto-detected.
         eval_data: Full evaluation dataset.
         backend_client: Backend client for evaluation.
+        baseline_opt: OptSearchPoint for prompt-field perturbation. Required
+            when scan_variants contains prompt_field axes.
         sample_size: If >0, subsample eval_data to this many queries
             (deterministic seed=42). 0 means use all.
         store: Optional ProjectStore for caching.
@@ -442,7 +443,7 @@ async def sensitivity_scan(
     for name, values in scan_variants.items():
         if len(values) <= 1:
             continue
-        axis_type = "prompt_field" if name in _PROMPT_STATE_FIELDS else "pipeline_param"
+        axis_type = "prompt_field" if name in PROMPT_STRING_FIELDS else "pipeline_param"
         axes.append((name, axis_type, values))
 
     # Evaluate baseline
@@ -500,7 +501,7 @@ async def sensitivity_scan(
         for vi, value in enumerate(values):
             # Detect baseline value for this axis
             if axis_type == "prompt_field":
-                current_val = getattr(baseline.prompt_state, axis_name, "")
+                current_val = getattr(baseline_opt, axis_name, "") if baseline_opt else ""
             else:
                 current_val = (baseline.pipeline_params or {}).get(axis_name)
 
@@ -526,9 +527,18 @@ async def sensitivity_scan(
                 })
                 continue
 
-            # Derive perturbed SearchPoint
+            # Derive perturbed JobSearchPoint
             if axis_type == "prompt_field":
-                perturbed = baseline.derive(**{axis_name: value})
+                assert baseline_opt is not None, (
+                    "baseline_opt required for prompt_field perturbation"
+                )
+                perturbed = baseline_opt.derive_candidate(
+                    **{axis_name: value},
+                ).to_job_search_point(
+                    model=baseline.model,
+                    temperature=baseline.temperature,
+                    base_pipeline_params=baseline.pipeline_params,
+                )
             else:
                 perturbed = baseline.derive(
                     pipeline_params={**(baseline.pipeline_params or {}), axis_name: value},
@@ -609,7 +619,7 @@ async def sensitivity_scan(
 
 
 async def adaptive_search(
-    baseline_ps: PromptState,
+    baseline_opt: OptSearchPoint,
     variant_library: dict,
     eval_data: list,
     backend_client: BackendClient,
@@ -624,7 +634,7 @@ async def adaptive_search(
     plan_id: str = "",
     pipeline_schema: "PipelineSchema | None" = None,
     experiment_id: str = "",
-) -> tuple[PromptState, dict, pd.DataFrame]:
+) -> tuple[OptSearchPoint, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.
 
     Iterates over active axes (those not classified as ``"skip"``),
@@ -633,7 +643,7 @@ async def adaptive_search(
     future rounds) when they produce no improvement.
 
     Args:
-        baseline_ps: Starting PromptState.
+        baseline_opt: Starting OptSearchPoint.
         variant_library: Full variant library dict.
         eval_data: Diagnostic query set.
         backend_client: Backend client for evaluation.
@@ -649,7 +659,7 @@ async def adaptive_search(
             ``axis_start``, ``variant_done``, ``axis_resolved``.
 
     Returns:
-        Tuple of (best_ps, best_pipeline_params, search_log_df).
+        Tuple of (best_opt, best_pipeline_params, search_log_df).
     """
     import pandas as pd
 
@@ -669,7 +679,7 @@ async def adaptive_search(
     ]
     active_axes.sort(key=lambda p: -p["sensitivity_range"])
 
-    current_ps = baseline_ps
+    current_opt = baseline_opt
     current_params = dict(pipeline_params or {})
     resolved_axes: set[str] = set()
     log_rows: list[dict] = []
@@ -683,13 +693,13 @@ async def adaptive_search(
         pipeline_params=pipeline_params,
         experiment_id=experiment_id,
     )
-    _eval_ps = _make_eval_fn(
+    _eval_opt = _make_eval_fn(
         eval_data, _scan_ctx,
         get_params=lambda: current_params,
     )
 
     # Get baseline accuracy
-    baseline_scores = await _eval_ps(current_ps)
+    baseline_scores = await _eval_opt(current_opt)
     current_acc = baseline_scores["accuracy"]
     current_composite = baseline_scores.get("composite", current_acc)
 
@@ -736,7 +746,7 @@ async def adaptive_search(
             })
 
             best_value = (
-                getattr(current_ps, axis_name, "")
+                getattr(current_opt, axis_name, "")
                 if axis_type == "prompt_field"
                 else current_params.get(axis_name)
             )
@@ -744,13 +754,13 @@ async def adaptive_search(
 
             for value in values:
                 if axis_type == "prompt_field":
-                    test_ps = current_ps.derive(**{axis_name: value})
+                    test_opt = current_opt.derive_candidate(**{axis_name: value})
                     test_params = current_params
                 else:
-                    test_ps = current_ps
+                    test_opt = current_opt
                     test_params = {**current_params, axis_name: value}
 
-                scores = await _eval_ps(test_ps, test_params)
+                scores = await _eval_opt(test_opt, test_params)
 
                 composite = scores.get("composite", scores["accuracy"])
                 delta = composite - current_composite
@@ -782,7 +792,7 @@ async def adaptive_search(
             improvement = best_composite - current_composite
             if improvement > stop_threshold:
                 if axis_type == "prompt_field":
-                    current_ps = current_ps.derive(
+                    current_opt = current_opt.derive_candidate(
                         **{axis_name: best_value},
                         changes_description=(
                             f"adaptive_r{round_num}_{axis_name}"
@@ -833,7 +843,7 @@ async def adaptive_search(
         store.smart_search.update(backend_id, plan_id, {
             "status": "search_complete",
             "search_results": {
-                "best_ps": current_ps.model_dump(),
+                "best_opt": current_opt.model_dump(),
                 "best_params": current_params,
                 "log_rows": log_df.to_dict(orient="records")
                 if not log_df.empty else [],
@@ -841,7 +851,7 @@ async def adaptive_search(
         })
         logger.info("Saved search results to plan: %s", plan_id)
 
-    return current_ps, current_params, log_df
+    return current_opt, current_params, log_df
 
 
 # ---------------------------------------------------------------------------
@@ -852,7 +862,7 @@ async def adaptive_search(
 
 async def resume_or_build_diagnostic(
     campaign_config: dict,
-    baseline: PromptState,
+    baseline: OptSearchPoint,
     baseline_results: list,
     llm_client: Any,
     model: str,
@@ -861,7 +871,7 @@ async def resume_or_build_diagnostic(
     eval_data: list,
     improvement_areas: str = "",
     variant_library: dict | None = None,
-) -> tuple[str, PromptState, list, dict, list]:
+) -> tuple[str, OptSearchPoint, list, dict, list]:
     """Resume or build smart search diagnostic set.
 
     Returns:
@@ -981,7 +991,7 @@ async def resume_or_build_diagnostic(
         model=model,
         improvement_areas=improvement_areas,
     )
-    search_baseline = baseline.derive(
+    search_baseline = baseline.derive_candidate(
         **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
         changes_description="search_baseline (decomposed)",
     )
@@ -1017,13 +1027,19 @@ async def resume_or_build_diagnostic(
 def select_scan_winner(
     scan_df: pd.DataFrame,
     axis_profiles: list[dict],
-    baseline: SearchPoint,
+    baseline: JobSearchPoint,
     scan_variants: dict[str, list],
-) -> SearchPoint:
+    *,
+    baseline_opt: OptSearchPoint | None = None,
+) -> JobSearchPoint:
     """Pick best variant per sensitive axis from OAT scan results.
 
     Composes the best-performing value for each axis that showed positive
-    improvement (best_delta > 0) into a single SearchPoint.
+    improvement (best_delta > 0) into a single JobSearchPoint.
+
+    Args:
+        baseline_opt: Required when scan_variants contains prompt_field axes.
+            Used to derive prompt-field perturbations via OptSearchPoint.
     """
     prompt_changes: dict[str, Any] = {}
     param_changes: dict[str, Any] = {}
@@ -1048,14 +1064,24 @@ def select_scan_winner(
             )
             continue
         value = values[value_idx]
-        if axis_name in _PROMPT_STATE_FIELDS:
+        if axis_name in PROMPT_STRING_FIELDS:
             prompt_changes[axis_name] = value
         else:
             param_changes[axis_name] = value
 
     best = baseline
     if prompt_changes:
-        best = best.derive(**prompt_changes, changes_description="scan_winner")
+        assert baseline_opt is not None, (
+            "baseline_opt required for prompt_field perturbation in select_scan_winner"
+        )
+        best_opt = baseline_opt.derive_candidate(
+            **prompt_changes, changes_description="scan_winner",
+        )
+        best = best_opt.to_job_search_point(
+            model=baseline.model,
+            temperature=baseline.temperature,
+            base_pipeline_params=baseline.pipeline_params,
+        )
     if param_changes:
         best = best.derive(
             pipeline_params={**(best.pipeline_params or {}), **param_changes},

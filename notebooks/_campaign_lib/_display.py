@@ -284,10 +284,11 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     indent = prefix if prefix else "        "
 
     sw = 10 if cached else 8
+    time_col = f"{tt:5.1f}s" if tt is not None else "     "
     if err:
-        return f"{indent}{tag} {step:>{sw}s}  {q:<45s}  ERR: {str(err)[:40]}{time_str}"
+        return f"{indent}{time_col} {tag} {step:>{sw}s}  {q:<45s}  ERR: {str(err)[:40]}"
 
-    line = f"{indent}{tag} {step:>{sw}s}  {q:<45s}  -> {pred}{time_str}"
+    line = f"{indent}{time_col} {tag} {step:>{sw}s}  {q:<45s}  -> {pred}"
 
     # Append pipeline degradation warnings from diagnostics
     diag = pd.get("diagnostics", {})
@@ -604,7 +605,7 @@ def show_flip_tracking(campaign_rounds: list) -> None:
 
 
 def show_lineage_chain(campaign_rounds: list) -> None:
-    """Display PromptState lineage chain across rounds."""
+    """Display OptSearchPoint lineage chain across rounds."""
     if not campaign_rounds:
         print("No campaign rounds to display.")
         return

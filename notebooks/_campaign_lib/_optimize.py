@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
     from api.services.project_store import ProjectStore
 
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 
 from ._display import (
     BOLD, CYAN, GREEN, RED, RESET, YELLOW,
@@ -500,7 +500,9 @@ async def run_feedback_cycle_notebook(
 
         round_entry = round_result.model_dump()
         ps_raw = round_entry.get("prompt_state", {})
-        round_entry["prompt_state"] = PromptState(**ps_raw) if isinstance(ps_raw, dict) else ps_raw
+        round_entry["prompt_state"] = (
+            OptSearchPoint.from_prompt_fields(ps_raw) if isinstance(ps_raw, dict) else ps_raw
+        )
         round_entry["round"] = len(campaign_rounds)
         campaign_rounds.append(round_entry)
 

@@ -18,7 +18,7 @@ import httpx
 
 from api.evaluators.exact_match import EvalResult, ExactMatchEvaluator
 from api.models.hashing import HASH_TRUNCATE
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 from api.config.settings import NO_RESULT
 
 if TYPE_CHECKING:
@@ -125,7 +125,7 @@ def build_dataset_run_data(
         "run_id": run_id,
         "name": name,
         "content_hash": content_hash,
-        "prompt_state_id": search_point.prompt_state.id,
+        "prompt_state_id": search_point.sp_hash(),
         "rendered_prompt_hash": hashlib.sha256(
             rendered_prompt.encode(),
         ).hexdigest()[:HASH_TRUNCATE],
@@ -145,14 +145,14 @@ def build_dataset_run_data(
     return data
 
 
-def load_baseline_prompt(exp_data: dict) -> PromptState:
-    """Extract the llm_ranking prompt from experiment data, wrap in PromptState.
+def load_baseline_prompt(exp_data: dict) -> OptSearchPoint:
+    """Extract the llm_ranking prompt from experiment data, wrap in OptSearchPoint.
 
     Args:
         exp_data: Synced experiment data dict with ``dependencies.prompts``.
 
     Returns:
-        PromptState with the baseline reranker prompt as ``instruction``.
+        OptSearchPoint with the baseline reranker prompt as ``instruction``.
 
     Raises:
         RuntimeError: If no llm_ranking prompt is found.
@@ -172,13 +172,8 @@ def load_baseline_prompt(exp_data: dict) -> PromptState:
             "Re-sync the experiment after TermNorm prompt registry is initialized."
         )
 
-    return PromptState(
+    return OptSearchPoint(
         instruction=reranker_prompt["template"],
-        parameters={
-            "family": reranker_prompt.get("family", "llm_ranking"),
-            "version": reranker_prompt.get("version"),
-            "template_variables": reranker_prompt.get("template_variables", []),
-        },
         changes_description="Baseline reranker_v1 from TermNorm prompt registry",
     )
 
@@ -617,14 +612,13 @@ async def evaluate_prompt_cached(
     - Final run storage
 
     The ``search_point`` bundles the search-space dimensions
-    (prompt_state, model, temperature, pipeline_params).  Infrastructure
+    (model, temperature, pipeline_params).  Infrastructure
     params (backend_client, store, obs, …) live on ``ctx``.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
     """
     # Extract search-space params from SearchPoint
-    prompt_state = search_point.prompt_state
     model = search_point.model
     temperature = search_point.temperature
 
@@ -636,7 +630,7 @@ async def evaluate_prompt_cached(
     obs = ctx.obs
     source = source or ctx.source
 
-    rendered = prompt_state.render()
+    rendered = search_point.render()
     content_hash = search_point.content_hash(eval_data)
 
     # --- dedup lookup (content hash + alias group fallback) ---
@@ -736,7 +730,7 @@ async def evaluate_prompt_cached(
 
         _finalize_observability(
             store, backend_id, run_id, content_hash, scores,
-            model, temperature, prompt_state.id, obs,
+            model, temperature, search_point.sp_hash(), obs,
         )
 
     return results, scores, False

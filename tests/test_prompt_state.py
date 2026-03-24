@@ -1,15 +1,15 @@
-"""Tests for PromptState model."""
-from api.models.prompt_state import FewShotExample, PromptState, diff
+"""Tests for OptSearchPoint model (migrated from PromptState tests)."""
+from api.models.opt_search_point import FewShotExample, OptSearchPoint
 
 
 def test_create_and_derive():
-    parent = PromptState(
+    parent = OptSearchPoint(
         instruction="Classify: {{text}}",
         optimizer_params={"temperature": 0.7},
     )
     assert parent.parent_id is None
 
-    child = parent.derive(
+    child = parent.derive_candidate(
         instruction="Improved: {{text}}",
         persona="Expert",
         changes_description="Rewrote instruction",
@@ -22,7 +22,7 @@ def test_create_and_derive():
 
 
 def test_render():
-    state = PromptState(
+    state = OptSearchPoint(
         persona="You are an expert.",
         instruction="Classify: {{text}}",
         thinking_style="Think step by step.",
@@ -36,35 +36,18 @@ def test_render():
     assert "plan" not in rendered.lower()
 
 
-def test_diff():
-    a = PromptState(instruction="Version A", optimizer_params={"k": 1})
-    b = PromptState(instruction="Version B", optimizer_params={"k": 2})
-    result = diff(a, b)
-    assert result.generate_changed is True
-    assert result.context_changed is True  # optimizer_params changed
-    assert any(fc.field == "instruction" for fc in result.field_changes)
-    assert result.optimizer_params_changed == {"k": {"old": 1, "new": 2}}
-
-
-def test_diff_no_redundant_few_shot_field_change():
-
-    a = PromptState(instruction="same")
-    b = PromptState(
-        instruction="same",
+def test_few_shot_in_derive():
+    a = OptSearchPoint(instruction="same")
+    b = a.derive_candidate(
         few_shot_examples=[FewShotExample(input="x", output="y")],
     )
-    result = diff(a, b)
-    assert result.generate_changed is True
-    assert result.few_shot_added == [FewShotExample(input="x", output="y")]
-    assert not any(fc.field == "few_shot_examples" for fc in result.field_changes)
+    assert len(b.few_shot_examples) == 1
+    assert b.few_shot_examples[0].input == "x"
+    assert b.parent_id == a.id
 
 
-def test_diff_no_redundant_parameters_field_change():
-
-    a = PromptState(instruction="same", optimizer_params={"k": 1})
-    b = PromptState(instruction="same", optimizer_params={"k": 2, "new_key": 3})
-    result = diff(a, b)
-    assert result.context_changed is True
-    assert result.optimizer_params_changed == {"k": {"old": 1, "new": 2}}
-    assert result.optimizer_params_added == {"new_key": 3}
-    assert not any(fc.field == "optimizer_params" for fc in result.field_changes)
+def test_derive_preserves_optimizer_params():
+    a = OptSearchPoint(instruction="same", optimizer_params={"k": 1})
+    b = a.derive_candidate(optimizer_params={"k": 2, "new_key": 3})
+    assert b.optimizer_params == {"k": 2, "new_key": 3}
+    assert a.optimizer_params == {"k": 1}  # original unchanged

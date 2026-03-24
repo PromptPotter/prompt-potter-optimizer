@@ -5,14 +5,14 @@ Covers CampaignStore CRUD, lineage reconstruction, and API endpoints.
 
 import pytest
 
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 
 BACKEND_ID = "test-backend"
 
 
 @pytest.fixture
 def baseline_ps():
-    return PromptState(
+    return OptSearchPoint(
         instruction="Rank candidates by relevance.",
         persona="You are a domain expert.",
         changes_description="baseline",
@@ -78,7 +78,7 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
         accuracy=0.67, hits=2, total=3, label="baseline",
     )
 
-    improved_ps = baseline_ps.derive(
+    improved_ps = baseline_ps.derive_candidate(
         instruction="better", changes_description="round1",
     )
     store.campaigns.record_trial(
@@ -87,7 +87,7 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
         accuracy=0.80, hits=4, total=5, label="round1", improved=True,
     )
 
-    worse_ps = improved_ps.derive(
+    worse_ps = improved_ps.derive_candidate(
         instruction="worse", changes_description="round2",
     )
     store.campaigns.record_trial(
@@ -125,7 +125,7 @@ def test_record_campaign_rounds(store, campaign, baseline_ps):
 
     cid = campaign["campaign_id"]
 
-    improved_ps = baseline_ps.derive(
+    improved_ps = baseline_ps.derive_candidate(
         instruction="better", changes_description="improved",
     )
 
@@ -159,8 +159,8 @@ def test_lineage_chain(store, campaign, baseline_ps):
 
     cid = campaign["campaign_id"]
 
-    r1_ps = baseline_ps.derive(instruction="r1", changes_description="round1")
-    r2_ps = r1_ps.derive(instruction="r2", changes_description="round2")
+    r1_ps = baseline_ps.derive_candidate(instruction="r1", changes_description="round1")
+    r2_ps = r1_ps.derive_candidate(instruction="r2", changes_description="round2")
 
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=0,
@@ -272,13 +272,11 @@ def _apply_e2e_mocks(monkeypatch):
 
     async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
-        from api.models.prompt_state import PromptState
-        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            base_ps.derive(
+            osp.derive_candidate(
                 instruction=f"Match query to canonical drug name (variant {i})",
                 changes_description=f"e2e_candidate_{i}",
-            ).model_dump()
+            ).prompt_field_dict()
             for i in range(n)
         ]
 
@@ -329,7 +327,7 @@ async def test_e2e_feedback_cycle_with_registry(
         instruction="Normalize drug names.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=PromptState(instruction="Normalize drug names.").model_dump(),
+        baseline_prompt_state=OptSearchPoint(instruction="Normalize drug names.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -346,7 +344,7 @@ async def test_e2e_feedback_cycle_with_registry(
 
     rounds_for_registry = []
     for rd in result.rounds:
-        ps = PromptState(**rd.prompt_state)
+        ps = OptSearchPoint(**rd.prompt_state)
         rounds_for_registry.append({
             "round": rd.round,
             "label": rd.label,

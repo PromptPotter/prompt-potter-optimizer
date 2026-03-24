@@ -23,9 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.models.hashing import HASH_TRUNCATE
 from api.models.phase_event import PhaseEvent
-from api.models.prompt_state import PromptState, diff as prompt_diff
-from api.models.search_point import SearchPoint
-from api.models.opt_search_point import OptSearchPoint
+from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS
 from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
 from api.config.settings import DATASET_NAME
@@ -80,28 +78,16 @@ def _get_obs_trace(
 
 def _candidate_summaries(
     candidates: list[dict],
-    current_ps_dict: dict,
+    current_prompt_fields: dict,
 ) -> list[dict]:
     """Build compact per-candidate summary dicts for phase event data."""
-    current_ps = PromptState(**current_ps_dict)
     summaries = []
     for i, c in enumerate(candidates):
-        # Non-destructive read of pipeline override
         pp_override = c.get("__pipeline_params_override__")
-
-        # Diff to find changed fields
-        # Strip the dunder key before constructing PromptState
-        c_clean = {k: v for k, v in c.items() if k != "__pipeline_params_override__"}
-        try:
-            candidate_ps = PromptState(**c_clean)
-            delta = prompt_diff(current_ps, candidate_ps)
-            changed_fields = [fc.field for fc in delta.field_changes]
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception:
-            logger.debug("Failed to diff candidate %d", i, exc_info=True)
-            changed_fields = []
-
+        changed_fields = [
+            f for f in PROMPT_STRING_FIELDS
+            if c.get(f, "") != current_prompt_fields.get(f, "")
+        ]
         summary: dict = {
             "idx": i,
             "changes_description": c.get("changes_description", ""),
@@ -269,7 +255,8 @@ def _resume_or_create_campaign(
             cycle_id = cycle_id_override
         else:
             bl_ps = baseline_prompt_state if baseline_prompt_state is not None else current_ps
-            cycle_id = cycle_config_identity(config, PromptState(**bl_ps).render(), eval_data)
+            bl_osp = OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
+            cycle_id = cycle_config_identity(config, bl_osp.render(), eval_data)
         logger.info("Cycle identity: %s", cycle_id)
 
         existing = campaign_store.load(config.backend_id, cycle_id)
@@ -334,7 +321,7 @@ async def _generate_or_load_candidates(
     """Load persisted candidates or generate fresh ones via LLM."""
     _n_variants = n_variants if n_variants is not None else config.n_variants
     _creativity = creativity if creativity is not None else config.creativity
-    prompt_preview = state.opt_sp.render_prompt()[:120]
+    prompt_preview = state.opt_sp.render()[:120]
 
     _emit_phase(on_phase, "l1_generate", "enter", round=round_num,
                 current_accuracy=state.current_accuracy,
@@ -361,7 +348,7 @@ async def _generate_or_load_candidates(
                         n_eval_queries=n_eval_queries,
                         loaded_from_disk=True,
                         candidates=_candidate_summaries(
-                            persisted, state.current_sp.prompt_state.model_dump()))
+                            persisted, state.opt_sp.prompt_field_dict()))
             return persisted
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
@@ -389,7 +376,7 @@ async def _generate_or_load_candidates(
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=False,
                 candidates=_candidate_summaries(
-                    candidates, state.current_sp.prompt_state.model_dump()))
+                    candidates, state.opt_sp.prompt_field_dict()))
 
     return candidates
 
@@ -419,7 +406,7 @@ async def _evaluate_candidates(
     current_best = {
         "accuracy": state.current_accuracy,
         "composite": state.current_composite,
-        "prompt_state": state.current_sp.prompt_state.model_dump(),
+        "prompt_state": state.opt_sp.prompt_field_dict(),
         "results": state.current_results,
         "label": baseline_label,
     }
@@ -522,18 +509,16 @@ def _log_round_obs(
         logger.warning("ObsLogger.log_round_end failed", exc_info=True)
 
     try:
-        winner_ps = PromptState(**eval_out["winner_prompt_state"])
+        winner_fields = eval_out["winner_prompt_state"]
+        winner_osp = OptSearchPoint.from_prompt_fields(winner_fields)
         obs.log_prompt_version(
-            prompt_state_id=winner_ps.id,
-            rendered_prompt=winner_ps.render(),
+            prompt_state_id=winner_osp.id,
+            rendered_prompt=winner_osp.render(),
             layer1_fields={
-                f: getattr(winner_ps, f)
-                for f in [
-                    "persona", "task_intent", "problem_description",
-                    "instruction", "thinking_style", "answer_format",
-                ]
+                f: getattr(winner_osp, f)
+                for f in PROMPT_STRING_FIELDS
             },
-            parent_id=winner_ps.parent_id,
+            parent_id=winner_osp.parent_id,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
@@ -723,7 +708,13 @@ async def _do_l2_transition(
     # Store L2 directive for next L1 round (sliding window=1)
     state.opt_sp.l2_directive = tr.l2_directive
     # L2 does NOT set pipeline_params — only L1 Generate does that
-    state.current_sp = state.current_sp.derive(prompt_state=tr.prompt_state)
+    # Update opt_sp from L2 result, then rebuild JobSearchPoint
+    state.opt_sp = tr.opt_search_point
+    state.current_sp = state.opt_sp.to_job_search_point(
+        model=state.current_sp.model,
+        temperature=state.current_sp.temperature,
+        base_pipeline_params=state.current_sp.pipeline_params,
+    )
     state.l2_round += 1
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
@@ -732,9 +723,9 @@ async def _do_l2_transition(
 
     _emit_phase(on_phase, "refine_context", "exit", round=round_num,
                 l2_round=state.l2_round,
-                param_changes_count=len(tr.prompt_state.optimizer_params),
+                param_changes_count=len(tr.opt_search_point.optimizer_params),
                 task_context_changed=tr.task_context is not None,
-                changes_description=tr.prompt_state.changes_description or "",
+                changes_description=tr.opt_search_point.changes_description or "",
                 pipeline_params_changed=tr.pipeline_params is not None,
                 pipeline_params=tr.pipeline_params,
                 action=tr.action,
@@ -786,9 +777,13 @@ async def _do_l3_transition(
             pipeline_params=current_pp,
             pipeline_schema=config.pipeline_schema,
         )
-    state.current_sp = state.current_sp.derive(
-        prompt_state=tr.prompt_state,
-        **({"pipeline_params": tr.pipeline_params} if tr.pipeline_params else {}),
+    # Update opt_sp from L3 result, then rebuild JobSearchPoint
+    state.opt_sp = tr.opt_search_point
+    _pp = tr.pipeline_params or state.current_sp.pipeline_params
+    state.current_sp = state.opt_sp.to_job_search_point(
+        model=state.current_sp.model,
+        temperature=state.current_sp.temperature,
+        base_pipeline_params=_pp,
     )
     state.l3_round += 1
     state.best_accuracy_at_l3_entry = state.best_accuracy
@@ -799,8 +794,8 @@ async def _do_l3_transition(
     state.best_composite_at_l2_entry = state.best_composite
     _emit_phase(on_phase, "modify_plan", "exit", round=round_num,
                 l3_round=state.l3_round,
-                new_plan_preview=str(tr.prompt_state.plan)[:120],
-                changes_description=tr.prompt_state.changes_description or "",
+                new_plan_preview=str(tr.opt_search_point.plan)[:120],
+                changes_description=tr.opt_search_point.changes_description or "",
                 pipeline_params_changed=tr.pipeline_params is not None)
     logger.info(
         "L3 modify_plan at round %d (l3_round=%d)",
@@ -814,15 +809,17 @@ def _update_round_state(
 ) -> None:
     """Apply round result to loop state (shared by escalation + normal paths)."""
     state.rounds.append(rr)
-    winner_ps = PromptState(**rr.prompt_state)
-    derive_kwargs: dict = {"prompt_state": winner_ps}
-    if rr.pipeline_params is not None:
-        derive_kwargs["pipeline_params"] = rr.pipeline_params
-    state.current_sp = state.current_sp.derive(**derive_kwargs)
-    # Sync prompt fields to OptSearchPoint so l1_generate reads them
-    for f in ("persona", "task_intent", "problem_description", "instruction",
-              "thinking_style", "answer_format"):
-        setattr(state.opt_sp, f, getattr(winner_ps, f, ""))
+    # Sync winner prompt fields to OptSearchPoint (source of truth)
+    winner_fields = rr.prompt_state  # dict of prompt fields
+    for f in PROMPT_STRING_FIELDS:
+        setattr(state.opt_sp, f, winner_fields.get(f, ""))
+    # Rebuild JobSearchPoint from opt_sp
+    _pp = rr.pipeline_params if rr.pipeline_params is not None else state.current_sp.pipeline_params
+    state.current_sp = state.opt_sp.to_job_search_point(
+        model=state.current_sp.model,
+        temperature=state.current_sp.temperature,
+        base_pipeline_params=_pp,
+    )
     state.current_accuracy = rr.accuracy
     state.current_composite = rr.composite
     state.current_results = list(rr.results)
@@ -1015,15 +1012,17 @@ async def _init_cycle_state(
             "baseline_prompt_state is required. Run baseline evaluation in the "
             "notebook before starting the feedback cycle.",
         )
-    current_ps = PromptState(**baseline_prompt_state) if isinstance(
-        baseline_prompt_state, dict,
-    ) else baseline_prompt_state
+    baseline_osp = (
+        OptSearchPoint.from_prompt_fields(baseline_prompt_state)
+        if isinstance(baseline_prompt_state, dict)
+        else baseline_prompt_state
+    )
     current_results: list = baseline_results or []
     logger.info("Using provided baseline (acc=%.3f)", baseline_accuracy)
 
     # Resume detection
     campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
-        config, eval_data, current_ps.model_dump(),
+        config, eval_data, baseline_osp.prompt_field_dict(),
         baseline_prompt_state, baseline_accuracy,
         cycle_id_override=cycle_id,
     )
@@ -1043,11 +1042,22 @@ async def _init_cycle_state(
         )["composite"]
     else:
         _bl_composite = baseline_accuracy
-    baseline_sp = SearchPoint(
-        prompt_state=current_ps,
+    # Init OptSearchPoint from baseline + task_context
+    opt_sp = OptSearchPoint(
+        task_context=config.task_context or {},
+        persona=baseline_osp.persona,
+        task_intent=baseline_osp.task_intent,
+        problem_description=baseline_osp.problem_description,
+        instruction=baseline_osp.instruction,
+        thinking_style=baseline_osp.thinking_style,
+        answer_format=baseline_osp.answer_format,
+        plan=baseline_osp.plan,
+        optimizer_params=dict(baseline_osp.optimizer_params),
+    )
+    baseline_sp = opt_sp.to_job_search_point(
         model=config.model or "",
         temperature=config.temperature,
-        pipeline_params=config.pipeline_params,
+        base_pipeline_params=config.pipeline_params,
     )
     state = _LoopState(
         current_sp=baseline_sp,
@@ -1057,18 +1067,7 @@ async def _init_cycle_state(
         best_accuracy=baseline_accuracy,
         best_composite=_bl_composite,
         best_sp=baseline_sp,
-        opt_sp=OptSearchPoint(
-            task_context=config.task_context or {},
-            # Sync prompt fields from baseline PromptState
-            persona=current_ps.persona,
-            task_intent=current_ps.task_intent,
-            problem_description=current_ps.problem_description,
-            instruction=current_ps.instruction,
-            thinking_style=current_ps.thinking_style,
-            answer_format=current_ps.answer_format,
-            plan=current_ps.plan,
-            optimizer_params=dict(current_ps.optimizer_params),
-        ),
+        opt_sp=opt_sp,
     )
 
     # Restore optimizer state on resume
@@ -1123,7 +1122,7 @@ async def _init_cycle_state(
     if _store and config.backend_id and instruction:
         _raw_hash = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
         _restructured_hash = hashlib.sha256(
-            current_ps.render().encode(),
+            baseline_osp.render().encode(),
         ).hexdigest()[:HASH_TRUNCATE]
         if _raw_hash != _restructured_hash:
             _store.dataset_runs.register_alias(
@@ -1313,9 +1312,7 @@ async def run_feedback_cycle(
                         "problem_step": _problem_step,
                         "step_config": dict(_step_cfg) if isinstance(_step_cfg, dict) else {},
                         "warning_types": _esc_ctx.get("warning_types", {}),
-                        "l2_action": (
-                            state.current_sp.prompt_state.changes_description or ""
-                        ),
+                        "l2_action": state.opt_sp.changes_description or "",
                         "outcome_degraded_rate": None,
                     })
                 elif signal["target"] == "abort":
@@ -1346,11 +1343,6 @@ async def run_feedback_cycle(
             # Checkpoint round to disk
             if campaign_store and cycle_id:
                 try:
-                    # Sync plan + optimizer_params from current SearchPoint
-                    state.opt_sp.plan = state.current_sp.prompt_state.plan
-                    state.opt_sp.optimizer_params = (
-                        state.current_sp.prompt_state.optimizer_params
-                    )
                     campaign_store.add_trial(config.backend_id, cycle_id, {
                         "trial_id": f"round_{round_num}",
                         "round": round_num,
@@ -1454,7 +1446,7 @@ async def run_feedback_cycle(
         baseline_accuracy=(
             state.rounds[0].accuracy if state.rounds else state.current_accuracy
         ),
-        winner_prompt_state=state.best_sp.prompt_state.model_dump() if state.best_sp else {},
+        winner_prompt_state=state.opt_sp.prompt_field_dict() if state.best_sp else {},
         winner_pipeline_params=state.best_sp.pipeline_params if state.best_sp else None,
         stop_reason=stop_reason,
         started_at=started_at,

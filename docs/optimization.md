@@ -6,7 +6,7 @@
 │  L1 GENERATE (LLM)                                                     │
 │    in:  critique (5 fields), task_context, thinking_styles,            │
 │         scan_context, focus_note, failure_examples                     │
-│    out: N candidate SearchPoints (prompt + pipeline_params)            │
+│    out: N candidate OptSearchPoints (prompt + pipeline_params)         │
 │         ↓                                                              │
 │  L1 EVALUATE                                                           │
 │    ┌─ Backend /matches ──── per candidate × per query ──────────────┐  │
@@ -80,7 +80,7 @@ Adjusted when Layer 1 improvements stall:
 | Field | Purpose |
 |-------|---------|
 | `optimizer_params` | Meta-settings (creativity, n_variants, sample_size, variant_strategy) |
-| `task_context` | Structured domain context (domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges, raw_description). Decomposed from `TASK_DESCRIPTION` at init. L2 can refine individual fields. `PromptState.context` is auto-synced from this -- one source of truth. |
+| `task_context` | Structured domain context (domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges, raw_description). Decomposed from `TASK_DESCRIPTION` at init. L2 can refine individual fields. |
 
 ### Layer 3: Modify Plan
 
@@ -90,7 +90,7 @@ Optimization strategy -- rarely changed:
 |-------|---------|
 | `plan` | High-level optimization strategy |
 
-`render()` assembles prompt fields into the final rendered prompt. `derive()` creates child states forming a lineage chain.
+`render_prompt()` assembles prompt fields into the final rendered prompt. `derive_candidate()` creates child points forming a lineage chain.
 
 > **L4 (meta-optimization):** The escalation hierarchy extends naturally -- when L3 stalls, L4 optimizes the optimizer itself (meta-prompts, critique templates, optimizer parameters). See [M7 spec](specs/m7-optimizer-pipeline.md#l4-meta-optimization).
 

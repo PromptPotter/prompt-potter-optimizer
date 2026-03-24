@@ -1,14 +1,14 @@
 """Tests for build_data_inventory()."""
 
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 from api.services.search import build_data_inventory
 from api.services.search.coverage import serialize_smart_search_plan
 
-from _helpers import make_baseline_ps, make_dataset_run
+from _helpers import make_baseline_osp, make_dataset_run
 
 
-def _make_baseline() -> PromptState:
-    return make_baseline_ps(persona="default persona", task_intent="default intent")
+def _make_baseline() -> OptSearchPoint:
+    return make_baseline_osp(persona="default persona", task_intent="default intent")
 
 
 def _fake_run(run_id: str, rendered_prompt: str, n_queries: int = 3) -> dict:
@@ -31,8 +31,8 @@ def test_pipeline_params_from_smart_search(tmp_store):
     plan_data = serialize_smart_search_plan(
         plan_id="ssplan_abc123",
         config={"n_diagnostic": 6, "max_rounds": 3},
-        baseline_ps=bl,
-        search_baseline_ps=bl,
+        baseline_opt=bl,
+        search_baseline_opt=bl,
         layer1_fields={},
         diagnostic=[],
         diag_summary={},

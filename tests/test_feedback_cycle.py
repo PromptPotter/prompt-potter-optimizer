@@ -13,7 +13,7 @@ import pytest
 
 import pandas as pd
 
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.models import CycleConfig
 from api.services.campaign.feedback_cycle import (
     _validate_config_match,
@@ -100,7 +100,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=cycle_config,
-        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -122,7 +122,7 @@ async def test_result_structure(monkeypatch, eval_data, cycle_config):
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
-    baseline_ps = PromptState(
+    baseline_ps = OptSearchPoint(
         instruction="Pre-existing baseline",
         persona="Expert pharmacologist",
         changes_description="manual_baseline",
@@ -149,12 +149,11 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
     async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         grow_results_received.append(list(results))
-        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            base_ps.derive(
+            osp.derive_candidate(
                 instruction=f"variant_{i}",
                 changes_description=f"gen_{i}",
-            ).model_dump()
+            ).prompt_field_dict()
             for i in range(n)
         ]
 
@@ -168,7 +167,7 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
 
     result = await run_feedback_cycle(
         instruction="Test.", eval_data=eval_data, config=cycle_config,
-        baseline_prompt_state=PromptState(instruction="Test.").model_dump(),
+        baseline_prompt_state=OptSearchPoint(instruction="Test.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -210,14 +209,16 @@ class TestSelectScanWinner:
     """Tests for select_scan_winner greedy composition."""
 
     @pytest.fixture
-    def baseline_sp(self):
-        from api.models.search_point import SearchPoint
-        ps = PromptState(
+    def baseline_osp(self):
+        return OptSearchPoint(
             instruction="Rank candidates",
             thinking_style="baseline_style",
             task_intent="baseline_intent",
         )
-        return SearchPoint(prompt_state=ps)
+
+    @pytest.fixture
+    def baseline_sp(self, baseline_osp):
+        return baseline_osp.to_job_search_point()
 
     @pytest.fixture
     def scan_variants(self):
@@ -279,19 +280,20 @@ class TestSelectScanWinner:
         ]
 
     def test_picks_best_per_improving_axis(
-        self, scan_df, axis_profiles, baseline_sp, scan_variants,
+        self, scan_df, axis_profiles, baseline_sp, baseline_osp, scan_variants,
     ):
         best_sp = select_scan_winner(
             scan_df, axis_profiles, baseline_sp, scan_variants,
+            baseline_opt=baseline_osp,
         )
-        # thinking_style should be "analytical reasoning" (idx 2)
-        assert best_sp.prompt_state.thinking_style == "analytical reasoning"
-        # task_intent unchanged (best_delta=0)
-        assert best_sp.prompt_state.task_intent == "baseline_intent"
+        # thinking_style should be "analytical reasoning" (idx 2) — check via rendered prompt
+        assert "analytical reasoning" in best_sp.render()
+        # task_intent unchanged (best_delta=0) — baseline_intent still in prompt
+        assert "baseline_intent" in best_sp.render()
         # ranking_temperature should be 0.3 (idx 1)
         assert best_sp.pipeline_params["ranking_temperature"] == 0.3
 
-    def test_no_improving_axes(self, baseline_sp, scan_variants):
+    def test_no_improving_axes(self, baseline_sp, baseline_osp, scan_variants):
         scan_df = pd.DataFrame([
             {"axis": "thinking_style", "axis_type": "prompt_field",
              "value_idx": 0, "accuracy": 0.50, "delta": 0.0},
@@ -303,12 +305,14 @@ class TestSelectScanWinner:
         ]
         best_sp = select_scan_winner(
             scan_df, profiles, baseline_sp, scan_variants,
+            baseline_opt=baseline_osp,
         )
-        assert best_sp.prompt_state.id == baseline_sp.prompt_state.id
-        assert best_sp.pipeline_params is None
+        # No improvement -> returns baseline unchanged
+        assert best_sp.render() == baseline_sp.render()
+        assert best_sp.pipeline_params == baseline_sp.pipeline_params
 
     def test_skipped_axes_excluded(
-        self, scan_df, baseline_sp, scan_variants,
+        self, scan_df, baseline_sp, baseline_osp, scan_variants,
     ):
         """Axes with exploration_budget='skip' are excluded even if best_delta > 0."""
         profiles = [
@@ -318,24 +322,24 @@ class TestSelectScanWinner:
         ]
         best_sp = select_scan_winner(
             scan_df, profiles, baseline_sp, scan_variants,
+            baseline_opt=baseline_osp,
         )
-        assert best_sp.prompt_state.id == baseline_sp.prompt_state.id
+        assert best_sp.render() == baseline_sp.render()
 
     def test_pipeline_params_merged(
         self, scan_df, axis_profiles, scan_variants,
     ):
-        from api.models.search_point import SearchPoint
-        ps = PromptState(
+        osp = OptSearchPoint(
             instruction="Rank candidates",
             thinking_style="baseline_style",
             task_intent="baseline_intent",
         )
-        sp = SearchPoint(
-            prompt_state=ps,
-            pipeline_params={"existing_key": "keep_me"},
+        sp = osp.to_job_search_point(
+            base_pipeline_params={"existing_key": "keep_me"},
         )
         best_sp = select_scan_winner(
             scan_df, axis_profiles, sp, scan_variants,
+            baseline_opt=osp,
         )
         assert best_sp.pipeline_params["existing_key"] == "keep_me"
         assert best_sp.pipeline_params["ranking_temperature"] == 0.3
@@ -425,7 +429,7 @@ async def test_completed_cycle_returns_cached(
         "backend_id": "test_backend",
     })
 
-    _bl = PromptState(instruction="Rank candidates.").model_dump()
+    _bl = OptSearchPoint(instruction="Rank candidates.").model_dump()
     result1 = await run_feedback_cycle(
         instruction="Rank candidates.",
         eval_data=eval_data,
@@ -474,7 +478,7 @@ async def test_resume_from_interrupted_cycle(
         backend_id="test_backend",
     )
 
-    _bl = PromptState(instruction="Rank candidates.").model_dump()
+    _bl = OptSearchPoint(instruction="Rank candidates.").model_dump()
     result1 = await run_feedback_cycle(
         instruction="Rank candidates.",
         eval_data=eval_data,
@@ -557,7 +561,7 @@ async def test_interrupt_writes_interrupted_status(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -582,12 +586,11 @@ async def test_mid_round_resume_uses_persisted_candidates(
     async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
         grow_calls[0] += 1
-        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            base_ps.derive(
+            osp.derive_candidate(
                 instruction=f"variant_{i}_acc{accuracy:.0%}",
                 changes_description=f"gen_{i}",
-            ).model_dump()
+            ).prompt_field_dict()
             for i in range(n)
         ]
 
@@ -610,7 +613,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
         backend_id="test_backend",
     )
 
-    _bl = PromptState(instruction="Rank candidates.").model_dump()
+    _bl = OptSearchPoint(instruction="Rank candidates.").model_dump()
     result1 = await run_feedback_cycle(
         instruction="Rank candidates.",
         eval_data=eval_data,

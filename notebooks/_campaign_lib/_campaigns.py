@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from api.services.project_store import ProjectStore
 
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.campaign_init import (  # noqa: F401
     apply_experiment_overrides,
     resolve_experiment_id as _resolve_experiment_id,
@@ -242,7 +242,7 @@ def show_experiment_dashboard(
             )
             bl_rendered = ""
             if baseline_prompt_state:
-                bl_rendered = PromptState(**baseline_prompt_state).render()
+                bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_state).render()
             active_id = cycle_config_identity(config, bl_rendered, eval_data)
         except Exception:
             pass

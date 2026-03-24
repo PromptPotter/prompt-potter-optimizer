@@ -2,7 +2,7 @@
 
 from api.services.search import assess_scan_coverage
 
-from _helpers import rp_hash as _rp_hash, make_baseline_ps as _make_baseline
+from _helpers import rp_hash as _rp_hash, make_baseline_osp as _make_baseline
 
 
 def _diagnostic(n: int = 6) -> list[dict]:
@@ -50,11 +50,11 @@ def test_full_coverage_all_prompt_fields_satisfied():
 
     for persona_val in ["You are a domain expert.", "You are a precise system.",
                         "You are a careful assistant."]:
-        rendered = baseline.derive(persona=persona_val).render()
+        rendered = baseline.derive_candidate(persona=persona_val).render()
         entries[rendered] = query_strings
 
     for ti_val in ["Identify the best match.", "Rank candidates by relevance."]:
-        rendered = baseline.derive(task_intent=ti_val).render()
+        rendered = baseline.derive_candidate(task_intent=ti_val).render()
         entries[rendered] = query_strings
 
     index = _build_index(entries)
@@ -83,7 +83,7 @@ def test_min_queries_threshold():
     diag = _diagnostic(6)
     partial_queries = [d["query"] for d in diag[:3]]
 
-    rendered = baseline.derive(persona="You are a domain expert.").render()
+    rendered = baseline.derive_candidate(persona="You are a domain expert.").render()
     index = _build_index({rendered: partial_queries})
 
     # min_queries=6 -> not usable
@@ -117,7 +117,7 @@ def test_axis_requirements_partial():
     # Cover 2 of 3 persona variants
     entries: dict[str, list[str]] = {}
     for val in ["You are a domain expert.", "You are a precise system."]:
-        rendered = baseline.derive(persona=val).render()
+        rendered = baseline.derive_candidate(persona=val).render()
         entries[rendered] = query_strings
 
     index = _build_index(entries)
@@ -141,7 +141,7 @@ def test_sufficient_axes_excluded_from_needed():
     # Give task_intent full coverage (2 variants × 6 queries each)
     entries: dict[str, list[str]] = {}
     for ti_val in ["Identify the best match.", "Rank candidates by relevance."]:
-        rendered = baseline.derive(task_intent=ti_val).render()
+        rendered = baseline.derive_candidate(task_intent=ti_val).render()
         entries[rendered] = query_strings
     index = _build_index(entries)
 

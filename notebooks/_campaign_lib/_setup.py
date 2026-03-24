@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import extract_pipeline_config
 from api.services.project_store import ProjectStore
 
@@ -309,7 +309,7 @@ async def show_backend_status(client) -> dict:
 async def prepare_eval_context(
     svc: dict,
     train_data: list[dict] | None,
-) -> tuple[PromptState, list[dict], dict]:
+) -> tuple[OptSearchPoint, list[dict], dict]:
     """Load baseline prompt, set eval_data, check backend.
 
     Returns:

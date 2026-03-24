@@ -2,6 +2,8 @@
 import pytest
 
 from api.config.settings import load_variant_library
+from api.models.opt_search_point import OptSearchPoint
+from api.models.search_point import JobSearchPoint
 from api.services.prompt_eval import _error_category, _dominant_error_category
 from api.services.search.smart_search import (
     sensitivity_scan,
@@ -28,6 +30,19 @@ def _make_baseline_results(eval_data: list, hit_indices: set) -> list:
             "error": False,
         })
     return results
+
+
+def _make_scan_baseline(
+    instruction: str = "test",
+    persona: str = "default_persona",
+    pipeline_params: dict | None = None,
+    **kwargs,
+) -> tuple[JobSearchPoint, OptSearchPoint]:
+    """Build a (JobSearchPoint, OptSearchPoint) pair for scan tests."""
+    osp = OptSearchPoint(instruction=instruction, persona=persona, **kwargs)
+    pp = pipeline_params or {"steps": ["llm_ranking"]}
+    jsp = osp.to_job_search_point(base_pipeline_params=pp)
+    return jsp, osp
 
 
 @pytest.fixture
@@ -70,24 +85,14 @@ def test_profiles_from_rows():
 
 @pytest.mark.asyncio
 async def test_scan_rows_include_errors(scan_eval_mock):
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
-
-    baseline = PromptState(
-        instruction="test",
-        persona="default_persona",
-    )
-    sp = SearchPoint(
-        prompt_state=baseline,
-        pipeline_params={"steps": ["llm_ranking"]},
-    )
+    sp, osp = _make_scan_baseline()
+    baseline_rendered = sp.render()
 
     scan_variants = {"persona": ["default_persona", "expert"]}
     eval_data = _make_eval_data(4)
 
     async def _mock_eval(search_point, data, client, **kw):
-        ps = search_point.prompt_state
-        if ps.persona != baseline.persona:
+        if search_point.render() != baseline_rendered:
             return (
                 [{"hit": False, "query": d["query"]} for d in data],
                 {"accuracy": 0.0, "hits": 0, "total": 4, "errors": 2},
@@ -103,6 +108,7 @@ async def test_scan_rows_include_errors(scan_eval_mock):
 
     df, profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
+        baseline_opt=osp,
     )
 
     # Both baseline and perturbed rows should have 'errors' field
@@ -115,18 +121,7 @@ async def test_scan_rows_include_errors(scan_eval_mock):
 
 @pytest.mark.asyncio
 async def test_scan_skips_all_error_axis(scan_eval_mock):
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
-
-    baseline = PromptState(
-        instruction="test",
-        persona="default_persona",
-        task_intent="default_intent",
-    )
-    sp = SearchPoint(
-        prompt_state=baseline,
-        pipeline_params={"steps": ["llm_ranking"]},
-    )
+    sp, osp = _make_scan_baseline(task_intent="default_intent")
 
     scan_variants = {
         "persona": ["default_persona", "expert"],
@@ -135,21 +130,23 @@ async def test_scan_skips_all_error_axis(scan_eval_mock):
     eval_data = _make_eval_data(4)
 
     async def _mock_eval(search_point, data, client, **kw):
-        ps = search_point.prompt_state
-        # persona variants all error out
-        if ps.persona != baseline.persona:
+        rendered = search_point.render()
+        # persona variants all error out (rendered differs from baseline but NOT
+        # due to task_intent change)
+        if "expert" in rendered:
             return (
                 [{"hit": False, "query": d["query"]} for d in data],
                 {"accuracy": 0.0, "hits": 0, "total": 4, "errors": 4},
                 False,
             )
-        # task_intent works fine
-        if ps.task_intent != baseline.task_intent:
+        # task_intent variant works fine
+        if "classify" in rendered:
             return (
                 [{"hit": True, "query": d["query"]} for d in data],
                 {"accuracy": 0.75, "hits": 3, "total": 4, "errors": 0},
                 False,
             )
+        # baseline
         return (
             [{"hit": True, "query": d["query"]} for d in data],
             {"accuracy": 1.0, "hits": 4, "total": 4},
@@ -160,6 +157,7 @@ async def test_scan_skips_all_error_axis(scan_eval_mock):
 
     df, profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
+        baseline_opt=osp,
     )
 
     # Both axes should still be in the results (rows are preserved)
@@ -168,14 +166,7 @@ async def test_scan_skips_all_error_axis(scan_eval_mock):
 
 @pytest.mark.asyncio
 async def test_scan_aborts_on_baseline_all_errors(scan_eval_mock):
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
-
-    baseline = PromptState(instruction="test", persona="default_persona")
-    sp = SearchPoint(
-        prompt_state=baseline,
-        pipeline_params={"steps": ["llm_ranking"]},
-    )
+    sp, osp = _make_scan_baseline()
     scan_variants = {"persona": ["default_persona", "expert", "analyst"]}
     eval_data = _make_eval_data(4)
 
@@ -194,6 +185,7 @@ async def test_scan_aborts_on_baseline_all_errors(scan_eval_mock):
 
     df, profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
+        baseline_opt=osp,
     )
     assert df.empty
     assert profiles == []
@@ -202,14 +194,8 @@ async def test_scan_aborts_on_baseline_all_errors(scan_eval_mock):
 
 @pytest.mark.asyncio
 async def test_scan_aborts_after_consecutive_all_error_variants(scan_eval_mock):
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
-
-    baseline = PromptState(instruction="test", persona="default_persona")
-    sp = SearchPoint(
-        prompt_state=baseline,
-        pipeline_params={"steps": ["llm_ranking"]},
-    )
+    sp, osp = _make_scan_baseline()
+    baseline_rendered = sp.render()
     scan_variants = {"persona": ["default_persona", "expert", "analyst", "reviewer"]}
     eval_data = _make_eval_data(4)
 
@@ -218,8 +204,7 @@ async def test_scan_aborts_after_consecutive_all_error_variants(scan_eval_mock):
     async def _mock_eval(search_point, data, client, **kw):
         nonlocal call_count
         call_count += 1
-        ps = search_point.prompt_state
-        if ps.persona == baseline.persona:
+        if search_point.render() == baseline_rendered:
             # Baseline succeeds
             return (
                 [{"hit": True, "query": d["query"]} for d in data],
@@ -237,6 +222,7 @@ async def test_scan_aborts_after_consecutive_all_error_variants(scan_eval_mock):
 
     df, profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
+        baseline_opt=osp,
     )
     # 1 baseline + 2 variants (circuit breaker fires on 2nd all-error)
     assert call_count == 3
@@ -246,20 +232,13 @@ async def test_scan_aborts_after_consecutive_all_error_variants(scan_eval_mock):
 
 @pytest.mark.asyncio
 async def test_scan_baseline_row_reflects_actual_errors(scan_eval_mock):
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
-
-    baseline = PromptState(instruction="test", persona="default_persona")
-    sp = SearchPoint(
-        prompt_state=baseline,
-        pipeline_params={"steps": ["llm_ranking"]},
-    )
+    sp, osp = _make_scan_baseline()
+    baseline_rendered = sp.render()
     scan_variants = {"persona": ["default_persona", "expert"]}
     eval_data = _make_eval_data(4)
 
     async def _mock_eval(search_point, data, client, **kw):
-        ps = search_point.prompt_state
-        if ps.persona == baseline.persona:
+        if search_point.render() == baseline_rendered:
             return (
                 [{"hit": True, "query": d["query"]} for d in data],
                 {"accuracy": 0.75, "hits": 3, "total": 4, "errors": 1},
@@ -275,6 +254,7 @@ async def test_scan_baseline_row_reflects_actual_errors(scan_eval_mock):
 
     df, profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
+        baseline_opt=osp,
     )
     baseline_row = df[df["value_preview"] == "default_persona"].iloc[0]
     assert baseline_row["errors"] == 1
@@ -370,14 +350,7 @@ class TestDominantErrorCategory:
 @pytest.mark.asyncio
 async def test_scan_baseline_client_error_message(scan_eval_mock):
     """Baseline all-CLIENT-errors should mention config, not 'backend down'."""
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
-
-    baseline = PromptState(instruction="test", persona="default_persona")
-    sp = SearchPoint(
-        prompt_state=baseline,
-        pipeline_params={"steps": ["llm_ranking"]},
-    )
+    sp, osp = _make_scan_baseline()
     scan_variants = {"persona": ["default_persona", "expert"]}
     eval_data = _make_eval_data(4)
 
@@ -395,6 +368,7 @@ async def test_scan_baseline_client_error_message(scan_eval_mock):
 
     df, profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
+        baseline_opt=osp,
         progress_cb=events.append,
     )
     assert df.empty
@@ -408,9 +382,6 @@ async def test_scan_baseline_client_error_message(scan_eval_mock):
 @pytest.mark.asyncio
 async def test_batch_fast_abort_on_client_error(monkeypatch):
     """evaluate_prompt_batch should abort after first CLIENT error."""
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
-
     import api.services.prompt_eval as _pe
 
     call_count = 0
@@ -430,8 +401,9 @@ async def test_batch_fast_abort_on_client_error(monkeypatch):
 
     monkeypatch.setattr(_pe, "backend_reranker_evaluate", _counting_eval)
 
-    ps = PromptState(instruction="test")
-    sp = SearchPoint(prompt_state=ps)
+    sp = JobSearchPoint(
+        pipeline_params={"llm_ranking": {"prompt": "test"}},
+    )
     eval_data = _make_eval_data(10)
 
     results = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
@@ -448,9 +420,6 @@ async def test_batch_fast_abort_on_client_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_batch_server_errors_use_consecutive_threshold(monkeypatch):
     """Server errors should still require 3 consecutive failures before abort."""
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
-
     import api.services.prompt_eval as _pe
 
     call_count = 0
@@ -470,8 +439,9 @@ async def test_batch_server_errors_use_consecutive_threshold(monkeypatch):
 
     monkeypatch.setattr(_pe, "backend_reranker_evaluate", _server_error_eval)
 
-    ps = PromptState(instruction="test")
-    sp = SearchPoint(prompt_state=ps)
+    sp = JobSearchPoint(
+        pipeline_params={"llm_ranking": {"prompt": "test"}},
+    )
     eval_data = _make_eval_data(10)
 
     results = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)

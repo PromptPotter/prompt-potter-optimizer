@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from api.models.opt_search_point import OptSearchPoint
 from api.models.pipeline_schema import PipelineSchema
-from api.models.search_point import SearchPoint
+from api.models.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from api.services.prompt_eval import EvalContext
@@ -174,14 +174,14 @@ class _LoopState:
     """
 
     rounds: list[CycleRoundResult] = field(default_factory=list)
-    current_sp: SearchPoint | None = None
+    current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
     current_composite: float = 0.0
     current_results: list[dict] = field(default_factory=list)
     best_accuracy: float = 0.0
     best_composite: float = 0.0
     best_round: int = -1
-    best_sp: SearchPoint | None = None
+    best_sp: JobSearchPoint | None = None
     stall_count: int = 0
     eval_ctx: EvalContext | None = None
 

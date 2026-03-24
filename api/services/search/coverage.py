@@ -18,13 +18,13 @@ from typing import Any
 
 from api.models.hashing import HASH_TRUNCATE
 from api.models.pipeline_schema import is_result_step_compatible
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 from api.services.project_store import ProjectStore
 
 from api.config.settings import DEFAULT_DIAGNOSTIC_QUERIES
 
 if TYPE_CHECKING:
-    from api.models.search_point import SearchPoint
+    from api.models.search_point import JobSearchPoint
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,8 @@ def smart_search_plan_identity(
 def serialize_smart_search_plan(
     plan_id: str,
     config: dict,
-    baseline_ps: PromptState,
-    search_baseline_ps: PromptState,
+    baseline_opt: OptSearchPoint,
+    search_baseline_opt: OptSearchPoint,
     layer1_fields: dict,
     diagnostic: list,
     diag_summary: dict,
@@ -92,8 +92,8 @@ def serialize_smart_search_plan(
         "plan_id": plan_id,
         "status": "diagnostic_built",
         "config": config,
-        "baseline_ps": baseline_ps.model_dump(),
-        "search_baseline_ps": search_baseline_ps.model_dump(),
+        "baseline_ps": baseline_opt.model_dump(),
+        "search_baseline_ps": search_baseline_opt.model_dump(),
         "layer1_fields": layer1_fields,
         "diagnostic": diagnostic,
         "diag_summary": diag_summary,
@@ -107,8 +107,8 @@ def deserialize_smart_search_plan(plan_data: dict) -> dict:
         "plan_id": plan_data["plan_id"],
         "status": plan_data["status"],
         "config": plan_data.get("config", {}),
-        "baseline_ps": PromptState(**plan_data["baseline_ps"]),
-        "search_baseline_ps": PromptState(**plan_data["search_baseline_ps"]),
+        "baseline_ps": OptSearchPoint.from_prompt_fields(plan_data["baseline_ps"]),
+        "search_baseline_ps": OptSearchPoint.from_prompt_fields(plan_data["search_baseline_ps"]),
         "layer1_fields": plan_data.get("layer1_fields", {}),
         "diagnostic": plan_data.get("diagnostic", []),
         "diag_summary": plan_data.get("diag_summary", {}),
@@ -185,11 +185,11 @@ def diagnose_scan_variants(
     store: ProjectStore,
     backend_id: str,
     scan_variants: dict[str, list],
-    baseline_sp: "SearchPoint",
+    baseline_sp: "JobSearchPoint",
 ) -> dict:
     """Check scan variant coverage using sp_hash matching.
 
-    For each axis value, derives a perturbed SearchPoint, computes its
+    For each axis value, derives a perturbed JobSearchPoint, computes its
     sp_hash, and counts matching runs in the index.  Uses the same
     matching logic as the eval cache — no false positives from different
     pipeline configs.
@@ -310,7 +310,7 @@ def build_prompt_result_index(
 
 
 def assess_scan_coverage(
-    baseline_ps: PromptState,
+    baseline_opt: OptSearchPoint,
     variant_library: dict,
     diagnostic_queries: list,
     prompt_result_index: dict[str, dict[str, dict]],
@@ -320,13 +320,13 @@ def assess_scan_coverage(
 ) -> dict:
     """Check whether the historical index already covers the OAT scan needs.
 
-    For each prompt-field axis: derive perturbed PromptStates, render them,
+    For each prompt-field axis: derive perturbed OptSearchPoints, render them,
     hash, and check the index for cached diagnostic-query results.  Pipeline
     param axes always require fresh backend calls (same rendered prompt,
     different params -> index can't distinguish).
 
     Args:
-        baseline_ps: The search baseline PromptState.
+        baseline_opt: The search baseline OptSearchPoint.
         variant_library: Full variant library dict.
         diagnostic_queries: List of diagnostic query dicts (must have ``"query"``).
         prompt_result_index: Historical index from ``build_prompt_result_index``.
@@ -343,7 +343,7 @@ def assess_scan_coverage(
     n_diagnostic = len(diag_query_strings)
 
     # --- Baseline coverage ---
-    baseline_rendered = baseline_ps.render()
+    baseline_rendered = baseline_opt.render()
     baseline_rp_hash = hashlib.sha256(baseline_rendered.encode()).hexdigest()[:HASH_TRUNCATE]
     baseline_cached = prompt_result_index.get(baseline_rp_hash, {})
     baseline_hits = sum(1 for q in diag_query_strings if q in baseline_cached)
@@ -357,7 +357,7 @@ def assess_scan_coverage(
 
     # --- Prompt-field axes ---
     for axis_name, values in prompt_fields.items():
-        current_val = getattr(baseline_ps, axis_name, "")
+        current_val = getattr(baseline_opt, axis_name, "")
         non_baseline = [v for v in values if v != current_val]
         if not non_baseline:
             continue
@@ -368,7 +368,7 @@ def assess_scan_coverage(
         axis_needed = 0
 
         for value in non_baseline:
-            perturbed = baseline_ps.derive(**{axis_name: value})
+            perturbed = baseline_opt.derive_candidate(**{axis_name: value})
             rendered = perturbed.render()
             rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
             cached = prompt_result_index.get(rp_hash, {})
@@ -404,7 +404,7 @@ def assess_scan_coverage(
     base_params = dict(pipeline_params or {})
     target_steps = set(base_params.get("steps", []))
     baseline_rp_hash = hashlib.sha256(
-        baseline_ps.render().encode(),
+        baseline_opt.render().encode(),
     ).hexdigest()[:HASH_TRUNCATE]
     for axis_name, values in pipeline_param_defs.items():
         current_val = base_params.get(axis_name)
@@ -519,9 +519,9 @@ def build_data_inventory(
     Returns a dict with total counts, per-axis breakdown, and unmatched
     prompt counts (prompts in the index that don't belong to any plan).
     """
-    # 1. Collect PromptStates + their plan baselines from stored plans ------
-    #    rp_hash -> (PromptState, plan_baseline_ps)
-    rp_to_ps: dict[str, tuple[PromptState, PromptState]] = {}
+    # 1. Collect OptSearchPoints + their plan baselines from stored plans ----
+    #    rp_hash -> (OptSearchPoint, plan_baseline_opt)
+    rp_to_ps: dict[str, tuple[OptSearchPoint, OptSearchPoint]] = {}
     baseline_rp_hashes: set[str] = set()
 
     # Smart search plans

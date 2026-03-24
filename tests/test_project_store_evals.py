@@ -78,31 +78,28 @@ def test_upsert_replaces_same_hash(tmp_store):
 
 
 def test_build_dataset_run_data_includes_source():
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
+    from api.models.opt_search_point import OptSearchPoint
     from api.services.prompt_eval import build_dataset_run_data
 
-    ps = PromptState(instruction="test prompt")
-    sp = SearchPoint(prompt_state=ps, model="model", temperature=0.0)
+    osp = OptSearchPoint(instruction="test prompt")
+    sp = osp.to_job_search_point(model="model", temperature=0.0)
     data = build_dataset_run_data(
         "baseline_aabb", "Baseline", "aabb1122", sp,
         {"hits": 1, "total": 1, "accuracy": 1.0, "errors": 0}, [],
         source="baseline",
     )
     assert data["source"] == "baseline"
-    assert data["prompt_state_id"] == ps.id
+    assert data["prompt_state_id"] == sp.sp_hash()
     assert data["model"] == "model"
     assert data["temperature"] == 0.0
 
 
 def test_build_dataset_run_data_includes_pipeline_params():
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
+    from api.models.search_point import JobSearchPoint
     from api.services.prompt_eval import build_dataset_run_data
 
-    ps = PromptState(instruction="test prompt")
-    pp = {"steps": ["llm_ranking"], "ranking_temperature": 0.5}
-    sp = SearchPoint(prompt_state=ps, pipeline_params=pp)
+    pp = {"llm_ranking": {"prompt": "test prompt"}, "ranking_temperature": 0.5}
+    sp = JobSearchPoint(pipeline_params=pp)
     data = build_dataset_run_data(
         "run_pp", "PP Test", "hash1234", sp,
         {"hits": 1, "total": 1, "accuracy": 1.0, "errors": 0}, [],
@@ -111,12 +108,10 @@ def test_build_dataset_run_data_includes_pipeline_params():
 
 
 def test_build_dataset_run_data_omits_empty_pipeline_params():
-    from api.models.prompt_state import PromptState
-    from api.models.search_point import SearchPoint
+    from api.models.search_point import JobSearchPoint
     from api.services.prompt_eval import build_dataset_run_data
 
-    ps = PromptState(instruction="test prompt")
-    sp = SearchPoint(prompt_state=ps)
+    sp = JobSearchPoint()
     data = build_dataset_run_data(
         "run_npp", "No PP", "hash5678", sp,
         {"hits": 1, "total": 1, "accuracy": 1.0, "errors": 0}, [],

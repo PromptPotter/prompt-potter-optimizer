@@ -225,7 +225,7 @@ def test_finalize_obs_with_explicit_obs(tmp_path):
 async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
     from api.services.campaign.models import CycleConfig
     from api.services.campaign.feedback_cycle import run_feedback_cycle
-    from api.models.prompt_state import PromptState
+    from api.models.opt_search_point import OptSearchPoint
     from api.config import settings as _settings_mod
 
     apply_llm_mock(monkeypatch)
@@ -250,7 +250,7 @@ async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
     result = await run_feedback_cycle(
         instruction="Test.", eval_data=eval_data, config=config,
         langfuse_session_id="test_session_123",
-        baseline_prompt_state=PromptState(instruction="Test.").model_dump(),
+        baseline_prompt_state=OptSearchPoint(instruction="Test.").model_dump(),
         baseline_accuracy=0.0, baseline_results=[],
     )
 

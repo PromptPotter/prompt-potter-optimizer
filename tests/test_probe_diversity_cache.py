@@ -230,12 +230,13 @@ class TestEvaluatePromptBatchCaching:
     @pytest.mark.asyncio
     async def test_cached_queries_skip_backend(self):
         from unittest.mock import AsyncMock
-        from api.models.prompt_state import PromptState
-        from api.models.search_point import SearchPoint
+        from api.models.search_point import JobSearchPoint
         from api.services.prompt_eval import evaluate_prompt_batch
 
-        ps = PromptState(instruction="test")
-        sp = SearchPoint(prompt_state=ps, model="m1", temperature=0.0)
+        sp = JobSearchPoint(
+            model="m1", temperature=0.0,
+            pipeline_params={"llm_ranking": {"prompt": "test"}},
+        )
 
         backend = AsyncMock()
         backend.run_match.return_value = {

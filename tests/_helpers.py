@@ -6,7 +6,7 @@ that test modules can import directly.
 
 import hashlib
 
-from api.models.prompt_state import PromptState
+from api.models.opt_search_point import OptSearchPoint
 from api.services.llm_client import MockLLMClient
 from api.models.hashing import HASH_TRUNCATE
 
@@ -28,12 +28,11 @@ def apply_grow_mock(monkeypatch):
     """Mock l1_generate to return deterministic variants (as dicts)."""
     async def mock_generate(osp, accuracy, results, n, creativity,
                             llm_client, **kwargs):
-        base_ps = PromptState(**osp.prompt_field_dict())
         return [
-            base_ps.derive(
+            osp.derive_candidate(
                 instruction=f"variant_{i}_acc{accuracy:.0%}",
                 changes_description=f"gen_{i}",
-            ).model_dump()
+            ).prompt_field_dict()
             for i in range(n)
         ]
 
@@ -46,7 +45,7 @@ def apply_grow_mock(monkeypatch):
 def apply_eval_mock(monkeypatch, round_hits=None):
     """Mock evaluate_prompt_cached with configurable per-round hit counts.
 
-    The first positional arg is now a ``SearchPoint`` (not a raw PromptState).
+    The first positional arg is now a ``SearchPoint`` (not a raw OptSearchPoint).
     Returns a ``call_count`` list ([int]) so callers can track invocations.
     """
     if round_hits is None:
@@ -299,8 +298,8 @@ def rp_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:HASH_TRUNCATE]
 
 
-def make_baseline_ps(**overrides) -> PromptState:
-    """Build a baseline PromptState with sensible defaults."""
+def make_baseline_osp(**overrides) -> OptSearchPoint:
+    """Build a baseline OptSearchPoint with sensible defaults."""
     defaults = {
         "instruction": "Rank the candidates.",
         "persona": "",
@@ -309,7 +308,7 @@ def make_baseline_ps(**overrides) -> PromptState:
         "answer_format": "",
     }
     defaults.update(overrides)
-    return PromptState(**defaults)
+    return OptSearchPoint(**defaults)
 
 
 def make_dataset_run(
@@ -393,7 +392,7 @@ async def run_simple_cycle(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=PromptState(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )

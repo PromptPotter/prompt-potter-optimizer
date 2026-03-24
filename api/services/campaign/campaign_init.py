@@ -19,7 +19,7 @@ from api.config.settings import DATASET_NAME
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
-    from api.models.prompt_state import PromptState
+    from api.models.opt_search_point import OptSearchPoint
     from api.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -270,7 +270,7 @@ async def _verify_matches_liveness(
 
 
 async def run_baseline_eval(
-    baseline: "PromptState",
+    baseline: "OptSearchPoint",
     eval_data: list,
     backend_client: BackendClient,
     pipeline_params: dict | None = None,
@@ -286,7 +286,7 @@ async def run_baseline_eval(
     """Evaluate baseline prompt and build initial campaign_rounds list.
 
     Args:
-        baseline: Baseline PromptState.
+        baseline: Baseline OptSearchPoint.
         eval_data: Evaluation data. If empty and store+experiment_id are
             provided, attempts to load from store.
         backend_client: BackendClient for evaluation.
@@ -305,7 +305,6 @@ async def run_baseline_eval(
     Raises:
         RuntimeError: If no evaluation data is available.
     """
-    from api.models.search_point import SearchPoint
     from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
 
     if not eval_data and store and experiment_id:
@@ -338,11 +337,10 @@ async def run_baseline_eval(
         except Exception:
             logger.warning("Dataset registration in run_baseline_eval failed", exc_info=True)
 
-    sp = SearchPoint(
-        prompt_state=baseline,
+    sp = baseline.to_job_search_point(
         model=model,
         temperature=temperature,
-        pipeline_params=pipeline_params,
+        base_pipeline_params=pipeline_params,
     )
     ctx = EvalContext(
         backend_client=backend_client,

@@ -1,33 +1,36 @@
 """OptSearchPoint — the optimizer's full working state.
 
-The more capable twin of ``SearchPoint``. Where SearchPoint is a flat,
-frozen, content-hashable target-layer specification (model + temperature +
-pipeline_params), OptSearchPoint holds everything the optimizer needs:
-prompt decomposition fields, L2/L3 state, and optimization memory.
+Inherits from ``SearchPoint`` (the shared base for all pipeline search
+points). Where ``JobSearchPoint`` is a flat, frozen, content-hashable
+target-layer specification (model + temperature + pipeline_params),
+OptSearchPoint holds everything the optimizer needs: prompt decomposition
+fields, L2/L3 state, and optimization memory.
 
-The rendering bridge: ``render_prompt()`` assembles prompt fields into a
-string; ``to_search_point()`` projects into a SearchPoint for evaluation
+The rendering bridge: ``render()`` assembles prompt fields into a string;
+``to_job_search_point()`` projects into a JobSearchPoint for evaluation
 by injecting the rendered prompt into ``pipeline_params``.
 
 Two-layer tracing:
-  Target layer:    SearchPoint  → content_hash → dataset_runs/
-  Optimizer layer: OptSearchPoint → model_dump() → campaigns/{id}/trial.json
-
-L4 meta-optimization searches over OptSearchPoints, just as L1-L3 produce
-SearchPoints for evaluation.
+  Target layer:    JobSearchPoint  → content_hash → dataset_runs/
+  Optimizer layer: OptSearchPoint  → model_dump() → campaigns/{id}/trial.json
 
 ADR-8: Mutable (not frozen). Updated in-place during the feedback cycle,
 serialized via ``model_dump()`` at checkpoint time.
 """
 from __future__ import annotations
 
+import hashlib
 import re
+import uuid
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from api.models.search_point import SearchPoint
-
 from pydantic import BaseModel, Field
+
+from api.models.search_point import SearchPoint
+
+if TYPE_CHECKING:
+    from api.models.search_point import JobSearchPoint
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +45,7 @@ class FewShotExample(BaseModel):
     explanation: str | None = None
 
 
-# Fields that render_prompt() assembles into the prompt string.
+# Fields that render() assembles into the prompt string.
 PROMPT_STRING_FIELDS: list[str] = [
     "persona",
     "task_intent",
@@ -52,17 +55,43 @@ PROMPT_STRING_FIELDS: list[str] = [
     "answer_format",
 ]
 
+# Layer field mapping (absorbed from PromptState)
+LAYER_FIELDS: dict[str, list[str]] = {
+    "generate": [
+        "persona",
+        "task_intent",
+        "problem_description",
+        "instruction",
+        "thinking_style",
+        "answer_format",
+        "few_shot_examples",
+    ],
+    "refine_context": ["optimizer_params"],
+    "modify_plan": ["plan"],
+}
+
+# Layer 1 string fields (all generate fields except few_shot_examples).
+LAYER1_STRING_FIELDS = [f for f in LAYER_FIELDS["generate"] if f != "few_shot_examples"]
+
 
 # ---------------------------------------------------------------------------
 # OptSearchPoint
 # ---------------------------------------------------------------------------
 
-class OptSearchPoint(BaseModel):
+class OptSearchPoint(SearchPoint):
     """Optimizer-level search point — the optimizer's full working state.
 
     Persisted in trial checkpoints. Enables L4 to correlate optimizer
     configuration with target-pipeline evaluation outcomes.
     """
+
+    # -- Lineage (absorbed from PromptState) --------------------------------
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    parent_id: str | None = None
+    changes_description: str = ""
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
     # -- Prompt decomposition (L1 working representation) ------------------
     persona: str = ""
@@ -118,9 +147,9 @@ class OptSearchPoint(BaseModel):
         description="One-shot flag — True after backend warning has been emitted.",
     )
 
-    # -- Rendering ---------------------------------------------------------
+    # -- SearchPoint interface ---------------------------------------------
 
-    def render_prompt(self) -> str:
+    def render(self) -> str:
         """Assemble prompt decomposition fields into a prompt string.
 
         Skips empty fields. Sections separated by double newlines.
@@ -142,13 +171,20 @@ class OptSearchPoint(BaseModel):
 
         return "\n\n".join(parts)
 
+    def point_hash(self) -> str:
+        """Identity hash for this optimizer search point."""
+        blob = self.model_dump_json()
+        return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+    # -- Rendering helpers -------------------------------------------------
+
     def compile_prompt(self, **kwargs: str) -> str:
         """Render and substitute ``{{variable}}`` placeholders.
 
         Uses Langfuse-compatible double-brace syntax. Raises KeyError if
         template-defined variables remain unsubstituted.
         """
-        text = self.render_prompt()
+        text = self.render()
         expected = set(re.findall(r"\{\{(\w+)\}\}", text))
         for key, value in kwargs.items():
             text = text.replace("{{" + key + "}}", str(value))
@@ -157,31 +193,67 @@ class OptSearchPoint(BaseModel):
             raise KeyError(f"Unsubstituted template variables: {sorted(missing)}")
         return text
 
-    def to_search_point(
+    # -- Projection to target layer ----------------------------------------
+
+    def to_job_search_point(
         self,
         model: str = "",
         temperature: float = 0.0,
         base_pipeline_params: dict | None = None,
         *,
         prompt_node: str = "llm_ranking",
-    ) -> "SearchPoint":
-        """Project into a SearchPoint for target-layer evaluation.
+    ) -> "JobSearchPoint":
+        """Project into a JobSearchPoint for target-layer evaluation.
 
         Renders prompt fields → injects into pipeline_params → creates
-        a frozen SearchPoint. The ``prompt_node`` param controls which
+        a frozen JobSearchPoint. The ``prompt_node`` param controls which
         node receives the rendered prompt (default: llm_ranking).
         """
-        from api.models.search_point import SearchPoint
+        from api.models.search_point import JobSearchPoint
 
         pp = dict(base_pipeline_params or {})
-        rendered = self.render_prompt()
+        rendered = self.render()
         if rendered:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
-        return SearchPoint(
+        return JobSearchPoint(
             model=model,
             temperature=temperature,
             pipeline_params=pp,
         )
+
+    # -- Candidate derivation (replaces PromptState.derive()) --------------
+
+    def derive_candidate(self, **changes: Any) -> OptSearchPoint:
+        """Create a child OptSearchPoint with prompt field modifications.
+
+        Sets parent_id to this instance's id. Generates a new id/timestamp.
+        Only copies prompt decomposition + L2/L3 state fields — does NOT
+        copy optimization memory (critique, escalation_journal, etc.).
+        """
+        data: dict[str, Any] = {}
+        # Copy prompt decomposition fields
+        for f in PROMPT_STRING_FIELDS:
+            data[f] = changes.pop(f, getattr(self, f))
+        # few_shot_examples
+        fse = changes.pop("few_shot_examples", None)
+        if fse is not None:
+            if fse and isinstance(fse[0], dict):
+                fse = [FewShotExample(**ex) for ex in fse]
+            data["few_shot_examples"] = fse
+        else:
+            data["few_shot_examples"] = [ex.model_copy() for ex in self.few_shot_examples]
+        # L2/L3 state
+        data["optimizer_params"] = changes.pop("optimizer_params", dict(self.optimizer_params))
+        data["task_context"] = changes.pop("task_context", dict(self.task_context))
+        data["plan"] = changes.pop("plan", self.plan)
+        # Lineage
+        data["parent_id"] = self.id
+        data["changes_description"] = changes.pop("changes_description", "")
+        # Any remaining changes
+        data.update(changes)
+        return OptSearchPoint(**data)
+
+    # -- Field extraction --------------------------------------------------
 
     def prompt_field_dict(self) -> dict[str, Any]:
         """Return prompt decomposition fields as a dict (for L1 candidate generation)."""
@@ -197,6 +269,7 @@ class OptSearchPoint(BaseModel):
     @classmethod
     def from_prompt_fields(cls, fields: dict[str, Any], **kwargs: Any) -> OptSearchPoint:
         """Create an OptSearchPoint from a dict of prompt fields + optional extra state."""
+        fields = dict(fields)  # don't mutate caller's dict
         fse = fields.pop("few_shot_examples", [])
         if fse and isinstance(fse[0], dict):
             fse = [FewShotExample(**ex) for ex in fse]

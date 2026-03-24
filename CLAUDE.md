@@ -26,7 +26,7 @@ Two entry points (FastAPI API + Jupyter notebook), one service core in `api/serv
 
 **Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided feedback cycle (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup.
 
-**Two-layer tracing:** Target layer (SearchPoint → dataset_runs/) and optimizer layer (OptSearchPoint → campaign trials). Both independently reconstructable from disk.
+**Two-layer tracing:** Target layer (JobSearchPoint → dataset_runs/) and optimizer layer (OptSearchPoint → campaign trials). Both independently reconstructable from disk.
 
 **Pipeline composability:** `pipeline_params` (nested dicts keyed by node name) throughout PromptPotter. `node_config` only at the TermNorm wire boundary.
 
@@ -36,19 +36,26 @@ See [`docs/architecture.md`](docs/architecture.md) for diagrams, caching, pipeli
 
 All services follow: `f(SearchPoint, PipelineSchema, eval_data) → scores`.
 
-### SearchPoint (`api/models/search_point.py`)
+### SearchPoint hierarchy (`api/models/`)
 
-Flat, frozen, content-hashable target evaluation specification. Fields: `model` + `temperature` + `pipeline_params`. The rendered prompt lives inside `pipeline_params` as a node config value (e.g., `{"llm_ranking": {"prompt": "..."}}`). The lightweight twin. Methods: `render()`, `content_hash(eval_data)`, `sp_hash()`, `derive()`.
+```
+SearchPoint (base)           — abstract base, "a point in a search space"
+    ├── JobSearchPoint       — user's job: model + temp + pipeline_params (frozen)
+    └── OptSearchPoint       — optimizer state: prompt fields + L2/L3 + memory (mutable)
+```
 
-### OptSearchPoint (`api/models/opt_search_point.py`)
+**SearchPoint** (`api/models/search_point.py`) — abstract base class defining the search space contract.
 
-The more capable twin — full optimizer working state:
+**JobSearchPoint** (`api/models/search_point.py`) — flat, frozen, content-hashable target evaluation specification. Fields: `model` + `temperature` + `pipeline_params`. The rendered prompt lives inside `pipeline_params` as a node config value (e.g., `{"llm_ranking": {"prompt": "..."}}`). Methods: `render()`, `content_hash(eval_data)`, `sp_hash()`, `derive()`.
+
+**OptSearchPoint** (`api/models/opt_search_point.py`) — inherits from SearchPoint. Full optimizer working state:
+- **Lineage**: `id`, `parent_id`, `changes_description`
 - **Prompt decomposition** (L1): `persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`, `few_shot_examples`
 - **L2 state**: `optimizer_params`, `task_context`
 - **L3 state**: `plan`
 - **Optimization memory**: `critique_text`, `critique`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`, `content_hashes`
 
-Key methods: `render_prompt()` assembles prompt fields into a string. `to_search_point()` projects into a SearchPoint by injecting the rendered prompt into `pipeline_params`. `compile_prompt()` substitutes `{{variables}}`.
+Key methods: `render_prompt()` assembles prompt fields into a string. `to_job_search_point()` projects into a JobSearchPoint by injecting the rendered prompt into `pipeline_params`. `derive_candidate()` creates child points. `compile_prompt()` substitutes `{{variables}}`.
 
 ### PipelineSchema / PipelineNode (`api/models/pipeline_schema.py`)
 

@@ -10,9 +10,9 @@ Backends have monolithic prompts — one big string. PromptPotter decomposes tha
 
 This is the core architectural move. It turns one opaque prompt into a combinatorial search space where sensitivity scan can measure each axis independently and the feedback cycle can mutate specific fields. Without decomposition, optimization is blind rewriting of a monolith.
 
-## SearchPoint as atomic unit
+## SearchPoint hierarchy as atomic unit
 
-`SearchPoint` bundles `prompt_state` + `model` + `temperature` + `pipeline_params` into one frozen object. All mutations via `.derive(**changes)`. Content-hashable, prevents accidental mutation of shared state.
+`SearchPoint` is the abstract base class. `JobSearchPoint` bundles `model` + `temperature` + `pipeline_params` into one frozen object for target evaluation. `OptSearchPoint` extends SearchPoint with prompt decomposition fields, L2/L3 state, and optimization memory. `to_job_search_point()` projects optimizer state into a JobSearchPoint for evaluation. Content-hashable, prevents accidental mutation of shared state.
 
 ## Prompt alias groups
 

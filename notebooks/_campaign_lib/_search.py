@@ -7,7 +7,7 @@ import json
 import logging
 from pathlib import Path
 from api.models.pipeline_schema import PipelineSchema
-from api.models.prompt_state import LAYER1_STRING_FIELDS
+from api.models.opt_search_point import LAYER1_STRING_FIELDS, OptSearchPoint
 
 from api.config.settings import load_variant_library_rich
 from api.services.search import (
@@ -202,10 +202,11 @@ async def prepare_scan_baseline(
     diagnostic with scan variant coverage via prompt alias groups.
 
     Returns:
-        SearchPoint ready for scanning.
+        (baseline_jsp, search_baseline, scan_diag) — a JobSearchPoint for
+        evaluation, the OptSearchPoint for display/prompt fields, and
+        scan variant diagnosis dict.
     """
     import hashlib
-    from api.models.search_point import SearchPoint
 
     # svc shorthand: extract store/backend_id if provided
     if svc is not None:
@@ -236,7 +237,7 @@ async def prepare_scan_baseline(
         force=force_restructure,
     )
 
-    search_baseline = baseline.derive(
+    search_baseline = baseline.derive_candidate(
         **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
         changes_description="search_baseline (decomposed)",
     )
@@ -254,11 +255,10 @@ async def prepare_scan_baseline(
           f"(render: {len(search_baseline.render())} chars)")
 
     # Historical data diagnostic via sp_hash matching
-    baseline_sp = SearchPoint(
-        prompt_state=search_baseline,
+    baseline_sp = search_baseline.to_job_search_point(
         model=model,
         temperature=temperature,
-        pipeline_params=pipeline_params,
+        base_pipeline_params=pipeline_params,
     )
 
     if can_cache:
@@ -287,7 +287,7 @@ async def prepare_scan_baseline(
             prompt_index, scan_diagnosis=scan_diag,
         )
 
-    return baseline_sp, scan_diag
+    return baseline_sp, search_baseline, scan_diag
 
 
 # ── Coverage & data inventory ────────────────────────────────────────────
@@ -909,6 +909,7 @@ async def sensitivity_scan(
     eval_data: list,
     backend_client=None,
     *,
+    baseline_opt: OptSearchPoint | None = None,
     sample_size: int = 0,
     store=None,
     backend_id: str = "",
@@ -935,14 +936,15 @@ async def sensitivity_scan(
 
     # Print scan overview
     print("Running sensitivity scan...")
-    print("\n  Baseline field values:")
-    for field in LAYER1_STRING_FIELDS:
-        val = getattr(baseline.prompt_state, field, "")
-        if val:
-            print(f"    {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
-        else:
-            print(f"    {field}: (empty)")
-    print()
+    if baseline_opt is not None:
+        print("\n  Baseline field values:")
+        for field in LAYER1_STRING_FIELDS:
+            val = getattr(baseline_opt, field, "")
+            if val:
+                print(f"    {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
+            else:
+                print(f"    {field}: (empty)")
+        print()
 
     n_axes = sum(1 for v in scan_variants.values() if len(v) > 1)
     n_configs = sum(len(v) for v in scan_variants.values() if len(v) > 1)
@@ -968,6 +970,7 @@ async def sensitivity_scan(
         print("  Evaluating baseline...")
         df, profiles = await _sensitivity_scan(
             baseline, scan_variants, eval_data, backend_client,
+            baseline_opt=baseline_opt,
             sample_size=sample_size,
             store=store, backend_id=backend_id,
             pipeline_schema=pipeline_schema,
@@ -1271,10 +1274,8 @@ def select_scan_winner_notebook(
     else:
         print("No axes improved over baseline -- using baseline as-is.")
 
-    ps = best_sp.prompt_state
-    if ps.id != baseline.prompt_state.id:
-        print(f"\nComposed PromptState: {ps.id[:12]} "
-              f"(parent: {ps.parent_id[:12] if ps.parent_id else 'root'})")
+    if best_sp.sp_hash() != baseline.sp_hash():
+        print(f"\nComposed winner: sp_hash={best_sp.sp_hash()[:12]}")
     if best_sp.pipeline_params != baseline.pipeline_params:
         print(f"Pipeline params updated: {best_sp.pipeline_params}")
 
@@ -1323,11 +1324,15 @@ def seed_campaign_from_scan(
         scan_baseline_acc = baseline_rows.iloc[0]["accuracy"]
 
     bl = campaign_rounds[0] if campaign_rounds else {}
-    ps = best_sp.prompt_state
+    # Create an OptSearchPoint for campaign_rounds lineage (from rendered prompt)
+    search_opt = OptSearchPoint(
+        instruction=best_sp.render(),
+        changes_description=f"scan_winner (sp_hash={best_sp.sp_hash()[:12]})",
+    )
     campaign_rounds.append({
         "round": "search",
-        "label": f"smart_search ({ps.changes_description or ps.id[:12]})",
-        "prompt_state": ps,
+        "label": f"smart_search ({search_opt.changes_description or search_opt.id[:12]})",
+        "prompt_state": search_opt,
         "accuracy": bl.get("accuracy", scan_baseline_acc),
         "hits": bl.get("hits", 0),
         "total": bl.get("total", 0),
