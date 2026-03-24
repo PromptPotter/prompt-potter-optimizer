@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from api.models.prompt_state import PromptState
-from api.services.backend_client import load_pipeline_config
+from api.services.backend_client import extract_pipeline_config
 from api.services.project_store import ProjectStore
 
 from api.services.campaign.campaign_init import (
@@ -171,7 +171,7 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
     if pipeline_schema:
         all_steps = [s.name for s in pipeline_schema.steps]
     else:
-        pipeline_config = load_pipeline_config(svc["exp_data"])
+        pipeline_config = extract_pipeline_config(svc["exp_data"])
         all_steps = [s["name"] for s in pipeline_config["steps"]]
 
     active_steps = [s for s in all_steps if s not in (exclude or [])]

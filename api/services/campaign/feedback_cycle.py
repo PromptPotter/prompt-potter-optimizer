@@ -39,7 +39,7 @@ from api.services.campaign.critique_stats import (
     CritiqueContext, update_query_tracker, warning_summary,
 )
 # l1_generate / l1_evaluate stay as lazy imports inside their call sites
-# so that test monkeypatching on api.services.prompt_optimizer takes effect.
+# so that test monkeypatching on api.services.l1_optimizer takes effect.
 from api.services.obs.step_tracer import observed_step
 from api.services.prompt_eval import EvalContext, compute_composite_score
 from api.services.query_utils import subsample_queries
@@ -367,7 +367,7 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    from api.services.prompt_optimizer import l1_generate
+    from api.services.l1_optimizer import l1_generate
 
     client = _llm_client.get_llm_client(config.provider)
     async with observed_step(f"l1_generate_r{round_num}", "llm/meta",
@@ -431,7 +431,7 @@ async def _evaluate_candidates(
         "label": baseline_label,
     }
 
-    from api.services.prompt_optimizer import l1_evaluate
+    from api.services.l1_optimizer import l1_evaluate
 
     async with observed_step(f"l1_evaluate_r{round_num}", "evaluation",
                              obs=obs, trace_id=trace_id, obs_type="span"):

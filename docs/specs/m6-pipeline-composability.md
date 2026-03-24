@@ -323,7 +323,7 @@ The 0.9/0.1 split ensures accuracy dominates while breaking ties with recall sig
 | What | Where | Change |
 |------|-------|--------|
 | `compute_composite_score()` | `api/services/prompt_eval.py` | New function: takes results list, returns `{accuracy, token_recall, composite}` |
-| Winner selection | `api/services/prompt_optimizer.py` | `_select_round_winner()` uses composite instead of raw accuracy |
+| Winner selection | `api/services/l1_optimizer.py` | `_select_round_winner()` uses composite instead of raw accuracy |
 | Sensitivity scan | `api/services/search/smart_search.py` | Axis ranking uses composite |
 | Rank display | `notebooks/_campaign_lib.py` | `_fmt_query_result()` shows compact `rank/total` for misses (replaces verbose `(#3 of 15)` format) |
 | Notebook display | `notebooks/_campaign_lib.py` | Show composite alongside accuracy |
@@ -451,7 +451,7 @@ Wave 6 resolves chokepoint #7 ("Hit@1 exact match" → `schema.eval_config`). Th
 |----|-----------|
 | 6.8 | `api/models/pipeline_schema.py` (PipelineStep fields), `api/services/pipeline_discovery.py` (parse_pipeline_response) |
 | 6.9 | `api/services/prompt_eval.py` (compute_accuracy, compute_composite_score from Wave 5), `api/services/search/smart_search.py` (axis ranking) |
-| 6.10 | `api/services/prompt_optimizer.py` (_select_round_winner), `api/services/campaign/feedback_cycle.py` (winner selection), `notebooks/_campaign_lib.py` (display) |
+| 6.10 | `api/services/l1_optimizer.py` (_select_round_winner), `api/services/campaign/feedback_cycle.py` (winner selection), `notebooks/_campaign_lib.py` (display) |
 
 ---
 

@@ -82,7 +82,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
     apply_eval_mock(monkeypatch, round_hits=[1])
 
     # Wrap l1_evaluate to force next_action="stop"
-    from api.services.prompt_optimizer import l1_evaluate
+    from api.services.l1_optimizer import l1_evaluate
 
     original_eval = l1_evaluate
 
@@ -92,7 +92,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
         return result
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.l1_evaluate",
+        "api.services.l1_optimizer.l1_evaluate",
         patched_eval,
     )
 
@@ -158,7 +158,7 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.l1_generate",
+        "api.services.l1_optimizer.l1_generate",
         mock_generate,
     )
 
@@ -590,7 +590,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.l1_generate",
+        "api.services.l1_optimizer.l1_generate",
         mock_generate,
     )
     apply_eval_mock(monkeypatch, round_hits=[2, 2])

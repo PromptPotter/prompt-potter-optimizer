@@ -140,7 +140,7 @@ def show_feedback_preflight(
 def _print_preflight_sections(config, bl, eval_data,
                               *, campaign_config=None, scan_context=None):
     """Print three-section preflight walkthrough."""
-    from api.services.prompt_optimizer import MAX_FAILURES_GENERATE
+    from api.services.l1_optimizer import MAX_FAILURES_GENERATE
 
     baseline_acc = bl["baseline_acc"]
     instruction = bl["instruction"]

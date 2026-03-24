@@ -222,4 +222,4 @@ That's it. `DegradationCheck` counts it, critique shows `ANOMALY FLAGS`, escalat
 | `campaign/feedback_cycle.py` | Orchestration, escalation journal, critique threading |
 | `campaign/layer_transitions.py` | L2 (context + meta-settings), L3 (plan) |
 | `prompt_eval.py` | `evaluate_prompt_batch` (per-query checks), `_extract_pipeline_data` |
-| `prompt_optimizer.py` | L1 generation (sole pipeline_params decider) |
+| `l1_optimizer.py` | L1 generation (sole pipeline_params decider) |

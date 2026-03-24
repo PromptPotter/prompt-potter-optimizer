@@ -18,7 +18,7 @@ from api.services.prompt_eval import load_baseline_prompt
 from api.services.search.coverage import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
 )
-from api.services.prompt_optimizer import l1_generate as generate_candidates
+from api.services.l1_optimizer import l1_generate as generate_candidates
 from api.services.search import (
     load_eval_dataset as _load_eval_dataset,
 )

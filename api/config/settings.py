@@ -16,10 +16,6 @@ class Settings(BaseSettings):
     # Environment
     ENVIRONMENT: str = "development"
 
-    # API Configuration — consumed by docker/entrypoint.sh, not by Python
-    API_HOST: str = "0.0.0.0"
-    API_PORT: int = 8001
-
     # CORS - stored as comma-separated string, parsed via property
     ALLOWED_ORIGINS: str = "*"
 

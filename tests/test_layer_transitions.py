@@ -279,7 +279,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.l1_generate",
+        "api.services.l1_optimizer.l1_generate",
         mock_generate,
     )
 
@@ -335,7 +335,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.l1_generate",
+        "api.services.l1_optimizer.l1_generate",
         mock_generate,
     )
 

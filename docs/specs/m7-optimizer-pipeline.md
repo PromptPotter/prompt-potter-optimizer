@@ -145,7 +145,7 @@ Generates N candidate PromptState variants via LLM meta-prompt.
 
 **Config defaults:** `temperature: 0.7`, `max_tokens: 8192`, `output_format: "json"`, `prompt_family: "meta_scan_aware"`, `context_sources: ["scan_context", "critique", "task_context", "escalation_journal"]`, `response_parser: "candidate_list"`
 
-**Implementation:** `l1_generate()` in `api/services/prompt_optimizer.py`. Assembles a meta-prompt from scan analytics, critique, task context, L2 directive, thinking styles, escalation journal, and warning inventory. Returns a list of candidate dicts (PromptState dumps with optional `__pipeline_params_override__`).
+**Implementation:** `l1_generate()` in `api/services/l1_optimizer.py`. Assembles a meta-prompt from scan analytics, critique, task context, L2 directive, thinking styles, escalation journal, and warning inventory. Returns a list of candidate dicts (PromptState dumps with optional `__pipeline_params_override__`).
 
 **Key inputs:** `current_ps`, `current_accuracy`, `current_results`, `n_variants`, `creativity`, `scan_context`, `critique_text`, `thinking_styles`, `escalation_journal`, `task_context`, `warning_inventory`, `l2_directive`, `is_probe_round`
 
@@ -157,7 +157,7 @@ Evaluates candidates via backend `/matches` endpoint, selects winner, runs criti
 
 **Config defaults:** `improvement_threshold: 0.01`
 
-**Implementation:** `l1_evaluate()` in `api/services/prompt_optimizer.py` (winner selection) + `_evaluate_candidates()` in `api/services/campaign/feedback_cycle.py` (orchestration wrapper that adds critique + thinking style sampling).
+**Implementation:** `l1_evaluate()` in `api/services/l1_optimizer.py` (winner selection) + `_evaluate_candidates()` in `api/services/campaign/feedback_cycle.py` (orchestration wrapper that adds critique + thinking style sampling).
 
 **Key inputs:** `candidates`, `round_eval_data`, `current_best` (accuracy + prompt_state + results), `eval_ctx`, `improvement_threshold`, `escalation_checks`
 
@@ -246,7 +246,7 @@ async def llm_call(
 `get_node_config(node_name)` loads a node's config dict from `optimizer_pipeline.json` (cached after first call). All optimizer nodes use this instead of calling `chat()` directly.
 
 **Callers:**
-- `l1_generate()` in `prompt_optimizer.py` — `llm_call(..., config=get_node_config("l1_generate"), temperature=creativity)`
+- `l1_generate()` in `l1_optimizer.py` — `llm_call(..., config=get_node_config("l1_generate"), temperature=creativity)`
 - `CritiqueAgent.run()` in `critique.py` — `llm_call(..., config=get_node_config("critique"))`
 - `refine_context()` in `layer_transitions.py` — `llm_call(..., config=get_node_config("l2_refine_context"))`
 - `modify_plan()` in `layer_transitions.py` — `llm_call(..., config=get_node_config("l3_modify_plan"))`
@@ -775,7 +775,7 @@ The warning inventory summary is injected into three consumers:
 | **L2 refine_context** | Alongside escalation section in the L2 prompt | See which queries have recurring warnings |
 | **L1 generate** | Warning annotations on `failure_examples` + probe round context | Know which failures have recurring pipeline issues |
 
-Failure examples in `prompt_optimizer.py` are annotated with warning history:
+Failure examples in `l1_optimizer.py` are annotated with warning history:
 
 ```
 Query: PA 66 25%... | Predicted: Glass fibre... | GT: Polyamide...  [web_search:partial_scrape 3/3 rounds]
@@ -913,7 +913,7 @@ After repeated degradation resets (configurable via `backend_warning_threshold`)
 | `api/services/obs/step_tracer.py` | `observed_step()` async context manager |
 | `api/services/campaign/feedback_cycle.py` | Orchestrator: round loop, escalation, checkpointing |
 | `api/services/campaign/models.py` | `CycleConfig`, `CycleRoundResult`, `CycleResult`, `_LoopState` |
-| `api/services/prompt_optimizer.py` | `l1_generate()`, `l1_evaluate()`, `generate_suggestions()` |
+| `api/services/l1_optimizer.py` | `l1_generate()`, `l1_evaluate()`, `generate_suggestions()` |
 | `api/services/campaign/layer_transitions.py` | `refine_context()` (L2), `modify_plan()` (L3), `TransitionResult` |
 | `api/services/campaign/critique.py` | `CritiqueAgent`, `format_critique_for_prompt()`, `sample_thinking_styles()` |
 | `api/services/campaign/critique_stats.py` | Pre-computed stats, anomaly detection, warning inventory, prompt assembly |

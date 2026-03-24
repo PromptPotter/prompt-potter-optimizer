@@ -69,7 +69,7 @@ The optimizer is a 4-step pipeline (`l1_generate`, `l1_evaluate`, `l2_refine_con
 
 ### Node primitive (`api/core/llm_call.py`)
 
-`llm_call()` is the shared LLM interaction primitive. Config-driven from `api/config/optimizer_pipeline.json` with runtime overrides. Used by all optimizer nodes (`l1_generate`, `refine_context`, `modify_plan`, `CritiqueAgent`).
+`llm_call()` is the shared LLM interaction primitive. Config-driven from `api/config/optimizer_pipeline.json` with runtime overrides. Used by all optimizer nodes (`l1_generate`, `l2_refine_context`, `l3_modify_plan`, `critique`).
 
 ### Milestones
 
@@ -103,7 +103,7 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
 | Service | Purpose |
 |---------|---------|
 | `prompt_eval.py` | Evaluate prompts against datasets via backend `/matches` endpoint |
-| `prompt_optimizer.py` | LLM meta-prompt candidate generation and round winner selection |
+| `l1_optimizer.py` | L1 candidate generation (`l1_generate`) and winner selection (`l1_evaluate`) |
 | `backend_client.py` | HTTP client for backend APIs (sync, replay, `fetch_pipeline()`) |
 | `pipeline_discovery.py` | Pipeline schema factory (parses `GET /pipeline` response into `PipelineSchema`) |
 | `project_store.py` | Facade over focused store modules in `stores/` |
@@ -125,9 +125,9 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
 
 ### Pipeline discovery — ownership principle
 
-**TermNorm owns all pipeline metadata** — step descriptions, param mappings, observation config, node roles — served via `GET /pipeline`. `parse_pipeline_response()` builds `PipelineSchema` entirely from the live response (no hardcoded fallback). Each node carries an `optimizer` sub-object with PromptPotter-consumed metadata (param_keys, override_map, observation_mappings). Registry-owned metadata (`StepOutputSchema`, `StepPromptMeta`) is resolved from `resolved_schemas`/`resolved_prompts` in the response.
+**DO:** All pipeline metadata comes from `GET /pipeline`. `parse_pipeline_response()` builds `PipelineSchema` from the live response. Each node carries an `optimizer` sub-object (param_keys, override_map, observation_mappings). Registry metadata (`StepOutputSchema`, `StepPromptMeta`) resolved from `resolved_schemas`/`resolved_prompts`.
 
-**No backend-specific constants in PromptPotter code.** Do NOT add hardcoded pipeline schemas, step names, param keys, or any other backend-specific knowledge to PromptPotter services or notebooks. All pipeline structure must come from the live `GET /pipeline` response. The only exception is tests, which may use inline test schemas. If PromptPotter needs new metadata from a backend, add it to the backend's `pipeline.json` → `optimizer` section and consume it generically via `parse_pipeline_response()`.
+**DON'T:** No hardcoded pipeline schemas, step names, or param keys in PromptPotter code. Need new metadata? Add it to the backend's `pipeline.json` → `optimizer` section. Tests may use inline test schemas.
 
 ### ProjectStore disk layout
 
@@ -154,6 +154,6 @@ Frozen model bundling `prompt_state` + `model` + `temperature` + `pipeline_param
 - **Pipeline reproducibility**: The notebook MUST display the full pipeline configuration (all node configs, models, temperatures, schemas) via `GET /pipeline` before any evaluation. This is the experiment's parameter manifest.
 - **EXPERIMENT_ID is the single source of truth**: Every notebook cell operates within the scope of `EXPERIMENT_ID`. When set, config MUST match the stored experiment — mismatches raise `ValueError` demanding a new ID. When `None`, a new experiment is auto-created from the config hash. This invariant applies to feedback cycle, scan, and all data surfaces. No silent config drift between runs.
 - **Display parity**: Cached results must display identically to fresh results — no visible difference in output format between cached and computed data. The user should not be able to tell whether a result came from cache or a live backend call.
-- **Graceful interrupt**: Backend eval batches use a signal-flag pattern for Ctrl+C. First interrupt lets the in-flight backend call finish (result printed + saved), then stops. Second interrupt force-quits. Partial results are always saved to disk with `"partial": True` so the SP-hash query cache bridges them on re-run. All interrupt handlers must catch both `KeyboardInterrupt` and `asyncio.CancelledError`. **No completed work is ever discarded.**
+- **Graceful interrupt**: Signal-flag pattern — first Ctrl+C finishes the in-flight call and saves, second force-quits. Partial results persisted with `"partial": True`; SP-hash cache bridges them on re-run. Catch both `KeyboardInterrupt` and `asyncio.CancelledError`. **No completed work is ever discarded.**
 
 See [`docs/design-principles.md`](docs/design-principles.md) for the full principles catalog with rationale.

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from api.models.prompt_state import PromptState
-from api.services.prompt_optimizer import l1_generate
+from api.services.l1_optimizer import l1_generate
 from api.services.stores.dataset_run_store import DatasetRunStore
 
 from _helpers import make_dataset_run
@@ -23,7 +23,7 @@ def _capture_llm_prompts(monkeypatch):
             content = json.dumps(_parsed)
         return R()
 
-    monkeypatch.setattr("api.services.prompt_optimizer.llm_call", mock_llm_call)
+    monkeypatch.setattr("api.services.l1_optimizer.llm_call", mock_llm_call)
     return captured
 
 

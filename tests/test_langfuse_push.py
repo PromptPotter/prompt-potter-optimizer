@@ -41,7 +41,7 @@ class TestClassifyRunOrigin:
     @pytest.mark.parametrize("run_id,source,expected", [
         ("unknown_run_xyz", "", "other"),
         ("", "", "other"),
-        ("grid_00230b37", "baseline", "baseline"),
+        ("run_00230b37", "baseline", "baseline"),
         ("any_id", "sensitivity_scan", "sensitivity_scan"),
         ("any_id", "feedback_cycle", "feedback_cycle"),
     ])
@@ -169,7 +169,7 @@ class TestPushAllRuns:
         assert stats1["new_runs"] == 1
 
         # Add more runs
-        _seed_runs(self.store, self.BACKEND_ID, [_make_run("grid_001", 0.9)])
+        _seed_runs(self.store, self.BACKEND_ID, [_make_run("run_001", 0.9)])
 
         self.mock.traces.clear()
         self.mock.spans.clear()

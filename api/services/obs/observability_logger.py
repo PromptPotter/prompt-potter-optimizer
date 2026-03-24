@@ -32,6 +32,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from api.services.obs.cloud_backend import CloudObsBackend
+
 logger = logging.getLogger(__name__)
 
 
@@ -93,8 +95,6 @@ def _append_jsonl(path: Path, data: dict) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(data, ensure_ascii=False, default=str) + "\n")
 
-
-from api.services.obs.cloud_backend import CloudObsBackend  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # ObsLogger — file writes + thin cloud delegation

@@ -37,7 +37,7 @@ def apply_grow_mock(monkeypatch):
         ]
 
     monkeypatch.setattr(
-        "api.services.prompt_optimizer.l1_generate",
+        "api.services.l1_optimizer.l1_generate",
         mock_generate,
     )
 

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 MATCH_TIMEOUT = 120.0
 
 
-def load_pipeline_config(exp_data: dict) -> dict:
+def extract_pipeline_config(exp_data: dict) -> dict:
     """Extract pipeline config (steps + params) from synced experiment data."""
     runs = exp_data.get("runs", [])
     if not runs:
