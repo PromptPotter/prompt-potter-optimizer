@@ -168,7 +168,7 @@ class _LoopState:
     """Mutable state threaded through the feedback cycle round loop.
 
     Optimizer-level state (critique, thinking_styles, task_context,
-    escalation_journal, query_failure_tracker) lives on ``opt_sp``
+    escalation_journal, warning_inventory) lives on ``opt_sp``
     — a mutable ``OptSearchPoint`` that is serialized at checkpoint
     time and hydrated on resume.
     """

@@ -984,7 +984,7 @@ Status after v1 Phase 0.5 (to be re-achieved by Wave D5):
 | Phase events (display) | N/A | ✅ `_emit_phase()` callbacks | Already present |
 | `escalation_journal` | Lost on restart | ❌ Move to OptSearchPoint | F1 |
 | `critique` (full dict) | Lost (only text) | ❌ Move to OptSearchPoint | F1 |
-| `query_failure_tracker` | N/A | ❌ New in Wave F | F1 |
+| `warning_inventory` | N/A | ❌ New in Wave F | F1 |
 
 ---
 
@@ -1027,7 +1027,7 @@ class OptSearchPoint(BaseModel):
         description="Cross-round degradation investigation memory. "
         "Currently on _LoopState only — lost on kernel restart.",
     )
-    query_failure_tracker: dict[str, dict[str, Any]] = Field(
+    warning_inventory: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Per-query warning inventory across rounds. "
         "Keyed by query text, values are warning counters.",
@@ -1056,13 +1056,13 @@ state.opt_sp.optimizer_params = state.current_sp.prompt_state.optimizer_params
 campaign_store.add_trial(..., "opt_search_point": state.opt_sp.model_dump())
 ```
 
-**Resume simplification:** `state.opt_sp = OptSearchPoint(**_osp)` — one-shot hydration. `escalation_journal` and `query_failure_tracker` now survive kernel restarts for free.
+**Resume simplification:** `state.opt_sp = OptSearchPoint(**_osp)` — one-shot hydration. `escalation_journal` and `warning_inventory` now survive kernel restarts for free.
 
 **Scope boundary:** Node I/O models (`L1GenerateInput.critique_text`, etc.) are wire-format fields — unchanged. The orchestrator passes `state.opt_sp.critique_text` into node input dicts.
 
 ### 13.3 Per-Query Warning Inventory
 
-A cross-round per-query warning inventory on `OptSearchPoint.query_failure_tracker`. Updated after each round's eval results. Simple counters, no complex classification.
+A cross-round per-query warning inventory on `OptSearchPoint.warning_inventory`. Updated after each round's eval results. Simple counters, no complex classification.
 
 **Data shape:**
 

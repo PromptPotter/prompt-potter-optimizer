@@ -18,6 +18,7 @@ from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.services.constants import DISPLAY_TRUNCATE
 from api.core.llm_call import get_node_config, llm_call
 from api.models.prompt_state import PromptState
+from api.services.campaign.critique_stats import summarize_warning_inventory
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -101,7 +102,6 @@ async def refine_context(
     # Inject cross-round warning inventory
     warning_section = ""
     if warning_inventory:
-        from api.services.campaign.critique_stats import summarize_warning_inventory
         warning_section = summarize_warning_inventory(warning_inventory)
         if warning_section:
             warning_section = "\n\n" + warning_section + "\n"

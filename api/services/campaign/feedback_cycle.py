@@ -8,7 +8,7 @@ them against the current best.
 Stopping conditions:
 - ``max_rounds`` reached
 - ``patience`` consecutive non-improving rounds exhausted
-- ``next_action == "stop"`` from suggestion analysis (when enabled)
+- ``next_action == "stop"`` from evaluation
 - ``winner_accuracy >= 1.0`` (perfect score)
 """
 
@@ -32,7 +32,14 @@ from api.services.constants import DATASET_NAME
 from api.services.campaign.models import (
     CycleConfig, CycleResult, CycleRoundResult, _LoopState,
 )
-from api.services.campaign.critique import sample_thinking_styles
+from api.services.campaign.critique import (
+    CritiqueAgent, format_critique_for_prompt, sample_thinking_styles,
+)
+from api.services.campaign.critique_stats import (
+    CritiqueContext, update_query_tracker, warning_summary,
+)
+# l1_generate / l1_evaluate stay as lazy imports inside their call sites
+# so that test monkeypatching on api.services.prompt_optimizer takes effect.
 from api.services.obs.step_tracer import observed_step
 from api.services.prompt_eval import EvalContext, compute_composite_score
 from api.services.query_utils import subsample_queries
@@ -60,6 +67,15 @@ def _emit_phase(
         return
     pe = PhaseEvent(phase=phase, event=event, round=round, data=data)
     on_phase(pe)
+
+
+def _get_obs_trace(
+    state: _LoopState, obs_campaign_id: str,
+) -> tuple[Any | None, str | None]:
+    """Extract obs logger and trace_id from loop state."""
+    obs = state.eval_ctx.obs if state.eval_ctx else None
+    trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
+    return obs, trace_id
 
 
 def _candidate_summaries(
@@ -365,7 +381,7 @@ async def _generate_or_load_candidates(
             thinking_styles=state.opt_sp.thinking_styles,
             escalation_journal=state.opt_sp.escalation_journal,
             task_context=state.opt_sp.task_context or None,
-            warning_inventory=state.opt_sp.query_failure_tracker or None,
+            warning_inventory=state.opt_sp.warning_inventory or None,
             l2_directive=state.opt_sp.l2_directive,
             is_probe_round=state.probe_next_round,
         )
@@ -398,7 +414,7 @@ async def _evaluate_candidates(
     trace_id: str | None = None,
     escalation_checks: list | None = None,
 ) -> dict:
-    """Evaluate candidates, run critique, optionally generate suggestions."""
+    """Evaluate candidates and run critique analysis."""
     _emit_phase(on_phase, "l1_evaluate", "enter", round=round_num,
                 n_candidates=len(candidates),
                 n_queries=len(round_eval_data),
@@ -428,11 +444,9 @@ async def _evaluate_candidates(
         )
 
         # Critique analysis
+        critique_result: dict = {}
         critique_text = ""
         if config.enable_critique and eval_out.get("winner_results"):
-            from api.services.campaign.critique import CritiqueAgent
-            from api.services.campaign.critique_stats import CritiqueContext
-
             crit_llm = _llm_client.get_llm_client(config.provider)
             agent = CritiqueAgent(crit_llm, model=config.model,
                                   positive_threshold=config.critique_positive_threshold)
@@ -457,17 +471,17 @@ async def _evaluate_candidates(
                 pipeline_params=(
                     state.current_sp.pipeline_params if state.current_sp else None
                 ),
-                warning_inventory=state.opt_sp.query_failure_tracker or None,
+                warning_inventory=state.opt_sp.warning_inventory or None,
                 task_context=state.opt_sp.task_context or None,
             )
             critique_result = await agent.run(cctx)
-            from api.services.campaign.critique import format_critique_for_prompt
             critique_text = format_critique_for_prompt(critique_result)
 
         thinking_styles = sample_thinking_styles(
             n=3, seed=config.seed + round_num + 1,
         )
         eval_out["critique_text"] = critique_text
+        eval_out["critique"] = critique_result
         eval_out["thinking_styles"] = thinking_styles
 
     _emit_phase(on_phase, "l1_evaluate", "exit", round=round_num,
@@ -579,16 +593,11 @@ async def _execute_round(
     )
 
     # Update state with critique + thinking styles from eval output
-    _critique_raw = eval_out.pop("critique_text", "")
+    state.opt_sp.critique_text = eval_out.pop("critique_text", "")
+    state.opt_sp.critique = eval_out.pop(
+        "critique", {"summary": state.opt_sp.critique_text},
+    )
     state.opt_sp.thinking_styles = eval_out.pop("thinking_styles", [])
-    # critique_text can be str (legacy) or dict (new 5-field format)
-    if isinstance(_critique_raw, dict):
-        state.opt_sp.critique = _critique_raw
-        from api.services.campaign.critique import format_critique_for_prompt
-        state.opt_sp.critique_text = format_critique_for_prompt(_critique_raw)
-    else:
-        state.opt_sp.critique_text = _critique_raw
-        state.opt_sp.critique = {"summary": _critique_raw}
 
     round_result = CycleRoundResult(
         round=round_num,
@@ -612,8 +621,7 @@ async def _execute_round(
     # (not just winner — aborted candidates carry the pipeline warnings)
     _all_results = eval_out.get("all_eval_results", [])
     if _all_results:
-        from api.services.campaign.critique_stats import update_query_tracker
-        update_query_tracker(state.opt_sp.query_failure_tracker, _all_results)
+        update_query_tracker(state.opt_sp.warning_inventory, _all_results)
 
     if obs:
         _log_round_obs(eval_out, round_num, config, obs, obs_campaign_id)
@@ -719,7 +727,7 @@ async def _do_l2_transition(
             escalation_context=escalation_context,
             escalation_journal=state.opt_sp.escalation_journal,
             task_context=state.opt_sp.task_context or None,
-            warning_inventory=state.opt_sp.query_failure_tracker or None,
+            warning_inventory=state.opt_sp.warning_inventory or None,
             critique_text=state.opt_sp.critique_text,
             prev_l2_directive=state.opt_sp.l2_directive,
         )
@@ -734,18 +742,7 @@ async def _do_l2_transition(
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
     # Build warning inventory one-liner for display
-    _inv = state.opt_sp.query_failure_tracker
-    _warned_count = sum(
-        1 for e in _inv.values() if e.get("warnings")
-    ) if _inv else 0
-    _top_warning = ""
-    if _inv:
-        _all_wtypes: dict[str, int] = {}
-        for e in _inv.values():
-            for wt, c in e.get("warnings", {}).items():
-                _all_wtypes[wt] = _all_wtypes.get(wt, 0) + c
-        if _all_wtypes:
-            _top_warning = max(_all_wtypes, key=_all_wtypes.get)
+    _warned_count, _top_warning = warning_summary(state.opt_sp.warning_inventory)
 
     _emit_phase(on_phase, "refine_context", "exit", round=round_num,
                 l2_round=state.l2_round,
@@ -1205,7 +1202,7 @@ async def run_feedback_cycle(
             _is_probe = state.probe_next_round
             if _is_probe:
                 _warned_queries = {
-                    q for q, e in state.opt_sp.query_failure_tracker.items()
+                    q for q, e in state.opt_sp.warning_inventory.items()
                     if e.get("warnings")
                 }
                 _round_data = [
@@ -1246,11 +1243,7 @@ async def run_feedback_cycle(
             if _is_probe:
                 state.probe_next_round = False
                 if config.enable_l2:
-                    _obs = state.eval_ctx.obs if state.eval_ctx else None
-                    _tid = (
-                        _obs.get_file_trace_id(obs_campaign_id) if _obs
-                        else None
-                    )
+                    _obs, _tid = _get_obs_trace(state, obs_campaign_id)
                     _l2_stop = await _escalate_l2(
                         state, config, round_num, _round_data, on_phase,
                         obs=_obs, trace_id=_tid,
@@ -1291,8 +1284,7 @@ async def run_feedback_cycle(
                             _esc_ctx.get("degraded_rate", 0)
                         )
 
-                    _obs = state.eval_ctx.obs if state.eval_ctx else None
-                    _tid = _obs.get_file_trace_id(obs_campaign_id) if _obs else None
+                    _obs, _tid = _get_obs_trace(state, obs_campaign_id)
                     try:
                         _l2_stop = await _escalate_l2(
                             state, config, round_num, round_eval_data, on_phase,
@@ -1397,8 +1389,7 @@ async def run_feedback_cycle(
                 break
             if state.stall_count >= config.patience:
                 if config.enable_l2:
-                    _obs = state.eval_ctx.obs if state.eval_ctx else None
-                    _tid = _obs.get_file_trace_id(obs_campaign_id) if _obs else None
+                    _obs, _tid = _get_obs_trace(state, obs_campaign_id)
                     _l2_stop = await _escalate_l2(
                         state, config, round_num, round_eval_data, on_phase,
                         obs=_obs, trace_id=_tid,

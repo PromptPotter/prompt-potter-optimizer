@@ -37,7 +37,7 @@ class CritiqueContext:
     # Current pipeline config
     pipeline_params: dict | None = None
 
-    # Cross-round warning inventory (from OptSearchPoint.query_failure_tracker)
+    # Cross-round warning inventory (from OptSearchPoint.warning_inventory)
     warning_inventory: dict | None = None
 
     # L2 domain context (so critique understands L2's problem framing)
@@ -155,6 +155,23 @@ def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
                 f"({wcount}/{seen} rounds, {hits} hits)"
             )
     return "\n".join(lines)
+
+
+def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
+    """Return ``(warned_count, top_warning_type)`` from the warning inventory.
+
+    ``warned_count`` is the number of queries with at least one warning.
+    ``top_warning_type`` is the most frequent warning type, or ``""`` if none.
+    """
+    if not tracker:
+        return 0, ""
+    warned_count = sum(1 for e in tracker.values() if e.get("warnings"))
+    all_wtypes: dict[str, int] = {}
+    for e in tracker.values():
+        for wt, c in e.get("warnings", {}).items():
+            all_wtypes[wt] = all_wtypes.get(wt, 0) + c
+    top_warning = max(all_wtypes, key=all_wtypes.get) if all_wtypes else ""
+    return warned_count, top_warning
 
 
 # ---------------------------------------------------------------------------

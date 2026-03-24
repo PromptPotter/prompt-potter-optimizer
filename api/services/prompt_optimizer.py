@@ -378,7 +378,7 @@ async def l1_evaluate(
 
     Returns:
         Dict with keys: winner, winner_prompt_state, winner_accuracy,
-        improved, next_action, suggestions, candidate_scores, winner_results.
+        improved, next_action, candidate_scores, winner_results.
     """
     from api.models.search_point import SearchPoint
     from api.services.prompt_eval import evaluate_prompt_cached
@@ -494,7 +494,6 @@ async def l1_evaluate(
         "winner_composite": winner_entry.get("composite", winner_entry["accuracy"]),
         "improved": winner_entry["improved"],
         "next_action": "escalate" if escalation_signal else "generate",
-        "suggestions": {},
         "candidate_scores": candidate_scores,
         "winner_results": winner_entry.get("results", []),
         "all_eval_results": [

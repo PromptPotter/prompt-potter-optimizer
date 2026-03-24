@@ -35,7 +35,7 @@ All core logic lives here.
 
 **Two layers must both be traced:**
 - **Target layer**: `SearchPoint` → `evaluate_prompt_cached()` → `dataset_runs/` (content-addressed, shared across all eval paths)
-- **Optimizer layer**: `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint). Captures critique, thinking_styles, task_context, escalation_journal, query_failure_tracker, plan, optimizer_params.
+- **Optimizer layer**: `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint). Captures critique, thinking_styles, task_context, escalation_journal, warning_inventory, plan, optimizer_params.
 
 `OptSearchPoint` is the optimizer-layer analogue of `SearchPoint`. All optimizer state flows through it — check existing fields before proposing new data structures. Both layers must be independently reconstructable from disk.
 

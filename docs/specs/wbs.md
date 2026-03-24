@@ -116,7 +116,7 @@ See [M7 spec](m7-optimizer-pipeline.md) for full details (§1-§13).
 
 | ID | Work Package | Sessions | Depends | Status |
 |----|-------------|:--------:|---------|--------|
-| 7.F1 | OptSearchPoint consolidation (unfreeze, add critique/escalation_journal/query_failure_tracker, consolidate _LoopState) | 1 | 7.D5 | Active |
+| 7.F1 | OptSearchPoint consolidation (unfreeze, add critique/escalation_journal/warning_inventory, consolidate _LoopState) | 1 | 7.D5 | Active |
 | 7.F2 | Warning inventory: `update_query_tracker()`, `summarize_warning_inventory()` in critique_stats.py | 1 | 7.F1 | Planned |
 | 7.F3 | Context injection: wire inventory into critique, L2, L1-gen prompts | 1 | 7.F2 | Planned |
 | 7.F4 | L2 diagnostic probe rounds: `TransitionResult.probe_queries`, L2 prompt update, orchestrator probe logic | 1 | 7.F3 | Planned |

@@ -54,7 +54,7 @@ class OptSearchPoint(BaseModel):
         description="Cross-round degradation investigation memory. "
         "Tracks tried configs and their outcomes across escalation rounds.",
     )
-    query_failure_tracker: dict[str, dict[str, Any]] = Field(
+    warning_inventory: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Per-query warning inventory across rounds. "
         "Keyed by query text, values are warning counters.",
