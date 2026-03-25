@@ -130,7 +130,6 @@ def dev_reload() -> None:
         "api.services.campaign.layer_transitions",
         "api.services.campaign.critique",
         "api.services.campaign.models",
-        "api.services.prompt_optimizer",
         "api.services.campaign.feedback_cycle",
     ]:
         if mod in sys.modules:

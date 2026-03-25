@@ -33,6 +33,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from api.services.obs.cloud_backend import CloudObsBackend
+from api.services.stores.base import (
+    append_jsonl, append_text, write_json, write_text, write_yaml_kv,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,39 +64,7 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _yaml_value(v: object) -> str:
-    """Format a single value for YAML output (no PyYAML dependency)."""
-    if isinstance(v, str):
-        return f'"{v}"'
-    if v is None:
-        return "null"
-    if isinstance(v, bool):
-        return str(v).lower()
-    if isinstance(v, list):
-        return json.dumps(v)
-    return str(v)
 
-
-def _write_yaml(path: Path, data: dict) -> None:
-    """Write dict as YAML-compatible ``key: value`` lines."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        for key, value in data.items():
-            f.write(f"{key}: {_yaml_value(value)}\n")
-
-
-def _write_json(path: Path, data: dict) -> None:
-    """Write pretty-printed JSON, creating parent dirs as needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False, default=str)
-
-
-def _append_jsonl(path: Path, data: dict) -> None:
-    """Append one JSON line to a JSONL file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(data, ensure_ascii=False, default=str) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +121,7 @@ class ObsLogger:
                 if lf.enabled:
                     self._cloud = CloudObsBackend(lf)
             except Exception:
-                pass
+                logger.debug("Cloud backend init failed; file-only mode", exc_info=True)
         elif langfuse is not None:
             self._cloud = CloudObsBackend(langfuse)
 
@@ -163,7 +134,7 @@ class ObsLogger:
         Every public method calls this to maintain the flat navigation log.
         """
         event["timestamp"] = _utcnow_iso()
-        _append_jsonl(self.obs_root / "langfuse" / "events.jsonl", event)
+        append_jsonl(self.obs_root / "langfuse" / "events.jsonl", event)
 
     def _write_trace(
         self,
@@ -187,7 +158,7 @@ class ObsLogger:
             "metadata": metadata or {},
             "tags": tags or [],
         }
-        _write_json(
+        write_json(
             self.obs_root / "langfuse" / "traces" / f"{trace_id}.json",
             trace,
         )
@@ -220,7 +191,7 @@ class ObsLogger:
             "metadata": metadata or {},
         }
         obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
-        _write_json(obs_dir / f"{obs_id}.json", observation)
+        write_json(obs_dir / f"{obs_id}.json", observation)
         return obs_id
 
     def _write_score(
@@ -238,7 +209,7 @@ class ObsLogger:
             "data_type": data_type,
             "timestamp": _utcnow_iso(),
         }
-        _append_jsonl(
+        append_jsonl(
             self.obs_root / "langfuse" / "scores" / f"{trace_id}.jsonl",
             score,
         )
@@ -253,7 +224,7 @@ class ObsLogger:
         meta_path = exp_dir / "meta.yaml"
         if not meta_path.exists():
             now_ms = int(time.time() * 1000)
-            _write_yaml(meta_path, {
+            write_yaml_kv(meta_path, {
                 "experiment_id": campaign_id,
                 "name": campaign_id,
                 "artifact_location": str(exp_dir),
@@ -282,7 +253,7 @@ class ObsLogger:
         now_ms = int(time.time() * 1000)
 
         # meta.yaml — MLflow RunInfo format
-        _write_yaml(run_dir / "meta.yaml", {
+        write_yaml_kv(run_dir / "meta.yaml", {
             "run_id": run_id,
             "run_uuid": run_id,
             "run_name": run_name,
@@ -301,25 +272,18 @@ class ObsLogger:
         })
 
         # params/ — one file per param
-        params_dir = run_dir / "params"
-        params_dir.mkdir(parents=True, exist_ok=True)
         for key, value in params.items():
-            (params_dir / key).write_text(str(value), encoding="utf-8")
+            write_text(run_dir / "params" / key, str(value))
 
         # metrics/ — one file per metric ("timestamp value step\n")
-        metrics_dir = run_dir / "metrics"
-        metrics_dir.mkdir(parents=True, exist_ok=True)
         timestamp_ms = now_ms
         for key, value in metrics.items():
-            with open(metrics_dir / key, "a", encoding="utf-8") as f:
-                f.write(f"{timestamp_ms} {value} 0\n")
+            append_text(run_dir / "metrics" / key, f"{timestamp_ms} {value} 0\n")
 
         # tags/ — one file per tag
         if tags:
-            tags_dir = run_dir / "tags"
-            tags_dir.mkdir(parents=True, exist_ok=True)
             for key, value in tags.items():
-                (tags_dir / key).write_text(str(value), encoding="utf-8")
+                write_text(run_dir / "tags" / key, str(value))
 
         return run_id
 
@@ -367,7 +331,7 @@ class ObsLogger:
                     "input": {"query": query},
                     "expected_output": ground_truth,
                 }
-                _write_json(ds_dir / f"{item_id}.json", item_data)
+                write_json(ds_dir / f"{item_id}.json", item_data)
                 query_to_item_id[query] = item_id
 
             n_skipped = len(eval_data) - len(query_to_item_id)
@@ -594,7 +558,7 @@ class ObsLogger:
                     obs_data.setdefault("metadata", {})["metrics"] = metrics
                 if error:
                     obs_data.setdefault("metadata", {})["error"] = error
-                _write_json(obs_path, obs_data)
+                write_json(obs_path, obs_data)
 
             self._log_event({
                 "event": "node_step_end",
@@ -760,10 +724,7 @@ class ObsLogger:
             version = prompt_state_id[:8] if prompt_state_id else "unknown"
             prompt_dir = self.obs_root / "prompts" / family / version
 
-            prompt_dir.mkdir(parents=True, exist_ok=True)
-            (prompt_dir / "prompt.txt").write_text(
-                rendered_prompt, encoding="utf-8",
-            )
+            write_text(prompt_dir / "prompt.txt", rendered_prompt)
 
             metadata = {
                 "family": family,
@@ -773,7 +734,7 @@ class ObsLogger:
                 "layer1_fields": layer1_fields,
                 "created_at": _utcnow_iso(),
             }
-            _write_json(prompt_dir / "metadata.json", metadata)
+            write_json(prompt_dir / "metadata.json", metadata)
 
             self._log_event({
                 "event": "prompt_version",
@@ -825,7 +786,7 @@ class ObsLogger:
                         "n_rounds": n_rounds,
                         "stop_reason": stop_reason,
                     }
-                    _write_json(trace_path, trace_data)
+                    write_json(trace_path, trace_data)
 
                 self._write_score(trace_id, "best_accuracy", best_accuracy)
 

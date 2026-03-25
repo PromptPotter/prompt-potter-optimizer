@@ -11,7 +11,7 @@ from api.models.pipeline_schema import (
     PipelineStep,
     ROLE_METRIC_REGISTRY,
 )
-from api.services.prompt_eval import compute_composite_score
+from api.services.prompt_eval import compute_composite_score, derive_metrics
 
 
 def _make_results(hits, total, *, terminated_at="llm_ranking", gt_in_candidates=True):
@@ -149,7 +149,7 @@ class TestDeriveMetrics:
             PipelineStep(name="llm_ranking", node_role="ranker"),
         ])
         results = _make_results(3, 5, gt_in_candidates=True)
-        metrics = schema.derive_metrics(results)
+        metrics = derive_metrics(schema, results)
         assert "composite" in metrics
         assert "source_recall" in metrics
         assert "candidate_recall" in metrics
@@ -160,7 +160,7 @@ class TestDeriveMetrics:
             PipelineStep(name="step1"),
         ])
         results = _make_results(2, 4)
-        metrics = schema.derive_metrics(results)
+        metrics = derive_metrics(schema, results)
         assert metrics["accuracy"] == pytest.approx(0.5)
         assert "composite" in metrics
 
@@ -170,7 +170,7 @@ class TestDeriveMetrics:
             PipelineStep(name="token_matching", node_role="candidate_source"),
         ])
         results = _make_results(3, 5)
-        metrics = schema.derive_metrics(results)
+        metrics = derive_metrics(schema, results)
         has_ns = ("fuzzy_matching_source_recall" in metrics
                   or "token_matching_source_recall" in metrics)
         assert has_ns
@@ -179,7 +179,7 @@ class TestDeriveMetrics:
         schema = PipelineSchema(steps=[
             PipelineStep(name="llm_ranking", node_role="ranker"),
         ])
-        metrics = schema.derive_metrics([])
+        metrics = derive_metrics(schema, [])
         assert metrics["accuracy"] == 0.0
         assert metrics["composite"] == 0.0
 
@@ -188,7 +188,7 @@ class TestDeriveMetrics:
             PipelineStep(name="cache_lookup", node_role="cache"),
         ])
         results = _make_results(2, 4)
-        metrics = schema.derive_metrics(results)
+        metrics = derive_metrics(schema, results)
         assert "cache_hit_rate" in metrics
         assert metrics["cache_hit_rate"] == pytest.approx(0.0)
 
@@ -197,8 +197,8 @@ class TestDeriveMetrics:
             PipelineStep(name="token_matching", node_role="candidate_source"),
         ])
         results = _make_results(3, 5, gt_in_candidates=True)
-        metrics = schema.derive_metrics(
-            results,
+        metrics = derive_metrics(
+            schema, results,
             metric_weights={"source_recall": 0.05},
             accuracy_weight=0.95,
         )

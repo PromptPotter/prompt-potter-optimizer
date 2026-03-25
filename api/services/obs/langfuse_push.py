@@ -20,7 +20,6 @@ Usage::
     stats = push_all_runs(store, backend_id)
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +28,7 @@ from typing import Any, Callable
 from api.config.settings import DATASET_NAME
 from api.services.obs.pipeline_nodes import extract_pipeline_nodes
 from api.services.project_store import ProjectStore
+from api.services.stores.base import read_json_optional, write_json
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +54,7 @@ def _state_path(store: ProjectStore, backend_id: str) -> Path:
 
 
 def _load_state(store: ProjectStore, backend_id: str) -> dict[str, Any]:
-    path = _state_path(store, backend_id)
-    if path.exists():
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    return _fresh_state()
+    return read_json_optional(_state_path(store, backend_id)) or _fresh_state()
 
 
 def _fresh_state() -> dict[str, Any]:
@@ -71,10 +67,7 @@ def _fresh_state() -> dict[str, Any]:
 
 
 def _save_state(store: ProjectStore, backend_id: str, state: dict[str, Any]) -> None:
-    path = _state_path(store, backend_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+    write_json(_state_path(store, backend_id), state)
 
 
 def _collect_ground_truth(

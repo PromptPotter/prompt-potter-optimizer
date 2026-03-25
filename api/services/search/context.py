@@ -148,7 +148,6 @@ def save_restructure_cache(
         "layer1_fields": layer1_fields,
         "cached_at": datetime.now(timezone.utc).isoformat(),
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
     write_json(path, cache)
 
 

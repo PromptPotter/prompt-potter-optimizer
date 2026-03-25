@@ -281,7 +281,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     cache_marker = " \U0001f4d6" if cached else ""
     step = f"{step}{cache_marker}"
 
-    indent = prefix if prefix else "        "
+    indent = prefix if prefix else ""
 
     sw = 10 if cached else 8
     time_col = f"{tt:5.1f}s" if tt is not None else "     "

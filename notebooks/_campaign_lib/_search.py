@@ -672,6 +672,7 @@ async def scan_advisor(
     svc: dict,
     *,
     task_description: str | dict = "",
+    model: str = "",
 ) -> dict:
     """LLM-powered scan configuration advice.
 
@@ -690,7 +691,8 @@ async def scan_advisor(
 
     variant_library = _load_filtered_variants(pipeline_params, pipeline_schema)
 
-    llm_client, model = setup_llm(campaign_config)
+    llm_client, resolved_model = setup_llm(campaign_config)
+    model = model or resolved_model
 
     # --- Display ---
     print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
@@ -819,6 +821,7 @@ async def run_scan_advisor(
     svc: dict,
     *,
     task_description: str | dict = "",
+    model: str = "",
 ) -> tuple[dict, dict, dict]:
     """Run scan advisor + extract/display proposed variants.
 
@@ -828,6 +831,7 @@ async def run_scan_advisor(
     advisory = await scan_advisor(
         campaign_config, svc,
         task_description=task_description,
+        model=model,
     )
 
     proposed, schema_labels = advisory_to_scan_variants(

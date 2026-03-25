@@ -10,6 +10,8 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from api.models.pipeline_schema import PipelineSchema
+
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import DISPLAY_TRUNCATE
 from api.models.opt_search_point import OptSearchPoint
@@ -294,33 +296,37 @@ def _select_round_winner(
     all_candidate_results: dict[str, list[dict]],
     current_best: dict[str, Any],
     improvement_threshold: float,
-    pipeline_schema: Any = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, Any]:
     """Compare candidates and select the round winner."""
     current_acc = current_best["accuracy"]
     current_composite = current_best.get("composite", current_acc)
-    current_ps = current_best["prompt_state"]
-    current_results = current_best["results"]
 
+    # Score each candidate once, reuse for selection and display
+    candidate_scores = {
+        c.id: compute_composite_score(all_candidate_results[c.id], pipeline_schema)
+        for c in candidates
+    }
+
+    # Find best candidate
     best_composite = current_composite
     best_acc = current_acc
-    best_ps = current_ps
-    best_results = current_results
+    best_ps = current_best["prompt_state"]
+    best_results = current_best["results"]
     best_label = current_best["label"]
     winner_idx: int | None = None
 
     for idx, candidate in enumerate(candidates):
-        c_results = all_candidate_results[candidate.id]
-        c_scores = compute_composite_score(c_results, pipeline_schema)
-        c_composite = c_scores["composite"]
+        c_composite = candidate_scores[candidate.id]["composite"]
         if c_composite > best_composite:
             best_composite = c_composite
-            best_acc = c_scores["accuracy"]
+            best_acc = candidate_scores[candidate.id]["accuracy"]
             best_ps = candidate
-            best_results = c_results
+            best_results = all_candidate_results[candidate.id]
             best_label = candidate.changes_description or candidate.id[:12]
             winner_idx = idx
 
+    # Build comparison rows
     rows = [
         {
             "prompt": f"current_best ({current_best['label'][:30]})",
@@ -330,20 +336,16 @@ def _select_round_winner(
         }
     ]
     for candidate in candidates:
-        c_results = all_candidate_results[candidate.id]
-        c_scores = compute_composite_score(c_results, pipeline_schema)
-        c_composite = c_scores["composite"]
-        delta = c_composite - current_composite
+        scores = candidate_scores[candidate.id]
+        delta = scores["composite"] - current_composite
         rows.append({
             "prompt": (
                 candidate.changes_description or candidate.id[:12]
             )[:DISPLAY_TRUNCATE],
-            "hit@1": f"{c_scores['accuracy']:.1%}",
-            "composite": f"{c_composite:.4f}",
+            "hit@1": f"{scores['accuracy']:.1%}",
+            "composite": f"{scores['composite']:.4f}",
             "delta": f"{delta:+.4f}",
         })
-
-    improved = best_composite > current_composite + improvement_threshold
 
     return {
         "label": best_label,
@@ -355,7 +357,7 @@ def _select_round_winner(
         "results": best_results,
         "candidates_evaluated": len(candidates),
         "comparison_rows": rows,
-        "improved": improved,
+        "improved": best_composite > current_composite + improvement_threshold,
         "winner_idx": winner_idx,
     }
 
@@ -474,14 +476,15 @@ async def l1_evaluate(
 
     winner_osp = winner_entry["prompt_state"]
     # Serialize winner as prompt field dict (compatible with CycleRoundResult.prompt_state)
-    winner_dict = (
-        winner_osp.prompt_field_dict()
-        if isinstance(winner_osp, OptSearchPoint)
-        else winner_osp if isinstance(winner_osp, dict) else winner_osp.model_dump()
-    )
-    winner_dict["id"] = getattr(winner_osp, "id", "")
-    winner_dict["parent_id"] = getattr(winner_osp, "parent_id", None)
-    winner_dict["changes_description"] = getattr(winner_osp, "changes_description", "")
+    if isinstance(winner_osp, OptSearchPoint):
+        winner_dict = winner_osp.prompt_field_dict()
+        winner_dict["id"] = winner_osp.id
+        winner_dict["parent_id"] = winner_osp.parent_id
+        winner_dict["changes_description"] = winner_osp.changes_description
+    elif isinstance(winner_osp, dict):
+        winner_dict = winner_osp
+    else:
+        winner_dict = winner_osp.model_dump()
     return {
         "winner": {
             "label": winner_entry["label"],
