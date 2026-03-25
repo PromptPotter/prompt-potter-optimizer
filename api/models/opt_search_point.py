@@ -55,7 +55,7 @@ PROMPT_STRING_FIELDS: list[str] = [
     "answer_format",
 ]
 
-# Layer field mapping (absorbed from PromptState)
+# Layer field mapping
 LAYER_FIELDS: dict[str, list[str]] = {
     "generate": [
         "persona",
@@ -85,7 +85,7 @@ class OptSearchPoint(SearchPoint):
     configuration with target-pipeline evaluation outcomes.
     """
 
-    # -- Lineage (absorbed from PromptState) --------------------------------
+    # -- Lineage -------------------------------------------------------------
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     parent_id: str | None = None
     changes_description: str = ""
@@ -221,7 +221,7 @@ class OptSearchPoint(SearchPoint):
             pipeline_params=pp,
         )
 
-    # -- Candidate derivation (replaces PromptState.derive()) --------------
+    # -- Candidate derivation ------------------------------------------------
 
     def derive_candidate(self, **changes: Any) -> OptSearchPoint:
         """Create a child OptSearchPoint with prompt field modifications.

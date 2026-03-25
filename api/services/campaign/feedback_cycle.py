@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -50,6 +51,17 @@ if TYPE_CHECKING:
     from api.services.stores.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def graceful(msg: str):
+    """Suppress non-interrupt exceptions with a warning log."""
+    try:
+        yield
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
+    except Exception:
+        logger.warning(msg, exc_info=True)
 
 
 def _emit_phase(
@@ -150,29 +162,21 @@ def _init_obs(
 
     obs: ObsLogger | None = None
     if config.project_root and config.backend_id:
-        try:
+        with graceful("Failed to create ObsLogger"):
             obs = ObsLogger(config.project_root, config.backend_id)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception:
-            logger.warning("Failed to create ObsLogger", exc_info=True)
 
     dataset_name: str | None = None
     dataset_item_map: dict[str, str] | None = None
     if not obs:
         return obs, dataset_name, dataset_item_map
 
-    try:
+    with graceful("ObsLogger.log_campaign_start failed"):
         obs.log_campaign_start(
             campaign_id=obs_campaign_id,
             config=config.model_dump(mode="json"),
             baseline_accuracy=baseline_accuracy,
             session_id=langfuse_session_id,
         )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception:
-        logger.warning("ObsLogger.log_campaign_start failed", exc_info=True)
 
     try:
         dataset_name = DATASET_NAME
@@ -484,7 +488,7 @@ def _log_round_obs(
     obs_campaign_id: str,
 ) -> None:
     """Log round-end metrics and prompt version to observability."""
-    try:
+    with graceful("ObsLogger.log_round_end failed"):
         obs.log_round_end(
             campaign_id=obs_campaign_id,
             round_num=round_num,
@@ -503,12 +507,8 @@ def _log_round_obs(
                 "critique_negative",
             ],
         )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception:
-        logger.warning("ObsLogger.log_round_end failed", exc_info=True)
 
-    try:
+    with graceful("ObsLogger.log_prompt_version failed"):
         winner_fields = eval_out["winner_prompt_state"]
         winner_osp = OptSearchPoint.from_prompt_fields(winner_fields)
         obs.log_prompt_version(
@@ -520,10 +520,6 @@ def _log_round_obs(
             },
             parent_id=winner_osp.parent_id,
         )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception:
-        logger.warning("ObsLogger.log_prompt_version failed", exc_info=True)
 
 
 async def _execute_round(
@@ -543,12 +539,8 @@ async def _execute_round(
     obs = state.eval_ctx.obs if state.eval_ctx else None
     trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
     if obs:
-        try:
+        with graceful("ObsLogger.log_round_start failed"):
             obs.log_round_start(obs_campaign_id, round_num)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception:
-            logger.warning("ObsLogger.log_round_start failed", exc_info=True)
 
     # Resolve L2 meta-param overrides from OptSearchPoint.optimizer_params
     opt_params = state.opt_sp.optimizer_params
@@ -624,7 +616,7 @@ def _finalize_campaign(
         Cloud Langfuse trace ID (or None).
     """
     if campaign_store and cycle_id:
-        try:
+        with graceful("Campaign completion update failed"):
             campaign_store.update(config.backend_id, cycle_id, {
                 "status": status,
                 "stop_reason": stop_reason,
@@ -633,14 +625,10 @@ def _finalize_campaign(
                 "n_rounds": len(state.rounds),
                 "finished_at": finished_at,
             })
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception:
-            logger.warning("Campaign completion update failed", exc_info=True)
 
     cloud_trace_id: str | None = None
     if obs:
-        try:
+        with graceful("ObsLogger campaign end failed"):
             obs.log_campaign_end(
                 campaign_id=obs_campaign_id,
                 best_accuracy=state.best_accuracy,
@@ -650,10 +638,6 @@ def _finalize_campaign(
             )
             obs.flush()
             cloud_trace_id = obs.get_cloud_trace_id(obs_campaign_id)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception:
-            logger.warning("ObsLogger campaign end failed", exc_info=True)
 
     return cloud_trace_id
 
@@ -1198,8 +1182,8 @@ async def run_feedback_cycle(
             state.eval_ctx.pipeline_params = state.current_sp.pipeline_params
 
             # --- Probe round: override eval data + disable escalation ---
-            _is_probe = state.probe_next_round
-            if _is_probe:
+            is_probe = state.probe_next_round
+            if is_probe:
                 _warned_queries = {
                     q for q, e in state.opt_sp.warning_inventory.items()
                     if e.get("warnings")
@@ -1222,7 +1206,7 @@ async def run_feedback_cycle(
                 "stall=%d/%d%s)",
                 round_num, clean_rounds, max_rounds,
                 state.current_accuracy, state.stall_count, config.patience,
-                ", PROBE" if _is_probe else "",
+                ", PROBE" if is_probe else "",
             )
 
             round_result = await _execute_round(
@@ -1239,7 +1223,7 @@ async def run_feedback_cycle(
             # (tracker already updated inside _execute_round from all_eval_results)
 
             # --- After probe round: reset flag + force L2 ---
-            if _is_probe:
+            if is_probe:
                 state.probe_next_round = False
                 if config.enable_l2:
                     _obs, _tid = _get_obs_trace(state, obs_campaign_id)
@@ -1274,44 +1258,44 @@ async def run_feedback_cycle(
                 )
 
                 # Dispatch by target
-                _esc_ctx = signal["context"]
+                esc_context = signal["context"]
                 if signal["target"] in ("l2", "l3") and config.enable_l2:
                     # Fill outcome of previous journal entry (if any)
-                    _ej = state.opt_sp.escalation_journal
-                    if _ej and _ej[-1].get("outcome_degraded_rate") is None:
-                        _ej[-1]["outcome_degraded_rate"] = (
-                            _esc_ctx.get("degraded_rate", 0)
+                    journal = state.opt_sp.escalation_journal
+                    if journal and journal[-1].get("outcome_degraded_rate") is None:
+                        journal[-1]["outcome_degraded_rate"] = (
+                            esc_context.get("degraded_rate", 0)
                         )
 
                     _obs, _tid = _get_obs_trace(state, obs_campaign_id)
                     try:
-                        _l2_stop = await _escalate_l2(
+                        l2_stop = await _escalate_l2(
                             state, config, round_num, round_eval_data, on_phase,
                             obs=_obs, trace_id=_tid,
                             from_degradation=True,
-                            escalation_context=_esc_ctx,
+                            escalation_context=esc_context,
                         )
                     except (KeyboardInterrupt, asyncio.CancelledError):
                         raise
                     except Exception:
                         logger.warning("L2 escalation failed", exc_info=True)
-                        _l2_stop = None
-                    if _l2_stop:
-                        stop_reason = _l2_stop
+                        l2_stop = None
+                    if l2_stop:
+                        stop_reason = l2_stop
                         break
 
                     # Record journal entry after L2 transition
-                    _dominant = _esc_ctx.get("dominant_warning", "unknown:unknown")
-                    _problem_step = _dominant.split(":")[0] if ":" in _dominant else "unknown"
-                    _step_cfg = (
-                        (state.current_sp.pipeline_params or {}).get(_problem_step, {})
+                    dominant = esc_context.get("dominant_warning", "unknown:unknown")
+                    problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
+                    step_cfg = (
+                        (state.current_sp.pipeline_params or {}).get(problem_step, {})
                     )
                     state.opt_sp.escalation_journal.append({
                         "round": round_num,
-                        "degraded_rate": _esc_ctx.get("degraded_rate", 0),
-                        "problem_step": _problem_step,
-                        "step_config": dict(_step_cfg) if isinstance(_step_cfg, dict) else {},
-                        "warning_types": _esc_ctx.get("warning_types", {}),
+                        "degraded_rate": esc_context.get("degraded_rate", 0),
+                        "problem_step": problem_step,
+                        "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
+                        "warning_types": esc_context.get("warning_types", {}),
                         "l2_action": state.opt_sp.changes_description or "",
                         "outcome_degraded_rate": None,
                     })
@@ -1342,7 +1326,7 @@ async def run_feedback_cycle(
 
             # Checkpoint round to disk
             if campaign_store and cycle_id:
-                try:
+                with graceful("Round checkpoint failed"):
                     campaign_store.add_trial(config.backend_id, cycle_id, {
                         "trial_id": f"round_{round_num}",
                         "round": round_num,
@@ -1367,10 +1351,6 @@ async def run_feedback_cycle(
                         "l3_round": state.l3_round,
                         "opt_search_point": state.opt_sp.model_dump(),
                     })
-                except (KeyboardInterrupt, asyncio.CancelledError):
-                    raise
-                except Exception:
-                    logger.warning("Round checkpoint failed", exc_info=True)
 
             # Stopping conditions
             if state.current_accuracy >= 1.0:
@@ -1418,7 +1398,7 @@ async def run_feedback_cycle(
     campaign_status = "interrupted" if stop_reason == "interrupted" else "completed"
     if stop_reason == "interrupted":
         if campaign_store and cycle_id:
-            try:
+            with graceful("Campaign interrupt update failed"):
                 campaign_store.update(config.backend_id, cycle_id, {
                     "status": "interrupted",
                     "stop_reason": "interrupted",
@@ -1427,10 +1407,6 @@ async def run_feedback_cycle(
                     "n_rounds": len(state.rounds),
                     "finished_at": finished_at,
                 })
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                raise
-            except Exception:
-                logger.warning("Campaign interrupt update failed", exc_info=True)
         cloud_trace_id = None
     else:
         cloud_trace_id = _finalize_campaign(

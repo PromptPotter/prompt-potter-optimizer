@@ -30,7 +30,7 @@ from api.services.stores.campaign_store import CampaignStore
 from api.services.stores.dataset_run_store import DatasetRunStore
 from api.services.stores.dataset_store import DatasetStore
 from api.services.stores.execution_store import ExecutionStore
-from api.services.stores.smart_search_store import SmartSearchStore
+from api.services.stores.base import SmartSearchStore
 
 BASE_DIR = Path(".promptpotter") / "projects"
 

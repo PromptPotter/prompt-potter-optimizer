@@ -309,19 +309,30 @@ async def show_backend_status(client) -> dict:
 async def prepare_eval_context(
     svc: dict,
     train_data: list[dict] | None,
-) -> tuple[OptSearchPoint, list[dict], dict]:
-    """Load baseline prompt, set eval_data, check backend.
+    campaign_config: dict | None = None,
+    run_baseline: bool = False,
+) -> tuple[OptSearchPoint, list[dict], list, list]:
+    """Load baseline prompt, set eval_data, check backend, optionally run baseline.
 
     Returns:
-        (baseline, eval_data, backend_status)
+        (baseline, eval_data, campaign_rounds, baseline_results)
     """
     from api.services.prompt_eval import load_baseline_prompt
     baseline = load_baseline_prompt(svc["exp_data"])
     eval_data = train_data or []
-    backend_status = await show_backend_status(svc["backend_client"])
+    await show_backend_status(svc["backend_client"])
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
-    return baseline, eval_data, backend_status
+
+    campaign_rounds: list = []
+    baseline_results: list = []
+    if run_baseline and campaign_config is not None:
+        from ._eval import run_baseline_eval
+        campaign_rounds, baseline_results = await run_baseline_eval(
+            baseline, eval_data, campaign_config, svc,
+        )
+
+    return baseline, eval_data, campaign_rounds, baseline_results
 
 
 

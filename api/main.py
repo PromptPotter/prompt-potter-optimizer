@@ -3,13 +3,14 @@ PromptPotter Optimizer API — main FastAPI application entry point.
 """
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from scalar_fastapi import get_scalar_api_reference
 
 from api.config.settings import APP_VERSION, settings
-from api.routers import backends, campaigns, health
+from api.routers import backends, campaigns
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Health check
+_health = APIRouter()
+
+@_health.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "service": "PromptPotter Optimizer",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "version": APP_VERSION,
+    }
+
 # Include routers
-app.include_router(health.router, prefix="/api/v1", tags=["Health"])
+app.include_router(_health, prefix="/api/v1", tags=["Health"])
 app.include_router(backends.router, prefix="/api/v1", tags=["Backends"])
 app.include_router(campaigns.router, prefix="/api/v1", tags=["Campaigns"])

@@ -387,59 +387,50 @@ def _make_openai_client() -> OpenAICompatibleClient:
     )
 
 
-def get_llm_client(provider: str | None = None) -> LLMClientBase:
-    """Get the configured LLM client.
+def _resolve_provider() -> str:
+    """Auto-detect LLM provider from settings + environment.
 
-    Args:
-        provider: "openai", "anthropic", "groq", or "mock".
-            Auto-detects from settings if not specified.
-
-    Returns:
-        LLM client instance.
+    Priority: configured provider (if key exists) → first available key.
     """
+    configured = getattr(settings, "LLM_PROVIDER", "").lower()
+    _candidates = [
+        ("groq", settings.GROQ_API_KEY),
+        ("anthropic", settings.ANTHROPIC_API_KEY),
+        ("openai", settings.OPENAI_API_KEY),
+    ]
+    def _has_key(key: str | None) -> bool:
+        return bool(key) and key not in _PLACEHOLDER_KEYS
+
+    # Configured provider takes priority
+    for name, key in _candidates:
+        if configured == name and _has_key(key):
+            return name
+    # Fallback: first available key
+    for name, key in _candidates:
+        if _has_key(key):
+            return name
+    return "mock"
+
+
+_PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
+    "groq": _make_groq_client,
+    "anthropic": AnthropicClient,
+    "openai": _make_openai_client,
+    "mock": MockLLMClient,
+}
+
+
+def get_llm_client(provider: str | None = None) -> LLMClientBase:
+    """Get the configured LLM client (auto-detects provider if not specified)."""
     global _llm_client
 
     if provider:
-        _providers: dict[str, Callable[[], LLMClientBase]] = {
-            "openai": _make_openai_client,
-            "anthropic": AnthropicClient,
-            "groq": _make_groq_client,
-            "mock": MockLLMClient,
-        }
-        factory = _providers.get(provider)
+        factory = _PROVIDER_FACTORIES.get(provider)
         if factory is None:
             raise ValueError(f"Unknown provider: {provider}")
         return factory()
 
     if _llm_client is None:
-        configured = getattr(settings, "LLM_PROVIDER", "").lower()
-
-        if (
-            configured == "groq"
-            and settings.GROQ_API_KEY
-            and settings.GROQ_API_KEY not in _PLACEHOLDER_KEYS
-        ):
-            _llm_client = _make_groq_client()
-        elif configured == "anthropic" and settings.ANTHROPIC_API_KEY:
-            _llm_client = AnthropicClient()
-        elif configured == "openai" and settings.OPENAI_API_KEY:
-            _llm_client = _make_openai_client()
-        elif (
-            settings.GROQ_API_KEY
-            and settings.GROQ_API_KEY not in _PLACEHOLDER_KEYS
-        ):
-            _llm_client = _make_groq_client()
-        elif (
-            settings.OPENAI_API_KEY
-            and settings.OPENAI_API_KEY not in _PLACEHOLDER_KEYS
-        ):
-            _llm_client = _make_openai_client()
-        elif (
-            settings.ANTHROPIC_API_KEY
-            and settings.ANTHROPIC_API_KEY not in _PLACEHOLDER_KEYS
-        ):
-            _llm_client = AnthropicClient()
-        else:
-            _llm_client = MockLLMClient()
+        _llm_client = _PROVIDER_FACTORIES[_resolve_provider()]()
 
     return _llm_client

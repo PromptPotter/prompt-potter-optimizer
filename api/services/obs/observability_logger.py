@@ -61,25 +61,25 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _write_yaml(path: Path, data: dict) -> None:
-    """Write dict as YAML-compatible ``key: value`` lines (no PyYAML dependency).
+def _yaml_value(v: object) -> str:
+    """Format a single value for YAML output (no PyYAML dependency)."""
+    if isinstance(v, str):
+        return f'"{v}"'
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return str(v).lower()
+    if isinstance(v, list):
+        return json.dumps(v)
+    return str(v)
 
-    Adapted from TermNorm ``RunManager._write_yaml()``. Handles str, int, float,
-    bool, None, and list (as JSON arrays). Sufficient for MLflow meta.yaml format.
-    """
+
+def _write_yaml(path: Path, data: dict) -> None:
+    """Write dict as YAML-compatible ``key: value`` lines."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         for key, value in data.items():
-            if isinstance(value, str):
-                f.write(f'{key}: "{value}"\n')
-            elif value is None:
-                f.write(f"{key}: null\n")
-            elif isinstance(value, bool):
-                f.write(f"{key}: {str(value).lower()}\n")
-            elif isinstance(value, list):
-                f.write(f"{key}: {json.dumps(value)}\n")
-            else:
-                f.write(f"{key}: {value}\n")
+            f.write(f"{key}: {_yaml_value(value)}\n")
 
 
 def _write_json(path: Path, data: dict) -> None:
