@@ -127,3 +127,142 @@ def test_derive_returns_new_frozen_instance():
     assert sp is not sp2
     with pytest.raises(Exception):
         sp2.model = "another"
+
+
+# ---------------------------------------------------------------------------
+# prompt_fields — variant derivation without OptSearchPoint
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_fields_render():
+    """JSP with prompt_fields renders from them, not from pipeline_params."""
+    sp = JobSearchPoint(
+        pipeline_params={"llm_ranking": {"prompt": "stale rendered text"}},
+        prompt_fields={"persona": "You are an expert.", "instruction": "Rank items."},
+    )
+    rendered = sp.render()
+    assert "You are an expert." in rendered
+    assert "Rank items." in rendered
+    assert "stale rendered text" not in rendered
+
+
+def test_prompt_fields_render_fallback():
+    """JSP without prompt_fields renders from pipeline_params as before."""
+    sp = JobSearchPoint(
+        pipeline_params={"llm_ranking": {"prompt": "Hello world."}},
+    )
+    assert sp.render() == "Hello world."
+    assert sp.prompt_fields is None
+
+
+def test_prompt_fields_render_preserves_field_order():
+    """Fields are assembled in PROMPT_STRING_FIELDS order."""
+    sp = JobSearchPoint(
+        pipeline_params={"llm_ranking": {"prompt": ""}},
+        prompt_fields={
+            "instruction": "Second",
+            "persona": "First",
+        },
+    )
+    rendered = sp.render()
+    assert rendered.index("First") < rendered.index("Second")
+
+
+def test_prompt_fields_render_includes_few_shot_block():
+    """Pre-rendered few_shot_block is appended after string fields."""
+    sp = JobSearchPoint(
+        pipeline_params={"llm_ranking": {"prompt": ""}},
+        prompt_fields={
+            "instruction": "Rank items.",
+            "few_shot_block": "Input: x\nOutput: y",
+        },
+    )
+    rendered = sp.render()
+    assert "Rank items." in rendered
+    assert "Input: x\nOutput: y" in rendered
+    # few_shot_block comes after instruction
+    assert rendered.index("Rank items.") < rendered.index("Input: x")
+
+
+def test_derive_with_prompt_fields():
+    """derive(prompt_fields=...) merges fields and re-renders into pipeline_params."""
+    sp = _make_jsp("Rank by relevance.")
+    assert sp.prompt_fields is not None
+    assert sp.prompt_fields["instruction"] == "Rank by relevance."
+
+    sp2 = sp.derive(prompt_fields={"instruction": "Sort by name."})
+    assert sp2.prompt_fields["instruction"] == "Sort by name."
+    assert "Sort by name." in sp2.render()
+    assert "Sort by name." in sp2.pipeline_params["llm_ranking"]["prompt"]
+    # Original unchanged
+    assert sp.prompt_fields["instruction"] == "Rank by relevance."
+
+
+def test_derive_prompt_fields_preserves_other_fields():
+    """Partial prompt_fields update keeps unmentioned fields."""
+    osp = OptSearchPoint(persona="Expert", instruction="Rank items.")
+    sp = osp.to_job_search_point()
+    sp2 = sp.derive(prompt_fields={"instruction": "Sort items."})
+    assert sp2.prompt_fields["persona"] == "Expert"
+    assert sp2.prompt_fields["instruction"] == "Sort items."
+
+
+def test_derive_prompt_fields_sp_hash_consistency():
+    """derive(prompt_fields=...) produces the same sp_hash as a fresh projection."""
+    osp = OptSearchPoint(persona="Expert", instruction="Rank items.")
+    sp = osp.to_job_search_point(model="m", temperature=0.5)
+
+    # Derive with a field change
+    sp_derived = sp.derive(prompt_fields={"instruction": "Sort items."})
+
+    # Fresh projection with the same change
+    osp2 = osp.derive_candidate(instruction="Sort items.")
+    sp_fresh = osp2.to_job_search_point(model="m", temperature=0.5)
+
+    assert sp_derived.sp_hash() == sp_fresh.sp_hash()
+    assert sp_derived.render() == sp_fresh.render()
+
+
+def test_prompt_fields_not_in_sp_hash():
+    """JSP with and without prompt_fields but same rendered prompt → same sp_hash."""
+    pp = {"llm_ranking": {"prompt": "Expert\n\nRank items."}}
+    sp_with = JobSearchPoint(
+        pipeline_params=pp,
+        prompt_fields={"persona": "Expert", "instruction": "Rank items."},
+    )
+    sp_without = JobSearchPoint(pipeline_params=pp)
+    assert sp_with.sp_hash() == sp_without.sp_hash()
+
+
+def test_to_job_search_point_populates_prompt_fields():
+    """OptSearchPoint.to_job_search_point() populates prompt_fields."""
+    osp = OptSearchPoint(
+        persona="Expert",
+        thinking_style="Step by step",
+        instruction="Rank items.",
+    )
+    sp = osp.to_job_search_point()
+    assert sp.prompt_fields is not None
+    assert sp.prompt_fields["persona"] == "Expert"
+    assert sp.prompt_fields["thinking_style"] == "Step by step"
+    assert sp.prompt_fields["instruction"] == "Rank items."
+
+
+def test_to_job_search_point_includes_few_shot_block():
+    """Few-shot examples are pre-rendered into prompt_fields."""
+    from api.models.opt_search_point import FewShotExample
+    osp = OptSearchPoint(
+        instruction="Rank.",
+        few_shot_examples=[FewShotExample(input="a", output="b")],
+    )
+    sp = osp.to_job_search_point()
+    assert "few_shot_block" in sp.prompt_fields
+    assert "Input: a" in sp.prompt_fields["few_shot_block"]
+
+
+def test_derive_without_prompt_fields_carries_forward():
+    """derive(pipeline_params=...) preserves existing prompt_fields."""
+    sp = _make_jsp("Rank by relevance.")
+    sp2 = sp.derive(pipeline_params={**sp.pipeline_params, "extra": 42})
+    assert sp2.prompt_fields == sp.prompt_fields
+    assert sp2.pipeline_params["extra"] == 42

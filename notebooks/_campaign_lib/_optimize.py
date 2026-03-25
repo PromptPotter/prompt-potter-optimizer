@@ -140,8 +140,6 @@ def show_feedback_preflight(
 def _print_preflight_sections(config, bl, eval_data,
                               *, campaign_config=None, scan_context=None):
     """Print three-section preflight walkthrough."""
-    from api.services.l1_optimizer import MAX_FAILURES_GENERATE
-
     baseline_acc = bl["baseline_acc"]
     instruction = bl["instruction"]
     baseline_results = bl["baseline_results"]
@@ -216,7 +214,7 @@ def _print_preflight_sections(config, bl, eval_data,
     if baseline_results:
         n_failures = sum(1 for r in baseline_results if not r.get("hit"))
     print(f"  {CYAN}2. FAILURE ANALYSIS{RESET}")
-    print(f"     Up to {MAX_FAILURES_GENERATE} failures extracted"
+    print(f"     Up to {config.max_failures} failures extracted"
           f" (currently {n_failures} available)")
 
     # Step 3: Context assembly

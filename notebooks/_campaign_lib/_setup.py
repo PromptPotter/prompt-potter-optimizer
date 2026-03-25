@@ -206,9 +206,9 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
 
     campaign_config["pipeline_params"] = pipeline_params
 
-    print(f"Active steps: {active_steps}")
-    if exclude:
-        print(f"  Excluded: {exclude}")
+    steps_str = ", ".join(active_steps)
+    excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
+    print(f"Active steps: {steps_str}{excl_str}")
 
     return pipeline_params
 

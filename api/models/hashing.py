@@ -13,6 +13,18 @@ import json
 # for the expected dataset sizes (<100k eval runs).
 HASH_TRUNCATE = 16
 
+# Fields that render() assembles into the prompt string.
+# Lives here (leaf module) to avoid circular imports between
+# search_point.py and opt_search_point.py.
+PROMPT_STRING_FIELDS: list[str] = [
+    "persona",
+    "task_intent",
+    "problem_description",
+    "instruction",
+    "thinking_style",
+    "answer_format",
+]
+
 
 def sp_identity_hash(
     rendered_prompt_hash: str,

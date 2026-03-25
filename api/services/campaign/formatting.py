@@ -8,12 +8,9 @@ from api.config.settings import DISPLAY_TRUNCATE
 from api.services.campaign.critique_stats import summarize_warning_inventory
 
 
-MAX_FAILURES_GENERATE = 15
-
-
 def format_failure_lines(
     results: list[dict],
-    max_lines: int = MAX_FAILURES_GENERATE,
+    max_lines: int = 15,
     truncate: int = DISPLAY_TRUNCATE,
 ) -> list[str]:
     """Format failure examples as Q/Pred/GT lines.
@@ -36,11 +33,12 @@ def format_failure_examples(
     current_results: list,
     warning_inventory: dict | None,
     is_probe_round: bool,
+    max_failures: int = 15,
 ) -> str:
     """Format failure examples with optional warning annotations."""
     failures = [r for r in current_results if not r["hit"] and not r.get("error")]
     lines = []
-    for r in failures[:MAX_FAILURES_GENERATE]:
+    for r in failures[:max_failures]:
         line = (
             f"  Query: {r['query'][:DISPLAY_TRUNCATE]}  |  "
             f"Predicted: {r['predicted'][:DISPLAY_TRUNCATE]}  |  "

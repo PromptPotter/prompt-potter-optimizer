@@ -45,6 +45,7 @@ async def l1_generate(
     model: str | None = None,
     scan_context: dict | None = None,
     is_probe_round: bool = False,
+    max_failures: int = 15,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -61,6 +62,7 @@ async def l1_generate(
 
     failure_examples = _format_failure_examples(
         current_results, opt_sp.warning_inventory or None, is_probe_round,
+        max_failures=max_failures,
     )
     instruction_spec = (
         '  - "instruction": full prompt template text '

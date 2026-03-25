@@ -23,6 +23,7 @@ _SUBMODULE_MAP: dict[str, str] = {
     "build_data_inventory": "api.services.search.coverage",
     "build_prompt_result_index": "api.services.search.coverage",
     "diagnose_scan_variants": "api.services.search.coverage",
+    "preview": "api.services.search.coverage",
     # eval_dataset
     "load_eval_dataset": "api.services.search.eval_dataset",
     # context

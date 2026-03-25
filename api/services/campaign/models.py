@@ -90,6 +90,9 @@ class CycleConfig(BaseModel):
         2,
         description="Degradation resets before emitting backend warning (0 = disabled)",
     )
+    max_failures: int = Field(
+        15, description="Max failure examples fed to LLM candidate generation",
+    )
 
     @classmethod
     def from_campaign_config(
@@ -142,6 +145,7 @@ class CycleConfig(BaseModel):
             critique_positive_threshold=opt["critique_positive_threshold"],
             degradation_threshold=opt["degradation_threshold"],
             backend_warning_threshold=opt["backend_warning_threshold"],
+            max_failures=opt["max_failures"],
         )
 
 

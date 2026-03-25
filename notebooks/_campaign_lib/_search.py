@@ -29,6 +29,7 @@ from api.services.search import (
 )
 
 from ._display import (
+    CYAN, DIM, RESET,
     _fmt_query_result, _print_interrupt_banner, show_axis_profiles, show_progress,
     show_scan_leaderboard, show_scan_query_difficulty,
 )
@@ -251,14 +252,14 @@ async def prepare_scan_baseline(
 
     # Print decomposed fields
     cache_tag = " (cached)" if was_cached else ""
-    print(f"  Restructured baseline fields{cache_tag}:")
+    print(f"{CYAN}Restructured baseline fields{cache_tag}:{RESET}")
     for field in LAYER1_STRING_FIELDS:
         val = getattr(search_baseline, field, "")
         if val:
-            print(f"    {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
+            print(f"  {DIM}{field}:{RESET} {val[:80]}{'...' if len(val) > 80 else ''}")
         else:
-            print(f"    {field}: (empty)")
-    print(f"  Search baseline: {search_baseline.id[:12]} "
+            print(f"  {DIM}{field}:{RESET} (empty)")
+    print(f"Search baseline: {search_baseline.id[:12]} "
           f"(render: {len(search_baseline.render())} chars)")
 
     # Historical data diagnostic via sp_hash matching
@@ -300,6 +301,10 @@ async def prepare_scan_baseline(
 # ── Coverage & data inventory ────────────────────────────────────────────
 
 
+_BLOCK_WIDTH = 70  # max chars per line for block-filled values
+_FOOTNOTE_LEN = 50  # values longer than this get a footnote code
+
+
 def _print_historical_diagnostic(
     prompt_index: dict[str, dict[str, dict]],
     *,
@@ -309,41 +314,93 @@ def _print_historical_diagnostic(
     n_prompts = len(prompt_index)
     n_results = sum(len(v) for v in prompt_index.values())
     if n_results == 0:
-        print("\n  Historical data: (none)")
+        print(f"{DIM}Historical data: (none){RESET}")
         return
 
-    print(f"\n  Historical data: {n_results} results across {n_prompts} unique prompts")
+    print(
+        f"{CYAN}Historical data:{RESET}"
+        f" {n_results} results across {n_prompts} unique prompts"
+    )
 
     if scan_diagnosis:
         n_matching = scan_diagnosis["n_matching_runs"]
         n_cached = scan_diagnosis["n_matching_results"]
-        print(f"  Matching runs (sp_hash): {n_matching}, {n_cached} cached results")
+        print(f"Matching runs (sp_hash): {n_matching},"
+              f" {n_cached} cached results")
 
     # Scan variant coverage
-    if scan_diagnosis and scan_diagnosis["axes"]:
-        n_matching = scan_diagnosis["n_matching_runs"]
-        print(f"\n  Scan variant coverage ({n_matching} matching runs):")
-        for axis_name, info in scan_diagnosis["axes"].items():
-            values = info["values"]
-            n_covered = sum(1 for c in values.values() if c > 0)
-            n_total = len(values)
+    if not (scan_diagnosis and scan_diagnosis["axes"]):
+        return
 
-            if n_total <= 5:
-                parts = []
-                for key, count in values.items():
-                    if count > 0:
-                        parts.append(f"{key}\u2192{count} \u2713")
-                    else:
-                        parts.append(f"{key}\u2192\u2717")
-                detail = "  ".join(parts)
-            else:
-                detail = f"{n_covered}/{n_total} values tested"
+    n_matching = scan_diagnosis["n_matching_runs"]
+    print(f"{CYAN}Scan variant coverage"
+          f" ({n_matching} matching runs):{RESET}")
 
-            label = f"    {axis_name:<24s}"
-            if n_covered == 0:
-                print(f"{label} (not tested)")
+    # Footnote lookup for very long values
+    legend: list[tuple[str, str]] = []
+    code_idx = 0
+    codes: dict[str, str] = {}
+
+    def _code(val: str) -> str:
+        nonlocal code_idx
+        if val in codes:
+            return codes[val]
+        c = chr(ord("a") + code_idx)
+        code_idx += 1
+        codes[val] = f"[{c}]"
+        legend.append((f"[{c}]", val))
+        return f"[{c}]"
+
+    indent = "  "
+    gap = "  "
+
+    for axis_name, info in scan_diagnosis["axes"].items():
+        values = info["values"]
+        n_covered = sum(1 for c in values.values() if c > 0)
+        n_total = len(values)
+        label = f"{DIM}{axis_name:<24s}{RESET}"
+
+        if n_covered == 0:
+            print(f"{label} {DIM}(not tested){RESET}")
+            continue
+
+        # Build chunks: "value→N ✓" or "value→✗"
+        chunks: list[str] = []
+        for key, count in values.items():
+            skey = str(key)
+            display = _code(skey) if len(skey) > _FOOTNOTE_LEN else skey
+            if count > 0:
+                chunks.append(f"{display}\u2192{count} \u2713")
             else:
-                print(f"{label} {detail}")
+                chunks.append(
+                    f"{display}\u2192{DIM}\u2717{RESET}"
+                )
+
+        # Try single-line after axis label
+        joined = gap.join(chunks)
+        # 24 = raw label width (without ANSI)
+        if 24 + 1 + len(joined) <= _BLOCK_WIDTH:
+            print(f"{label} {joined}")
+            continue
+
+        # Multi-line: header + block-filled rows
+        print(f"{label} {n_covered}/{n_total} values tested")
+        line = indent
+        for chunk in chunks:
+            addition = chunk if line == indent else gap + chunk
+            if len(line) + len(addition) > _BLOCK_WIDTH:
+                if line != indent:
+                    print(line)
+                line = indent + chunk
+            else:
+                line += addition
+        if line != indent:
+            print(line)
+
+    if legend:
+        print(f"{CYAN}Values:{RESET}")
+        for code, full in legend:
+            print(f"  {code} {full}")
 
 
 async def resume_or_build_diagnostic(
@@ -939,13 +996,13 @@ async def sensitivity_scan(
     # Print scan overview
     print("Running sensitivity scan...")
     if baseline_opt is not None:
-        print("\n  Baseline field values:")
+        print(f"{CYAN}Baseline field values:{RESET}")
         for field in LAYER1_STRING_FIELDS:
             val = getattr(baseline_opt, field, "")
             if val:
-                print(f"    {field}: {val[:80]}{'...' if len(val) > 80 else ''}")
+                print(f"  {DIM}{field}:{RESET} {val[:80]}{'...' if len(val) > 80 else ''}")
             else:
-                print(f"    {field}: (empty)")
+                print(f"  {DIM}{field}:{RESET} (empty)")
         print()
 
     n_axes = sum(1 for v in scan_variants.values() if len(v) > 1)

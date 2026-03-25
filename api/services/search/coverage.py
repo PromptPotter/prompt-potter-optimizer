@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from typing import Any
 
-from api.models.hashing import HASH_TRUNCATE
+from api.models.hashing import HASH_TRUNCATE, PROMPT_STRING_FIELDS
 from api.models.pipeline_schema import is_result_step_compatible
 from api.models.opt_search_point import OptSearchPoint
 from api.services.project_store import ProjectStore
@@ -220,16 +220,24 @@ def diagnose_scan_variants(
     for axis_name, values in scan_variants.items():
         value_counts: dict[str, int] = {}
         value_scores: dict[str, dict] = {}
+        is_prompt_field = (
+            axis_name in PROMPT_STRING_FIELDS
+            and baseline_sp.prompt_fields is not None
+        )
 
         for v in values:
             key = json.dumps(v, sort_keys=True) if isinstance(v, dict) else str(v)
-            # Derive perturbed SP for this variant
-            perturbed = baseline_sp.derive(
-                pipeline_params={**(baseline_sp.pipeline_params or {}), axis_name: v},
-            )
+            # Derive perturbed SP — prompt fields re-render the prompt,
+            # pipeline params swap a top-level key.
+            if is_prompt_field:
+                perturbed = baseline_sp.derive(prompt_fields={axis_name: v})
+            else:
+                perturbed = baseline_sp.derive(
+                    pipeline_params={**(baseline_sp.pipeline_params or {}), axis_name: v},
+                )
             sp_h = perturbed.sp_hash()
             entries = sp_index.get(sp_h, [])
-            value_counts[key] = len(entries)
+            value_counts[key] = sum(e.get("item_count", 0) for e in entries)
 
             for e in entries:
                 all_matching.add(e.get("run_id", ""))

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from api.models.hashing import PROMPT_STRING_FIELDS
 from api.models.search_point import SearchPoint
 
 if TYPE_CHECKING:
@@ -43,17 +44,6 @@ class FewShotExample(BaseModel):
     input: str
     output: str
     explanation: str | None = None
-
-
-# Fields that render() assembles into the prompt string.
-PROMPT_STRING_FIELDS: list[str] = [
-    "persona",
-    "task_intent",
-    "problem_description",
-    "instruction",
-    "thinking_style",
-    "answer_format",
-]
 
 # Layer field mapping
 LAYER_FIELDS: dict[str, list[str]] = {
@@ -206,8 +196,8 @@ class OptSearchPoint(SearchPoint):
         """Project into a JobSearchPoint for target-layer evaluation.
 
         Renders prompt fields → injects into pipeline_params → creates
-        a frozen JobSearchPoint. The ``prompt_node`` param controls which
-        node receives the rendered prompt (default: llm_ranking).
+        a frozen JobSearchPoint with ``prompt_fields`` populated for
+        variant derivation.
         """
         from api.models.search_point import JobSearchPoint
 
@@ -215,10 +205,26 @@ class OptSearchPoint(SearchPoint):
         rendered = self.render()
         if rendered:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
+
+        # Build prompt_fields for variant derivation in JobSearchPoint
+        pf: dict[str, str] = {}
+        for f in PROMPT_STRING_FIELDS:
+            v = getattr(self, f)
+            if v:
+                pf[f] = v
+        if self.few_shot_examples:
+            lines: list[str] = []
+            for ex in self.few_shot_examples:
+                lines.append(f"Input: {ex.input}\nOutput: {ex.output}")
+                if ex.explanation:
+                    lines.append(f"Explanation: {ex.explanation}")
+            pf["few_shot_block"] = "\n".join(lines)
+
         return JobSearchPoint(
             model=model,
             temperature=temperature,
             pipeline_params=pp,
+            prompt_fields=pf or None,
         )
 
     # -- Candidate derivation ------------------------------------------------
