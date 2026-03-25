@@ -247,7 +247,7 @@ def show_experiment_dashboard(
     active_id = None
     if campaign_config is not None and eval_data is not None:
         try:
-            from api.services.campaign.feedback_cycle import cycle_config_identity
+            from api.services.campaign.cycle_setup import cycle_config_identity
             from api.services.campaign.models import CycleConfig
 
             config = CycleConfig.from_campaign_config(

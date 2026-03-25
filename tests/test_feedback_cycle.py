@@ -15,11 +15,11 @@ import pandas as pd
 
 from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.models import CycleConfig
-from api.services.campaign.feedback_cycle import (
+from api.services.campaign.cycle_setup import (
     _validate_config_match,
     cycle_config_identity,
-    run_feedback_cycle,
 )
+from api.services.campaign.feedback_cycle import run_feedback_cycle
 from api.services.search import select_scan_winner
 
 from _helpers import (

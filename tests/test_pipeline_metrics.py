@@ -11,7 +11,7 @@ from api.models.pipeline_schema import (
     PipelineStep,
     ROLE_METRIC_REGISTRY,
 )
-from api.services.prompt_eval import compute_composite_score, derive_metrics
+from api.services.metrics import compute_composite_score, derive_metrics
 
 
 def _make_results(hits, total, *, terminated_at="llm_ranking", gt_in_candidates=True):

@@ -16,188 +16,19 @@ from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import DISPLAY_TRUNCATE
 from api.models.opt_search_point import OptSearchPoint
 from api.core.llm_call import get_node_config, llm_call
-from api.services.campaign.critique_stats import summarize_warning_inventory
+from api.services.campaign.formatting import (
+    format_failure_examples as _format_failure_examples,
+    format_scan_analytics as _format_scan_analytics,
+    format_focus_note as _format_focus_note,
+    format_context_sections as _format_context_sections,
+)
 from api.services.llm_client import LLMClientBase
-from api.services.prompt_eval import compute_composite_score
+from api.services.metrics import compute_composite_score
 
 if TYPE_CHECKING:
     from api.services.prompt_eval import EvalContext
 
 logger = logging.getLogger(__name__)
-
-MAX_FAILURES_GENERATE = 15
-
-
-# ---------------------------------------------------------------------------
-# Formatting helpers for l1_generate template variables
-# ---------------------------------------------------------------------------
-
-
-def _format_failure_examples(
-    current_results: list,
-    warning_inventory: dict | None,
-    is_probe_round: bool,
-) -> str:
-    """Format failure examples with optional warning annotations."""
-    failures = [r for r in current_results if not r["hit"] and not r.get("error")]
-    lines = []
-    for r in failures[:MAX_FAILURES_GENERATE]:
-        line = (
-            f"  Query: {r['query'][:DISPLAY_TRUNCATE]}  |  "
-            f"Predicted: {r['predicted'][:DISPLAY_TRUNCATE]}  |  "
-            f"GT: {r['ground_truth'][:DISPLAY_TRUNCATE]}"
-        )
-        if warning_inventory:
-            entry = warning_inventory.get(r["query"])
-            if entry and entry.get("warnings"):
-                top_warn = max(entry["warnings"], key=entry["warnings"].get)
-                wcount = entry["warnings"][top_warn]
-                seen = entry.get("rounds_seen", 0)
-                threshold = 1 if is_probe_round else 2
-                if wcount >= threshold:
-                    line += f"  [{top_warn} {wcount}/{seen} rounds]"
-        lines.append(line)
-    return "\n".join(lines)
-
-
-def _format_scan_analytics(scan_context: dict | None) -> str:
-    """Format scan analytics section (empty when no scan data)."""
-    if not scan_context:
-        return "(no scan data available)"
-    return (
-        f"### Variant leaderboard (ranked by accuracy)\n"
-        f"{scan_context['leaderboard_text']}\n\n"
-        f"### Axis sensitivity (most impactful parameters)\n"
-        f"{scan_context['sensitivity_text']}\n\n"
-        f"### Query difficulty\n"
-        f"{scan_context['difficulty_text']}\n\n"
-        f"### Tested values per axis\n"
-        f"{scan_context['tested_values']}"
-    )
-
-
-def _format_focus_note(escalation_journal: list[dict] | None) -> str:
-    """Format pipeline degradation note from escalation journal."""
-    if not escalation_journal:
-        return ""
-    latest = escalation_journal[-1]
-    rate = latest.get("degraded_rate", 0)
-    problem_step = latest.get("problem_step", "unknown")
-    lines = [
-        f"PIPELINE ISSUE: {rate:.0%} of queries degrade at the "
-        f"{problem_step} step.",
-        "Address pipeline instability in your candidates.",
-    ]
-    if len(escalation_journal) > 1:
-        lines.append(
-            f"Previous {len(escalation_journal)} attempts have not "
-            "resolved the issue.",
-        )
-    wtypes = latest.get("warning_types", {})
-    if wtypes:
-        lines.append(f"Warning breakdown: {wtypes}")
-    return "\n".join(lines)
-
-
-def _format_context_sections(
-    task_context: dict | None,
-    critique_text: str,
-    l2_directive: str,
-    thinking_styles: list[str] | None,
-    plan: str,
-    warning_inventory: dict | None,
-    escalation_journal: list[dict] | None,
-    is_probe_round: bool,
-) -> str:
-    """Build all optional context sections as a single string.
-
-    Each non-empty section is a titled block. Returned string is empty
-    when no context is available.
-    """
-    sections: list[str] = []
-
-    # Task context
-    if task_context:
-        tc_lines = "\n".join(
-            f"  {k}: {v}" for k, v in task_context.items() if v
-        )
-        if tc_lines:
-            sections.append(
-                "TASK CONTEXT (domain understanding — use to guide "
-                f"your changes):\n{tc_lines}"
-            )
-
-    # Probe round — enriched with warning inventory and escalation history
-    if is_probe_round:
-        probe_lines = [
-            "PROBE ROUND: These queries have recurring pipeline warnings. "
-            "Generate candidates that specifically address pipeline "
-            "robustness for the affected steps.",
-        ]
-        if warning_inventory:
-            inv_text = summarize_warning_inventory(warning_inventory)
-            if inv_text:
-                probe_lines.append("")
-                probe_lines.append(inv_text)
-            step_counts: dict[str, int] = {}
-            for entry in warning_inventory.values():
-                for wtype in entry.get("warnings", {}):
-                    step = wtype.split(":")[0] if ":" in wtype else wtype
-                    step_counts[step] = step_counts.get(step, 0) + 1
-            if step_counts:
-                dominant_step = max(step_counts, key=step_counts.get)
-                probe_lines.append(
-                    f"\nDominant problem step: {dominant_step} "
-                    f"({step_counts[dominant_step]} warning occurrences)"
-                )
-                if escalation_journal:
-                    tried = [
-                        ej for ej in escalation_journal
-                        if ej.get("problem_step") == dominant_step
-                    ]
-                    if tried:
-                        probe_lines.append(
-                            f"Previous attempts targeting {dominant_step}:"
-                        )
-                        for ej in tried[-3:]:
-                            wt = ej.get("warning_types", {})
-                            probe_lines.append(
-                                f"  - degraded_rate="
-                                f"{ej.get('degraded_rate', 0):.0%}, "
-                                f"warnings={wt}"
-                            )
-        sections.append("\n".join(probe_lines))
-
-    # L2 directive
-    if l2_directive:
-        sections.append(
-            "L2 DIRECTIVE (from context refinement — additional "
-            f"guidance for this round):\n{l2_directive}"
-        )
-
-    # Critique
-    if critique_text:
-        sections.append(
-            "CRITIQUE (from previous evaluation — use this to guide "
-            f"your changes):\n{critique_text}"
-        )
-
-    # Thinking styles
-    if thinking_styles:
-        styles = "\n".join(
-            f"  {i+1}. {s}" for i, s in enumerate(thinking_styles)
-        )
-        sections.append(
-            "THINKING STYLES (consider these approaches when generating "
-            f"variants):\n{styles}"
-        )
-
-    # Strategic plan
-    if plan:
-        sections.append(f"STRATEGIC GUIDANCE (from optimization plan):\n{plan}")
-
-    return "\n\n".join(sections)
-
 
 # ---------------------------------------------------------------------------
 # L1 Generate — candidate prompt variant generation
@@ -205,7 +36,7 @@ def _format_context_sections(
 
 
 async def l1_generate(
-    osp: OptSearchPoint,
+    opt_sp: OptSearchPoint,
     current_accuracy: float,
     current_results: list,
     n_variants: int,
@@ -229,7 +60,7 @@ async def l1_generate(
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
     failure_examples = _format_failure_examples(
-        current_results, osp.warning_inventory or None, is_probe_round,
+        current_results, opt_sp.warning_inventory or None, is_probe_round,
     )
     instruction_spec = (
         '  - "instruction": full prompt template text '
@@ -240,14 +71,14 @@ async def l1_generate(
         n_variants=n_variants,
         accuracy_pct=f"{current_accuracy:.1%}",
         n_queries=len(current_results),
-        rendered_prompt=osp.render(),
+        rendered_prompt=opt_sp.render(),
         failure_examples=failure_examples,
         scan_analytics=_format_scan_analytics(scan_context),
-        focus_note=_format_focus_note(osp.escalation_journal or None),
+        focus_note=_format_focus_note(opt_sp.escalation_journal or None),
         context_sections=_format_context_sections(
-            osp.task_context or None, osp.critique_text, osp.l2_directive,
-            osp.thinking_styles or None, osp.plan or "",
-            osp.warning_inventory or None, osp.escalation_journal or None,
+            opt_sp.task_context or None, opt_sp.critique_text, opt_sp.l2_directive,
+            opt_sp.thinking_styles or None, opt_sp.plan or "",
+            opt_sp.warning_inventory or None, opt_sp.escalation_journal or None,
             is_probe_round,
         ),
         instruction_spec=instruction_spec,
@@ -270,7 +101,7 @@ async def l1_generate(
     candidates: list[dict] = []
     for v in variants_list[:n_variants]:
         instr = v.get("instruction", "")
-        child = osp.derive_candidate(
+        child = opt_sp.derive_candidate(
             **({"instruction": instr} if instr else {}),
             changes_description=v.get("changes_description", ""),
         )
