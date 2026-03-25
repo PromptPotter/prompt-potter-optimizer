@@ -36,6 +36,8 @@ __all__ = [
     "decompose_task_context",
     # Re-exports
     "save_campaign_winner",
+    # Dev
+    "dev_reload",
 ]
 
 
@@ -98,9 +100,8 @@ async def decompose_task_context(
     task_context["raw_description"] = task_description
     cache_tag = " (cached)" if was_cached else ""
 
-    print(f"{'=' * 70}")
     print(f"TASK CONTEXT DECOMPOSITION{cache_tag}")
-    print(f"{'=' * 70}")
+    print("-" * 50)
     for field in TASK_CONTEXT_FIELDS:
         val = task_context.get(field, "")
         if val:
@@ -109,20 +110,31 @@ async def decompose_task_context(
             print(f"  {field}: (empty)")
 
     if result.get("consultation"):
-        print(f"\n  Consultation: {result['consultation']}")
-    print(f"{'=' * 70}")
+        print(f"  Consultation: {result['consultation']}")
 
     return task_context
 
 
 # ---------------------------------------------------------------------------
-# LLM setup
+# Dev helpers
 # ---------------------------------------------------------------------------
 
 
+def dev_reload() -> None:
+    """Force-reload api modules so code edits take effect without kernel restart."""
+    import importlib
+    import sys
 
-# setup_llm and save_campaign_winner are now imported from
-# api.services.campaign.campaign_init (see imports above)
+    for mod in [
+        "api.services.campaign.escalation",
+        "api.services.campaign.layer_transitions",
+        "api.services.campaign.critique",
+        "api.services.campaign.models",
+        "api.services.prompt_optimizer",
+        "api.services.campaign.feedback_cycle",
+    ]:
+        if mod in sys.modules:
+            importlib.reload(sys.modules[mod])
 
 
 async def show_pipeline_snapshot(svc: dict) -> dict:
@@ -142,15 +154,12 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     schemas = list(config.get("resolved_schemas", {}).keys())
     prompts = list(config.get("resolved_prompts", {}).keys())
 
-    print("=" * 70)
-    print(f"  PIPELINE SNAPSHOT: {name} {version}")
-    print("=" * 70)
+    print(f"PIPELINE SNAPSHOT: {name} {version}")
+    print("-" * 50)
     print(f"  Nodes:   {nodes}")
     print(f"  Schemas: {schemas}")
     print(f"  Prompts: {prompts}")
-    print()
     print(json.dumps(config, indent=2))
-    print("=" * 70)
 
     return config
 
@@ -283,8 +292,8 @@ async def show_backend_status(client) -> dict:
     # Success -- TermNorm wraps data under "data" key
     data = status.get("data", status)
 
-    print("\nBACKEND STATUS")
-    print("=" * 50)
+    print("BACKEND STATUS")
+    print("-" * 40)
     for key, val in data.items():
         if key == "experiments":
             continue  # displayed separately below
@@ -294,14 +303,11 @@ async def show_backend_status(client) -> dict:
     # Per-experiment breakdown (if backend provides it)
     experiments = data.get("experiments")
     if experiments:
-        print(f"  {'-' * 48}")
         print(f"  {'Experiments':30s}")
         for exp in experiments:
             eid = exp.get("id", "?")
             count = exp.get("mappings", 0)
             print(f"    {eid:<28s} {count} mappings")
-
-    print("=" * 50)
 
     return status
 
@@ -320,7 +326,6 @@ async def prepare_eval_context(
     from api.services.prompt_eval import load_baseline_prompt
     baseline = load_baseline_prompt(svc["exp_data"])
     eval_data = train_data or []
-    await show_backend_status(svc["backend_client"])
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
 

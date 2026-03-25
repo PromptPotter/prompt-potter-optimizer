@@ -30,6 +30,7 @@ from api.services.search import (
 
 from ._display import (
     _fmt_query_result, _print_interrupt_banner, show_axis_profiles, show_progress,
+    show_scan_leaderboard, show_scan_query_difficulty,
 )
 from ._setup import setup_llm
 
@@ -46,7 +47,7 @@ __all__ = [
     # Notebook-facing wrappers
     "prepare_scan_baseline", "run_scan_advisor", "seed_campaign_from_scan",
     "build_pipeline_overview", "build_tunable_params", "build_llm_context",
-    "show_variant_library",
+    "show_variant_library", "show_scan_analytics", "run_sensitivity_scan",
 ]
 
 
@@ -198,8 +199,9 @@ async def prepare_scan_baseline(
     Uses alias-aware disk caching so repeated runs reuse the same
     decomposition (stable content hashes → scan cache hits).
 
-    If *store* and *backend_id* are provided, prints a historical data
-    diagnostic with scan variant coverage via prompt alias groups.
+    When *pipeline_params* is None, builds fresh defaults from
+    ``configure_pipeline(svc, campaign_config)`` so the baseline content
+    hash matches previous runs regardless of EXPERIMENT_ID.
 
     Returns:
         (baseline_jsp, search_baseline, scan_diag) — a JobSearchPoint for
@@ -207,11 +209,16 @@ async def prepare_scan_baseline(
         scan variant diagnosis dict.
     """
     import hashlib
+    from ._setup import configure_pipeline
 
     # svc shorthand: extract store/backend_id if provided
     if svc is not None:
         store = store or svc.get("store")
         backend_id = backend_id or svc.get("backend_id", "")
+
+    # Fresh pipeline defaults when not explicitly provided
+    if pipeline_params is None and svc is not None:
+        pipeline_params = configure_pipeline(svc, campaign_config)
 
     llm_client, llm_model = setup_llm(campaign_config)
 
@@ -616,9 +623,8 @@ def load_task_description(path: str | None) -> str:
 
 def _display_scan_advisory(advisory: dict) -> None:
     """Print the scan advisor results (priority axes, budget, warnings)."""
-    print(f"{'-' * 70}")
     print("PRIORITY AXES (ranked by importance)")
-    print(f"{'-' * 70}")
+    print("-" * 40)
     for i, ax in enumerate(advisory.get("priority_axes", []), 1):
         imp = ax.get("importance", "?").upper()
         src = ax.get("source", "?")
@@ -632,39 +638,33 @@ def _display_scan_advisory(advisory: dict) -> None:
 
     skipped = advisory.get("axes_to_skip", [])
     if skipped:
-        print(f"\n{'-' * 70}")
         print("AXES TO SKIP")
-        print(f"{'-' * 70}")
+        print("-" * 40)
         for ax in skipped:
             print(f"  - {ax.get('axis', '?')}: {ax.get('reason', '?')}")
 
     budget = advisory.get("budget_breakdown", {})
     if budget:
-        print(f"\n{'-' * 70}")
         print("BUDGET BREAKDOWN")
-        print(f"{'-' * 70}")
+        print("-" * 40)
         for k, v in budget.items():
             print(f"  {k}: {v}")
 
     n_diag = advisory.get("suggested_n_diagnostic", 6)
-    print(f"\n  Suggested n_diagnostic: {n_diag}")
+    print(f"  Suggested n_diagnostic: {n_diag}")
 
     reasoning = advisory.get("reasoning", "")
     if reasoning:
-        print(f"\n{'-' * 70}")
         print("REASONING")
-        print(f"{'-' * 70}")
+        print("-" * 40)
         print(f"  {reasoning}")
 
     warnings = advisory.get("validation_warnings", [])
     if warnings:
-        print(f"\n{'-' * 70}")
         print("VALIDATION WARNINGS")
-        print(f"{'-' * 70}")
+        print("-" * 40)
         for w in warnings:
             print(f"  [!] {w}")
-
-    print("=" * 70)
 
 
 async def scan_advisor(
@@ -693,9 +693,8 @@ async def scan_advisor(
     llm_client, model = setup_llm(campaign_config)
 
     # --- Display ---
-    print("=" * 70)
     print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
-    print("=" * 70)
+    print("-" * 50)
     print(f"  Pipeline: {pipeline_schema.name} ({pipeline_schema.version})")
     print(f"  Steps: {[s.name for s in pipeline_schema.steps]}")
     if user_excluded:
@@ -708,7 +707,6 @@ async def scan_advisor(
         else:
             print(f"  Task context: {task_description[:80].strip()}...")
     print(f"  Calling {model or '?'} ...")
-    print()
 
     eval_llm = campaign_config.get("eval_llm", {})
     max_tokens = eval_llm.get("max_tokens", 2000)
@@ -1341,3 +1339,48 @@ def seed_campaign_from_scan(
     show_progress(campaign_rounds)
 
     return best_sp
+
+
+# ── Scan analytics ───────────────────────────────────────────────────────
+
+
+def show_scan_analytics(scan_df, axis_profiles, svc: dict):
+    """Display scan leaderboard and query difficulty if results are available.
+
+    Returns difficulty_df (or None if scan_df is empty/None).
+    """
+    if scan_df is None or scan_df.empty:
+        return None
+    show_scan_leaderboard(scan_df, axis_profiles)
+    return show_scan_query_difficulty(svc["store"], svc["backend_id"])
+
+
+async def run_sensitivity_scan(
+    baseline,
+    campaign_config: dict,
+    scan_variants: dict[str, list],
+    eval_data: list,
+    *,
+    scan_sample_size: int = 0,
+    svc: dict | None = None,
+    experiment_id: str = "",
+):
+    """Prepare scan baseline and run sensitivity scan in one call.
+
+    Absorbs ``prepare_scan_baseline()`` and ``sensitivity_scan()`` plumbing.
+
+    Returns:
+        (scan_baseline_sp, scan_df, axis_profiles) — the JobSearchPoint
+        baseline, per-variant DataFrame, and axis profile list.
+    """
+    scan_baseline_sp, search_baseline, _scan_diag = await prepare_scan_baseline(
+        baseline, campaign_config,
+        svc=svc, scan_variants=scan_variants,
+    )
+    scan_df, axis_profiles = await sensitivity_scan(
+        scan_baseline_sp, scan_variants, eval_data,
+        baseline_opt=search_baseline,
+        sample_size=scan_sample_size,
+        svc=svc, experiment_id=experiment_id,
+    )
+    return scan_baseline_sp, scan_df, axis_profiles

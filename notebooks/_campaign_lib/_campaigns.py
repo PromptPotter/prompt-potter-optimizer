@@ -216,19 +216,29 @@ def show_experiment_dashboard(
     pipeline_params: dict | None = None,
     baseline_prompt_state: dict | None = None,
     svc: dict | None = None,
-) -> dict | list | None:
-    """Unified experiment dashboard — overview or detail by experiment ID."""
+) -> dict:
+    """Unified experiment dashboard — overview or detail by experiment ID.
+
+    When *experiment_id* is truthy, loads and applies experiment overrides
+    before displaying. Always returns ``pipeline_params`` (possibly updated).
+    """
     # svc shorthand
     if svc is not None:
         store = store or svc.get("store")
         backend_id = backend_id or svc.get("backend_id", "")
+
+    # Apply experiment overrides when resuming
+    if experiment_id and svc is not None:
+        pipeline_params = load_and_apply_experiment(
+            svc, campaign_config, experiment_id, pipeline_params,
+        )
 
     # --- Resolve short ID ---
     full_id = None
     if experiment_id is not None:
         full_id = _resolve_experiment_id(store, backend_id, experiment_id)
         if full_id is None:
-            return None
+            return pipeline_params or {}
 
     # --- Detect active campaign from current config ---
     active_id = None
@@ -252,7 +262,7 @@ def show_experiment_dashboard(
         campaign = store.campaigns.load(backend_id, full_id)
         if campaign is None:
             print(f"Campaign {full_id} not found.")
-            return None
+            return pipeline_params or {}
 
         status = campaign["status"]
         n = campaign["n_trials"]
@@ -306,7 +316,7 @@ def show_experiment_dashboard(
             print("  → Config does NOT match — update campaign_config to resume")
 
         print(f"{'=' * 72}\n")
-        return campaign
+        return pipeline_params or {}
 
     # --- Overview mode ---
     # Dataset runs summary
@@ -388,4 +398,4 @@ def show_experiment_dashboard(
     elif campaign_config is not None:
         print("  No matching campaign — feedback cycle will create new")
     print()
-    return campaigns
+    return pipeline_params or {}

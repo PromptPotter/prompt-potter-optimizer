@@ -86,6 +86,42 @@ class LLMClientBase(ABC):
         ...
 
 
+def _repair_json(text: str) -> str:
+    """Best-effort repair of malformed JSON from LLM output.
+
+    Handles common Groq/kimi artifacts:
+    - Unquoted keys (``key:`` → ``"key":``)
+    - Trailing commas before ``}`` or ``]``
+    - Truncated tail (strip to last complete ``}`` or ``]``)
+    - Double-escaped newlines (``\\\\n`` → ``\\n``)
+    """
+    import re
+
+    # Normalize double-escaped sequences back to single-escaped
+    text = text.replace("\\\\n", "\\n").replace("\\\\t", "\\t")
+
+    # Unquoted keys: word before colon not already quoted
+    text = re.sub(r'(?<=[{,\s])(\w+)\s*:', r'"\1":', text)
+
+    # Trailing commas
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+
+    # Truncated JSON: find last balanced closing brace
+    depth = 0
+    last_valid = -1
+    for i, ch in enumerate(text):
+        if ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+            if depth == 0:
+                last_valid = i
+    if last_valid > 0 and last_valid < len(text) - 1:
+        text = text[: last_valid + 1]
+
+    return text
+
+
 def _try_parse_json(content: str, provider: str) -> Any | None:
     """Parse JSON from response content, return None on failure."""
     text = content.strip()
@@ -99,6 +135,15 @@ def _try_parse_json(content: str, provider: str) -> Any | None:
         text = text.strip()
     try:
         return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt repair
+    try:
+        repaired = _repair_json(text)
+        result = json.loads(repaired)
+        logger.info("%s JSON repaired successfully", provider)
+        return result
     except json.JSONDecodeError:
         logger.debug("%s response not valid JSON: %s", provider, content[:200])
         return None
@@ -187,13 +232,52 @@ class OpenAICompatibleClient(LLMClientBase):
                         f"Update campaign_config['eval_llm']['model'] or "
                         f"set EXPERIMENT_ID = None to use current config."
                     ) from exc
-                # Groq JSON mode: empty/invalid generation — transient, retry
+                # Groq JSON mode: invalid generation — try to salvage
                 is_json_validate_failed = (
                     status == 400
                     and "json_validate_failed" in str(exc)
                 )
+                if is_json_validate_failed:
+                    # Extract failed_generation from error body and try repair
+                    err_str = str(exc)
+                    fg_key = "'failed_generation': '"
+                    fg_start = err_str.find(fg_key)
+                    if fg_start >= 0:
+                        fg_text = err_str[fg_start + len(fg_key):]
+                        # Find matching end quote (skip escaped quotes)
+                        fg_end = fg_text.rfind("'}")
+                        if fg_end > 0:
+                            fg_text = fg_text[:fg_end]
+                            # Unescape Python string repr artifacts
+                            fg_text = fg_text.replace("\\n", "\n").replace("\\'", "'")
+                            parsed = _try_parse_json(fg_text, self._provider_name)
+                            if parsed is not None:
+                                logger.info(
+                                    "%s: salvaged failed_generation via JSON repair",
+                                    self._provider_name,
+                                )
+                                return LLMResponse(
+                                    content=fg_text,
+                                    model=request_params.get("model", ""),
+                                    usage={"prompt_tokens": 0, "completion_tokens": 0},
+                                    parsed=parsed,
+                                )
+                    # Repair failed — fall through to retry
+                    last_exc = exc
+                    if attempt < _MAX_APP_RETRIES:
+                        delay = _BASE_DELAY * (2 ** attempt)
+                        logger.warning(
+                            "%s JSON validation failed (attempt %d/%d), "
+                            "retrying in %.1fs",
+                            self._provider_name, attempt + 1,
+                            _MAX_APP_RETRIES + 1, delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    raise
+
                 is_connection = "Connection" in type(exc).__name__
-                if status in _RETRY_STATUSES or is_connection or is_json_validate_failed:
+                if status in _RETRY_STATUSES or is_connection:
                     last_exc = exc
                     if attempt < _MAX_APP_RETRIES:
                         delay = _BASE_DELAY * (2 ** attempt)

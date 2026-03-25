@@ -44,6 +44,7 @@ __all__ = [  # noqa: F405
     "show_scan_coverage", "show_data_inventory",
     "audit_historical_data", "run_scan_advisor", "seed_campaign_from_scan",
     "prepare_scan_baseline", "preview_advisor_prompt", "show_variant_library",
+    "show_scan_analytics", "run_sensitivity_scan",
     # Campaign
     "show_feedback_preflight", "run_feedback_cycle_notebook", "save_campaign_winner",
     "show_progress",
@@ -59,4 +60,6 @@ __all__ = [  # noqa: F405
     "push_langfuse", "sync_langfuse",
     # Entity profiles
     "show_entity_profiles",
+    # Dev
+    "dev_reload",
 ]
