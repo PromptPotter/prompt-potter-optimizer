@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -17,7 +17,7 @@ from api.models.pipeline_schema import PipelineSchema
 from api.models.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
-    from api.services.prompt_eval import EvalContext
+    from api.services.eval_context import EvalContext
 
 
 class StopReason(str, enum.Enum):
@@ -220,3 +220,16 @@ class _LoopState:
     best_accuracy_at_l3_entry: float = 0.0
     best_composite_at_l2_entry: float = 0.0
     best_composite_at_l3_entry: float = 0.0
+
+
+@dataclass
+class CycleInitResult:
+    """Return type for ``_init_cycle_state()`` — replaces a 7-tuple."""
+
+    state: _LoopState
+    campaign_store: Any = None
+    cycle_id: str | None = None
+    obs_campaign_id: str = ""
+    round_eval_data: list = field(default_factory=list)
+    escalation_checks: list = field(default_factory=list)
+    resumed_from_round: int = 0

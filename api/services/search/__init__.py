@@ -11,13 +11,13 @@ Submodules are imported lazily to avoid pulling in heavy dependencies
 _SUBMODULE_MAP: dict[str, str] = {
     # smart_search
     "ScanEvent": "api.services.search.smart_search",
-    "adaptive_search": "api.services.search.smart_search",
+    "adaptive_search": "api.services.search.adaptive_search",
     "build_diagnostic_set": "api.services.search.smart_search",
     "filter_variant_library": "api.services.search.smart_search",
     "load_filtered_variant_library": "api.services.search.smart_search",
     "resume_or_build_diagnostic": "api.services.search.scan_results",
     "select_scan_winner": "api.services.search.scan_results",
-    "sensitivity_scan": "api.services.search.smart_search",
+    "sensitivity_scan": "api.services.search.sensitivity_scan",
     # coverage
     "assess_scan_coverage": "api.services.search.coverage",
     "build_data_inventory": "api.services.search.coverage",

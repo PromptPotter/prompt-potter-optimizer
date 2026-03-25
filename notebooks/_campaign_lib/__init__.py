@@ -10,7 +10,6 @@ from ._setup import *      # noqa: F403
 from ._eval import *       # noqa: F403
 from ._search import *     # noqa: F403
 from ._campaigns import *  # noqa: F403
-from ._langfuse import *   # noqa: F403
 from ._optimize import *   # noqa: F403
 
 # Private names used by tests (not exported by *)
@@ -57,7 +56,7 @@ __all__ = [  # noqa: F405
     # Campaign results display
     "show_campaign_summary", "show_flip_tracking", "show_lineage_chain",
     # Langfuse
-    "push_langfuse", "sync_langfuse",
+    "configure_langfuse", "push_langfuse", "sync_langfuse",
     # Entity profiles
     "show_entity_profiles",
     # Dev

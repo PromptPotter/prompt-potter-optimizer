@@ -1,9 +1,8 @@
-"""Sensitivity scan, adaptive search, diagnostic set, and axis classification.
+"""Shared types and utilities for sensitivity scan and adaptive search.
 
-One-at-a-time (OAT) perturbation scanning and importance-weighted
-coordinate descent over prompt-field and pipeline-param axes.
+Axis classification, variant library filtering, eval function factory,
+and diagnostic set builder.
 """
-
 from __future__ import annotations
 
 import logging
@@ -11,19 +10,13 @@ import random
 from collections import defaultdict
 from typing import TYPE_CHECKING, Callable, Literal, TypedDict
 
-if TYPE_CHECKING:
-    import pandas as pd
-
 from api.config.settings import DEFAULT_DIAGNOSTIC_QUERIES
-from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS
-from api.models.search_point import JobSearchPoint
-from api.services.project_store import ProjectStore
-from api.services.prompt_eval import EvalContext, evaluate_prompt_cached, _dominant_error_category
-from api.services.search.coverage import preview as _preview
+from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS  # noqa: F401
+from api.services.eval_context import EvalContext
+from api.services.prompt_eval import evaluate_prompt_cached
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
-    from api.services.backend_client import BackendClient
 
 logger = logging.getLogger(__name__)
 
@@ -153,13 +146,16 @@ def _make_eval_fn(
     ctx: "EvalContext",
     get_params: Callable[[], dict],
     on_result: Callable | None = None,
+    *,
+    model: str = "",
+    temperature: float = 0.0,
 ) -> Callable:
     """Factory for the ``_eval_opt`` closure used by scan and adaptive search."""
 
     async def _eval_opt(opt: OptSearchPoint, pp: dict | None = None) -> dict:
         sp = opt.to_job_search_point(
-            model=ctx.model,
-            temperature=ctx.temperature,
+            model=model,
+            temperature=temperature,
             base_pipeline_params=pp or get_params(),
         )
         results, scores, cached = await evaluate_prompt_cached(
@@ -293,7 +289,6 @@ def classify_axis(
     return "high"
 
 
-
 # ---------------------------------------------------------------------------
 # Variant library filtering
 # ---------------------------------------------------------------------------
@@ -307,9 +302,8 @@ def filter_variant_library(
     """Filter variant library to axes relevant for the active pipeline.
 
     - Keeps only ``pipeline_params`` axes whose owning step is active.
-    - Drops all ``prompt_fields`` when ``llm_ranking`` is not active
-      (``OptSearchPoint.render()`` produces the prompt consumed only
-      by that step).
+    - Drops all ``prompt_fields`` when no active step has ``prompt_meta``
+      (prompt fields only affect steps with an LLM prompt template).
 
     Args:
         variant_library: Full variant library dict with ``prompt_fields``
@@ -336,9 +330,14 @@ def filter_variant_library(
         if axis in active_param_keys:
             filtered_pp[axis] = values
 
-    # Drop prompt_fields when llm_ranking is not active
+    # Drop prompt_fields when no active step has a prompt template
+    has_prompt_step = any(
+        step.prompt_meta is not None
+        for step in schema.steps
+        if step.name in active_steps
+    )
     filtered_pf = variant_library.get("prompt_fields", {})
-    if "llm_ranking" not in active_steps:
+    if not has_prompt_step:
         filtered_pf = {}
 
     result: dict = {}
@@ -349,11 +348,11 @@ def filter_variant_library(
 
     removed_pp = set(variant_library.get("pipeline_params", {})) - set(filtered_pp)
     if removed_pp:
-        logger.info("filter_variant_library: dropped pipeline_params %s", removed_pp)
+        logger.debug("filter_variant_library: dropped pipeline_params %s", removed_pp)
     if not filtered_pf and variant_library.get("prompt_fields"):
-        logger.info(
+        logger.debug(
             "filter_variant_library: dropped all prompt_fields "
-            "(llm_ranking not active)"
+            "(no active step with prompt_meta)"
         )
 
     return result
@@ -369,488 +368,3 @@ def load_filtered_variant_library(
     if pipeline_params and pipeline_schema:
         lib = filter_variant_library(lib, pipeline_params, schema=pipeline_schema)
     return lib
-
-
-# ---------------------------------------------------------------------------
-# Sensitivity scan
-# ---------------------------------------------------------------------------
-
-
-async def sensitivity_scan(
-    baseline: JobSearchPoint,
-    scan_variants: dict[str, list],
-    eval_data: list,
-    backend_client: BackendClient,
-    *,
-    baseline_opt: OptSearchPoint | None = None,
-    sample_size: int = 0,
-    store: ProjectStore | None = None,
-    backend_id: str = "",
-    pipeline_schema: "PipelineSchema | None" = None,
-    progress_cb: Callable[[ScanEvent], None] | None = None,
-    on_result: Callable | None = None,
-    experiment_id: str = "",
-) -> tuple[pd.DataFrame, list[dict]]:
-    """OAT perturbation scan over all axes.
-
-    Evaluates each axis value one-at-a-time against the baseline, holding
-    all other axes at their baseline values. Returns per-variant results
-    and an axis profile sorted by sensitivity.
-
-    Args:
-        baseline: Baseline JobSearchPoint (model + temperature + pipeline_params).
-        scan_variants: Flat dict mapping axis names to value lists.
-            Prompt fields (in ``PROMPT_STRING_FIELDS``) and pipeline
-            params are auto-detected.
-        eval_data: Full evaluation dataset.
-        backend_client: Backend client for evaluation.
-        baseline_opt: OptSearchPoint for prompt-field perturbation. Required
-            when scan_variants contains prompt_field axes.
-        sample_size: If >0, subsample eval_data to this many queries
-            (deterministic seed=42). 0 means use all.
-        store: Optional ProjectStore for caching.
-        backend_id: Backend identifier.
-        pipeline_schema: Optional PipelineSchema for composite scoring.
-        progress_cb: Optional callback for progress events.
-        on_result: Optional per-result callback.
-
-    Returns:
-        Tuple of (per_variant_df, axis_profiles).
-    """
-    import pandas as pd
-
-    _cb = progress_cb or (lambda _e: None)
-
-    # Subsample eval_data if requested
-    if sample_size > 0 and sample_size < len(eval_data):
-        eval_data = random.Random(42).sample(eval_data, sample_size)
-
-    # Build EvalContext once for all scan evaluations
-    scan_ctx = EvalContext(
-        backend_client=backend_client,
-        store=store,
-        backend_id=backend_id,
-        pipeline_schema=pipeline_schema,
-        source="sensitivity_scan",
-        model=baseline.model,
-        temperature=baseline.temperature,
-        pipeline_params=baseline.pipeline_params,
-        experiment_id=experiment_id,
-    )
-
-    # Classify axes: prompt_field vs pipeline_param
-    axes: list[tuple[str, str, list]] = []
-    for name, values in scan_variants.items():
-        if len(values) <= 1:
-            continue
-        axis_type = "prompt_field" if name in PROMPT_STRING_FIELDS else "pipeline_param"
-        axes.append((name, axis_type, values))
-
-    # Evaluate baseline
-    baseline_results, baseline_scores, baseline_cached = await evaluate_prompt_cached(
-        baseline, eval_data, scan_ctx,
-        label="scan",
-        on_result=on_result,
-    )
-    baseline_acc = baseline_scores["accuracy"]
-    baseline_composite = baseline_scores.get("composite", baseline_acc)
-    _cb({
-        "type": "baseline_done",
-        "accuracy": baseline_acc,
-        "hits": baseline_scores["hits"],
-        "total": baseline_scores["total"],
-        "results": baseline_results,
-        "cached": baseline_cached,
-    })
-
-    # Circuit breaker: abort if baseline eval is all-errors
-    baseline_errors = baseline_scores.get("errors", 0)
-    if baseline_errors == baseline_scores["total"] > 0:
-        dominant = _dominant_error_category(baseline_results)
-        if dominant == "CLIENT":
-            reason = (
-                f"Baseline eval failed: all {baseline_scores['total']} queries "
-                "returned client errors (HTTP 4xx). "
-                "Check pipeline configuration and request parameters."
-            )
-        elif dominant == "CONNECTION":
-            reason = (
-                f"Baseline eval failed: all {baseline_scores['total']} queries "
-                "failed to connect. Backend may be down or unreachable."
-            )
-        else:
-            reason = (
-                f"Baseline eval failed: all {baseline_scores['total']} queries "
-                "errored. Backend may be experiencing issues."
-            )
-        logger.error("Aborting scan: %s", reason)
-        _cb({"type": "scan_aborted", "reason": reason})
-        return pd.DataFrame(), []
-
-    rows: list[dict] = []
-    _consecutive_all_error = 0
-
-    for ai, (axis_name, axis_type, values) in enumerate(axes):
-        _cb({
-            "type": "axis_start",
-            "axis": axis_name, "axis_type": axis_type,
-            "cardinality": len(values),
-            "axis_index": ai, "total_axes": len(axes),
-        })
-
-        for vi, value in enumerate(values):
-            # Detect baseline value for this axis
-            if axis_type == "prompt_field":
-                current_val = getattr(baseline_opt, axis_name, "") if baseline_opt else ""
-            else:
-                current_val = (baseline.pipeline_params or {}).get(axis_name)
-
-            if value == current_val:
-                rows.append({
-                    "axis": axis_name, "axis_type": axis_type,
-                    "value_idx": vi,
-                    "value_preview": _preview(value),
-                    "hits": baseline_scores["hits"],
-                    "total": baseline_scores["total"],
-                    "accuracy": baseline_acc, "delta": 0.0,
-                    "errors": baseline_errors,
-                })
-                _cb({
-                    "type": "variant_done",
-                    "axis": axis_name, "value_idx": vi,
-                    "value_preview": _preview(value),
-                    "is_baseline_value": True,
-                    "accuracy": baseline_acc, "delta": 0.0,
-                    "hits": baseline_scores["hits"],
-                    "total": baseline_scores["total"],
-                    "results": [], "cached": False,
-                })
-                continue
-
-            # Derive perturbed JobSearchPoint
-            if axis_type == "prompt_field":
-                assert baseline_opt is not None, (
-                    "baseline_opt required for prompt_field perturbation"
-                )
-                perturbed = baseline_opt.derive_candidate(
-                    **{axis_name: value},
-                ).to_job_search_point(
-                    model=baseline.model,
-                    temperature=baseline.temperature,
-                    base_pipeline_params=baseline.pipeline_params,
-                )
-            else:
-                perturbed = baseline.derive(
-                    pipeline_params={**(baseline.pipeline_params or {}), axis_name: value},
-                )
-
-            results, scores, cached = await evaluate_prompt_cached(
-                perturbed, eval_data, scan_ctx,
-                label="scan",
-                on_result=on_result,
-            )
-
-            acc = scores["accuracy"]
-            composite = scores.get("composite", acc)
-            delta = composite - baseline_composite
-            variant_errors = scores.get("errors", 0)
-            rows.append({
-                "axis": axis_name, "axis_type": axis_type,
-                "value_idx": vi,
-                "value_preview": _preview(value),
-                "hits": scores["hits"],
-                "total": scores["total"],
-                "accuracy": acc, "delta": delta,
-                "composite": composite,
-                "errors": variant_errors,
-            })
-            _cb({
-                "type": "variant_done",
-                "axis": axis_name, "value_idx": vi,
-                "value_preview": _preview(value),
-                "is_baseline_value": False,
-                "accuracy": acc, "delta": delta,
-                "composite": composite,
-                "hits": scores["hits"], "total": scores["total"],
-                "results": results,
-                "cached": cached,
-            })
-
-            # Circuit breaker: track consecutive non-cached all-error evals
-            if not cached and variant_errors == scores["total"] > 0:
-                _consecutive_all_error += 1
-                if _consecutive_all_error >= 2:
-                    dominant = _dominant_error_category(results)
-                    if dominant == "CLIENT":
-                        detail = "Client errors (HTTP 4xx). Check pipeline configuration."
-                    elif dominant == "CONNECTION":
-                        detail = "Backend may be down or unreachable."
-                    else:
-                        detail = "Backend may be experiencing issues."
-                    reason = (
-                        f"Aborting scan: {_consecutive_all_error} consecutive "
-                        f"variant evals returned all errors. {detail}"
-                    )
-                    logger.error(reason)
-                    profiles = _profiles_from_rows(rows, axes, len(eval_data))
-                    for profile in profiles:
-                        _cb({"type": "axis_done", **profile})
-                    _cb({"type": "scan_aborted", "reason": reason})
-                    return pd.DataFrame(rows), profiles
-            else:
-                _consecutive_all_error = 0
-
-    # Build axis profiles
-    profiles = _profiles_from_rows(rows, axes, len(eval_data))
-    for profile in profiles:
-        _cb({"type": "axis_done", **profile})
-
-    return pd.DataFrame(rows), profiles
-
-
-# ---------------------------------------------------------------------------
-# Select best from scan (greedy composition, no backend calls)
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Adaptive search (importance-weighted coordinate descent)
-# ---------------------------------------------------------------------------
-
-
-async def adaptive_search(
-    baseline_opt: OptSearchPoint,
-    variant_library: dict,
-    eval_data: list,
-    backend_client: BackendClient,
-    axis_profiles: list[dict],
-    max_rounds: int = 3,
-    stop_threshold: float = 0.0,
-    store: ProjectStore | None = None,
-    backend_id: str = "",
-    pipeline_params: dict | None = None,
-    session_terms: list | None = None,
-    progress_cb: Callable[[ScanEvent], None] | None = None,
-    plan_id: str = "",
-    pipeline_schema: "PipelineSchema | None" = None,
-    experiment_id: str = "",
-) -> tuple[OptSearchPoint, dict, pd.DataFrame]:
-    """Coordinate descent with per-axis budget from sensitivity profiles.
-
-    Iterates over active axes (those not classified as ``"skip"``),
-    sorted by sensitivity. Each round tries all variant values for each
-    active axis, keeping the best. Axes are resolved (removed from
-    future rounds) when they produce no improvement.
-
-    Args:
-        baseline_opt: Starting OptSearchPoint.
-        variant_library: Full variant library dict.
-        eval_data: Diagnostic query set.
-        backend_client: Backend client for evaluation.
-        axis_profiles: From ``sensitivity_scan()``.
-        max_rounds: Maximum coordinate descent rounds.
-        stop_threshold: Minimum per-round improvement to continue an axis.
-        store: Optional ProjectStore for caching.
-        backend_id: Backend identifier.
-        pipeline_params: Base pipeline parameters.
-        session_terms: Optional session terms.
-        progress_cb: Optional callback ``(event: dict) -> None`` for
-            progress reporting. Event types: ``round_start``,
-            ``axis_start``, ``variant_done``, ``axis_resolved``.
-
-    Returns:
-        Tuple of (best_opt, best_pipeline_params, search_log_df).
-    """
-    import pandas as pd
-
-    _cb = progress_cb or (lambda _e: None)
-
-    if session_terms:
-        await backend_client.init_session(session_terms)
-
-    # Filter variant library to active pipeline steps
-    variant_library = filter_variant_library(
-        variant_library, pipeline_params, schema=pipeline_schema,
-    )
-
-    # Filter and sort axes by sensitivity
-    active_axes = [
-        p for p in axis_profiles if p["exploration_budget"] != "skip"
-    ]
-    active_axes.sort(key=lambda p: -p["sensitivity_range"])
-
-    current_opt = baseline_opt
-    current_params = dict(pipeline_params or {})
-    resolved_axes: set[str] = set()
-    log_rows: list[dict] = []
-
-    _scan_ctx = EvalContext(
-        backend_client=backend_client,
-        store=store,
-        backend_id=backend_id,
-        pipeline_schema=pipeline_schema,
-        source="adaptive_search",
-        pipeline_params=pipeline_params,
-        experiment_id=experiment_id,
-    )
-    _eval_opt = _make_eval_fn(
-        eval_data, _scan_ctx,
-        get_params=lambda: current_params,
-    )
-
-    # Get baseline accuracy
-    baseline_scores = await _eval_opt(current_opt)
-    current_acc = baseline_scores["accuracy"]
-    current_composite = baseline_scores.get("composite", current_acc)
-
-    for round_num in range(1, max_rounds + 1):
-        round_improved = False
-        _cb({
-            "type": "round_start",
-            "round": round_num, "max_rounds": max_rounds,
-            "current_accuracy": current_composite,
-            "active_axes": [
-                p["axis"] for p in active_axes
-                if p["axis"] not in resolved_axes
-            ],
-        })
-
-        for profile in active_axes:
-            axis_name = profile["axis"]
-            axis_type = profile["axis_type"]
-            budget = profile["exploration_budget"]
-
-            if axis_name in resolved_axes:
-                continue
-
-            # Binary axes resolved after round 1
-            if budget == "low" and round_num > 1:
-                resolved_axes.add(axis_name)
-                continue
-
-            # Get values for this axis
-            if axis_type == "prompt_field":
-                values = variant_library.get("prompt_fields", {}).get(
-                    axis_name, [],
-                )
-            else:
-                values = variant_library.get("pipeline_params", {}).get(
-                    axis_name, [],
-                )
-
-            _cb({
-                "type": "axis_start",
-                "round": round_num,
-                "axis": axis_name, "axis_type": axis_type,
-                "cardinality": len(values), "budget": budget,
-            })
-
-            best_value = (
-                getattr(current_opt, axis_name, "")
-                if axis_type == "prompt_field"
-                else current_params.get(axis_name)
-            )
-            best_composite = current_composite
-
-            for value in values:
-                if axis_type == "prompt_field":
-                    test_opt = current_opt.derive_candidate(**{axis_name: value})
-                    test_params = current_params
-                else:
-                    test_opt = current_opt
-                    test_params = {**current_params, axis_name: value}
-
-                scores = await _eval_opt(test_opt, test_params)
-
-                composite = scores.get("composite", scores["accuracy"])
-                delta = composite - current_composite
-                log_rows.append({
-                    "round": round_num,
-                    "axis": axis_name,
-                    "axis_type": axis_type,
-                    "value_preview": _preview(value),
-                    "accuracy": scores["accuracy"],
-                    "composite": composite,
-                    "delta": delta,
-                })
-                _cb({
-                    "type": "variant_done",
-                    "round": round_num,
-                    "axis": axis_name, "value_preview": _preview(value),
-                    "accuracy": scores["accuracy"], "delta": delta,
-                    "composite": composite,
-                    "hits": scores["hits"], "total": scores["total"],
-                    "results": scores.get("results", []),
-                    "cached": scores.get("cached", False),
-                })
-
-                if composite > best_composite:
-                    best_composite = composite
-                    best_value = value
-
-            # Apply best value if improved
-            improvement = best_composite - current_composite
-            if improvement > stop_threshold:
-                if axis_type == "prompt_field":
-                    current_opt = current_opt.derive_candidate(
-                        **{axis_name: best_value},
-                        changes_description=(
-                            f"adaptive_r{round_num}_{axis_name}"
-                        ),
-                    )
-                else:
-                    current_params[axis_name] = best_value
-                current_composite = best_composite
-                round_improved = True
-                _cb({
-                    "type": "axis_resolved",
-                    "round": round_num,
-                    "axis": axis_name, "action": "improved",
-                    "best_value": _preview(best_value),
-                    "improvement": round(improvement, 4),
-                    "new_accuracy": current_composite,
-                })
-            else:
-                resolved_axes.add(axis_name)
-                _cb({
-                    "type": "axis_resolved",
-                    "round": round_num,
-                    "axis": axis_name, "action": "skipped",
-                    "improvement": round(improvement, 4),
-                })
-
-        if not round_improved:
-            logger.info(
-                "Adaptive search: no improvement in round %d, stopping.",
-                round_num,
-            )
-            _cb({
-                "type": "round_done",
-                "round": round_num, "improved": False,
-                "accuracy": current_composite,
-            })
-            break
-        _cb({
-            "type": "round_done",
-            "round": round_num, "improved": True,
-            "accuracy": current_composite,
-        })
-
-    log_df = pd.DataFrame(log_rows)
-
-    # Persist search results to plan
-    if store and backend_id and plan_id:
-        store.smart_search.update(backend_id, plan_id, {
-            "status": "search_complete",
-            "search_results": {
-                "best_opt": current_opt.model_dump(),
-                "best_params": current_params,
-                "log_rows": log_df.to_dict(orient="records")
-                if not log_df.empty else [],
-            },
-        })
-        logger.info("Saved search results to plan: %s", plan_id)
-
-    return current_opt, current_params, log_df
-
-

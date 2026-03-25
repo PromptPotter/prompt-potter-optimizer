@@ -1,10 +1,13 @@
 """
-Backend CRUD and sync storage.
+Backend CRUD, sync, execution, and dataset storage.
+
+Consolidates all backend-scoped file I/O into one class.
 """
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from api.models.backend import BackendConnection
+from api.models.backend import BackendConnection, Execution
 from api.services.stores.base import (
     read_json,
     read_json_optional,
@@ -77,3 +80,70 @@ class BackendStore:
         if not exp_dir.exists():
             return []
         return [read_json(p) for p in sorted(exp_dir.glob("*.json"))]
+
+    # -- executions (absorbed from ExecutionStore) ----------------------------
+
+    def _executions_dir(self, backend_id: str) -> Path:
+        validate_path_component(backend_id)
+        return self._base_dir / backend_id / "executions"
+
+    def load_execution(self, backend_id: str, execution_id: str) -> Execution | None:
+        """Load an execution by ID. Returns None if not found."""
+        data = read_json_optional(
+            self._executions_dir(backend_id) / f"{execution_id}.json",
+        )
+        return Execution(**data) if data is not None else None
+
+    def list_executions(self, backend_id: str) -> list[dict[str, Any]]:
+        """List execution summaries (without full results array)."""
+        d = self._executions_dir(backend_id)
+        if not d.exists():
+            return []
+        items = []
+        for p in sorted(d.glob("*.json")):
+            data = read_json(p)
+            items.append({
+                "execution_id": data["execution_id"],
+                "backend_id": data["backend_id"],
+                "experiment_id": data["experiment_id"],
+                "variant_label": data.get("variant_label", ""),
+                "pipeline_notation": data.get("pipeline_notation", ""),
+                "query_count": data.get("query_count", 0),
+                "successful_count": data.get("successful_count", 0),
+                "created_at": data.get("created_at", ""),
+            })
+        return items
+
+    # -- datasets (absorbed from DatasetStore) --------------------------------
+
+    def _datasets_dir(self, backend_id: str) -> Path:
+        validate_path_component(backend_id)
+        return self._base_dir / backend_id / "datasets"
+
+    def save_dataset(
+        self,
+        backend_id: str,
+        name: str,
+        items: list[dict],
+        *,
+        source_file: str = "",
+    ) -> Path:
+        """Write a named dataset to disk."""
+        validate_path_component(name)
+        data: dict[str, Any] = {
+            "name": name,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "source_file": source_file,
+            "row_count": len(items),
+            "items": items,
+        }
+        path = self._datasets_dir(backend_id) / f"{name}.json"
+        write_json(path, data)
+        return path
+
+    def load_dataset(self, backend_id: str, name: str) -> dict[str, Any] | None:
+        """Load a named dataset. Returns ``None`` if not found."""
+        validate_path_component(name)
+        return read_json_optional(
+            self._datasets_dir(backend_id) / f"{name}.json",
+        )

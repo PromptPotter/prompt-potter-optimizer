@@ -1278,8 +1278,6 @@ def select_scan_winner_notebook(
 
     if best_sp.sp_hash() != baseline.sp_hash():
         print(f"\nComposed winner: sp_hash={best_sp.sp_hash()[:12]}")
-    if best_sp.pipeline_params != baseline.pipeline_params:
-        print(f"Pipeline params updated: {best_sp.pipeline_params}")
 
     return best_sp
 

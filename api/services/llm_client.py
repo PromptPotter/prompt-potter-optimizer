@@ -266,7 +266,7 @@ class OpenAICompatibleClient(LLMClientBase):
                     last_exc = exc
                     if attempt < _MAX_APP_RETRIES:
                         delay = _BASE_DELAY * (2 ** attempt)
-                        logger.warning(
+                        logger.info(
                             "%s JSON validation failed (attempt %d/%d), "
                             "retrying in %.1fs",
                             self._provider_name, attempt + 1,

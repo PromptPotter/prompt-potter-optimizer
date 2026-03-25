@@ -264,6 +264,9 @@ Rules:
 - importance: "high", "medium", or "low"
 - source: "pipeline_param" or "prompt_field"
 - For pipeline_param axes: include "step" and "suggested_values"
+- CRITICAL: For pipeline_param axes, "axis" must be an EXACT key from the \
+Tunable Parameters param_keys above. Do NOT invent names or combine step \
+names with param names — copy the key exactly as listed.
 - For prompt_field axes: omit "step" and "suggested_values"
 - *_schema mutations: each suggested_value is a JSON array of mutation arrays. \
 Ops: ["-","path"] remove | ["+","path","type",required,"desc"] add | \

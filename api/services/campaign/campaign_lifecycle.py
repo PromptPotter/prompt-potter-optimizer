@@ -278,3 +278,47 @@ def _resume_or_create_campaign(
     except Exception:
         logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
         return None, None, 0
+
+
+def _finalize_campaign(
+    campaign_store,
+    cycle_id: str | None,
+    config: CycleConfig,
+    state: "_LoopState",
+    stop_reason: str,
+    finished_at: str,
+    obs,
+    obs_campaign_id: str,
+    *,
+    status: str = "completed",
+) -> str | None:
+    """Mark campaign on disk and finalize observability.
+
+    Returns:
+        Cloud Langfuse trace ID (or None).
+    """
+    if campaign_store and cycle_id:
+        with graceful("Campaign completion update failed"):
+            campaign_store.update(config.backend_id, cycle_id, {
+                "status": status,
+                "stop_reason": stop_reason,
+                "best_accuracy": state.best_accuracy,
+                "best_round": state.best_round,
+                "n_rounds": len(state.rounds),
+                "finished_at": finished_at,
+            })
+
+    cloud_trace_id: str | None = None
+    if obs:
+        with graceful("ObsLogger campaign end failed"):
+            obs.log_campaign_end(
+                campaign_id=obs_campaign_id,
+                best_accuracy=state.best_accuracy,
+                n_rounds=len(state.rounds),
+                stop_reason=stop_reason,
+                best_round=state.best_round,
+            )
+            obs.flush()
+            cloud_trace_id = obs.get_cloud_trace_id(obs_campaign_id)
+
+    return cloud_trace_id

@@ -180,7 +180,7 @@ async def restructure_context_cached(
             store_base_dir, backend_id, alias_hashes, improvement_areas,
         )
         if cached is not None:
-            logger.info("restructure_context_cached: hit (alias group)")
+            logger.debug("restructure_context_cached: hit (alias group)")
             return cached, True
 
     # --- cache miss: call LLM ---

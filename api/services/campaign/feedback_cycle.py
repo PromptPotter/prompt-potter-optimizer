@@ -24,19 +24,21 @@ from api.models.phase_event import PhaseEvent
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
 from api.services.campaign.critique import sample_thinking_styles
-from api.services.campaign.cycle_setup import (
+from api.services.campaign.campaign_lifecycle import (
     graceful, _emit_phase, _get_obs_trace,
     _init_obs, _resume_or_create_campaign,
 )
 from api.services.campaign.models import (
-    CycleConfig, CycleResult, CycleRoundResult, StopReason, _LoopState,
+    CycleConfig, CycleInitResult, CycleResult, CycleRoundResult,
+    StopReason, _LoopState,
 )
+from api.services.campaign.escalation import _escalate_l2
 from api.services.campaign.round_execution import (
-    _execute_round, _finalize_campaign, _update_round_state,
-    _escalate_l2,
+    _execute_round, _update_round_state,
 )
+from api.services.campaign.campaign_lifecycle import _finalize_campaign
 from api.services.metrics import compute_composite_score
-from api.services.prompt_eval import EvalContext
+from api.services.eval_context import EvalContext
 from api.services.prompt_eval import subsample_queries
 
 if TYPE_CHECKING:
@@ -320,9 +322,6 @@ async def _init_cycle_state(
         pipeline_schema=config.pipeline_schema,
         obs=obs,
         source="feedback_cycle",
-        model=config.model or "",
-        temperature=config.temperature,
-        pipeline_params=config.pipeline_params,
         experiment_id=experiment_id or (cycle_id.replace("cycle_", "")[:12] if cycle_id else ""),
     )
 
@@ -352,8 +351,15 @@ async def _init_cycle_state(
                 sample_count=len(round_eval_data),
                 enable_critique=config.enable_critique)
 
-    return (state, campaign_store, cycle_id, obs_campaign_id,
-            round_eval_data, escalation_checks, resumed_from_round)
+    return CycleInitResult(
+        state=state,
+        campaign_store=campaign_store,
+        cycle_id=cycle_id,
+        obs_campaign_id=obs_campaign_id,
+        round_eval_data=round_eval_data,
+        escalation_checks=escalation_checks,
+        resumed_from_round=resumed_from_round,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -389,13 +395,19 @@ async def run_feedback_cycle(
     started_at = datetime.now(timezone.utc).isoformat()
 
     # -- Init --
-    (state, campaign_store, cycle_id, obs_campaign_id,
-     round_eval_data, escalation_checks, resumed_from_round) = await _init_cycle_state(
+    init = await _init_cycle_state(
         instruction, eval_data, config,
         baseline_prompt_state, baseline_accuracy, baseline_results,
         on_phase, langfuse_session_id, cycle_id, experiment_id,
         backend_client, started_at,
     )
+    state = init.state
+    campaign_store = init.campaign_store
+    cycle_id = init.cycle_id
+    obs_campaign_id = init.obs_campaign_id
+    round_eval_data = init.round_eval_data
+    escalation_checks = init.escalation_checks
+    resumed_from_round = init.resumed_from_round
 
     # -- Round loop --
     stop_reason: StopReason | None = None
@@ -407,9 +419,6 @@ async def run_feedback_cycle(
         max_rounds = config.max_rounds or 999
 
         while clean_rounds < max_rounds and round_num < _HARD_CAP:
-            # Sync eval_ctx pipeline_params from current search point
-            state.eval_ctx.pipeline_params = state.current_sp.pipeline_params
-
             # --- Probe vs normal round data ---
             is_probe = state.probe_next_round
             if is_probe:

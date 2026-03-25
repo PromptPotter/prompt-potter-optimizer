@@ -5,10 +5,8 @@ from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
 from api.services.prompt_eval import _error_category, _dominant_error_category
-from api.services.search.smart_search import (
-    sensitivity_scan,
-    _profiles_from_rows,
-)
+from api.services.search.sensitivity_scan import sensitivity_scan
+from api.services.search.smart_search import _profiles_from_rows
 from api.services.pipeline_discovery import parse_pipeline_response
 
 
@@ -48,10 +46,10 @@ def _make_scan_baseline(
 @pytest.fixture
 def scan_eval_mock(monkeypatch):
     """Fixture that returns a function to patch evaluate_prompt_cached for scan tests."""
-    import api.services.search.smart_search as _ss
+    import api.services.search.sensitivity_scan as _scan
 
     def _apply(mock_eval):
-        monkeypatch.setattr(_ss, "evaluate_prompt_cached", mock_eval)
+        monkeypatch.setattr(_scan, "evaluate_prompt_cached", mock_eval)
 
     return _apply
 

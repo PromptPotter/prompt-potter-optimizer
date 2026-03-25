@@ -20,6 +20,8 @@ def setup_logging(level: int = logging.INFO) -> None:
     handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
     root.setLevel(level)
     root.addHandler(handler)
+    # Suppress noisy httpx request logging
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 # Auto-configure on first import so all modules get consistent logging.

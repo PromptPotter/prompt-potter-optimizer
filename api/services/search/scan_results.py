@@ -251,7 +251,7 @@ def select_scan_winner(
         best = best.derive(
             pipeline_params={**(best.pipeline_params or {}), **param_changes},
         )
-    logger.info(
+    logger.debug(
         "select_scan_winner: %d prompt changes, %d param changes from %d improving axes",
         len(prompt_changes), len(param_changes), len(improving),
     )

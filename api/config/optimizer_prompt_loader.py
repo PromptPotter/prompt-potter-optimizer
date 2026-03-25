@@ -53,6 +53,11 @@ def _try_langfuse(name: str) -> OptSearchPoint | None:
     ``_LANGFUSE_CACHE_TTL`` seconds.
     """
     try:
+        from api.config.settings import settings
+
+        if not settings.LANGFUSE_PROMPTS_ENABLED:
+            return None
+
         from api.services.obs.langfuse_client import LangfuseLogger
 
         lf = LangfuseLogger.get_instance()

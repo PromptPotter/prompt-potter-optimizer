@@ -1,8 +1,8 @@
 """
 Prompt evaluation service.
 
-Extracts baseline prompts from experiment data, filters evaluation datasets,
-and evaluates reranker prompts via the TermNorm backend's /matches endpoint.
+Evaluates reranker prompts via the TermNorm backend's /matches endpoint,
+with content-hash deduplication and alias-aware caching.
 """
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import asyncio
 import hashlib
 import logging
 import signal
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
@@ -18,8 +17,8 @@ import httpx
 
 from api.evaluators.exact_match import EvalResult, ExactMatchEvaluator
 from api.models.hashing import HASH_TRUNCATE
-from api.models.opt_search_point import OptSearchPoint
 from api.config.settings import NO_RESULT
+from api.services.eval_context import EvalContext  # noqa: F401 — re-export for existing callers
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -79,34 +78,6 @@ def subsample_queries(
     return eval_data
 
 
-@dataclass
-class EvalContext:
-    """Infrastructure bundle shared across evaluation calls.
-
-    Pure infrastructure — does NOT carry a SearchPoint.  The search-space
-    dimensions (model, temperature, pipeline_params) live here so that
-    ``l1_evaluate`` can build per-candidate SearchPoints.
-    """
-
-    backend_client: BackendClient
-    store: ProjectStore | None = None
-    backend_id: str = ""
-    pipeline_schema: PipelineSchema | None = None
-    obs: ObsLogger | None = None
-    source: str = ""
-    model: str = ""
-    temperature: float = 0.0
-    pipeline_params: dict | None = None
-    experiment_id: str = ""
-    # Escalation checks (passed through to evaluate_prompt_batch)
-    escalation_checks: list | None = None
-    candidate_idx: int = 0
-    n_total_candidates: int = 1
-
-    def __post_init__(self):
-        if not self.model:
-            logger.debug("EvalContext created with empty model — content hashes will use default")
-
 
 def build_dataset_run_data(
     run_id: str,
@@ -144,38 +115,6 @@ def build_dataset_run_data(
         data["experiment_id"] = experiment_id
     return data
 
-
-def load_baseline_prompt(exp_data: dict) -> OptSearchPoint:
-    """Extract the llm_ranking prompt from experiment data, wrap in OptSearchPoint.
-
-    Args:
-        exp_data: Synced experiment data dict with ``dependencies.prompts``.
-
-    Returns:
-        OptSearchPoint with the baseline reranker prompt as ``instruction``.
-
-    Raises:
-        RuntimeError: If no llm_ranking prompt is found.
-    """
-    dependencies = exp_data.get("dependencies", {})
-    prompts = dependencies.get("prompts", {})
-
-    reranker_prompt = None
-    for key, prompt_info in prompts.items():
-        if "llm_ranking" in key:
-            reranker_prompt = prompt_info
-            break
-
-    if reranker_prompt is None:
-        raise RuntimeError(
-            "No llm_ranking prompt found in synced experiment data. "
-            "Re-sync the experiment after TermNorm prompt registry is initialized."
-        )
-
-    return OptSearchPoint(
-        instruction=reranker_prompt["template"],
-        changes_description="Baseline reranker_v1 from TermNorm prompt registry",
-    )
 
 
 def _extract_pipeline_data(

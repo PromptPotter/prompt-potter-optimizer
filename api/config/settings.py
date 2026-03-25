@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     LANGFUSE_ENABLED: bool = True
+    LANGFUSE_PROMPTS_ENABLED: bool = False
 
     # File-based observability (traces, experiments, events.jsonl)
     OBS_ENABLED: bool = True

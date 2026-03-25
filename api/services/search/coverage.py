@@ -300,7 +300,7 @@ def build_prompt_result_index(
                 index[rp_hash][query] = item
         loaded += 1
 
-    logger.info(
+    logger.debug(
         "build_prompt_result_index: %d runs -> %d unique prompts, %d total query results",
         loaded,
         len(index),

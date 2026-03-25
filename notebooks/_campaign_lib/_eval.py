@@ -13,8 +13,9 @@ if TYPE_CHECKING:
 from api.models.opt_search_point import OptSearchPoint
 from api.services.project_store import ProjectStore
 
-from api.services.campaign.campaign_init import run_baseline_eval as _run_baseline_eval
-from api.services.prompt_eval import load_baseline_prompt
+from api.services.campaign.campaign_init import (
+    load_baseline_prompt, run_baseline_eval as _run_baseline_eval,
+)
 from api.services.search.coverage import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
 )

@@ -19,10 +19,44 @@ from api.config.settings import DATASET_NAME
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
-    from api.models.opt_search_point import OptSearchPoint
     from api.services.llm_client import LLMClientBase
 
+from api.models.opt_search_point import OptSearchPoint
+
 logger = logging.getLogger(__name__)
+
+
+def load_baseline_prompt(exp_data: dict) -> OptSearchPoint:
+    """Extract the llm_ranking prompt from experiment data, wrap in OptSearchPoint.
+
+    Args:
+        exp_data: Synced experiment data dict with ``dependencies.prompts``.
+
+    Returns:
+        OptSearchPoint with the baseline reranker prompt as ``instruction``.
+
+    Raises:
+        RuntimeError: If no llm_ranking prompt is found.
+    """
+    dependencies = exp_data.get("dependencies", {})
+    prompts = dependencies.get("prompts", {})
+
+    reranker_prompt = None
+    for key, prompt_info in prompts.items():
+        if "llm_ranking" in key:
+            reranker_prompt = prompt_info
+            break
+
+    if reranker_prompt is None:
+        raise RuntimeError(
+            "No llm_ranking prompt found in synced experiment data. "
+            "Re-sync the experiment after TermNorm prompt registry is initialized."
+        )
+
+    return OptSearchPoint(
+        instruction=reranker_prompt["template"],
+        changes_description="Baseline reranker_v1 from TermNorm prompt registry",
+    )
 
 
 async def init_services(
@@ -305,7 +339,8 @@ async def run_baseline_eval(
     Raises:
         RuntimeError: If no evaluation data is available.
     """
-    from api.services.prompt_eval import EvalContext, evaluate_prompt_cached
+    from api.services.eval_context import EvalContext
+    from api.services.prompt_eval import evaluate_prompt_cached
 
     if not eval_data and store and experiment_id:
         from api.services.search.eval_dataset import load_eval_dataset
@@ -348,9 +383,6 @@ async def run_baseline_eval(
         backend_id=backend_id,
         obs=obs,
         source="baseline",
-        model=model,
-        temperature=temperature,
-        pipeline_params=pipeline_params,
     )
     baseline_results, scores, _cached = await evaluate_prompt_cached(
         sp, eval_data, ctx,

@@ -26,7 +26,7 @@ from api.services.llm_client import LLMClientBase
 from api.services.metrics import compute_composite_score
 
 if TYPE_CHECKING:
-    from api.services.prompt_eval import EvalContext
+    from api.services.eval_context import EvalContext
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +199,9 @@ async def l1_evaluate(
     current_best: dict[str, Any],
     ctx: "EvalContext",
     *,
+    model: str = "",
+    temperature: float = 0.0,
+    pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
     on_candidate_eval: Callable[[int, int, dict], None] | None = None,
     on_query_eval: Callable[[int, int, int, int, dict], None] | None = None,
@@ -212,9 +215,9 @@ async def l1_evaluate(
     """
     from api.services.prompt_eval import evaluate_prompt_cached
 
-    _sp_model = ctx.model
-    _sp_temperature = ctx.temperature
-    _sp_pipeline_params = ctx.pipeline_params
+    _sp_model = model
+    _sp_temperature = temperature
+    _sp_pipeline_params = pipeline_params
 
     candidate_pp: list[dict | None] = []
     clean_candidates: list[dict] = []
