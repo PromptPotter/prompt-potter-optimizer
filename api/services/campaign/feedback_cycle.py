@@ -29,7 +29,7 @@ from api.services.backend_client import BackendClient
 from api.services.campaign import layer_transitions
 from api.config.settings import DATASET_NAME
 from api.services.campaign.models import (
-    CycleConfig, CycleResult, CycleRoundResult, _LoopState,
+    CycleConfig, CycleResult, CycleRoundResult, StopReason, _LoopState,
 )
 from api.services.campaign.critique import (
     CritiqueAgent, format_critique_for_prompt, sample_thinking_styles,
@@ -917,7 +917,7 @@ async def _escalate_l2(
         logger.info(
             "L2 patience exhausted (%d stalls) at round %d", state.l2_stall_count, round_num,
         )
-        return "l2_patience_exhausted"
+        return StopReason.L2_PATIENCE
 
     # L2 stalled, L3 enabled — track L3 stall
     l3_improved = state.best_composite > state.best_composite_at_l3_entry
@@ -939,7 +939,7 @@ async def _escalate_l2(
         await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
         return None
     logger.info("L3 patience exhausted (%d stalls) at round %d", state.l3_stall_count, round_num)
-    return "l3_patience_exhausted"
+    return StopReason.L3_PATIENCE
 
 
 # ---------------------------------------------------------------------------
@@ -1132,6 +1132,127 @@ async def _init_cycle_state(
             round_eval_data, escalation_checks, resumed_from_round)
 
 
+# ---------------------------------------------------------------------------
+# Extracted loop helpers (probe + escalation)
+# ---------------------------------------------------------------------------
+
+
+def _prepare_probe_data(
+    state: _LoopState,
+    eval_data: list[dict],
+    round_num: int,
+) -> tuple[list[dict], list | None]:
+    """Build eval data for a probe round (warned queries only, no escalation)."""
+    warned_queries = {
+        q for q, e in state.opt_sp.warning_inventory.items()
+        if e.get("warnings")
+    }
+    round_data = [d for d in eval_data if d.get("query") in warned_queries]
+    logger.info(
+        "PROBE round %d: %d warned queries (from %d tracked)",
+        round_num, len(round_data), len(warned_queries),
+    )
+    return round_data, None  # no escalation checks during probe
+
+
+async def _handle_post_probe(
+    state: _LoopState,
+    config: CycleConfig,
+    round_num: int,
+    round_data: list[dict],
+    on_phase: Callable[[PhaseEvent], None] | None,
+    obs_campaign_id: str,
+) -> StopReason | None:
+    """After a probe round: reset flag and force L2 if enabled."""
+    state.probe_next_round = False
+    if config.enable_l2:
+        _obs, _tid = _get_obs_trace(state, obs_campaign_id)
+        return await _escalate_l2(
+            state, config, round_num, round_data, on_phase,
+            obs=_obs, trace_id=_tid,
+        )
+    return None
+
+
+async def _handle_escalation_signal(
+    state: _LoopState,
+    config: CycleConfig,
+    round_result: CycleRoundResult,
+    round_num: int,
+    round_eval_data: list[dict],
+    on_phase: Callable[[PhaseEvent], None] | None,
+    obs_campaign_id: str,
+    campaign_store: "CampaignStore | None",
+    cycle_id: str | None,
+) -> StopReason | None:
+    """Handle a degradation escalation signal from a round result.
+
+    Returns a StopReason if the cycle should stop, None to continue.
+    """
+    signal = round_result.escalation_signal
+    _emit_phase(
+        on_phase, "escalation", "enter", round=round_num,
+        check_name=signal["check_name"],
+        target=signal["target"],
+        degraded_rate=signal["context"].get("degraded_rate"),
+        warning_types=signal["context"].get("warning_types"),
+    )
+    logger.warning(
+        "Escalation '%s' at round %d — target=%s, degraded_rate=%.1f%%",
+        signal["check_name"], round_num, signal["target"],
+        signal["context"].get("degraded_rate", 0) * 100,
+    )
+
+    esc_context = signal["context"]
+
+    # Dispatch by target
+    if signal["target"] in ("l2", "l3") and config.enable_l2:
+        # Fill outcome of previous journal entry (if any)
+        journal = state.opt_sp.escalation_journal
+        if journal and journal[-1].get("outcome_degraded_rate") is None:
+            journal[-1]["outcome_degraded_rate"] = esc_context.get("degraded_rate", 0)
+
+        _obs, _tid = _get_obs_trace(state, obs_campaign_id)
+        try:
+            l2_stop = await _escalate_l2(
+                state, config, round_num, round_eval_data, on_phase,
+                obs=_obs, trace_id=_tid,
+                from_degradation=True,
+                escalation_context=esc_context,
+            )
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
+        except Exception:
+            logger.warning("L2 escalation failed", exc_info=True)
+            l2_stop = None
+        if l2_stop:
+            return l2_stop
+
+        # Record journal entry after L2 transition
+        dominant = esc_context.get("dominant_warning", "unknown:unknown")
+        problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
+        step_cfg = (state.current_sp.pipeline_params or {}).get(problem_step, {})
+        state.opt_sp.escalation_journal.append({
+            "round": round_num,
+            "degraded_rate": esc_context.get("degraded_rate", 0),
+            "problem_step": problem_step,
+            "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
+            "warning_types": esc_context.get("warning_types", {}),
+            "l2_action": state.opt_sp.changes_description or "",
+            "outcome_degraded_rate": None,
+        })
+    elif signal["target"] == "abort":
+        return StopReason.ABORT
+
+    # Common escalation exit (L2 continued, retry, or L2 disabled)
+    if campaign_store and cycle_id:
+        campaign_store.delete_round_candidates(
+            config.backend_id, cycle_id, round_num + 1,
+        )
+    _emit_phase(on_phase, "escalation", "exit", round=round_num)
+    return None
+
+
 async def run_feedback_cycle(
     instruction: str,
     eval_data: list[dict[str, Any]],
@@ -1169,7 +1290,7 @@ async def run_feedback_cycle(
     )
 
     # -- Round loop --
-    stop_reason: str | None = None
+    stop_reason: StopReason | None = None
     _HARD_CAP = 100
 
     try:
@@ -1181,21 +1302,11 @@ async def run_feedback_cycle(
             # Sync eval_ctx pipeline_params from current search point
             state.eval_ctx.pipeline_params = state.current_sp.pipeline_params
 
-            # --- Probe round: override eval data + disable escalation ---
+            # --- Probe vs normal round data ---
             is_probe = state.probe_next_round
             if is_probe:
-                _warned_queries = {
-                    q for q, e in state.opt_sp.warning_inventory.items()
-                    if e.get("warnings")
-                }
-                _round_data = [
-                    d for d in eval_data
-                    if d.get("query") in _warned_queries
-                ]
-                _round_checks = None  # no degradation abort during probe
-                logger.info(
-                    "PROBE round %d: %d warned queries (from %d tracked)",
-                    round_num, len(_round_data), len(_warned_queries),
+                _round_data, _round_checks = _prepare_probe_data(
+                    state, eval_data, round_num,
                 )
             else:
                 _round_data = round_eval_data
@@ -1216,99 +1327,31 @@ async def run_feedback_cycle(
                 on_candidate_eval, on_query_eval, on_phase,
                 escalation_checks=_round_checks,
             )
-
-            # Common state update (both escalation + normal paths)
             _update_round_state(state, round_result, round_num)
-
-            # (tracker already updated inside _execute_round from all_eval_results)
 
             # --- After probe round: reset flag + force L2 ---
             if is_probe:
-                state.probe_next_round = False
-                if config.enable_l2:
-                    _obs, _tid = _get_obs_trace(state, obs_campaign_id)
-                    _l2_stop = await _escalate_l2(
-                        state, config, round_num, _round_data, on_phase,
-                        obs=_obs, trace_id=_tid,
-                    )
-                    if _l2_stop:
-                        stop_reason = _l2_stop
-                        break
+                probe_stop = await _handle_post_probe(
+                    state, config, round_num, _round_data,
+                    on_phase, obs_campaign_id,
+                )
+                if probe_stop:
+                    stop_reason = probe_stop
+                    break
                 round_num += 1
                 clean_rounds += 1
                 continue  # skip normal escalation/stopping — L2 handled it
 
             # --- Escalation path ---
             if round_result.escalation_signal:
-                signal = round_result.escalation_signal
-                # No stall_count reset — degradation didn't produce L1 signal
-
-                _emit_phase(
-                    on_phase, "escalation", "enter", round=round_num,
-                    check_name=signal["check_name"],
-                    target=signal["target"],
-                    degraded_rate=signal["context"].get("degraded_rate"),
-                    warning_types=signal["context"].get("warning_types"),
+                esc_stop = await _handle_escalation_signal(
+                    state, config, round_result, round_num,
+                    round_eval_data, on_phase, obs_campaign_id,
+                    campaign_store, cycle_id,
                 )
-                logger.warning(
-                    "Escalation '%s' at round %d — target=%s, "
-                    "degraded_rate=%.1f%%",
-                    signal["check_name"], round_num, signal["target"],
-                    signal["context"].get("degraded_rate", 0) * 100,
-                )
-
-                # Dispatch by target
-                esc_context = signal["context"]
-                if signal["target"] in ("l2", "l3") and config.enable_l2:
-                    # Fill outcome of previous journal entry (if any)
-                    journal = state.opt_sp.escalation_journal
-                    if journal and journal[-1].get("outcome_degraded_rate") is None:
-                        journal[-1]["outcome_degraded_rate"] = (
-                            esc_context.get("degraded_rate", 0)
-                        )
-
-                    _obs, _tid = _get_obs_trace(state, obs_campaign_id)
-                    try:
-                        l2_stop = await _escalate_l2(
-                            state, config, round_num, round_eval_data, on_phase,
-                            obs=_obs, trace_id=_tid,
-                            from_degradation=True,
-                            escalation_context=esc_context,
-                        )
-                    except (KeyboardInterrupt, asyncio.CancelledError):
-                        raise
-                    except Exception:
-                        logger.warning("L2 escalation failed", exc_info=True)
-                        l2_stop = None
-                    if l2_stop:
-                        stop_reason = l2_stop
-                        break
-
-                    # Record journal entry after L2 transition
-                    dominant = esc_context.get("dominant_warning", "unknown:unknown")
-                    problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
-                    step_cfg = (
-                        (state.current_sp.pipeline_params or {}).get(problem_step, {})
-                    )
-                    state.opt_sp.escalation_journal.append({
-                        "round": round_num,
-                        "degraded_rate": esc_context.get("degraded_rate", 0),
-                        "problem_step": problem_step,
-                        "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
-                        "warning_types": esc_context.get("warning_types", {}),
-                        "l2_action": state.opt_sp.changes_description or "",
-                        "outcome_degraded_rate": None,
-                    })
-                elif signal["target"] == "abort":
-                    stop_reason = "escalation_abort"
+                if esc_stop:
+                    stop_reason = esc_stop
                     break
-
-                # Common escalation exit (L2 continued, retry, or L2 disabled)
-                if campaign_store and cycle_id:
-                    campaign_store.delete_round_candidates(
-                        config.backend_id, cycle_id, round_num + 1,
-                    )
-                _emit_phase(on_phase, "escalation", "exit", round=round_num)
                 # Degradation rounds don't count toward max_rounds
                 round_num += 1
                 continue
@@ -1354,10 +1397,10 @@ async def run_feedback_cycle(
 
             # Stopping conditions
             if state.current_accuracy >= 1.0:
-                stop_reason = "perfect_score"
+                stop_reason = StopReason.PERFECT
                 break
             if round_result.next_action == "stop":
-                stop_reason = "next_action_stop"
+                stop_reason = StopReason.NEXT_ACTION
                 break
             if state.stall_count >= config.patience:
                 if config.enable_l2:
@@ -1371,7 +1414,7 @@ async def run_feedback_cycle(
                         break
                     state.stall_count = 0  # L2/L3 changed prompt — fresh window
                 else:
-                    stop_reason = "patience_exhausted"
+                    stop_reason = StopReason.PATIENCE
                     break
 
             round_num += 1
@@ -1380,12 +1423,12 @@ async def run_feedback_cycle(
         # Loop completed without break
         if stop_reason is None:
             if round_num >= _HARD_CAP:
-                stop_reason = "hard_cap_reached"
+                stop_reason = StopReason.HARD_CAP
             else:
-                stop_reason = "max_rounds"
+                stop_reason = StopReason.MAX_ROUNDS
 
     except (KeyboardInterrupt, asyncio.CancelledError):
-        stop_reason = "interrupted"
+        stop_reason = StopReason.INTERRUPTED
         logger.warning(
             "Feedback cycle interrupted at round %d. "
             "Completed rounds are checkpointed.",
@@ -1395,8 +1438,8 @@ async def run_feedback_cycle(
     # -- Finalize --
     finished_at = datetime.now(timezone.utc).isoformat()
     obs = state.eval_ctx.obs if state.eval_ctx else None
-    campaign_status = "interrupted" if stop_reason == "interrupted" else "completed"
-    if stop_reason == "interrupted":
+    campaign_status = "interrupted" if stop_reason == StopReason.INTERRUPTED else "completed"
+    if stop_reason == StopReason.INTERRUPTED:
         if campaign_store and cycle_id:
             with graceful("Campaign interrupt update failed"):
                 campaign_store.update(config.backend_id, cycle_id, {

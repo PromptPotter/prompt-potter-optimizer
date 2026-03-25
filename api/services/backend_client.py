@@ -58,6 +58,7 @@ def extract_pipeline_config(exp_data: dict) -> dict:
 
 def build_pipeline_params(
     pipeline_config: dict,
+    *,
     overrides: dict | None = None,
     exclude_steps: list[str] | None = None,
     schema: "PipelineSchema | None" = None,

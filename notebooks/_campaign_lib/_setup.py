@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import extract_pipeline_config
 from api.services.project_store import ProjectStore
+
+if TYPE_CHECKING:
+    from api.services.llm_client import LLMClientBase
 
 from api.services.campaign.campaign_init import (
     init_services as _init_services,

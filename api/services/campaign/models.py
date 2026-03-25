@@ -6,6 +6,7 @@ iterative prompt optimization cycle.
 """
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,20 @@ from api.models.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from api.services.prompt_eval import EvalContext
+
+
+class StopReason(str, enum.Enum):
+    """Feedback cycle termination reasons."""
+
+    PATIENCE = "patience_exhausted"
+    PERFECT = "perfect_score"
+    MAX_ROUNDS = "max_rounds"
+    INTERRUPTED = "interrupted"
+    ABORT = "escalation_abort"
+    L2_PATIENCE = "l2_patience_exhausted"
+    L3_PATIENCE = "l3_patience_exhausted"
+    HARD_CAP = "hard_cap_reached"
+    NEXT_ACTION = "next_action_stop"
 
 
 class CycleConfig(BaseModel):
@@ -90,38 +105,43 @@ class CycleConfig(BaseModel):
         scan_context: dict | None = None,
         task_context: dict | None = None,
     ) -> CycleConfig:
-        """Build from the notebook's ``campaign_config`` dict."""
-        opt = campaign_config.get("optimization", {})
-        eval_llm = campaign_config.get("eval_llm", {})
+        """Build from the notebook's ``campaign_config`` dict.
+
+        All experiment knobs must be explicitly set in the notebook — no
+        hidden defaults.  Missing keys raise ``KeyError`` immediately so
+        the researcher sees what's missing.
+        """
+        opt = campaign_config["optimization"]
+        eval_llm = campaign_config["eval_llm"]
         return cls(
-            max_rounds=opt.get("max_rounds", 10),
-            patience=opt.get("patience", 3),
-            n_variants=opt.get("n_variants", 5),
-            creativity=opt.get("creativity", 0.7),
-            improvement_threshold=opt.get("improvement_threshold", 0.01),
-            model=eval_llm.get("model"),
+            max_rounds=opt["max_rounds"],
+            patience=opt["patience"],
+            n_variants=opt["n_variants"],
+            creativity=opt["creativity"],
+            improvement_threshold=opt["improvement_threshold"],
+            model=eval_llm["model"],
             provider=None,
             backend_url=backend_url,
             backend_id=backend_id,
             project_root=project_root,
             pipeline_params=pipeline_params,
             session_terms=session_terms,
-            temperature=eval_llm.get("temperature", 0.0),
-            sample_size=campaign_config.get("sample_size", 0),
-            seed=42,
+            temperature=eval_llm["temperature"],
+            sample_size=campaign_config["sample_size"],
+            seed=opt["seed"],
             pipeline_schema=pipeline_schema,
             scan_context=scan_context,
             task_context=task_context,
-            enable_l2=opt.get("enable_l2", True),
-            enable_l3=opt.get("enable_l3", True),
-            l2_patience=opt.get("l2_patience") or 2,
-            l3_patience=opt.get("l3_patience") or 1,
-            l2_temperature=opt.get("l2_temperature", 0.3),
-            l3_temperature=opt.get("l3_temperature", 0.5),
-            enable_critique=opt.get("enable_critique", True),
-            critique_positive_threshold=opt.get("critique_positive_threshold", 0.7),
-            degradation_threshold=opt.get("degradation_threshold", 0.4),
-            backend_warning_threshold=opt.get("backend_warning_threshold", 2),
+            enable_l2=opt["enable_l2"],
+            enable_l3=opt["enable_l3"],
+            l2_patience=opt["l2_patience"],
+            l3_patience=opt["l3_patience"],
+            l2_temperature=opt["l2_temperature"],
+            l3_temperature=opt["l3_temperature"],
+            enable_critique=opt["enable_critique"],
+            critique_positive_threshold=opt["critique_positive_threshold"],
+            degradation_threshold=opt["degradation_threshold"],
+            backend_warning_threshold=opt["backend_warning_threshold"],
         )
 
 

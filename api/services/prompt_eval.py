@@ -295,6 +295,7 @@ async def evaluate_prompt_batch(
     search_point: "SearchPoint",
     eval_data: list,
     backend_client: "BackendClient",
+    *,
     on_result: Callable | None = None,
     pipeline_schema: "PipelineSchema | None" = None,
     escalation_checks: list | None = None,
@@ -367,10 +368,8 @@ async def evaluate_prompt_batch(
                 )
             results.append(result)
 
-            if cached is not None:
-                # Cached results don't count toward consecutive error tracking
-                pass
-            elif result.get("error"):
+            # Cached results don't count toward consecutive error tracking
+            if cached is None and result.get("error"):
                 cat = _error_category(result["error"])
                 if cat == "CLIENT":
                     # Client errors are deterministic — same config will

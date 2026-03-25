@@ -262,7 +262,6 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     step = _step_tag(step_name)
 
     tt = pd.get("total_time")
-    time_str = f" {tt:.1f}s" if tt is not None else ""
 
     # Build tag: "HIT " or "MISS 3/20" with rank info inline
     if r.get("hit"):

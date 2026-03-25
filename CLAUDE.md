@@ -63,7 +63,7 @@ Describes a pipeline — target or optimizer. Both TermNorm's `GET /pipeline` re
 
 ### EvalContext (`api/services/prompt_eval.py`)
 
-Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema`, `obs`, `model`, `temperature`, `pipeline_params`.
+Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema`, `obs`, `source`, `model`, `temperature`, `pipeline_params`, `experiment_id`, `escalation_checks`, `candidate_idx`, `n_total_candidates`.
 
 ## Service Catalog
 
