@@ -5,12 +5,12 @@ and adds tqdm progress bars, print statements, and IPython display for
 interactive notebook use.
 """
 
-from ._display import *    # noqa: F403
-from ._setup import *      # noqa: F403
-from ._eval import *       # noqa: F403
-from ._search import *     # noqa: F403
-from ._campaigns import *  # noqa: F403
-from ._optimize import *   # noqa: F403
+from .display import *    # noqa: F403
+from .setup import *      # noqa: F403
+from .eval import *       # noqa: F403
+from .search import *     # noqa: F403
+from .campaigns import *  # noqa: F403
+from .optimize import *   # noqa: F403
 
 # Public API -- every name the notebook imports.
 __all__ = [  # noqa: F405

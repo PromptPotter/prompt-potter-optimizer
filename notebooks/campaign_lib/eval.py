@@ -23,7 +23,7 @@ from api.services.search import (
     load_eval_dataset as _load_eval_dataset,
 )
 
-from ._display import _fmt_query_result, _print_interrupt_banner, show_progress
+from .display import _fmt_query_result, _print_interrupt_banner, show_progress
 
 __all__ = [
     # Baseline & eval

@@ -12,12 +12,12 @@ from dataclasses import dataclass, field
 
 from api.models.phase_event import PhaseEvent
 
-from ._display import (
+from .display import (
     BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW,
     _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
     _fmt_delta, _scoreboard,
 )
-from ._stats import (
+from .stats import (
     fmt_pvalue, min_detectable_effect, proportion_test,
 )
 

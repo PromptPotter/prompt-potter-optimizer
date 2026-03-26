@@ -337,7 +337,7 @@ async def prepare_eval_context(
     campaign_rounds: list = []
     baseline_results: list = []
     if run_baseline and campaign_config is not None:
-        from ._eval import run_baseline_eval
+        from .eval import run_baseline_eval
         campaign_rounds, baseline_results = await run_baseline_eval(
             baseline, eval_data, campaign_config, svc,
         )

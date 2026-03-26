@@ -22,7 +22,7 @@ cd docker && docker-compose up --build
 
 ## Mental Model
 
-Two entry points (FastAPI API + Jupyter notebook), one service core in `api/services/`. The notebook (`notebooks/optimization_campaign.ipynb`) is the primary interface; `_campaign_lib` wraps services with display only.
+Two entry points (FastAPI API + Jupyter notebook), one service core in `api/services/`. The notebook (`notebooks/optimization_campaign.ipynb`) is the primary interface; `campaign_lib` wraps services with display only.
 
 **Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided feedback cycle (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup.
 

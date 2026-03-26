@@ -138,7 +138,7 @@ The feedback cycle should pick queries that maximise information about which pro
 - Drop "dead" queries from the eval set: queries that always hit or always miss regardless of prompt variant carry zero discriminative power
 - Replace with "discriminating" queries from the full eval pool: queries that show proxy variance in historical results (their outcome changes depending on configuration)
 - Implementation in `feedback_cycle.py` or a new `adaptive_eval.py` module called by the cycle
-- Uses `_LoopState.current_results` (already tracked per round) as input
+- Uses `LoopState.current_results` (already tracked per round) as input
 - If the method works, it can later be offered to the sensitivity scan as an option
 
 ---
@@ -170,9 +170,9 @@ Waves 0-2 (caching) and Waves 3-4 (intelligence) are independent and can be deve
 | `derive_metrics()` | Aggregate metrics from node roles | `api/services/metrics.py:91` |
 | `_extract_pipeline_data()` | Assembles per-query pipeline_data from schema | `api/services/prompt_eval.py` |
 | `obs_extraction_map()` | Schema → observation mapping | `api/models/pipeline_schema.py` |
-| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `notebooks/_campaign_lib/_stats.py` |
+| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `notebooks/campaign_lib/stats.py` |
 | `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `api/services/search/smart_search.py:175` |
-| `_LoopState` | Feedback cycle state (has `current_results` per round) | `api/services/campaign/feedback_cycle.py` |
+| `LoopState` | Feedback cycle state (has `current_results` per round) | `api/services/campaign/feedback_cycle.py` |
 | `format_failure_examples()` | Current failure formatting for LLM prompts | `api/services/campaign/formatting.py` |
 
 ---

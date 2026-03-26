@@ -12,16 +12,16 @@ from typing import TYPE_CHECKING
 from api.models.phase_event import PhaseEvent
 from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS
 from api.services.campaign.models import (
-    CycleConfig, CycleRoundResult, _LoopState,
+    CycleConfig, CycleRoundResult, LoopState,
 )
 from api.services.campaign.critique import (
     CritiqueAgent, CritiqueContext, format_critique_for_prompt,
     sample_thinking_styles, update_query_tracker,
 )
-from api.services.campaign._helpers import (
+from api.services.campaign.helpers import (
     graceful, emit_phase, _candidate_summaries,
 )
-from api.services.obs.observability_logger import observed_node
+from api.services.obs.node_tracer import observed_node
 
 # Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 async def _generate_or_load_candidates(
     round_num: int,
-    state: _LoopState,
+    state: LoopState,
     config: CycleConfig,
     campaign_store: "CampaignStore | None",
     cycle_id: str | None,
@@ -120,7 +120,7 @@ async def _generate_or_load_candidates(
 async def _evaluate_candidates(
     candidates: list[dict],
     round_num: int,
-    state: _LoopState,
+    state: LoopState,
     round_eval_data: list[dict],
     config: CycleConfig,
     on_candidate_eval: Callable[[int, int, dict], None] | None,
@@ -259,7 +259,7 @@ def _log_round_obs(
 
 async def _execute_round(
     round_num: int,
-    state: _LoopState,
+    state: LoopState,
     round_eval_data: list[dict],
     config: CycleConfig,
     obs_campaign_id: str,
@@ -339,7 +339,7 @@ async def _execute_round(
 
 
 def _update_round_state(
-    state: _LoopState, rr: CycleRoundResult, round_num: int,
+    state: LoopState, rr: CycleRoundResult, round_num: int,
 ) -> None:
     """Apply round result to loop state (shared by escalation + normal paths)."""
     state.rounds.append(rr)

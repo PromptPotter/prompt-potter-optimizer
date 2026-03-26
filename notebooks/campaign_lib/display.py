@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from ._stats import fmt_ci, wilson_ci
+from .stats import fmt_ci, wilson_ci
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 

@@ -82,7 +82,7 @@ See the [Setup Guide](docs/setup-guide.md) for prerequisites, configuration, and
 
 ## Jupyter Notebook
 
-The notebook uses `notebooks/_campaign_lib/` wrapping services with progress bars and IPython display:
+The notebook uses `notebooks/campaign_lib/` wrapping services with progress bars and IPython display:
 - Pipeline config fetch, dataset loading (Excel + trace-based)
 - Scan advisor → sensitivity scan → coverage advisor
 - Feedback cycle with patience, campaign rounds, Langfuse sync

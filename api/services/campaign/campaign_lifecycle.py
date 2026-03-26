@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 from api.models.opt_search_point import OptSearchPoint
 from api.config.settings import DATASET_NAME
-from api.services.campaign._helpers import graceful
+from api.services.campaign.helpers import graceful
 from api.services.campaign.models import CycleConfig
 
 if TYPE_CHECKING:
-    from api.services.campaign.models import _LoopState
+    from api.services.campaign.models import LoopState
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +224,7 @@ def _finalize_campaign(
     campaign_store,
     cycle_id: str | None,
     config: CycleConfig,
-    state: "_LoopState",
+    state: "LoopState",
     stop_reason: str,
     finished_at: str,
     obs,

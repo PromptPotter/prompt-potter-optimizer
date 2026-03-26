@@ -195,9 +195,11 @@ async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
     def on_round(round_result, stall_count):
         callbacks.append((round_result.round, stall_count))
 
+    from api.services.campaign.models import CycleCallbacks
+
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[0],
-        on_round_complete=on_round,
+        callbacks=CycleCallbacks(on_round_complete=on_round),
     )
     assert len(callbacks) == result.n_rounds
     for i, (round_num, stall) in enumerate(callbacks):
@@ -658,9 +660,11 @@ async def test_no_store_no_persistence(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
     events = []
+    from api.services.campaign.models import CycleCallbacks
+
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[0],
-        on_phase=lambda e: events.append(e),
+        callbacks=CycleCallbacks(on_phase=lambda e: events.append(e)),
     )
 
     pairs = [(e.phase, e.event) for e in events]

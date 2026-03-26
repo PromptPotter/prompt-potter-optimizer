@@ -399,7 +399,7 @@ async def run_baseline_eval(
 
 
 # ---------------------------------------------------------------------------
-# Functions extracted from notebooks/_campaign_lib
+# Functions extracted from notebooks/campaign_lib
 # ---------------------------------------------------------------------------
 
 

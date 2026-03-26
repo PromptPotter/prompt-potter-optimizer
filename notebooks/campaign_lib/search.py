@@ -28,12 +28,12 @@ from api.services.search import (
     load_filtered_variant_library as _load_filtered_variants,
 )
 
-from ._display import (
+from .display import (
     CYAN, DIM, RESET,
     _fmt_query_result, _print_interrupt_banner, show_axis_profiles, show_progress,
     show_scan_leaderboard, show_scan_query_difficulty,
 )
-from ._setup import setup_llm
+from .setup import setup_llm
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def show_variant_library(
     Returns:
         The filtered rich variant dict (objects with ``text``/``source``/``year``).
     """
-    from ._display import BOLD, RESET, CYAN, GREEN, YELLOW
+    from .display import BOLD, RESET, CYAN, GREEN, YELLOW
 
     rich = load_variant_library_rich()
     all_fields = rich.get("prompt_fields", {})
@@ -210,7 +210,7 @@ async def prepare_scan_baseline(
         scan variant diagnosis dict.
     """
     import hashlib
-    from ._setup import configure_pipeline
+    from .setup import configure_pipeline
 
     # svc shorthand: extract store/backend_id if provided
     if svc is not None:

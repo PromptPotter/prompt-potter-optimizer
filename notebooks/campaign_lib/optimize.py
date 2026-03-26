@@ -8,17 +8,17 @@ from api.models.opt_search_point import OptSearchPoint
 from api.models.phase_event import PhaseEvent
 from api.services.campaign.campaign_init import resolve_experiment_id as _resolve_experiment_id
 
-from ._display import (
+from .display import (
     BOLD, CYAN, GREEN, RED, RESET, YELLOW,
     _box_bottom, _box_line, _box_top,
     _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
     _fmt_delta, _fmt_query_result,
     show_progress,
 )
-from ._stats import (
+from .stats import (
     fmt_ci, wilson_ci,
 )
-from ._phase_display import (
+from .phase_display import (
     _CycleDisplayState, _dispatch_phase, _pp_val,
     _node_bottom, _node_line, _node_top,
 )
@@ -651,6 +651,8 @@ async def run_feedback_cycle_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
+    from api.services.campaign.models import CycleCallbacks
+
     result = await run_feedback_cycle(
         instruction=instruction,
         eval_data=eval_data,
@@ -658,10 +660,12 @@ async def run_feedback_cycle_notebook(
         baseline_prompt_fields=baseline_ps,
         baseline_accuracy=baseline_acc,
         baseline_results=baseline_results,
-        on_round_complete=_on_round,
-        on_candidate_eval=_on_candidate,
-        on_query_eval=_on_query,
-        on_phase=_on_phase,
+        callbacks=CycleCallbacks(
+            on_round_complete=_on_round,
+            on_candidate_eval=_on_candidate,
+            on_query_eval=_on_query,
+            on_phase=_on_phase,
+        ),
         langfuse_session_id=langfuse_session_id,
         cycle_id=resolved_cycle_id,
         experiment_id=experiment_id or "",

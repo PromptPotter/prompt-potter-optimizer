@@ -17,10 +17,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from api.models.phase_event import PhaseEvent
-from api.services.campaign._helpers import emit_phase
+from api.services.campaign.helpers import emit_phase
 
 if TYPE_CHECKING:
-    from api.services.campaign.models import CycleConfig, StopReason, _LoopState
+    from api.services.campaign.models import CycleConfig, StopReason, LoopState
     from api.services.obs.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ def build_escalation_checks(config: "CycleConfig") -> list[EscalationCheck]:
 
 
 def _maybe_emit_backend_warning(
-    state: "_LoopState",
+    state: "LoopState",
     config: "CycleConfig",
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
@@ -236,7 +236,7 @@ def _maybe_emit_backend_warning(
 
 
 def _degradation_reset(
-    state: "_LoopState",
+    state: "LoopState",
     config: "CycleConfig",
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
@@ -254,7 +254,7 @@ def _degradation_reset(
 
 
 async def _do_l2_transition(
-    state: "_LoopState",
+    state: "LoopState",
     config: "CycleConfig",
     round_num: int,
     eval_data: list[dict],
@@ -266,7 +266,7 @@ async def _do_l2_transition(
     """Perform L2 refine_context transition. Updates state in-place."""
     from api.services.campaign import layer_transitions
     from api.services import llm_client as _llm_client
-    from api.services.obs.observability_logger import observed_node
+    from api.services.obs.node_tracer import observed_node
     from api.services.campaign.critique import warning_summary
 
     current_pp = state.current_sp.pipeline_params
@@ -341,7 +341,7 @@ async def _do_l2_transition(
 
 
 async def _do_l3_transition(
-    state: "_LoopState",
+    state: "LoopState",
     config: "CycleConfig",
     round_num: int,
     eval_data: list[dict],
@@ -352,7 +352,7 @@ async def _do_l3_transition(
     """Perform L3 modify_plan transition. Updates state in-place."""
     from api.services.campaign import layer_transitions
     from api.services import llm_client as _llm_client
-    from api.services.obs.observability_logger import observed_node
+    from api.services.obs.node_tracer import observed_node
 
     current_pp = state.current_sp.pipeline_params
 
@@ -404,7 +404,7 @@ async def _do_l3_transition(
 
 
 async def _escalate_l2(
-    state: "_LoopState",
+    state: "LoopState",
     config: "CycleConfig",
     round_num: int,
     eval_data: list[dict],

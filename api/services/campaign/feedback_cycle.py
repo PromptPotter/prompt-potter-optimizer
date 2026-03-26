@@ -24,13 +24,13 @@ from api.models.phase_event import PhaseEvent
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
 from api.services.campaign.critique import sample_thinking_styles
-from api.services.campaign._helpers import graceful, emit_phase, _get_obs_trace
+from api.services.campaign.helpers import graceful, emit_phase, _get_obs_trace
 from api.services.campaign.campaign_lifecycle import (
     _init_obs, _resume_or_create_campaign, _finalize_campaign,
 )
 from api.services.campaign.models import (
-    CycleConfig, CycleInitResult, CycleResult, CycleRoundResult,
-    StopReason, _LoopState,
+    CycleCallbacks, CycleConfig, CycleInitResult, CycleResult,
+    CycleRoundResult, StopReason, LoopState,
 )
 from api.services.campaign.escalation import _escalate_l2
 from api.services.campaign.round_execution import (
@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 def _prepare_probe_data(
-    state: _LoopState,
+    state: LoopState,
     eval_data: list[dict],
     round_num: int,
 ) -> tuple[list[dict], list | None]:
@@ -70,7 +70,7 @@ def _prepare_probe_data(
 
 
 async def _handle_post_probe(
-    state: _LoopState,
+    state: LoopState,
     config: CycleConfig,
     round_num: int,
     round_data: list[dict],
@@ -89,7 +89,7 @@ async def _handle_post_probe(
 
 
 async def _handle_escalation_signal(
-    state: _LoopState,
+    state: LoopState,
     config: CycleConfig,
     round_result: CycleRoundResult,
     round_num: int,
@@ -185,7 +185,7 @@ async def _init_cycle_state(
     experiment_id: str,
     backend_client: "BackendClient | None",
     started_at: str,
-) -> tuple[_LoopState, Any, str | None, str, list[dict], list, int]:
+) -> tuple[LoopState, Any, str | None, str, list[dict], list, int]:
     """Initialize all cycle state: baseline, resume, obs, eval context.
 
     Returns:
@@ -268,7 +268,7 @@ async def _init_cycle_state(
         temperature=config.temperature,
         base_pipeline_params=config.pipeline_params,
     )
-    state = _LoopState(
+    state = LoopState(
         current_sp=baseline_sp,
         current_accuracy=baseline_accuracy,
         current_composite=_bl_composite,
@@ -374,10 +374,7 @@ async def run_feedback_cycle(
     baseline_prompt_fields: dict | None = None,
     baseline_accuracy: float = 0.0,
     baseline_results: list | None = None,
-    on_round_complete: Callable[[CycleRoundResult, int], None] | None = None,
-    on_candidate_eval: Callable[[int, int, dict], None] | None = None,
-    on_query_eval: Callable[[int, int, int, int, dict], None] | None = None,
-    on_phase: Callable[[PhaseEvent], None] | None = None,
+    callbacks: CycleCallbacks | None = None,
     langfuse_session_id: str | None = None,
     scan_context: dict | None = None,
     cycle_id: str | None = None,
@@ -393,11 +390,13 @@ async def run_feedback_cycle(
         config = config.model_copy(update={"scan_context": scan_context})
     started_at = datetime.now(timezone.utc).isoformat()
 
+    cb = callbacks or CycleCallbacks()
+
     # -- Init --
     init = await _init_cycle_state(
         instruction, eval_data, config,
         baseline_prompt_fields, baseline_accuracy, baseline_results,
-        on_phase, langfuse_session_id, cycle_id, experiment_id,
+        cb.on_phase, langfuse_session_id, cycle_id, experiment_id,
         backend_client, started_at,
     )
     state = init.state
@@ -440,7 +439,7 @@ async def run_feedback_cycle(
                 round_num, state, _round_data, config,
                 obs_campaign_id,
                 campaign_store, cycle_id,
-                on_candidate_eval, on_query_eval, on_phase,
+                cb.on_candidate_eval, cb.on_query_eval, cb.on_phase,
                 escalation_checks=_round_checks,
             )
             _update_round_state(state, round_result, round_num)
@@ -449,7 +448,7 @@ async def run_feedback_cycle(
             if is_probe:
                 probe_stop = await _handle_post_probe(
                     state, config, round_num, _round_data,
-                    on_phase, obs_campaign_id,
+                    cb.on_phase, obs_campaign_id,
                 )
                 if probe_stop:
                     stop_reason = probe_stop
@@ -462,7 +461,7 @@ async def run_feedback_cycle(
             if round_result.escalation_signal:
                 esc_stop = await _handle_escalation_signal(
                     state, config, round_result, round_num,
-                    round_eval_data, on_phase, obs_campaign_id,
+                    round_eval_data, cb.on_phase, obs_campaign_id,
                     campaign_store, cycle_id,
                 )
                 if esc_stop:
@@ -480,8 +479,8 @@ async def run_feedback_cycle(
             if round_result.improved:
                 state.opt_sp.l2_directive = ""
 
-            if on_round_complete:
-                on_round_complete(round_result, state.stall_count)
+            if cb.on_round_complete:
+                cb.on_round_complete(round_result, state.stall_count)
 
             # Checkpoint round to disk
             if campaign_store and cycle_id:
@@ -522,7 +521,7 @@ async def run_feedback_cycle(
                 if config.enable_l2:
                     _obs, _tid = _get_obs_trace(state, obs_campaign_id)
                     _l2_stop = await _escalate_l2(
-                        state, config, round_num, round_eval_data, on_phase,
+                        state, config, round_num, round_eval_data, cb.on_phase,
                         obs=_obs, trace_id=_tid,
                     )
                     if _l2_stop:

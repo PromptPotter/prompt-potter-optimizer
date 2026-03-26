@@ -7,18 +7,34 @@ iterative prompt optimization cycle.
 from __future__ import annotations
 
 import enum
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from api.models.opt_search_point import OptSearchPoint
+from api.models.phase_event import PhaseEvent
 from api.models.pipeline_schema import PipelineSchema
 from api.models.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from api.services.campaign.escalation import EscalationCheck
     from api.models.eval_context import EvalContext
+
+
+@dataclass
+class CycleCallbacks:
+    """Optional progress callbacks for the feedback cycle.
+
+    Bundles the four callback parameters that previously threaded through
+    every function in the campaign module individually.
+    """
+
+    on_round_complete: Callable[[CycleRoundResult, int], None] | None = None
+    on_candidate_eval: Callable[[int, int, dict], None] | None = None
+    on_query_eval: Callable[[int, int, int, int, dict], None] | None = None
+    on_phase: Callable[[PhaseEvent], None] | None = None
 
 
 class StopReason(str, enum.Enum):
@@ -189,7 +205,7 @@ class CycleResult(BaseModel):
 
 
 @dataclass
-class _LoopState:
+class LoopState:
     """Mutable state threaded through the feedback cycle round loop.
 
     Optimizer-level state (critique, thinking_styles, task_context,
@@ -231,7 +247,7 @@ class _LoopState:
 class CycleInitResult:
     """Return type for ``_init_cycle_state()`` — replaces a 7-tuple."""
 
-    state: _LoopState
+    state: LoopState
     campaign_store: Any = None
     cycle_id: str | None = None
     obs_campaign_id: str = ""
