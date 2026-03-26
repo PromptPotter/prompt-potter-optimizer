@@ -291,10 +291,10 @@ async def _init_cycle_state(
                     k: v for k, v in _osp.items()
                     if k in OptSearchPoint.model_fields
                 })
-            state.l2_round = _latest_trial.get("l2_round", 0)
-            state.l3_round = _latest_trial.get("l3_round", 0)
-            state.l2_stall_count = _latest_trial.get("l2_stall_count", 0)
-            state.l3_stall_count = _latest_trial.get("l3_stall_count", 0)
+            state.escalation.l2_round = _latest_trial.get("l2_round", 0)
+            state.escalation.l3_round = _latest_trial.get("l3_round", 0)
+            state.escalation.l2_stall_count = _latest_trial.get("l2_stall_count", 0)
+            state.escalation.l3_stall_count = _latest_trial.get("l3_stall_count", 0)
             state.stall_count = _latest_trial.get("stall_count", 0)
             logger.info(
                 "Restored optimizer state from round %d "
@@ -304,7 +304,7 @@ async def _init_cycle_state(
                 len(state.opt_sp.critique_text),
                 len(state.opt_sp.task_context),
                 len(state.opt_sp.escalation_journal),
-                state.l2_round,
+                state.escalation.l2_round,
             )
 
     state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
@@ -503,10 +503,10 @@ async def run_feedback_cycle(
                             for s in round_result.candidate_scores
                         ],
                         "stall_count": state.stall_count,
-                        "l2_stall_count": state.l2_stall_count,
-                        "l3_stall_count": state.l3_stall_count,
-                        "l2_round": state.l2_round,
-                        "l3_round": state.l3_round,
+                        "l2_stall_count": state.escalation.l2_stall_count,
+                        "l3_stall_count": state.escalation.l3_stall_count,
+                        "l2_round": state.escalation.l2_round,
+                        "l3_round": state.escalation.l3_round,
                         "opt_search_point": state.opt_sp.model_dump(),
                     })
 

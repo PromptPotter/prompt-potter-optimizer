@@ -9,6 +9,7 @@ returns a configured singleton.
 import asyncio
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, Literal
@@ -90,8 +91,6 @@ def _repair_json(text: str) -> str:
     - Truncated tail (strip to last complete ``}`` or ``]``)
     - Double-escaped newlines (``\\\\n`` → ``\\n``)
     """
-    import re
-
     # Normalize double-escaped sequences back to single-escaped
     text = text.replace("\\\\n", "\\n").replace("\\\\t", "\\t")
 
@@ -395,49 +394,6 @@ class AnthropicClient(LLMClientBase):
 
 
 # ---------------------------------------------------------------------------
-# Mock client (testing)
-# ---------------------------------------------------------------------------
-
-
-class MockLLMClient(LLMClientBase):
-    """Mock LLM client for testing — returns configurable responses."""
-
-    def __init__(self, responses: list[str] | None = None):
-        self.responses = responses or ["Mock LLM response"]
-        self._call_count = 0
-
-    async def chat(
-        self,
-        messages: list[dict[str, str]],
-        model: str | None = None,
-        temperature: float = 0.0,
-        max_tokens: int = 1000,
-        output_format: Literal["text", "json"] = "text",
-        **kwargs,
-    ) -> LLMResponse:
-        content = self.responses[self._call_count % len(self.responses)]
-        self._call_count += 1
-
-        parsed = (
-            _try_parse_json(content, "Mock")
-            if output_format == "json"
-            else None
-        )
-
-        return LLMResponse(
-            content=content,
-            model=model or "mock-model",
-            usage={
-                "prompt_tokens": 100,
-                "completion_tokens": 50,
-                "total_tokens": 150,
-            },
-            finish_reason="stop",
-            parsed=parsed,
-        )
-
-
-# ---------------------------------------------------------------------------
 # Global singleton
 # ---------------------------------------------------------------------------
 
@@ -493,11 +449,23 @@ def _resolve_provider() -> str:
     return "mock"
 
 
+def _make_mock_client() -> LLMClientBase:
+    """Lazy-load MockLLMClient (lives in tests package)."""
+    try:
+        from tests.mock_llm_client import MockLLMClient
+    except ImportError:
+        raise ValueError(
+            "No LLM API keys configured and test mock unavailable. "
+            "Set GROQ_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY."
+        )
+    return MockLLMClient()
+
+
 _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
     "groq": _make_groq_client,
     "anthropic": AnthropicClient,
     "openai": _make_openai_client,
-    "mock": MockLLMClient,
+    "mock": _make_mock_client,
 }
 
 

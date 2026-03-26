@@ -20,10 +20,18 @@ from api.services.search.scan_results import (
 #   from api.services.search.sensitivity_scan import sensitivity_scan
 #   from api.services.search.adaptive_search import adaptive_search
 
+# preview
+from api.services.search.preview import preview
+# plan_persistence
+from api.services.search.plan_persistence import (
+    analyze_candidate_coverage,
+    deserialize_smart_search_plan, serialize_smart_search_plan,
+    smart_search_plan_identity,
+)
 # coverage
 from api.services.search.coverage import (
     assess_scan_coverage, build_data_inventory, build_prompt_result_index,
-    diagnose_scan_variants, preview,
+    diagnose_scan_variants,
 )
 # eval_dataset
 from api.services.search.eval_dataset import load_eval_dataset
@@ -40,7 +48,9 @@ __all__ = [
     "filter_variant_library", "load_filtered_variant_library",
     "resume_or_build_diagnostic", "select_scan_winner",
     "assess_scan_coverage", "build_data_inventory", "build_prompt_result_index",
-    "diagnose_scan_variants", "preview",
+    "diagnose_scan_variants", "preview", "analyze_candidate_coverage",
+    "serialize_smart_search_plan", "deserialize_smart_search_plan",
+    "smart_search_plan_identity",
     "load_eval_dataset",
     "restructure_context", "restructure_context_cached",
     "advise_scan_config", "build_llm_context", "build_pipeline_overview",

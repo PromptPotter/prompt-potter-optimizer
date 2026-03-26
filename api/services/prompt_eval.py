@@ -18,6 +18,7 @@ import httpx
 from api.evaluators.exact_match import EvalResult, ExactMatchEvaluator
 from api.models.hashing import HASH_TRUNCATE
 from api.config.settings import NO_RESULT
+from api.services.metrics import compute_composite_score
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -41,6 +42,17 @@ class _GracefulStop(Exception):
     def __init__(self, results: list):
         self.partial_results = results
         super().__init__(f"Graceful stop with {len(results)} results")
+
+
+class _ForceStop(KeyboardInterrupt):
+    """Raised on force-quit (2nd Ctrl+C) during eval batch.
+
+    Carries ``partial_results`` — the queries completed before the stop.
+    """
+
+    def __init__(self, partial_results: list):
+        self.partial_results = partial_results
+        super().__init__()
 
 
 def _error_category(error: str | None) -> str | None:
@@ -357,9 +369,7 @@ async def evaluate_prompt_batch(
             "Eval batch force-interrupted at query %d/%d.",
             len(results), len(eval_data),
         )
-        exc = KeyboardInterrupt()
-        exc.partial_results = results  # type: ignore[attr-defined]
-        raise exc
+        raise _ForceStop(results)
     finally:
         signal.signal(signal.SIGINT, old_handler)
 
@@ -374,9 +384,6 @@ async def evaluate_prompt_batch(
         raise _GracefulStop(results)
 
     return results
-
-
-from api.services.metrics import compute_composite_score  # noqa: E402
 
 
 def _finalize_observability(
@@ -395,7 +402,9 @@ def _finalize_observability(
     Langfuse push is handled separately via push_all_runs() to ensure
     dataset-item linking is always present.
     """
-    try:
+    from api.services.campaign.helpers import graceful
+
+    with graceful("ObsLogger.log_dataset_run failed"):
         _obs = obs
         if _obs is None:
             from api.services.obs.observability_logger import ObsLogger
@@ -410,8 +419,6 @@ def _finalize_observability(
             temperature=temperature,
             prompt_fields_id=prompt_fields_id,
         )
-    except Exception:
-        logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
 
 
 def _try_cached_lookup(
@@ -565,12 +572,9 @@ async def evaluate_prompt_cached(
             n_total_candidates=ctx.n_total_candidates,
             cached_queries=sp_cache,
         )
-    except (_GracefulStop, KeyboardInterrupt, asyncio.CancelledError) as exc:
+    except (_GracefulStop, _ForceStop) as exc:
         # Save whatever queries completed so sp-hash cache can reuse them.
-        partial = (
-            exc.partial_results if isinstance(exc, _GracefulStop)
-            else getattr(exc, "partial_results", [])
-        )
+        partial = exc.partial_results
         if partial:
             _save_run(partial, compute_composite_score(partial, pipeline_schema), partial=True)
             logger.info(

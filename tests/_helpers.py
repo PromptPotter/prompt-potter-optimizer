@@ -7,7 +7,7 @@ that test modules can import directly.
 import hashlib
 
 from api.models.opt_search_point import OptSearchPoint
-from api.services.llm_client import MockLLMClient
+from tests.mock_llm_client import MockLLMClient
 from api.models.hashing import HASH_TRUNCATE
 
 

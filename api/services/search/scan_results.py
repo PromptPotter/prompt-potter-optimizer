@@ -50,7 +50,7 @@ async def resume_or_build_diagnostic(
 
     from api.config.settings import load_variant_library
     from api.services.search.context import restructure_context
-    from api.services.search.coverage import (
+    from api.services.search.plan_persistence import (
         deserialize_smart_search_plan,
         serialize_smart_search_plan,
         smart_search_plan_identity,

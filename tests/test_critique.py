@@ -3,7 +3,7 @@
 import pytest
 
 from api.services.campaign.critique import CritiqueAgent, CritiqueContext, sample_thinking_styles
-from api.services.llm_client import MockLLMClient
+from tests.mock_llm_client import MockLLMClient
 
 
 

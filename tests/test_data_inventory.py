@@ -2,7 +2,7 @@
 
 from api.models.opt_search_point import OptSearchPoint
 from api.services.search import build_data_inventory
-from api.services.search.coverage import serialize_smart_search_plan
+from api.services.search.plan_persistence import serialize_smart_search_plan
 
 from _helpers import make_baseline_osp, make_dataset_run
 

@@ -298,7 +298,7 @@ def _apply_e2e_mocks(monkeypatch):
         mock_eval,
     )
 
-    from api.services.llm_client import MockLLMClient
+    from tests.mock_llm_client import MockLLMClient
     monkeypatch.setattr(
         "api.services.llm_client.get_llm_client",
         lambda provider=None: MockLLMClient(),

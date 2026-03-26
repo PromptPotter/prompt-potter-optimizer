@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Callable
 
 from api.models.opt_search_point import OptSearchPoint
 from api.models.eval_context import EvalContext
-from api.services.search.coverage import preview as _preview
+from api.services.search.preview import preview as _preview
 from api.services.search.smart_search import (
     ScanEvent, filter_variant_library, _make_eval_fn,
 )

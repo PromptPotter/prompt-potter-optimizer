@@ -15,7 +15,7 @@ from api.services.project_store import ProjectStore
 from api.services.campaign.campaign_init import (
     load_baseline_prompt, run_baseline_eval as _run_baseline_eval,
 )
-from api.services.search.coverage import (
+from api.services.search.plan_persistence import (
     analyze_candidate_coverage as _analyze_candidate_coverage,
 )
 from api.services.l1_optimizer import l1_generate

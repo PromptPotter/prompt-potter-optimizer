@@ -105,7 +105,14 @@ Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema
 - **Display parity**: Cached results display identically to fresh results.
 - **Graceful interrupt**: Signal-flag pattern. No completed work is ever discarded.
 
+- **Error handling**: `graceful()` context manager in `campaign/helpers.py` is the standard suppress-and-log pattern. Only 2 custom exceptions: `_GracefulStop` and `EscalationError`, both carry structured `partial_results`.
+
 See [`docs/design-principles.md`](docs/design-principles.md) for the full principles catalog.
+
+## Evaluated & Rejected Refactorings
+
+- **PromptDecomposition sub-model on OptSearchPoint**: Evaluated 2026-03-26 and rejected. 15+ `getattr(opt_sp, field)` iteration sites across 7 files (round_execution, coverage, sensitivity_scan, scan_results, search_point, hashing, opt_search_point) depend on flat fields via `PROMPT_STRING_FIELDS`. Extracting to `opt_sp.prompt.field` would add indirection at every site without clarity gain. OptSearchPoint is a legitimate aggregation of the optimizer's full working state, not a god object.
+- **OptimizationMemory sub-model on OptSearchPoint**: 9 memory fields accessed from 5 files in fragmented patterns (l1_optimizer reads all as context; escalation.py writes degradation subset; round_execution.py writes critique). No clean seam exists.
 
 ## Navigation Guide
 

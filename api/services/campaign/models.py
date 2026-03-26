@@ -9,7 +9,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from pydantic import BaseModel, Field
 
@@ -23,18 +23,26 @@ if TYPE_CHECKING:
     from api.models.eval_context import EvalContext
 
 
+# -- Callback type aliases (documented parameter semantics) ----------------
+
+# (round_result, round_number)
+OnRoundComplete: TypeAlias = Callable[["CycleRoundResult", int], None]
+# (candidate_index, total_candidates, scores_dict)
+OnCandidateEval: TypeAlias = Callable[[int, int, dict], None]
+# (candidate_index, total_candidates, query_index, total_queries, result_dict)
+OnQueryEval: TypeAlias = Callable[[int, int, int, int, dict], None]
+# (phase_event)
+OnPhase: TypeAlias = Callable[[PhaseEvent], None]
+
+
 @dataclass
 class CycleCallbacks:
-    """Optional progress callbacks for the feedback cycle.
+    """Optional progress callbacks for the feedback cycle."""
 
-    Bundles the four callback parameters that previously threaded through
-    every function in the campaign module individually.
-    """
-
-    on_round_complete: Callable[[CycleRoundResult, int], None] | None = None
-    on_candidate_eval: Callable[[int, int, dict], None] | None = None
-    on_query_eval: Callable[[int, int, int, int, dict], None] | None = None
-    on_phase: Callable[[PhaseEvent], None] | None = None
+    on_round_complete: OnRoundComplete | None = None
+    on_candidate_eval: OnCandidateEval | None = None
+    on_query_eval: OnQueryEval | None = None
+    on_phase: OnPhase | None = None
 
 
 class StopReason(str, enum.Enum):
@@ -205,6 +213,25 @@ class CycleResult(BaseModel):
 
 
 @dataclass
+class EscalationCounters:
+    """L2/L3 escalation tracking — stall counts, round counters, entry baselines.
+
+    Extracted from LoopState to make the three-layer escalation semantics
+    explicit.  Accessed primarily by ``escalation.py`` and serialized at
+    checkpoint time by ``feedback_cycle.py``.
+    """
+
+    l2_stall_count: int = 0
+    l3_stall_count: int = 0
+    l2_round: int = 0
+    l3_round: int = 0
+    best_accuracy_at_l2_entry: float = 0.0
+    best_accuracy_at_l3_entry: float = 0.0
+    best_composite_at_l2_entry: float = 0.0
+    best_composite_at_l3_entry: float = 0.0
+
+
+@dataclass
 class LoopState:
     """Mutable state threaded through the feedback cycle round loop.
 
@@ -232,15 +259,8 @@ class LoopState:
     # Probe round flag (set by L2 action="probe", reset after probe round)
     probe_next_round: bool = False
 
-    # L2/L3 state
-    l2_stall_count: int = 0
-    l3_stall_count: int = 0
-    l2_round: int = 0
-    l3_round: int = 0
-    best_accuracy_at_l2_entry: float = 0.0
-    best_accuracy_at_l3_entry: float = 0.0
-    best_composite_at_l2_entry: float = 0.0
-    best_composite_at_l3_entry: float = 0.0
+    # L2/L3 escalation counters
+    escalation: EscalationCounters = field(default_factory=EscalationCounters)
 
 
 @dataclass

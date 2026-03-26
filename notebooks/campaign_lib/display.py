@@ -45,7 +45,10 @@ CYAN    = "\033[36m"
 # Box-drawing helpers (pure formatting, no business logic)
 # ---------------------------------------------------------------------------
 
-_W = 70  # standard box width
+# Display geometry — single source of truth for terminal widths
+BOX_WIDTH = 70          # standard box width
+NODE_FRAME_WIDTH = 74   # node frame width (phase_display.py)
+_W = BOX_WIDTH          # internal alias
 
 
 def _box_top(label: str = "", label_right: str = "", width: int = _W) -> str:

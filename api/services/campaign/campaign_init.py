@@ -364,12 +364,9 @@ async def run_baseline_eval(
 
     # Register dataset items in obs if available
     if obs and eval_data:
-        try:
+        from api.services.campaign.helpers import graceful
+        with graceful("Dataset registration in run_baseline_eval failed"):
             obs.register_dataset(DATASET_NAME, eval_data)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception:
-            logger.warning("Dataset registration in run_baseline_eval failed", exc_info=True)
 
     sp = baseline.to_job_search_point(
         model=model,

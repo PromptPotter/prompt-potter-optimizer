@@ -15,7 +15,7 @@ from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS
 from api.models.search_point import JobSearchPoint
 from api.models.eval_context import EvalContext
 from api.services.prompt_eval import evaluate_prompt_cached, _dominant_error_category
-from api.services.search.coverage import preview as _preview
+from api.services.search.preview import preview as _preview
 from api.services.search.smart_search import (
     ScanEvent, _profiles_from_rows,
 )

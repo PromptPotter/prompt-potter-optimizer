@@ -19,7 +19,7 @@ from api.services.campaign.feedback_cycle import run_feedback_cycle
 from api.services.campaign.layer_transitions import (
     TransitionResult, modify_plan, refine_context,
 )
-from api.services.llm_client import MockLLMClient
+from tests.mock_llm_client import MockLLMClient
 
 from _helpers import (
     apply_eval_mock,

@@ -244,11 +244,11 @@ def _degradation_reset(
     reset_l3: bool = False,
 ) -> None:
     """Reset L2 (and optionally L3) counters during degradation investigation."""
-    state.l2_stall_count = 0
-    state.l2_round = 0
+    state.escalation.l2_stall_count = 0
+    state.escalation.l2_round = 0
     if reset_l3:
-        state.l3_stall_count = 0
-        state.l3_round = 0
+        state.escalation.l3_stall_count = 0
+        state.escalation.l3_round = 0
     state.opt_sp.degradation_reset_count += 1
     _maybe_emit_backend_warning(state, config, round_num, on_phase)
 
@@ -280,7 +280,7 @@ async def _do_l2_transition(
         for r in state.rounds[-config.patience:]
     ]
     emit_phase(on_phase, "refine_context", "enter", round=round_num,
-                l2_round=state.l2_round,
+                l2_round=state.escalation.l2_round,
                 stall_count=state.stall_count,
                 current_params=state.opt_sp.optimizer_params,
                 current_accuracy=state.current_accuracy,
@@ -310,14 +310,14 @@ async def _do_l2_transition(
         temperature=state.current_sp.temperature,
         base_pipeline_params=state.current_sp.pipeline_params,
     )
-    state.l2_round += 1
-    state.best_accuracy_at_l2_entry = state.best_accuracy
-    state.best_composite_at_l2_entry = state.best_composite
+    state.escalation.l2_round += 1
+    state.escalation.best_accuracy_at_l2_entry = state.best_accuracy
+    state.escalation.best_composite_at_l2_entry = state.best_composite
     # Build warning inventory one-liner for display
     _warned_count, _top_warning = warning_summary(state.opt_sp.warning_inventory)
 
     emit_phase(on_phase, "refine_context", "exit", round=round_num,
-                l2_round=state.l2_round,
+                l2_round=state.escalation.l2_round,
                 param_changes_count=len(tr.opt_search_point.optimizer_params),
                 task_context_changed=tr.task_context is not None,
                 changes_description=tr.opt_search_point.changes_description or "",
@@ -335,7 +335,7 @@ async def _do_l2_transition(
 
     logger.info(
         "L2 refine_context at round %d (l2_round=%d)",
-        round_num, state.l2_round,
+        round_num, state.escalation.l2_round,
     )
     return tr
 
@@ -357,13 +357,13 @@ async def _do_l3_transition(
     current_pp = state.current_sp.pipeline_params
 
     l2_history = [{
-        "l2_round": state.l2_round,
+        "l2_round": state.escalation.l2_round,
         "optimizer_params": state.opt_sp.optimizer_params,
-        "accuracy_change": state.best_composite - state.best_composite_at_l3_entry,
+        "accuracy_change": state.best_composite - state.escalation.best_composite_at_l3_entry,
     }]
     emit_phase(on_phase, "modify_plan", "enter", round=round_num,
-                l3_round=state.l3_round,
-                l2_stall_count=state.l2_stall_count,
+                l3_round=state.escalation.l3_round,
+                l2_stall_count=state.escalation.l2_stall_count,
                 current_plan_preview=str(state.opt_sp.plan)[:120])
 
     client = _llm_client.get_llm_client(config.provider)
@@ -384,21 +384,21 @@ async def _do_l3_transition(
         temperature=state.current_sp.temperature,
         base_pipeline_params=_pp,
     )
-    state.l3_round += 1
-    state.best_accuracy_at_l3_entry = state.best_accuracy
-    state.best_composite_at_l3_entry = state.best_composite
-    state.l2_stall_count = 0
-    state.l2_round = 0
-    state.best_accuracy_at_l2_entry = state.best_accuracy
-    state.best_composite_at_l2_entry = state.best_composite
+    state.escalation.l3_round += 1
+    state.escalation.best_accuracy_at_l3_entry = state.best_accuracy
+    state.escalation.best_composite_at_l3_entry = state.best_composite
+    state.escalation.l2_stall_count = 0
+    state.escalation.l2_round = 0
+    state.escalation.best_accuracy_at_l2_entry = state.best_accuracy
+    state.escalation.best_composite_at_l2_entry = state.best_composite
     emit_phase(on_phase, "modify_plan", "exit", round=round_num,
-                l3_round=state.l3_round,
+                l3_round=state.escalation.l3_round,
                 new_plan_preview=str(tr.opt_search_point.plan)[:120],
                 changes_description=tr.opt_search_point.changes_description or "",
                 pipeline_params_changed=tr.pipeline_params is not None)
     logger.info(
         "L3 modify_plan at round %d (l3_round=%d)",
-        round_num, state.l3_round,
+        round_num, state.escalation.l3_round,
     )
     return tr
 
@@ -423,13 +423,14 @@ async def _escalate_l2(
     from api.services.campaign.models import StopReason
 
     _l2_kwargs = dict(obs=obs, trace_id=trace_id, escalation_context=escalation_context)
+    esc = state.escalation
 
     # Track L2 stall
-    l2_improved = state.best_composite > state.best_composite_at_l2_entry
-    state.l2_stall_count = 0 if l2_improved or state.l2_round == 0 else state.l2_stall_count + 1
+    l2_improved = state.best_composite > esc.best_composite_at_l2_entry
+    esc.l2_stall_count = 0 if l2_improved or esc.l2_round == 0 else esc.l2_stall_count + 1
 
     # Not stalled → plain L2 transition
-    l2_stalled = config.l2_patience is not None and state.l2_stall_count >= config.l2_patience
+    l2_stalled = config.l2_patience is not None and esc.l2_stall_count >= config.l2_patience
     if not l2_stalled:
         await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
         return None
@@ -444,15 +445,15 @@ async def _escalate_l2(
             await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
             return None
         logger.info(
-            "L2 patience exhausted (%d stalls) at round %d", state.l2_stall_count, round_num,
+            "L2 patience exhausted (%d stalls) at round %d", esc.l2_stall_count, round_num,
         )
         return StopReason.L2_PATIENCE
 
     # L2 stalled, L3 enabled — track L3 stall
-    l3_improved = state.best_composite > state.best_composite_at_l3_entry
-    state.l3_stall_count = 0 if l3_improved or state.l3_round == 0 else state.l3_stall_count + 1
+    l3_improved = state.best_composite > esc.best_composite_at_l3_entry
+    esc.l3_stall_count = 0 if l3_improved or esc.l3_round == 0 else esc.l3_stall_count + 1
 
-    l3_exhausted = config.l3_patience is not None and state.l3_stall_count >= config.l3_patience
+    l3_exhausted = config.l3_patience is not None and esc.l3_stall_count >= config.l3_patience
     if not l3_exhausted:
         await _do_l3_transition(
             state, config, round_num, eval_data, on_phase, obs=obs, trace_id=trace_id,
@@ -467,5 +468,7 @@ async def _escalate_l2(
         _degradation_reset(state, config, round_num, on_phase, reset_l3=True)
         await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
         return None
-    logger.info("L3 patience exhausted (%d stalls) at round %d", state.l3_stall_count, round_num)
+    logger.info(
+        "L3 patience exhausted (%d stalls) at round %d", esc.l3_stall_count, round_num,
+    )
     return StopReason.L3_PATIENCE

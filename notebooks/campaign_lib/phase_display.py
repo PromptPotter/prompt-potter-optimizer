@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from api.models.phase_event import PhaseEvent
 
 from .display import (
-    BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW,
+    BOLD, CYAN, DIM, GREEN, NODE_FRAME_WIDTH, RED, RESET, YELLOW,
     _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
     _fmt_delta, _scoreboard,
 )
@@ -55,7 +55,7 @@ class _CycleDisplayState:
 # Node-frame box-drawing helpers
 # ---------------------------------------------------------------------------
 
-_NW = 74  # node frame width
+_NW = NODE_FRAME_WIDTH
 
 
 def _node_top(label: str, label_right: str = "", width: int = _NW) -> str:

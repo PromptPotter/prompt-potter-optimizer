@@ -1,0 +1,15 @@
+"""Truncated preview utility for variant values."""
+from __future__ import annotations
+
+from typing import Any
+
+
+def preview(value: Any, max_len: int = 40) -> str:
+    """Truncated preview of a variant value."""
+    if isinstance(value, dict) and "properties" in value:
+        n = len(value["properties"])
+        return f"schema({n} fields)"
+    s = str(value)
+    if not s:
+        return "(empty)"
+    return s[:max_len] + ("..." if len(s) > max_len else "")
