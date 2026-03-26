@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from api.models.hashing import PROMPT_STRING_FIELDS
+from api.shared.hashing import PROMPT_STRING_FIELDS
 from api.models.search_point import SearchPoint
 
 if TYPE_CHECKING:
@@ -144,23 +144,24 @@ class OptSearchPoint(SearchPoint):
         Skips empty fields. Sections separated by double newlines.
         Few-shot examples formatted as Input/Output pairs.
         """
-        parts: list[str] = []
-        for field_name in PROMPT_STRING_FIELDS:
-            value = getattr(self, field_name)
-            if value:
-                parts.append(value)
-
-        if self.few_shot_examples:
-            lines: list[str] = []
-            for ex in self.few_shot_examples:
-                lines.append(f"Input: {ex.input}\nOutput: {ex.output}")
-                if ex.explanation:
-                    lines.append(f"Explanation: {ex.explanation}")
-            parts.append("\n".join(lines))
-
+        parts = [v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))]
+        block = self._render_few_shot_block()
+        if block:
+            parts.append(block)
         return "\n\n".join(parts)
 
     # -- Rendering helpers -------------------------------------------------
+
+    def _render_few_shot_block(self) -> str:
+        """Format few-shot examples into a text block (empty string if none)."""
+        if not self.few_shot_examples:
+            return ""
+        lines: list[str] = []
+        for ex in self.few_shot_examples:
+            lines.append(f"Input: {ex.input}\nOutput: {ex.output}")
+            if ex.explanation:
+                lines.append(f"Explanation: {ex.explanation}")
+        return "\n".join(lines)
 
     def compile_prompt(self, **kwargs: str) -> str:
         """Render and substitute ``{{variable}}`` placeholders.
@@ -201,18 +202,10 @@ class OptSearchPoint(SearchPoint):
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
         # Build prompt_fields for variant derivation in JobSearchPoint
-        pf: dict[str, str] = {}
-        for f in PROMPT_STRING_FIELDS:
-            v = getattr(self, f)
-            if v:
-                pf[f] = v
-        if self.few_shot_examples:
-            lines: list[str] = []
-            for ex in self.few_shot_examples:
-                lines.append(f"Input: {ex.input}\nOutput: {ex.output}")
-                if ex.explanation:
-                    lines.append(f"Explanation: {ex.explanation}")
-            pf["few_shot_block"] = "\n".join(lines)
+        pf = {f: v for f, v in self.prompt_field_dict().items() if f != "few_shot_examples"}
+        block = self._render_few_shot_block()
+        if block:
+            pf["few_shot_block"] = block
 
         return JobSearchPoint(
             model=model,

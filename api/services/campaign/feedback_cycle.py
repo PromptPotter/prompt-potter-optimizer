@@ -19,7 +19,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from api.models.hashing import HASH_TRUNCATE
+from api.shared.hashing import HASH_TRUNCATE
 from api.models.phase_event import PhaseEvent
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient

@@ -8,7 +8,7 @@ import hashlib
 
 from api.models.opt_search_point import OptSearchPoint
 from tests.mock_llm_client import MockLLMClient
-from api.models.hashing import HASH_TRUNCATE
+from api.shared.hashing import HASH_TRUNCATE
 
 
 # ---------------------------------------------------------------------------

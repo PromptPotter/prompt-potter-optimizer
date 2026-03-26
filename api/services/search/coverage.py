@@ -13,7 +13,7 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from api.models.hashing import HASH_TRUNCATE, PROMPT_STRING_FIELDS
+from api.shared.hashing import HASH_TRUNCATE, PROMPT_STRING_FIELDS
 from api.models.pipeline_schema import is_result_step_compatible
 from api.models.opt_search_point import OptSearchPoint
 from api.services.project_store import ProjectStore

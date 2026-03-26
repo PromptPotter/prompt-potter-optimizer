@@ -18,7 +18,7 @@ import hashlib
 
 from pydantic import BaseModel
 
-from api.models.hashing import (
+from api.shared.hashing import (
     HASH_TRUNCATE,
     PROMPT_STRING_FIELDS,
     eval_content_hash,
@@ -127,7 +127,11 @@ class JobSearchPoint(SearchPoint):
                     injected = True
                     break
             if not injected and rendered:
-                new_pp.setdefault("llm_ranking", {})["prompt"] = rendered
+                raise ValueError(
+                    "Cannot inject rendered prompt: no node with a 'prompt' key "
+                    "found in pipeline_params. Pass pipeline_params with the "
+                    "target node pre-configured."
+                )
 
         return JobSearchPoint(
             model=changes.get("model", self.model),

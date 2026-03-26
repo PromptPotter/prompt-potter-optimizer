@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from api.config.settings import load_variant_library
-from api.core.llm_call import get_node_config, llm_call
+from api.config.optimizer_pipeline import get_node_config, llm_call
 
 if TYPE_CHECKING:
     from api.services.llm_client import LLMClientBase

@@ -9,9 +9,11 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from scalar_fastapi import get_scalar_api_reference
 
+from api.config.logging import setup_logging
 from api.config.settings import APP_VERSION, settings
 from api.routers import backends, campaigns
 
+setup_logging()
 logger = logging.getLogger(__name__)
 
 

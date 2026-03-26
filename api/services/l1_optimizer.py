@@ -15,7 +15,7 @@ from api.models.pipeline_schema import PipelineSchema
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import DISPLAY_TRUNCATE
 from api.models.opt_search_point import OptSearchPoint
-from api.core.llm_call import get_node_config, llm_call
+from api.config.optimizer_pipeline import get_node_config, llm_call
 from api.services.campaign.formatting import (
     format_failure_examples as _format_failure_examples,
     format_scan_analytics as _format_scan_analytics,

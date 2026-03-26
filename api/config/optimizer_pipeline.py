@@ -1,16 +1,15 @@
-"""
-Shared LLM call primitive — the node standard's execution layer.
+"""Optimizer pipeline schema loader and LLM call primitive.
 
-``llm_call()`` is a thin wrapper over ``LLMClientBase.chat()`` that reads
-defaults from a config dict (typically from a ``PipelineNode.current_config``)
-and allows runtime overrides.  Every optimizer pipeline node uses this
-instead of calling ``chat()`` directly.
+``get_optimizer_schema()`` loads the optimizer pipeline declaration
+(``optimizer_pipeline.json``) as a ``PipelineSchema`` — the same model
+used for target pipelines.
 
-``get_optimizer_schema()`` loads the optimizer pipeline declaration as a
-``PipelineSchema`` — the same model used for target pipelines. This unifies
-the twin: both TermNorm and optimizer pipelines parse into PipelineSchema.
+``llm_call()`` is a thin config-driven wrapper over ``LLMClientBase.chat()``
+that reads defaults from a node's config dict and allows runtime overrides.
+Every optimizer pipeline node uses this instead of calling ``chat()`` directly.
 """
 
+import functools
 import json
 import logging
 from pathlib import Path
@@ -19,22 +18,16 @@ from api.services.llm_client import LLMClientBase, LLMResponse
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Pipeline config loading (cached)
-# ---------------------------------------------------------------------------
-
-_OPTIMIZER_SCHEMA = None
+_PIPELINE_PATH = Path(__file__).parent / "optimizer_pipeline.json"
 
 
+@functools.lru_cache(maxsize=1)
 def get_optimizer_schema():
     """Load optimizer_pipeline.json as PipelineSchema (cached)."""
-    global _OPTIMIZER_SCHEMA  # noqa: PLW0603
-    if _OPTIMIZER_SCHEMA is None:
-        from api.models.pipeline_schema import load_pipeline_from_dict
-        path = Path(__file__).resolve().parents[1] / "config" / "optimizer_pipeline.json"
-        data = json.loads(path.read_text())
-        _OPTIMIZER_SCHEMA = load_pipeline_from_dict(data)
-    return _OPTIMIZER_SCHEMA
+    from api.models.pipeline_schema import load_pipeline_from_dict
+
+    data = json.loads(_PIPELINE_PATH.read_text())
+    return load_pipeline_from_dict(data)
 
 
 def get_node_config(node_name: str) -> dict:
@@ -46,11 +39,6 @@ def get_node_config(node_name: str) -> dict:
     if node is None:
         raise KeyError(f"Unknown optimizer node: {node_name}")
     return node.current_config
-
-
-# ---------------------------------------------------------------------------
-# LLM call primitive
-# ---------------------------------------------------------------------------
 
 
 async def llm_call(

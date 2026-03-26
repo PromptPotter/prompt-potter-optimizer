@@ -337,7 +337,7 @@ def _validate_advisory(
 
     Returns list of warning strings (empty = valid).
     """
-    from api.models.schema_mutation import parse_mutation_tuples
+    from api.shared.schema_mutation import parse_mutation_tuples
 
     warnings: list[str] = []
 

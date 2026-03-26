@@ -114,7 +114,7 @@ def _resolve_schema_axes(
 
     Non-schema axes pass through unchanged.  Returns ``(resolved, schema_labels)``.
     """
-    from api.models.schema_mutation import (
+    from api.shared.schema_mutation import (
         baseline_schema_from_node,
         parse_mutation_tuples,
         resolve_schema_variants,

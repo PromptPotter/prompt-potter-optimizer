@@ -3,7 +3,7 @@ import pytest
 
 from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
-from api.models.hashing import eval_content_hash
+from api.shared.hashing import eval_content_hash
 
 
 def _make_jsp(instruction: str = "Rank by relevance.", **kwargs) -> JobSearchPoint:

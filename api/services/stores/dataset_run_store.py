@@ -285,7 +285,7 @@ class DatasetRunStore:
         Uses ``rendered_prompt_hash``, ``model``, ``temperature``, and
         ``pipeline_params`` from the index — no detail file loading needed.
         """
-        from api.models.hashing import sp_identity_hash
+        from api.shared.hashing import sp_identity_hash
 
         index = self._load_index(backend_id)
         entries = index.get("dataset_runs", [])

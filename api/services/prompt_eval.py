@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, Callable
 
 import httpx
 
-from api.evaluators.exact_match import EvalResult, ExactMatchEvaluator
-from api.models.hashing import HASH_TRUNCATE
+from api.models.evaluator import EvalResult, ExactMatchEvaluator
+from api.shared.hashing import HASH_TRUNCATE
 from api.config.settings import NO_RESULT
 from api.services.metrics import compute_composite_score
 

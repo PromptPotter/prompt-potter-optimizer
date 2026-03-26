@@ -1,7 +1,7 @@
 """Content-addressed hashing for evaluation deduplication.
 
-Shared between models (SearchPoint.content_hash) and services
-(prompt_eval) — lives in models to avoid layering violations.
+Leaf module shared by both models and services. Lives in ``api/shared/``
+to avoid circular imports between search_point.py and opt_search_point.py.
 """
 from __future__ import annotations
 

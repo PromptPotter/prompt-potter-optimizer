@@ -28,7 +28,7 @@ from pathlib import Path
 from api.services.stores.backend_store import BackendStore
 from api.services.stores.campaign_store import CampaignStore
 from api.services.stores.dataset_run_store import DatasetRunStore
-from api.services.stores.base import PlanStore
+from api.services.stores.plan_store import PlanStore
 
 BASE_DIR = Path(".promptpotter") / "projects"
 

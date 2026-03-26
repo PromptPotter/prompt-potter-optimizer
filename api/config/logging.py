@@ -1,7 +1,8 @@
 """
 Logging configuration for PromptPotter Optimizer.
 
-Call ``setup_logging()`` once at import time to configure the root logger.
+Call ``setup_logging()`` explicitly from entry points (``api.main``,
+notebook ``init_services()``) to configure the root logger.
 All modules should use ``logger = logging.getLogger(__name__)``.
 """
 import logging
@@ -22,7 +23,3 @@ def setup_logging(level: int = logging.INFO) -> None:
     root.addHandler(handler)
     # Suppress noisy httpx request logging
     logging.getLogger("httpx").setLevel(logging.WARNING)
-
-
-# Auto-configure on first import so all modules get consistent logging.
-setup_logging()

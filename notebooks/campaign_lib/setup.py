@@ -235,6 +235,9 @@ async def init_services(
     When *dataset_name* is provided, loads ground-truth data from the
     DatasetStore instead of requiring experiment traces.
     """
+    from api.config.logging import setup_logging
+    setup_logging()
+
     project_root = Path(__file__).resolve().parent.parent.parent
 
     svc = await _init_services(
