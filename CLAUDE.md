@@ -24,7 +24,7 @@ cd docker && docker-compose up --build
 
 Two entry points (FastAPI API + Jupyter notebook), one service core in `api/services/`. The notebook (`notebooks/optimization_campaign.ipynb`) is the primary interface; `campaign_lib` wraps services with display only.
 
-**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided feedback cycle (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup.
+**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup.
 
 **Two-layer tracing:** Target layer (JobSearchPoint → dataset_runs/) and optimizer layer (OptSearchPoint → campaign trials). Both independently reconstructable from disk.
 
@@ -55,7 +55,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 - **L3 state**: `plan`
 - **Optimization memory**: `critique_text`, `critique`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`, `content_hashes`
 
-Key methods: `render_prompt()` assembles prompt fields into a string. `to_job_search_point()` projects into a JobSearchPoint by injecting the rendered prompt into `pipeline_params`. `derive_candidate()` creates child points. `compile_prompt()` substitutes `{{variables}}`.
+Key methods: `render()` assembles prompt fields into a string. `to_job_search_point()` projects into a JobSearchPoint by injecting the rendered prompt into `pipeline_params`. `derive_candidate()` creates child points. `compile_prompt()` substitutes `{{variables}}`.
 
 ### PipelineSchema / PipelineNode (`api/models/pipeline_schema.py`)
 
@@ -74,7 +74,7 @@ Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema
 | `backend_client.py` | HTTP client for backend APIs (sync, replay, `fetch_pipeline()`) |
 | `pipeline_discovery.py` | Parses `GET /pipeline` response into `PipelineSchema` |
 | `project_store.py` | Facade over focused store modules in `stores/` |
-| `campaign/feedback_cycle.py` | L1→L2→L3 escalation loop with patience-based stopping |
+| `campaign/optimization_loop.py` | L1→L2→L3 optimization loop with patience-based stopping |
 | `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
 | `campaign/campaign_init.py` | Campaign init, `resolve_experiment_id()`, experiment overrides |
 | `search/smart_search.py` | Sensitivity scan (OAT), adaptive search |
@@ -105,7 +105,9 @@ Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema
 - **Display parity**: Cached results display identically to fresh results.
 - **Graceful interrupt**: Signal-flag pattern. No completed work is ever discarded.
 
-- **Error handling**: `graceful()` context manager in `campaign/helpers.py` is the standard suppress-and-log pattern. Only 2 custom exceptions: `_GracefulStop` and `EscalationError`, both carry structured `partial_results`.
+- **Error handling**: `graceful()` context manager in `campaign/helpers.py` is the standard suppress-and-log pattern. `EscalationError` carries structured `partial_results` for campaign flow control.
+- **`api/shared/`**: Leaf-level utilities shared by models and services (hashing, schema mutations). No domain model or service dependencies allowed.
+- **`api/config/optimizer_pipeline.py`**: Optimizer pipeline schema loader + `llm_call()` primitive. All optimizer nodes use this instead of calling `chat()` directly.
 
 See [`docs/design-principles.md`](docs/design-principles.md) for the full principles catalog.
 
@@ -118,8 +120,8 @@ See [`docs/design-principles.md`](docs/design-principles.md) for the full princi
 
 1. **This file** — overview, commands, data models, conventions, service catalog
 2. [`docs/architecture.md`](docs/architecture.md) — system design, two-loop diagram, two-layer tracing, caching, pipeline discovery, disk layout
-3. [`docs/optimization.md`](docs/optimization.md) — L1/L2/L3 feedback cycle, critique agent, escalation, configuration
-4. [`docs/node-standard.md`](docs/node-standard.md) — node type hierarchy, `llm_call()` primitive, pipeline declaration format
+3. [`docs/optimization.md`](docs/optimization.md) — L1/L2/L3 optimization loop, critique agent, escalation, configuration
+4. [`docs/node-standard.md`](docs/node-standard.md) — node type hierarchy, `llm_call()` primitive (`api/config/optimizer_pipeline.py`), pipeline declaration format
 5. [`docs/sensitivity-scan.md`](docs/sensitivity-scan.md) — OAT scan workflow, coverage, circuit breaker
 6. [`docs/observability.md`](docs/observability.md) — Langfuse, MLflow, events.jsonl
 7. [`docs/setup-guide.md`](docs/setup-guide.md) — installation, quick start, REST API

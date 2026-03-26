@@ -218,7 +218,7 @@ class EscalationCounters:
 
     Extracted from LoopState to make the three-layer escalation semantics
     explicit.  Accessed primarily by ``escalation.py`` and serialized at
-    checkpoint time by ``feedback_cycle.py``.
+    checkpoint time by ``optimization_loop.py``.
     """
 
     l2_stall_count: int = 0

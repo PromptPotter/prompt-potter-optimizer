@@ -26,7 +26,7 @@
                           |
           +---------------+----------------+
           |         Service Layer           |
-          |  feedback_cycle, search/*,      |
+          |  optimization_loop, search/*,      |
           |  l1_optimizer, prompt_eval, |
           |  campaign/campaign_init,        |
           |  backend_client, project_store, |
@@ -62,7 +62,7 @@ See [CLAUDE.md](../../CLAUDE.md) for the canonical description of the Human Loop
 
 **Summary:** An outer Human Loop (explore -> optimize -> harvest -> reuse) wraps an inner AI Loop (generate -> evaluate -> select -> iterate). The **data loop** connects them: every evaluation writes to the shared `dataset_runs` store with content-addressed deduplication, making all prior work available to the coverage advisor.
 
-The AI Loop is itself a 4-step pipeline, implemented by `feedback_cycle.py`:
+The AI Loop is itself a 4-step pipeline, implemented by `optimization_loop.py`:
 
 | Step | Purpose | Wraps |
 |------|---------|-------|

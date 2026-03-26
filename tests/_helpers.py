@@ -382,7 +382,7 @@ async def run_simple_cycle(
     monkeypatch, eval_data, config, *, round_hits, **kwargs,
 ):
     """Apply standard mocks and run a feedback cycle. Returns CycleResult."""
-    from api.services.campaign.feedback_cycle import run_feedback_cycle
+    from api.services.campaign.optimization_loop import run_optimization
 
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)
@@ -397,4 +397,4 @@ async def run_simple_cycle(
         baseline_results=[],
     )
     defaults.update(kwargs)
-    return await run_feedback_cycle(**defaults)
+    return await run_optimization(**defaults)

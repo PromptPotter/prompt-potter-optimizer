@@ -307,14 +307,14 @@ def _apply_e2e_mocks(monkeypatch):
 
 @pytest.mark.slow
 @pytest.mark.asyncio
-async def test_e2e_feedback_cycle_with_registry(
+async def test_e2e_optimization_with_registry(
     monkeypatch, store, eval_data,
 ):
 
     _apply_e2e_mocks(monkeypatch)
 
     from api.services.campaign.models import CycleConfig
-    from api.services.campaign.feedback_cycle import run_feedback_cycle
+    from api.services.campaign.optimization_loop import run_optimization
 
     config = CycleConfig(
         max_rounds=3,
@@ -323,7 +323,7 @@ async def test_e2e_feedback_cycle_with_registry(
         backend_url="http://mock:8000",
     )
 
-    result = await run_feedback_cycle(
+    result = await run_optimization(
         instruction="Normalize drug names.",
         eval_data=eval_data,
         config=config,

@@ -193,7 +193,7 @@ The `pipelines` dict composes named sequences from the node pool. The same node 
 
 ### Now (M7)
 
-- **`llm_call()`** (`api/core/llm_call.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline nodes use it.
+- **`llm_call()`** (`api/config/optimizer_pipeline.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline nodes use it.
 - **`get_node_config()`** — loads node configs from `optimizer_pipeline.json` (cached)
 - **`optimizer_pipeline.json`** declares optimizer nodes with the same config shape as TermNorm's pipeline
 - **`observed_node()`** (`api/services/obs/node_tracer.py`) — traces node execution with timing + Langfuse observations. Callers use node type names as `node_type` (e.g., `"llm/meta"`, `"evaluation"`).

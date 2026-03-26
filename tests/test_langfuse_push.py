@@ -43,7 +43,7 @@ class TestClassifyRunOrigin:
         ("", "", "other"),
         ("run_00230b37", "baseline", "baseline"),
         ("any_id", "sensitivity_scan", "sensitivity_scan"),
-        ("any_id", "feedback_cycle", "feedback_cycle"),
+        ("any_id", "optimization_loop", "optimization_loop"),
     ])
     def test_classify(self, run_id, source, expected):
         assert classify_run_origin(run_id, source=source) == expected
@@ -224,7 +224,7 @@ def test_finalize_obs_with_explicit_obs(tmp_path):
 @pytest.mark.asyncio
 async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
     from api.services.campaign.models import CycleConfig
-    from api.services.campaign.feedback_cycle import run_feedback_cycle
+    from api.services.campaign.optimization_loop import run_optimization
     from api.models.opt_search_point import OptSearchPoint
     from api.config import settings as _settings_mod
 
@@ -247,7 +247,7 @@ async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
         LangfuseLogger, "get_instance", classmethod(lambda cls: mock),
     )
 
-    result = await run_feedback_cycle(
+    result = await run_optimization(
         instruction="Test.", eval_data=eval_data, config=config,
         langfuse_session_id="test_session_123",
         baseline_prompt_fields=OptSearchPoint(instruction="Test.").model_dump(),
@@ -256,7 +256,7 @@ async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
 
     assert result.langfuse_trace_id is not None
     assert result.langfuse_trace_id.startswith("mock_trace_")
-    campaign_traces = [t for t in mock.traces if t["name"] == "feedback_cycle"]
+    campaign_traces = [t for t in mock.traces if t["name"] == "optimization_loop"]
     assert len(campaign_traces) == 1
     assert campaign_traces[0]["session_id"] == "test_session_123"
     assert result.n_rounds == 3

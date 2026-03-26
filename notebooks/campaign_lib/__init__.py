@@ -46,7 +46,7 @@ from .campaigns import (
     apply_experiment_overrides, load_and_apply_experiment,
 )
 from .optimize import (
-    show_feedback_preflight, run_feedback_cycle_notebook,
+    show_feedback_preflight, run_optimization_notebook,
 )
 
 __all__ = [
@@ -90,5 +90,5 @@ __all__ = [
     "list_campaigns", "diff_campaign_config", "show_experiment_dashboard",
     "load_experiment_config", "apply_experiment_overrides", "load_and_apply_experiment",
     # Feedback cycle (optimize)
-    "show_feedback_preflight", "run_feedback_cycle_notebook",
+    "show_feedback_preflight", "run_optimization_notebook",
 ]

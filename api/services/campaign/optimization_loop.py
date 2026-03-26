@@ -1,5 +1,5 @@
 """
-Feedback cycling orchestrator for iterative prompt optimization.
+Optimization loop orchestrator for iterative prompt optimization.
 
 Runs ``l1_generate()`` → ``l1_evaluate()`` in a
 counter-based loop.  Each round generates Layer 1 variants and evaluates
@@ -320,7 +320,7 @@ async def _init_cycle_state(
         backend_id=config.backend_id,
         pipeline_schema=config.pipeline_schema,
         obs=obs,
-        source="feedback_cycle",
+        source="optimization_loop",
         experiment_id=experiment_id or (cycle_id.replace("cycle_", "")[:12] if cycle_id else ""),
     )
 
@@ -366,7 +366,7 @@ async def _init_cycle_state(
 # ---------------------------------------------------------------------------
 
 
-async def run_feedback_cycle(
+async def run_optimization(
     instruction: str,
     eval_data: list[dict[str, Any]],
     config: CycleConfig,
@@ -428,7 +428,7 @@ async def run_feedback_cycle(
                 _round_checks = escalation_checks
 
             logger.info(
-                "Feedback cycle round %d (clean=%d/%d, acc=%.3f, "
+                "Optimization round %d (clean=%d/%d, acc=%.3f, "
                 "stall=%d/%d%s)",
                 round_num, clean_rounds, max_rounds,
                 state.current_accuracy, state.stall_count, config.patience,
@@ -545,7 +545,7 @@ async def run_feedback_cycle(
     except (KeyboardInterrupt, asyncio.CancelledError):
         stop_reason = StopReason.INTERRUPTED
         logger.warning(
-            "Feedback cycle interrupted at round %d. "
+            "Optimization interrupted at round %d. "
             "Completed rounds are checkpointed.",
             len(state.rounds),
         )

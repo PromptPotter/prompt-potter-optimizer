@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "show_feedback_preflight",
-    "run_feedback_cycle_notebook",
+    "run_optimization_notebook",
     "show_progress",
 ]
 
@@ -91,7 +91,7 @@ def show_feedback_preflight(
     three sections: configuration summary, round pipeline walkthrough,
     and scan context preview.
 
-    Call this in a separate notebook cell before ``run_feedback_cycle_notebook()``
+    Call this in a separate notebook cell before ``run_optimization_notebook()``
     so the user can review config before committing to a run.
 
     Returns:
@@ -330,7 +330,7 @@ def _print_preflight_sections(config, bl, eval_data,
 # ---------------------------------------------------------------------------
 
 
-async def run_feedback_cycle_notebook(
+async def run_optimization_notebook(
     campaign_rounds: list,
     eval_data: list,
     campaign_config: dict,
@@ -359,7 +359,7 @@ async def run_feedback_cycle_notebook(
         Updated campaign_rounds list.
     """
     from api.services.campaign.models import CycleConfig
-    from api.services.campaign.feedback_cycle import run_feedback_cycle
+    from api.services.campaign.optimization_loop import run_optimization
 
     # svc shorthand
     if svc is not None:
@@ -653,7 +653,7 @@ async def run_feedback_cycle_notebook(
 
     from api.services.campaign.models import CycleCallbacks
 
-    result = await run_feedback_cycle(
+    result = await run_optimization(
         instruction=instruction,
         eval_data=eval_data,
         config=config,

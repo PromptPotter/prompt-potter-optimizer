@@ -397,13 +397,13 @@ class ObsLogger:
             self._ensure_experiment(campaign_id)
 
             trace_id = self._write_trace(
-                name="feedback_cycle",
+                name="optimization_loop",
                 input_data={
                     "campaign_id": campaign_id,
                     "baseline_accuracy": baseline_accuracy,
                     "config": config,
                 },
-                tags=["campaign", "feedback_cycle"],
+                tags=["campaign", "optimization_loop"],
             )
             self._campaign_traces[campaign_id] = trace_id
             self._write_score(trace_id, "baseline_accuracy", baseline_accuracy)

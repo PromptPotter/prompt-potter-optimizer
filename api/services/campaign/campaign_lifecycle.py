@@ -207,7 +207,7 @@ def _resume_or_create_campaign(
         else:
             resumed_from = 0
             campaign_store.create(config.backend_id, cycle_id, {
-                "type": "feedback_cycle",
+                "type": "optimization_loop",
                 "config": config.model_dump(mode="json"),
                 "baseline_accuracy": baseline_accuracy,
             })

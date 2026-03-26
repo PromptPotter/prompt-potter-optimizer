@@ -15,7 +15,7 @@ import pytest
 
 from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.models import CycleConfig
-from api.services.campaign.feedback_cycle import run_feedback_cycle
+from api.services.campaign.optimization_loop import run_optimization
 from api.services.campaign.layer_transitions import (
     TransitionResult, modify_plan, refine_context,
 )
@@ -178,7 +178,7 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
         l2_patience=2,
     )
 
-    result = await run_feedback_cycle(
+    result = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
@@ -239,7 +239,7 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
         l3_patience=1,
     )
 
-    result = await run_feedback_cycle(
+    result = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
@@ -298,7 +298,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
         enable_l2=False,
     )
 
-    await run_feedback_cycle(
+    await run_optimization(
         instruction="",
         eval_data=eval_data,
         config=config,
@@ -352,7 +352,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
         enable_l2=False,
     )
 
-    await run_feedback_cycle(
+    await run_optimization(
         instruction="",
         eval_data=eval_data,
         config=config,

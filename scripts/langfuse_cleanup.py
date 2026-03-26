@@ -44,10 +44,10 @@ JUNK_TRACE_NAMES = {"a", "b", "evaluate", "grow", "candidate_ranker",
 JUNK_TRACE_PREFIXES = ("round_",)
 
 # Trace names to KEEP
-KEEP_TRACE_NAMES = {"feedback_cycle"}
+KEEP_TRACE_NAMES = {"optimization_loop"}
 
 # Also keep any trace whose name starts with "eval_" (from backfill)
-KEEP_TRACE_PREFIXES = ("eval_", "feedback_cycle")
+KEEP_TRACE_PREFIXES = ("eval_", "optimization_loop")
 
 
 def auth() -> tuple[str, str]:

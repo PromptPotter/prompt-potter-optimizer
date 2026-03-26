@@ -171,7 +171,7 @@ logger = logging.getLogger(__name__)
 ORIGIN_ORDER = [
     "baseline",
     "sensitivity_scan",
-    "feedback_cycle",
+    "optimization_loop",
     "smart_search_winner",
     "other",
 ]

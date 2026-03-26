@@ -1,6 +1,6 @@
 """Small utilities shared across the campaign package.
 
-These are used by feedback_cycle, round_execution, escalation, and
+These are used by optimization_loop, round_execution, escalation, and
 campaign_lifecycle — extracted here to keep each module focused on
 its primary responsibility.
 """

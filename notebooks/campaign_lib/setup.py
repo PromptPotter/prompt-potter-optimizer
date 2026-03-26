@@ -136,7 +136,7 @@ def dev_reload() -> None:
         "api.services.campaign.layer_transitions",
         "api.services.campaign.critique",
         "api.services.campaign.models",
-        "api.services.campaign.feedback_cycle",
+        "api.services.campaign.optimization_loop",
     ]:
         if mod in sys.modules:
             importlib.reload(sys.modules[mod])

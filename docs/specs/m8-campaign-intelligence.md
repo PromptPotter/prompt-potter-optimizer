@@ -137,7 +137,7 @@ The feedback cycle should pick queries that maximise information about which pro
 - After each round, analyze per-query proxy variance across rounds using `extract_query_proxies()`
 - Drop "dead" queries from the eval set: queries that always hit or always miss regardless of prompt variant carry zero discriminative power
 - Replace with "discriminating" queries from the full eval pool: queries that show proxy variance in historical results (their outcome changes depending on configuration)
-- Implementation in `feedback_cycle.py` or a new `adaptive_eval.py` module called by the cycle
+- Implementation in `optimization_loop.py` or a new `adaptive_eval.py` module called by the cycle
 - Uses `LoopState.current_results` (already tracked per round) as input
 - If the method works, it can later be offered to the sensitivity scan as an option
 
@@ -172,7 +172,7 @@ Waves 0-2 (caching) and Waves 3-4 (intelligence) are independent and can be deve
 | `obs_extraction_map()` | Schema → observation mapping | `api/models/pipeline_schema.py` |
 | `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `notebooks/campaign_lib/stats.py` |
 | `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `api/services/search/smart_search.py:175` |
-| `LoopState` | Feedback cycle state (has `current_results` per round) | `api/services/campaign/feedback_cycle.py` |
+| `LoopState` | Feedback cycle state (has `current_results` per round) | `api/services/campaign/optimization_loop.py` |
 | `format_failure_examples()` | Current failure formatting for LLM prompts | `api/services/campaign/formatting.py` |
 
 ---

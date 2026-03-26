@@ -19,7 +19,7 @@ from api.services.campaign.campaign_lifecycle import (
     _validate_config_match,
     cycle_config_identity,
 )
-from api.services.campaign.feedback_cycle import run_feedback_cycle
+from api.services.campaign.optimization_loop import run_optimization
 from api.services.search import select_scan_winner
 
 from _helpers import (
@@ -96,7 +96,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
         patched_eval,
     )
 
-    result = await run_feedback_cycle(
+    result = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=cycle_config,
@@ -165,7 +165,7 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
     # First candidate always gets 1/3 accuracy with real results
     apply_eval_mock(monkeypatch, round_hits=[1])
 
-    result = await run_feedback_cycle(
+    result = await run_optimization(
         instruction="Test.", eval_data=eval_data, config=cycle_config,
         baseline_prompt_fields=OptSearchPoint(instruction="Test.").model_dump(),
         baseline_accuracy=0.0,
@@ -432,7 +432,7 @@ async def test_completed_cycle_returns_cached(
     })
 
     _bl = OptSearchPoint(instruction="Rank candidates.").model_dump()
-    result1 = await run_feedback_cycle(
+    result1 = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
@@ -443,7 +443,7 @@ async def test_completed_cycle_returns_cached(
     assert result1.stop_reason == "perfect_score"
     evals_after_first = call_count[0]
 
-    result2 = await run_feedback_cycle(
+    result2 = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
@@ -481,7 +481,7 @@ async def test_resume_from_interrupted_cycle(
     )
 
     _bl = OptSearchPoint(instruction="Rank candidates.").model_dump()
-    result1 = await run_feedback_cycle(
+    result1 = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
@@ -497,7 +497,7 @@ async def test_resume_from_interrupted_cycle(
     cycle_id = result1.cycle_id
     store.update("test_backend", cycle_id, {"status": "interrupted"})
 
-    result2 = await run_feedback_cycle(
+    result2 = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
@@ -559,7 +559,7 @@ async def test_interrupt_writes_interrupted_status(
         backend_id="test_backend",
     )
 
-    result = await run_feedback_cycle(
+    result = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
@@ -616,7 +616,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
     )
 
     _bl = OptSearchPoint(instruction="Rank candidates.").model_dump()
-    result1 = await run_feedback_cycle(
+    result1 = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
@@ -633,7 +633,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
 
     grow_calls[0] = 0
 
-    result2 = await run_feedback_cycle(
+    result2 = await run_optimization(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,

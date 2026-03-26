@@ -110,14 +110,14 @@ class CloudDelegate:
         """Create cloud trace for campaign start."""
         try:
             cloud_id = self._lf.create_trace(
-                name="feedback_cycle",
+                name="optimization_loop",
                 input={
                     "campaign_id": campaign_id,
                     "baseline_accuracy": baseline_accuracy,
                     "config": config,
                 },
                 session_id=session_id,
-                tags=["campaign", "feedback_cycle"],
+                tags=["campaign", "optimization_loop"],
             )
             if cloud_id:
                 self._trace_ids[campaign_id] = cloud_id
