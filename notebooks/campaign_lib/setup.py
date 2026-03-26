@@ -191,13 +191,20 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
     active = [n for n in all_names if n not in (exclude or [])]
     pipeline_params: dict = {"steps": active}
 
-    # Apply overrides via schema if available
+    # Seed with live config from GET /pipeline (no hidden defaults)
+    if pipeline_schema:
+        for node in pipeline_schema.nodes:
+            if node.name in active and node.current_config:
+                pipeline_params[node.name] = dict(node.current_config)
+
+    # Apply overrides for active nodes only
     if overrides and pipeline_schema:
         for flat_name, value in overrides.items():
             resolved = pipeline_schema.resolve_flat_param(flat_name)
             if resolved:
                 node, wire_key = resolved
-                pipeline_params.setdefault(node, {})[wire_key] = value
+                if node in active:
+                    pipeline_params.setdefault(node, {})[wire_key] = value
             else:
                 pipeline_params[flat_name] = value
     elif overrides:

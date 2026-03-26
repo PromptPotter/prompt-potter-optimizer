@@ -166,9 +166,8 @@ class TestParsePipelineResponse:
         assert len(ws.observation_mappings) == 1
         assert ws.observation_mappings[0].pipeline_key == "web_sources"
         assert ws.langfuse_type == "tool"
-        # default_config only includes param_keys
+        # default_config includes param_keys + override_map wire targets
         assert ws.default_config == {"max_sites": 7, "num_results": 20}
-        assert "query_prefix" not in ws.default_config
 
         # LLM ranking step
         lr = schema.nodes[2]

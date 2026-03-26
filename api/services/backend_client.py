@@ -85,6 +85,12 @@ def build_pipeline_params(
         node_names = [n for n in node_names if n not in exclude_nodes]
     params: dict = {"steps": node_names}
 
+    # Seed with current config from schema (no hidden defaults)
+    if schema is not None:
+        for node in schema.nodes:
+            if node.name in node_names and node.current_config:
+                params[node.name] = dict(node.current_config)
+
     if not overrides:
         return params
 

@@ -6,6 +6,7 @@ sorted by sensitivity.
 """
 from __future__ import annotations
 
+import copy
 import logging
 import random
 from typing import TYPE_CHECKING, Callable
@@ -189,9 +190,18 @@ async def sensitivity_scan(
                     base_pipeline_params=baseline.pipeline_params,
                 )
             else:
-                perturbed = baseline.derive(
-                    pipeline_params={**(baseline.pipeline_params or {}), axis_name: value},
-                )
+                # Resolve flat param name → nested node dict
+                pp = copy.deepcopy(baseline.pipeline_params or {})
+                if pipeline_schema:
+                    resolved = pipeline_schema.resolve_flat_param(axis_name)
+                    if resolved:
+                        node, wire_key = resolved
+                        pp.setdefault(node, {})[wire_key] = value
+                    else:
+                        pp[axis_name] = value
+                else:
+                    pp[axis_name] = value
+                perturbed = baseline.derive(pipeline_params=pp)
 
             results, scores, cached = await evaluate_prompt_cached(
                 perturbed, eval_data, scan_ctx,
