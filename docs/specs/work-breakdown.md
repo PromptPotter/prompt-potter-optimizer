@@ -67,7 +67,7 @@ See [M6 spec](m6-pipeline-composability.md) for full details. Cross-repo: TermNo
 | 6.2 | Replace hardcoded dicts with schema derivation | Complete |
 | 6.0c | Unified tracing (TermNorm) | Complete |
 
-**Wave 4: Workflow Nodes** — Deferred to M8 (WP 6.3-6.6 move to M8 alongside notebook migration).
+**Wave 4: Workflow Nodes** — Deferred to M9 (WP 6.3-6.6 move to M9 alongside notebook migration).
 
 **Wave 5: Composite Scoring + Rank Display**
 
@@ -123,32 +123,46 @@ See [M7 spec](m7-optimizer-pipeline.md) for full details (§1-§13).
 
 ---
 
-## Phase 8: Multi-Connector Architecture (M8) -- Planned
+## Phase 8: Campaign Intelligence (M8) -- Planned
 
-See [M8 spec](m8-multi-connector.md) for full details. Absorbs former M6 Wave 5 (notebook migration + Docker Compose) and M6 Wave 4 (workflow nodes).
+See [M8 spec](m8-campaign-intelligence.md) for full details. Three pillars: partial pipeline caching, adaptive sensitivity scan, data-informed generation.
 
-| ID | Work Package | Sessions | PRD Ref | Status |
+| ID | Work Package | Sessions | Depends | Status |
 |----|-------------|:--------:|---------|--------|
-| 8.0 | Write M8 spec | 1 | -- | Complete |
-| 8.1 | ConnectorProtocol + MockConnector | 1 | P1.13 | Planned |
-| 8.2 | ConnectorRegistry | 1 | P1.13 | Planned |
-| 8.3 | Service migration (type annotation swap) | 1 | P1.13 | Planned |
-| 8.4 | Docs + integration test | 1 | P1.13 | Planned |
-| 8.5 | Notebook migration + Docker Compose (from former M6 Wave 5) | 1 | P1.12 | Planned |
-| 8.6 | Workflow nodes: runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode (from M6 Wave 4) | 2 | P1.12 | 8.3 | Planned |
+| 8.0 | Upstream config hash + `split_at_ranker()` + IntermediateCache store | 1 | -- | Planned |
+| 8.1 | TermNorm: `node_outputs` response + `precomputed` request | 1 | -- | Planned |
+| 8.2 | Eval gateway integration (cache lookup + populate) | 1 | 8.0, 8.1 | Planned |
+| 8.3 | Adaptive sensitivity scan (two-phase + per-axis circuit breaker) | 1 | -- | Planned |
+| 8.4 | Data-informed L1/L2/advisor (analysis context injection) | 1 | -- | Planned |
 
 ---
 
-## Phase 9: n8n Connector Implementation (M9) -- Planned
+## Phase 9: Multi-Connector Architecture (M9) -- Planned
 
-See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depends on M8 ConnectorProtocol.
+See [M9 spec](m9-multi-connector.md) for full details. Absorbs former M6 Wave 5 (notebook migration + Docker Compose) and M6 Wave 4 (workflow nodes).
+
+| ID | Work Package | Sessions | PRD Ref | Status |
+|----|-------------|:--------:|---------|--------|
+| 9.0 | Write M9 spec | 1 | -- | Complete |
+| 9.1 | ConnectorProtocol + MockConnector | 1 | P1.13 | Planned |
+| 9.2 | ConnectorRegistry | 1 | P1.13 | Planned |
+| 9.3 | Service migration (type annotation swap) | 1 | P1.13 | Planned |
+| 9.4 | Docs + integration test | 1 | P1.13 | Planned |
+| 9.5 | Notebook migration + Docker Compose (from former M6 Wave 5) | 1 | P1.12 | Planned |
+| 9.6 | Workflow nodes: runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode (from M6 Wave 4) | 2 | P1.12 | 9.3 | Planned |
+
+---
+
+## Phase 10: n8n Connector Implementation (M10) -- Planned
+
+See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depends on M9 ConnectorProtocol.
 
 | ID | Work Package | Sessions | PRD Ref | Depends | Status |
 |----|-------------|:--------:|---------|---------|--------|
-| 9.1 | Node.js bridge (`external/n8n-bridge/`) + bridge output Pydantic models | 1 | P1.13 | 8.1 | Planned |
-| 9.2 | n8n mapper (Phases A-E) + MappingReport + gap detection | 1 | P1.13 | 9.1 | Planned |
-| 9.3 | n8n ConnectorProtocol adapter + pipeline_discovery integration | 1 | P1.13 | 9.2, 8.3 | Planned |
-| 9.4 | Tests against real fixture + raw fallback path | 1 | P1.13 | 9.2 | Planned |
+| 10.1 | Node.js bridge (`external/n8n-bridge/`) + bridge output Pydantic models | 1 | P1.13 | 9.1 | Planned |
+| 10.2 | n8n mapper (Phases A-E) + MappingReport + gap detection | 1 | P1.13 | 10.1 | Planned |
+| 10.3 | n8n ConnectorProtocol adapter + pipeline_discovery integration | 1 | P1.13 | 10.2, 9.3 | Planned |
+| 10.4 | Tests against real fixture + raw fallback path | 1 | P1.13 | 10.2 | Planned |
 
 ---
 
@@ -162,11 +176,12 @@ See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depe
 | M3: Optimization Infrastructure | 11 | 14 | Complete |
 | M4: Integration and Polish | -- | -- | Complete (reclassified) |
 | M5: Observability Layer | 7 | 7 | Complete |
-| M6: PipelineSchema + Pipeline Composability | 14 | 14 | Waves 0-3, 5-7 complete; Wave 4 → M8 |
+| M6: PipelineSchema + Pipeline Composability | 14 | 14 | Waves 0-3, 5-7 complete; Wave 4 → M9 |
 | M7: Optimizer-as-Pipeline | 22 | 22 | In Progress (Waves A-E complete, Wave F active) |
-| M8: Multi-Connector | 6 | 6 | Planned |
-| M9: n8n Connector | 4 | 4 | Planned |
-| **Total** | **63** | **~67** | |
+| M8: Campaign Intelligence | 5 | 5 | Planned |
+| M9: Multi-Connector | 7 | 7 | Planned |
+| M10: n8n Connector | 4 | 4 | Planned |
+| **Total** | **69** | **~73** | |
 
 ---
 
@@ -191,8 +206,8 @@ See [n8n mapper spec](m6-n8n-mapper.md) for full research and architecture. Depe
 | P1.9 Data Loop | 3.9 | M3 | Complete |
 | P1.10 File-Based Observability | 5.1-5.6 | M5 | Complete |
 | P1.11 LLM Retry Logic | 5.3 | M5 | Complete |
-| P1.12 Workflow-Driven Optimization | 6.3-6.6, 8.5 | M6, M8 | Planned |
-| P1.13 Multi-Connector Support | 8.1-8.4, 9.1-9.4 | M8, M9 | Planned |
+| P1.12 Workflow-Driven Optimization | 6.3-6.6, 9.5 | M6, M9 | Planned |
+| P1.13 Multi-Connector Support | 9.1-9.4, 10.1-10.4 | M9, M10 | Planned |
 | P1.14 PipelineSchema | 6.1-6.2 | M6 | Complete |
 | P2.3 Streamlit Dashboard | -- | Backlog | Planned |
 | SC5 TermNorm Validation | -- | Backlog | Planned |

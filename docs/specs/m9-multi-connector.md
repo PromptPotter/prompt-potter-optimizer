@@ -1,9 +1,9 @@
-# Milestone 8: Multi-Connector Architecture
+# Milestone 9: Multi-Connector Architecture
 
 **Version:** 0.9.0
 **Date:** 2026-02-27
 **Status:** Planned
-**Depends on:** [Roadmap M8](roadmap.md), [ADD v0.10.0](architecture-design.md), [M6 Pipeline Composability](m6-pipeline-composability.md), [PRD P1.13](product-requirements.md)
+**Depends on:** [Roadmap M9](roadmap.md), [ADD v0.10.0](architecture-design.md), [M6 Pipeline Composability](m6-pipeline-composability.md), [PRD P1.13](product-requirements.md)
 
 > **Staleness note:** Written against ADD v0.9.0 (2026-02-27), before the ADD/WBS v0.10.0 rewrite. Verify `BackendClient` signatures against current code before implementing.
 
@@ -207,7 +207,7 @@ async def backend_reranker_evaluate(
     ...
 ) -> dict:
 
-# After (M8)
+# After (M9)
 from api.services.connector_protocol import ConnectorProtocol
 
 async def backend_reranker_evaluate(
@@ -225,21 +225,21 @@ async def backend_reranker_evaluate(
 
 | ID | Work Package | Sessions | Depends on | Description |
 |----|-------------|:--------:|------------|-------------|
-| 8.0 | Write M8 spec | 1 | — | This document |
-| 8.1 | ConnectorProtocol + MockConnector | 1 | 8.0 | Create `connector_protocol.py` and `mock_connector.py`. Protocol conformance tests verifying BackendClient satisfies protocol. MockConnector unit tests. |
-| 8.2 | ConnectorRegistry | 1 | 8.1 | Create `connector_registry.py`. Register/get/list connectors. Integration with `runtime_config` from M6. |
-| 8.3 | Service migration | 1 | 8.1 | Change type annotations in `prompt_eval.py`, `feedback_cycle.py`. Update connector instantiation to use registry. |
-| 8.4 | Docs + integration test | 1 | 8.2, 8.3 | Write `docs/connectors/connector-protocol.md`. Integration test: run feedback cycle with MockConnector. |
-| 8.5 | OPTIMIZER_PIPELINE_SCHEMA | 1 | 8.1 | Describe the optimizer's own 4-step pipeline as a `PipelineSchema` instance (moved from M7 Wave E2). Enables `GET /optimizer/pipeline` for L4 self-optimization. |
+| 9.0 | Write M9 spec | 1 | — | This document |
+| 9.1 | ConnectorProtocol + MockConnector | 1 | 9.0 | Create `connector_protocol.py` and `mock_connector.py`. Protocol conformance tests verifying BackendClient satisfies protocol. MockConnector unit tests. |
+| 9.2 | ConnectorRegistry | 1 | 9.1 | Create `connector_registry.py`. Register/get/list connectors. Integration with `runtime_config` from M6. |
+| 9.3 | Service migration | 1 | 9.1 | Change type annotations in `prompt_eval.py`, `feedback_cycle.py`. Update connector instantiation to use registry. |
+| 9.4 | Docs + integration test | 1 | 9.2, 9.3 | Write `docs/connectors/connector-protocol.md`. Integration test: run feedback cycle with MockConnector. |
+| 9.5 | OPTIMIZER_PIPELINE_SCHEMA | 1 | 9.1 | Describe the optimizer's own 4-step pipeline as a `PipelineSchema` instance (moved from M7 Wave E2). Enables `GET /optimizer/pipeline` for L4 self-optimization. |
 
 ### Reading list per work package
 
 | WP | Read first |
 |----|-----------|
-| 7.1 | `api/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
-| 7.2 | `api/services/llm_client.py` (singleton pattern reference: `get_llm_client()`) |
-| 7.3 | `api/services/prompt_eval.py` (backend_reranker_evaluate, evaluate_prompt_cached), `api/services/campaign/feedback_cycle.py` (BackendClient usage) |
-| 7.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_campaign_registry.py` (E2E test pattern) |
+| 9.1 | `api/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
+| 9.2 | `api/services/llm_client.py` (singleton pattern reference: `get_llm_client()`) |
+| 9.3 | `api/services/prompt_eval.py` (backend_reranker_evaluate, evaluate_prompt_cached), `api/services/campaign/feedback_cycle.py` (BackendClient usage) |
+| 9.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_campaign_registry.py` (E2E test pattern) |
 
 ---
 

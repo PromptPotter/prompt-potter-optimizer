@@ -17,9 +17,10 @@
 | M3 | Optimization Infrastructure | Complete |
 | M4 | Integration and Polish (reclassified — absorbed into M3-M5) | Complete |
 | M5 | Observability Layer | Complete |
-| M6 | PipelineSchema + Pipeline Composability | Waves 0-3, 5-7 complete; Wave 4 → M8 |
+| M6 | PipelineSchema + Pipeline Composability | Waves 0-3, 5-7 complete; Wave 4 → M9 |
 | M7 | Optimizer-as-Pipeline | In Progress (Waves A-F complete, Wave G active) |
-| M8 | Multi-Connector Architecture | Future |
+| M8 | Campaign Intelligence | Future |
+| M9 | Multi-Connector Architecture | Future |
 
 ---
 
@@ -49,7 +50,7 @@ File-based observability (Langfuse traces, MLflow experiments, prompt versioning
 | 1 | `GET /pipeline` endpoint (6-step config) | Complete |
 | 2 | PipelineSchema model + schema derivation (6 chokepoints resolved) | Complete |
 | 3 | Unified tracing (one trace per query) | Complete |
-| 4 | Workflow nodes (runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode) | Deferred to M8 |
+| 4 | Workflow nodes (runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode) | Deferred to M9 |
 | 5 | Composite scoring + rank display | Complete |
 | 6 | `node_role`, `IntermediateMetric`, `derive_metrics()` | Complete |
 | 7 | Consolidated pipeline control surfaces (`node_config`) | Complete |
@@ -86,7 +87,19 @@ Full spec: [`docs/specs/m7-optimizer-pipeline.md`](m7-optimizer-pipeline.md)
 
 ---
 
-## M8: Multi-Connector Architecture -- Future
+## M8: Campaign Intelligence -- Future
+
+Make campaigns smarter and faster by using accumulated data better. Three pillars: (1) cache intermediate node outputs so prompt variants skip redundant upstream computation, (2) adaptive sensitivity scan that prunes dead axes early, (3) inject accumulated analysis (query difficulty, failure clusters, axis sensitivity) into L1/L2/scan advisor prompts.
+
+**Entry criteria:** M7 exit gate passed.
+
+**Exit gate:** Upstream caching active, scan prunes dead axes, L1 receives accumulated analysis context.
+
+Full spec: [`docs/specs/m8-campaign-intelligence.md`](m8-campaign-intelligence.md)
+
+---
+
+## M9: Multi-Connector Architecture -- Future
 
 Generalize beyond TermNorm to support arbitrary LLM application backends. Resolves remaining chokepoints (4,5,7,10,11,12,13) that require ConnectorProtocol.
 
@@ -98,11 +111,11 @@ Generalize beyond TermNorm to support arbitrary LLM application backends. Resolv
 - **Notebook migration + Docker** (absorbed from former M6 Wave 5)
 - **Workflow nodes** (absorbed from M6 Wave 4: runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode)
 
-**Entry criteria:** M6 exit gate passed (PipelineSchema + composite scoring active).
+**Entry criteria:** M8 exit gate passed.
 
 **Exit gate:** A second backend connector exists and runs through the same optimization workflow.
 
-Full spec: [`docs/specs/m8-multi-connector.md`](m8-multi-connector.md)
+Full spec: [`docs/specs/m9-multi-connector.md`](m9-multi-connector.md)
 
 ---
 
@@ -110,7 +123,7 @@ Full spec: [`docs/specs/m8-multi-connector.md`](m8-multi-connector.md)
 
 | Feature | Notes |
 |---------|-------|
-| TermNorm Variant Comparison (SC5) | Needs ConnectorProtocol + pipeline comparison infrastructure (post-M8) |
+| TermNorm Variant Comparison (SC5) | Needs ConnectorProtocol + pipeline comparison infrastructure (post-M9) |
 | Web scrape ablation | How many websites to scrape? Quality vs cost/latency tradeoff. |
 | Streamlit Dashboard (P2.3) | Campaign browser, trial comparison, dataset explorer. |
 | Public service deployment | Auth, rate limiting, multi-tenancy. API already stateless. |

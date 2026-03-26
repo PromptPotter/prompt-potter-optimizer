@@ -12,8 +12,9 @@ Each milestone has an executable spec in `docs/specs/`. One Claude Code session 
 
 | Milestone | Spec file | Pre-reading hint |
 |-----------|-----------|-----------------|
-| M6: PipelineSchema + Pipeline Composability | Waves 0-3, 5-7 complete; Wave 4 → M8. [`m6-pipeline-composability.md`](m6-pipeline-composability.md) | Read `api/services/prompt_eval.py` and `api/models/pipeline_schema.py` |
+| M6: PipelineSchema + Pipeline Composability | Waves 0-3, 5-7 complete; Wave 4 → M9. [`m6-pipeline-composability.md`](m6-pipeline-composability.md) | Read `api/services/prompt_eval.py` and `api/models/pipeline_schema.py` |
 | M7: Optimizer-as-Pipeline | Complete. [`m7-optimizer-pipeline.md`](m7-optimizer-pipeline.md) | Read `api/services/campaign/feedback_cycle.py`, `api/config/optimizer_pipeline.json`, `api/models/opt_search_point.py` |
-| M8: Multi-Connector | [`m8-multi-connector.md`](m8-multi-connector.md) | Read `api/services/backend_client.py` |
+| M8: Campaign Intelligence | [`m8-campaign-intelligence.md`](m8-campaign-intelligence.md) | Read `api/services/prompt_eval.py`, `api/services/search/sensitivity_scan.py`, `api/services/l1_optimizer.py` |
+| M9: Multi-Connector | [`m9-multi-connector.md`](m9-multi-connector.md) | Read `api/services/backend_client.py` |
 
 Archived specs (superseded or deferred) are in `docs/specs/archive/`.

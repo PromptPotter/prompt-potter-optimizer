@@ -41,7 +41,7 @@
           v      v        v        v       v       v
       Connector LLM    Langfuse  File   Evaluator  obs/
       Protocol Providers  SDK    System  Framework  (Langfuse
-      (M8)     (Groq,           (.pp/)  (api/       traces,
+      (M9)     (Groq,           (.pp/)  (api/       traces,
        |       OpenAI)                   evaluators/ MLflow
        v                                )           experiments,
    TermNorm                                         prompts)
@@ -106,7 +106,7 @@ See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full servic
 | **Optimizer nodes as thin wrappers** | Nodes wrap existing service functions. Service logic is independently testable. |
 | **Notebook-first HITL** | Campaign config as editable JSON, manual round control, LLM suggestions -- natural fit for HITL. Feedback cycle is also callable from any Python context. |
 
-> **Cross-reference:** [Observability](../observability.md) covers M5 data exploration. Milestone specs [M6](m6-pipeline-composability.md) (pipeline composability) and [M8](m8-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
+> **Cross-reference:** [Observability](../observability.md) covers M5 data exploration. Milestone specs [M6](m6-pipeline-composability.md) (pipeline composability), [M8](m8-campaign-intelligence.md) (campaign intelligence), and [M9](m9-multi-connector.md) (multi-connector) extend this architecture. Each spec includes scope decisions, deliverables, and work packages.
 
 ---
 
@@ -122,4 +122,4 @@ See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full servic
 | File-based observability | Langfuse trace JSON + MLflow FileStore YAML in `obs/` | Implemented |
 | PipelineSchema | Backend-agnostic pipeline description, derivation methods | Implemented ([M6](m6-pipeline-composability.md) WP 6.1) |
 | CWL workflow engine | `WorkflowRunner` with `runtime_config`, YAML workflow definitions | Planned ([M6](m6-pipeline-composability.md)) |
-| ConnectorProtocol | `typing.Protocol` abstraction over backend connectors | Planned ([M8](m8-multi-connector.md)) |
+| ConnectorProtocol | `typing.Protocol` abstraction over backend connectors | Planned ([M9](m9-multi-connector.md)) |

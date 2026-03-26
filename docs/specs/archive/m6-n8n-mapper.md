@@ -2,8 +2,8 @@
 
 **Version:** 1.0.0
 **Date:** 2026-02-28
-**Status:** Research complete (M6). Implementation deferred to M9.
-**Depends on:** [M6 spec](m6-pipeline-composability.md) (PipelineSchema model), [M8 spec](m8-multi-connector.md) (ConnectorProtocol)
+**Status:** Research complete (M6). Implementation deferred to M10.
+**Depends on:** [M6 spec](m6-pipeline-composability.md) (PipelineSchema model), [M9 spec](m9-multi-connector.md) (ConnectorProtocol)
 
 ---
 
@@ -26,8 +26,8 @@ A mapper bridges this gap, enabling PromptPotter to optimize n8n-hosted pipeline
 ### When
 
 - **M6** (this document): Research, architecture decisions, gap analysis
-- **M8**: ConnectorProtocol — prerequisite for any non-TermNorm connector
-- **M9**: Implementation using this spec as guide
+- **M9**: ConnectorProtocol — prerequisite for any non-TermNorm connector
+- **M10**: Implementation using this spec as guide
 
 ### Real test case
 
@@ -445,7 +445,7 @@ The mapper should NOT modify `PipelineSchema` directly. Instead, extension sugge
 
 | Extension | Source | Decision |
 |-----------|--------|----------|
-| **`io_schema`** | JSON Schemas from `outputParserStructured` nodes | Surface in MappingReport as `SchemaExtension` with `category="io_schema"`. Do NOT add to PipelineStep — cross-cutting M6/M8 decision. |
+| **`io_schema`** | JSON Schemas from `outputParserStructured` nodes | Surface in MappingReport as `SchemaExtension` with `category="io_schema"`. Do NOT add to PipelineStep — cross-cutting M6/M9 decision. |
 | **Step-level I/O contracts** | `$('Node Name').first().json.field` expressions reveal data-flow dependencies | PipelineSchema currently has no concept of step-level I/O. Future consideration. |
 | **`"code"` step type** | 5 of 8 pipeline nodes are Code | Map to `"tool"` with gap flag. Don't add new PipelineStep type until gap frequency justifies it. |
 | **Nested param descriptions** | `param_keys` is `set[str]`, can't describe typed/nested params | httpRequest queryParameters are objects. Future: consider `param_schema: dict` alongside flat `param_keys`. |
