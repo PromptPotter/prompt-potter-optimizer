@@ -17,8 +17,8 @@ from api.models.pipeline_schema import (
     ObservationMapping,
     PipelineSchema,
     PipelineNode,
-    StepOutputSchema,
-    StepPromptMeta,
+    NodeOutputSchema,
+    NodePromptMeta,
 )
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Factory helpers
 # ---------------------------------------------------------------------------
 
-def _parse_resolved_schema(resolved: dict[str, Any]) -> StepOutputSchema:
+def _parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
     """Convert a ``_resolved_schema`` dict from the enriched response."""
     json_schema = resolved.get("json_schema", {})
     props = json_schema.get("properties", {})
@@ -41,7 +41,7 @@ def _parse_resolved_schema(resolved: dict[str, Any]) -> StepOutputSchema:
         for k, v in props.items()
         if v.get("description")
     }
-    return StepOutputSchema(
+    return NodeOutputSchema(
         family=resolved.get("family", ""),
         version=resolved.get("version"),
         fields=fields,
@@ -50,9 +50,9 @@ def _parse_resolved_schema(resolved: dict[str, Any]) -> StepOutputSchema:
     )
 
 
-def _parse_resolved_prompt(resolved: dict[str, Any]) -> StepPromptMeta:
+def _parse_resolved_prompt(resolved: dict[str, Any]) -> NodePromptMeta:
     """Convert a resolved prompt dict from the enriched response."""
-    return StepPromptMeta(
+    return NodePromptMeta(
         family=resolved.get("family", ""),
         version=resolved.get("version"),
         template_variables=resolved.get("template_variables", []),
@@ -224,7 +224,7 @@ async def compute_pipeline_view(
 
     Returns a dict with keys:
       backend_pipeline  — PipelineSchema.model_dump()
-      computed_steps    — pipeline steps as dicts (direct copy for now)
+      computed_nodes    — pipeline nodes as dicts (direct copy for now)
       fetched_at        — ISO timestamp
       source            — "live" | "cached" | "default"
     """
@@ -255,11 +255,11 @@ async def compute_pipeline_view(
     schema = parse_pipeline_response(raw) if raw is not None else PipelineSchema()
 
     # Computed steps (direct copy from backend pipeline for now)
-    computed_steps = [s.model_dump() for s in schema.nodes]
+    computed_nodes = [s.model_dump() for s in schema.nodes]
 
     return {
         "backend_pipeline": schema.model_dump(),
-        "computed_steps": computed_steps,
+        "computed_nodes": computed_nodes,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source": source,
     }

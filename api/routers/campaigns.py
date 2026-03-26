@@ -6,7 +6,7 @@ Provides REST API for listing and viewing optimization campaigns.
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.services.project_store import ProjectStore
 
@@ -23,47 +23,49 @@ def _get_store() -> ProjectStore:
 
 
 class CampaignSummary(BaseModel):
-    campaign_id: str
-    name: str
-    status: str
-    n_trials: int
-    best_accuracy: float
-    baseline_accuracy: float
-    created_at: str
-    updated_at: str
+    campaign_id: str = Field(description="Unique campaign identifier")
+    name: str = Field(description="Human-readable campaign name")
+    status: str = Field(description="Campaign status: active, completed, or stopped")
+    n_trials: int = Field(description="Total number of completed trial rounds")
+    best_accuracy: float = Field(description="Highest accuracy achieved across all trials")
+    baseline_accuracy: float = Field(description="Initial accuracy before optimization")
+    created_at: str = Field(description="ISO 8601 creation timestamp")
+    updated_at: str = Field(description="ISO 8601 last-update timestamp")
 
 
 class CampaignListResponse(BaseModel):
-    campaigns: list[CampaignSummary]
-    total: int
+    campaigns: list[CampaignSummary] = Field(description="List of campaign summaries")
+    total: int = Field(description="Total number of campaigns")
 
 
 class TrialSummary(BaseModel):
-    trial_id: str
-    round: int
-    label: str
-    prompt_fields_id: str
-    accuracy: float
-    hits: int
-    total: int
-    improved: bool
-    created_at: str
+    trial_id: str = Field(description="Unique trial identifier")
+    round: int = Field(description="Round number within the campaign")
+    label: str = Field(description="Human-readable label (e.g. 'round_3')")
+    prompt_fields_id: str = Field(description="OptSearchPoint ID for this trial's prompt")
+    accuracy: float = Field(description="Accuracy achieved in this trial")
+    hits: int = Field(description="Number of correct matches")
+    total: int = Field(description="Total number of evaluated queries")
+    improved: bool = Field(description="Whether this trial improved over the previous best")
+    created_at: str = Field(description="ISO 8601 creation timestamp")
 
 
 class CampaignDetailResponse(BaseModel):
-    campaign_id: str
-    name: str
-    backend_id: str
-    status: str
-    config: dict[str, Any]
-    n_trials: int
-    best_accuracy: float
-    best_trial_id: str | None
-    baseline_accuracy: float
-    created_at: str
-    updated_at: str
-    trials: list[TrialSummary]
-    langfuse_trace_id: str | None = None
+    campaign_id: str = Field(description="Unique campaign identifier")
+    name: str = Field(description="Human-readable campaign name")
+    backend_id: str = Field(description="Backend this campaign optimizes against")
+    status: str = Field(description="Campaign status: active, completed, or stopped")
+    config: dict[str, Any] = Field(description="Full campaign configuration used for this run")
+    n_trials: int = Field(description="Total number of completed trial rounds")
+    best_accuracy: float = Field(description="Highest accuracy achieved across all trials")
+    best_trial_id: str | None = Field(description="Trial ID of the best-performing round")
+    baseline_accuracy: float = Field(description="Initial accuracy before optimization")
+    created_at: str = Field(description="ISO 8601 creation timestamp")
+    updated_at: str = Field(description="ISO 8601 last-update timestamp")
+    trials: list[TrialSummary] = Field(description="Ordered list of trial summaries")
+    langfuse_trace_id: str | None = Field(
+        default=None, description="Langfuse trace ID if observability is enabled",
+    )
 
 
 # ---------------------------------------------------------------------------

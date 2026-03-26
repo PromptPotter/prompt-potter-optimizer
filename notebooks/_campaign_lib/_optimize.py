@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from api.models.pipeline_schema import PipelineSchema
-    from api.services.project_store import ProjectStore
-
 from api.models.opt_search_point import OptSearchPoint
+from api.models.phase_event import PhaseEvent
+from api.services.campaign.campaign_init import resolve_experiment_id as _resolve_experiment_id
 
 from ._display import (
     BOLD, CYAN, GREEN, RED, RESET, YELLOW,
@@ -24,10 +22,10 @@ from ._phase_display import (
     _CycleDisplayState, _dispatch_phase, _pp_val,
     _node_bottom, _node_line, _node_top,
 )
-from api.services.campaign.campaign_init import resolve_experiment_id as _resolve_experiment_id
 
-# Phase event printer for feedback cycle observability
-from api.models.phase_event import PhaseEvent
+if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
+    from api.services.project_store import ProjectStore
 
 __all__ = [
     "show_feedback_preflight",
@@ -151,17 +149,17 @@ def _print_preflight_sections(config, bl, eval_data,
         _queries_label = f"{config.sample_size} of {len(eval_data)}"
     else:
         _queries_label = f"all {len(eval_data)}"
-    # Pipeline step display
+    # Pipeline node display
     pp = config.pipeline_params or {}
-    active_steps = pp.get("steps", [])
-    exclude = (campaign_config or {}).get("exclude_steps", [])
-    total_steps = len(active_steps) + len(exclude)
-    if active_steps:
-        _pipeline_label = f"{len(active_steps)} of {total_steps} steps"
-        _steps_detail = ", ".join(active_steps)
+    active_nodes = pp.get("steps", [])
+    exclude = (campaign_config or {}).get("exclude_nodes", [])
+    total_nodes = len(active_nodes) + len(exclude)
+    if active_nodes:
+        _pipeline_label = f"{len(active_nodes)} of {total_nodes} nodes"
+        _nodes_detail = ", ".join(active_nodes)
     else:
         _pipeline_label = "(default pipeline)"
-        _steps_detail = None
+        _nodes_detail = None
 
     _est_calls = (config.max_rounds * config.n_variants * _eff_queries
                   if config.max_rounds is not None else None)
@@ -192,8 +190,8 @@ def _print_preflight_sections(config, bl, eval_data,
     print(f"  Candidate model        : {config.model or '(default)'}")
     print(f"  Creativity             : {config.creativity}")
     print(f"  Pipeline               : {_pipeline_label}")
-    if _steps_detail:
-        print(f"    Steps                : {_steps_detail}")
+    if _nodes_detail:
+        print(f"    Nodes                : {_nodes_detail}")
     if exclude:
         print(f"    Excluded             : {', '.join(exclude)}")
     print(f"  Strategy               : {_strategy}")

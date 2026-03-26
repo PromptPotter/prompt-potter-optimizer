@@ -47,8 +47,8 @@ class _CycleDisplayState:
     original_sp_flat: dict[str, str] = field(default_factory=dict)
     previous_sp_flat: dict[str, str] = field(default_factory=dict)
     current_sp_flat: dict[str, str] = field(default_factory=dict)
-    # Pipeline step ordering for grouped diff display
-    step_param_keys: dict[str, list[str]] | None = None
+    # Pipeline node ordering for grouped diff display
+    node_param_keys: dict[str, list[str]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +128,7 @@ def _flatten_sp_summary(
 
     for k, v in (pp or {}).items():
         if k == "steps":
-            continue  # skip pipeline step metadata
+            continue  # skip pipeline node list
         # JSON Schema object — drill into properties
         if isinstance(v, dict) and v.get("type") == "object" and "properties" in v:
             for prop_name, prop_def in v["properties"].items():
@@ -180,31 +180,31 @@ def _build_candidate_flat(
 
 def _group_diff_keys(
     diff_keys: list[str],
-    step_param_keys: dict[str, list[str]] | None,
+    node_param_keys: dict[str, list[str]] | None,
 ) -> list[tuple[str, list[str]]]:
-    """Group diff keys by pipeline step in execution order.
+    """Group diff keys by pipeline node in execution order.
 
-    Returns ``(step_name, [keys])`` pairs.  When ``step_param_keys``
+    Returns ``(node_name, [keys])`` pairs.  When ``node_param_keys``
     is ``None``, returns a single unnamed group sorted alphabetically.
     """
-    if not step_param_keys:
+    if not node_param_keys:
         return [("", diff_keys)]
 
-    # Reverse map: flat_key → step_name (including dot-notation children)
-    key_to_step: dict[str, str] = {}
-    for sname, keys in step_param_keys.items():
+    # Reverse map: flat_key → node_name (including dot-notation children)
+    key_to_node: dict[str, str] = {}
+    for sname, keys in node_param_keys.items():
         for k in keys:
-            key_to_step[k] = sname
+            key_to_node[k] = sname
     for k in diff_keys:
-        if k not in key_to_step:
+        if k not in key_to_node:
             base = k.split(".")[0]
-            if base in key_to_step:
-                key_to_step[k] = key_to_step[base]
+            if base in key_to_node:
+                key_to_node[k] = key_to_node[base]
 
-    groups: dict[str, list[str]] = {sname: [] for sname in step_param_keys}
+    groups: dict[str, list[str]] = {sname: [] for sname in node_param_keys}
     groups[""] = []
     for k in diff_keys:
-        sname = key_to_step.get(k, "")
+        sname = key_to_node.get(k, "")
         groups.setdefault(sname, []).append(k)
 
     return [(sname, sorted(keys)) for sname, keys in groups.items() if keys]
@@ -212,7 +212,7 @@ def _group_diff_keys(
 
 def _print_sp_diff(
     columns: list[tuple[str, dict[str, str]]],
-    step_param_keys: dict[str, list[str]] | None = None,
+    node_param_keys: dict[str, list[str]] | None = None,
 ) -> None:
     """Print N-column diff table with lookup codes for long values.
 
@@ -221,8 +221,8 @@ def _print_sp_diff(
     Short values (<=12 chars) are shown inline; longer values get a
     letter code [a]..[z] with full text in a legend below the table.
 
-    When ``step_param_keys`` is provided, rows are grouped by pipeline
-    step in execution order with separator lines between groups.
+    When ``node_param_keys`` is provided, rows are grouped by pipeline
+    node in execution order with separator lines between groups.
     """
     if len(columns) < 2:
         return
@@ -275,11 +275,11 @@ def _print_sp_diff(
         f"{label:<{col_w}}" for label, _ in columns)
     print(_node_line(hdr))
 
-    # Rows — grouped by pipeline step
-    groups = _group_diff_keys(diff_keys, step_param_keys)
-    for gi, (step_name, group_keys) in enumerate(groups):
-        if step_name and len(groups) > 1:
-            sep = f"{'─── ' + step_name + ' ':─<{max_key + 2}}"
+    # Rows — grouped by pipeline node
+    groups = _group_diff_keys(diff_keys, node_param_keys)
+    for gi, (node_name, group_keys) in enumerate(groups):
+        if node_name and len(groups) > 1:
+            sep = f"{'─── ' + node_name + ' ':─<{max_key + 2}}"
             print(_node_line(f"{DIM}{sep}{RESET}"))
         for k in group_keys:
             cells = []
@@ -311,7 +311,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     state.original_sp_flat = _flatten_sp_summary(
         d.get("pipeline_params"), d.get("model", ""), 0.0,
     )
-    state.step_param_keys = d.get("step_param_keys")
+    state.node_param_keys = d.get("node_param_keys")
 
     model = d.get("model", "(default)")
     l2 = "enabled" if d.get("enable_l2") else "disabled"
@@ -445,7 +445,7 @@ def _print_l1_generate_exit(d: dict, state: _CycleDisplayState) -> None:
         c_flat = _build_candidate_flat(state.current_sp_flat, c)
         columns.append((f"C{c['idx'] + 1}", c_flat))
     print()
-    _print_sp_diff(columns, step_param_keys=state.step_param_keys)
+    _print_sp_diff(columns, node_param_keys=state.node_param_keys)
 
 
 def _print_l1_evaluate_enter(d: dict, state: _CycleDisplayState) -> None:

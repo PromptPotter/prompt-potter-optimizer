@@ -60,7 +60,7 @@ def build_pipeline_params(
     pipeline_config: dict,
     *,
     overrides: dict | None = None,
-    exclude_steps: list[str] | None = None,
+    exclude_nodes: list[str] | None = None,
     schema: "PipelineSchema | None" = None,
 ) -> dict:
     """Build pipeline_params from a (possibly shortened) pipeline config.
@@ -76,23 +76,23 @@ def build_pipeline_params(
         overrides: Optional parameter overrides using flat param names
             (e.g. ``ranking_temperature``). Translated to per-node dicts
             via the schema's ``override_map``.
-        exclude_steps: Step names to remove from the active pipeline
+        exclude_nodes: Node names to remove from the active pipeline
             (e.g. ``["llm_ranking"]`` for token-matching-only evaluation).
-        schema: PipelineSchema for step-param and flat→wire lookup.
+        schema: PipelineSchema for node-param and flat→wire lookup.
     """
-    step_names = [s["name"] for s in pipeline_config["steps"]]
-    if exclude_steps:
-        step_names = [s for s in step_names if s not in exclude_steps]
-    params: dict = {"steps": step_names}
+    node_names = [s["name"] for s in pipeline_config["steps"]]
+    if exclude_nodes:
+        node_names = [n for n in node_names if n not in exclude_nodes]
+    params: dict = {"steps": node_names}
 
     if not overrides:
         return params
 
     if schema is not None:
-        step_param_map = schema.node_param_keys()
+        node_param_map = schema.node_param_keys()
         active_param_names: set = set()
-        for name in step_names:
-            active_param_names |= step_param_map.get(name, set())
+        for name in node_names:
+            active_param_names |= node_param_map.get(name, set())
 
         for k, v in overrides.items():
             if k not in active_param_names:

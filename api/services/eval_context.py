@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
     from api.services.backend_client import BackendClient
+    from api.services.campaign.escalation import EscalationCheck
     from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
 
@@ -31,6 +32,6 @@ class EvalContext:
     source: str = ""
     experiment_id: str = ""
     # Escalation checks (passed through to evaluate_prompt_batch)
-    escalation_checks: list | None = None
+    escalation_checks: "list[EscalationCheck] | None" = None
     candidate_idx: int = 0
     n_total_candidates: int = 1

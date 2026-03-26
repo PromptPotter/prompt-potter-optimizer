@@ -33,7 +33,6 @@ class Settings(BaseSettings):
 
     # LLM Provider Settings
     LLM_PROVIDER: str = "groq"  # "groq", "openai", or "anthropic"
-    # LLM_MODEL: str = "moonshotai/kimi-k2-instruct-0905"  # 10x more expensive
     LLM_MODEL: str = "openai/gpt-oss-120b"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""

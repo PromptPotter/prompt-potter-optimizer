@@ -5,13 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import extract_pipeline_config
-from api.services.project_store import ProjectStore
-
-if TYPE_CHECKING:
-    from api.services.llm_client import LLMClientBase
-
 from api.services.campaign.campaign_init import (
     init_services as _init_services,
     build_all_session_terms,
@@ -23,7 +19,10 @@ from api.services.dataset_builder import (
     train_test_split as _train_test_split,
     SHEET_COLUMN_MAP,
 )
-from api.config.settings import load_variant_library
+from api.services.project_store import ProjectStore
+
+if TYPE_CHECKING:
+    from api.services.llm_client import LLMClientBase
 
 __all__ = [
     # Service init
@@ -174,23 +173,23 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
     Uses ``svc["pipeline_schema"]`` (from ``GET /pipeline``) as the source of
-    truth for step names, falling back to experiment data only when the schema
-    is unavailable.  Reads ``exclude_steps`` and ``pipeline_overrides`` from
+    truth for node names, falling back to experiment data only when the schema
+    is unavailable.  Reads ``exclude_nodes`` and ``pipeline_overrides`` from
     *campaign_config*, stores the result back into
     ``campaign_config["pipeline_params"]``, and returns the params dict.
     """
     pipeline_schema = svc.get("pipeline_schema")
-    exclude = campaign_config.get("exclude_steps", [])
+    exclude = campaign_config.get("exclude_nodes", [])
     overrides = campaign_config.get("pipeline_overrides")
 
     if pipeline_schema:
-        all_steps = [s.name for s in pipeline_schema.nodes]
+        all_names = [n.name for n in pipeline_schema.nodes]
     else:
         pipeline_config = extract_pipeline_config(svc["exp_data"])
-        all_steps = [s["name"] for s in pipeline_config["steps"]]
+        all_names = [s["name"] for s in pipeline_config["steps"]]
 
-    active_steps = [s for s in all_steps if s not in (exclude or [])]
-    pipeline_params: dict = {"steps": active_steps}
+    active = [n for n in all_names if n not in (exclude or [])]
+    pipeline_params: dict = {"steps": active}
 
     # Apply overrides via schema if available
     if overrides and pipeline_schema:
@@ -206,9 +205,9 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
 
     campaign_config["pipeline_params"] = pipeline_params
 
-    steps_str = ", ".join(active_steps)
+    nodes_str = ", ".join(active)
     excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
-    print(f"Active steps: {steps_str}{excl_str}")
+    print(f"Active nodes: {nodes_str}{excl_str}")
 
     return pipeline_params
 

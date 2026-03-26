@@ -1,7 +1,7 @@
 """Typed pipeline node extraction for Langfuse graph observations.
 
-Parses backend ``pipeline_data`` dicts into ordered ``PipelineNode`` objects
-with correct Langfuse ``as_type`` mapping so each step appears as a distinct
+Parses backend ``pipeline_data`` dicts into ordered ``LangfuseObservation`` objects
+with correct Langfuse ``as_type`` mapping so each node appears as a distinct
 top-level node in the trace graph.
 
 as_type mapping:
@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class PipelineNode:
-    """A single pipeline step ready to be pushed as a Langfuse observation."""
+class LangfuseObservation:
+    """A single pipeline node ready to be pushed as a Langfuse observation."""
 
     name: str
     as_type: str
@@ -42,20 +42,20 @@ def _profile_summary(profile: dict) -> str:
     return name or concept or ""
 
 
-def _step_meta(
+def _node_meta(
     timings: dict,
-    step_params: dict,
-    step_name: str,
+    node_params: dict,
+    node_name: str,
     schema: "PipelineSchema",
 ) -> dict[str, Any]:
-    """Build metadata dict for a pipeline step: timing + per-step params."""
+    """Build metadata dict for a pipeline node: timing + per-node params."""
     meta: dict[str, Any] = {}
-    if step_name in timings:
-        meta["duration_s"] = timings[step_name]
-    param_keys = schema.node_param_keys().get(step_name, set())
-    node_params = {k: step_params[k] for k in param_keys if k in step_params}
-    if node_params:
-        meta["pipeline_params"] = node_params
+    if node_name in timings:
+        meta["duration_s"] = timings[node_name]
+    param_keys = schema.node_param_keys().get(node_name, set())
+    matched = {k: node_params[k] for k in param_keys if k in node_params}
+    if matched:
+        meta["pipeline_params"] = matched
     return meta
 
 
@@ -63,21 +63,21 @@ def extract_pipeline_nodes(
     pipeline_data: dict,
     query: str,
     schema: "PipelineSchema",
-) -> list[PipelineNode]:
+) -> list[LangfuseObservation]:
     """Parse pipeline_data into an ordered list of typed nodes.
 
-    Missing steps are simply absent from the returned list.
+    Missing nodes are simply absent from the returned list.
     """
-    nodes: list[PipelineNode] = []
+    nodes: list[LangfuseObservation] = []
     timings = pipeline_data.get("step_timings") or {}
     llm_provider = pipeline_data.get("llm_provider", "")
-    step_params = pipeline_data.get("pipeline_params") or {}
+    node_params = pipeline_data.get("pipeline_params") or {}
     lf_types = schema.langfuse_type_map() if schema else {}
 
     # 1. web_search — tool
     if pipeline_data.get("web_search_status"):
-        meta = _step_meta(timings, step_params, "web_search", schema)
-        nodes.append(PipelineNode(
+        meta = _node_meta(timings, node_params, "web_search", schema)
+        nodes.append(LangfuseObservation(
             name="web_search",
             as_type=lf_types.get("web_search", "tool"),
             input={"query": query},
@@ -93,8 +93,8 @@ def extract_pipeline_nodes(
     # 2. entity_profiling — generation (LLM call 1)
     if pipeline_data.get("entity_profile"):
         profile = pipeline_data["entity_profile"]
-        meta = _step_meta(timings, step_params, "entity_profiling", schema)
-        nodes.append(PipelineNode(
+        meta = _node_meta(timings, node_params, "entity_profiling", schema)
+        nodes.append(LangfuseObservation(
             name="entity_profiling",
             as_type=lf_types.get("entity_profiling", "generation"),
             input={"query": query},
@@ -106,8 +106,8 @@ def extract_pipeline_nodes(
     # 3. token_matching — retriever
     if pipeline_data.get("token_matched_candidates"):
         candidates = pipeline_data["token_matched_candidates"]
-        meta = _step_meta(timings, step_params, "token_matching", schema)
-        nodes.append(PipelineNode(
+        meta = _node_meta(timings, node_params, "token_matching", schema)
+        nodes.append(LangfuseObservation(
             name="token_matching",
             as_type=lf_types.get("token_matching", "retriever"),
             input={
@@ -126,8 +126,8 @@ def extract_pipeline_nodes(
     # 4. llm_ranking — generation (LLM call 2, conditional)
     if pipeline_data.get("ranked_candidates"):
         ranked = pipeline_data["ranked_candidates"]
-        meta = _step_meta(timings, step_params, "llm_ranking", schema)
-        nodes.append(PipelineNode(
+        meta = _node_meta(timings, node_params, "llm_ranking", schema)
+        nodes.append(LangfuseObservation(
             name="llm_ranking",
             as_type=lf_types.get("llm_ranking", "generation"),
             input={"n_candidates": len(ranked)},

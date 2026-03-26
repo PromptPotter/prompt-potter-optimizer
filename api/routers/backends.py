@@ -42,25 +42,25 @@ class RegisterBackendRequest(BaseModel):
 
 
 class RegisterBackendResponse(BaseModel):
-    id: str
-    name: str
-    backend_type: str
-    base_url: str
-    created_at: str
+    id: str = Field(description="Backend identifier")
+    name: str = Field(description="Human-readable backend name")
+    backend_type: str = Field(description="Backend type (e.g. 'termnorm')")
+    base_url: str = Field(description="Backend API base URL")
+    created_at: str = Field(description="ISO 8601 creation timestamp")
 
 
 class SyncResponse(BaseModel):
-    backend_id: str
-    experiments_synced: int
-    synced_at: str
+    backend_id: str = Field(description="Backend identifier")
+    experiments_synced: int = Field(description="Number of experiments synced from backend")
+    synced_at: str = Field(description="ISO 8601 sync timestamp")
 
 
 class PipelineViewResponse(BaseModel):
-    backend_id: str
-    backend_pipeline: dict[str, Any]  # PipelineSchema.model_dump()
-    computed_steps: list[dict[str, Any]]  # PipelineNode dicts
-    fetched_at: str
-    source: str  # "live" | "cached" | "default"
+    backend_id: str = Field(description="Backend identifier")
+    backend_pipeline: dict[str, Any] = Field(description="Full PipelineSchema as dict")
+    computed_nodes: list[dict[str, Any]] = Field(description="Computed PipelineNode dicts")
+    fetched_at: str = Field(description="ISO 8601 fetch timestamp")
+    source: str = Field(description="Pipeline source: 'live', 'cached', or 'default'")
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +227,7 @@ async def get_pipeline(backend_id: str):
     return PipelineViewResponse(
         backend_id=backend_id,
         backend_pipeline=view["backend_pipeline"],
-        computed_steps=view["computed_steps"],
+        computed_nodes=view["computed_nodes"],
         fetched_at=view["fetched_at"],
         source=view["source"],
     )

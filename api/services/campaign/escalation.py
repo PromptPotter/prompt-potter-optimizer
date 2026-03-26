@@ -266,7 +266,7 @@ async def _do_l2_transition(
     """Perform L2 refine_context transition. Updates state in-place."""
     from api.services.campaign import layer_transitions
     from api.services import llm_client as _llm_client
-    from api.services.obs.node_tracer import observed_step
+    from api.services.obs.node_tracer import observed_node
     from api.services.campaign.critique_stats import warning_summary
 
     current_pp = state.current_sp.pipeline_params
@@ -287,7 +287,7 @@ async def _do_l2_transition(
                 best_accuracy=state.best_accuracy)
 
     client = _llm_client.get_llm_client(config.provider)
-    async with observed_step(f"l2_refine_r{round_num}", "llm/meta",
+    async with observed_node(f"l2_refine_r{round_num}", "llm/meta",
                              obs=obs, trace_id=trace_id):
         tr = await layer_transitions.refine_context(
             state.opt_sp, stalled_rounds, eval_data, client,
@@ -352,7 +352,7 @@ async def _do_l3_transition(
     """Perform L3 modify_plan transition. Updates state in-place."""
     from api.services.campaign import layer_transitions
     from api.services import llm_client as _llm_client
-    from api.services.obs.node_tracer import observed_step
+    from api.services.obs.node_tracer import observed_node
 
     current_pp = state.current_sp.pipeline_params
 
@@ -367,7 +367,7 @@ async def _do_l3_transition(
                 current_plan_preview=str(state.opt_sp.plan)[:120])
 
     client = _llm_client.get_llm_client(config.provider)
-    async with observed_step(f"l3_modify_plan_r{round_num}", "llm/meta",
+    async with observed_node(f"l3_modify_plan_r{round_num}", "llm/meta",
                              obs=obs, trace_id=trace_id):
         tr = await layer_transitions.modify_plan(
             state.opt_sp, l2_history, eval_data, client,

@@ -18,12 +18,12 @@ import httpx
 from api.evaluators.exact_match import EvalResult, ExactMatchEvaluator
 from api.models.hashing import HASH_TRUNCATE
 from api.config.settings import NO_RESULT
-from api.services.eval_context import EvalContext  # noqa: F401 — re-export for existing callers
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
     from api.models.search_point import SearchPoint
     from api.services.backend_client import BackendClient
+    from api.services.eval_context import EvalContext
     from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
 

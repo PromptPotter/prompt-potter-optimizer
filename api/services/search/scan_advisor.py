@@ -1,6 +1,6 @@
 """Scan advisor — LLM-powered sensitivity scan configuration.
 
-Analyzes the connected pipeline (steps, params, node types) and recommends
+Analyzes the connected pipeline (nodes, params, node types) and recommends
 which axes to focus the sensitivity scan on, BEFORE running it.
 
 Key design principle: no static axis enrichment. The advisor dynamically reads
@@ -13,7 +13,7 @@ import json
 import logging
 from typing import Any
 
-from api.models.pipeline_schema import PipelineSchema, PipelineNode, StepOutputSchema
+from api.models.pipeline_schema import PipelineSchema, PipelineNode, NodeOutputSchema
 
 logger = logging.getLogger(__name__)
 
@@ -22,30 +22,30 @@ logger = logging.getLogger(__name__)
 STRUCTURAL_OVERRIDES = {"prompt", "output_schema", "model"}
 
 
-def _active_steps(
+def _active_nodes(
     schema: PipelineSchema,
-    excluded_steps: set[str] | None = None,
+    excluded_nodes: set[str] | None = None,
 ) -> list[PipelineNode]:
-    """Return pipeline steps that are not excluded."""
-    if not excluded_steps:
+    """Return pipeline nodes that are not excluded."""
+    if not excluded_nodes:
         return list(schema.nodes)
-    return [s for s in schema.nodes if s.name not in excluded_steps]
+    return [s for s in schema.nodes if s.name not in excluded_nodes]
 
 
 def build_pipeline_overview(
     schema: PipelineSchema,
-    excluded_steps: set[str] | None = None,
+    excluded_nodes: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Layer 1 — high-level pipeline structure.
 
-    Step name, role, short_circuit flag. No config details.
+    Node name, role, short_circuit flag. No config details.
     """
     overview = []
-    for step in _active_steps(schema, excluded_steps):
-        entry: dict[str, Any] = {"name": step.name}
-        if step.node_role:
-            entry["node_role"] = step.node_role
-        if step.short_circuit:
+    for node in _active_nodes(schema, excluded_nodes):
+        entry: dict[str, Any] = {"name": node.name}
+        if node.node_role:
+            entry["node_role"] = node.node_role
+        if node.short_circuit:
             entry["short_circuit"] = True
         overview.append(entry)
     return overview
@@ -53,32 +53,32 @@ def build_pipeline_overview(
 
 def build_tunable_params(
     schema: PipelineSchema,
-    excluded_steps: set[str] | None = None,
+    excluded_nodes: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Layer 2 — tunable knobs per step.
+    """Layer 2 — tunable knobs per node.
 
     Shows param_keys and current_values, stripping structural overrides
     (prompt, output_schema, model) which are not numeric/string "knobs".
     """
     tunable = []
-    for step in _active_steps(schema, excluded_steps):
-        if not step.param_keys:
+    for node in _active_nodes(schema, excluded_nodes):
+        if not node.param_keys:
             continue
         # Identify structural keys via override_map
         structural_keys: set[str] = set()
-        if step.override_map:
-            for flat_key, wire_key in step.override_map.items():
+        if node.override_map:
+            for flat_key, wire_key in node.override_map.items():
                 if wire_key in STRUCTURAL_OVERRIDES:
                     structural_keys.add(flat_key)
 
         tunable_config = {
-            k: v for k, v in step.current_config.items()
+            k: v for k, v in node.current_config.items()
             if k not in structural_keys
-        } if step.current_config else {}
+        } if node.current_config else {}
 
         entry: dict[str, Any] = {
-            "name": step.name,
-            "param_keys": sorted(step.param_keys),
+            "name": node.name,
+            "param_keys": sorted(node.param_keys),
         }
         if tunable_config:
             entry["current_values"] = tunable_config
@@ -87,7 +87,7 @@ def build_tunable_params(
 
 
 def _flatten_schema_fields(
-    output_schema: StepOutputSchema,
+    output_schema: NodeOutputSchema,
 ) -> dict[str, str]:
     """Flatten an output schema into a dot-path → ``"type — description"`` map.
 
@@ -127,25 +127,25 @@ def _flatten_schema_fields(
 
 def build_llm_context(
     schema: PipelineSchema,
-    excluded_steps: set[str] | None = None,
+    excluded_nodes: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Layer 3 — LLM node details (flattened output schema fields, prompt metadata).
 
-    Only includes non-excluded steps that have output_schema or prompt_meta.
+    Only includes non-excluded nodes that have output_schema or prompt_meta.
     Presented as reference context, not primary optimization targets.
     """
     context = []
-    for step in _active_steps(schema, excluded_steps):
-        if not step.output_schema and not step.prompt_meta:
+    for node in _active_nodes(schema, excluded_nodes):
+        if not node.output_schema and not node.prompt_meta:
             continue
-        entry: dict[str, Any] = {"name": step.name}
-        if step.output_schema:
-            entry["output_schema"] = _flatten_schema_fields(step.output_schema)
-        if step.prompt_meta:
+        entry: dict[str, Any] = {"name": node.name}
+        if node.output_schema:
+            entry["output_schema"] = _flatten_schema_fields(node.output_schema)
+        if node.prompt_meta:
             entry["prompt_meta"] = {
-                "family": step.prompt_meta.family,
-                "template_variables": step.prompt_meta.template_variables,
-                "description": step.prompt_meta.description,
+                "family": node.prompt_meta.family,
+                "template_variables": node.prompt_meta.template_variables,
+                "description": node.prompt_meta.description,
             }
         context.append(entry)
     return context
@@ -188,7 +188,7 @@ def _build_advisor_prompt(
     if llm_context:
         llm_context_section = f"""
 ## LLM Node Details
-Output schema fields and prompt metadata for LLM-driven steps:
+Output schema fields and prompt metadata for LLM-driven nodes:
 {json.dumps(llm_context, indent=2)}
 """
 
@@ -199,10 +199,10 @@ You are an expert prompt optimization advisor. Recommend which axes \
 {constraints_section}
 
 ## Pipeline: {pipeline_description or "No description available."}
-Steps execute sequentially — each step's output feeds the next:
+Nodes execute sequentially — each node's output feeds the next:
 {json.dumps(pipeline_overview, indent=2)}
 {task_context_section}\
-## Tunable Parameters (per step)
+## Tunable Parameters (per node)
 {json.dumps(tunable_params, indent=2)}
 
 ## Prompt Field Axes
@@ -210,7 +210,7 @@ Prompt template fields that can be varied (variant library has pre-defined value
 {json.dumps(prompt_field_axes, indent=2)}
 {llm_context_section}\
 ## Analysis Approach
-Work through these steps before producing your recommendation:
+Work through these analysis steps before producing your recommendation:
 1. Trace data flow: UPSTREAM parameters have multiplier effects — poor upstream \
 data cannot be compensated by downstream tuning.
 2. Flag high-impact targets: empty or default string params (prefixes, suffixes, \
@@ -233,7 +233,7 @@ Return a JSON object with this structure:
     {{
       "axis": "<param_name>",
       "source": "pipeline_param",
-      "step": "<step_name>",
+      "node": "<node_name>",
       "rationale": "...",
       "suggested_values": ["<val>", "..."],
       "importance": "<high|medium|low>"
@@ -263,11 +263,11 @@ Rules:
 - suggested_values: 2-4 values, numbers or short strings only
 - importance: "high", "medium", or "low"
 - source: "pipeline_param" or "prompt_field"
-- For pipeline_param axes: include "step" and "suggested_values"
+- For pipeline_param axes: include "node" and "suggested_values"
 - CRITICAL: For pipeline_param axes, "axis" must be an EXACT key from the \
-Tunable Parameters param_keys above. Do NOT invent names or combine step \
+Tunable Parameters param_keys above. Do NOT invent names or combine node \
 names with param names — copy the key exactly as listed.
-- For prompt_field axes: omit "step" and "suggested_values"
+- For prompt_field axes: omit "node" and "suggested_values"
 - *_schema mutations: each suggested_value is a JSON array of mutation arrays. \
 Ops: ["-","path"] remove | ["+","path","type",required,"desc"] add | \
 ["~","old","new","type",required,"desc"] replace. \
@@ -283,7 +283,7 @@ def preview_advisor_prompt(
     variant_library: dict | None = None,
     pipeline_params: dict | None = None,
     task_description: str | dict = "",
-    exclude_steps: list[str] | None = None,
+    exclude_nodes: list[str] | None = None,
 ) -> str:
     """Return the advisor prompt — with real data when available, else placeholders.
 
@@ -297,10 +297,10 @@ def preview_advisor_prompt(
         if variant_library is None:
             variant_library = _load_vl()
 
-        excluded_steps = _resolve_excluded_steps(
-            exclude_steps, pipeline_schema, pipeline_params,
+        excluded_nodes = _resolve_excluded_nodes(
+            exclude_nodes, pipeline_schema, pipeline_params,
         )
-        layer_args = dict(schema=pipeline_schema, excluded_steps=excluded_steps)
+        layer_args = dict(schema=pipeline_schema, excluded_nodes=excluded_nodes)
         return _build_advisor_prompt(
             pipeline_overview=build_pipeline_overview(**layer_args),
             tunable_params=build_tunable_params(**layer_args),
@@ -331,7 +331,7 @@ def _validate_advisory(
     advisory: dict,
     schema: PipelineSchema,
     variant_library: dict,
-    excluded_steps: set[str] | None = None,
+    excluded_nodes: set[str] | None = None,
 ) -> list[str]:
     """Validate LLM advisory against schema and variant library.
 
@@ -341,17 +341,17 @@ def _validate_advisory(
 
     warnings: list[str] = []
 
-    # Build step-to-params mapping for excluded-step checks
-    step_param_keys = schema.node_param_keys()
+    # Build node-to-params mapping for excluded-node checks
+    node_param_map = schema.node_param_keys()
     excluded_param_keys: set[str] = set()
-    if excluded_steps:
-        for step_name in excluded_steps:
-            excluded_param_keys.update(step_param_keys.get(step_name, set()))
+    if excluded_nodes:
+        for node_name in excluded_nodes:
+            excluded_param_keys.update(node_param_map.get(node_name, set()))
 
     # Collect all pipeline param keys
     all_param_keys: set[str] = set()
-    for step in schema.nodes:
-        all_param_keys.update(step.param_keys)
+    for node in schema.nodes:
+        all_param_keys.update(node.param_keys)
 
     prompt_fields = set(_extract_prompt_field_axes(variant_library))
 
@@ -369,10 +369,10 @@ def _validate_advisory(
                     f"PipelineSchema param_keys: {sorted(all_param_keys)}"
                 )
             elif axis_name in excluded_param_keys:
-                step_name = ax.get("step", "?")
+                node_name = ax.get("node", "?")
                 warnings.append(
                     f"pipeline_param axis '{axis_name}' belongs to excluded "
-                    f"step '{step_name}' — will have no effect"
+                    f"node '{node_name}' — will have no effect"
                 )
 
             # Validate schema axis mutation tuples
@@ -415,23 +415,23 @@ def _validate_advisory(
 def _excluded_from_schema(
     schema: PipelineSchema, pipeline_params: dict | None,
 ) -> set[str] | None:
-    """Derive excluded steps by diffing schema steps vs pipeline_params["steps"]."""
+    """Derive excluded nodes by diffing schema nodes vs pipeline_params["steps"]."""
     if not pipeline_params or "steps" not in pipeline_params:
         return None
-    all_step_names = {s.name for s in schema.nodes}
+    all_node_names = {n.name for n in schema.nodes}
     active = set(pipeline_params["steps"])
-    excluded = all_step_names - active
+    excluded = all_node_names - active
     return excluded or None
 
 
-def _resolve_excluded_steps(
-    exclude_steps: list[str] | None,
+def _resolve_excluded_nodes(
+    exclude_nodes: list[str] | None,
     schema: PipelineSchema,
     pipeline_params: dict | None,
 ) -> set[str] | None:
-    """Resolve excluded steps from explicit list or schema diff."""
-    if exclude_steps is not None:
-        return set(exclude_steps) if exclude_steps else None
+    """Resolve excluded nodes from explicit list or schema diff."""
+    if exclude_nodes is not None:
+        return set(exclude_nodes) if exclude_nodes else None
     return _excluded_from_schema(schema, pipeline_params)
 
 
@@ -443,7 +443,7 @@ async def advise_scan_config(
     max_tokens: int = 2000,
     pipeline_params: dict | None = None,
     task_description: str | dict = "",
-    exclude_steps: list[str] | None = None,
+    exclude_nodes: list[str] | None = None,
 ) -> dict:
     """Generate LLM-powered scan configuration advice.
 
@@ -454,10 +454,10 @@ async def advise_scan_config(
         model: Model identifier for the LLM call.
         max_tokens: Maximum response tokens for the LLM call.
         pipeline_params: Pipeline params dict with ``steps`` key. Excluded
-            steps are derived by diffing schema steps vs active steps.
+            nodes are derived by diffing schema nodes vs active nodes.
         task_description: Domain context for the advisor LLM. Either a raw
             string or a structured task_context dict.
-        exclude_steps: Explicit list of steps to exclude. When provided,
+        exclude_nodes: Explicit list of nodes to exclude. When provided,
             overrides the automatic schema-vs-pipeline_params diff.
 
     Returns:
@@ -465,10 +465,10 @@ async def advise_scan_config(
         ``axes_to_skip``, ``budget_breakdown``, ``reasoning``, and
         ``validation_warnings``.
     """
-    excluded_steps = _resolve_excluded_steps(
-        exclude_steps, pipeline_schema, pipeline_params,
+    excluded_nodes = _resolve_excluded_nodes(
+        exclude_nodes, pipeline_schema, pipeline_params,
     )
-    layer_args = dict(schema=pipeline_schema, excluded_steps=excluded_steps)
+    layer_args = dict(schema=pipeline_schema, excluded_nodes=excluded_nodes)
     pipeline_overview = build_pipeline_overview(**layer_args)
     tunable_params = build_tunable_params(**layer_args)
     llm_context = build_llm_context(**layer_args)
@@ -520,7 +520,7 @@ async def advise_scan_config(
 
     # Validate against schema
     warnings = _validate_advisory(
-        advisory, pipeline_schema, variant_library, excluded_steps=excluded_steps,
+        advisory, pipeline_schema, variant_library, excluded_nodes=excluded_nodes,
     )
     if warnings:
         for w in warnings:

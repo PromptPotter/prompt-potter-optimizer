@@ -73,7 +73,7 @@ def preview_advisor_prompt(
     if svc is not None:
         pipeline_schema = svc.get("pipeline_schema")
         pipeline_params = campaign_config.get("pipeline_params") if campaign_config else None
-        exclude_steps = campaign_config.get("exclude_steps") if campaign_config else None
+        exclude_nodes = campaign_config.get("exclude_nodes") if campaign_config else None
 
         variant_library = _load_filtered_variants(pipeline_params, pipeline_schema)
 
@@ -82,7 +82,7 @@ def preview_advisor_prompt(
             variant_library=variant_library,
             pipeline_params=pipeline_params,
             task_description=task_description,
-            exclude_steps=exclude_steps,
+            exclude_nodes=exclude_nodes,
         )
     else:
         prompt = _preview_advisor_prompt()
@@ -744,7 +744,7 @@ async def scan_advisor(
     # --- Internalized prep (matches resume_or_build_diagnostic pattern) ---
     pipeline_schema = svc.get("pipeline_schema")
     pipeline_params = campaign_config.get("pipeline_params")
-    user_excluded = campaign_config.get("exclude_steps", [])
+    user_excluded = campaign_config.get("exclude_nodes", [])
 
     variant_library = _load_filtered_variants(pipeline_params, pipeline_schema)
 
@@ -778,7 +778,7 @@ async def scan_advisor(
         max_tokens=max_tokens,
         pipeline_params=pipeline_params,
         task_description=task_description,
-        exclude_steps=user_excluded or None,
+        exclude_nodes=user_excluded or None,
     )
 
     _display_scan_advisory(advisory)
@@ -800,7 +800,7 @@ def _resolve_schema_axes(
     Non-schema axes pass through unchanged.  Returns ``(resolved, schema_labels)``.
     """
     from api.models.schema_mutation import (
-        baseline_schema_from_step,
+        baseline_schema_from_node,
         parse_mutation_tuples,
         resolve_schema_variants,
     )
@@ -815,12 +815,12 @@ def _resolve_schema_axes(
             and vals
             and isinstance(vals[0], list)
         ):
-            step_name = pipeline_schema.node_for_flat_param(axis_name)
-            step = pipeline_schema.get_node(step_name) if step_name else None
-            if step and step.output_schema:
+            node_name = pipeline_schema.node_for_flat_param(axis_name)
+            node = pipeline_schema.get_node(node_name) if node_name else None
+            if node and node.output_schema:
                 try:
                     variants = [parse_mutation_tuples(sv) for sv in vals]
-                    baseline = baseline_schema_from_step(step.output_schema)
+                    baseline = baseline_schema_from_node(node.output_schema)
                     resolved[axis_name] = resolve_schema_variants(baseline, variants)
                     schema_labels[axis_name] = (
                         ["(baseline)"] + [v.render_label() for v in variants]

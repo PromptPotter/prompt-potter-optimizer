@@ -23,7 +23,7 @@ from api.services.campaign.critique_stats import (
 from api.services.campaign.campaign_lifecycle import (
     graceful, emit_phase, _candidate_summaries,
 )
-from api.services.obs.node_tracer import observed_step
+from api.services.obs.node_tracer import observed_node
 
 # Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client
@@ -93,7 +93,7 @@ async def _generate_or_load_candidates(
     from api.services.l1_optimizer import l1_generate
 
     client = _llm_client.get_llm_client(config.provider)
-    async with observed_step(f"l1_generate_r{round_num}", "llm/meta",
+    async with observed_node(f"l1_generate_r{round_num}", "llm/meta",
                              obs=obs, trace_id=trace_id):
         candidates = await l1_generate(
             state.opt_sp, state.current_accuracy, state.current_results,
@@ -151,7 +151,7 @@ async def _evaluate_candidates(
 
     from api.services.l1_optimizer import l1_evaluate
 
-    async with observed_step(f"l1_evaluate_r{round_num}", "evaluation",
+    async with observed_node(f"l1_evaluate_r{round_num}", "evaluation",
                              obs=obs, trace_id=trace_id, obs_type="span"):
         eval_out = await l1_evaluate(
             candidates, round_eval_data, current_best, state.eval_ctx,

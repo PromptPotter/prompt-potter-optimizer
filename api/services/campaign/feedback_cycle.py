@@ -205,7 +205,7 @@ async def _init_cycle_state(
                 has_scan_context=config.scan_context is not None,
                 enable_critique=config.enable_critique,
                 pipeline_params=config.pipeline_params,
-                step_param_keys=(
+                node_param_keys=(
                     {s: sorted(k) for s, k in config.pipeline_schema.node_param_keys().items()}
                     if config.pipeline_schema else None
                 ))

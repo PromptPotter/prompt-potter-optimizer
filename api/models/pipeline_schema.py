@@ -39,15 +39,15 @@ class ObservationMapping(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Step metadata (output schema + prompt info)
+# Node metadata (output schema + prompt info)
 # ---------------------------------------------------------------------------
 
-class StepOutputSchema(BaseModel):
-    """Resolved output schema for a pipeline step.
+class NodeOutputSchema(BaseModel):
+    """Resolved output schema for a pipeline node.
 
     Carries the field names and descriptions from the backend's schema registry
     so that downstream consumers (scan advisor, notebooks) can reason about
-    what a step produces without calling the registry directly.
+    what a node produces without calling the registry directly.
     """
 
     model_config = {"frozen": True}
@@ -59,8 +59,8 @@ class StepOutputSchema(BaseModel):
     json_schema: dict = Field(default_factory=dict)
 
 
-class StepPromptMeta(BaseModel):
-    """Resolved prompt metadata for a pipeline step.
+class NodePromptMeta(BaseModel):
+    """Resolved prompt metadata for a pipeline node.
 
     Carries template variable names, a human description, and the full
     prompt template text from the backend's prompt registry.
@@ -97,8 +97,8 @@ class PipelineNode(BaseModel):
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"
-    output_schema: StepOutputSchema | None = None
-    prompt_meta: StepPromptMeta | None = None
+    output_schema: NodeOutputSchema | None = None
+    prompt_meta: NodePromptMeta | None = None
     current_config: dict[str, Any] = Field(default_factory=dict)
     default_config: dict[str, Any] = Field(default_factory=dict)
     input_keys: set[str] = Field(default_factory=set)

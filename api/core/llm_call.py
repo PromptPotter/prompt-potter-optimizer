@@ -48,13 +48,6 @@ def get_node_config(node_name: str) -> dict:
     return node.current_config
 
 
-# Backward compat alias
-def get_optimizer_pipeline() -> dict:
-    """Load optimizer_pipeline.json as raw dict (legacy — prefer get_optimizer_schema)."""
-    path = Path(__file__).resolve().parents[1] / "config" / "optimizer_pipeline.json"
-    return json.loads(path.read_text())
-
-
 # ---------------------------------------------------------------------------
 # LLM call primitive
 # ---------------------------------------------------------------------------

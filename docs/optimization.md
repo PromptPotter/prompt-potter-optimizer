@@ -265,7 +265,7 @@ When scan data is available, `prepare_scan_context()` enriches the meta-prompt w
 
 See [architecture.md](architecture.md#the-optimizer-pipeline) for the optimizer pipeline table.
 
-The optimizer nodes are declared in [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json): `l1_generate` (`llm/meta`), `l1_evaluate` (`evaluation`), `critique` (`agent`), `l2_refine_context` (`llm/meta`), `l3_modify_plan` (`llm/meta`). Each node's config (temperature, prompt_family, context_sources) is loaded via `get_node_config()` and LLM calls use the shared `llm_call()` primitive (`api/core/llm_call.py`). Node tracing uses `observed_step()`. `OptSearchPoint` checkpoints optimizer state (critique, thinking_styles, plan, `task_context`) per round.
+The optimizer nodes are declared in [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json): `l1_generate` (`llm/meta`), `l1_evaluate` (`evaluation`), `critique` (`agent`), `l2_refine_context` (`llm/meta`), `l3_modify_plan` (`llm/meta`). Each node's config (temperature, prompt_family, context_sources) is loaded via `get_node_config()` and LLM calls use the shared `llm_call()` primitive (`api/core/llm_call.py`). Node tracing uses `observed_node()`. `OptSearchPoint` checkpoints optimizer state (critique, thinking_styles, plan, `task_context`) per round.
 
 **Critique and thinking styles are tools of `l1_evaluate`, not separate nodes.** The critique agent runs *within* the evaluation node -- its output (`critique_text`) feeds the *next* round's `l1_generate`. Similarly, `sample_thinking_styles()` runs at the end of evaluation to prepare mutation guidance for the next round. Neither has an independent parameter surface or routing decision that would warrant a separate optimizer pipeline node.
 
@@ -293,7 +293,7 @@ Each event: `phase` (str), `event` ("enter"/"exit"), `round` (int or None), `dat
 ```python
 campaign_config = {
     "sample_size": 35,                 # queries per eval (0 = all)
-    "exclude_steps": ["llm_ranking"],  # target pipeline nodes to skip
+    "exclude_nodes": ["llm_ranking"],  # target pipeline nodes to skip
     "optimization": {
         "n_variants": 5,
         "creativity": 0.7,

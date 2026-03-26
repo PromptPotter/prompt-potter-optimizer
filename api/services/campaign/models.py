@@ -17,6 +17,7 @@ from api.models.pipeline_schema import PipelineSchema
 from api.models.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
+    from api.services.campaign.escalation import EscalationCheck
     from api.services.eval_context import EvalContext
 
 
@@ -234,6 +235,6 @@ class CycleInitResult:
     campaign_store: Any = None
     cycle_id: str | None = None
     obs_campaign_id: str = ""
-    round_eval_data: list = field(default_factory=list)
-    escalation_checks: list = field(default_factory=list)
+    round_eval_data: list[dict[str, Any]] = field(default_factory=list)
+    escalation_checks: "list[EscalationCheck]" = field(default_factory=list)
     resumed_from_round: int = 0

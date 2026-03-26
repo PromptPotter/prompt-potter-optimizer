@@ -14,14 +14,13 @@ from typing import Any, TYPE_CHECKING
 import httpx
 
 from api.models.backend import BackendConnection
+from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
 from api.config.settings import DATASET_NAME
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
     from api.services.llm_client import LLMClientBase
-
-from api.models.opt_search_point import OptSearchPoint
 
 logger = logging.getLogger(__name__)
 

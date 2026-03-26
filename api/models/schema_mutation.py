@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from api.models.pipeline_schema import StepOutputSchema
+from api.models.pipeline_schema import NodeOutputSchema
 
 logger = logging.getLogger(__name__)
 
@@ -199,8 +199,8 @@ def resolve_schema_variants(
 # Baseline extraction
 # ---------------------------------------------------------------------------
 
-def baseline_schema_from_step(output_schema: StepOutputSchema) -> dict:
-    """Extract the baseline JSON Schema dict from a ``StepOutputSchema``.
+def baseline_schema_from_node(output_schema: NodeOutputSchema) -> dict:
+    """Extract the baseline JSON Schema dict from a ``NodeOutputSchema``.
 
     Prefers ``json_schema`` if non-empty; falls back to building from
     ``fields`` + ``field_descriptions``.
