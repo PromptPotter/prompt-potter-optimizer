@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.core.llm_call import get_node_config, llm_call
 from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.critique_stats import summarize_warning_inventory
+from api.services.campaign.critique import summarize_warning_inventory
 from api.services.campaign.formatting import format_failure_lines
 
 if TYPE_CHECKING:

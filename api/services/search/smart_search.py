@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Callable, Literal, TypedDict
 
 from api.config.settings import DEFAULT_DIAGNOSTIC_QUERIES
 from api.models.opt_search_point import OptSearchPoint
-from api.services.eval_context import EvalContext
+from api.models.eval_context import EvalContext
 from api.services.prompt_eval import evaluate_prompt_cached
 
 if TYPE_CHECKING:

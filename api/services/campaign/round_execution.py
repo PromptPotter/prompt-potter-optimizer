@@ -15,15 +15,13 @@ from api.services.campaign.models import (
     CycleConfig, CycleRoundResult, _LoopState,
 )
 from api.services.campaign.critique import (
-    CritiqueAgent, format_critique_for_prompt, sample_thinking_styles,
+    CritiqueAgent, CritiqueContext, format_critique_for_prompt,
+    sample_thinking_styles, update_query_tracker,
 )
-from api.services.campaign.critique_stats import (
-    CritiqueContext, update_query_tracker,
-)
-from api.services.campaign.campaign_lifecycle import (
+from api.services.campaign._helpers import (
     graceful, emit_phase, _candidate_summaries,
 )
-from api.services.obs.node_tracer import observed_node
+from api.services.obs.observability_logger import observed_node
 
 # Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client

@@ -26,7 +26,7 @@ from api.services.llm_client import LLMClientBase
 from api.services.metrics import compute_composite_score
 
 if TYPE_CHECKING:
-    from api.services.eval_context import EvalContext
+    from api.models.eval_context import EvalContext
 
 logger = logging.getLogger(__name__)
 

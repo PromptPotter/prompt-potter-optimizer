@@ -28,7 +28,7 @@ from pathlib import Path
 from api.services.stores.backend_store import BackendStore
 from api.services.stores.campaign_store import CampaignStore
 from api.services.stores.dataset_run_store import DatasetRunStore
-from api.services.stores.smart_search_store import SmartSearchStore
+from api.services.stores.base import PlanStore
 
 BASE_DIR = Path(".promptpotter") / "projects"
 
@@ -69,4 +69,4 @@ class ProjectStore:
         self.datasets = _DatasetAdapter(self.backends)
         self.executions = _ExecutionAdapter(self.backends)
         self.dataset_runs = DatasetRunStore(self.base_dir)
-        self.smart_search = SmartSearchStore(self.base_dir)
+        self.smart_search = PlanStore(self.base_dir)

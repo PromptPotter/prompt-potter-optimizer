@@ -18,7 +18,7 @@ from api.models.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from api.services.campaign.escalation import EscalationCheck
-    from api.services.eval_context import EvalContext
+    from api.models.eval_context import EvalContext
 
 
 class StopReason(str, enum.Enum):

@@ -24,8 +24,8 @@ from api.models.phase_event import PhaseEvent
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
 from api.services.campaign.critique import sample_thinking_styles
+from api.services.campaign._helpers import graceful, emit_phase, _get_obs_trace
 from api.services.campaign.campaign_lifecycle import (
-    graceful, emit_phase, _get_obs_trace,
     _init_obs, _resume_or_create_campaign, _finalize_campaign,
 )
 from api.services.campaign.models import (
@@ -37,7 +37,7 @@ from api.services.campaign.round_execution import (
     _execute_round, _update_round_state,
 )
 from api.services.metrics import compute_composite_score
-from api.services.eval_context import EvalContext
+from api.models.eval_context import EvalContext
 from api.services.prompt_eval import subsample_queries
 
 if TYPE_CHECKING:

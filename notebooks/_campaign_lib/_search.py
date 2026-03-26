@@ -10,10 +10,10 @@ from api.models.pipeline_schema import PipelineSchema
 from api.models.opt_search_point import LAYER1_STRING_FIELDS, OptSearchPoint
 
 from api.config.settings import load_variant_library_rich
+from api.services.search.sensitivity_scan import sensitivity_scan as _sensitivity_scan
+from api.services.search.adaptive_search import adaptive_search as _adaptive_search
 from api.services.search import (
     build_diagnostic_set,
-    sensitivity_scan as _sensitivity_scan,
-    adaptive_search as _adaptive_search,
     select_scan_winner as _select_scan_winner,
     build_prompt_result_index as build_historical_index,
     assess_scan_coverage as _assess_scan_coverage,
@@ -1363,6 +1363,11 @@ def seed_campaign_from_scan(
         merged = {**existing_pp, **best_sp.pipeline_params}
         if "steps" in existing_pp:
             merged["steps"] = existing_pp["steps"]
+            # Strip node-level config for excluded nodes so the backend
+            # doesn't run them despite being absent from the steps list.
+            excluded = set(campaign_config.get("exclude_nodes", []))
+            for node_name in excluded:
+                merged.pop(node_name, None)
         campaign_config["pipeline_params"] = merged
         # Summarize — avoid dumping full JSON schemas
         display_pp = {}

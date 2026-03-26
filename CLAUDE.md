@@ -61,7 +61,7 @@ Key methods: `render_prompt()` assembles prompt fields into a string. `to_job_se
 
 Describes a pipeline — target or optimizer. Both TermNorm's `GET /pipeline` response and `optimizer_pipeline.json` parse into PipelineSchema. `PipelineNode` carries node type, config, param_keys, override_map.
 
-### EvalContext (`api/services/prompt_eval.py`)
+### EvalContext (`api/models/eval_context.py`)
 
 Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema`, `obs`, `source`, `model`, `temperature`, `pipeline_params`, `experiment_id`, `escalation_checks`, `candidate_idx`, `n_total_candidates`.
 

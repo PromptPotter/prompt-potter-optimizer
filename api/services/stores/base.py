@@ -126,27 +126,18 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Base class for plan-like stores (smart search plans, …)
+# PlanStore — file I/O for smart search plan persistence
 # ---------------------------------------------------------------------------
 
-class _BasePlanStore:
-    """Shared save / load / update / list_all for plan stores.
-
-    Subclasses set two class attributes:
-
-    - ``_subdir``: directory name under ``{backend_id}/`` (e.g. ``"smart_search_plans"``)
-    - ``_glob_prefix``: filename prefix for ``list_all`` (e.g. ``"ssplan_"``)
-    """
-
-    _subdir: str  # set by subclass
-    _glob_prefix: str  # set by subclass
+class PlanStore:
+    """File I/O for smart search plan persistence and resume."""
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
 
     def _plans_dir(self, backend_id: str) -> Path:
         validate_path_component(backend_id)
-        return self._base_dir / backend_id / self._subdir
+        return self._base_dir / backend_id / "smart_search_plans"
 
     def save(
         self, backend_id: str, plan_id: str, plan_data: dict[str, Any],
@@ -172,13 +163,23 @@ class _BasePlanStore:
         write_json(path, data)
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
-        """Return raw data for all plans matching the glob prefix."""
+        """Return summary metadata for all smart search plans on disk."""
         plans_dir = self._plans_dir(backend_id)
         if not plans_dir.exists():
             return []
-        return [
-            read_json(path)
-            for path in sorted(plans_dir.glob(f"{self._glob_prefix}*.json"))
-        ]
+        results = []
+        for path in sorted(plans_dir.glob("ssplan_*.json")):
+            data = read_json(path)
+            config = data.get("config", {})
+            scan = data.get("scan_results", {})
+            results.append({
+                "plan_id": data["plan_id"],
+                "status": data["status"],
+                "n_diagnostic": config.get("n_diagnostic", "?"),
+                "max_rounds": config.get("max_rounds", "?"),
+                "n_axis_profiles": len(scan.get("axis_profiles", [])),
+                "variant_library_hash": data.get("variant_library_hash", ""),
+            })
+        return results
 
 

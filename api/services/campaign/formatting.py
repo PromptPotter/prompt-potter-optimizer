@@ -5,7 +5,7 @@ l1_optimizer (L1 generate) and layer_transitions (L2/L3).
 """
 
 from api.config.settings import DISPLAY_TRUNCATE
-from api.services.campaign.critique_stats import summarize_warning_inventory
+from api.services.campaign.critique import summarize_warning_inventory
 
 
 def format_failure_lines(

@@ -579,7 +579,7 @@ async def run_feedback_cycle_notebook(
         if round_result.results:
             try:
                 from collections import Counter
-                from api.services.campaign.critique_stats import _find_rank, _get_candidates
+                from api.services.campaign.critique import _find_rank, _get_candidates
 
                 _results = round_result.results
                 _total = len(_results)

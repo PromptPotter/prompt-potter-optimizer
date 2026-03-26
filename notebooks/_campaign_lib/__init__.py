@@ -12,10 +12,6 @@ from ._search import *     # noqa: F403
 from ._campaigns import *  # noqa: F403
 from ._optimize import *   # noqa: F403
 
-# Private names used by tests (not exported by *)
-from ._display import _step_tag, _fmt_query_result, _infer_terminated_step  # noqa: F401
-from ._stats import wilson_ci, proportion_test, min_detectable_effect  # noqa: F401
-
 # Public API -- every name the notebook imports.
 __all__ = [  # noqa: F405
     # Constants

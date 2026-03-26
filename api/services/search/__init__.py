@@ -3,51 +3,47 @@
 Re-exports entry-point functions so callers use one import path::
 
     from api.services.search import sensitivity_scan, adaptive_search, ...
-
-Submodules are imported lazily to avoid pulling in heavy dependencies
-(e.g. pandas) at package-import time.
 """
 
-_SUBMODULE_MAP: dict[str, str] = {
-    # smart_search
-    "ScanEvent": "api.services.search.smart_search",
-    "adaptive_search": "api.services.search.adaptive_search",
-    "build_diagnostic_set": "api.services.search.smart_search",
-    "filter_variant_library": "api.services.search.smart_search",
-    "load_filtered_variant_library": "api.services.search.smart_search",
-    "resume_or_build_diagnostic": "api.services.search.scan_results",
-    "select_scan_winner": "api.services.search.scan_results",
-    "sensitivity_scan": "api.services.search.sensitivity_scan",
-    # coverage
-    "assess_scan_coverage": "api.services.search.coverage",
-    "build_data_inventory": "api.services.search.coverage",
-    "build_prompt_result_index": "api.services.search.coverage",
-    "diagnose_scan_variants": "api.services.search.coverage",
-    "preview": "api.services.search.coverage",
-    # eval_dataset
-    "load_eval_dataset": "api.services.search.eval_dataset",
-    # context
-    "restructure_context": "api.services.search.context",
-    "restructure_context_cached": "api.services.search.context",
-    # scan_advisor
-    "advise_scan_config": "api.services.search.scan_advisor",
-    "build_llm_context": "api.services.search.scan_advisor",
-    "build_pipeline_overview": "api.services.search.scan_advisor",
-    "build_tunable_params": "api.services.search.scan_advisor",
-    "preview_advisor_prompt": "api.services.search.scan_advisor",
-    # scan_seeding
-    "prepare_scan_context": "api.services.search.scan_results",
-}
+# smart_search
+from api.services.search.smart_search import (
+    ScanEvent, build_diagnostic_set, filter_variant_library,
+    load_filtered_variant_library,
+)
+# scan_results
+from api.services.search.scan_results import (
+    prepare_scan_context, resume_or_build_diagnostic, select_scan_winner,
+)
+# NOTE: sensitivity_scan and adaptive_search are NOT re-exported here
+# because their function names collide with submodule names. Import them
+# from their submodules directly:
+#   from api.services.search.sensitivity_scan import sensitivity_scan
+#   from api.services.search.adaptive_search import adaptive_search
 
-__all__ = list(_SUBMODULE_MAP)
+# coverage
+from api.services.search.coverage import (
+    assess_scan_coverage, build_data_inventory, build_prompt_result_index,
+    diagnose_scan_variants, preview,
+)
+# eval_dataset
+from api.services.search.eval_dataset import load_eval_dataset
+# context
+from api.services.search.context import restructure_context, restructure_context_cached
+# scan_advisor
+from api.services.search.scan_advisor import (
+    advise_scan_config, build_llm_context, build_pipeline_overview,
+    build_tunable_params, preview_advisor_prompt,
+)
 
-
-def __getattr__(name: str):
-    if name in _SUBMODULE_MAP:
-        import importlib
-        mod = importlib.import_module(_SUBMODULE_MAP[name])
-        attr = getattr(mod, name)
-        # Cache on the module so __getattr__ isn't called again
-        globals()[name] = attr
-        return attr
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__ = [
+    "ScanEvent", "build_diagnostic_set",
+    "filter_variant_library", "load_filtered_variant_library",
+    "resume_or_build_diagnostic", "select_scan_winner",
+    "assess_scan_coverage", "build_data_inventory", "build_prompt_result_index",
+    "diagnose_scan_variants", "preview",
+    "load_eval_dataset",
+    "restructure_context", "restructure_context_cached",
+    "advise_scan_config", "build_llm_context", "build_pipeline_overview",
+    "build_tunable_params", "preview_advisor_prompt",
+    "prepare_scan_context",
+]
