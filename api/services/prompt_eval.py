@@ -1,7 +1,7 @@
 """
 Prompt evaluation service.
 
-Evaluates reranker prompts via the TermNorm backend's /matches endpoint,
+Evaluates prompts via the backend's /matches endpoint,
 with content-hash deduplication and alias-aware caching.
 """
 from __future__ import annotations
@@ -96,7 +96,7 @@ def build_dataset_run_data(
         "run_id": run_id,
         "name": name,
         "content_hash": content_hash,
-        "prompt_state_id": search_point.sp_hash(),
+        "prompt_fields_id": search_point.sp_hash(),
         "rendered_prompt_hash": hashlib.sha256(
             rendered_prompt.encode(),
         ).hexdigest()[:HASH_TRUNCATE],
@@ -143,7 +143,7 @@ def _extract_pipeline_data(
     if terminated_at is None:
         st = pd.get("step_timings")
         if st:
-            terminated_at = pipeline_schema.infer_terminating_step(st)
+            terminated_at = pipeline_schema.infer_terminating_node(st)
     if terminated_at is not None:
         pd["terminated_at"] = terminated_at
 
@@ -387,7 +387,7 @@ def _finalize_observability(
     scores: dict,
     model: str,
     temperature: float,
-    prompt_state_id: str,
+    prompt_fields_id: str,
     obs: "ObsLogger | None",
 ) -> None:
     """Log eval run to local obs store.
@@ -408,7 +408,7 @@ def _finalize_observability(
             hits=scores["hits"],
             model=model,
             temperature=temperature,
-            prompt_state_id=prompt_state_id,
+            prompt_fields_id=prompt_fields_id,
         )
     except Exception:
         logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)

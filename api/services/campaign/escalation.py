@@ -17,9 +17,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from api.models.phase_event import PhaseEvent
+from api.services.campaign.campaign_lifecycle import emit_phase
 
 if TYPE_CHECKING:
-    from api.services.campaign.models import CycleConfig, _LoopState
+    from api.services.campaign.models import CycleConfig, StopReason, _LoopState
     from api.services.obs.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
@@ -190,21 +191,6 @@ def build_escalation_checks(config: "CycleConfig") -> list[EscalationCheck]:
 # ---------------------------------------------------------------------------
 
 
-def _emit_phase(
-    on_phase: Callable[[PhaseEvent], None] | None,
-    phase: str,
-    event: str,
-    *,
-    round: int | None = None,
-    **data: Any,
-) -> None:
-    """Construct a PhaseEvent and call the callback if set."""
-    if on_phase is None:
-        return
-    pe = PhaseEvent(phase=phase, event=event, round=round, data=data)
-    on_phase(pe)
-
-
 def _maybe_emit_backend_warning(
     state: "_LoopState",
     config: "CycleConfig",
@@ -229,7 +215,7 @@ def _maybe_emit_backend_warning(
         for wt, n in e.get("warning_types", {}).items():
             wtypes[wt] = wtypes.get(wt, 0) + n
 
-    _emit_phase(
+    emit_phase(
         on_phase, "backend_warning", "notify", round=round_num,
         message=(
             f"Repeated pipeline degradation \u2014 {count} investigation "
@@ -280,7 +266,7 @@ async def _do_l2_transition(
     """Perform L2 refine_context transition. Updates state in-place."""
     from api.services.campaign import layer_transitions
     from api.services import llm_client as _llm_client
-    from api.services.obs.step_tracer import observed_step
+    from api.services.obs.node_tracer import observed_step
     from api.services.campaign.critique_stats import warning_summary
 
     current_pp = state.current_sp.pipeline_params
@@ -293,7 +279,7 @@ async def _do_l2_transition(
         }
         for r in state.rounds[-config.patience:]
     ]
-    _emit_phase(on_phase, "refine_context", "enter", round=round_num,
+    emit_phase(on_phase, "refine_context", "enter", round=round_num,
                 l2_round=state.l2_round,
                 stall_count=state.stall_count,
                 current_params=state.opt_sp.optimizer_params,
@@ -330,7 +316,7 @@ async def _do_l2_transition(
     # Build warning inventory one-liner for display
     _warned_count, _top_warning = warning_summary(state.opt_sp.warning_inventory)
 
-    _emit_phase(on_phase, "refine_context", "exit", round=round_num,
+    emit_phase(on_phase, "refine_context", "exit", round=round_num,
                 l2_round=state.l2_round,
                 param_changes_count=len(tr.opt_search_point.optimizer_params),
                 task_context_changed=tr.task_context is not None,
@@ -366,7 +352,7 @@ async def _do_l3_transition(
     """Perform L3 modify_plan transition. Updates state in-place."""
     from api.services.campaign import layer_transitions
     from api.services import llm_client as _llm_client
-    from api.services.obs.step_tracer import observed_step
+    from api.services.obs.node_tracer import observed_step
 
     current_pp = state.current_sp.pipeline_params
 
@@ -375,7 +361,7 @@ async def _do_l3_transition(
         "optimizer_params": state.opt_sp.optimizer_params,
         "accuracy_change": state.best_composite - state.best_composite_at_l3_entry,
     }]
-    _emit_phase(on_phase, "modify_plan", "enter", round=round_num,
+    emit_phase(on_phase, "modify_plan", "enter", round=round_num,
                 l3_round=state.l3_round,
                 l2_stall_count=state.l2_stall_count,
                 current_plan_preview=str(state.opt_sp.plan)[:120])
@@ -405,7 +391,7 @@ async def _do_l3_transition(
     state.l2_round = 0
     state.best_accuracy_at_l2_entry = state.best_accuracy
     state.best_composite_at_l2_entry = state.best_composite
-    _emit_phase(on_phase, "modify_plan", "exit", round=round_num,
+    emit_phase(on_phase, "modify_plan", "exit", round=round_num,
                 l3_round=state.l3_round,
                 new_plan_preview=str(tr.opt_search_point.plan)[:120],
                 changes_description=tr.opt_search_point.changes_description or "",
@@ -427,10 +413,10 @@ async def _escalate_l2(
     trace_id: str | None = None,
     from_degradation: bool = False,
     escalation_context: dict | None = None,
-) -> str | None:
+) -> "StopReason | None":
     """Handle L1→L2 escalation and optionally L2→L3.
 
-    Returns a stop_reason string if the cycle should stop, or None to continue.
+    Returns a StopReason if the cycle should stop, or None to continue.
     When *from_degradation* is True, L2/L3 patience exhaustion resets counters
     instead of stopping — the degradation investigation loop continues.
     """

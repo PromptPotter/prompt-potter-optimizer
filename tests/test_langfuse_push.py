@@ -250,7 +250,7 @@ async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
     result = await run_feedback_cycle(
         instruction="Test.", eval_data=eval_data, config=config,
         langfuse_session_id="test_session_123",
-        baseline_prompt_state=OptSearchPoint(instruction="Test.").model_dump(),
+        baseline_prompt_fields=OptSearchPoint(instruction="Test.").model_dump(),
         baseline_accuracy=0.0, baseline_results=[],
     )
 

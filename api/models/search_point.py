@@ -41,10 +41,6 @@ class SearchPoint(BaseModel):
         """Render the key output of this search point (e.g., the prompt string)."""
         raise NotImplementedError
 
-    def point_hash(self) -> str:
-        """Identity hash for this search point."""
-        raise NotImplementedError
-
 
 # ---------------------------------------------------------------------------
 # JobSearchPoint (target layer)
@@ -84,10 +80,6 @@ class JobSearchPoint(SearchPoint):
             if isinstance(node_config, dict) and "prompt" in node_config:
                 return node_config["prompt"]
         return ""
-
-    def point_hash(self) -> str:
-        """Alias for sp_hash()."""
-        return self.sp_hash()
 
     def sp_hash(self) -> str:
         """SearchPoint identity hash — eval_data independent."""

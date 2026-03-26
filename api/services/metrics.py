@@ -97,7 +97,7 @@ def derive_metrics(
 ) -> dict[str, float]:
     """Compute intermediate metrics from pipeline step node_roles.
 
-    Walks ``pipeline_schema.steps``; for each with a ``node_role`` in the
+    Walks ``pipeline_schema.nodes``; for each with a ``node_role`` in the
     registry, computes the corresponding metric scoped to queries where
     the step ran.
 
@@ -112,7 +112,7 @@ def derive_metrics(
 
     # Collect steps by role (namespace when >1 step shares a role)
     role_steps: dict[str, list] = {}
-    for step in pipeline_schema.steps:
+    for step in pipeline_schema.nodes:
         if step.node_role and step.node_role in ROLE_METRIC_REGISTRY:
             role_steps.setdefault(step.node_role, []).append(step)
 
@@ -161,7 +161,7 @@ def compute_composite_score(
 ) -> dict:
     """Compute composite score combining accuracy with intermediate metrics.
 
-    When ``pipeline_schema`` is provided and has steps with ``node_role``,
+    When ``pipeline_schema`` is provided and has nodes with ``node_role``,
     uses ``derive_metrics()`` for role-based metrics.
     Otherwise falls back to hardcoded ``token_recall``.
 
@@ -169,7 +169,7 @@ def compute_composite_score(
     and optionally token_recall or other role-derived metrics.
     """
     if pipeline_schema is not None:
-        has_roles = any(s.node_role for s in pipeline_schema.steps)
+        has_roles = any(s.node_role for s in pipeline_schema.nodes)
         if has_roles:
             return derive_metrics(
                 pipeline_schema, results, accuracy_weight=accuracy_weight,

@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from api.models.pipeline_schema import ObservationMapping, PipelineSchema, PipelineStep
+from api.models.pipeline_schema import ObservationMapping, PipelineSchema, PipelineNode
 from api.services.search.eval_dataset import (
     _extract_eval_from_traces,
     load_eval_dataset,
@@ -13,8 +13,8 @@ from api.services.search.eval_dataset import (
 _TEST_SCHEMA = PipelineSchema(
     name="test",
     required_step="entity_profile",
-    steps=[
-        PipelineStep(
+    nodes=[
+        PipelineNode(
             name="web_search",
             observation_name="web_search",
             observation_mappings=[
@@ -22,14 +22,14 @@ _TEST_SCHEMA = PipelineSchema(
                 ObservationMapping(pipeline_key="web_search_status", output_field="status"),
             ],
         ),
-        PipelineStep(
+        PipelineNode(
             name="entity_profiling",
             observation_name="entity_profiling",
             observation_mappings=[
                 ObservationMapping(pipeline_key="entity_profile", is_llm=True),
             ],
         ),
-        PipelineStep(
+        PipelineNode(
             name="token_matching",
             observation_name="token_matching",
             observation_mappings=[
@@ -38,7 +38,7 @@ _TEST_SCHEMA = PipelineSchema(
                 ),
             ],
         ),
-        PipelineStep(
+        PipelineNode(
             name="llm_ranking",
             observation_name="llm_ranking",
             observation_mappings=[
@@ -232,15 +232,15 @@ def test_custom_schema_obs_mapping():
     custom_schema = PipelineSchema(
         name="custom",
         required_step="entity_profile",
-        steps=[
-            PipelineStep(
+        nodes=[
+            PipelineNode(
                 name="entity_profiling",
                 observation_name="entity_profiling",
                 observation_mappings=[
                     ObservationMapping(pipeline_key="entity_profile", is_llm=True),
                 ],
             ),
-            PipelineStep(
+            PipelineNode(
                 name="custom_step",
                 observation_name="custom_step",
                 observation_mappings=[

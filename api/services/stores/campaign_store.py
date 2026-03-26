@@ -142,7 +142,7 @@ class CampaignStore:
             "trial_id": trial_id,
             "round": round_num,
             "label": trial.get("label", ""),
-            "prompt_state_id": trial.get("prompt_state_id", ""),
+            "prompt_fields_id": trial.get("prompt_fields_id", ""),
             "accuracy": trial.get("accuracy", 0.0),
             "hits": trial.get("hits", 0),
             "total": trial.get("total", 0),
@@ -226,7 +226,7 @@ class CampaignStore:
         campaign_id: str,
         *,
         round_num: int,
-        prompt_state: dict[str, Any],
+        prompt_fields: dict[str, Any],
         accuracy: float,
         hits: int,
         total: int,
@@ -245,9 +245,9 @@ class CampaignStore:
             "trial_id": trial_id,
             "round": round_num,
             "label": label,
-            "prompt_state": prompt_state,
-            "prompt_state_id": prompt_state.get("id", ""),
-            "parent_prompt_state_id": prompt_state.get("parent_id"),
+            "prompt_fields": prompt_fields,
+            "prompt_fields_id": prompt_fields.get("id", ""),
+            "parent_prompt_fields_id": prompt_fields.get("parent_id"),
             "accuracy": accuracy,
             "hits": hits,
             "total": total,
@@ -275,13 +275,13 @@ class CampaignStore:
         """Bulk-record campaign round dicts as trials.  Returns trial IDs."""
         trial_ids = []
         for rd in campaign_rounds:
-            ps = rd["prompt_state"]
+            ps = rd["prompt_fields"]
             ps_dict = ps.model_dump()
 
             trial = self.record_trial(
                 backend_id, campaign_id,
                 round_num=rd.get("round", 0),
-                prompt_state=ps_dict,
+                prompt_fields=ps_dict,
                 accuracy=rd.get("accuracy", 0.0),
                 hits=rd.get("hits", 0),
                 total=rd.get("total", 0),
@@ -346,9 +346,9 @@ class CampaignStore:
     def get_lineage(
         self, backend_id: str, campaign_id: str,
     ) -> list[dict[str, Any]]:
-        """Reconstruct the full PromptState lineage chain for a campaign.
+        """Reconstruct the full OptSearchPoint lineage chain for a campaign.
 
-        Returns a list of ``{trial_id, round, prompt_state_id, parent_id,
+        Returns a list of ``{trial_id, round, prompt_fields_id, parent_id,
         accuracy, label}`` ordered by round.
         """
         campaign = self.load(backend_id, campaign_id)
@@ -358,12 +358,12 @@ class CampaignStore:
         lineage = []
         for entry in campaign.get("trials", []):
             trial = self.load_trial(backend_id, campaign_id, entry["round"])
-            parent_id = trial.get("parent_prompt_state_id") if trial else None
+            parent_id = trial.get("parent_prompt_fields_id") if trial else None
             lineage.append({
                 "trial_id": entry["trial_id"],
                 "round": entry["round"],
-                "prompt_state_id": entry.get("prompt_state_id", ""),
-                "parent_prompt_state_id": parent_id,
+                "prompt_fields_id": entry.get("prompt_fields_id", ""),
+                "parent_prompt_fields_id": parent_id,
                 "accuracy": entry.get("accuracy", 0.0),
                 "label": entry.get("label", ""),
             })

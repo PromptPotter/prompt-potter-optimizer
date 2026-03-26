@@ -283,7 +283,7 @@ def _build_pipeline_prompt_section(
     """
     if not pipeline_schema:
         return ""
-    param_keys = pipeline_schema.step_param_keys()
+    param_keys = pipeline_schema.node_param_keys()
     if not param_keys:
         return ""
     lines = ["AVAILABLE PIPELINE PARAMETERS (in pipeline execution order):\n"]
@@ -353,7 +353,7 @@ def _build_escalation_prompt_section(
 
     # Surface the problem step's configurable axes
     if pipeline_schema:
-        all_keys = pipeline_schema.step_param_keys()
+        all_keys = pipeline_schema.node_param_keys()
         step_keys = all_keys.get(step_name, set())
         if step_keys:
             lines.append(

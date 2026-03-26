@@ -19,7 +19,6 @@ serialized via ``model_dump()`` at checkpoint time.
 """
 from __future__ import annotations
 
-import hashlib
 import re
 import uuid
 from datetime import datetime, timezone
@@ -160,11 +159,6 @@ class OptSearchPoint(SearchPoint):
             parts.append("\n".join(lines))
 
         return "\n\n".join(parts)
-
-    def point_hash(self) -> str:
-        """Identity hash for this optimizer search point."""
-        blob = self.model_dump_json()
-        return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
     # -- Rendering helpers -------------------------------------------------
 

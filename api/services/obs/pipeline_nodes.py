@@ -52,7 +52,7 @@ def _step_meta(
     meta: dict[str, Any] = {}
     if step_name in timings:
         meta["duration_s"] = timings[step_name]
-    param_keys = schema.step_param_keys().get(step_name, set())
+    param_keys = schema.node_param_keys().get(step_name, set())
     node_params = {k: step_params[k] for k in param_keys if k in step_params}
     if node_params:
         meta["pipeline_params"] = node_params

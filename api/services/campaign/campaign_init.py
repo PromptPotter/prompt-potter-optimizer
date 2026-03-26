@@ -118,7 +118,7 @@ async def init_services(
         pipeline_resp = await client.fetch_pipeline()
         pipeline_schema = parse_pipeline_response(pipeline_resp)
         logger.info("Pipeline schema loaded: %s v%s", pipeline_schema.name, pipeline_schema.version)
-        _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.steps)} steps)")
+        _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception as exc:
@@ -391,7 +391,7 @@ async def run_baseline_eval(
     )
 
     campaign_rounds = [{
-        "round": 0, "label": "baseline", "prompt_state": baseline,
+        "round": 0, "label": "baseline", "prompt_fields": baseline,
         "accuracy": scores["accuracy"], "hits": scores["hits"],
         "total": scores["total"], "results": baseline_results,
     }]
@@ -465,12 +465,12 @@ def save_campaign_winner(
     """Find best round, save to store + link to campaign. Returns save_data dict."""
     from datetime import datetime, timezone
 
-    winner = campaign_rounds[-1]["prompt_state"]
+    winner = campaign_rounds[-1]["prompt_fields"]
     winner_acc = campaign_rounds[-1]["accuracy"]
 
     for rd in campaign_rounds:
         if rd["accuracy"] > winner_acc:
-            winner = rd["prompt_state"]
+            winner = rd["prompt_fields"]
             winner_acc = rd["accuracy"]
 
     baseline_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else None
@@ -493,7 +493,7 @@ def save_campaign_winner(
         if full_id:
             try:
                 store.campaigns.update(backend_id, full_id, {
-                    "winner_prompt_state_id": winner.id,
+                    "winner_prompt_fields_id": winner.id,
                     "winner_accuracy": winner_acc,
                     "winner_filename": filename,
                 })

@@ -89,7 +89,7 @@ def test_build_dataset_run_data_includes_source():
         source="baseline",
     )
     assert data["source"] == "baseline"
-    assert data["prompt_state_id"] == sp.sp_hash()
+    assert data["prompt_fields_id"] == sp.sp_hash()
     assert data["model"] == "model"
     assert data["temperature"] == 0.0
 

@@ -318,7 +318,7 @@ def filter_variant_library(
     active_steps = set((pipeline_params or {}).get("steps", []))
 
     # Build set of param keys owned by active steps
-    step_param_map = schema.step_param_keys()
+    step_param_map = schema.node_param_keys()
     active_param_keys: set[str] = set()
     for step_name, param_keys in step_param_map.items():
         if step_name in active_steps:
@@ -333,7 +333,7 @@ def filter_variant_library(
     # Drop prompt_fields when no active step has a prompt template
     has_prompt_step = any(
         step.prompt_meta is not None
-        for step in schema.steps
+        for step in schema.nodes
         if step.name in active_steps
     )
     filtered_pf = variant_library.get("prompt_fields", {})

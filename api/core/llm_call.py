@@ -42,7 +42,7 @@ def get_node_config(node_name: str) -> dict:
 
     Returns ``PipelineNode.current_config`` for the named node.
     """
-    node = get_optimizer_schema().get_step(node_name)
+    node = get_optimizer_schema().get_node(node_name)
     if node is None:
         raise KeyError(f"Unknown optimizer node: {node_name}")
     return node.current_config

@@ -338,7 +338,7 @@ def make_dataset_run(
         "run_id": run_id,
         "name": name or run_id,
         "content_hash": content_hash or f"hash_{run_id}",
-        "prompt_state_id": f"ps_{run_id}",
+        "prompt_fields_id": f"ps_{run_id}",
         "model": "test-model",
         "temperature": 0,
         "item_count": total,
@@ -392,7 +392,7 @@ async def run_simple_cycle(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_fields=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )

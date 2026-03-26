@@ -8,7 +8,7 @@ import pytest
 from api.models.pipeline_schema import (
     IntermediateMetric,
     PipelineSchema,
-    PipelineStep,
+    PipelineNode,
     ROLE_METRIC_REGISTRY,
 )
 from api.services.metrics import compute_composite_score, derive_metrics
@@ -83,10 +83,10 @@ class TestComputeCompositeScore:
         assert scores["composite"] == 0.0
 
     def test_with_pipeline_schema(self):
-        schema = PipelineSchema(steps=[
-            PipelineStep(name="cache_lookup", node_role="cache"),
-            PipelineStep(name="token_matching", node_role="candidate_source"),
-            PipelineStep(name="llm_ranking", node_role="ranker"),
+        schema = PipelineSchema(nodes=[
+            PipelineNode(name="cache_lookup", node_role="cache"),
+            PipelineNode(name="token_matching", node_role="candidate_source"),
+            PipelineNode(name="llm_ranking", node_role="ranker"),
         ])
         results = _make_results(3, 5)
         scores = compute_composite_score(results, schema)
@@ -97,23 +97,23 @@ class TestComputeCompositeScore:
 
 class TestNodeRole:
     def test_pipeline_step_has_node_role(self):
-        step = PipelineStep(name="test", node_role="ranker")
+        step = PipelineNode(name="test", node_role="ranker")
         assert step.node_role == "ranker"
 
     def test_pipeline_step_default_empty(self):
-        step = PipelineStep(name="test")
+        step = PipelineNode(name="test")
         assert step.node_role == ""
 
     def test_schema_roles(self):
-        schema = PipelineSchema(steps=[
-            PipelineStep(name="cache_lookup", node_role="cache"),
-            PipelineStep(name="fuzzy_matching", node_role="candidate_source"),
-            PipelineStep(name="web_search", node_role="enricher"),
-            PipelineStep(name="entity_profiling", node_role="enricher"),
-            PipelineStep(name="token_matching", node_role="candidate_source"),
-            PipelineStep(name="llm_ranking", node_role="ranker"),
+        schema = PipelineSchema(nodes=[
+            PipelineNode(name="cache_lookup", node_role="cache"),
+            PipelineNode(name="fuzzy_matching", node_role="candidate_source"),
+            PipelineNode(name="web_search", node_role="enricher"),
+            PipelineNode(name="entity_profiling", node_role="enricher"),
+            PipelineNode(name="token_matching", node_role="candidate_source"),
+            PipelineNode(name="llm_ranking", node_role="ranker"),
         ])
-        roles = {s.name: s.node_role for s in schema.steps}
+        roles = {s.name: s.node_role for s in schema.nodes}
         assert roles["cache_lookup"] == "cache"
         assert roles["fuzzy_matching"] == "candidate_source"
         assert roles["web_search"] == "enricher"
@@ -144,9 +144,9 @@ class TestIntermediateMetric:
 
 class TestDeriveMetrics:
     def test_basic_derive(self):
-        schema = PipelineSchema(steps=[
-            PipelineStep(name="token_matching", node_role="candidate_source"),
-            PipelineStep(name="llm_ranking", node_role="ranker"),
+        schema = PipelineSchema(nodes=[
+            PipelineNode(name="token_matching", node_role="candidate_source"),
+            PipelineNode(name="llm_ranking", node_role="ranker"),
         ])
         results = _make_results(3, 5, gt_in_candidates=True)
         metrics = derive_metrics(schema, results)
@@ -156,8 +156,8 @@ class TestDeriveMetrics:
         assert metrics["source_recall"] == pytest.approx(1.0)
 
     def test_no_roles_returns_accuracy_only(self):
-        schema = PipelineSchema(steps=[
-            PipelineStep(name="step1"),
+        schema = PipelineSchema(nodes=[
+            PipelineNode(name="step1"),
         ])
         results = _make_results(2, 4)
         metrics = derive_metrics(schema, results)
@@ -165,9 +165,9 @@ class TestDeriveMetrics:
         assert "composite" in metrics
 
     def test_namespaced_when_multiple_same_role(self):
-        schema = PipelineSchema(steps=[
-            PipelineStep(name="fuzzy_matching", node_role="candidate_source"),
-            PipelineStep(name="token_matching", node_role="candidate_source"),
+        schema = PipelineSchema(nodes=[
+            PipelineNode(name="fuzzy_matching", node_role="candidate_source"),
+            PipelineNode(name="token_matching", node_role="candidate_source"),
         ])
         results = _make_results(3, 5)
         metrics = derive_metrics(schema, results)
@@ -176,16 +176,16 @@ class TestDeriveMetrics:
         assert has_ns
 
     def test_empty_results(self):
-        schema = PipelineSchema(steps=[
-            PipelineStep(name="llm_ranking", node_role="ranker"),
+        schema = PipelineSchema(nodes=[
+            PipelineNode(name="llm_ranking", node_role="ranker"),
         ])
         metrics = derive_metrics(schema, [])
         assert metrics["accuracy"] == 0.0
         assert metrics["composite"] == 0.0
 
     def test_cache_hit_rate(self):
-        schema = PipelineSchema(steps=[
-            PipelineStep(name="cache_lookup", node_role="cache"),
+        schema = PipelineSchema(nodes=[
+            PipelineNode(name="cache_lookup", node_role="cache"),
         ])
         results = _make_results(2, 4)
         metrics = derive_metrics(schema, results)
@@ -193,8 +193,8 @@ class TestDeriveMetrics:
         assert metrics["cache_hit_rate"] == pytest.approx(0.0)
 
     def test_custom_weights(self):
-        schema = PipelineSchema(steps=[
-            PipelineStep(name="token_matching", node_role="candidate_source"),
+        schema = PipelineSchema(nodes=[
+            PipelineNode(name="token_matching", node_role="candidate_source"),
         ])
         results = _make_results(3, 5, gt_in_candidates=True)
         metrics = derive_metrics(

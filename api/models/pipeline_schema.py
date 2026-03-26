@@ -1,16 +1,16 @@
 """
 PipelineSchema — backend-agnostic description of an LLM pipeline.
 
-Describes the steps, parameters, observation mappings, and metadata of
+Describes the nodes, parameters, observation mappings, and metadata of
 a backend pipeline so that PromptPotter services can work generically
 instead of hardcoding TermNorm-specific constants.
 
 Derivation methods:
-  step_param_keys()       → step name → param keys
+  node_param_keys()       → node name → param keys
   obs_extraction_map()    → observation name → extraction rules
-  langfuse_type_map()     → step name → Langfuse as_type
-  backend_steps()         → runtime filtering
-  frontend_steps()        → runtime filtering
+  langfuse_type_map()     → node name → Langfuse as_type
+  backend_nodes()         → runtime filtering
+  frontend_nodes()        → runtime filtering
 """
 
 from typing import Any
@@ -75,7 +75,7 @@ class StepPromptMeta(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Pipeline step
+# Pipeline node
 # ---------------------------------------------------------------------------
 
 
@@ -165,7 +165,7 @@ class PipelineSchema(BaseModel):
     name: str = ""
     version: str = ""
     description: str = ""
-    steps: list[PipelineNode] = Field(default_factory=list)
+    nodes: list[PipelineNode] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
     required_step: str | None = None
     template_variables: set[str] = Field(default_factory=set)
@@ -175,9 +175,9 @@ class PipelineSchema(BaseModel):
     # Lookup helpers
     # -------------------------------------------------------------------
 
-    def get_step(self, name: str) -> PipelineNode | None:
-        """Find a step by name, or None if not found."""
-        for step in self.steps:
+    def get_node(self, name: str) -> PipelineNode | None:
+        """Find a node by name, or None if not found."""
+        for step in self.nodes:
             if step.name == name:
                 return step
         return None
@@ -187,26 +187,26 @@ class PipelineSchema(BaseModel):
 
         Returns ``None`` if the key is not mapped by any step.
         """
-        for step in self.steps:
+        for step in self.nodes:
             if flat_key in step.override_map:
                 return (step.name, step.override_map[flat_key])
         return None
 
-    def step_for_flat_param(self, flat_key: str) -> str | None:
+    def node_for_flat_param(self, flat_key: str) -> str | None:
         """Return the step name that owns a flat param, or None."""
-        for step in self.steps:
+        for step in self.nodes:
             if flat_key in step.param_keys:
                 return step.name
         return None
 
-    def infer_terminating_step(self, step_timings: dict[str, float | None]) -> str | None:
+    def infer_terminating_node(self, step_timings: dict[str, float | None]) -> str | None:
         """Infer which pipeline step produced the final result.
 
         Walks steps in pipeline order. The last step with a non-None timing
         is the one that produced the result.
         """
         last_executed: str | None = None
-        for step in self.steps:
+        for step in self.nodes:
             if step_timings.get(step.name) is not None:
                 last_executed = step.name
         return last_executed
@@ -215,12 +215,12 @@ class PipelineSchema(BaseModel):
     # Derivation methods
     # -------------------------------------------------------------------
 
-    def step_param_keys(self) -> dict[str, set[str]]:
+    def node_param_keys(self) -> dict[str, set[str]]:
         """Map step name → parameter keys.
         """
         return {
             step.name: step.param_keys
-            for step in self.steps
+            for step in self.nodes
             if step.param_keys
         }
 
@@ -231,7 +231,7 @@ class PipelineSchema(BaseModel):
         """
         return {
             step.observation_name: step.observation_mappings
-            for step in self.steps
+            for step in self.nodes
             if step.observation_name and step.observation_mappings
         }
 
@@ -240,43 +240,36 @@ class PipelineSchema(BaseModel):
 
         Replaces the implicit mapping in ``pipeline_nodes.py``.
         """
-        return {step.name: step.langfuse_type for step in self.steps}
+        return {step.name: step.langfuse_type for step in self.nodes}
 
-    def backend_steps(self) -> list[PipelineNode]:
+    def backend_nodes(self) -> list[PipelineNode]:
         """Steps that run on the backend."""
-        return [s for s in self.steps if s.runtime == "backend"]
+        return [s for s in self.nodes if s.runtime == "backend"]
 
-    def frontend_steps(self) -> list[PipelineNode]:
+    def frontend_nodes(self) -> list[PipelineNode]:
         """Steps that run on the frontend."""
-        return [s for s in self.steps if s.runtime == "frontend"]
+        return [s for s in self.nodes if s.runtime == "frontend"]
 
 
 
 def is_result_step_compatible(
     result: dict,
-    target_steps: set[str] | list[str],
+    target_nodes: set[str] | list[str],
 ) -> bool:
     """Tag whether a historical result's prediction matches what target config would produce.
 
-    True when terminated_at is in target_steps (the result never reached
+    True when terminated_at is in target_nodes (the result never reached
     a step absent from the target config). False when terminated_at is
-    missing or outside target_steps. Used for annotation, not filtering.
+    missing or outside target_nodes. Used for annotation, not filtering.
     """
     pd = result.get("pipeline_data") or {}
     terminated_at = pd.get("terminated_at")
     if terminated_at is None:
         return False
-    target = target_steps if isinstance(target_steps, set) else set(target_steps)
+    target = target_nodes if isinstance(target_nodes, set) else set(target_nodes)
     return terminated_at in target
 
 
-
-
-# ---------------------------------------------------------------------------
-# Backward compatibility alias
-# ---------------------------------------------------------------------------
-
-PipelineStep = PipelineNode
 
 
 # ---------------------------------------------------------------------------
@@ -300,5 +293,5 @@ def load_pipeline_from_dict(data: dict) -> PipelineSchema:
     return PipelineSchema(
         name=data.get("name", ""),
         version=data.get("version", ""),
-        steps=nodes,
+        nodes=nodes,
     )

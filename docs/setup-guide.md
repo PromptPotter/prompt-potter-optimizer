@@ -60,6 +60,6 @@ cd docker && docker-compose up --build
 
 **"No llm_ranking prompt found"** — Your backend needs to expose prompts in the experiment data. Ensure TermNorm's prompt registry is initialized before syncing.
 
-**"No queries have entity_profile"** — Re-run replay with `entity_profiling` in the pipeline steps. The entity_profile is populated by the full pipeline.
+**"No queries have entity_profile"** — Re-run replay with `entity_profiling` in the pipeline nodes. The entity_profile is populated by the full pipeline.
 
 **LLM errors / timeouts** — Check your API key in `.env`. Increase timeout in `eval_llm["max_tokens"]`. Groq has rate limits — add delays if hitting 429s.

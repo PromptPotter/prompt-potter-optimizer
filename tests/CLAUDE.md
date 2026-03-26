@@ -21,7 +21,7 @@
 | `MockLangfuseLogger` | Records all Langfuse calls (traces, spans, scores, generations, dataset API) |
 | `MockCompletion` | Fake OpenAI-compatible completion response |
 | `rp_hash(text)` | Compute `rendered_prompt_hash` matching `build_dataset_run_data` |
-| `make_baseline_ps(**overrides)` | Build a baseline `PromptState` with sensible defaults |
+| `make_baseline_ps(**overrides)` | Build a baseline `OptSearchPoint` with sensible defaults |
 | `make_dataset_run(run_id, ...)` | Build a minimal `dataset_run` dict with configurable fields |
 | `build_eval_results(data, hits)` | Build `(results, scores)` tuple for eval mocking |
 | `make_http_error(status_code)` | Create a mock HTTP error exception with `status_code` attribute |

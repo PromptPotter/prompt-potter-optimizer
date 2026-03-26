@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from api.models.pipeline_schema import (
     ObservationMapping,
     PipelineSchema,
-    PipelineStep,
+    PipelineNode,
     StepOutputSchema,
     StepPromptMeta,
 )
@@ -124,7 +124,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     # Step order from pipelines.default, fallback to nodes dict order
     step_order = config.get("pipelines", {}).get("default", list(nodes.keys()))
 
-    steps: list[PipelineStep] = []
+    steps: list[PipelineNode] = []
     for name in step_order:
         node = nodes.get(name, {})
         if not node:
@@ -169,7 +169,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         if "prompt_meta" in rm:
             step_kwargs["prompt_meta"] = rm["prompt_meta"]
 
-        steps.append(PipelineStep(**step_kwargs))
+        steps.append(PipelineNode(**step_kwargs))
 
     logger.info(
         "Parsed pipeline '%s' with %d steps",
@@ -184,7 +184,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         template_variables=set(config.get("template_variables", [])),
         dataset_name=config.get("dataset_name", ""),
         available_models=config.get("available_models", []),
-        steps=steps,
+        nodes=steps,
     )
 
 
@@ -255,7 +255,7 @@ async def compute_pipeline_view(
     schema = parse_pipeline_response(raw) if raw is not None else PipelineSchema()
 
     # Computed steps (direct copy from backend pipeline for now)
-    computed_steps = [s.model_dump() for s in schema.steps]
+    computed_steps = [s.model_dump() for s in schema.nodes]
 
     return {
         "backend_pipeline": schema.model_dump(),

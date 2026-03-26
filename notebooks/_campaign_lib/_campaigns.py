@@ -217,7 +217,7 @@ def show_experiment_dashboard(
     campaign_config: dict | None = None,
     eval_data: list | None = None,
     pipeline_params: dict | None = None,
-    baseline_prompt_state: dict | None = None,
+    baseline_prompt_fields: dict | None = None,
     svc: dict | None = None,
 ) -> dict:
     """Unified experiment dashboard — overview or detail by experiment ID.
@@ -254,8 +254,8 @@ def show_experiment_dashboard(
                 campaign_config, pipeline_params=pipeline_params,
             )
             bl_rendered = ""
-            if baseline_prompt_state:
-                bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_state).render()
+            if baseline_prompt_fields:
+                bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
             active_id = cycle_config_identity(config, bl_rendered, eval_data)
         except Exception:
             logger.debug("Could not compute active campaign ID", exc_info=True)

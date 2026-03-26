@@ -152,7 +152,7 @@ class CloudObsBackend:
         accuracy: float,
         hits: int,
         total: int,
-        prompt_state_id: str,
+        prompt_fields_id: str,
     ) -> None:
         """Push eval-run span to cloud, nesting under active round if present."""
         if not self._active_trace_id:
@@ -164,7 +164,7 @@ class CloudObsBackend:
                 input={
                     "run_id": run_id,
                     "content_hash": content_hash,
-                    "prompt_state_id": prompt_state_id,
+                    "prompt_fields_id": prompt_fields_id,
                 },
                 output={
                     "accuracy": accuracy,
@@ -179,7 +179,7 @@ class CloudObsBackend:
 
     def on_prompt_version(
         self,
-        prompt_state_id: str,
+        prompt_fields_id: str,
         parent_id: str | None,
         family: str,
         version: str,
@@ -194,7 +194,7 @@ class CloudObsBackend:
                 trace_id=cloud_trace_id,
                 name="prompt_version",
                 input={
-                    "prompt_state_id": prompt_state_id,
+                    "prompt_fields_id": prompt_fields_id,
                     "parent_id": parent_id,
                 },
                 output={"family": family, "version": version},
@@ -205,7 +205,7 @@ class CloudObsBackend:
         except Exception:
             logger.debug("Cloud Langfuse prompt_version failed", exc_info=True)
 
-    def on_node_step_start(
+    def on_node_start(
         self,
         trace_id: str,
         node_id: str,
@@ -230,9 +230,9 @@ class CloudObsBackend:
             if obs_id:
                 self._active_step_obs_ids[node_id] = obs_id
         except Exception:
-            logger.debug("Cloud Langfuse node_step_start failed", exc_info=True)
+            logger.debug("Cloud Langfuse node_start failed", exc_info=True)
 
-    def on_node_step_end(
+    def on_node_end(
         self,
         node_id: str,
         output_data: dict | None = None,
@@ -253,7 +253,7 @@ class CloudObsBackend:
                 obs_id, output=output_data, metadata=meta or None,
             )
         except Exception:
-            logger.debug("Cloud Langfuse node_step_end failed", exc_info=True)
+            logger.debug("Cloud Langfuse node_end failed", exc_info=True)
 
     def on_campaign_end(
         self,

@@ -89,7 +89,7 @@ def build_pipeline_params(
         return params
 
     if schema is not None:
-        step_param_map = schema.step_param_keys()
+        step_param_map = schema.node_param_keys()
         active_param_names: set = set()
         for name in step_names:
             active_param_names |= step_param_map.get(name, set())

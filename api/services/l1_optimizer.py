@@ -144,7 +144,7 @@ def _select_round_winner(
     # Find best candidate
     best_composite = current_composite
     best_acc = current_acc
-    best_ps = current_best["prompt_state"]
+    best_ps = current_best["prompt_fields"]
     best_results = current_best["results"]
     best_label = current_best["label"]
     winner_idx: int | None = None
@@ -182,7 +182,7 @@ def _select_round_winner(
 
     return {
         "label": best_label,
-        "prompt_state": best_ps,
+        "prompt_fields": best_ps,
         "accuracy": best_acc,
         "composite": best_composite,
         "hits": sum(1 for r in best_results if r["hit"]),
@@ -212,7 +212,7 @@ async def l1_evaluate(
     """Evaluate candidates and select the round winner.
 
     Returns:
-        Dict with keys: winner, winner_prompt_state, winner_accuracy,
+        Dict with keys: winner, winner_prompt_fields, winner_accuracy,
         improved, next_action, candidate_scores, winner_results.
     """
     from api.services.prompt_eval import evaluate_prompt_cached
@@ -288,8 +288,8 @@ async def l1_evaluate(
             break
 
     cb = dict(current_best)
-    if isinstance(cb.get("prompt_state"), dict):
-        cb["prompt_state"] = OptSearchPoint.from_prompt_fields(cb["prompt_state"])
+    if isinstance(cb.get("prompt_fields"), dict):
+        cb["prompt_fields"] = OptSearchPoint.from_prompt_fields(cb["prompt_fields"])
 
     evaluated_candidates = [
         c for c in osp_candidates
@@ -310,8 +310,8 @@ async def l1_evaluate(
     else:
         winner_pp = _sp_pipeline_params
 
-    winner_osp = winner_entry["prompt_state"]
-    # Serialize winner as prompt field dict (compatible with CycleRoundResult.prompt_state)
+    winner_osp = winner_entry["prompt_fields"]
+    # Serialize winner as prompt field dict (compatible with CycleRoundResult.prompt_fields)
     if isinstance(winner_osp, OptSearchPoint):
         winner_dict = winner_osp.prompt_field_dict()
         winner_dict["id"] = winner_osp.id
@@ -331,7 +331,7 @@ async def l1_evaluate(
             "improved": winner_entry["improved"],
             "candidates_evaluated": winner_entry["candidates_evaluated"],
         },
-        "winner_prompt_state": winner_dict,
+        "winner_prompt_fields": winner_dict,
         "winner_pipeline_params": winner_pp,
         "winner_accuracy": winner_entry["accuracy"],
         "winner_composite": winner_entry.get("composite", winner_entry["accuracy"]),

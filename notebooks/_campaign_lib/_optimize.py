@@ -45,7 +45,7 @@ def _extract_campaign_baseline(campaign_rounds: list) -> dict:
     """Extract baseline prompt state, accuracy, and results from campaign rounds.
 
     Searches reversed rounds for the last with actual eval ``results``,
-    then overrides the prompt_state with the tip (most recent round).
+    then overrides the prompt_fields with the tip (most recent round).
 
     Returns dict with keys: baseline_ps, baseline_acc, baseline_results, instruction.
     """
@@ -62,9 +62,9 @@ def _extract_campaign_baseline(campaign_rounds: list) -> dict:
                 break
         baseline_acc = last.get("accuracy", 0.0)
         baseline_results = last.get("results", [])
-        # Use prompt_state from the tip (most recent round) — may differ from
+        # Use prompt_fields from the tip (most recent round) — may differ from
         # the round with results (e.g. search winner with derived prompt)
-        tip_ps = campaign_rounds[-1]["prompt_state"]
+        tip_ps = campaign_rounds[-1]["prompt_fields"]
         baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
         instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else ""
     return {
@@ -497,8 +497,8 @@ async def run_feedback_cycle_notebook(
         _ds.best_in_round = None
 
         round_entry = round_result.model_dump()
-        ps_raw = round_entry.get("prompt_state", {})
-        round_entry["prompt_state"] = (
+        ps_raw = round_entry.get("prompt_fields", {})
+        round_entry["prompt_fields"] = (
             OptSearchPoint.from_prompt_fields(ps_raw) if isinstance(ps_raw, dict) else ps_raw
         )
         round_entry["round"] = len(campaign_rounds)
@@ -657,7 +657,7 @@ async def run_feedback_cycle_notebook(
         instruction=instruction,
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=baseline_ps,
+        baseline_prompt_fields=baseline_ps,
         baseline_accuracy=baseline_acc,
         baseline_results=baseline_results,
         on_round_complete=_on_round,

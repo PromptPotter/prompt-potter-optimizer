@@ -151,7 +151,7 @@ class DatasetRunStore:
             "run_id": data["run_id"],
             "name": data.get("name", run_id),
             "experiment_id": data.get("experiment_id", ""),
-            "prompt_state_id": data["prompt_state_id"],
+            "prompt_fields_id": data["prompt_fields_id"],
             "model": data["model"],
             "temperature": data["temperature"],
             "item_count": data["item_count"],

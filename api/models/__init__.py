@@ -2,7 +2,6 @@ from .pipeline_schema import (
     ObservationMapping as ObservationMapping,
     PipelineNode as PipelineNode,
     PipelineSchema as PipelineSchema,
-    PipelineStep as PipelineStep,  # backward compat alias → PipelineNode
 )
 from .opt_search_point import (
     FewShotExample as FewShotExample,

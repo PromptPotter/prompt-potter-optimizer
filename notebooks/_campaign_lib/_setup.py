@@ -184,7 +184,7 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
     overrides = campaign_config.get("pipeline_overrides")
 
     if pipeline_schema:
-        all_steps = [s.name for s in pipeline_schema.steps]
+        all_steps = [s.name for s in pipeline_schema.nodes]
     else:
         pipeline_config = extract_pipeline_config(svc["exp_data"])
         all_steps = [s["name"] for s in pipeline_config["steps"]]

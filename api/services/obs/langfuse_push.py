@@ -234,7 +234,7 @@ def push_run(
         trace_metadata: dict[str, Any] = {
             "run_id": run_id,
             "llm_provider": pipeline.get("llm_provider", detail.get("model", "")),
-            "prompt_state_id": detail.get("prompt_state_id", ""),
+            "prompt_fields_id": detail.get("prompt_fields_id", ""),
         }
         pp = pipeline.get("pipeline_params")
         if pp:

@@ -554,7 +554,7 @@ def show_campaign_summary(campaign_rounds: list) -> None:
             "hit@1": rd["hits"],
             "total": rd["total"],
             "accuracy": f"{rd['accuracy']:.1%}",
-            "prompt_id": rd["prompt_state"].id[:12],
+            "prompt_id": rd["prompt_fields"].id[:12],
         })
 
     print(f"CAMPAIGN SUMMARY ({len(campaign_rounds)} rounds)")
@@ -612,7 +612,7 @@ def show_lineage_chain(campaign_rounds: list) -> None:
     print("LINEAGE CHAIN")
     print("=" * 50)
     for i, rd in enumerate(campaign_rounds):
-        ps = rd["prompt_state"]
+        ps = rd["prompt_fields"]
         parent = ps.parent_id[:12] if ps.parent_id else "root"
         arrow = "  " if i == 0 else "  -> "
         print(

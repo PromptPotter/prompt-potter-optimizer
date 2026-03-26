@@ -21,7 +21,7 @@ Usage::
     obs.log_dataset_run(run_id, content_hash, accuracy, ...)
     obs.log_campaign_start(campaign_id, config, baseline_accuracy)
     obs.log_round_start(campaign_id, round_num)
-    obs.log_prompt_version(prompt_state_id, rendered_prompt, layer1_fields)
+    obs.log_prompt_version(prompt_fields_id, rendered_prompt, layer1_fields)
 """
 
 import hashlib
@@ -376,7 +376,7 @@ class ObsLogger:
         hits: int,
         model: str,
         temperature: float,
-        prompt_state_id: str = "",
+        prompt_fields_id: str = "",
         dataset_name: str | None = None,
         dataset_item_map: dict[str, str] | None = None,
     ) -> Path | None:
@@ -394,7 +394,7 @@ class ObsLogger:
                     "content_hash": content_hash,
                     "model": model,
                     "temperature": temperature,
-                    "prompt_state_id": prompt_state_id,
+                    "prompt_fields_id": prompt_fields_id,
                 },
                 output_data={
                     "accuracy": accuracy,
@@ -414,12 +414,12 @@ class ObsLogger:
                 "hits": hits,
                 "total": total,
                 "model": model,
-                "prompt_state_id": prompt_state_id,
+                "prompt_fields_id": prompt_fields_id,
             })
 
             if self._cloud:
                 self._cloud.on_dataset_run(
-                    run_id, content_hash, accuracy, hits, total, prompt_state_id,
+                    run_id, content_hash, accuracy, hits, total, prompt_fields_id,
                 )
 
             trace_path = (
@@ -487,7 +487,7 @@ class ObsLogger:
         """Return file trace ID for a campaign, or None."""
         return self._campaign_traces.get(campaign_id)
 
-    def log_node_step_start(
+    def log_node_start(
         self,
         trace_id: str,
         node_id: str,
@@ -499,7 +499,7 @@ class ObsLogger:
         """Open an observation for a node step. Returns obs_id for closing later.
 
         Reuses ``_write_observation()`` for file, ``_log_event()`` for events,
-        and ``CloudObsBackend.on_node_step_start()`` for Langfuse cloud.
+        and ``CloudObsBackend.on_node_start()`` for Langfuse cloud.
         """
         if not self._enabled:
             return None
@@ -513,7 +513,7 @@ class ObsLogger:
             )
 
             self._log_event({
-                "event": "node_step_start",
+                "event": "node_start",
                 "trace_id": trace_id,
                 "obs_id": obs_id,
                 "node_id": node_id,
@@ -521,16 +521,16 @@ class ObsLogger:
             })
 
             if self._cloud:
-                self._cloud.on_node_step_start(
+                self._cloud.on_node_start(
                     trace_id, node_id, node_type, obs_type, input_data, metadata,
                 )
 
             return obs_id
         except Exception:
-            logger.warning("ObsLogger.log_node_step_start failed", exc_info=True)
+            logger.warning("ObsLogger.log_node_start failed", exc_info=True)
             return None
 
-    def log_node_step_end(
+    def log_node_end(
         self,
         obs_id: str,
         trace_id: str,
@@ -542,7 +542,7 @@ class ObsLogger:
         """Close a node step observation with output and metrics.
 
         Updates the file observation JSON in place, appends to events.jsonl,
-        and delegates to ``CloudObsBackend.on_node_step_end()``.
+        and delegates to ``CloudObsBackend.on_node_end()``.
         """
         if not self._enabled:
             return
@@ -561,7 +561,7 @@ class ObsLogger:
                 write_json(obs_path, obs_data)
 
             self._log_event({
-                "event": "node_step_end",
+                "event": "node_end",
                 "trace_id": trace_id,
                 "obs_id": obs_id,
                 "node_id": node_id,
@@ -569,11 +569,11 @@ class ObsLogger:
             })
 
             if self._cloud:
-                self._cloud.on_node_step_end(
+                self._cloud.on_node_end(
                     node_id, output_data, metrics, error,
                 )
         except Exception:
-            logger.warning("ObsLogger.log_node_step_end failed", exc_info=True)
+            logger.warning("ObsLogger.log_node_end failed", exc_info=True)
 
     def log_round_start(
         self,
@@ -610,7 +610,7 @@ class ObsLogger:
         total: int,
         improved: bool,
         next_action: str,
-        winner_prompt_state_id: str,
+        winner_prompt_fields_id: str,
         candidate_scores: list[dict],
         model: str = "",
         temperature: float = 0.0,
@@ -641,7 +641,7 @@ class ObsLogger:
                         "total": total,
                         "improved": improved,
                         "next_action": next_action,
-                        "winner_prompt_state_id": winner_prompt_state_id,
+                        "winner_prompt_fields_id": winner_prompt_fields_id,
                     },
                     metadata={
                         "candidate_scores": candidate_scores,
@@ -673,7 +673,7 @@ class ObsLogger:
                 tags={
                     "improved": str(improved).lower(),
                     "next_action": next_action,
-                    "winner_prompt_state_id": winner_prompt_state_id,
+                    "winner_prompt_fields_id": winner_prompt_fields_id,
                 },
             )
 
@@ -687,7 +687,7 @@ class ObsLogger:
                 "total": total,
                 "improved": improved,
                 "next_action": next_action,
-                "winner_prompt_state_id": winner_prompt_state_id,
+                "winner_prompt_fields_id": winner_prompt_fields_id,
                 **({"optimizer_templates": optimizer_templates}
                    if optimizer_templates else {}),
             })
@@ -707,7 +707,7 @@ class ObsLogger:
 
     def log_prompt_version(
         self,
-        prompt_state_id: str,
+        prompt_fields_id: str,
         rendered_prompt: str,
         layer1_fields: dict,
         parent_id: str | None = None,
@@ -715,13 +715,13 @@ class ObsLogger:
         """Write prompt.txt + metadata.json + events.jsonl line.
 
         Adapted from TermNorm ``PromptRegistry.register_prompt()``.
-        Family is always ``ranking_prompt``. Version is the PromptState ID prefix.
+        Family is always ``ranking_prompt``. Version is the OptSearchPoint ID prefix.
         """
         if not self._enabled:
             return None
         try:
             family = "ranking_prompt"
-            version = prompt_state_id[:8] if prompt_state_id else "unknown"
+            version = prompt_fields_id[:8] if prompt_fields_id else "unknown"
             prompt_dir = self.obs_root / "prompts" / family / version
 
             write_text(prompt_dir / "prompt.txt", rendered_prompt)
@@ -729,7 +729,7 @@ class ObsLogger:
             metadata = {
                 "family": family,
                 "version": version,
-                "prompt_state_id": prompt_state_id,
+                "prompt_fields_id": prompt_fields_id,
                 "parent_id": parent_id,
                 "layer1_fields": layer1_fields,
                 "created_at": _utcnow_iso(),
@@ -738,7 +738,7 @@ class ObsLogger:
 
             self._log_event({
                 "event": "prompt_version",
-                "prompt_state_id": prompt_state_id,
+                "prompt_fields_id": prompt_fields_id,
                 "family": family,
                 "version": version,
                 "parent_id": parent_id,
@@ -746,7 +746,7 @@ class ObsLogger:
 
             if self._cloud:
                 self._cloud.on_prompt_version(
-                    prompt_state_id, parent_id, family, version, layer1_fields,
+                    prompt_fields_id, parent_id, family, version, layer1_fields,
                 )
 
             return prompt_dir / "prompt.txt"

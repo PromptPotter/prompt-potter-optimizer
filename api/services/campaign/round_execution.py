@@ -21,14 +21,15 @@ from api.services.campaign.critique_stats import (
     CritiqueContext, update_query_tracker,
 )
 from api.services.campaign.campaign_lifecycle import (
-    graceful, _emit_phase, _candidate_summaries,
+    graceful, emit_phase, _candidate_summaries,
 )
-from api.services.obs.step_tracer import observed_step
+from api.services.obs.node_tracer import observed_step
 
 # Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client
 
 if TYPE_CHECKING:
+    from api.services.campaign.escalation import EscalationCheck
     from api.services.obs.observability_logger import ObsLogger
     from api.services.stores.campaign_store import CampaignStore
 
@@ -59,7 +60,7 @@ async def _generate_or_load_candidates(
     _creativity = creativity if creativity is not None else config.creativity
     prompt_preview = state.opt_sp.render()[:120]
 
-    _emit_phase(on_phase, "l1_generate", "enter", round=round_num,
+    emit_phase(on_phase, "l1_generate", "enter", round=round_num,
                 current_accuracy=state.current_accuracy,
                 prompt_preview=prompt_preview,
                 n_variants=_n_variants,
@@ -79,7 +80,7 @@ async def _generate_or_load_candidates(
                 "Loaded %d persisted candidates for round %d",
                 len(persisted), round_num,
             )
-            _emit_phase(on_phase, "l1_generate", "exit", round=round_num,
+            emit_phase(on_phase, "l1_generate", "exit", round=round_num,
                         n_candidates=len(persisted),
                         n_eval_queries=n_eval_queries,
                         loaded_from_disk=True,
@@ -108,7 +109,7 @@ async def _generate_or_load_candidates(
             config.backend_id, cycle_id, round_num, candidates,
         )
 
-    _emit_phase(on_phase, "l1_generate", "exit", round=round_num,
+    emit_phase(on_phase, "l1_generate", "exit", round=round_num,
                 n_candidates=len(candidates),
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=False,
@@ -129,10 +130,10 @@ async def _evaluate_candidates(
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: "ObsLogger | None" = None,
     trace_id: str | None = None,
-    escalation_checks: list | None = None,
+    escalation_checks: "list[EscalationCheck] | None" = None,
 ) -> dict:
     """Evaluate candidates and run critique analysis."""
-    _emit_phase(on_phase, "l1_evaluate", "enter", round=round_num,
+    emit_phase(on_phase, "l1_evaluate", "enter", round=round_num,
                 n_candidates=len(candidates),
                 n_queries=len(round_eval_data),
                 current_best_accuracy=state.current_accuracy,
@@ -143,7 +144,7 @@ async def _evaluate_candidates(
     current_best = {
         "accuracy": state.current_accuracy,
         "composite": state.current_composite,
-        "prompt_state": state.opt_sp.prompt_field_dict(),
+        "prompt_fields": state.opt_sp.prompt_field_dict(),
         "results": state.current_results,
         "label": baseline_label,
     }
@@ -203,7 +204,7 @@ async def _evaluate_candidates(
         eval_out["critique"] = critique_result
         eval_out["thinking_styles"] = thinking_styles
 
-    _emit_phase(on_phase, "l1_evaluate", "exit", round=round_num,
+    emit_phase(on_phase, "l1_evaluate", "exit", round=round_num,
                 winner_label=eval_out["winner"].get("label", ""),
                 winner_accuracy=eval_out["winner_accuracy"],
                 winner_composite=eval_out.get("winner_composite",
@@ -233,7 +234,7 @@ def _log_round_obs(
             total=eval_out["winner"].get("total", 0),
             improved=eval_out["improved"],
             next_action=eval_out["next_action"],
-            winner_prompt_state_id=eval_out["winner_prompt_state"].get("id", ""),
+            winner_prompt_fields_id=eval_out["winner_prompt_fields"].get("id", ""),
             candidate_scores=eval_out["candidate_scores"],
             model=config.model or "",
             temperature=config.temperature,
@@ -245,10 +246,10 @@ def _log_round_obs(
         )
 
     with graceful("ObsLogger.log_prompt_version failed"):
-        winner_fields = eval_out["winner_prompt_state"]
+        winner_fields = eval_out["winner_prompt_fields"]
         winner_osp = OptSearchPoint.from_prompt_fields(winner_fields)
         obs.log_prompt_version(
-            prompt_state_id=winner_osp.id,
+            prompt_fields_id=winner_osp.id,
             rendered_prompt=winner_osp.render(),
             layer1_fields={
                 f: getattr(winner_osp, f)
@@ -269,7 +270,7 @@ async def _execute_round(
     on_candidate_eval: Callable[[int, int, dict], None] | None,
     on_query_eval: Callable[[int, int, int, int, dict], None] | None,
     on_phase: Callable[[PhaseEvent], None] | None = None,
-    escalation_checks: list | None = None,
+    escalation_checks: "list[EscalationCheck] | None" = None,
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     obs = state.eval_ctx.obs if state.eval_ctx else None
@@ -306,17 +307,17 @@ async def _execute_round(
 
     round_result = CycleRoundResult(
         round=round_num,
-        label=eval_out["winner"].get("label", f"round_{round_num}"),
+        label=eval_out["winner"]["label"],
         accuracy=eval_out["winner_accuracy"],
-        composite=eval_out.get("winner_composite", eval_out["winner_accuracy"]),
-        hits=eval_out["winner"].get("hits", 0),
-        total=eval_out["winner"].get("total", 0),
+        composite=eval_out["winner_composite"],
+        hits=eval_out["winner"]["hits"],
+        total=eval_out["winner"]["total"],
         improved=eval_out["improved"],
         next_action=eval_out["next_action"],
-        prompt_state=eval_out["winner_prompt_state"],
+        prompt_fields=eval_out["winner_prompt_fields"],
         pipeline_params=eval_out.get("winner_pipeline_params"),
         results=eval_out["winner_results"],
-        candidates_evaluated=eval_out["winner"].get("candidates_evaluated", 0),
+        candidates_evaluated=eval_out["winner"]["candidates_evaluated"],
         candidate_scores=eval_out["candidate_scores"],
         degraded_queries=eval_out.get("degraded_queries", 0),
         escalation_signal=eval_out.get("escalation_signal"),
@@ -345,7 +346,7 @@ def _update_round_state(
     """Apply round result to loop state (shared by escalation + normal paths)."""
     state.rounds.append(rr)
     # Sync winner prompt fields to OptSearchPoint (source of truth)
-    winner_fields = rr.prompt_state  # dict of prompt fields
+    winner_fields = rr.prompt_fields  # dict of prompt fields
     for f in PROMPT_STRING_FIELDS:
         setattr(state.opt_sp, f, winner_fields.get(f, ""))
     # Rebuild JobSearchPoint from opt_sp

@@ -160,7 +160,7 @@ class CycleRoundResult(BaseModel):
     total: int
     improved: bool
     next_action: str
-    prompt_state: dict
+    prompt_fields: dict
     pipeline_params: dict | None = None
     results: list[dict] = Field(default_factory=list)
     candidates_evaluated: int
@@ -177,7 +177,7 @@ class CycleResult(BaseModel):
     best_accuracy: float
     best_round: int
     baseline_accuracy: float
-    winner_prompt_state: dict
+    winner_prompt_fields: dict
     winner_pipeline_params: dict | None = None
     stop_reason: str
     started_at: str

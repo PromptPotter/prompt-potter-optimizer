@@ -182,7 +182,7 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_fields=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -243,7 +243,7 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_fields=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -302,7 +302,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
         instruction="",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=baseline_ps.model_dump(),
+        baseline_prompt_fields=baseline_ps.model_dump(),
         baseline_accuracy=0.0,
     )
 
@@ -356,7 +356,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
         instruction="",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=baseline_ps.model_dump(),
+        baseline_prompt_fields=baseline_ps.model_dump(),
         baseline_accuracy=0.0,
     )
 

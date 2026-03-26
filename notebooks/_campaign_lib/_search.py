@@ -755,7 +755,7 @@ async def scan_advisor(
     print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
     print("-" * 50)
     print(f"  Pipeline: {pipeline_schema.name} ({pipeline_schema.version})")
-    print(f"  Steps: {[s.name for s in pipeline_schema.steps]}")
+    print(f"  Nodes: {[s.name for s in pipeline_schema.nodes]}")
     if user_excluded:
         print(f"  Excluded: {user_excluded}")
     if task_description:
@@ -815,8 +815,8 @@ def _resolve_schema_axes(
             and vals
             and isinstance(vals[0], list)
         ):
-            step_name = pipeline_schema.step_for_flat_param(axis_name)
-            step = pipeline_schema.get_step(step_name) if step_name else None
+            step_name = pipeline_schema.node_for_flat_param(axis_name)
+            step = pipeline_schema.get_node(step_name) if step_name else None
             if step and step.output_schema:
                 try:
                     variants = [parse_mutation_tuples(sv) for sv in vals]
@@ -1389,7 +1389,7 @@ def seed_campaign_from_scan(
     campaign_rounds.append({
         "round": "search",
         "label": f"smart_search ({search_opt.changes_description or search_opt.id[:12]})",
-        "prompt_state": search_opt,
+        "prompt_fields": search_opt,
         "accuracy": bl.get("accuracy", scan_baseline_acc),
         "hits": bl.get("hits", 0),
         "total": bl.get("total", 0),

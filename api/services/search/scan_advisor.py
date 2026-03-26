@@ -13,7 +13,7 @@ import json
 import logging
 from typing import Any
 
-from api.models.pipeline_schema import PipelineSchema, PipelineStep, StepOutputSchema
+from api.models.pipeline_schema import PipelineSchema, PipelineNode, StepOutputSchema
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +25,11 @@ STRUCTURAL_OVERRIDES = {"prompt", "output_schema", "model"}
 def _active_steps(
     schema: PipelineSchema,
     excluded_steps: set[str] | None = None,
-) -> list[PipelineStep]:
+) -> list[PipelineNode]:
     """Return pipeline steps that are not excluded."""
     if not excluded_steps:
-        return list(schema.steps)
-    return [s for s in schema.steps if s.name not in excluded_steps]
+        return list(schema.nodes)
+    return [s for s in schema.nodes if s.name not in excluded_steps]
 
 
 def build_pipeline_overview(
@@ -342,7 +342,7 @@ def _validate_advisory(
     warnings: list[str] = []
 
     # Build step-to-params mapping for excluded-step checks
-    step_param_keys = schema.step_param_keys()
+    step_param_keys = schema.node_param_keys()
     excluded_param_keys: set[str] = set()
     if excluded_steps:
         for step_name in excluded_steps:
@@ -350,7 +350,7 @@ def _validate_advisory(
 
     # Collect all pipeline param keys
     all_param_keys: set[str] = set()
-    for step in schema.steps:
+    for step in schema.nodes:
         all_param_keys.update(step.param_keys)
 
     prompt_fields = set(_extract_prompt_field_axes(variant_library))
@@ -418,7 +418,7 @@ def _excluded_from_schema(
     """Derive excluded steps by diffing schema steps vs pipeline_params["steps"]."""
     if not pipeline_params or "steps" not in pipeline_params:
         return None
-    all_step_names = {s.name for s in schema.steps}
+    all_step_names = {s.name for s in schema.nodes}
     active = set(pipeline_params["steps"])
     excluded = all_step_names - active
     return excluded or None

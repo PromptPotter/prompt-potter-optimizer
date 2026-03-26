@@ -1,6 +1,6 @@
-"""Lightweight step-level timing + observability for optimizer pipeline steps.
+"""Lightweight node-level timing + observability for optimizer pipeline nodes.
 
-Async context manager wrapping ``ObsLogger.log_node_step_start/end``.
+Async context manager wrapping ``ObsLogger.log_node_start/end``.
 
 Usage::
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StepTrace:
-    """Mutable bag for step output and metrics, yielded by ``observed_step``."""
+    """Mutable bag for node output and metrics, yielded by ``observed_step``."""
 
     output: dict[str, Any] = field(default_factory=dict)
     duration_ms: float = 0.0
@@ -40,10 +40,10 @@ async def observed_step(
     trace_id: str | None = None,
     obs_type: str = "generation",
 ):
-    """Async context manager for step-level timing + observability.
+    """Async context manager for node-level timing + observability.
 
     Captures wall-clock duration and optionally writes Langfuse-compatible
-    observations via ``obs.log_node_step_start/end``.  Non-fatal: observability
+    observations via ``obs.log_node_start/end``.  Non-fatal: observability
     failures are logged as warnings and never crash the caller.
 
     Yields:
@@ -54,7 +54,7 @@ async def observed_step(
 
     if obs and trace_id:
         try:
-            obs_id = obs.log_node_step_start(
+            obs_id = obs.log_node_start(
                 trace_id=trace_id,
                 node_id=step_id,
                 node_type=step_type,
@@ -74,7 +74,7 @@ async def observed_step(
         step.duration_ms = (time.perf_counter() - t0) * 1000
         if obs and trace_id and obs_id:
             try:
-                obs.log_node_step_end(
+                obs.log_node_end(
                     obs_id=obs_id,
                     trace_id=trace_id,
                     node_id=step_id,

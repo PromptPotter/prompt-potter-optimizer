@@ -7,7 +7,7 @@ and registry metadata flow.
 from api.models.pipeline_schema import (
     ObservationMapping,
     PipelineSchema,
-    PipelineStep,
+    PipelineNode,
 )
 from api.services.pipeline_discovery import parse_pipeline_response
 
@@ -15,8 +15,8 @@ from api.services.pipeline_discovery import parse_pipeline_response
 def test_derivation_methods():
     schema = PipelineSchema(
         name="test",
-        steps=[
-            PipelineStep(
+        nodes=[
+            PipelineNode(
                 name="search",
                 runtime="backend",
                 param_keys={"max_results"},
@@ -26,7 +26,7 @@ def test_derivation_methods():
                 ],
                 langfuse_type="tool",
             ),
-            PipelineStep(
+            PipelineNode(
                 name="rank",
                 runtime="backend",
                 param_keys={"temperature"},
@@ -36,7 +36,7 @@ def test_derivation_methods():
                 ],
                 langfuse_type="generation",
             ),
-            PipelineStep(
+            PipelineNode(
                 name="cache",
                 runtime="frontend",
                 langfuse_type="span",
@@ -44,12 +44,12 @@ def test_derivation_methods():
         ],
     )
 
-    # step_param_keys
-    assert schema.step_param_keys() == {
+    # node_param_keys
+    assert schema.node_param_keys() == {
         "search": {"max_results"},
         "rank": {"temperature"},
     }
-    assert "cache" not in schema.step_param_keys()
+    assert "cache" not in schema.node_param_keys()
 
     # obs_extraction_map
     obs_map = schema.obs_extraction_map()
@@ -63,8 +63,8 @@ def test_derivation_methods():
     }
 
     # runtime filtering
-    assert [s.name for s in schema.backend_steps()] == ["search", "rank"]
-    assert [s.name for s in schema.frontend_steps()] == ["cache"]
+    assert [s.name for s in schema.backend_nodes()] == ["search", "rank"]
+    assert [s.name for s in schema.frontend_nodes()] == ["cache"]
 
 
 class TestParsePipelineResponse:
@@ -144,20 +144,20 @@ class TestParsePipelineResponse:
         assert schema.required_step == "entity_profile"
         assert schema.dataset_name == "termnorm_ground_truth"
         assert schema.available_models == ["model-a"]
-        assert len(schema.steps) == 3
+        assert len(schema.nodes) == 3
 
         # Step order matches pipelines.default
-        assert [s.name for s in schema.steps] == ["cache_lookup", "web_search", "llm_ranking"]
+        assert [s.name for s in schema.nodes] == ["cache_lookup", "web_search", "llm_ranking"]
 
         # Cache step
-        cache = schema.steps[0]
+        cache = schema.nodes[0]
         assert cache.runtime == "frontend"
         assert cache.short_circuit is True
         assert cache.node_role == "cache"
         assert cache.langfuse_type == "span"
 
         # Web search step — full optimizer metadata
-        ws = schema.steps[1]
+        ws = schema.nodes[1]
         assert ws.runtime == "backend"
         assert ws.node_role == "enricher"
         assert ws.param_keys == {"max_sites", "num_results"}
@@ -171,7 +171,7 @@ class TestParsePipelineResponse:
         assert "query_prefix" not in ws.default_config
 
         # LLM ranking step
-        lr = schema.steps[2]
+        lr = schema.nodes[2]
         assert lr.node_role == "ranker"
         assert lr.param_keys == {"ranking_temperature"}
         assert lr.override_map == {"ranking_temperature": "temperature"}
@@ -193,9 +193,9 @@ class TestParsePipelineResponse:
         }
         schema = parse_pipeline_response(data)
         assert schema.name == "custompipeline"
-        assert len(schema.steps) == 2
+        assert len(schema.nodes) == 2
         # Without optimizer, param_keys is empty
-        step_a = next(s for s in schema.steps if s.name == "step_a")
+        step_a = next(s for s in schema.nodes if s.name == "step_a")
         assert step_a.param_keys == set()
 
     def test_resolved_metadata_merged(self):
@@ -230,9 +230,9 @@ class TestParsePipelineResponse:
             },
         }
         schema = parse_pipeline_response(data)
-        assert len(schema.steps) == 2
+        assert len(schema.nodes) == 2
 
-        step_a = schema.steps[0]
+        step_a = schema.nodes[0]
         assert step_a.output_schema is not None
         assert step_a.output_schema.family == "my_schema"
         assert step_a.output_schema.fields == ["field1", "field2"]
@@ -240,7 +240,7 @@ class TestParsePipelineResponse:
         assert step_a.prompt_meta is not None
         assert step_a.prompt_meta.template_variables == ["input", "context"]
 
-        assert schema.steps[1].output_schema is None
+        assert schema.nodes[1].output_schema is None
 
     def test_data_envelope_unwrap(self):
         data = {
@@ -278,16 +278,16 @@ class TestParsePipelineResponse:
         schema = parse_pipeline_response(data)
 
         assert schema.name == "testpipeline"
-        assert len(schema.steps) == 1
+        assert len(schema.nodes) == 1
 
-        ep = schema.steps[0]
+        ep = schema.nodes[0]
         assert ep.output_schema is not None
         assert ep.output_schema.fields == ["entity_name", "core_concept"]
 
     def test_empty_response(self):
         schema = parse_pipeline_response({})
         assert schema.name == ""
-        assert len(schema.steps) == 0
+        assert len(schema.nodes) == 0
 
     def test_step_order_from_pipelines_default(self):
         data = {
@@ -300,7 +300,7 @@ class TestParsePipelineResponse:
             "pipelines": {"default": ["step_a", "step_b", "step_c"]},
         }
         schema = parse_pipeline_response(data)
-        assert [s.name for s in schema.steps] == ["step_a", "step_b", "step_c"]
+        assert [s.name for s in schema.nodes] == ["step_a", "step_b", "step_c"]
 
     def test_observation_mappings_with_is_llm(self):
         data = {
@@ -320,7 +320,7 @@ class TestParsePipelineResponse:
             },
         }
         schema = parse_pipeline_response(data)
-        step = schema.steps[0]
+        step = schema.nodes[0]
         assert step.observation_name == "llm_step"
         assert len(step.observation_mappings) == 1
         assert step.observation_mappings[0].is_llm is True

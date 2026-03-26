@@ -100,7 +100,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=cycle_config,
-        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_fields=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -116,7 +116,7 @@ async def test_result_structure(monkeypatch, eval_data, cycle_config):
         monkeypatch, eval_data, cycle_config, round_hits=[0],
     )
     assert result.started_at < result.finished_at
-    assert result.winner_prompt_state
+    assert result.winner_prompt_fields
 
 
 @pytest.mark.slow
@@ -130,7 +130,7 @@ async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[0],
         instruction="",
-        baseline_prompt_state=baseline_ps.model_dump(),
+        baseline_prompt_fields=baseline_ps.model_dump(),
         baseline_accuracy=0.5,
         baseline_results=[{"query": "test", "hit": True}],
     )
@@ -167,7 +167,7 @@ async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_confi
 
     result = await run_feedback_cycle(
         instruction="Test.", eval_data=eval_data, config=cycle_config,
-        baseline_prompt_state=OptSearchPoint(instruction="Test.").model_dump(),
+        baseline_prompt_fields=OptSearchPoint(instruction="Test.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -434,7 +434,7 @@ async def test_completed_cycle_returns_cached(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=_bl,
+        baseline_prompt_fields=_bl,
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -445,7 +445,7 @@ async def test_completed_cycle_returns_cached(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=_bl,
+        baseline_prompt_fields=_bl,
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -483,7 +483,7 @@ async def test_resume_from_interrupted_cycle(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=_bl,
+        baseline_prompt_fields=_bl,
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -499,7 +499,7 @@ async def test_resume_from_interrupted_cycle(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=_bl,
+        baseline_prompt_fields=_bl,
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -561,7 +561,7 @@ async def test_interrupt_writes_interrupted_status(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=OptSearchPoint(instruction="Rank candidates.").model_dump(),
+        baseline_prompt_fields=OptSearchPoint(instruction="Rank candidates.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -618,7 +618,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=_bl,
+        baseline_prompt_fields=_bl,
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -635,7 +635,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
         instruction="Rank candidates.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=_bl,
+        baseline_prompt_fields=_bl,
         baseline_accuracy=0.0,
         baseline_results=[],
     )

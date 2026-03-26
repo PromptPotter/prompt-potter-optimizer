@@ -58,7 +58,7 @@ class SyncResponse(BaseModel):
 class PipelineViewResponse(BaseModel):
     backend_id: str
     backend_pipeline: dict[str, Any]  # PipelineSchema.model_dump()
-    computed_steps: list[dict[str, Any]]  # PipelineStep dicts
+    computed_steps: list[dict[str, Any]]  # PipelineNode dicts
     fetched_at: str
     source: str  # "live" | "cached" | "default"
 

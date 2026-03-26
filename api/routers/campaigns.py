@@ -42,7 +42,7 @@ class TrialSummary(BaseModel):
     trial_id: str
     round: int
     label: str
-    prompt_state_id: str
+    prompt_fields_id: str
     accuracy: float
     hits: int
     total: int

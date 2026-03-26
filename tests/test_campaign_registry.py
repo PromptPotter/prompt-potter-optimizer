@@ -49,7 +49,7 @@ def test_add_trial_updates_index(store, campaign, baseline_ps):
     trial = store.campaigns.record_trial(
         BACKEND_ID, cid,
         round_num=0,
-        prompt_state=baseline_ps.model_dump(),
+        prompt_fields=baseline_ps.model_dump(),
         accuracy=0.67,
         hits=2,
         total=3,
@@ -65,7 +65,7 @@ def test_add_trial_updates_index(store, campaign, baseline_ps):
     assert loaded["n_trials"] == 1
     assert loaded["baseline_accuracy"] == 0.67
     assert loaded["best_accuracy"] == 0.67
-    assert loaded["trials"][0]["prompt_state_id"] == baseline_ps.id
+    assert loaded["trials"][0]["prompt_fields_id"] == baseline_ps.id
 
 
 def test_multiple_trials_track_best(store, campaign, baseline_ps):
@@ -74,7 +74,7 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
 
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=0,
-        prompt_state=baseline_ps.model_dump(),
+        prompt_fields=baseline_ps.model_dump(),
         accuracy=0.67, hits=2, total=3, label="baseline",
     )
 
@@ -83,7 +83,7 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
     )
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=1,
-        prompt_state=improved_ps.model_dump(),
+        prompt_fields=improved_ps.model_dump(),
         accuracy=0.80, hits=4, total=5, label="round1", improved=True,
     )
 
@@ -92,7 +92,7 @@ def test_multiple_trials_track_best(store, campaign, baseline_ps):
     )
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=2,
-        prompt_state=worse_ps.model_dump(),
+        prompt_fields=worse_ps.model_dump(),
         accuracy=0.60, hits=3, total=5, label="round2", improved=False,
     )
 
@@ -132,13 +132,13 @@ def test_record_campaign_rounds(store, campaign, baseline_ps):
     rounds = [
         {
             "round": 0, "label": "baseline",
-            "prompt_state": baseline_ps,
+            "prompt_fields": baseline_ps,
             "accuracy": 0.67, "hits": 2, "total": 3,
             "results": [], "improved": False,
         },
         {
             "round": 1, "label": "improved",
-            "prompt_state": improved_ps,
+            "prompt_fields": improved_ps,
             "accuracy": 0.90, "hits": 9, "total": 10,
             "results": [], "improved": True,
             "candidates_evaluated": 5,
@@ -164,25 +164,25 @@ def test_lineage_chain(store, campaign, baseline_ps):
 
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=0,
-        prompt_state=baseline_ps.model_dump(),
+        prompt_fields=baseline_ps.model_dump(),
         accuracy=0.50, hits=1, total=2, label="baseline",
     )
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=1,
-        prompt_state=r1_ps.model_dump(),
+        prompt_fields=r1_ps.model_dump(),
         accuracy=0.75, hits=3, total=4, label="round1",
     )
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=2,
-        prompt_state=r2_ps.model_dump(),
+        prompt_fields=r2_ps.model_dump(),
         accuracy=1.0, hits=4, total=4, label="round2",
     )
 
     lineage = store.campaigns.get_lineage(BACKEND_ID, cid)
     assert len(lineage) == 3
-    assert lineage[0]["parent_prompt_state_id"] is None
-    assert lineage[1]["parent_prompt_state_id"] == baseline_ps.id
-    assert lineage[2]["parent_prompt_state_id"] == r1_ps.id
+    assert lineage[0]["parent_prompt_fields_id"] is None
+    assert lineage[1]["parent_prompt_fields_id"] == baseline_ps.id
+    assert lineage[2]["parent_prompt_fields_id"] == r1_ps.id
 
 
 
@@ -204,7 +204,7 @@ def test_api_crud_lifecycle(api_client, store, baseline_ps):
     cid = c["campaign_id"]
     store.campaigns.record_trial(
         BACKEND_ID, cid, round_num=0,
-        prompt_state=baseline_ps.model_dump(),
+        prompt_fields=baseline_ps.model_dump(),
         accuracy=0.67, hits=2, total=3, label="baseline",
         results=[{"query": "q1", "hit": True}],
     )
@@ -327,7 +327,7 @@ async def test_e2e_feedback_cycle_with_registry(
         instruction="Normalize drug names.",
         eval_data=eval_data,
         config=config,
-        baseline_prompt_state=OptSearchPoint(instruction="Normalize drug names.").model_dump(),
+        baseline_prompt_fields=OptSearchPoint(instruction="Normalize drug names.").model_dump(),
         baseline_accuracy=0.0,
         baseline_results=[],
     )
@@ -344,11 +344,11 @@ async def test_e2e_feedback_cycle_with_registry(
 
     rounds_for_registry = []
     for rd in result.rounds:
-        ps = OptSearchPoint(**rd.prompt_state)
+        ps = OptSearchPoint(**rd.prompt_fields)
         rounds_for_registry.append({
             "round": rd.round,
             "label": rd.label,
-            "prompt_state": ps,
+            "prompt_fields": ps,
             "accuracy": rd.accuracy,
             "hits": rd.hits,
             "total": rd.total,

@@ -36,7 +36,7 @@ def graceful(msg: str):
         logger.warning(msg, exc_info=True)
 
 
-def _emit_phase(
+def emit_phase(
     on_phase: Callable[[PhaseEvent], None] | None,
     phase: str,
     event: str,
@@ -203,7 +203,7 @@ def _resume_or_create_campaign(
     config: CycleConfig,
     eval_data: list[dict],
     current_ps: dict,
-    baseline_prompt_state: dict | None,
+    baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
     *,
     cycle_id_override: str | None = None,
@@ -230,7 +230,7 @@ def _resume_or_create_campaign(
         if cycle_id_override:
             cycle_id = cycle_id_override
         else:
-            bl_ps = baseline_prompt_state if baseline_prompt_state is not None else current_ps
+            bl_ps = baseline_prompt_fields if baseline_prompt_fields is not None else current_ps
             bl_osp = OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
             cycle_id = cycle_config_identity(config, bl_osp.render(), eval_data)
         logger.info("Cycle identity: %s", cycle_id)

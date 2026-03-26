@@ -1,4 +1,4 @@
-"""Tests for OptSearchPoint model (migrated from PromptState tests)."""
+"""Tests for OptSearchPoint model."""
 from api.models.opt_search_point import FewShotExample, OptSearchPoint
 
 

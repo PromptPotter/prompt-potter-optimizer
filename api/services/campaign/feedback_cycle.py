@@ -25,8 +25,8 @@ from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
 from api.services.campaign.critique import sample_thinking_styles
 from api.services.campaign.campaign_lifecycle import (
-    graceful, _emit_phase, _get_obs_trace,
-    _init_obs, _resume_or_create_campaign,
+    graceful, emit_phase, _get_obs_trace,
+    _init_obs, _resume_or_create_campaign, _finalize_campaign,
 )
 from api.services.campaign.models import (
     CycleConfig, CycleInitResult, CycleResult, CycleRoundResult,
@@ -36,7 +36,6 @@ from api.services.campaign.escalation import _escalate_l2
 from api.services.campaign.round_execution import (
     _execute_round, _update_round_state,
 )
-from api.services.campaign.campaign_lifecycle import _finalize_campaign
 from api.services.metrics import compute_composite_score
 from api.services.eval_context import EvalContext
 from api.services.prompt_eval import subsample_queries
@@ -105,7 +104,7 @@ async def _handle_escalation_signal(
     Returns a StopReason if the cycle should stop, None to continue.
     """
     signal = round_result.escalation_signal
-    _emit_phase(
+    emit_phase(
         on_phase, "escalation", "enter", round=round_num,
         check_name=signal["check_name"],
         target=signal["target"],
@@ -164,7 +163,7 @@ async def _handle_escalation_signal(
         campaign_store.delete_round_candidates(
             config.backend_id, cycle_id, round_num + 1,
         )
-    _emit_phase(on_phase, "escalation", "exit", round=round_num)
+    emit_phase(on_phase, "escalation", "exit", round=round_num)
     return None
 
 
@@ -177,7 +176,7 @@ async def _init_cycle_state(
     instruction: str,
     eval_data: list[dict[str, Any]],
     config: CycleConfig,
-    baseline_prompt_state: dict | None,
+    baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
     baseline_results: list | None,
     on_phase: Callable[[PhaseEvent], None] | None,
@@ -193,7 +192,7 @@ async def _init_cycle_state(
         (state, campaign_store, cycle_id, obs_campaign_id,
          round_eval_data, escalation_checks, resumed_from_round)
     """
-    _emit_phase(on_phase, "init", "enter",
+    emit_phase(on_phase, "init", "enter",
                 max_rounds=config.max_rounds,
                 patience=config.patience,
                 n_variants=config.n_variants,
@@ -207,7 +206,7 @@ async def _init_cycle_state(
                 enable_critique=config.enable_critique,
                 pipeline_params=config.pipeline_params,
                 step_param_keys=(
-                    {s: sorted(k) for s, k in config.pipeline_schema.step_param_keys().items()}
+                    {s: sorted(k) for s, k in config.pipeline_schema.node_param_keys().items()}
                     if config.pipeline_schema else None
                 ))
 
@@ -217,15 +216,15 @@ async def _init_cycle_state(
 
     round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
 
-    if baseline_prompt_state is None:
+    if baseline_prompt_fields is None:
         raise ValueError(
-            "baseline_prompt_state is required. Run baseline evaluation in the "
+            "baseline_prompt_fields is required. Run baseline evaluation in the "
             "notebook before starting the feedback cycle.",
         )
     baseline_osp = (
-        OptSearchPoint.from_prompt_fields(baseline_prompt_state)
-        if isinstance(baseline_prompt_state, dict)
-        else baseline_prompt_state
+        OptSearchPoint.from_prompt_fields(baseline_prompt_fields)
+        if isinstance(baseline_prompt_fields, dict)
+        else baseline_prompt_fields
     )
     current_results: list = baseline_results or []
     logger.info("Using provided baseline (acc=%.3f)", baseline_accuracy)
@@ -233,7 +232,7 @@ async def _init_cycle_state(
     # Resume detection
     campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
         config, eval_data, baseline_osp.prompt_field_dict(),
-        baseline_prompt_state, baseline_accuracy,
+        baseline_prompt_fields, baseline_accuracy,
         cycle_id_override=cycle_id,
     )
 
@@ -343,7 +342,7 @@ async def _init_cycle_state(
     from api.services.campaign.escalation import build_escalation_checks
     escalation_checks = build_escalation_checks(config)
 
-    _emit_phase(on_phase, "init", "exit",
+    emit_phase(on_phase, "init", "exit",
                 cycle_id=cycle_id,
                 resumed_from_round=resumed_from_round,
                 baseline_accuracy=baseline_accuracy,
@@ -372,7 +371,7 @@ async def run_feedback_cycle(
     eval_data: list[dict[str, Any]],
     config: CycleConfig,
     *,
-    baseline_prompt_state: dict | None = None,
+    baseline_prompt_fields: dict | None = None,
     baseline_accuracy: float = 0.0,
     baseline_results: list | None = None,
     on_round_complete: Callable[[CycleRoundResult, int], None] | None = None,
@@ -397,7 +396,7 @@ async def run_feedback_cycle(
     # -- Init --
     init = await _init_cycle_state(
         instruction, eval_data, config,
-        baseline_prompt_state, baseline_accuracy, baseline_results,
+        baseline_prompt_fields, baseline_accuracy, baseline_results,
         on_phase, langfuse_session_id, cycle_id, experiment_id,
         backend_client, started_at,
     )
@@ -497,7 +496,7 @@ async def run_feedback_cycle(
                         "total": round_result.total,
                         "improved": round_result.improved,
                         "next_action": round_result.next_action,
-                        "prompt_state": round_result.prompt_state,
+                        "prompt_fields": round_result.prompt_fields,
                         "results": round_result.results,
                         "candidates_evaluated": round_result.candidates_evaluated,
                         "candidate_scores": [
@@ -572,7 +571,7 @@ async def run_feedback_cycle(
         baseline_accuracy=(
             state.rounds[0].accuracy if state.rounds else state.current_accuracy
         ),
-        winner_prompt_state=state.opt_sp.prompt_field_dict() if state.best_sp else {},
+        winner_prompt_fields=state.opt_sp.prompt_field_dict() if state.best_sp else {},
         winner_pipeline_params=state.best_sp.pipeline_params if state.best_sp else None,
         stop_reason=stop_reason,
         started_at=started_at,
