@@ -259,10 +259,11 @@ class TestEvaluatePromptBatchCaching:
             },
         }
 
-        results = await evaluate_prompt_batch(
+        batch = await evaluate_prompt_batch(
             sp, eval_data, backend,
             cached_queries=cached,
         )
+        results = batch.results
 
         assert len(results) == 2
         assert results[0]["predicted"] == "Aspirin"

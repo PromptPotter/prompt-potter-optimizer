@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import logging
 import signal
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
@@ -33,26 +34,18 @@ _evaluator = ExactMatchEvaluator({"strip": True})
 logger = logging.getLogger(__name__)
 
 
-class _GracefulStop(Exception):
-    """Raised when a graceful interrupt (1st Ctrl+C) stops the eval loop.
+@dataclass
+class EvalBatchResult:
+    """Return value from ``evaluate_prompt_batch()``.
 
-    Carries ``partial_results`` — the queries completed before the stop.
+    Replaces the former exception-as-data pattern (``_GracefulStop`` /
+    ``_ForceStop``).  Data always flows through return values; interrupts
+    are signalled via ``completed`` and ``stop_reason``.
     """
 
-    def __init__(self, results: list):
-        self.partial_results = results
-        super().__init__(f"Graceful stop with {len(results)} results")
-
-
-class _ForceStop(KeyboardInterrupt):
-    """Raised on force-quit (2nd Ctrl+C) during eval batch.
-
-    Carries ``partial_results`` — the queries completed before the stop.
-    """
-
-    def __init__(self, partial_results: list):
-        self.partial_results = partial_results
-        super().__init__()
+    results: list
+    completed: bool = True
+    stop_reason: str | None = None  # "graceful" | "force" | None
 
 
 def _error_category(error: str | None) -> str | None:
@@ -249,7 +242,7 @@ async def evaluate_prompt_batch(
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
     cached_queries: dict[str, dict] | None = None,
-) -> list:
+) -> EvalBatchResult:
     """Evaluate a prompt on all eval_data queries via the backend.
 
     Args:
@@ -266,7 +259,7 @@ async def evaluate_prompt_batch(
             backend call.
 
     Returns:
-        List of result dicts from backend_reranker_evaluate.
+        EvalBatchResult with results, completion status, and stop reason.
 
     Raises:
         EscalationError: If an escalation check triggers mid-batch.
@@ -369,7 +362,7 @@ async def evaluate_prompt_batch(
             "Eval batch force-interrupted at query %d/%d.",
             len(results), len(eval_data),
         )
-        raise _ForceStop(results)
+        return EvalBatchResult(results, completed=False, stop_reason="force")
     finally:
         signal.signal(signal.SIGINT, old_handler)
 
@@ -379,11 +372,10 @@ async def evaluate_prompt_batch(
             n_reused, len(eval_data),
         )
 
-    # Graceful stop path — raise with partial results so caller can save
     if _stop_requested:
-        raise _GracefulStop(results)
+        return EvalBatchResult(results, completed=False, stop_reason="graceful")
 
-    return results
+    return EvalBatchResult(results, completed=True)
 
 
 def _finalize_observability(
@@ -563,7 +555,7 @@ async def evaluate_prompt_cached(
 
     escalation_signal = None
     try:
-        results = await evaluate_prompt_batch(
+        batch = await evaluate_prompt_batch(
             search_point, eval_data, backend_client,
             on_result=on_result,
             pipeline_schema=pipeline_schema,
@@ -572,16 +564,16 @@ async def evaluate_prompt_cached(
             n_total_candidates=ctx.n_total_candidates,
             cached_queries=sp_cache,
         )
-    except (_GracefulStop, _ForceStop) as exc:
-        # Save whatever queries completed so sp-hash cache can reuse them.
-        partial = exc.partial_results
-        if partial:
-            _save_run(partial, compute_composite_score(partial, pipeline_schema), partial=True)
-            logger.info(
-                "Saved partial run (%d/%d queries) for SP %s",
-                len(partial), len(eval_data), content_hash[:8],
-            )
-        raise KeyboardInterrupt() from None
+        results = batch.results
+        if not batch.completed:
+            # Graceful or force stop — save partial results then re-raise
+            if results:
+                _save_run(results, compute_composite_score(results, pipeline_schema), partial=True)
+                logger.info(
+                    "Saved partial run (%d/%d queries) for SP %s",
+                    len(results), len(eval_data), content_hash[:8],
+                )
+            raise KeyboardInterrupt()
     except _EscalationError as e:
         results = e.partial_results
         escalation_signal = e.signal

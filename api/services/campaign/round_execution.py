@@ -6,13 +6,11 @@ logic (L2/L3) lives in ``escalation.py``; campaign lifecycle
 """
 
 import logging
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from api.models.phase_event import PhaseEvent
 from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS
 from api.services.campaign.models import (
-    CycleConfig, CycleRoundResult, LoopState,
+    CycleCallbacks, CycleConfig, CycleRoundResult, LoopState,
 )
 from api.services.campaign.critique import (
     CritiqueAgent, CritiqueContext, format_critique_for_prompt,
@@ -45,7 +43,7 @@ async def _generate_or_load_candidates(
     config: CycleConfig,
     campaign_store: "CampaignStore | None",
     cycle_id: str | None,
-    on_phase: Callable[[PhaseEvent], None] | None = None,
+    on_phase=None,
     n_eval_queries: int = 0,
     *,
     n_variants: int | None = None,
@@ -123,15 +121,13 @@ async def _evaluate_candidates(
     state: LoopState,
     round_eval_data: list[dict],
     config: CycleConfig,
-    on_candidate_eval: Callable[[int, int, dict], None] | None,
-    on_query_eval: Callable[[int, int, int, int, dict], None] | None,
-    on_phase: Callable[[PhaseEvent], None] | None = None,
+    callbacks: CycleCallbacks,
     obs: "ObsLogger | None" = None,
     trace_id: str | None = None,
     escalation_checks: "list[EscalationCheck] | None" = None,
 ) -> dict:
     """Evaluate candidates and run critique analysis."""
-    emit_phase(on_phase, "l1_evaluate", "enter", round=round_num,
+    emit_phase(callbacks.on_phase, "l1_evaluate", "enter", round=round_num,
                 n_candidates=len(candidates),
                 n_queries=len(round_eval_data),
                 current_best_accuracy=state.current_accuracy,
@@ -157,8 +153,7 @@ async def _evaluate_candidates(
             temperature=state.current_sp.temperature,
             pipeline_params=state.current_sp.pipeline_params,
             improvement_threshold=config.improvement_threshold,
-            on_candidate_eval=on_candidate_eval,
-            on_query_eval=on_query_eval,
+            callbacks=callbacks,
             escalation_checks=escalation_checks,
         )
 
@@ -202,7 +197,7 @@ async def _evaluate_candidates(
         eval_out["critique"] = critique_result
         eval_out["thinking_styles"] = thinking_styles
 
-    emit_phase(on_phase, "l1_evaluate", "exit", round=round_num,
+    emit_phase(callbacks.on_phase, "l1_evaluate", "exit", round=round_num,
                 winner_label=eval_out["winner"].get("label", ""),
                 winner_accuracy=eval_out["winner_accuracy"],
                 winner_composite=eval_out.get("winner_composite",
@@ -265,9 +260,7 @@ async def _execute_round(
     obs_campaign_id: str,
     campaign_store: "CampaignStore | None",
     cycle_id: str | None,
-    on_candidate_eval: Callable[[int, int, dict], None] | None,
-    on_query_eval: Callable[[int, int, int, int, dict], None] | None,
-    on_phase: Callable[[PhaseEvent], None] | None = None,
+    callbacks: CycleCallbacks,
     escalation_checks: "list[EscalationCheck] | None" = None,
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
@@ -283,7 +276,7 @@ async def _execute_round(
     creativity = opt_params.get("creativity", config.creativity)
 
     candidates = await _generate_or_load_candidates(
-        round_num, state, config, campaign_store, cycle_id, on_phase,
+        round_num, state, config, campaign_store, cycle_id, callbacks.on_phase,
         n_eval_queries=len(round_eval_data),
         n_variants=n_variants, creativity=creativity,
         obs=obs, trace_id=trace_id,
@@ -291,7 +284,7 @@ async def _execute_round(
 
     eval_out = await _evaluate_candidates(
         candidates, round_num, state, round_eval_data, config,
-        on_candidate_eval, on_query_eval, on_phase,
+        callbacks,
         obs=obs, trace_id=trace_id,
         escalation_checks=escalation_checks,
     )

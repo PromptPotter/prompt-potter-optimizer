@@ -404,7 +404,8 @@ async def test_batch_fast_abort_on_client_error(monkeypatch):
     )
     eval_data = _make_eval_data(10)
 
-    results = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    batch = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    results = batch.results
     # Only 1 actual backend call — the rest are skipped
     assert call_count == 1
     assert len(results) == 10
@@ -442,7 +443,8 @@ async def test_batch_server_errors_use_consecutive_threshold(monkeypatch):
     )
     eval_data = _make_eval_data(10)
 
-    results = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    batch = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    results = batch.results
     # 3 actual calls (consecutive threshold), then 7 skipped
     assert call_count == 3
     assert len(results) == 10

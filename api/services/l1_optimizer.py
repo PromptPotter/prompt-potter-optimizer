@@ -7,7 +7,6 @@ improvement suggestion generation.
 
 import json
 import logging
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from api.models.pipeline_schema import PipelineSchema
@@ -27,6 +26,7 @@ from api.services.metrics import compute_composite_score
 
 if TYPE_CHECKING:
     from api.models.eval_context import EvalContext
+    from api.services.campaign.models import CycleCallbacks
 
 logger = logging.getLogger(__name__)
 
@@ -205,8 +205,7 @@ async def l1_evaluate(
     temperature: float = 0.0,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
-    on_candidate_eval: Callable[[int, int, dict], None] | None = None,
-    on_query_eval: Callable[[int, int, int, int, dict], None] | None = None,
+    callbacks: "CycleCallbacks | None" = None,
     escalation_checks: list | None = None,
 ) -> dict[str, Any]:
     """Evaluate candidates and select the round winner.
@@ -243,9 +242,9 @@ async def l1_evaluate(
 
     for idx, c in enumerate(osp_candidates):
         _on_result = None
-        if on_query_eval:
+        if callbacks and callbacks.on_query_eval:
             def _on_result(result, qi, qt, _ci=idx, _ct=len(osp_candidates)):
-                on_query_eval(_ci, _ct, qi, qt, result)
+                callbacks.on_query_eval(_ci, _ct, qi, qt, result)
 
         if candidate_pp[idx]:
             pp = {**(_sp_pipeline_params or {}), **candidate_pp[idx]}
@@ -278,11 +277,11 @@ async def l1_evaluate(
             "eval_queries": len(results),
             "expected_queries": len(eval_data),
         })
-        if on_candidate_eval:
+        if callbacks and callbacks.on_candidate_eval:
             scores["escalation_aborted"] = aborted
             scores["eval_queries"] = len(results)
             scores["expected_queries"] = len(eval_data)
-            on_candidate_eval(idx, len(osp_candidates), scores)
+            callbacks.on_candidate_eval(idx, len(osp_candidates), scores)
 
         if escalation_signal:
             break

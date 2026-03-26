@@ -439,7 +439,7 @@ async def run_optimization(
                 round_num, state, _round_data, config,
                 obs_campaign_id,
                 campaign_store, cycle_id,
-                cb.on_candidate_eval, cb.on_query_eval, cb.on_phase,
+                cb,
                 escalation_checks=_round_checks,
             )
             _update_round_state(state, round_result, round_num)
