@@ -116,4 +116,4 @@ See [`docs/design-principles.md`](docs/design-principles.md) for the full princi
 5. [`docs/sensitivity-scan.md`](docs/sensitivity-scan.md) — OAT scan workflow, coverage, circuit breaker
 6. [`docs/observability.md`](docs/observability.md) — Langfuse, MLflow, events.jsonl
 7. [`docs/setup-guide.md`](docs/setup-guide.md) — installation, quick start, REST API
-8. [`docs/specs/`](docs/specs/CLAUDE.md) — milestone specs
+8. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M8, M9) + roadmap; archived specs in `docs/specs/archive/`

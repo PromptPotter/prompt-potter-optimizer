@@ -3,9 +3,7 @@
 **Version:** 0.9.0
 **Date:** 2026-02-27
 **Status:** Planned
-**Depends on:** [Roadmap M9](roadmap.md), [ADD v0.10.0](architecture-design.md), [M6 Pipeline Composability](m6-pipeline-composability.md), [PRD P1.13](product-requirements.md)
-
-> **Staleness note:** Written against ADD v0.9.0 (2026-02-27), before the ADD/WBS v0.10.0 rewrite. Verify `BackendClient` signatures against current code before implementing.
+**Depends on:** [Roadmap](roadmap.md), [M6 Pipeline Composability](archive/m6-pipeline-composability.md)
 
 ---
 
