@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from api.services.llm_client import _MAX_APP_RETRIES, OpenAICompatibleClient
+from api.config.settings import LLM_MAX_APP_RETRIES
+from api.services.llm_client import OpenAICompatibleClient
 from _helpers import MockCompletion, make_http_error
 
 
@@ -38,7 +39,7 @@ def llm_client():
 @pytest.mark.parametrize("status_code,n_failures,expected_calls,succeeds", [
     (503, 2, 3, True),
     (429, 1, 2, True),
-    (503, _MAX_APP_RETRIES + 1, _MAX_APP_RETRIES + 1, False),
+    (503, LLM_MAX_APP_RETRIES + 1, LLM_MAX_APP_RETRIES + 1, False),
 ])
 async def test_llm_retry_transient(
     llm_client, status_code, n_failures, expected_calls, succeeds,

@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from api.config.settings import LOCK_RETRY_INTERVAL, LOCK_TIMEOUT
 from api.services.stores.base import (
     read_json,
     read_json_optional,
@@ -19,10 +20,6 @@ from api.services.stores.base import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Lock acquisition parameters
-_LOCK_RETRY_INTERVAL = 0.05  # seconds between retries
-_LOCK_TIMEOUT = 5.0  # seconds before treating lock as stale
 
 
 class DatasetRunStore:
@@ -90,7 +87,7 @@ class DatasetRunStore:
         Uses short non-blocking retries so KeyboardInterrupt (Jupyter cell
         interrupt) is never swallowed by a blocking sleep.
         """
-        deadline = time.monotonic() + _LOCK_TIMEOUT
+        deadline = time.monotonic() + LOCK_TIMEOUT
         while True:
             try:
                 fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -101,7 +98,7 @@ class DatasetRunStore:
                 try:
                     mtime = os.path.getmtime(lock_path)
                     age = time.time() - mtime
-                    if age > _LOCK_TIMEOUT:
+                    if age > LOCK_TIMEOUT:
                         logger.warning(
                             "Removing stale lock file: %s (age=%.1fs)",
                             lock_path, age,
@@ -122,7 +119,7 @@ class DatasetRunStore:
                     except OSError:
                         pass
                     continue
-                time.sleep(_LOCK_RETRY_INTERVAL)
+                time.sleep(LOCK_RETRY_INTERVAL)
 
     @staticmethod
     def _release_lock(lock_path: Path) -> None:

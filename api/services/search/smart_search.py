@@ -10,7 +10,11 @@ import random
 from collections import defaultdict
 from typing import TYPE_CHECKING, Callable, Literal, TypedDict
 
-from api.config.settings import DEFAULT_DIAGNOSTIC_QUERIES
+from api.config.settings import (
+    DEFAULT_DIAGNOSTIC_QUERIES,
+    DIAGNOSTIC_HIT_RATIO,
+    MIN_DIAGNOSTIC_QUERIES,
+)
 from api.models.opt_search_point import OptSearchPoint
 from api.models.eval_context import EvalContext
 from api.services.prompt_eval import evaluate_prompt_cached
@@ -92,13 +96,6 @@ class ScanEvent(TypedDict, total=False):
     exploration_budget: str
     estimated_eval_cost: int
 
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-MIN_DIAGNOSTIC_QUERIES = 3
-DIAGNOSTIC_HIT_RATIO = 0.75
 
 
 def _profiles_from_rows(

@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from api.config.settings import MATCH_TIMEOUT
+
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
-
-MATCH_TIMEOUT = 120.0
 
 
 def parse_bom_material(query: str) -> tuple[str, str]:

@@ -15,23 +15,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from api.config.settings import settings
+from api.config.settings import (
+    GROQ_BASE_URL,
+    GROQ_MAX_RETRIES,
+    GROQ_TIMEOUT,
+    LLM_BASE_DELAY,
+    LLM_MAX_APP_RETRIES,
+    LLM_RETRY_STATUSES,
+    OPENAI_MAX_RETRIES,
+    settings,
+)
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Provider-specific constants
-# ---------------------------------------------------------------------------
-
-OPENAI_MAX_RETRIES = 5
-GROQ_MAX_RETRIES = 3
-GROQ_TIMEOUT = 60.0
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-
-# App-level retry for transient errors (beyond SDK's own retry)
-_RETRY_STATUSES = {429, 502, 503}
-_MAX_APP_RETRIES = 3
-_BASE_DELAY = 1.0  # seconds
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +212,7 @@ class OpenAICompatibleClient(LLMClientBase):
 
         # App-level retry for transient server errors
         last_exc: Exception | None = None
-        for attempt in range(_MAX_APP_RETRIES + 1):
+        for attempt in range(LLM_MAX_APP_RETRIES + 1):
             try:
                 response = await client.chat.completions.create(**request_params)
                 break
@@ -264,28 +259,28 @@ class OpenAICompatibleClient(LLMClientBase):
                                 )
                     # Repair failed — fall through to retry
                     last_exc = exc
-                    if attempt < _MAX_APP_RETRIES:
-                        delay = _BASE_DELAY * (2 ** attempt)
+                    if attempt < LLM_MAX_APP_RETRIES:
+                        delay = LLM_BASE_DELAY * (2 ** attempt)
                         logger.info(
                             "%s JSON validation failed (attempt %d/%d), "
                             "retrying in %.1fs",
                             self._provider_name, attempt + 1,
-                            _MAX_APP_RETRIES + 1, delay,
+                            LLM_MAX_APP_RETRIES + 1, delay,
                         )
                         await asyncio.sleep(delay)
                         continue
                     raise
 
                 is_connection = "Connection" in type(exc).__name__
-                if status in _RETRY_STATUSES or is_connection:
+                if status in LLM_RETRY_STATUSES or is_connection:
                     last_exc = exc
-                    if attempt < _MAX_APP_RETRIES:
-                        delay = _BASE_DELAY * (2 ** attempt)
+                    if attempt < LLM_MAX_APP_RETRIES:
+                        delay = LLM_BASE_DELAY * (2 ** attempt)
                         logger.warning(
                             "%s request failed (attempt %d/%d, status=%s), "
                             "retrying in %.1fs: %s",
                             self._provider_name, attempt + 1,
-                            _MAX_APP_RETRIES + 1, status, delay, exc,
+                            LLM_MAX_APP_RETRIES + 1, status, delay, exc,
                         )
                         await asyncio.sleep(delay)
                         continue
@@ -293,6 +288,8 @@ class OpenAICompatibleClient(LLMClientBase):
         else:
             raise last_exc  # type: ignore[misc]
 
+        if not response.choices:
+            raise ValueError(f"{self._provider_name} returned empty choices")
         content = response.choices[0].message.content or ""
         parsed = (
             _try_parse_json(content, self._provider_name)

@@ -13,6 +13,7 @@ import logging
 import time as _time
 from typing import TYPE_CHECKING, Any
 
+from api.config.settings import PIPELINE_CACHE_TTL
 from api.models.pipeline_schema import (
     ObservationMapping,
     PipelineSchema,
@@ -193,7 +194,6 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 # ---------------------------------------------------------------------------
 
 _PIPELINE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_CACHE_TTL_SECONDS = 30.0
 
 
 def _get_cached(base_url: str) -> dict[str, Any] | None:
@@ -202,7 +202,7 @@ def _get_cached(base_url: str) -> dict[str, Any] | None:
     if entry is None:
         return None
     ts, data = entry
-    if (_time.monotonic() - ts) > _CACHE_TTL_SECONDS:
+    if (_time.monotonic() - ts) > PIPELINE_CACHE_TTL:
         del _PIPELINE_CACHE[base_url]
         return None
     return data
