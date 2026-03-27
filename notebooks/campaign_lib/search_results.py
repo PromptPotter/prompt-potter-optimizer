@@ -12,7 +12,9 @@ from api.services.search import (
 )
 
 from .display import (
-    show_progress, show_scan_leaderboard, show_scan_query_difficulty,
+    show_progress,
+    show_scan_leaderboard,
+    show_scan_query_difficulty,
 )
 from .setup import setup_llm
 
@@ -52,18 +54,29 @@ async def resume_or_build_diagnostic(
     llm_client, llm_model = setup_llm(campaign_config)
 
     result = await _resume_or_build_diagnostic(
-        campaign_config, baseline, baseline_results, llm_client, llm_model,
-        svc["store"], svc["backend_id"], eval_data,
+        campaign_config,
+        baseline,
+        baseline_results,
+        llm_client,
+        llm_model,
+        svc["store"],
+        svc["backend_id"],
+        eval_data,
         improvement_areas=campaign_config.get("improvement_areas", ""),
         variant_library=variant_library,
     )
-    plan_id, search_baseline, diagnostic, _diag_summary, axis_profiles = result
+    plan_id = result.plan_id
+    search_baseline = result.search_baseline
+    diagnostic = result.diagnostic
+    axis_profiles = result.axis_profiles
 
     if axis_profiles:
         print(f"[RESUME] Plan {plan_id}: {len(axis_profiles)} axis profiles available")
     else:
-        print(f"  search_baseline: {search_baseline.id[:12]} "
-              f"(render: {len(search_baseline.render())} chars)")
+        print(
+            f"  search_baseline: {search_baseline.id[:12]} "
+            f"(render: {len(search_baseline.render())} chars)"
+        )
 
     return plan_id, search_baseline, diagnostic, axis_profiles, variant_library
 
@@ -84,13 +97,15 @@ def select_scan_winner_notebook(
         return baseline
 
     best_sp = _select_scan_winner(
-        scan_df, axis_profiles, baseline, scan_variants,
+        scan_df,
+        axis_profiles,
+        baseline,
+        scan_variants,
     )
 
     # Print summary
     improving = [
-        p for p in axis_profiles
-        if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
+        p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
     ]
     if improving:
         print(f"Selected best from {len(improving)} improving axes:")
@@ -126,7 +141,10 @@ def seed_campaign_from_scan(
         SearchPoint with best values composed in.
     """
     best_sp = select_scan_winner_notebook(
-        scan_df, axis_profiles, baseline, scan_variants,
+        scan_df,
+        axis_profiles,
+        baseline,
+        scan_variants,
     )
 
     if best_sp.pipeline_params:
@@ -164,15 +182,17 @@ def seed_campaign_from_scan(
         instruction=best_sp.render(),
         changes_description=f"scan_winner (sp_hash={best_sp.sp_hash()[:12]})",
     )
-    campaign_rounds.append({
-        "round": "search",
-        "label": f"smart_search ({search_opt.changes_description or search_opt.id[:12]})",
-        "prompt_fields": search_opt,
-        "accuracy": bl.get("accuracy", scan_baseline_acc),
-        "hits": bl.get("hits", 0),
-        "total": bl.get("total", 0),
-        "results": bl.get("results", []),
-    })
+    campaign_rounds.append(
+        {
+            "round": "search",
+            "label": f"smart_search ({search_opt.changes_description or search_opt.id[:12]})",
+            "prompt_fields": search_opt,
+            "accuracy": bl.get("accuracy", scan_baseline_acc),
+            "hits": bl.get("hits", 0),
+            "total": bl.get("total", 0),
+            "results": bl.get("results", []),
+        }
+    )
     show_progress(campaign_rounds)
 
     return best_sp

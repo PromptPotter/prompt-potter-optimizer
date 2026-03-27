@@ -7,6 +7,7 @@ Key design principle: no static axis enrichment. The advisor dynamically reads
 ``PipelineSchema`` and asks the LLM to suggest values. This makes the system
 backend-agnostic — a different PipelineSchema automatically surfaces its own axes.
 """
+
 from __future__ import annotations
 
 import json
@@ -71,10 +72,11 @@ def build_tunable_params(
                 if wire_key in STRUCTURAL_OVERRIDES:
                     structural_keys.add(flat_key)
 
-        tunable_config = {
-            k: v for k, v in node.current_config.items()
-            if k not in structural_keys
-        } if node.current_config else {}
+        tunable_config = (
+            {k: v for k, v in node.current_config.items() if k not in structural_keys}
+            if node.current_config
+            else {}
+        )
 
         entry: dict[str, Any] = {
             "name": node.name,
@@ -151,64 +153,42 @@ def build_llm_context(
     return context
 
 
-def _build_advisor_prompt(
-    pipeline_overview: list[dict],
-    tunable_params: list[dict],
-    llm_context: list[dict],
-    prompt_field_axes: list[str],
-    pipeline_description: str,
-    task_description: str | dict = "",
-) -> str:
-    """Build the LLM prompt for scan configuration advice.
-
-    Uses progressive pipeline disclosure: overview → tunable params → LLM details.
-
-    Args:
-        task_description: Raw string or structured task_context dict.
-    """
-    # --- conditional sections ---
-    constraints_section = (
+def _advisor_system_section(pipeline_description: str) -> str:
+    """Role definition and constraints."""
+    return (
+        "You are an expert prompt optimization advisor. Recommend which axes "
+        "(parameters and prompt fields) to prioritize in a sensitivity scan.\n\n"
         "## Constraints (apply strictly)\n"
         "- Do NOT recommend *_model axes — place them in axes_to_skip.\n"
-        "- Response must fit within 1500 tokens. Be terse."
+        "- Response must fit within 1500 tokens. Be terse.\n\n"
+        f"## Pipeline: {pipeline_description or 'No description available.'}\n"
+        "Nodes execute sequentially — each node's output feeds the next:"
     )
 
-    task_context_section = ""
+
+def _advisor_task_context_section(task_description: str | dict) -> str:
+    """Optional task context from user description or structured dict."""
     if isinstance(task_description, dict) and task_description:
         tc_lines = "\n".join(f"- **{k}**: {v}" for k, v in task_description.items() if v)
         if tc_lines:
-            task_context_section = f"\n## Task Context\n{tc_lines}\n"
+            return f"\n## Task Context\n{tc_lines}\n"
     elif task_description:
-        task_context_section = f"""
-## Task Context
-{task_description}
-"""
+        return f"\n## Task Context\n{task_description}\n"
+    return ""
 
-    llm_context_section = ""
-    if llm_context:
-        llm_context_section = f"""
-## LLM Node Details
-Output schema fields and prompt metadata for LLM-driven nodes:
-{json.dumps(llm_context, indent=2)}
-"""
 
-    return f"""\
-You are an expert prompt optimization advisor. Recommend which axes \
-(parameters and prompt fields) to prioritize in a sensitivity scan.
+def _advisor_llm_context_section(llm_context: list[dict]) -> str:
+    """LLM node output schema and prompt metadata."""
+    if not llm_context:
+        return ""
+    return (
+        "\n## LLM Node Details\n"
+        "Output schema fields and prompt metadata for LLM-driven nodes:\n"
+        f"{json.dumps(llm_context, indent=2)}\n"
+    )
 
-{constraints_section}
 
-## Pipeline: {pipeline_description or "No description available."}
-Nodes execute sequentially — each node's output feeds the next:
-{json.dumps(pipeline_overview, indent=2)}
-{task_context_section}\
-## Tunable Parameters (per node)
-{json.dumps(tunable_params, indent=2)}
-
-## Prompt Field Axes
-Prompt template fields that can be varied (variant library has pre-defined values):
-{json.dumps(prompt_field_axes, indent=2)}
-{llm_context_section}\
+_ADVISOR_ANALYSIS_APPROACH = """\
 ## Analysis Approach
 Work through these analysis steps before producing your recommendation:
 1. Trace data flow: UPSTREAM parameters have multiplier effects — poor upstream \
@@ -220,8 +200,10 @@ downstream consumption. Suggest mutations relative to the current output_schema 
 shown in LLM Node Details.
 4. Skip axes unlikely to affect accuracy. Prioritize axes with the highest \
 expected impact on end-to-end accuracy.
-5. Estimate a diagnostic budget (queries per axis).
+5. Estimate a diagnostic budget (queries per axis)."""
 
+
+_ADVISOR_OUTPUT_FORMAT = """\
 ## Output Format
 For pipeline_param axes, suggest concrete values that meaningfully differ from \
 current_values. For prompt_field axes, just flag them — the variant library \
@@ -278,6 +260,36 @@ Keep each variant to 1-2 mutations so individual effects are measurable.
 Return ONLY the JSON object, no markdown fences or extra text."""
 
 
+def _build_advisor_prompt(
+    pipeline_overview: list[dict],
+    tunable_params: list[dict],
+    llm_context: list[dict],
+    prompt_field_axes: list[str],
+    pipeline_description: str,
+    task_description: str | dict = "",
+) -> str:
+    """Build the LLM prompt for scan configuration advice.
+
+    Assembles from section helpers: system → pipeline → task context →
+    params → prompt fields → LLM details → analysis → output format.
+    """
+    sections = [
+        _advisor_system_section(pipeline_description),
+        json.dumps(pipeline_overview, indent=2),
+        _advisor_task_context_section(task_description),
+        f"## Tunable Parameters (per node)\n{json.dumps(tunable_params, indent=2)}",
+        (
+            "## Prompt Field Axes\n"
+            "Prompt template fields that can be varied (variant library has pre-defined values):\n"
+            f"{json.dumps(prompt_field_axes, indent=2)}"
+        ),
+        _advisor_llm_context_section(llm_context),
+        _ADVISOR_ANALYSIS_APPROACH,
+        _ADVISOR_OUTPUT_FORMAT,
+    ]
+    return "\n\n".join(s for s in sections if s)
+
+
 def preview_advisor_prompt(
     pipeline_schema: PipelineSchema | None = None,
     variant_library: dict | None = None,
@@ -298,11 +310,17 @@ def preview_advisor_prompt(
             variant_library = _load_vl()
 
         excluded_nodes = _resolve_excluded_nodes(
-            exclude_nodes, pipeline_schema, pipeline_params,
+            exclude_nodes,
+            pipeline_schema,
+            pipeline_params,
         )
         return _build_advisor_prompt(
-            pipeline_overview=build_pipeline_overview(schema=pipeline_schema, excluded_nodes=excluded_nodes),
-            tunable_params=build_tunable_params(schema=pipeline_schema, excluded_nodes=excluded_nodes),
+            pipeline_overview=build_pipeline_overview(
+                schema=pipeline_schema, excluded_nodes=excluded_nodes
+            ),
+            tunable_params=build_tunable_params(
+                schema=pipeline_schema, excluded_nodes=excluded_nodes
+            ),
             llm_context=build_llm_context(schema=pipeline_schema, excluded_nodes=excluded_nodes),
             prompt_field_axes=_extract_prompt_field_axes(variant_library),
             pipeline_description=pipeline_schema.description,
@@ -393,9 +411,7 @@ def _validate_advisory(
                                     f"required is not bool for '{m.path}'"
                                 )
                     except ValueError as e:
-                        warnings.append(
-                            f"Schema axis '{axis_name}' variant {i}: parse error: {e}"
-                        )
+                        warnings.append(f"Schema axis '{axis_name}' variant {i}: parse error: {e}")
 
         elif source == "prompt_field":
             if axis_name not in prompt_fields:
@@ -412,7 +428,8 @@ def _validate_advisory(
 
 
 def _excluded_from_schema(
-    schema: PipelineSchema, pipeline_params: dict | None,
+    schema: PipelineSchema,
+    pipeline_params: dict | None,
 ) -> set[str] | None:
     """Derive excluded nodes by diffing schema nodes vs pipeline_params["steps"]."""
     if not pipeline_params or "steps" not in pipeline_params:
@@ -465,9 +482,13 @@ async def advise_scan_config(
         ``validation_warnings``.
     """
     excluded_nodes = _resolve_excluded_nodes(
-        exclude_nodes, pipeline_schema, pipeline_params,
+        exclude_nodes,
+        pipeline_schema,
+        pipeline_params,
     )
-    pipeline_overview = build_pipeline_overview(schema=pipeline_schema, excluded_nodes=excluded_nodes)
+    pipeline_overview = build_pipeline_overview(
+        schema=pipeline_schema, excluded_nodes=excluded_nodes
+    )
     tunable_params = build_tunable_params(schema=pipeline_schema, excluded_nodes=excluded_nodes)
     llm_context = build_llm_context(schema=pipeline_schema, excluded_nodes=excluded_nodes)
     prompt_field_axes = _extract_prompt_field_axes(variant_library)
@@ -494,14 +515,14 @@ async def advise_scan_config(
         logger.warning(
             "Scan advisor response truncated (finish_reason=%s, max_tokens=%d). "
             "Increase max_tokens in eval_llm config.",
-            response.finish_reason, max_tokens,
+            response.finish_reason,
+            max_tokens,
         )
 
     advisory = response.parsed
     if advisory is None:
         reason = (
-            f"Response truncated at {max_tokens} tokens — "
-            "increase max_tokens in eval_llm config."
+            f"Response truncated at {max_tokens} tokens — increase max_tokens in eval_llm config."
             if truncated
             else "LLM response was not valid JSON"
         )
@@ -518,7 +539,10 @@ async def advise_scan_config(
 
     # Validate against schema
     warnings = _validate_advisory(
-        advisory, pipeline_schema, variant_library, excluded_nodes=excluded_nodes,
+        advisory,
+        pipeline_schema,
+        variant_library,
+        excluded_nodes=excluded_nodes,
     )
     if warnings:
         for w in warnings:

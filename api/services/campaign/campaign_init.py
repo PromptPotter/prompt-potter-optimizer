@@ -3,11 +3,13 @@
 Sets up project store, backend client, auto-syncs experiment data,
 evaluates baselines, and returns a services dict ready for use.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,9 +23,36 @@ from api.services.backend_client import BackendClient
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
     from api.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class InitResult:
+    """Return value from ``init_services()``.
+
+    Supports dict-style access (``result["key"]``, ``result.get("key")``)
+    for backward compatibility with notebook code that treats the result
+    as a dict.  Prefer attribute access (``result.store``) in new code.
+    """
+
+    store: ProjectStore
+    backend_id: str
+    experiment_id: str
+    backend_client: BackendClient
+    pipeline_schema: PipelineSchema | None
+    synced: bool
+    queries: list[dict] = field(default_factory=list)
+    exp_data: dict = field(default_factory=dict)
+    session_terms: list[str] = field(default_factory=list)
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
 
 
 def load_baseline_prompt(exp_data: dict) -> OptSearchPoint:
@@ -66,7 +95,7 @@ async def init_services(
     project_root: Path | None = None,
     dataset_name: str | None = None,
     on_status: Callable[[str], None] | None = None,
-) -> dict:
+) -> InitResult:
     """Initialize store, client, and load experiment data.
 
     If experiment data is not in the project store, attempts an automatic
@@ -89,10 +118,9 @@ async def init_services(
             traces.
 
     Returns:
-        Dict with keys: store, client, queries, terms, exp_data,
-        backend_id, experiment_id, backend_client, session_terms,
-        synced (bool indicating whether auto-sync was attempted).
+        InitResult with all service handles and loaded data.
     """
+
     def _status(msg: str) -> None:
         if on_status:
             on_status(msg)
@@ -106,15 +134,20 @@ async def init_services(
     _status(f"Backend: {backend_url}")
 
     if not store.backends.get(backend_id):
-        store.backends.register(BackendConnection(
-            id=backend_id, name="TermNorm Local",
-            backend_type="termnorm", base_url=backend_url,
-        ))
+        store.backends.register(
+            BackendConnection(
+                id=backend_id,
+                name="TermNorm Local",
+                backend_type="termnorm",
+                base_url=backend_url,
+            )
+        )
 
     # Fetch pipeline schema (best-effort — non-fatal)
     pipeline_schema = None
     try:
         from api.services.pipeline_discovery import parse_pipeline_response
+
         pipeline_resp = await client.fetch_pipeline()
         pipeline_schema = parse_pipeline_response(pipeline_resp)
         logger.info("Pipeline schema loaded: %s v%s", pipeline_schema.name, pipeline_schema.version)
@@ -125,14 +158,14 @@ async def init_services(
         logger.info("Could not fetch pipeline schema: %s", exc)
         _status("Pipeline: unavailable")
 
-    base = {
-        "store": store,
-        "backend_id": backend_id,
-        "experiment_id": experiment_id,
-        "backend_client": client,
-        "pipeline_schema": pipeline_schema,
-        "synced": False,
-    }
+    base = InitResult(
+        store=store,
+        backend_id=backend_id,
+        experiment_id=experiment_id,
+        backend_client=client,
+        pipeline_schema=pipeline_schema,
+        synced=False,
+    )
 
     # --- Dataset store path (preferred when available) ---
     if dataset_name:
@@ -142,15 +175,14 @@ async def init_services(
             session_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
             logger.info(
                 "Loaded dataset %r from store: %d items, %d session terms",
-                dataset_name, len(items), len(session_terms),
+                dataset_name,
+                len(items),
+                len(session_terms),
             )
             _status(f"Dataset: {dataset_name} ({len(items)} queries)")
-            return {
-                **base,
-                "queries": _dataset_items_to_queries(items),
-                "exp_data": {},
-                "session_terms": session_terms,
-            }
+            base.queries = _dataset_items_to_queries(items)
+            base.session_terms = session_terms
+            return base
         logger.info("Dataset %r not found in store, falling back to experiment sync", dataset_name)
         _status(f"Dataset '{dataset_name}' not found, falling back to experiment sync")
 
@@ -158,11 +190,7 @@ async def init_services(
     exp_data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
 
     # Detect stale sync data: data exists but has no traces
-    _has_traces = bool(
-        exp_data
-        and exp_data.get("runs")
-        and exp_data["runs"][0].get("traces")
-    )
+    _has_traces = bool(exp_data and exp_data.get("runs") and exp_data["runs"][0].get("traces"))
 
     synced = False
     if not exp_data or not _has_traces:
@@ -171,7 +199,10 @@ async def init_services(
         _status(f"Syncing experiment {experiment_id} ...")
         try:
             exp_data = await client.sync_experiment(
-                store, backend_id, experiment_id, include_traces=True,
+                store,
+                backend_id,
+                experiment_id,
+                include_traces=True,
             )
             synced = True
             _status("Sync complete")
@@ -181,7 +212,7 @@ async def init_services(
             logger.warning("Auto-sync failed: %s", exc)
             _status(f"Sync failed: {exc}")
 
-    base["synced"] = synced
+    base.synced = synced
 
     if not exp_data:
         logger.warning(
@@ -189,25 +220,17 @@ async def init_services(
             "Downstream calls will fail until data is synced or datasets are loaded."
         )
         _status("WARNING: No experiment data available")
-        return {
-            **base,
-            "queries": [],
-            "exp_data": {},
-            "session_terms": [],
-        }
+        return base
 
     queries = client.extract_replay_queries(exp_data)
     session_terms = client.extract_session_terms(exp_data)
     exp_name = exp_data.get("experiment", {}).get("name", experiment_id)
-    _status(f"Experiment: {exp_name} ({len(queries)} queries, "
-            f"{len(session_terms)} session terms)")
+    _status(f"Experiment: {exp_name} ({len(queries)} queries, {len(session_terms)} session terms)")
 
-    return {
-        **base,
-        "queries": queries,
-        "exp_data": exp_data,
-        "session_terms": session_terms,
-    }
+    base.queries = queries
+    base.exp_data = exp_data
+    base.session_terms = session_terms
+    return base
 
 
 def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
@@ -218,13 +241,15 @@ def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
         gt = item.get("ground_truth", "")
         if not query or not gt:
             continue
-        queries.append({
-            "query": query,
-            "bom_material": query,
-            "process": "",
-            "query_fields": {"bom_material": query, "process": ""},
-            "ground_truth": gt,
-        })
+        queries.append(
+            {
+                "query": query,
+                "bom_material": query,
+                "process": "",
+                "query_fields": {"bom_material": query, "process": ""},
+                "ground_truth": gt,
+            }
+        )
     return queries
 
 
@@ -244,20 +269,25 @@ async def _wait_session_ready(
         if data.get("session_active") and data.get("terms_loaded", 0) > 0:
             logger.info(
                 "Session ready (attempt %d/%d): %d terms loaded",
-                attempt, max_attempts, data["terms_loaded"],
+                attempt,
+                max_attempts,
+                data["terms_loaded"],
             )
             return
         logger.debug(
             "Session not ready (attempt %d/%d): session_active=%s, terms_loaded=%s",
-            attempt, max_attempts,
-            data.get("session_active"), data.get("terms_loaded"),
+            attempt,
+            max_attempts,
+            data.get("session_active"),
+            data.get("terms_loaded"),
         )
         if attempt < max_attempts:
             await asyncio.sleep(delay)
 
     logger.warning(
-        "Session not ready after %d attempts — evaluation may produce errors. "
-        "Last status: %s", max_attempts, status,
+        "Session not ready after %d attempts — evaluation may produce errors. Last status: %s",
+        max_attempts,
+        status,
     )
 
 
@@ -277,20 +307,25 @@ async def _verify_matches_liveness(
             await backend_client.run_match(probe_query)
             logger.info(
                 "Matches liveness probe succeeded (attempt %d/%d)",
-                attempt, max_attempts,
+                attempt,
+                max_attempts,
             )
             return
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 400 and attempt < max_attempts:
                 logger.debug(
                     "Matches probe got 400 (attempt %d/%d), retrying in %.0fs",
-                    attempt, max_attempts, delay,
+                    attempt,
+                    max_attempts,
+                    delay,
                 )
                 await asyncio.sleep(delay)
             else:
                 logger.warning(
                     "Matches liveness probe failed (attempt %d/%d): %s",
-                    attempt, max_attempts, exc,
+                    attempt,
+                    max_attempts,
+                    exc,
                 )
                 return
         except (KeyboardInterrupt, asyncio.CancelledError):
@@ -298,7 +333,9 @@ async def _verify_matches_liveness(
         except Exception as exc:
             logger.warning(
                 "Matches liveness probe failed (attempt %d/%d): %s",
-                attempt, max_attempts, exc,
+                attempt,
+                max_attempts,
+                exc,
             )
             return
 
@@ -344,6 +381,7 @@ async def run_baseline_eval(
 
     if not eval_data and store and experiment_id:
         from api.services.search.eval_dataset import load_eval_dataset
+
         eval_data = load_eval_dataset(store, backend_id, experiment_id)
 
     if not eval_data:
@@ -366,6 +404,7 @@ async def run_baseline_eval(
     # Register dataset items in obs if available
     if obs and eval_data:
         from api.services.campaign.helpers import graceful
+
         with graceful("Dataset registration in run_baseline_eval failed"):
             obs.register_dataset(DATASET_NAME, eval_data)
 
@@ -382,16 +421,24 @@ async def run_baseline_eval(
         source="baseline",
     )
     baseline_results, scores, _cached = await evaluate_prompt_cached(
-        sp, eval_data, ctx,
+        sp,
+        eval_data,
+        ctx,
         label="Baseline",
         on_result=on_result,
     )
 
-    campaign_rounds = [{
-        "round": 0, "label": "baseline", "prompt_fields": baseline,
-        "accuracy": scores["accuracy"], "hits": scores["hits"],
-        "total": scores["total"], "results": baseline_results,
-    }]
+    campaign_rounds = [
+        {
+            "round": 0,
+            "label": "baseline",
+            "prompt_fields": baseline,
+            "accuracy": scores["accuracy"],
+            "hits": scores["hits"],
+            "total": scores["total"],
+            "results": baseline_results,
+        }
+    ]
 
     return campaign_rounds, baseline_results
 
@@ -402,7 +449,9 @@ async def run_baseline_eval(
 
 
 def resolve_experiment_id(
-    store: ProjectStore, backend_id: str, short_id: str,
+    store: ProjectStore,
+    backend_id: str,
+    short_id: str,
 ) -> str | None:
     """Resolve short prefix/suffix to full campaign_id."""
     campaigns = store.campaigns.list_all(backend_id)
@@ -412,7 +461,8 @@ def resolve_experiment_id(
     if len(matches) > 1:
         logger.warning(
             "Ambiguous ID '%s' — %d matches: %s",
-            short_id, len(matches),
+            short_id,
+            len(matches),
             [m["campaign_id"] for m in matches],
         )
         return None
@@ -489,11 +539,15 @@ def save_campaign_winner(
         full_id = resolve_experiment_id(store, backend_id, experiment_id)
         if full_id:
             try:
-                store.campaigns.update(backend_id, full_id, {
-                    "winner_prompt_fields_id": winner.id,
-                    "winner_accuracy": winner_acc,
-                    "winner_filename": filename,
-                })
+                store.campaigns.update(
+                    backend_id,
+                    full_id,
+                    {
+                        "winner_prompt_fields_id": winner.id,
+                        "winner_accuracy": winner_acc,
+                        "winner_filename": filename,
+                    },
+                )
             except (KeyboardInterrupt, asyncio.CancelledError):
                 raise
             except Exception:

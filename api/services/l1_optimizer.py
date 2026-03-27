@@ -29,7 +29,7 @@ from api.services.campaign.formatting import (
     format_scan_analytics as _format_scan_analytics,
 )
 from api.services.llm_client import LLMClientBase
-from api.services.metrics import compute_composite_score
+from api.services.metrics import compute_composite_score, count_degraded_queries
 from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
@@ -397,9 +397,5 @@ async def l1_evaluate(
         winner_results=winner_entry.get("results", []),
         all_eval_results=[r for results in all_candidate_results.values() for r in results],
         escalation_signal=escalation_signal,
-        degraded_queries=sum(
-            1
-            for r in winner_entry.get("results", [])
-            if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
-        ),
+        degraded_queries=count_degraded_queries(winner_entry.get("results", [])),
     )

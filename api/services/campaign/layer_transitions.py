@@ -9,6 +9,7 @@ L3 (modify_plan): Analyzes why L2 adjustments didn't help and suggests
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 from dataclasses import dataclass
@@ -28,6 +29,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class TransitionAction(enum.StrEnum):
+    """What the feedback cycle should do after an L2/L3 transition."""
+
+    CONTINUE = "continue"
+    PROBE = "probe"
+
 
 @dataclass
 class TransitionResult:
@@ -41,7 +48,7 @@ class TransitionResult:
     pipeline_params: dict | None = None
     task_context: dict | None = None
     l2_directive: str = ""
-    action: str = "continue"  # "continue" | "probe" (extensible)
+    action: TransitionAction = TransitionAction.CONTINUE
     debug_prompt: str = ""
     debug_response: dict | None = None
 
@@ -72,13 +79,14 @@ async def refine_context(
         failure_lines.extend(format_failure_lines(rd.get("results", []), max_lines=5))
 
     round_summary = "\n".join(
-        f"  Round {rd.get('round', '?')}: acc={rd.get('accuracy', 0):.1%}"
-        for rd in stalled_rounds
+        f"  Round {rd.get('round', '?')}: acc={rd.get('accuracy', 0):.1%}" for rd in stalled_rounds
     )
 
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
     escalation_section = _build_escalation_prompt_section(
-        escalation_context, opt_sp.escalation_journal or None, pipeline_params,
+        escalation_context,
+        opt_sp.escalation_journal or None,
+        pipeline_params,
         pipeline_schema=pipeline_schema,
     )
 
@@ -126,7 +134,7 @@ async def refine_context(
         "\nNote: L1 Generate makes the final decision on pipeline_params. "
         "Your job is to refine the "
         "situation context and meta-settings so L1 makes better choices.\n"
-        "Use your judgment on when to set action to \"probe\" vs \"continue\" "
+        'Use your judgment on when to set action to "probe" vs "continue" '
         "based on the data above."
     )
 
@@ -167,9 +175,10 @@ async def refine_context(
             new_task_context = merged
 
     # Parse action classification
-    action = result.get("action", "continue")
-    if action not in ("continue", "probe"):
-        action = "continue"
+    try:
+        action = TransitionAction(result.get("action", "continue"))
+    except ValueError:
+        action = TransitionAction.CONTINUE
 
     # Extract L2 directive for L1 injection
     l2_directive = result.get("directive", "")
@@ -177,8 +186,7 @@ async def refine_context(
         l2_directive = ""
 
     logger.info(
-        "L2 refine_context: %d param changes, task_context %s, "
-        "action=%s, directive=%d chars",
+        "L2 refine_context: %d param changes, task_context %s, action=%s, directive=%d chars",
         len(result.get("optimizer_params", {})),
         "updated" if new_task_context else "unchanged",
         action,
@@ -254,9 +262,11 @@ async def modify_plan(
 
     new_pipeline_params = _parse_pipeline_params(result, pipeline_params)
 
-    logger.info("L3 modify_plan: %s, pipeline_params %s",
-                rationale[:100],
-                "updated" if new_pipeline_params else "unchanged")
+    logger.info(
+        "L3 modify_plan: %s, pipeline_params %s",
+        rationale[:100],
+        "updated" if new_pipeline_params else "unchanged",
+    )
 
     new_opt_sp = opt_sp.derive_candidate(
         plan=new_plan,
@@ -357,9 +367,7 @@ def _build_escalation_prompt_section(
         all_keys = pipeline_schema.node_param_keys()
         step_keys = all_keys.get(step_name, set())
         if step_keys:
-            lines.append(
-                f"  Available {step_name} parameters: {', '.join(sorted(step_keys))}"
-            )
+            lines.append(f"  Available {step_name} parameters: {', '.join(sorted(step_keys))}")
 
     lines.append(
         "  The configurations above are all unstable. Suggest different "

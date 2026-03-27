@@ -137,8 +137,10 @@ async def _handle_escalation_signal(
 
     esc_context = signal["context"]
 
+    from api.services.campaign.escalation import EscalationTarget
+
     # Dispatch by target
-    if signal["target"] in ("l2", "l3") and config.enable_l2:
+    if signal["target"] in (EscalationTarget.L2, EscalationTarget.L3) and config.enable_l2:
         # Fill outcome of previous journal entry (if any)
         journal = state.opt_sp.escalation_journal
         if journal and journal[-1].get("outcome_degraded_rate") is None:
@@ -182,7 +184,7 @@ async def _handle_escalation_signal(
                 "outcome_degraded_rate": None,
             }
         )
-    elif signal["target"] == "abort":
+    elif signal["target"] == EscalationTarget.ABORT:
         return StopReason.ABORT
 
     # Common escalation exit (L2 continued, retry, or L2 disabled)

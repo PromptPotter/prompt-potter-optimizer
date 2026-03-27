@@ -2,9 +2,11 @@
 
 Pure functions for working with scan results — no backend calls, no eval.
 """
+
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -17,6 +19,45 @@ if TYPE_CHECKING:
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Result models
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ScanContext:
+    """Structured scan context for the LLM meta-prompt.
+
+    Supports dict-style access for backward compatibility with code
+    that treats scan_context as a dict.
+    """
+
+    leaderboard_text: str = ""
+    sensitivity_text: str = ""
+    difficulty_text: str = ""
+    improving_axes: list[str] = field(default_factory=list)
+    has_prompt_axes: bool = False
+    tested_values: str = ""
+    baseline_accuracy: float = 0.0
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+
+@dataclass
+class DiagnosticResult:
+    """Return value from ``resume_or_build_diagnostic()``."""
+
+    plan_id: str
+    search_baseline: OptSearchPoint
+    diagnostic: list
+    summary: dict
+    axis_profiles: list
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +76,7 @@ async def resume_or_build_diagnostic(
     eval_data: list,
     improvement_areas: str = "",
     variant_library: dict | None = None,
-) -> tuple[str, OptSearchPoint, list, dict, list]:
+) -> DiagnosticResult:
     """Resume or build smart search diagnostic set.
 
     Returns:
@@ -77,12 +118,12 @@ async def resume_or_build_diagnostic(
         if plan["scan_results"] and status in ("scan_complete", "search_complete"):
             cached_profiles = plan["scan_results"].get("axis_profiles", [])
             logger.info("Scan complete in plan %s, reusing profiles", plan_id)
-            return (
-                plan_id,
-                plan["search_baseline_ps"],
-                plan["diagnostic"],
-                plan["diag_summary"],
-                cached_profiles,
+            return DiagnosticResult(
+                plan_id=plan_id,
+                search_baseline=plan["search_baseline_ps"],
+                diagnostic=plan["diagnostic"],
+                summary=plan["diag_summary"],
+                axis_profiles=cached_profiles,
             )
         if plan["scan_results"] and status == "scan_partial":
             partial_rows = plan["scan_results"].get("rows", [])
@@ -97,23 +138,28 @@ async def resume_or_build_diagnostic(
                 if len(vals) > 1:
                     _axes.append((name, "pipeline_param", vals))
             partial_profiles = _profiles_from_rows(
-                partial_rows, _axes, len(plan["diagnostic"]),
+                partial_rows,
+                _axes,
+                len(plan["diagnostic"]),
             )
             logger.info(
                 "Scan partial in plan %s: %d axes done, %d profiles",
-                plan_id, len(partial_completed), len(partial_profiles),
-            )
-            return (
                 plan_id,
-                plan["search_baseline_ps"],
-                plan["diagnostic"],
-                plan["diag_summary"],
-                partial_profiles,
+                len(partial_completed),
+                len(partial_profiles),
+            )
+            return DiagnosticResult(
+                plan_id=plan_id,
+                search_baseline=plan["search_baseline_ps"],
+                diagnostic=plan["diagnostic"],
+                summary=plan["diag_summary"],
+                axis_profiles=partial_profiles,
             )
 
         # diagnostic_built -> reuse saved baseline; prefer sibling with scan data
         siblings = [
-            s for s in store.smart_search.list_all(backend_id)
+            s
+            for s in store.smart_search.list_all(backend_id)
             if s["plan_id"] != plan_id
             and s["status"] in ("scan_complete", "search_complete")
             and s.get("variant_library_hash") == existing.get("variant_library_hash", "")
@@ -121,39 +167,43 @@ async def resume_or_build_diagnostic(
         ]
         if siblings:
             current_n_diag = plan.get("config", {}).get("n_diagnostic", 6)
-            siblings.sort(key=lambda s: (
-                s.get("n_diagnostic") != current_n_diag,
-                s["status"] != "scan_complete",
-            ))
+            siblings.sort(
+                key=lambda s: (
+                    s.get("n_diagnostic") != current_n_diag,
+                    s["status"] != "scan_complete",
+                )
+            )
             sib_data = store.smart_search.load(backend_id, siblings[0]["plan_id"])
             assert sib_data is not None
             sib_plan = deserialize_smart_search_plan(sib_data)
             sib_profiles = (sib_plan.get("scan_results") or {}).get("axis_profiles", [])
             logger.info(
                 "Adopting scan data from sibling plan %s (%d profiles)",
-                siblings[0]["plan_id"], len(sib_profiles),
+                siblings[0]["plan_id"],
+                len(sib_profiles),
             )
-            return (
-                plan_id,
-                sib_plan["search_baseline_ps"],
-                sib_plan["diagnostic"],
-                sib_plan["diag_summary"],
-                sib_profiles,
+            return DiagnosticResult(
+                plan_id=plan_id,
+                search_baseline=sib_plan["search_baseline_ps"],
+                diagnostic=sib_plan["diagnostic"],
+                summary=sib_plan["diag_summary"],
+                axis_profiles=sib_profiles,
             )
 
         logger.info("Plan %s (status: %s), reusing saved diagnostic", plan_id, status)
-        return (
-            plan_id,
-            plan["search_baseline_ps"],
-            plan["diagnostic"],
-            plan["diag_summary"],
-            [],
+        return DiagnosticResult(
+            plan_id=plan_id,
+            search_baseline=plan["search_baseline_ps"],
+            diagnostic=plan["diagnostic"],
+            summary=plan["diag_summary"],
+            axis_profiles=[],
         )
 
     # Build new plan: LLM restructure + diagnostic set
     logger.info("Building new smart search plan: %s", plan_id)
     layer1_fields = await restructure_context(
-        baseline.instruction, llm_client,
+        baseline.instruction,
+        llm_client,
         model=model,
         improvement_areas=improvement_areas,
     )
@@ -163,7 +213,8 @@ async def resume_or_build_diagnostic(
     )
 
     diagnostic, diag_summary = build_diagnostic_set(
-        eval_data, baseline_results,
+        eval_data,
+        baseline_results,
         n_queries=ss.get("n_diagnostic", 6),
     )
 
@@ -177,12 +228,24 @@ async def resume_or_build_diagnostic(
         "stop_threshold": ss.get("stop_threshold", 0.0),
     }
     plan_data = serialize_smart_search_plan(
-        plan_id, config, baseline, search_baseline,
-        layer1_fields, diagnostic, diag_summary, vl_hash,
+        plan_id,
+        config,
+        baseline,
+        search_baseline,
+        layer1_fields,
+        diagnostic,
+        diag_summary,
+        vl_hash,
     )
     store.smart_search.save(backend_id, plan_id, plan_data)
 
-    return plan_id, search_baseline, diagnostic, diag_summary, []
+    return DiagnosticResult(
+        plan_id=plan_id,
+        search_baseline=search_baseline,
+        diagnostic=diagnostic,
+        summary=diag_summary,
+        axis_profiles=[],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +274,7 @@ def select_scan_winner(
     param_changes: dict[str, Any] = {}
 
     improving = [
-        p for p in axis_profiles
-        if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
+        p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
     ]
 
     for profile in improving:
@@ -226,7 +288,9 @@ def select_scan_winner(
         if value_idx >= len(values):
             logger.warning(
                 "select_scan_winner: value_idx %d out of range for %s (len=%d)",
-                value_idx, axis_name, len(values),
+                value_idx,
+                axis_name,
+                len(values),
             )
             continue
         value = values[value_idx]
@@ -241,7 +305,8 @@ def select_scan_winner(
             "baseline_opt required for prompt_field perturbation in select_scan_winner"
         )
         best_opt = baseline_opt.derive_candidate(
-            **prompt_changes, changes_description="scan_winner",
+            **prompt_changes,
+            changes_description="scan_winner",
         )
         best = best_opt.to_job_search_point(
             model=baseline.model,
@@ -254,7 +319,9 @@ def select_scan_winner(
         )
     logger.debug(
         "select_scan_winner: %d prompt changes, %d param changes from %d improving axes",
-        len(prompt_changes), len(param_changes), len(improving),
+        len(prompt_changes),
+        len(param_changes),
+        len(improving),
     )
     return best
 
@@ -271,7 +338,7 @@ def prepare_scan_context(
     baseline_accuracy: float,
     *,
     difficulty_summary: dict | None = None,
-) -> dict:
+) -> ScanContext:
     """Build structured scan context for the LLM meta-prompt.
 
     All formatting is deterministic — no LLM calls. Returns a dict with
@@ -316,8 +383,7 @@ def prepare_scan_context(
         difficulty_text = "  (not available)"
 
     _improving = [
-        p for p in axis_profiles
-        if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
+        p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
     ]
     improving_axes = [p["axis"] for p in _improving]
     has_prompt_axes = any(p["axis_type"] == "prompt_field" for p in _improving)
@@ -325,23 +391,25 @@ def prepare_scan_context(
     tested_lines = []
     for axis_name in improving_axes:
         axis_rows = scan_df[scan_df["axis"] == axis_name].sort_values(
-            "accuracy", ascending=False,
+            "accuracy",
+            ascending=False,
         )
         vals = []
         for _, r in axis_rows.iterrows():
             bl = " *baseline*" if r["delta"] == 0.0 else ""
-            vals.append(f"    [{r['value_idx']}] {r['value_preview'][:50]}"
-                        f"  acc={r['accuracy']:.1%}{bl}")
+            vals.append(
+                f"    [{r['value_idx']}] {r['value_preview'][:50]}  acc={r['accuracy']:.1%}{bl}"
+            )
         tested_lines.append(f"  {axis_name} ({len(axis_rows)} values tested):")
         tested_lines.extend(vals)
     tested_values = "\n".join(tested_lines)
 
-    return {
-        "leaderboard_text": leaderboard_text,
-        "sensitivity_text": sensitivity_text,
-        "difficulty_text": difficulty_text,
-        "improving_axes": improving_axes,
-        "has_prompt_axes": has_prompt_axes,
-        "tested_values": tested_values,
-        "baseline_accuracy": baseline_accuracy,
-    }
+    return ScanContext(
+        leaderboard_text=leaderboard_text,
+        sensitivity_text=sensitivity_text,
+        difficulty_text=difficulty_text,
+        improving_axes=improving_axes,
+        has_prompt_axes=has_prompt_axes,
+        tested_values=tested_values,
+        baseline_accuracy=baseline_accuracy,
+    )

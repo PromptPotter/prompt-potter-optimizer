@@ -2,6 +2,7 @@
 
 Pure computation — no I/O, no eval infrastructure dependencies.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -30,8 +31,15 @@ def compute_accuracy(results: list) -> dict:
     return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
 
 
-def _step_ran(step_name: str, result: dict) -> bool:
-    """Check if a step ran for a given result (via step_timings or terminated_at)."""
+def count_degraded_queries(results: list[dict]) -> int:
+    """Count queries that have pipeline degradation warnings."""
+    return sum(
+        1 for r in results if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
+    )
+
+
+def _step_executed(step_name: str, result: dict) -> bool:
+    """Check if a pipeline step executed for a result (via step_timings or terminated_at)."""
     pd = result.get("pipeline_data") or {}
     if pd.get("terminated_at") == step_name:
         return True
@@ -39,14 +47,14 @@ def _step_ran(step_name: str, result: dict) -> bool:
     return timings.get(step_name) is not None
 
 
-def _candidate_name(c) -> str:
+def _extract_candidate_label(c) -> str:
     """Extract the display name from a candidate (may be a tuple or string)."""
     return c[0] if isinstance(c, (list, tuple)) else str(c)
 
 
 def _compute_recall(step: PipelineNode, results: list[dict]) -> float:
     """Fraction of queries where GT appears in the candidate list for *step*."""
-    scoped = [r for r in results if _step_ran(step.name, r) and not r.get("error")]
+    scoped = [r for r in results if _step_executed(step.name, r) and not r.get("error")]
     if not scoped:
         return 0.0
     found = 0
@@ -54,7 +62,7 @@ def _compute_recall(step: PipelineNode, results: list[dict]) -> float:
         pd = r.get("pipeline_data") or {}
         candidates = pd.get("token_matched_candidates", [])
         gt = r.get("ground_truth", "")
-        if any(_candidate_name(c) == gt for c in candidates):
+        if any(_extract_candidate_label(c) == gt for c in candidates):
             found += 1
     return found / len(scoped)
 
@@ -122,12 +130,12 @@ def derive_metrics(
         for step in steps:
             for metric_def in metrics:
                 metric_name = (
-                    f"{step.name}_{metric_def.name}"
-                    if needs_namespace
-                    else metric_def.name
+                    f"{step.name}_{metric_def.name}" if needs_namespace else metric_def.name
                 )
                 metric_values[metric_name] = _compute_role_metric(
-                    metric_def, step, results,
+                    metric_def,
+                    step,
+                    results,
                 )
 
     # Composite: accuracy_weight * accuracy + distributed remaining weight
@@ -139,11 +147,7 @@ def derive_metrics(
             w = weights.get(m_name, remaining_weight / n_metrics)
             weighted_sum += w * m_val
 
-    # Count queries with pipeline degradation warnings
-    degraded = sum(
-        1 for r in results
-        if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
-    )
+    degraded = count_degraded_queries(results)
 
     return {
         **base,
@@ -172,7 +176,9 @@ def compute_composite_score(
         has_roles = any(s.node_role for s in pipeline_schema.nodes)
         if has_roles:
             return derive_metrics(
-                pipeline_schema, results, accuracy_weight=accuracy_weight,
+                pipeline_schema,
+                results,
+                accuracy_weight=accuracy_weight,
             )
 
     # Fallback: hardcoded token_recall
@@ -192,18 +198,14 @@ def compute_composite_score(
         n_llm += 1
         gt = r.get("ground_truth", "")
         candidates = pd.get("token_matched_candidates", [])
-        if any(_candidate_name(c) == gt for c in candidates):
+        if any(_extract_candidate_label(c) == gt for c in candidates):
             found += 1
 
     token_recall = found / n_llm if n_llm else 0.0
     recall_weight = 1.0 - accuracy_weight
     composite = accuracy_weight * accuracy + recall_weight * token_recall
 
-    # Count queries with pipeline degradation warnings
-    degraded = sum(
-        1 for r in results
-        if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
-    )
+    degraded = count_degraded_queries(results)
 
     return {
         **base,

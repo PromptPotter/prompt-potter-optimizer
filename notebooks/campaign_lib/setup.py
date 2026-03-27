@@ -9,6 +9,7 @@ from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import extract_pipeline_config
 from api.services.campaign.campaign_init import (
+    InitResult,
     init_services as _init_services,
     build_all_session_terms,
     create_llm_client as setup_llm,
@@ -26,10 +27,16 @@ if TYPE_CHECKING:
 
 __all__ = [
     # Service init
-    "init_services", "setup_llm", "load_variant_library",
+    "init_services",
+    "setup_llm",
+    "load_variant_library",
     # Backend status & datasets
-    "show_backend_status", "show_dataset_summary", "build_all_session_terms",
-    "load_or_create_datasets", "load_stored_dataset", "prepare_datasets",
+    "show_backend_status",
+    "show_dataset_summary",
+    "build_all_session_terms",
+    "load_or_create_datasets",
+    "load_stored_dataset",
+    "prepare_datasets",
     "prepare_eval_context",
     "SHEET_COLUMN_MAP",
     # Pipeline config
@@ -41,7 +48,9 @@ __all__ = [
     # Re-exports
     "save_campaign_winner",
     # Langfuse
-    "configure_langfuse", "sync_langfuse", "push_langfuse",
+    "configure_langfuse",
+    "sync_langfuse",
+    "push_langfuse",
     # Dev
     "dev_reload",
 ]
@@ -51,8 +60,13 @@ __all__ = [
 # Task context decomposition
 # ---------------------------------------------------------------------------
 
-TASK_CONTEXT_FIELDS = ("domain", "pipeline_purpose", "data_characteristics",
-                       "optimization_goals", "key_challenges")
+TASK_CONTEXT_FIELDS = (
+    "domain",
+    "pipeline_purpose",
+    "data_characteristics",
+    "optimization_goals",
+    "key_challenges",
+)
 
 
 async def decompose_task_context(
@@ -84,8 +98,8 @@ async def decompose_task_context(
         llm_client = llm_client or _client
         model = model or _model
     llm_model = model
-    store = svc.get("store")
-    backend_id = svc.get("backend_id", "")
+    store = svc.store
+    backend_id = svc.backend_id
     improvement_areas = campaign_config.get("improvement_areas", "")
 
     # Content-hash for caching
@@ -94,7 +108,8 @@ async def decompose_task_context(
     ).hexdigest()[:16]
 
     result, was_cached = await restructure_context_cached(
-        task_description, llm_client,
+        task_description,
+        llm_client,
         model=llm_model,
         improvement_areas=improvement_areas,
         store_base_dir=store.base_dir if store else None,
@@ -150,7 +165,7 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     """
     import json
 
-    pipeline_raw = await svc["backend_client"].fetch_pipeline()
+    pipeline_raw = await svc.backend_client.fetch_pipeline()
     config = pipeline_raw.get("data", pipeline_raw)
 
     name = config.get("name", "?")
@@ -172,20 +187,20 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
 def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
-    Uses ``svc["pipeline_schema"]`` (from ``GET /pipeline``) as the source of
+    Uses ``svc.pipeline_schema`` (from ``GET /pipeline``) as the source of
     truth for node names, falling back to experiment data only when the schema
     is unavailable.  Reads ``exclude_nodes`` and ``pipeline_overrides`` from
     *campaign_config*, stores the result back into
     ``campaign_config["pipeline_params"]``, and returns the params dict.
     """
-    pipeline_schema = svc.get("pipeline_schema")
+    pipeline_schema = svc.pipeline_schema
     exclude = campaign_config.get("exclude_nodes", [])
     overrides = campaign_config.get("pipeline_overrides")
 
     if pipeline_schema:
         all_names = [n.name for n in pipeline_schema.nodes]
     else:
-        pipeline_config = extract_pipeline_config(svc["exp_data"])
+        pipeline_config = extract_pipeline_config(svc.exp_data)
         all_names = [s["name"] for s in pipeline_config["steps"]]
 
     active = [n for n in all_names if n not in (exclude or [])]
@@ -229,13 +244,14 @@ async def init_services(
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
     dataset_name: str | None = None,
-) -> dict:
+) -> InitResult:
     """Initialize store, client, and load experiment data.
 
     When *dataset_name* is provided, loads ground-truth data from the
     DatasetStore instead of requiring experiment traces.
     """
     from api.config.logging import setup_logging
+
     setup_logging()
 
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -249,15 +265,12 @@ async def init_services(
         on_status=print,
     )
 
-    exp_data = svc.get("exp_data", {})
-    queries = svc.get("queries", [])
-
-    if dataset_name and queries:
-        print(f"Dataset    : {dataset_name} ({len(queries)} queries)")
-        print(f"Session terms: {len(svc.get('session_terms', []))}")
+    if dataset_name and svc.queries:
+        print(f"Dataset    : {dataset_name} ({len(svc.queries)} queries)")
+        print(f"Session terms: {len(svc.session_terms)}")
         return svc
 
-    if not exp_data:
+    if not svc.exp_data:
         print(
             "WARNING: No experiment data available. "
             "Use load_or_create_datasets() to load from Excel, "
@@ -265,15 +278,11 @@ async def init_services(
         )
         return svc
 
-    mappings = exp_data.get("mappings", [])
-    verified = sum(
-        1 for m in mappings
-        if m.get("dataset_entry", "").strip() not in ("", "--")
-    )
-    print(f"Experiment : {exp_data.get('experiment', {}).get('name', experiment_id)}")
+    mappings = svc.exp_data.get("mappings", [])
+    verified = sum(1 for m in mappings if m.get("dataset_entry", "").strip() not in ("", "--"))
+    print(f"Experiment : {svc.exp_data.get('experiment', {}).get('name', experiment_id)}")
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
-    print(f"Queries    : {len(queries)}  |  "
-          f"Session terms: {len(svc.get('session_terms', []))}")
+    print(f"Queries    : {len(svc.queries)}  |  Session terms: {len(svc.session_terms)}")
 
     return svc
 
@@ -339,7 +348,8 @@ async def prepare_eval_context(
         (baseline, eval_data, campaign_rounds, baseline_results)
     """
     from api.services.campaign.campaign_init import load_baseline_prompt
-    baseline = load_baseline_prompt(svc["exp_data"])
+
+    baseline = load_baseline_prompt(svc.exp_data)
     eval_data = train_data or []
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
@@ -348,12 +358,15 @@ async def prepare_eval_context(
     baseline_results: list = []
     if run_baseline and campaign_config is not None:
         from .eval import run_baseline_eval
+
         campaign_rounds, baseline_results = await run_baseline_eval(
-            baseline, eval_data, campaign_config, svc,
+            baseline,
+            eval_data,
+            campaign_config,
+            svc,
         )
 
     return baseline, eval_data, campaign_rounds, baseline_results
-
 
 
 # build_all_session_terms is now imported from
@@ -443,14 +456,14 @@ def prepare_datasets(
             if q:
                 all_queries.add(q)
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"  Train              : {len(splits['train'])} queries")
     print(f"  Test (processes)   : {len(splits['test_processes'])} queries")
     print(f"  Test (material)    : {len(splits['test_material'])} queries")
     print(f"  {'-' * 48}")
     print(f"  Combined queries   : {len(all_queries)} (deduplicated)")
     print(f"  Session identifiers: {len(session_terms)} unique targets")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
 
     return train_data, session_terms
 
@@ -484,8 +497,7 @@ def load_or_create_datasets(
                     result[name] = ds["items"]
                 else:
                     result[name] = []
-                    print(f"  WARNING: {name} not found on disk"
-                          " -- run with force=True to recreate")
+                    print(f"  WARNING: {name} not found on disk -- run with force=True to recreate")
             total = sum(len(v) for v in result.values())
             print(f"Loaded stored datasets: {total} total rows")
             for name, items in result.items():
@@ -528,8 +540,7 @@ def load_stored_dataset(
         print(f"Dataset '{name}' not found for backend '{backend_id}'.")
         return []
     items = ds["items"]
-    print(f"Loaded dataset '{name}': {len(items)} rows "
-          f"(source: {ds.get('source_file', '?')})")
+    print(f"Loaded dataset '{name}': {len(items)} rows (source: {ds.get('source_file', '?')})")
     return items
 
 
@@ -582,8 +593,11 @@ def sync_langfuse(
     from api.services.obs.langfuse_push import sync_langfuse_runs
 
     result = sync_langfuse_runs(
-        store, backend_id,
-        dataset_name=dataset_name, backfill=backfill, reset=reset,
+        store,
+        backend_id,
+        dataset_name=dataset_name,
+        backfill=backfill,
+        reset=reset,
     )
     if result is None:
         if not backfill:
