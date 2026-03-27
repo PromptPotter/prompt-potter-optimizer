@@ -52,7 +52,7 @@ def cycle_config():
     """Standard CycleConfig for feedback cycle tests."""
     return CycleConfig(
         max_rounds=5,
-        patience=2,
+        l1_patience=2,
         n_variants=3,
         creativity=0.5,
         improvement_threshold=0.01,

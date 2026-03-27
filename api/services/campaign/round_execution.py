@@ -34,6 +34,7 @@ from api.services.obs.node_tracer import observed_node
 
 if TYPE_CHECKING:
     from api.services.campaign.escalation import EscalationCheck
+    from api.services.l1_optimizer import L1EvalResult
     from api.services.obs.observability_logger import ObsLogger
     from api.services.stores.campaign_store import CampaignStore
 
@@ -65,32 +66,44 @@ async def _generate_or_load_candidates(
     prompt_preview = state.opt_sp.render()[:120]
 
     assert state.current_sp is not None
-    emit_phase(on_phase, "l1_generate", "enter", round=round_num,
-                current_accuracy=state.current_accuracy,
-                prompt_preview=prompt_preview,
-                n_variants=_n_variants,
-                creativity=_creativity,
-                model=config.model or "(default)",
-                has_scan_context=config.scan_context is not None,
-                has_critique=bool(state.opt_sp.critique_text),
-                pipeline_params=state.current_sp.pipeline_params,
-                temperature=state.current_sp.temperature)
+    emit_phase(
+        on_phase,
+        "l1_generate",
+        "enter",
+        round=round_num,
+        current_accuracy=state.current_accuracy,
+        prompt_preview=prompt_preview,
+        n_variants=_n_variants,
+        creativity=_creativity,
+        model=config.model or "(default)",
+        has_scan_context=config.scan_context is not None,
+        has_critique=bool(state.opt_sp.critique_text),
+        pipeline_params=state.current_sp.pipeline_params,
+        temperature=state.current_sp.temperature,
+    )
 
     if campaign_store and cycle_id:
         persisted = campaign_store.load_round_candidates(
-            config.backend_id, cycle_id, round_num,
+            config.backend_id,
+            cycle_id,
+            round_num,
         )
         if persisted is not None:
             logger.info(
                 "Loaded %d persisted candidates for round %d",
-                len(persisted), round_num,
+                len(persisted),
+                round_num,
             )
-            emit_phase(on_phase, "l1_generate", "exit", round=round_num,
-                        n_candidates=len(persisted),
-                        n_eval_queries=n_eval_queries,
-                        loaded_from_disk=True,
-                        candidates=_candidate_summaries(
-                            persisted, state.opt_sp.prompt_field_dict()))
+            emit_phase(
+                on_phase,
+                "l1_generate",
+                "exit",
+                round=round_num,
+                n_candidates=len(persisted),
+                n_eval_queries=n_eval_queries,
+                loaded_from_disk=True,
+                candidates=_candidate_summaries(persisted, state.opt_sp.prompt_field_dict()),
+            )
             return persisted
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
@@ -98,11 +111,14 @@ async def _generate_or_load_candidates(
     from api.services.l1_optimizer import l1_generate
 
     client = _llm_client.get_llm_client(config.provider)
-    async with observed_node(f"l1_generate_r{round_num}", "llm/meta",
-                             obs=obs, trace_id=trace_id):
+    async with observed_node(f"l1_generate_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
         candidates = await l1_generate(
-            state.opt_sp, state.current_accuracy, state.current_results,
-            _n_variants, _creativity, client,
+            state.opt_sp,
+            state.current_accuracy,
+            state.current_results,
+            _n_variants,
+            _creativity,
+            client,
             model=config.model,
             scan_context=config.scan_context,
             is_probe_round=state.probe_next_round,
@@ -111,15 +127,22 @@ async def _generate_or_load_candidates(
 
     if campaign_store and cycle_id:
         campaign_store.save_round_candidates(
-            config.backend_id, cycle_id, round_num, candidates,
+            config.backend_id,
+            cycle_id,
+            round_num,
+            candidates,
         )
 
-    emit_phase(on_phase, "l1_generate", "exit", round=round_num,
-                n_candidates=len(candidates),
-                n_eval_queries=n_eval_queries,
-                loaded_from_disk=False,
-                candidates=_candidate_summaries(
-                    candidates, state.opt_sp.prompt_field_dict()))
+    emit_phase(
+        on_phase,
+        "l1_generate",
+        "exit",
+        round=round_num,
+        n_candidates=len(candidates),
+        n_eval_queries=n_eval_queries,
+        loaded_from_disk=False,
+        candidates=_candidate_summaries(candidates, state.opt_sp.prompt_field_dict()),
+    )
 
     return candidates
 
@@ -134,14 +157,21 @@ async def _evaluate_candidates(
     obs: "ObsLogger | None" = None,
     trace_id: str | None = None,
     escalation_checks: "list[EscalationCheck] | None" = None,
-) -> dict:
+) -> "L1EvalResult":
     """Evaluate candidates and run critique analysis."""
-    emit_phase(callbacks.on_phase, "l1_evaluate", "enter", round=round_num,
-                n_candidates=len(candidates),
-                n_queries=len(round_eval_data),
-                current_best_accuracy=state.current_accuracy,
-                improvement_threshold=config.improvement_threshold,
-                current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None)
+    from api.services.l1_optimizer import l1_evaluate
+
+    emit_phase(
+        callbacks.on_phase,
+        "l1_evaluate",
+        "enter",
+        round=round_num,
+        n_candidates=len(candidates),
+        n_queries=len(round_eval_data),
+        current_best_accuracy=state.current_accuracy,
+        improvement_threshold=config.improvement_threshold,
+        current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None,
+    )
 
     baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
@@ -152,14 +182,16 @@ async def _evaluate_candidates(
         "label": baseline_label,
     }
 
-    from api.services.l1_optimizer import l1_evaluate
-
-    async with observed_node(f"l1_evaluate_r{round_num}", "evaluation",
-                             obs=obs, trace_id=trace_id, obs_type="span"):
+    async with observed_node(
+        f"l1_evaluate_r{round_num}", "evaluation", obs=obs, trace_id=trace_id, obs_type="span"
+    ):
         assert state.eval_ctx is not None
         assert state.current_sp is not None
         eval_out = await l1_evaluate(
-            candidates, round_eval_data, current_best, state.eval_ctx,
+            candidates,
+            round_eval_data,
+            current_best,
+            state.eval_ctx,
             model=state.current_sp.model,
             temperature=state.current_sp.temperature,
             pipeline_params=state.current_sp.pipeline_params,
@@ -171,20 +203,23 @@ async def _evaluate_candidates(
         # Critique analysis
         critique_result: dict = {}
         critique_text = ""
-        if config.enable_critique and eval_out.get("winner_results"):
+        if config.enable_critique and eval_out.winner_results:
             crit_llm = _llm_client.get_llm_client(config.provider)
             agent = CritiqueAgent(crit_llm, model=config.model)
             cctx = CritiqueContext(
-                results=eval_out["winner_results"],
-                accuracy=eval_out["winner_accuracy"],
-                composite=eval_out.get("winner_composite", eval_out["winner_accuracy"]),
-                degraded_queries=eval_out.get("degraded_queries", 0),
+                results=eval_out.winner_results,
+                accuracy=eval_out.winner_accuracy,
+                composite=eval_out.winner_composite,
+                degraded_queries=eval_out.degraded_queries,
                 round_history=[
-                    {"round": r.round, "accuracy": r.accuracy,
-                     "composite": r.composite,
-                     "pipeline_params": r.pipeline_params,
-                     "degraded": getattr(r, "degraded_queries", 0),
-                     "n_candidates": len(r.candidate_scores)}
+                    {
+                        "round": r.round,
+                        "accuracy": r.accuracy,
+                        "composite": r.composite,
+                        "pipeline_params": r.pipeline_params,
+                        "degraded": getattr(r, "degraded_queries", 0),
+                        "n_candidates": len(r.candidate_scores),
+                    }
                     for r in state.rounds
                 ],
                 current_round=round_num,
@@ -192,37 +227,42 @@ async def _evaluate_candidates(
                 best_accuracy=state.best_accuracy,
                 best_round=state.best_round,
                 scan_context=config.scan_context,
-                pipeline_params=(
-                    state.current_sp.pipeline_params if state.current_sp else None
-                ),
+                pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),
                 warning_inventory=state.opt_sp.warning_inventory or None,
                 task_context=state.opt_sp.task_context or None,
+                degradation_threshold=config.critique_degradation_threshold,
+                near_miss_ratio=config.critique_near_miss_ratio,
             )
             critique_result = await agent.run(cctx)
             critique_text = format_critique_for_prompt(critique_result)
 
         thinking_styles = sample_thinking_styles(
-            n=3, seed=config.seed + round_num + 1,
+            n=3,
+            seed=config.seed + round_num + 1,
         )
-        eval_out["critique_text"] = critique_text
-        eval_out["critique"] = critique_result
-        eval_out["thinking_styles"] = thinking_styles
+        eval_out.critique_text = critique_text
+        eval_out.critique = critique_result
+        eval_out.thinking_styles = thinking_styles
 
-    emit_phase(callbacks.on_phase, "l1_evaluate", "exit", round=round_num,
-                winner_label=eval_out["winner"].get("label", ""),
-                winner_accuracy=eval_out["winner_accuracy"],
-                winner_composite=eval_out.get("winner_composite",
-                                              eval_out["winner_accuracy"]),
-                improved=eval_out["improved"],
-                next_action=eval_out["next_action"],
-                candidate_scores=eval_out["candidate_scores"],
-                critique_text=eval_out.get("critique_text", ""))
+    emit_phase(
+        callbacks.on_phase,
+        "l1_evaluate",
+        "exit",
+        round=round_num,
+        winner_label=eval_out.winner.label,
+        winner_accuracy=eval_out.winner_accuracy,
+        winner_composite=eval_out.winner_composite,
+        improved=eval_out.improved,
+        next_action=eval_out.next_action,
+        candidate_scores=eval_out.candidate_scores,
+        critique_text=eval_out.critique_text,
+    )
 
     return eval_out
 
 
 def _log_round_obs(
-    eval_out: dict,
+    eval_out: "L1EvalResult",
     round_num: int,
     config: CycleConfig,
     obs: "ObsLogger",
@@ -233,13 +273,13 @@ def _log_round_obs(
         obs.log_round_end(
             campaign_id=obs_campaign_id,
             round_num=round_num,
-            accuracy=eval_out["winner_accuracy"],
-            hits=eval_out["winner"].get("hits", 0),
-            total=eval_out["winner"].get("total", 0),
-            improved=eval_out["improved"],
-            next_action=eval_out["next_action"],
-            winner_prompt_fields_id=eval_out["winner_prompt_fields"].get("id", ""),
-            candidate_scores=eval_out["candidate_scores"],
+            accuracy=eval_out.winner_accuracy,
+            hits=eval_out.winner.hits,
+            total=eval_out.winner.total,
+            improved=eval_out.improved,
+            next_action=eval_out.next_action,
+            winner_prompt_fields_id=eval_out.winner_prompt_fields.get("id", ""),
+            candidate_scores=eval_out.candidate_scores,
             model=config.model or "",
             temperature=config.temperature,
             n_variants=config.n_variants,
@@ -250,15 +290,12 @@ def _log_round_obs(
         )
 
     with graceful("ObsLogger.log_prompt_version failed"):
-        winner_fields = eval_out["winner_prompt_fields"]
+        winner_fields = eval_out.winner_prompt_fields
         winner_osp = OptSearchPoint.from_prompt_fields(winner_fields)
         obs.log_prompt_version(
             prompt_fields_id=winner_osp.id,
             rendered_prompt=winner_osp.render(),
-            layer1_fields={
-                f: getattr(winner_osp, f)
-                for f in PROMPT_STRING_FIELDS
-            },
+            layer1_fields={f: getattr(winner_osp, f) for f in PROMPT_STRING_FIELDS},
             parent_id=winner_osp.parent_id,
         )
 
@@ -287,47 +324,57 @@ async def _execute_round(
     creativity = opt_params.get("creativity", config.creativity)
 
     candidates = await _generate_or_load_candidates(
-        round_num, state, config, campaign_store, cycle_id, callbacks.on_phase,
+        round_num,
+        state,
+        config,
+        campaign_store,
+        cycle_id,
+        callbacks.on_phase,
         n_eval_queries=len(round_eval_data),
-        n_variants=n_variants, creativity=creativity,
-        obs=obs, trace_id=trace_id,
+        n_variants=n_variants,
+        creativity=creativity,
+        obs=obs,
+        trace_id=trace_id,
     )
 
     eval_out = await _evaluate_candidates(
-        candidates, round_num, state, round_eval_data, config,
+        candidates,
+        round_num,
+        state,
+        round_eval_data,
+        config,
         callbacks,
-        obs=obs, trace_id=trace_id,
+        obs=obs,
+        trace_id=trace_id,
         escalation_checks=escalation_checks,
     )
 
     # Update state with critique + thinking styles from eval output
-    state.opt_sp.critique_text = eval_out.pop("critique_text", "")
-    state.opt_sp.critique = eval_out.pop(
-        "critique", {"summary": state.opt_sp.critique_text},
-    )
-    state.opt_sp.thinking_styles = eval_out.pop("thinking_styles", [])
+    state.opt_sp.critique_text = eval_out.critique_text
+    state.opt_sp.critique = eval_out.critique or {"summary": eval_out.critique_text}
+    state.opt_sp.thinking_styles = eval_out.thinking_styles
 
     round_result = CycleRoundResult(
         round=round_num,
-        label=eval_out["winner"]["label"],
-        accuracy=eval_out["winner_accuracy"],
-        composite=eval_out["winner_composite"],
-        hits=eval_out["winner"]["hits"],
-        total=eval_out["winner"]["total"],
-        improved=eval_out["improved"],
-        next_action=eval_out["next_action"],
-        prompt_fields=eval_out["winner_prompt_fields"],
-        pipeline_params=eval_out.get("winner_pipeline_params"),
-        results=eval_out["winner_results"],
-        candidates_evaluated=eval_out["winner"]["candidates_evaluated"],
-        candidate_scores=eval_out["candidate_scores"],
-        degraded_queries=eval_out.get("degraded_queries", 0),
-        escalation_signal=eval_out.get("escalation_signal"),
+        label=eval_out.winner.label,
+        accuracy=eval_out.winner_accuracy,
+        composite=eval_out.winner_composite,
+        hits=eval_out.winner.hits,
+        total=eval_out.winner.total,
+        improved=eval_out.improved,
+        next_action=eval_out.next_action,
+        prompt_fields=eval_out.winner_prompt_fields,
+        pipeline_params=eval_out.winner_pipeline_params,
+        results=eval_out.winner_results,
+        candidates_evaluated=eval_out.winner.candidates_evaluated,
+        candidate_scores=eval_out.candidate_scores,
+        degraded_queries=eval_out.degraded_queries,
+        escalation_signal=eval_out.escalation_signal,
     )
 
     # Update per-query warning inventory from ALL candidate results
     # (not just winner — aborted candidates carry the pipeline warnings)
-    _all_results = eval_out.get("all_eval_results", [])
+    _all_results = eval_out.all_eval_results
     if _all_results:
         update_query_tracker(state.opt_sp.warning_inventory, _all_results)
 
@@ -343,7 +390,9 @@ async def _execute_round(
 
 
 def _update_round_state(
-    state: LoopState, rr: CycleRoundResult, round_num: int,
+    state: LoopState,
+    rr: CycleRoundResult,
+    round_num: int,
 ) -> None:
     """Apply round result to loop state (shared by escalation + normal paths)."""
     state.rounds.append(rr)

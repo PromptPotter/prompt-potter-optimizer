@@ -9,7 +9,10 @@ All methods are no-ops on failure (log + swallow), matching ObsLogger's
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from api.services.obs.langfuse_client import LangfuseLogger
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +20,7 @@ logger = logging.getLogger(__name__)
 class CloudDelegate:
     """Manages cloud Langfuse trace/observation lifecycle."""
 
-    def __init__(self, lf: Any) -> None:
+    def __init__(self, lf: "LangfuseLogger") -> None:
         self._lf = lf
         self._trace_ids: dict[str, str] = {}
         self._active_trace_id: str | None = None
@@ -216,8 +219,7 @@ class CloudDelegate:
                     trace_id=cloud_trace_id,
                     name=f"accuracy_round_{round_num}",
                     value=accuracy,
-                    comment=f"Round {round_num}: "
-                            f"{'improved' if improved else 'no change'}",
+                    comment=f"Round {round_num}: {'improved' if improved else 'no change'}",
                 )
         except Exception:
             logger.debug("Cloud Langfuse round_end failed", exc_info=True)
@@ -268,7 +270,9 @@ class CloudDelegate:
                 if error:
                     meta["error"] = error
                 self._lf.end_observation(
-                    cloud_obs_id, output=output_data, metadata=meta or None,
+                    cloud_obs_id,
+                    output=output_data,
+                    metadata=meta or None,
                 )
         except Exception:
             logger.debug("Cloud Langfuse node_end failed", exc_info=True)

@@ -4,8 +4,24 @@ Pure string formatting — no I/O, no LLM calls. Used by both
 l1_optimizer (L1 generate) and layer_transitions (L2/L3).
 """
 
+from dataclasses import dataclass
+
 from api.config.settings import DISPLAY_TRUNCATE
 from api.services.campaign.critique import summarize_warning_inventory
+
+
+@dataclass
+class ContextData:
+    """Data bundle for ``format_context_sections()``."""
+
+    task_context: dict | None = None
+    critique_text: str = ""
+    l2_directive: str = ""
+    thinking_styles: list[str] | None = None
+    plan: str = ""
+    warning_inventory: dict | None = None
+    escalation_journal: list[dict] | None = None
+    is_probe_round: bool = False
 
 
 def format_failure_lines(
@@ -81,14 +97,12 @@ def format_focus_note(escalation_journal: list[dict] | None) -> str:
     rate = latest.get("degraded_rate", 0)
     problem_step = latest.get("problem_step", "unknown")
     lines = [
-        f"PIPELINE ISSUE: {rate:.0%} of queries degrade at the "
-        f"{problem_step} step.",
+        f"PIPELINE ISSUE: {rate:.0%} of queries degrade at the {problem_step} step.",
         "Address pipeline instability in your candidates.",
     ]
     if len(escalation_journal) > 1:
         lines.append(
-            f"Previous {len(escalation_journal)} attempts have not "
-            "resolved the issue.",
+            f"Previous {len(escalation_journal)} attempts have not resolved the issue.",
         )
     wtypes = latest.get("warning_types", {})
     if wtypes:
@@ -96,32 +110,29 @@ def format_focus_note(escalation_journal: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
-def format_context_sections(
-    task_context: dict | None,
-    critique_text: str,
-    l2_directive: str,
-    thinking_styles: list[str] | None,
-    plan: str,
-    warning_inventory: dict | None,
-    escalation_journal: list[dict] | None,
-    is_probe_round: bool,
-) -> str:
+def format_context_sections(ctx: ContextData) -> str:
     """Build all optional context sections as a single string.
 
     Each non-empty section is a titled block. Returned string is empty
     when no context is available.
     """
+    task_context = ctx.task_context
+    critique_text = ctx.critique_text
+    l2_directive = ctx.l2_directive
+    thinking_styles = ctx.thinking_styles
+    plan = ctx.plan
+    warning_inventory = ctx.warning_inventory
+    escalation_journal = ctx.escalation_journal
+    is_probe_round = ctx.is_probe_round
+
     sections: list[str] = []
 
     # Task context
     if task_context:
-        tc_lines = "\n".join(
-            f"  {k}: {v}" for k, v in task_context.items() if v
-        )
+        tc_lines = "\n".join(f"  {k}: {v}" for k, v in task_context.items() if v)
         if tc_lines:
             sections.append(
-                "TASK CONTEXT (domain understanding — use to guide "
-                f"your changes):\n{tc_lines}"
+                f"TASK CONTEXT (domain understanding — use to guide your changes):\n{tc_lines}"
             )
 
     # Probe round — enriched with warning inventory and escalation history
@@ -149,19 +160,14 @@ def format_context_sections(
                 )
                 if escalation_journal:
                     tried = [
-                        ej for ej in escalation_journal
-                        if ej.get("problem_step") == dominant_step
+                        ej for ej in escalation_journal if ej.get("problem_step") == dominant_step
                     ]
                     if tried:
-                        probe_lines.append(
-                            f"Previous attempts targeting {dominant_step}:"
-                        )
+                        probe_lines.append(f"Previous attempts targeting {dominant_step}:")
                         for ej in tried[-3:]:
                             wt = ej.get("warning_types", {})
                             probe_lines.append(
-                                f"  - degraded_rate="
-                                f"{ej.get('degraded_rate', 0):.0%}, "
-                                f"warnings={wt}"
+                                f"  - degraded_rate={ej.get('degraded_rate', 0):.0%}, warnings={wt}"
                             )
         sections.append("\n".join(probe_lines))
 
@@ -181,12 +187,9 @@ def format_context_sections(
 
     # Thinking styles
     if thinking_styles:
-        styles = "\n".join(
-            f"  {i+1}. {s}" for i, s in enumerate(thinking_styles)
-        )
+        styles = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(thinking_styles))
         sections.append(
-            "THINKING STYLES (consider these approaches when generating "
-            f"variants):\n{styles}"
+            f"THINKING STYLES (consider these approaches when generating variants):\n{styles}"
         )
 
     # Strategic plan

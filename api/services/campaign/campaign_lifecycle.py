@@ -37,7 +37,7 @@ def cycle_config_identity(
     payload = json.dumps(
         {
             "max_rounds": config.max_rounds,
-            "patience": config.patience,
+            "patience": config.l1_patience,
             "n_variants": config.n_variants,
             "creativity": config.creativity,
             "improvement_threshold": config.improvement_threshold,
@@ -184,7 +184,7 @@ def _resume_or_create_campaign(
                     _validate_config_match(config, stored_cfg, cycle_id)
                     # Update loop-control fields in stored config
                     _LOOP_CONTROL_KEYS = [
-                        "max_rounds", "patience", "l2_patience",
+                        "max_rounds", "l1_patience", "l2_patience",
                         "l3_patience", "degradation_threshold",
                     ]
                     current_cfg = config.model_dump(mode="json")

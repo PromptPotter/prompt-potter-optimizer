@@ -127,7 +127,7 @@ class ObsLogger:
             except Exception:
                 logger.debug("Cloud backend init failed; file-only mode", exc_info=True)
         elif langfuse is not None:
-            self._cloud = CloudDelegate(langfuse)
+            self._cloud = CloudDelegate(langfuse)  # type: ignore[arg-type]
 
     # --- Internal helpers ---
 

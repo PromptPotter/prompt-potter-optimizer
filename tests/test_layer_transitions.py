@@ -170,7 +170,7 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
 
     config = CycleConfig(
         max_rounds=10,
-        patience=2,
+        l1_patience=2,
         n_variants=2,
         backend_url="http://mock:8000",
         enable_critique=False,
@@ -230,7 +230,7 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
 
     config = CycleConfig(
         max_rounds=30,
-        patience=2,
+        l1_patience=2,
         n_variants=2,
         backend_url="http://mock:8000",
         enable_critique=False,
@@ -291,7 +291,7 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
 
     config = CycleConfig(
         max_rounds=2,
-        patience=5,
+        l1_patience=5,
         n_variants=3,          # default: 3
         creativity=0.5,        # default: 0.5
         backend_url="http://mock:8000",
@@ -346,7 +346,7 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
 
     config = CycleConfig(
         max_rounds=2,
-        patience=5,
+        l1_patience=5,
         n_variants=2,
         backend_url="http://mock:8000",
         enable_critique=False,

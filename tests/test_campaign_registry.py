@@ -320,7 +320,7 @@ async def test_e2e_optimization_with_registry(
 
     config = CycleConfig(
         max_rounds=3,
-        patience=2,
+        l1_patience=2,
         n_variants=2,
         backend_url="http://mock:8000",
     )

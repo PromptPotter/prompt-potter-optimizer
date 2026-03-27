@@ -3,27 +3,20 @@
 Leaf module shared by both models and services. Lives in ``api/shared/``
 to avoid circular imports between search_point.py and opt_search_point.py.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
+
+from api.shared.constants import PROMPT_STRING_FIELDS
 
 # SHA256 truncated to 16 hex chars (64 bits) — sufficient for content-addressed
 # deduplication within a single project.  Collision probability stays negligible
 # for the expected dataset sizes (<100k eval runs).
 HASH_TRUNCATE = 16
 
-# Fields that render() assembles into the prompt string.
-# Lives here (leaf module) to avoid circular imports between
-# search_point.py and opt_search_point.py.
-PROMPT_STRING_FIELDS: list[str] = [
-    "persona",
-    "task_intent",
-    "problem_description",
-    "instruction",
-    "thinking_style",
-    "answer_format",
-]
+__all__ = ["HASH_TRUNCATE", "PROMPT_STRING_FIELDS", "eval_content_hash", "sp_identity_hash"]
 
 
 def sp_identity_hash(
@@ -71,12 +64,12 @@ def eval_content_hash(
     ``pipeline_params`` is included when non-empty so that different
     pipeline configurations produce distinct hashes.
     """
-    pairs = sorted(
-        (d.get("query", ""), d.get("ground_truth", "")) for d in eval_data
-    )
+    pairs = sorted((d.get("query", ""), d.get("ground_truth", "")) for d in eval_data)
     blob_dict: dict = {
-        "prompt": rendered_prompt, "pairs": pairs,
-        "model": model, "temperature": temperature,
+        "prompt": rendered_prompt,
+        "pairs": pairs,
+        "model": model,
+        "temperature": temperature,
     }
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params

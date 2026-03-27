@@ -58,7 +58,7 @@ async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_max_rounds(monkeypatch, eval_data):
     config = CycleConfig(
-        max_rounds=3, patience=10, n_variants=2,
+        max_rounds=3, l1_patience=10, n_variants=2,
         backend_url="http://mock:8000",
         enable_critique=False, enable_l2=False,
     )
@@ -86,7 +86,7 @@ async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
 
     async def patched_eval(*args, **kwargs):
         result = await original_eval(*args, **kwargs)
-        result["next_action"] = "stop"
+        result.next_action = "stop"
         return result
 
     monkeypatch.setattr(
@@ -349,11 +349,11 @@ class TestCycleConfigIdentity:
     def test_differs_on_config_change(self, eval_data):
         rendered = "You are an expert."
         c1 = CycleConfig(
-            max_rounds=5, patience=2, n_variants=3, creativity=0.5,
+            max_rounds=5, l1_patience=2, n_variants=3, creativity=0.5,
             backend_url="http://mock:8000",
         )
         c2 = CycleConfig(
-            max_rounds=10, patience=2, n_variants=3, creativity=0.5,
+            max_rounds=10, l1_patience=2, n_variants=3, creativity=0.5,
             backend_url="http://mock:8000",
         )
         assert cycle_config_identity(c1, rendered, eval_data) != \
@@ -467,7 +467,7 @@ async def test_resume_from_interrupted_cycle(
 
     config = CycleConfig(
         max_rounds=1,
-        patience=10,
+        l1_patience=10,
         n_variants=3,
         creativity=0.5,
         improvement_threshold=0.01,
@@ -546,7 +546,7 @@ async def test_interrupt_writes_interrupted_status(
 
     config = CycleConfig(
         max_rounds=3,
-        patience=10,
+        l1_patience=10,
         n_variants=1,
         creativity=0.5,
         improvement_threshold=0.01,
@@ -602,7 +602,7 @@ async def test_mid_round_resume_uses_persisted_candidates(
 
     config = CycleConfig(
         max_rounds=1,
-        patience=2,
+        l1_patience=2,
         n_variants=3,
         creativity=0.5,
         improvement_threshold=0.01,

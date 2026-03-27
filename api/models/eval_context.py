@@ -1,4 +1,5 @@
 """Evaluation context — infrastructure bundle for eval calls."""
+
 from __future__ import annotations
 
 import logging
@@ -35,3 +36,4 @@ class EvalContext:
     escalation_checks: list[EscalationCheck] | None = None
     candidate_idx: int = 0
     n_total_candidates: int = 1
+    max_consecutive_errors: int = 3

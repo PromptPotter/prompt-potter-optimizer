@@ -237,7 +237,7 @@ async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
     store_base = tmp_path / ".promptpotter" / "projects"
     store_base.mkdir(parents=True)
     config = CycleConfig(
-        max_rounds=3, patience=2, n_variants=2,
+        max_rounds=3, l1_patience=2, n_variants=2,
         backend_url="http://mock:8000",
         enable_critique=False, enable_l2=False,
         project_root=str(store_base), backend_id="test-backend",

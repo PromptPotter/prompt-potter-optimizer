@@ -27,7 +27,11 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from api.models.search_point import SearchPoint
-from api.shared.hashing import PROMPT_STRING_FIELDS
+from api.shared.constants import (  # noqa: F401
+    LAYER1_STRING_FIELDS,
+    LAYER_FIELDS,
+    PROMPT_STRING_FIELDS,
+)
 
 if TYPE_CHECKING:
     from api.models.search_point import JobSearchPoint
@@ -43,24 +47,6 @@ class FewShotExample(BaseModel):
     input: str
     output: str
     explanation: str | None = None
-
-# Layer field mapping
-LAYER_FIELDS: dict[str, list[str]] = {
-    "generate": [
-        "persona",
-        "task_intent",
-        "problem_description",
-        "instruction",
-        "thinking_style",
-        "answer_format",
-        "few_shot_examples",
-    ],
-    "refine_context": ["optimizer_params"],
-    "modify_plan": ["plan"],
-}
-
-# Layer 1 string fields (all generate fields except few_shot_examples).
-LAYER1_STRING_FIELDS = [f for f in LAYER_FIELDS["generate"] if f != "few_shot_examples"]
 
 
 # ---------------------------------------------------------------------------

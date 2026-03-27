@@ -56,6 +56,10 @@ class CritiqueContext:
     # L2 domain context (so critique understands L2's problem framing)
     task_context: dict | None = None
 
+    # Configurable thresholds
+    degradation_threshold: float = 0.4
+    near_miss_ratio: float = 0.3
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,8 +71,10 @@ def _find_rank(candidates: list, ground_truth: str) -> int | None:
     if not candidates or not ground_truth:
         return None
     for i, c in enumerate(candidates):
-        name = c.get("candidate", c) if isinstance(c, dict) else (
-            c[0] if isinstance(c, (list, tuple)) else str(c)
+        name = (
+            c.get("candidate", c)
+            if isinstance(c, dict)
+            else (c[0] if isinstance(c, (list, tuple)) else str(c))
         )
         if str(name) == ground_truth:
             return i + 1
@@ -111,13 +117,16 @@ def update_query_tracker(
         query = r.get("query", "")
         if not query:
             continue
-        entry = tracker.setdefault(query, {
-            "rounds_seen": 0,
-            "hits": 0,
-            "misses": 0,
-            "warnings": {},
-            "last_terminated_at": "",
-        })
+        entry = tracker.setdefault(
+            query,
+            {
+                "rounds_seen": 0,
+                "hits": 0,
+                "misses": 0,
+                "warnings": {},
+                "last_terminated_at": "",
+            },
+        )
         entry["rounds_seen"] += 1
         if r.get("hit"):
             entry["hits"] += 1
@@ -129,7 +138,6 @@ def update_query_tracker(
             entry["last_terminated_at"] = terminated
         for wtype in _extract_warning_types(r):
             entry["warnings"][wtype] = entry["warnings"].get(wtype, 0) + 1
-
 
 
 def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
@@ -148,11 +156,13 @@ def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
         return ""
 
     max_rounds = max(
-        (e.get("rounds_seen", 0) for e in tracker.values()), default=0,
+        (e.get("rounds_seen", 0) for e in tracker.values()),
+        default=0,
     )
     lines = [f"## RECURRING PIPELINE WARNINGS (across {max_rounds} rounds)"]
     for wtype, entries in sorted(
-        by_warning.items(), key=lambda x: -len(x[1]),
+        by_warning.items(),
+        key=lambda x: -len(x[1]),
     ):
         lines.append(f"  {wtype} — {len(entries)} queries affected:")
         # Sort by warning frequency descending
@@ -163,10 +173,7 @@ def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
             wcount = entry["warnings"].get(wtype, 0)
             seen = entry["rounds_seen"]
             hits = entry["hits"]
-            lines.append(
-                f"    {query[:70]}  "
-                f"({wcount}/{seen} rounds, {hits} hits)"
-            )
+            lines.append(f"    {query[:70]}  ({wcount}/{seen} rounds, {hits} hits)")
     return "\n".join(lines)
 
 
@@ -209,15 +216,9 @@ Rules:
 """
 
 
-def assemble_critique_prompt(ctx: CritiqueContext) -> str:
-    """Build the full critique prompt with inline stat computation."""
-    results = ctx.results
-    total = len(results)
-    sections: list[str] = []
-    anomalies: list[str] = []
-
-    # --- Summary ---
-    sections.append(
+def _summary_section(ctx: CritiqueContext) -> str:
+    total = len(ctx.results)
+    return (
         f"## EVALUATION SUMMARY\n"
         f"Accuracy: {ctx.accuracy:.1%} | Composite: {ctx.composite:.4f} | "
         f"Degraded: {ctx.degraded_queries}/{total}\n"
@@ -225,50 +226,66 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
         f"Best so far: {ctx.best_accuracy:.1%} (round {ctx.best_round})"
     )
 
-    # --- Pipeline health ---
-    if total > 0:
-        web_warning_count = 0
-        termination: Counter[str] = Counter()
-        times: list[float] = []
-        error_count = 0
 
-        for r in results:
-            pd = r.get("pipeline_data") or {}
-            diag = pd.get("diagnostics") or {}
-            if diag.get("warnings"):
-                web_warning_count += 1
-            termination[pd.get("terminated_at", "unknown")] += 1
-            t = pd.get("total_time")
-            if t is not None:
-                times.append(float(t))
-            if r.get("error"):
-                error_count += 1
+def _pipeline_health_section(
+    results: list[dict],
+    anomalies: list[str],
+    *,
+    degradation_threshold: float = 0.4,
+) -> str:
+    """Termination distribution, degradation rate, timing, error rate."""
+    total = len(results)
+    if total == 0:
+        return ""
 
-        deg_rate = web_warning_count / total
-        lines = ["## PIPELINE HEALTH"]
-        if termination:
-            lines.append("Termination distribution:")
-            for step, count in termination.most_common():
-                lines.append(f"  {step}: {count}/{total}")
-        lines.append(f"Step degradation: {deg_rate:.0%} of queries")
-        if times:
-            ts = sorted(times)
-            lines.append(
-                f"Timing: p50={ts[len(ts)//2]:.0f}ms "
-                f"p90={ts[int(len(ts)*0.9)]:.0f}ms "
-                f"max={ts[-1]:.0f}ms"
-            )
-        lines.append(f"Error rate: {error_count / total:.0%}")
-        sections.append("\n".join(lines))
+    web_warning_count = 0
+    termination: Counter[str] = Counter()
+    times: list[float] = []
+    error_count = 0
 
-        # --- Anomaly flags (inline) ---
-        if deg_rate > 0.4:
-            anomalies.append(
-                f"[HIGH] high_degradation: {web_warning_count}/{total} "
-                "queries had degraded steps."
-            )
+    for r in results:
+        pd = r.get("pipeline_data") or {}
+        diag = pd.get("diagnostics") or {}
+        if diag.get("warnings"):
+            web_warning_count += 1
+        termination[pd.get("terminated_at", "unknown")] += 1
+        t = pd.get("total_time")
+        if t is not None:
+            times.append(float(t))
+        if r.get("error"):
+            error_count += 1
 
-    # --- Rank analysis (precompute ranks once) ---
+    deg_rate = web_warning_count / total
+    lines = ["## PIPELINE HEALTH"]
+    if termination:
+        lines.append("Termination distribution:")
+        for step, count in termination.most_common():
+            lines.append(f"  {step}: {count}/{total}")
+    lines.append(f"Step degradation: {deg_rate:.0%} of queries")
+    if times:
+        ts = sorted(times)
+        lines.append(
+            f"Timing: p50={ts[len(ts) // 2]:.0f}ms "
+            f"p90={ts[int(len(ts) * 0.9)]:.0f}ms "
+            f"max={ts[-1]:.0f}ms"
+        )
+    lines.append(f"Error rate: {error_count / total:.0%}")
+
+    if deg_rate > degradation_threshold:
+        anomalies.append(
+            f"[HIGH] high_degradation: {web_warning_count}/{total} queries had degraded steps."
+        )
+
+    return "\n".join(lines)
+
+
+def _rank_analysis_section(
+    results: list[dict],
+    anomalies: list[str],
+    *,
+    near_miss_ratio: float = 0.3,
+) -> str:
+    """Rank buckets, top-k recall, and near-miss patterns."""
     rank_map: dict[int, int | None] = {}
     for i, r in enumerate(results):
         if not r.get("error"):
@@ -284,98 +301,108 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
             rank_buckets["1"] += 1
         elif rank is not None and rank <= 5:
             rank_buckets["2-5"] += 1
-            near_misses.append({
-                "query": r["query"][:80], "ground_truth": r.get("ground_truth", "")[:60],
-                "rank": rank, "predicted": r.get("predicted", "?")[:60],
-            })
+            near_misses.append(
+                {
+                    "query": r["query"][:80],
+                    "ground_truth": r.get("ground_truth", "")[:60],
+                    "rank": rank,
+                    "predicted": r.get("predicted", "?")[:60],
+                }
+            )
         elif rank is not None and rank <= 10:
             rank_buckets["6-10"] += 1
-            near_misses.append({
-                "query": r["query"][:80], "ground_truth": r.get("ground_truth", "")[:60],
-                "rank": rank, "predicted": r.get("predicted", "?")[:60],
-            })
+            near_misses.append(
+                {
+                    "query": r["query"][:80],
+                    "ground_truth": r.get("ground_truth", "")[:60],
+                    "rank": rank,
+                    "predicted": r.get("predicted", "?")[:60],
+                }
+            )
         elif rank is not None and rank <= 20:
             rank_buckets["11-20"] += 1
         else:
             rank_buckets["not_found"] += 1
 
     n_valid = sum(1 for r in results if not r.get("error"))
-    if n_valid > 0:
-        lines = ["## CANDIDATE RANK ANALYSIS"]
-        lines.append("Where does ground truth appear in candidate list?")
-        for bucket, count in rank_buckets.items():
-            lines.append(f"  Rank {bucket}: {count}")
+    if n_valid == 0:
+        return ""
 
-        # Top-k recall (using precomputed ranks)
-        for k in [1, 3, 5, 10]:
-            in_top_k = sum(
-                1 for i, rank in rank_map.items()
-                if rank is not None and rank <= k
-            )
-            lines.append(f"  top-{k}: {in_top_k / n_valid:.0%}")
+    lines = ["## CANDIDATE RANK ANALYSIS"]
+    lines.append("Where does ground truth appear in candidate list?")
+    for bucket, count in rank_buckets.items():
+        lines.append(f"  Rank {bucket}: {count}")
 
-        if near_misses:
-            lines.append(f"\nNear misses ({len(near_misses)} — GT in candidates but not rank 1):")
-            for nm in near_misses[:15]:
-                lines.append(
-                    f"  [{nm['rank']}] {nm['query']} → predicted: {nm['predicted']} "
-                    f"(GT: {nm['ground_truth']})"
-                )
-        sections.append("\n".join(lines))
+    for k in [1, 3, 5, 10]:
+        in_top_k = sum(1 for i, rank in rank_map.items() if rank is not None and rank <= k)
+        lines.append(f"  top-{k}: {in_top_k / n_valid:.0%}")
 
-        # Near-miss anomaly
-        misses = [r for r in results if not r.get("hit") and not r.get("error")]
-        if misses and len(near_misses) / max(len(misses), 1) > 0.3:
-            anomalies.append(
-                f"[MEDIUM] near_miss_pattern: GT in candidates for "
-                f"{len(near_misses)}/{len(misses)} misses but not ranked first."
-            )
-
-    # --- Round evolution ---
-    if ctx.round_history:
-        lines = ["## ROUND EVOLUTION"]
-        lines.append("Round  Accuracy  Delta   Degraded  Candidates")
-        prev_acc = None
-        plateau_count = 0
-        for rh in ctx.round_history:
-            acc = rh.get("accuracy", 0.0)
-            delta = acc - prev_acc if prev_acc is not None else 0.0
+    if near_misses:
+        lines.append(f"\nNear misses ({len(near_misses)} — GT in candidates but not rank 1):")
+        for nm in near_misses[:15]:
             lines.append(
-                f"  {rh.get('round', '?'):>5}  {acc:>7.1%}  {delta:>+6.1%}  "
-                f"{rh.get('degraded', 0):>8}  {rh.get('n_candidates', 0):>10}"
-            )
-            plateau_count = plateau_count + 1 if abs(delta) < 0.01 else 0
-            prev_acc = acc
-
-        # Param changes between rounds
-        for i in range(1, len(ctx.round_history)):
-            prev_pp = ctx.round_history[i - 1].get("pipeline_params") or {}
-            curr_pp = ctx.round_history[i].get("pipeline_params") or {}
-            changed = {
-                k for k in set(prev_pp) | set(curr_pp)
-                if prev_pp.get(k) != curr_pp.get(k) and k != "steps"
-            }
-            if changed:
-                lines.append(
-                    f"  Round {ctx.round_history[i-1].get('round')}→"
-                    f"{ctx.round_history[i].get('round')}: "
-                    f"{', '.join(sorted(changed))}"
-                )
-        sections.append("\n".join(lines))
-
-        if plateau_count >= 2:
-            anomalies.append(
-                f"[MEDIUM] plateau_signal: {plateau_count} consecutive rounds "
-                "with <1% improvement."
+                f"  [{nm['rank']}] {nm['query']} → predicted: {nm['predicted']} "
+                f"(GT: {nm['ground_truth']})"
             )
 
-    # --- Emit anomalies ---
-    if total > 0 and anomalies:
-        sections.insert(1, "## ANOMALY FLAGS ({})\n{}".format(
-            len(anomalies), "\n".join(f"  {a}" for a in anomalies),
-        ))
+    # >30% of misses are near-misses → ranking problem, not retrieval
+    misses = [r for r in results if not r.get("hit") and not r.get("error")]
+    if misses and len(near_misses) / max(len(misses), 1) > near_miss_ratio:
+        anomalies.append(
+            f"[MEDIUM] near_miss_pattern: GT in candidates for "
+            f"{len(near_misses)}/{len(misses)} misses but not ranked first."
+        )
 
-    # --- Query categories ---
+    return "\n".join(lines)
+
+
+def _round_evolution_section(
+    round_history: list[dict],
+    anomalies: list[str],
+) -> str:
+    """Accuracy trajectory and inter-round param changes."""
+    if not round_history:
+        return ""
+
+    lines = ["## ROUND EVOLUTION"]
+    lines.append("Round  Accuracy  Delta   Degraded  Candidates")
+    prev_acc = None
+    plateau_count = 0
+    for rh in round_history:
+        acc = rh.get("accuracy", 0.0)
+        delta = acc - prev_acc if prev_acc is not None else 0.0
+        lines.append(
+            f"  {rh.get('round', '?'):>5}  {acc:>7.1%}  {delta:>+6.1%}  "
+            f"{rh.get('degraded', 0):>8}  {rh.get('n_candidates', 0):>10}"
+        )
+        plateau_count = plateau_count + 1 if abs(delta) < 0.01 else 0
+        prev_acc = acc
+
+    for i in range(1, len(round_history)):
+        prev_pp = round_history[i - 1].get("pipeline_params") or {}
+        curr_pp = round_history[i].get("pipeline_params") or {}
+        changed = {
+            k
+            for k in set(prev_pp) | set(curr_pp)
+            if prev_pp.get(k) != curr_pp.get(k) and k != "steps"
+        }
+        if changed:
+            lines.append(
+                f"  Round {round_history[i - 1].get('round')}→"
+                f"{round_history[i].get('round')}: "
+                f"{', '.join(sorted(changed))}"
+            )
+
+    if plateau_count >= 2:
+        anomalies.append(
+            f"[MEDIUM] plateau_signal: {plateau_count} consecutive rounds with <1% improvement."
+        )
+
+    return "\n".join(lines)
+
+
+def _query_category_section(results: list[dict]) -> str:
+    """Failures grouped by termination step."""
     failures_by_step: dict[str, list[str]] = {}
     for r in results:
         if r.get("hit") or r.get("error"):
@@ -384,83 +411,130 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
         step = pd.get("terminated_at", "unknown")
         failures_by_step.setdefault(step, []).append(r.get("query", "?")[:80])
 
-    if failures_by_step:
-        lines = ["## QUERY CATEGORY ANALYSIS"]
-        lines.append("Failures by termination step:")
-        for step, queries in failures_by_step.items():
-            lines.append(f"  {step}: {len(queries)}")
-            for q in queries[:5]:
-                lines.append(f"    - {q}")
-        sections.append("\n".join(lines))
+    if not failures_by_step:
+        return ""
 
-    # --- Scan context ---
-    sc = ctx.scan_context
-    if sc:
-        lines = ["## SCAN CONTEXT (from sensitivity analysis)"]
-        if sc.get("leaderboard_text"):
-            lines.append("Leaderboard (tested values ranked by accuracy):")
-            lines.append(sc["leaderboard_text"])
-        if sc.get("sensitivity_text"):
-            lines.append("\nAxis sensitivity:")
-            lines.append(sc["sensitivity_text"])
-        if sc.get("difficulty_text"):
-            lines.append("\nQuery difficulty:")
-            lines.append(sc["difficulty_text"])
-        if sc.get("improving_axes"):
-            lines.append(f"\nImproving axes: {', '.join(sc['improving_axes'])}")
-        if sc.get("tested_values"):
-            lines.append("\nTested values per axis:")
-            lines.append(sc["tested_values"])
-        sections.append("\n".join(lines))
+    lines = ["## QUERY CATEGORY ANALYSIS"]
+    lines.append("Failures by termination step:")
+    for step, queries in failures_by_step.items():
+        lines.append(f"  {step}: {len(queries)}")
+        for q in queries[:5]:
+            lines.append(f"    - {q}")
+    return "\n".join(lines)
 
-    # --- Task context (L2 domain framing) ---
-    if ctx.task_context:
-        tc_lines = "\n".join(
-            f"  {k}: {v}" for k, v in ctx.task_context.items() if v
-        )
-        if tc_lines:
-            sections.append(f"## TASK CONTEXT\n{tc_lines}")
 
-    # --- Warning inventory (cross-round) ---
-    if ctx.warning_inventory:
-        inv_text = summarize_warning_inventory(ctx.warning_inventory)
-        if inv_text:
-            sections.append(inv_text)
+def _scan_context_section(scan_context: dict | None) -> str:
+    """Sensitivity analysis results (leaderboard, axis sensitivity, difficulty)."""
+    if not scan_context:
+        return ""
 
-    # --- Failure details ---
+    lines = ["## SCAN CONTEXT (from sensitivity analysis)"]
+    if scan_context.get("leaderboard_text"):
+        lines.append("Leaderboard (tested values ranked by accuracy):")
+        lines.append(scan_context["leaderboard_text"])
+    if scan_context.get("sensitivity_text"):
+        lines.append("\nAxis sensitivity:")
+        lines.append(scan_context["sensitivity_text"])
+    if scan_context.get("difficulty_text"):
+        lines.append("\nQuery difficulty:")
+        lines.append(scan_context["difficulty_text"])
+    if scan_context.get("improving_axes"):
+        lines.append(f"\nImproving axes: {', '.join(scan_context['improving_axes'])}")
+    if scan_context.get("tested_values"):
+        lines.append("\nTested values per axis:")
+        lines.append(scan_context["tested_values"])
+    return "\n".join(lines)
+
+
+def _task_context_section(task_context: dict | None) -> str:
+    """L2 domain framing."""
+    if not task_context:
+        return ""
+    tc_lines = "\n".join(f"  {k}: {v}" for k, v in task_context.items() if v)
+    return f"## TASK CONTEXT\n{tc_lines}" if tc_lines else ""
+
+
+def _failure_details_section(results: list[dict]) -> str:
+    """Per-query failure breakdown with rank and degradation info."""
     failures = [r for r in results if not r.get("hit") and not r.get("error")]
-    if failures:
-        lines = [f"## FAILURE DETAILS ({len(failures)} queries)"]
-        for r in failures[:15]:
-            pd = r.get("pipeline_data") or {}
-            gt = r.get("ground_truth", "?")
-            rank = _find_rank(_get_candidates(r), gt)
-            rank_str = f"rank {rank}" if rank else "not in candidates"
-            diag = pd.get("diagnostics") or {}
-            warn = "⚠ degraded" if diag.get("warnings") else ""
-            lines.append(
-                f"  MISS  [{pd.get('terminated_at', '?')}]  {r['query'][:70]}\n"
-                f"        → {r.get('predicted', '?')[:70]}\n"
-                f"        GT: {gt[:70]}  |  {rank_str}  {warn}"
-            )
-        sections.append("\n".join(lines))
+    if not failures:
+        return ""
 
-    # --- Success details ---
+    lines = [f"## FAILURE DETAILS ({len(failures)} queries)"]
+    for r in failures[:15]:
+        pd = r.get("pipeline_data") or {}
+        gt = r.get("ground_truth", "?")
+        rank = _find_rank(_get_candidates(r), gt)
+        rank_str = f"rank {rank}" if rank else "not in candidates"
+        diag = pd.get("diagnostics") or {}
+        warn = "⚠ degraded" if diag.get("warnings") else ""
+        lines.append(
+            f"  MISS  [{pd.get('terminated_at', '?')}]  {r['query'][:70]}\n"
+            f"        → {r.get('predicted', '?')[:70]}\n"
+            f"        GT: {gt[:70]}  |  {rank_str}  {warn}"
+        )
+    return "\n".join(lines)
+
+
+def _success_details_section(results: list[dict]) -> str:
+    """Per-query success samples."""
     successes = [r for r in results if r.get("hit")]
-    if successes:
-        lines = [f"## SUCCESS DETAILS ({len(successes)} queries)"]
-        for r in successes[:10]:
-            pd = r.get("pipeline_data") or {}
-            lines.append(
-                f"  HIT  [{pd.get('terminated_at', '?')}]  "
-                f"{r['query'][:70]} → {r.get('predicted', '?')[:70]}"
-            )
-        sections.append("\n".join(lines))
+    if not successes:
+        return ""
 
-    # --- Task ---
-    sections.append(CRITIQUE_TASK)
+    lines = [f"## SUCCESS DETAILS ({len(successes)} queries)"]
+    for r in successes[:10]:
+        pd = r.get("pipeline_data") or {}
+        lines.append(
+            f"  HIT  [{pd.get('terminated_at', '?')}]  "
+            f"{r['query'][:70]} → {r.get('predicted', '?')[:70]}"
+        )
+    return "\n".join(lines)
 
-    return "\n\n".join(sections)
+
+def assemble_critique_prompt(ctx: CritiqueContext) -> str:
+    """Build the full critique prompt from stat-rich sections.
+
+    Each section is computed by a dedicated helper; this function orchestrates
+    the assembly order and inserts anomaly flags after the summary.
+    """
+    results = ctx.results
+    anomalies: list[str] = []
+
+    sections = [
+        _summary_section(ctx),
+        _pipeline_health_section(
+            results,
+            anomalies,
+            degradation_threshold=ctx.degradation_threshold,
+        ),
+        _rank_analysis_section(
+            results,
+            anomalies,
+            near_miss_ratio=ctx.near_miss_ratio,
+        ),
+        _round_evolution_section(ctx.round_history, anomalies),
+        _query_category_section(results),
+        _scan_context_section(ctx.scan_context),
+        _task_context_section(ctx.task_context),
+    ]
+    if ctx.warning_inventory:
+        sections.append(summarize_warning_inventory(ctx.warning_inventory))
+    sections += [
+        _failure_details_section(results),
+        _success_details_section(results),
+        CRITIQUE_TASK,
+    ]
+
+    # Insert anomaly flags right after the summary
+    if results and anomalies:
+        anomaly_block = "## ANOMALY FLAGS ({})\n{}".format(
+            len(anomalies),
+            "\n".join(f"  {a}" for a in anomalies),
+        )
+        sections.insert(1, anomaly_block)
+
+    return "\n\n".join(s for s in sections if s)
 
 
 # ---------------------------------------------------------------------------
@@ -493,7 +567,9 @@ class CritiqueAgent:
         prompt = assemble_critique_prompt(ctx)
         logger.info(
             "Rich critique: %d chars prompt, round %d, acc=%.3f",
-            len(prompt), ctx.current_round + 1, ctx.accuracy,
+            len(prompt),
+            ctx.current_round + 1,
+            ctx.accuracy,
         )
 
         response = await llm_call(

@@ -13,13 +13,33 @@ Derivation methods:
   frontend_nodes()        → runtime filtering
 """
 
+import enum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+
+class NodeRuntime(enum.StrEnum):
+    """Where a pipeline node executes."""
+
+    BACKEND = "backend"
+    FRONTEND = "frontend"
+
+
+class NodeRole(enum.StrEnum):
+    """Semantic role of a pipeline node (empty string = no role)."""
+
+    NONE = ""
+    CANDIDATE_SOURCE = "candidate_source"
+    RANKER = "ranker"
+    ENRICHER = "enricher"
+    CACHE = "cache"
+
+
 # ---------------------------------------------------------------------------
 # Observation mapping
 # ---------------------------------------------------------------------------
+
 
 class ObservationMapping(BaseModel):
     """Maps one trace observation field to a pipeline_data key.
@@ -40,6 +60,7 @@ class ObservationMapping(BaseModel):
 # ---------------------------------------------------------------------------
 # Node metadata (output schema + prompt info)
 # ---------------------------------------------------------------------------
+
 
 class NodeOutputSchema(BaseModel):
     """Resolved output schema for a pipeline node.
@@ -78,7 +99,6 @@ class NodePromptMeta(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-
 class PipelineNode(BaseModel):
     """One node in a pipeline (target or optimizer)."""
 
@@ -86,9 +106,9 @@ class PipelineNode(BaseModel):
 
     name: str
     type: str = "tool"
-    runtime: str = "backend"  # "backend" | "frontend"
+    runtime: NodeRuntime = NodeRuntime.BACKEND
     short_circuit: bool = False
-    node_role: str = ""  # "candidate_source" | "ranker" | "enricher" | "cache" | ""
+    node_role: NodeRole = NodeRole.NONE
     description: str = ""
     param_keys: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
@@ -106,6 +126,7 @@ class PipelineNode(BaseModel):
 # ---------------------------------------------------------------------------
 # Intermediate metrics
 # ---------------------------------------------------------------------------
+
 
 class IntermediateMetric(BaseModel):
     """A metric derived from a pipeline step's node_role."""
@@ -151,6 +172,7 @@ ROLE_METRIC_REGISTRY: dict[str, list[IntermediateMetric]] = {
 # ---------------------------------------------------------------------------
 # PipelineSchema
 # ---------------------------------------------------------------------------
+
 
 class PipelineSchema(BaseModel):
     """Full description of a backend pipeline.
@@ -215,13 +237,8 @@ class PipelineSchema(BaseModel):
     # -------------------------------------------------------------------
 
     def node_param_keys(self) -> dict[str, set[str]]:
-        """Map step name → parameter keys.
-        """
-        return {
-            step.name: step.param_keys
-            for step in self.nodes
-            if step.param_keys
-        }
+        """Map step name → parameter keys."""
+        return {step.name: step.param_keys for step in self.nodes if step.param_keys}
 
     def obs_extraction_map(self) -> dict[str, list[ObservationMapping]]:
         """Map observation name → extraction rules.
@@ -243,12 +260,11 @@ class PipelineSchema(BaseModel):
 
     def backend_nodes(self) -> list[PipelineNode]:
         """Steps that run on the backend."""
-        return [s for s in self.nodes if s.runtime == "backend"]
+        return [s for s in self.nodes if s.runtime == NodeRuntime.BACKEND]
 
     def frontend_nodes(self) -> list[PipelineNode]:
         """Steps that run on the frontend."""
-        return [s for s in self.nodes if s.runtime == "frontend"]
-
+        return [s for s in self.nodes if s.runtime == NodeRuntime.FRONTEND]
 
 
 def is_result_step_compatible(
@@ -269,11 +285,10 @@ def is_result_step_compatible(
     return terminated_at in target
 
 
-
-
 # ---------------------------------------------------------------------------
 # Unified pipeline loading
 # ---------------------------------------------------------------------------
+
 
 def load_pipeline_from_dict(data: dict) -> PipelineSchema:
     """Load a PipelineSchema from a raw dict (e.g., optimizer_pipeline.json).
@@ -283,12 +298,15 @@ def load_pipeline_from_dict(data: dict) -> PipelineSchema:
     """
     nodes = []
     for name, node_data in data.get("nodes", {}).items():
-        nodes.append(PipelineNode(
-            name=name,
-            type=node_data.get("type", ""),
-            current_config=node_data.get("config", {}),
-            default_config=node_data.get("config", {}),
-        ))
+        nodes.append(
+            PipelineNode(
+                name=name,
+                type=node_data.get("type", ""),
+                current_config=node_data.get("config", {}),
+                # Snapshot defaults at load time; current_config may diverge at runtime
+                default_config=dict(node_data.get("config", {})),
+            )
+        )
     return PipelineSchema(
         name=data.get("name", ""),
         version=data.get("version", ""),

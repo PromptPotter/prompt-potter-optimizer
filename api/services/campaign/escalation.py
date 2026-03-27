@@ -278,7 +278,7 @@ async def _do_l2_transition(
             "accuracy": r.accuracy,
             "results": r.results,
         }
-        for r in state.rounds[-config.patience:]
+        for r in state.rounds[-config.l1_patience:]
     ]
     emit_phase(on_phase, "refine_context", "enter", round=round_num,
                 l2_round=state.escalation.l2_round,

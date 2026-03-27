@@ -4,6 +4,7 @@ Prompt evaluation service.
 Evaluates prompts via the backend's /matches endpoint,
 with content-hash deduplication and alias-aware caching.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -66,6 +67,7 @@ def _error_category(error: str | None) -> ErrorCategory | None:
 def _dominant_error_category(results: list) -> ErrorCategory | None:
     """Return the most common error category across errored results."""
     from collections import Counter
+
     cats = [_error_category(r.get("error")) for r in results if r.get("error")]
     cats = [c for c in cats if c]
     if not cats:
@@ -85,9 +87,9 @@ def subsample_queries(
     """
     if sample_size > 0 and len(eval_data) > sample_size:
         import random
+
         return random.Random(seed).sample(eval_data, sample_size)
     return eval_data
-
 
 
 def build_dataset_run_data(
@@ -125,7 +127,6 @@ def build_dataset_run_data(
     if experiment_id:
         data["experiment_id"] = experiment_id
     return data
-
 
 
 def _extract_pipeline_data(
@@ -195,6 +196,7 @@ async def backend_reranker_evaluate(
 
     if pipeline_schema is None:
         from api.models.pipeline_schema import PipelineSchema
+
         pipeline_schema = PipelineSchema()
 
     try:
@@ -209,9 +211,7 @@ async def backend_reranker_evaluate(
         )
         data = resp.get("data", {})
         ranked = data.get("ranked_candidates", [])
-        predicted = (
-            ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
-        )
+        predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
         eval_output = _evaluator.evaluate(ground_truth, predicted)
         return {
             "query": query,
@@ -251,15 +251,14 @@ async def _evaluate_single_query(
         Tuple of (result_dict, was_cached).  ``was_cached`` is True when
         the result came from ``cached_queries`` rather than a live backend call.
     """
-    cached = (
-        cached_queries.get(query_data["query"])
-        if cached_queries else None
-    )
+    cached = cached_queries.get(query_data["query"]) if cached_queries else None
     if cached is not None and not cached.get("error"):
         return {**cached, "cached": True}, True
 
     result = await backend_reranker_evaluate(
-        query_data, backend_client, rendered_prompt,
+        query_data,
+        backend_client,
+        rendered_prompt,
         pipeline_params=search_point.pipeline_params,
         pipeline_schema=pipeline_schema,
     )
@@ -277,6 +276,7 @@ async def evaluate_prompt_batch(
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
     cached_queries: dict[str, dict] | None = None,
+    max_consecutive_errors: int = 3,
 ) -> EvalBatchResult:
     """Evaluate a prompt on all eval_data queries via the backend.
 
@@ -304,7 +304,6 @@ async def evaluate_prompt_batch(
     results: list = []
     rendered = search_point.render()
     consecutive_errors = 0
-    max_consecutive_errors = 3
     n_reused = 0
 
     # -- Graceful interrupt: 1st Ctrl+C sets flag (current query finishes),
@@ -315,7 +314,7 @@ async def evaluate_prompt_batch(
         nonlocal _stop_requested
         if _stop_requested:
             raise KeyboardInterrupt  # 2nd Ctrl+C = force quit
-        _stop_requested = True       # 1st Ctrl+C = finish current query
+        _stop_requested = True  # 1st Ctrl+C = finish current query
 
     old_handler = signal.signal(signal.SIGINT, _graceful_handler)
     try:
@@ -323,13 +322,18 @@ async def evaluate_prompt_batch(
             if _stop_requested:
                 logger.info(
                     "Graceful stop after query %d/%d.",
-                    len(results), len(eval_data),
+                    len(results),
+                    len(eval_data),
                 )
                 break
 
             result, was_cached = await _evaluate_single_query(
-                search_point, qd, backend_client, rendered,
-                pipeline_schema, cached_queries,
+                search_point,
+                qd,
+                backend_client,
+                rendered,
+                pipeline_schema,
+                cached_queries,
             )
             if was_cached:
                 n_reused += 1
@@ -344,28 +348,34 @@ async def evaluate_prompt_batch(
                     logger.warning(
                         "Aborting eval: client error (4xx) on query %d. "
                         "Marking remaining %d queries as errors.",
-                        i + 1, len(eval_data) - i - 1,
+                        i + 1,
+                        len(eval_data) - i - 1,
                     )
-                    for remaining_qd in eval_data[i + 1:]:
-                        results.append(_error_result(
-                            remaining_qd["query"],
-                            remaining_qd.get("ground_truth", ""),
-                            "skipped_after_client_error",
-                        ))
+                    for remaining_qd in eval_data[i + 1 :]:
+                        results.append(
+                            _error_result(
+                                remaining_qd["query"],
+                                remaining_qd.get("ground_truth", ""),
+                                "skipped_after_client_error",
+                            )
+                        )
                     break
                 consecutive_errors += 1
                 if consecutive_errors >= max_consecutive_errors:
                     logger.warning(
                         "Aborting eval: %d consecutive errors. "
                         "Marking remaining %d queries as errors.",
-                        consecutive_errors, len(eval_data) - i - 1,
+                        consecutive_errors,
+                        len(eval_data) - i - 1,
                     )
-                    for remaining_qd in eval_data[i + 1:]:
-                        results.append(_error_result(
-                            remaining_qd["query"],
-                            remaining_qd.get("ground_truth", ""),
-                            "skipped_after_consecutive_errors",
-                        ))
+                    for remaining_qd in eval_data[i + 1 :]:
+                        results.append(
+                            _error_result(
+                                remaining_qd["query"],
+                                remaining_qd.get("ground_truth", ""),
+                                "skipped_after_consecutive_errors",
+                            )
+                        )
                     break
             else:
                 consecutive_errors = 0
@@ -379,7 +389,9 @@ async def evaluate_prompt_batch(
                     if not check.enabled:
                         continue
                     esc_signal = check.evaluate(
-                        results, candidate_idx, n_total_candidates,
+                        results,
+                        candidate_idx,
+                        n_total_candidates,
                     )
                     if esc_signal:
                         raise EscalationError(esc_signal, results)
@@ -387,7 +399,8 @@ async def evaluate_prompt_batch(
         # Force quit (2nd Ctrl+C) or task cancellation
         logger.warning(
             "Eval batch force-interrupted at query %d/%d.",
-            len(results), len(eval_data),
+            len(results),
+            len(eval_data),
         )
         return EvalBatchResult(results, completed=False, stop_reason="force")
     finally:
@@ -396,7 +409,8 @@ async def evaluate_prompt_batch(
     if n_reused:
         logger.info(
             "Per-query reuse: %d/%d queries from prior runs",
-            n_reused, len(eval_data),
+            n_reused,
+            len(eval_data),
         )
 
     if _stop_requested:
@@ -427,6 +441,7 @@ def _finalize_observability(
         _obs = obs
         if _obs is None:
             from api.services.obs.observability_logger import ObsLogger
+
             _obs = ObsLogger(store.base_dir, backend_id)
         _obs.log_dataset_run(
             run_id=run_id,
@@ -454,6 +469,7 @@ def _lookup_cached_or_aliased_result(
 
     Returns (results, scores, True) on cache hit, or None on miss.
     """
+
     def _use_cached(run: dict) -> tuple[list, dict, bool] | None:
         results = run["dataset_run_items"]
         if results and all(r.get("error") for r in results):
@@ -472,8 +488,12 @@ def _lookup_cached_or_aliased_result(
     # Alias-group fallback (semantically equivalent prompt forms)
     rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
     alias_match = store.dataset_runs.load_by_alias(
-        backend_id, rp_hash, search_point.model, search_point.temperature,
-        search_point.pipeline_params, len(eval_data),
+        backend_id,
+        rp_hash,
+        search_point.model,
+        search_point.temperature,
+        search_point.pipeline_params,
+        len(eval_data),
     )
     if alias_match:
         return _use_cached(alias_match)
@@ -523,8 +543,14 @@ async def evaluate_prompt_cached(
     # --- dedup lookup (content hash + alias group fallback) ---
     if store and backend_id and not force:
         cached = _lookup_cached_or_aliased_result(
-            store, backend_id, content_hash, rendered,
-            search_point, eval_data, pipeline_schema, on_result,
+            store,
+            backend_id,
+            content_hash,
+            rendered,
+            search_point,
+            eval_data,
+            pipeline_schema,
+            on_result,
         )
         if cached is not None:
             # Run escalation checks on cached results too — the per-query
@@ -535,7 +561,9 @@ async def evaluate_prompt_cached(
                     if not check.enabled:
                         continue
                     signal = check.evaluate(
-                        results, ctx.candidate_idx, ctx.n_total_candidates,
+                        results,
+                        ctx.candidate_idx,
+                        ctx.n_total_candidates,
                     )
                     if signal:
                         scores["escalation_signal"] = signal.to_dict()
@@ -547,10 +575,7 @@ async def evaluate_prompt_cached(
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
     # Prefix display name with experiment_id for discoverability
-    display_name = (
-        f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id
-        else safe_label
-    )
+    display_name = f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id else safe_label
 
     from api.services.campaign.escalation import EscalationError as _EscalationError
 
@@ -564,7 +589,8 @@ async def evaluate_prompt_cached(
         if sp_cache:
             logger.info(
                 "SP cache: %d cached queries for %d eval queries",
-                len(sp_cache), len(eval_data),
+                len(sp_cache),
+                len(eval_data),
             )
 
     def _save_run(results: list, scores: dict, *, partial: bool = False) -> None:
@@ -572,8 +598,13 @@ async def evaluate_prompt_cached(
         if not (store and backend_id):
             return
         run_data = build_dataset_run_data(
-            run_id, display_name, content_hash, search_point,
-            scores, results, source=source,
+            run_id,
+            display_name,
+            content_hash,
+            search_point,
+            scores,
+            results,
+            source=source,
             experiment_id=ctx.experiment_id,
         )
         if partial:
@@ -583,13 +614,16 @@ async def evaluate_prompt_cached(
     escalation_signal = None
     try:
         batch = await evaluate_prompt_batch(
-            search_point, eval_data, backend_client,
+            search_point,
+            eval_data,
+            backend_client,
             on_result=on_result,
             pipeline_schema=pipeline_schema,
             escalation_checks=ctx.escalation_checks,
             candidate_idx=ctx.candidate_idx,
             n_total_candidates=ctx.n_total_candidates,
             cached_queries=sp_cache,
+            max_consecutive_errors=ctx.max_consecutive_errors,
         )
         results = batch.results
         if not batch.completed:
@@ -598,7 +632,9 @@ async def evaluate_prompt_cached(
                 _save_run(results, compute_composite_score(results, pipeline_schema), partial=True)
                 logger.info(
                     "Saved partial run (%d/%d queries) for SP %s",
-                    len(results), len(eval_data), content_hash[:8],
+                    len(results),
+                    len(eval_data),
+                    content_hash[:8],
                 )
             raise KeyboardInterrupt()
     except _EscalationError as e:
@@ -612,8 +648,15 @@ async def evaluate_prompt_cached(
     _save_run(results, scores)
     if store and backend_id:
         _finalize_observability(
-            store, backend_id, run_id, content_hash, scores,
-            model, temperature, search_point.sp_hash(), obs,
+            store,
+            backend_id,
+            run_id,
+            content_hash,
+            scores,
+            model,
+            temperature,
+            search_point.sp_hash(),
+            obs,
         )
 
     return results, scores, False

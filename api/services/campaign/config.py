@@ -1,4 +1,5 @@
 """CycleConfig — configuration for the optimization loop."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -14,7 +15,7 @@ class CycleConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     max_rounds: int | None = Field(10, description="Maximum optimization rounds (None = unlimited)")
-    patience: int = Field(3, description="Stop after N consecutive non-improvements")
+    l1_patience: int = Field(3, description="Stop after N consecutive non-improving L1 rounds")
     n_variants: int = Field(5, description="Candidates per round")
     creativity: float = Field(0.7, description="Temperature for candidate generation")
     improvement_threshold: float = Field(0.01, description="Min accuracy delta")
@@ -34,7 +35,8 @@ class CycleConfig(BaseModel):
     # Critique-guided generation
     enable_critique: bool = Field(True, description="Enable critique agent between rounds")
     critique_positive_threshold: float = Field(
-        0.7, description="Accuracy threshold for positive vs negative critique",
+        0.7,
+        description="Accuracy threshold for positive vs negative critique",
     )
 
     # Scan-aware optimization
@@ -42,7 +44,8 @@ class CycleConfig(BaseModel):
 
     # Structured domain context (from TASK_DESCRIPTION decomposition)
     task_context: dict | None = Field(
-        None, description="Structured domain context for L1 gen and L2 refinement",
+        None,
+        description="Structured domain context for L1 gen and L2 refinement",
     )
 
     # L2/L3 escalation
@@ -65,7 +68,28 @@ class CycleConfig(BaseModel):
         description="Degradation resets before emitting backend warning (0 = disabled)",
     )
     max_failures: int = Field(
-        15, description="Max failure examples fed to LLM candidate generation",
+        15,
+        description="Max failure examples fed to LLM candidate generation",
+    )
+
+    # Eval robustness
+    max_consecutive_errors: int = Field(
+        3,
+        description="Abort eval batch after N consecutive backend errors",
+    )
+    hard_cap: int = Field(
+        100,
+        description="Safety cap on total rounds (incl. probe rounds)",
+    )
+
+    # Critique thresholds
+    critique_degradation_threshold: float = Field(
+        0.4,
+        description="Degradation rate above which critique flags an anomaly",
+    )
+    critique_near_miss_ratio: float = Field(
+        0.3,
+        description="Near-miss/miss ratio above which critique flags ranking issues",
     )
 
     @classmethod
@@ -92,7 +116,7 @@ class CycleConfig(BaseModel):
         eval_llm = campaign_config["eval_llm"]
         return cls(
             max_rounds=opt["max_rounds"],
-            patience=opt["patience"],
+            l1_patience=opt["patience"],
             n_variants=opt["n_variants"],
             creativity=opt["creativity"],
             improvement_threshold=opt["improvement_threshold"],
