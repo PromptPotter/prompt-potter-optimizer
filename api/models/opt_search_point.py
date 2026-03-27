@@ -163,7 +163,7 @@ class OptSearchPoint(SearchPoint):
                 lines.append(f"Explanation: {ex.explanation}")
         return "\n".join(lines)
 
-    def compile_prompt(self, **kwargs: str) -> str:
+    def compile_prompt(self, **kwargs: str | int) -> str:
         """Render and substitute ``{{variable}}`` placeholders.
 
         Uses Langfuse-compatible double-brace syntax. Raises KeyError if

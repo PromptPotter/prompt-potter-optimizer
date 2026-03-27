@@ -183,7 +183,7 @@ def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
     for e in tracker.values():
         for wt, c in e.get("warnings", {}).items():
             all_wtypes[wt] = all_wtypes.get(wt, 0) + c
-    top_warning = max(all_wtypes, key=all_wtypes.get) if all_wtypes else ""
+    top_warning = max(all_wtypes, key=all_wtypes.get) if all_wtypes else ""  # type: ignore[arg-type]
     return warned_count, top_warning
 
 

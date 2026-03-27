@@ -25,7 +25,7 @@ from api.shared.hashing import HASH_TRUNCATE
 if TYPE_CHECKING:
     from api.models.eval_context import EvalContext
     from api.models.pipeline_schema import PipelineSchema
-    from api.models.search_point import SearchPoint
+    from api.models.search_point import JobSearchPoint
     from api.services.backend_client import BackendClient
     from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
@@ -89,7 +89,7 @@ def build_dataset_run_data(
     run_id: str,
     name: str,
     content_hash: str,
-    search_point: SearchPoint,
+    search_point: JobSearchPoint,
     scores: dict,
     results: list,
     *,
@@ -233,7 +233,7 @@ async def backend_reranker_evaluate(
 
 
 async def evaluate_prompt_batch(
-    search_point: SearchPoint,
+    search_point: JobSearchPoint,
     eval_data: list,
     backend_client: BackendClient,
     *,
@@ -419,7 +419,7 @@ def _try_cached_lookup(
     backend_id: str,
     content_hash: str,
     rendered: str,
-    search_point: SearchPoint,
+    search_point: JobSearchPoint,
     eval_data: list,
     pipeline_schema: PipelineSchema | None,
     on_result: Callable | None,
@@ -456,7 +456,7 @@ def _try_cached_lookup(
 
 
 async def evaluate_prompt_cached(
-    search_point: SearchPoint,
+    search_point: JobSearchPoint,
     eval_data: list,
     ctx: EvalContext,
     *,

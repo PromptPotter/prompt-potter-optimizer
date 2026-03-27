@@ -112,6 +112,7 @@ async def _handle_escalation_signal(
     Returns a StopReason if the cycle should stop, None to continue.
     """
     signal = round_result.escalation_signal
+    assert signal is not None
     emit_phase(
         on_phase, "escalation", "enter", round=round_num,
         check_name=signal["check_name"],
@@ -153,7 +154,7 @@ async def _handle_escalation_signal(
         # Record journal entry after L2 transition
         dominant = esc_context.get("dominant_warning", "unknown:unknown")
         problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
-        step_cfg = (state.current_sp.pipeline_params or {}).get(problem_step, {})
+        step_cfg = ((state.current_sp.pipeline_params if state.current_sp else None) or {}).get(problem_step, {})
         state.opt_sp.escalation_journal.append({
             "round": round_num,
             "degraded_rate": esc_context.get("degraded_rate", 0),
@@ -193,7 +194,7 @@ async def _init_cycle_state(
     experiment_id: str,
     backend_client: "BackendClient | None",
     started_at: str,
-) -> tuple[LoopState, Any, str | None, str, list[dict], list, int]:
+) -> CycleInitResult:
     """Initialize all cycle state: baseline, resume, obs, eval context.
 
     Returns:

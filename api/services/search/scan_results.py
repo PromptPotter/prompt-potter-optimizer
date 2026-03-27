@@ -126,6 +126,7 @@ async def resume_or_build_diagnostic(
                 s["status"] != "scan_complete",
             ))
             sib_data = store.smart_search.load(backend_id, siblings[0]["plan_id"])
+            assert sib_data is not None
             sib_plan = deserialize_smart_search_plan(sib_data)
             sib_profiles = (sib_plan.get("scan_results") or {}).get("axis_profiles", [])
             logger.info(

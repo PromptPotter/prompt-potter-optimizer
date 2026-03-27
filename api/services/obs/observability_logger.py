@@ -260,8 +260,8 @@ class ObsLogger:
             write_text(run_dir / "params" / key, str(value))
 
         timestamp_ms = now_ms
-        for key, value in metrics.items():
-            append_text(run_dir / "metrics" / key, f"{timestamp_ms} {value} 0\n")
+        for metric_key, metric_value in metrics.items():
+            append_text(run_dir / "metrics" / metric_key, f"{timestamp_ms} {metric_value} 0\n")
 
         if tags:
             for key, value in tags.items():

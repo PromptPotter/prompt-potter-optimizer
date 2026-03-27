@@ -64,6 +64,7 @@ async def _generate_or_load_candidates(
     _creativity = creativity if creativity is not None else config.creativity
     prompt_preview = state.opt_sp.render()[:120]
 
+    assert state.current_sp is not None
     emit_phase(on_phase, "l1_generate", "enter", round=round_num,
                 current_accuracy=state.current_accuracy,
                 prompt_preview=prompt_preview,
@@ -140,7 +141,7 @@ async def _evaluate_candidates(
                 n_queries=len(round_eval_data),
                 current_best_accuracy=state.current_accuracy,
                 improvement_threshold=config.improvement_threshold,
-                current_pipeline_params=state.current_sp.pipeline_params)
+                current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None)
 
     baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
@@ -155,6 +156,8 @@ async def _evaluate_candidates(
 
     async with observed_node(f"l1_evaluate_r{round_num}", "evaluation",
                              obs=obs, trace_id=trace_id, obs_type="span"):
+        assert state.eval_ctx is not None
+        assert state.current_sp is not None
         eval_out = await l1_evaluate(
             candidates, round_eval_data, current_best, state.eval_ctx,
             model=state.current_sp.model,
@@ -349,6 +352,7 @@ def _update_round_state(
     for f in PROMPT_STRING_FIELDS:
         setattr(state.opt_sp, f, winner_fields.get(f, ""))
     # Rebuild JobSearchPoint from opt_sp
+    assert state.current_sp is not None
     _pp = rr.pipeline_params if rr.pipeline_params is not None else state.current_sp.pipeline_params
     state.current_sp = state.opt_sp.to_job_search_point(
         model=state.current_sp.model,

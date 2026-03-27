@@ -142,7 +142,7 @@ def format_context_sections(
                     step = wtype.split(":")[0] if ":" in wtype else wtype
                     step_counts[step] = step_counts.get(step, 0) + 1
             if step_counts:
-                dominant_step = max(step_counts, key=step_counts.get)
+                dominant_step = max(step_counts, key=step_counts.get)  # type: ignore[arg-type]
                 probe_lines.append(
                     f"\nDominant problem step: {dominant_step} "
                     f"({step_counts[dominant_step]} warning occurrences)"

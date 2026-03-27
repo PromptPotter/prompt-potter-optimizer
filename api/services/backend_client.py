@@ -105,8 +105,8 @@ def build_pipeline_params(
                 continue
             resolved = schema.resolve_flat_param(k)
             if resolved:
-                node, wire_key = resolved
-                params.setdefault(node, {})[wire_key] = v
+                node_name, wire_key = resolved
+                params.setdefault(node_name, {})[wire_key] = v
             else:
                 # No override_map entry — pass through as flat key
                 params[k] = v

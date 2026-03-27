@@ -48,6 +48,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.3.0",
+    "mypy>=1.10.0",
 ]
 
 [project.urls]
@@ -62,6 +63,27 @@ testpaths = ["tests"]
 pythonpath = ["tests"]
 addopts = "-q --tb=short"
 markers = ["slow: orchestrator integration tests (>1s each)"]
+
+[tool.mypy]
+python_version = "3.13"
+warn_unused_configs = true
+warn_redundant_casts = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+    "langfuse.*",
+    "groq.*",
+    "scalar_fastapi.*",
+    "openpyxl.*",
+    "pandas.*",
+    "requests.*",
+]
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py313"

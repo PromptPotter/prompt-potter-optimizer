@@ -75,9 +75,9 @@ async def l1_generate(
     )
 
     meta_prompt = load_optimizer_prompt("meta_scan_aware").compile_prompt(
-        n_variants=n_variants,
+        n_variants=str(n_variants),
         accuracy_pct=f"{current_accuracy:.1%}",
-        n_queries=len(current_results),
+        n_queries=str(len(current_results)),
         rendered_prompt=opt_sp.render(),
         failure_examples=failure_examples,
         scan_analytics=_format_scan_analytics(scan_context),
@@ -146,7 +146,7 @@ def _select_round_winner(
     # Find best candidate
     best_composite = current_composite
     best_acc = current_acc
-    best_ps = current_best["prompt_fields"]
+    best_ps: dict | OptSearchPoint = current_best["prompt_fields"]
     best_results = current_best["results"]
     best_label = current_best["label"]
     winner_idx: int | None = None
@@ -242,18 +242,19 @@ async def l1_evaluate(
     ctx.escalation_checks = escalation_checks
     ctx.n_total_candidates = len(osp_candidates)
 
-    for idx, c in enumerate(osp_candidates):
+    for idx, osp_c in enumerate(osp_candidates):
         _on_result = None
         if callbacks and callbacks.on_query_eval:
             _n_cand = len(osp_candidates)
             def _on_result(result, qi, qt, _ci=idx, _ct=_n_cand):
                 callbacks.on_query_eval(_ci, _ct, qi, qt, result)
 
-        if candidate_pp[idx]:
-            pp = {**(_sp_pipeline_params or {}), **candidate_pp[idx]}
+        _cpp = candidate_pp[idx]
+        if _cpp:
+            pp: dict | None = {**(_sp_pipeline_params or {}), **_cpp}
         else:
             pp = _sp_pipeline_params
-        sp = c.to_job_search_point(
+        sp = osp_c.to_job_search_point(
             model=_sp_model,
             temperature=_sp_temperature,
             base_pipeline_params=pp,
@@ -268,9 +269,9 @@ async def l1_evaluate(
         escalation_signal = scores.pop("escalation_signal", None)
 
         aborted = bool(escalation_signal) and len(results) < len(eval_data)
-        all_candidate_results[c.id] = results
+        all_candidate_results[osp_c.id] = results
         candidate_scores.append({
-            "candidate_id": c.id,
+            "candidate_id": osp_c.id,
             "accuracy": scores["accuracy"],
             "composite": scores.get("composite", scores["accuracy"]),
             "hits": scores["hits"],
@@ -307,8 +308,10 @@ async def l1_evaluate(
     )
 
     w_idx = winner_entry["winner_idx"]
-    if w_idx is not None and candidate_pp[w_idx]:
-        winner_pp = {**(_sp_pipeline_params or {}), **candidate_pp[w_idx]}
+    _w_cpp = candidate_pp[w_idx] if w_idx is not None else None
+    winner_pp: dict | None
+    if w_idx is not None and _w_cpp:
+        winner_pp = {**(_sp_pipeline_params or {}), **_w_cpp}
     else:
         winner_pp = _sp_pipeline_params
 

@@ -176,6 +176,7 @@ async def restructure_context_cached(
 
     # --- cache lookup ---
     if can_cache and not force and alias_hashes:
+        assert store_base_dir is not None
         cached = load_cached_restructure(
             store_base_dir, backend_id, alias_hashes, improvement_areas,
         )
@@ -192,6 +193,7 @@ async def restructure_context_cached(
 
     # --- save to cache ---
     if can_cache:
+        assert store_base_dir is not None
         save_key = rp_hash
         if not save_key:
             instruction = (

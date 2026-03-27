@@ -300,11 +300,10 @@ def preview_advisor_prompt(
         excluded_nodes = _resolve_excluded_nodes(
             exclude_nodes, pipeline_schema, pipeline_params,
         )
-        layer_args = {"schema": pipeline_schema, "excluded_nodes": excluded_nodes}
         return _build_advisor_prompt(
-            pipeline_overview=build_pipeline_overview(**layer_args),
-            tunable_params=build_tunable_params(**layer_args),
-            llm_context=build_llm_context(**layer_args),
+            pipeline_overview=build_pipeline_overview(schema=pipeline_schema, excluded_nodes=excluded_nodes),
+            tunable_params=build_tunable_params(schema=pipeline_schema, excluded_nodes=excluded_nodes),
+            llm_context=build_llm_context(schema=pipeline_schema, excluded_nodes=excluded_nodes),
             prompt_field_axes=_extract_prompt_field_axes(variant_library),
             pipeline_description=pipeline_schema.description,
             task_description=task_description,
@@ -468,10 +467,9 @@ async def advise_scan_config(
     excluded_nodes = _resolve_excluded_nodes(
         exclude_nodes, pipeline_schema, pipeline_params,
     )
-    layer_args = {"schema": pipeline_schema, "excluded_nodes": excluded_nodes}
-    pipeline_overview = build_pipeline_overview(**layer_args)
-    tunable_params = build_tunable_params(**layer_args)
-    llm_context = build_llm_context(**layer_args)
+    pipeline_overview = build_pipeline_overview(schema=pipeline_schema, excluded_nodes=excluded_nodes)
+    tunable_params = build_tunable_params(schema=pipeline_schema, excluded_nodes=excluded_nodes)
+    llm_context = build_llm_context(schema=pipeline_schema, excluded_nodes=excluded_nodes)
     prompt_field_axes = _extract_prompt_field_axes(variant_library)
 
     prompt = _build_advisor_prompt(

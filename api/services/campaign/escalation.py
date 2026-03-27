@@ -126,7 +126,7 @@ class DegradationCheck(EscalationCheck):
             return None
 
         warning_types = collect_warning_types(results_so_far)
-        dominant = max(warning_types, key=warning_types.get) if warning_types else "unknown"
+        dominant = max(warning_types, key=warning_types.get) if warning_types else "unknown"  # type: ignore[arg-type]
         strategy = self.strategies.get(dominant, EscalationStrategy())
 
         return EscalationSignal(
@@ -269,6 +269,7 @@ async def _do_l2_transition(
     from api.services.campaign.critique import warning_summary
     from api.services.obs.node_tracer import observed_node
 
+    assert state.current_sp is not None
     current_pp = state.current_sp.pipeline_params
 
     stalled_rounds = [
@@ -305,10 +306,12 @@ async def _do_l2_transition(
     # L2 does NOT set pipeline_params — only L1 Generate does that
     # Update opt_sp from L2 result, then rebuild JobSearchPoint
     state.opt_sp = tr.opt_search_point
+    _cur = state.current_sp
+    assert _cur is not None
     state.current_sp = state.opt_sp.to_job_search_point(
-        model=state.current_sp.model,
-        temperature=state.current_sp.temperature,
-        base_pipeline_params=state.current_sp.pipeline_params,
+        model=_cur.model,
+        temperature=_cur.temperature,
+        base_pipeline_params=_cur.pipeline_params,
     )
     state.escalation.l2_round += 1
     state.escalation.best_accuracy_at_l2_entry = state.best_accuracy
@@ -354,6 +357,7 @@ async def _do_l3_transition(
     from api.services.campaign import layer_transitions
     from api.services.obs.node_tracer import observed_node
 
+    assert state.current_sp is not None
     current_pp = state.current_sp.pipeline_params
 
     l2_history = [{
@@ -378,10 +382,12 @@ async def _do_l3_transition(
         )
     # Update opt_sp from L3 result, then rebuild JobSearchPoint
     state.opt_sp = tr.opt_search_point
-    _pp = tr.pipeline_params or state.current_sp.pipeline_params
+    _cur_l3 = state.current_sp
+    assert _cur_l3 is not None
+    _pp = tr.pipeline_params or _cur_l3.pipeline_params
     state.current_sp = state.opt_sp.to_job_search_point(
-        model=state.current_sp.model,
-        temperature=state.current_sp.temperature,
+        model=_cur_l3.model,
+        temperature=_cur_l3.temperature,
         base_pipeline_params=_pp,
     )
     state.escalation.l3_round += 1
@@ -422,7 +428,6 @@ async def _escalate_l2(
     """
     from api.services.campaign.models import StopReason
 
-    _l2_kwargs = {"obs": obs, "trace_id": trace_id, "escalation_context": escalation_context}
     esc = state.escalation
 
     # Track L2 stall
@@ -432,7 +437,10 @@ async def _escalate_l2(
     # Not stalled → plain L2 transition
     l2_stalled = config.l2_patience is not None and esc.l2_stall_count >= config.l2_patience
     if not l2_stalled:
-        await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
+        await _do_l2_transition(
+            state, config, round_num, eval_data, on_phase,
+            obs=obs, trace_id=trace_id, escalation_context=escalation_context,
+        )
         return None
 
     # L2 stalled, L3 disabled → exhaust or reset
@@ -442,7 +450,10 @@ async def _escalate_l2(
                 "L2 patience exhausted during degradation — resetting at round %d", round_num,
             )
             _degradation_reset(state, config, round_num, on_phase)
-            await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
+            await _do_l2_transition(
+                state, config, round_num, eval_data, on_phase,
+                obs=obs, trace_id=trace_id, escalation_context=escalation_context,
+            )
             return None
         logger.info(
             "L2 patience exhausted (%d stalls) at round %d", esc.l2_stall_count, round_num,
@@ -466,7 +477,10 @@ async def _escalate_l2(
             "L3 patience exhausted during degradation — resetting L2/L3 at round %d", round_num,
         )
         _degradation_reset(state, config, round_num, on_phase, reset_l3=True)
-        await _do_l2_transition(state, config, round_num, eval_data, on_phase, **_l2_kwargs)
+        await _do_l2_transition(
+            state, config, round_num, eval_data, on_phase,
+            obs=obs, trace_id=trace_id, escalation_context=escalation_context,
+        )
         return None
     logger.info(
         "L3 patience exhausted (%d stalls) at round %d", esc.l3_stall_count, round_num,

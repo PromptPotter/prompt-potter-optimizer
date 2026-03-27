@@ -218,7 +218,9 @@ class CampaignStore:
         }
         self.create(backend_id, cid, metadata)
         logger.info("Created campaign %s for backend %s", cid, backend_id)
-        return self.load(backend_id, cid)
+        result = self.load(backend_id, cid)
+        assert result is not None, f"Campaign {cid} not found after create"
+        return result
 
     def record_trial(
         self,

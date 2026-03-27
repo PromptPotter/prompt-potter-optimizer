@@ -84,6 +84,7 @@ class ScanEvent(TypedDict, total=False):
     best_value: str
     improvement: float
     new_accuracy: float
+    composite: float
     # round events
     round: int
     max_rounds: int
@@ -295,7 +296,7 @@ def classify_axis(
 def filter_variant_library(
     variant_library: dict,
     pipeline_params: dict | None,
-    schema: PipelineSchema,
+    schema: PipelineSchema | None = None,
 ) -> dict:
     """Filter variant library to axes relevant for the active pipeline.
 
@@ -313,6 +314,9 @@ def filter_variant_library(
     Returns:
         Filtered copy of the variant library.
     """
+    if schema is None:
+        return variant_library
+
     active_steps = set((pipeline_params or {}).get("steps", []))
 
     # Build set of param keys owned by active steps

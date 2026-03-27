@@ -119,7 +119,7 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
             osp = _load_local(name)
             lf.client.create_prompt(
                 name=f"{_LANGFUSE_PREFIX}{name}",
-                prompt=osp.render_prompt(),
+                prompt=osp.render(),
                 config=osp.model_dump(
                     exclude={"critique_text", "critique", "thinking_styles",
                              "escalation_journal", "warning_inventory",
