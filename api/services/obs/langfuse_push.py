@@ -21,10 +21,11 @@ Usage::
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from api.config.settings import DATASET_NAME
 from api.services.project_store import ProjectStore
@@ -266,7 +267,7 @@ def _register_dataset_items(
             existing = existing_items.get(query)
             if existing and getattr(existing, "expected_output", None) is None:
                 lf.update_dataset_item(
-                    item_id=getattr(existing, "id"),
+                    item_id=existing.id,
                     expected_output=ground_truth,
                 )
                 updated += 1
@@ -275,7 +276,7 @@ def _register_dataset_items(
         # Check if item exists in Langfuse but not in our state
         existing = existing_items.get(query)
         if existing:
-            item_id = getattr(existing, "id")
+            item_id = existing.id
             if getattr(existing, "expected_output", None) is None:
                 lf.update_dataset_item(
                     item_id=item_id,
@@ -429,7 +430,7 @@ def push_run(
     state["langfuse_trace_ids"][run_id] = trace_ids
 
     if _save:
-        state["last_backfill_at"] = datetime.now(timezone.utc).isoformat()
+        state["last_backfill_at"] = datetime.now(UTC).isoformat()
         _save_state(store, backend_id, state)
 
     return trace_ids
@@ -588,7 +589,7 @@ def push_all_runs(
                 _emit(f"    [{run_counter}/{new_runs}] flushed")
 
         # Save state after each origin group (crash recovery)
-        state["last_backfill_at"] = datetime.now(timezone.utc).isoformat()
+        state["last_backfill_at"] = datetime.now(UTC).isoformat()
         _save_state(store, backend_id, state)
 
         if accuracies:
@@ -607,7 +608,7 @@ def push_all_runs(
 
     # Final flush
     lf.flush()
-    state["last_backfill_at"] = datetime.now(timezone.utc).isoformat()
+    state["last_backfill_at"] = datetime.now(UTC).isoformat()
     _save_state(store, backend_id, state)
 
     return {

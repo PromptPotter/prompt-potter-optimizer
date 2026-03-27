@@ -31,12 +31,16 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from api.services.obs.cloud_delegate import CloudDelegate
 from api.services.stores.base import (
-    append_jsonl, append_text, write_json, write_text, write_yaml_kv,
+    append_jsonl,
+    append_text,
+    write_json,
+    write_text,
+    write_yaml_kv,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,14 +60,14 @@ def _generate_obs_id(length: int = 32) -> str:
 
     Example (32 chars): ``260225143052a7b8c9d0e1f2345678ab``
     """
-    prefix = datetime.now(timezone.utc).strftime("%y%m%d%H%M%S")
+    prefix = datetime.now(UTC).strftime("%y%m%d%H%M%S")
     suffix = uuid.uuid4().hex[: length - len(prefix)]
     return f"{prefix}{suffix}"
 
 
 def _utcnow_iso() -> str:
     """UTC timestamp in ISO 8601 format with Z suffix."""
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 # ---------------------------------------------------------------------------

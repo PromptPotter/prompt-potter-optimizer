@@ -12,8 +12,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from api.models.opt_search_point import OptSearchPoint
 from api.config.settings import DATASET_NAME
+from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.helpers import graceful
 from api.services.campaign.models import CycleConfig
 

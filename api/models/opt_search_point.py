@@ -21,13 +21,13 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from api.shared.hashing import PROMPT_STRING_FIELDS
 from api.models.search_point import SearchPoint
+from api.shared.hashing import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     from api.models.search_point import JobSearchPoint
@@ -79,7 +79,7 @@ class OptSearchPoint(SearchPoint):
     parent_id: str | None = None
     changes_description: str = ""
     created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     # -- Prompt decomposition (L1 working representation) ------------------
@@ -187,7 +187,7 @@ class OptSearchPoint(SearchPoint):
         base_pipeline_params: dict | None = None,
         *,
         prompt_node: str = "llm_ranking",
-    ) -> "JobSearchPoint":
+    ) -> JobSearchPoint:
         """Project into a JobSearchPoint for target-layer evaluation.
 
         Renders prompt fields → injects into pipeline_params → creates

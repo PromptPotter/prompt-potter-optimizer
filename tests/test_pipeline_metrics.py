@@ -3,13 +3,14 @@
 Merged from test_composite_score.py and test_node_role_metrics.py.
 """
 
+import pydantic
 import pytest
 
 from api.models.pipeline_schema import (
-    IntermediateMetric,
-    PipelineSchema,
-    PipelineNode,
     ROLE_METRIC_REGISTRY,
+    IntermediateMetric,
+    PipelineNode,
+    PipelineSchema,
 )
 from api.services.metrics import compute_composite_score, derive_metrics
 
@@ -127,7 +128,7 @@ class TestIntermediateMetric:
         m = IntermediateMetric(
             name="test", node_role="ranker", pipeline_data_key="ranked_candidates",
         )
-        with pytest.raises(Exception):
+        with pytest.raises(pydantic.ValidationError):
             m.name = "changed"
 
     def test_registry_has_expected_roles(self):

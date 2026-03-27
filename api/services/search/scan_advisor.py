@@ -13,7 +13,7 @@ import json
 import logging
 from typing import Any
 
-from api.models.pipeline_schema import PipelineSchema, PipelineNode, NodeOutputSchema
+from api.models.pipeline_schema import NodeOutputSchema, PipelineNode, PipelineSchema
 
 logger = logging.getLogger(__name__)
 
@@ -300,7 +300,7 @@ def preview_advisor_prompt(
         excluded_nodes = _resolve_excluded_nodes(
             exclude_nodes, pipeline_schema, pipeline_params,
         )
-        layer_args = dict(schema=pipeline_schema, excluded_nodes=excluded_nodes)
+        layer_args = {"schema": pipeline_schema, "excluded_nodes": excluded_nodes}
         return _build_advisor_prompt(
             pipeline_overview=build_pipeline_overview(**layer_args),
             tunable_params=build_tunable_params(**layer_args),
@@ -468,7 +468,7 @@ async def advise_scan_config(
     excluded_nodes = _resolve_excluded_nodes(
         exclude_nodes, pipeline_schema, pipeline_params,
     )
-    layer_args = dict(schema=pipeline_schema, excluded_nodes=excluded_nodes)
+    layer_args = {"schema": pipeline_schema, "excluded_nodes": excluded_nodes}
     pipeline_overview = build_pipeline_overview(**layer_args)
     tunable_params = build_tunable_params(**layer_args)
     llm_context = build_llm_context(**layer_args)

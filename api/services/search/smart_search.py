@@ -8,15 +8,16 @@ from __future__ import annotations
 import logging
 import random
 from collections import defaultdict
-from typing import TYPE_CHECKING, Callable, Literal, TypedDict
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 from api.config.settings import (
     DEFAULT_DIAGNOSTIC_QUERIES,
     DIAGNOSTIC_HIT_RATIO,
     MIN_DIAGNOSTIC_QUERIES,
 )
-from api.models.opt_search_point import OptSearchPoint
 from api.models.eval_context import EvalContext
+from api.models.opt_search_point import OptSearchPoint
 from api.services.prompt_eval import evaluate_prompt_cached
 
 if TYPE_CHECKING:
@@ -140,7 +141,7 @@ def _profiles_from_rows(
 
 def _make_eval_fn(
     eval_data: list,
-    ctx: "EvalContext",
+    ctx: EvalContext,
     get_params: Callable[[], dict],
     on_result: Callable | None = None,
     *,
@@ -294,7 +295,7 @@ def classify_axis(
 def filter_variant_library(
     variant_library: dict,
     pipeline_params: dict | None,
-    schema: "PipelineSchema",
+    schema: PipelineSchema,
 ) -> dict:
     """Filter variant library to axes relevant for the active pipeline.
 
@@ -357,7 +358,7 @@ def filter_variant_library(
 
 def load_filtered_variant_library(
     pipeline_params: dict | None = None,
-    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Load variant library, filtering to active pipeline steps when possible."""
     from api.config.settings import load_variant_library

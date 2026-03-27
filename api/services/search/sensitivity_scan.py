@@ -9,19 +9,22 @@ from __future__ import annotations
 import copy
 import logging
 import random
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS
-from api.models.search_point import JobSearchPoint
 from api.models.eval_context import EvalContext
-from api.services.prompt_eval import evaluate_prompt_cached, _dominant_error_category
+from api.models.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
+from api.models.search_point import JobSearchPoint
+from api.services.prompt_eval import _dominant_error_category, evaluate_prompt_cached
 from api.services.search.preview import preview as _preview
 from api.services.search.smart_search import (
-    ScanEvent, _profiles_from_rows,
+    ScanEvent,
+    _profiles_from_rows,
 )
 
 if TYPE_CHECKING:
     import pandas as pd
+
     from api.models.pipeline_schema import PipelineSchema
     from api.services.backend_client import BackendClient
     from api.services.project_store import ProjectStore
@@ -39,7 +42,7 @@ async def sensitivity_scan(
     sample_size: int = 0,
     store: ProjectStore | None = None,
     backend_id: str = "",
-    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_schema: PipelineSchema | None = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
     on_result: Callable | None = None,
     experiment_id: str = "",

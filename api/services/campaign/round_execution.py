@@ -8,21 +8,29 @@ logic (L2/L3) lives in ``escalation.py``; campaign lifecycle
 import logging
 from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS
-from api.services.campaign.models import (
-    CycleCallbacks, CycleConfig, CycleRoundResult, LoopState,
-)
-from api.services.campaign.critique import (
-    CritiqueAgent, CritiqueContext, format_critique_for_prompt,
-    sample_thinking_styles, update_query_tracker,
-)
-from api.services.campaign.helpers import (
-    graceful, emit_phase, _candidate_summaries,
-)
-from api.services.obs.node_tracer import observed_node
+from api.models.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client
+from api.services.campaign.critique import (
+    CritiqueAgent,
+    CritiqueContext,
+    format_critique_for_prompt,
+    sample_thinking_styles,
+    update_query_tracker,
+)
+from api.services.campaign.helpers import (
+    _candidate_summaries,
+    emit_phase,
+    graceful,
+)
+from api.services.campaign.models import (
+    CycleCallbacks,
+    CycleConfig,
+    CycleRoundResult,
+    LoopState,
+)
+from api.services.obs.node_tracer import observed_node
 
 if TYPE_CHECKING:
     from api.services.campaign.escalation import EscalationCheck

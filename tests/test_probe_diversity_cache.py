@@ -2,12 +2,11 @@
 import json
 
 import pytest
+from _helpers import make_dataset_run
 
 from api.models.opt_search_point import OptSearchPoint
 from api.services.l1_optimizer import l1_generate
 from api.services.stores.dataset_run_store import DatasetRunStore
-
-from _helpers import make_dataset_run
 
 
 def _capture_llm_prompts(monkeypatch):
@@ -230,6 +229,7 @@ class TestEvaluatePromptBatchCaching:
     @pytest.mark.asyncio
     async def test_cached_queries_skip_backend(self):
         from unittest.mock import AsyncMock
+
         from api.models.search_point import JobSearchPoint
         from api.services.prompt_eval import evaluate_prompt_batch
 

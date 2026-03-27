@@ -3,7 +3,7 @@ Backend CRUD, sync, execution, and dataset storage.
 
 Consolidates all backend-scoped file I/O into one class.
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -132,7 +132,7 @@ class BackendStore:
         validate_path_component(name)
         data: dict[str, Any] = {
             "name": name,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "source_file": source_file,
             "row_count": len(items),
             "items": items,

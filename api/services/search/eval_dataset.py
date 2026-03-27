@@ -6,8 +6,8 @@ import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from api.services.project_store import ProjectStore
 from api.services.backend_client import parse_bom_material
+from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -54,7 +54,7 @@ REQUIRED_PIPELINE_KEY = "entity_profile"
 
 def _extract_eval_from_traces(
     exp_data: dict,
-    schema: "PipelineSchema",
+    schema: PipelineSchema,
 ) -> list:
     """Build eval data from Langfuse-style traces in synced experiment data.
 

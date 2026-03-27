@@ -1,6 +1,6 @@
 """Phase lifecycle event for feedback cycle observability."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -20,5 +20,5 @@ class PhaseEvent(BaseModel):
     round: int | None = None
     data: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
     )

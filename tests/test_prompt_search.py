@@ -4,10 +4,10 @@ import pytest
 from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
-from api.services.prompt_eval import _error_category, _dominant_error_category
+from api.services.pipeline_discovery import parse_pipeline_response
+from api.services.prompt_eval import _dominant_error_category, _error_category
 from api.services.search.sensitivity_scan import sensitivity_scan
 from api.services.search.smart_search import _profiles_from_rows
-from api.services.pipeline_discovery import parse_pipeline_response
 
 
 def _make_eval_data(n: int) -> list:
@@ -104,7 +104,7 @@ async def test_scan_rows_include_errors(scan_eval_mock):
 
     scan_eval_mock(_mock_eval)
 
-    df, profiles = await sensitivity_scan(
+    df, _profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
         baseline_opt=osp,
     )
@@ -153,7 +153,7 @@ async def test_scan_skips_all_error_axis(scan_eval_mock):
 
     scan_eval_mock(_mock_eval)
 
-    df, profiles = await sensitivity_scan(
+    df, _profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
         baseline_opt=osp,
     )
@@ -218,7 +218,7 @@ async def test_scan_aborts_after_consecutive_all_error_variants(scan_eval_mock):
 
     scan_eval_mock(_mock_eval)
 
-    df, profiles = await sensitivity_scan(
+    df, _profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
         baseline_opt=osp,
     )
@@ -250,7 +250,7 @@ async def test_scan_baseline_row_reflects_actual_errors(scan_eval_mock):
 
     scan_eval_mock(_mock_eval)
 
-    df, profiles = await sensitivity_scan(
+    df, _profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
         baseline_opt=osp,
     )
@@ -364,7 +364,7 @@ async def test_scan_baseline_client_error_message(scan_eval_mock):
 
     scan_eval_mock(_mock_eval)
 
-    df, profiles = await sensitivity_scan(
+    df, _profiles = await sensitivity_scan(
         sp, scan_variants, eval_data, backend_client=None,
         baseline_opt=osp,
         progress_cb=events.append,

@@ -9,25 +9,23 @@ Covers:
 - select_scan_winner greedy composition from OAT scan results
 """
 
-import pytest
-
 import pandas as pd
-
-from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.models import CycleConfig
-from api.services.campaign.campaign_lifecycle import (
-    _validate_config_match,
-    cycle_config_identity,
-)
-from api.services.campaign.optimization_loop import run_optimization
-from api.services.search import select_scan_winner
-
+import pytest
 from _helpers import (
     apply_eval_mock,
     apply_grow_mock,
     apply_llm_mock,
     run_simple_cycle,
 )
+
+from api.models.opt_search_point import OptSearchPoint
+from api.services.campaign.campaign_lifecycle import (
+    _validate_config_match,
+    cycle_config_identity,
+)
+from api.services.campaign.models import CycleConfig
+from api.services.campaign.optimization_loop import run_optimization
+from api.services.search import select_scan_winner
 
 
 @pytest.mark.slow

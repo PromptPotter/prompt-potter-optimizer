@@ -11,15 +11,16 @@ from __future__ import annotations
 
 import logging
 import time as _time
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 from api.config.settings import PIPELINE_CACHE_TTL
 from api.models.pipeline_schema import (
-    ObservationMapping,
-    PipelineSchema,
-    PipelineNode,
     NodeOutputSchema,
     NodePromptMeta,
+    ObservationMapping,
+    PipelineNode,
+    PipelineSchema,
 )
 
 if TYPE_CHECKING:
@@ -231,7 +232,7 @@ async def compute_pipeline_view(
       fetched_at        — ISO timestamp
       source            — "live" | "cached" | "default"
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     base_url = backend_client.base_url
     source = "live"
@@ -263,6 +264,6 @@ async def compute_pipeline_view(
     return {
         "backend_pipeline": schema.model_dump(),
         "computed_nodes": computed_nodes,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "fetched_at": datetime.now(UTC).isoformat(),
         "source": source,
     }

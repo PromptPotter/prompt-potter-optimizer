@@ -7,20 +7,22 @@ traces, idempotency, incremental push, state persistence, and cloud push gating.
 import json
 
 import pytest
+from _helpers import (
+    MockLangfuseLogger,
+    apply_eval_mock,
+    apply_grow_mock,
+    apply_llm_mock,
+    make_dataset_run,
+)
 
+from api.services.obs.langfuse_client import LangfuseLogger
 from api.services.obs.langfuse_push import (
     DATASET_NAME,
     classify_run_origin,
     push_all_runs,
     push_run,
 )
-from api.services.obs.langfuse_client import LangfuseLogger
 from api.services.project_store import ProjectStore
-
-from _helpers import (
-    MockLangfuseLogger, make_dataset_run,
-    apply_eval_mock, apply_grow_mock, apply_llm_mock,
-)
 
 
 def _make_run(run_id: str, accuracy: float, items: list[dict] | None = None):
@@ -201,8 +203,8 @@ class TestPushAllRuns:
 
 
 def test_finalize_obs_with_explicit_obs(tmp_path):
-    from api.services.prompt_eval import _finalize_observability
     from api.services.obs.observability_logger import ObsLogger
+    from api.services.prompt_eval import _finalize_observability
 
     store = ProjectStore(tmp_path)
     backend_id = "test-backend"
@@ -223,10 +225,10 @@ def test_finalize_obs_with_explicit_obs(tmp_path):
 
 @pytest.mark.asyncio
 async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
+    from api.config import settings as _settings_mod
+    from api.models.opt_search_point import OptSearchPoint
     from api.services.campaign.models import CycleConfig
     from api.services.campaign.optimization_loop import run_optimization
-    from api.models.opt_search_point import OptSearchPoint
-    from api.config import settings as _settings_mod
 
     apply_llm_mock(monkeypatch)
     apply_grow_mock(monkeypatch)

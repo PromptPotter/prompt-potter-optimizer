@@ -44,7 +44,7 @@ def _candidate_name(c) -> str:
     return c[0] if isinstance(c, (list, tuple)) else str(c)
 
 
-def _compute_recall(step: "PipelineNode", results: list[dict]) -> float:
+def _compute_recall(step: PipelineNode, results: list[dict]) -> float:
     """Fraction of queries where GT appears in the candidate list for *step*."""
     scoped = [r for r in results if _step_ran(step.name, r) and not r.get("error")]
     if not scoped:
@@ -59,7 +59,7 @@ def _compute_recall(step: "PipelineNode", results: list[dict]) -> float:
     return found / len(scoped)
 
 
-def _compute_cache_hit_rate(step: "PipelineNode", results: list[dict]) -> float:
+def _compute_cache_hit_rate(step: PipelineNode, results: list[dict]) -> float:
     """Fraction of queries resolved by cache (non-null cache timing)."""
     if not results:
         return 0.0
@@ -76,8 +76,8 @@ def _compute_cache_hit_rate(step: "PipelineNode", results: list[dict]) -> float:
 
 
 def _compute_role_metric(
-    metric_def: "IntermediateMetric",
-    step: "PipelineNode",
+    metric_def: IntermediateMetric,
+    step: PipelineNode,
     results: list[dict],
 ) -> float:
     """Compute a single role-based metric value."""
@@ -89,7 +89,7 @@ def _compute_role_metric(
 
 
 def derive_metrics(
-    pipeline_schema: "PipelineSchema",
+    pipeline_schema: PipelineSchema,
     results: list[dict],
     *,
     metric_weights: dict[str, float] | None = None,
@@ -155,7 +155,7 @@ def derive_metrics(
 
 def compute_composite_score(
     results: list,
-    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_schema: PipelineSchema | None = None,
     *,
     accuracy_weight: float = 0.9,
 ) -> dict:

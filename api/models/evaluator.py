@@ -4,13 +4,13 @@ Exact match evaluator.
 Compares expected and actual values for exact equality,
 with optional case-insensitive and whitespace-normalized modes.
 """
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class EvalResult(str, Enum):
+class EvalResult(StrEnum):
     """Evaluation result status."""
     PASS = "pass"
     FAIL = "fail"

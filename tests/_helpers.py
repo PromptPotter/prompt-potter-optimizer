@@ -5,11 +5,11 @@ that test modules can import directly.
 """
 
 import hashlib
+import typing
 
 from api.models.opt_search_point import OptSearchPoint
-from tests.mock_llm_client import MockLLMClient
 from api.shared.hashing import HASH_TRUNCATE
-
+from tests.mock_llm_client import MockLLMClient
 
 # ---------------------------------------------------------------------------
 # Feedback-cycle mock helpers
@@ -278,7 +278,7 @@ class MockCompletion:
         message = Message()
         finish_reason = "stop"
 
-    choices = [Choice()]
+    choices: typing.ClassVar = [Choice()]
 
     class Usage:
         prompt_tokens = 10
@@ -373,9 +373,13 @@ def build_eval_results(data: list[dict], hits: int):
     return results, scores
 
 
+class MockHTTPError(Exception):
+    """Base class for mock HTTP errors used in tests."""
+
+
 def make_http_error(status_code: int, message: str = "error"):
     """Create a mock HTTP error class with the given status_code."""
-    return type(f"Mock{status_code}Error", (Exception,), {"status_code": status_code})(message)
+    return type(f"Mock{status_code}Error", (MockHTTPError,), {"status_code": status_code})(message)
 
 
 async def run_simple_cycle(
@@ -388,13 +392,13 @@ async def run_simple_cycle(
     apply_grow_mock(monkeypatch)
     apply_eval_mock(monkeypatch, round_hits=round_hits)
 
-    defaults = dict(
-        instruction="Rank candidates.",
-        eval_data=eval_data,
-        config=config,
-        baseline_prompt_fields=OptSearchPoint(instruction="Rank candidates.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
-    )
+    defaults = {
+        "instruction": "Rank candidates.",
+        "eval_data": eval_data,
+        "config": config,
+        "baseline_prompt_fields": OptSearchPoint(instruction="Rank candidates.").model_dump(),
+        "baseline_accuracy": 0.0,
+        "baseline_results": [],
+    }
     defaults.update(kwargs)
     return await run_optimization(**defaults)

@@ -1,8 +1,9 @@
 """Tests for assess_scan_coverage()."""
 
-from api.services.search import assess_scan_coverage
+from _helpers import make_baseline_osp as _make_baseline
+from _helpers import rp_hash as _rp_hash
 
-from _helpers import rp_hash as _rp_hash, make_baseline_osp as _make_baseline
+from api.services.search import assess_scan_coverage
 
 
 def _diagnostic(n: int = 6) -> list[dict]:

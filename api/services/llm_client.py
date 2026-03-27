@@ -173,8 +173,8 @@ class OpenAICompatibleClient(LLMClientBase):
         if self._client is None:
             try:
                 from openai import AsyncOpenAI
-            except ImportError:
-                raise ImportError("openai package not installed. Run: pip install openai")
+            except ImportError as err:
+                raise ImportError("openai package not installed. Run: pip install openai") from err
 
             kwargs: dict[str, Any] = {
                 "api_key": self._api_key,
@@ -327,10 +327,10 @@ class AnthropicClient(LLMClientBase):
         if self._client is None:
             try:
                 from anthropic import AsyncAnthropic
-            except ImportError:
+            except ImportError as err:
                 raise ImportError(
                     "anthropic package not installed. Run: pip install anthropic"
-                )
+                ) from err
             self._client = AsyncAnthropic(api_key=self._api_key)
         return self._client
 
@@ -453,11 +453,11 @@ def _make_mock_client() -> LLMClientBase:
     """Lazy-load MockLLMClient (lives in tests package)."""
     try:
         from tests.mock_llm_client import MockLLMClient
-    except ImportError:
+    except ImportError as err:
         raise ValueError(
             "No LLM API keys configured and test mock unavailable. "
             "Set GROQ_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY."
-        )
+        ) from err
     return MockLLMClient()
 
 

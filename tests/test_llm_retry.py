@@ -7,10 +7,10 @@ non-retryable errors (400) in OpenAICompatibleClient.
 from unittest.mock import AsyncMock
 
 import pytest
+from _helpers import MockCompletion, MockHTTPError, make_http_error
 
 from api.config.settings import LLM_MAX_APP_RETRIES
 from api.services.llm_client import OpenAICompatibleClient
-from _helpers import MockCompletion, make_http_error
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +63,7 @@ async def test_llm_retry_transient(
         )
         assert response.content == '{"result": "ok"}'
     else:
-        with pytest.raises(Exception):
+        with pytest.raises(MockHTTPError):
             await client.chat(
                 messages=[{"role": "user", "content": "test"}],
                 model="test-model",

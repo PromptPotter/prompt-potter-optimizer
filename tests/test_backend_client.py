@@ -1,8 +1,9 @@
 """Tests for BackendClient session auto-recovery."""
 
+from unittest.mock import MagicMock, patch
+
 import httpx
 import pytest
-from unittest.mock import MagicMock, patch
 
 from api.services.backend_client import BackendClient
 
@@ -58,9 +59,8 @@ async def test_run_match_no_reinit_without_stored_terms():
     mock_client.post = mock_post
     mock_client.is_closed = False
 
-    with patch.object(client, "_get_http", return_value=mock_client):
-        with pytest.raises(httpx.HTTPStatusError):
-            await client.run_match("test query")
+    with patch.object(client, "_get_http", return_value=mock_client), pytest.raises(httpx.HTTPStatusError):
+        await client.run_match("test query")
 
 
 @pytest.mark.asyncio

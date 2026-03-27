@@ -6,7 +6,6 @@ from api.services.campaign.critique import CritiqueAgent, CritiqueContext, sampl
 from tests.mock_llm_client import MockLLMClient
 
 
-
 @pytest.mark.asyncio
 async def test_critique_returns_dict():
 

@@ -13,7 +13,6 @@ from typing import Any
 
 from api.models.opt_search_point import OptSearchPoint
 
-
 SSPLAN_PREFIX = "ssplan_"
 
 

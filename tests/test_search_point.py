@@ -1,4 +1,5 @@
 """Tests for JobSearchPoint model."""
+import pydantic
 import pytest
 
 from api.models.opt_search_point import OptSearchPoint
@@ -36,7 +37,7 @@ def test_construct_with_all_fields():
 
 def test_frozen():
     sp = JobSearchPoint()
-    with pytest.raises(Exception):
+    with pytest.raises(pydantic.ValidationError):
         sp.model = "new-model"
 
 
@@ -125,7 +126,7 @@ def test_derive_returns_new_frozen_instance():
     sp = JobSearchPoint()
     sp2 = sp.derive(model="new-model")
     assert sp is not sp2
-    with pytest.raises(Exception):
+    with pytest.raises(pydantic.ValidationError):
         sp2.model = "another"
 
 

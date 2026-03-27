@@ -9,17 +9,22 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from api.models.pipeline_schema import PipelineSchema
-
+from api.config.optimizer_pipeline import get_node_config, llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import DISPLAY_TRUNCATE
 from api.models.opt_search_point import OptSearchPoint
-from api.config.optimizer_pipeline import get_node_config, llm_call
+from api.models.pipeline_schema import PipelineSchema
+from api.services.campaign.formatting import (
+    format_context_sections as _format_context_sections,
+)
 from api.services.campaign.formatting import (
     format_failure_examples as _format_failure_examples,
-    format_scan_analytics as _format_scan_analytics,
+)
+from api.services.campaign.formatting import (
     format_focus_note as _format_focus_note,
-    format_context_sections as _format_context_sections,
+)
+from api.services.campaign.formatting import (
+    format_scan_analytics as _format_scan_analytics,
 )
 from api.services.llm_client import LLMClientBase
 from api.services.metrics import compute_composite_score
@@ -95,10 +100,7 @@ async def l1_generate(
     )
     generated = response.parsed or json.loads(response.content)
 
-    if isinstance(generated, dict):
-        variants_list = generated.get("variants", [])
-    else:
-        variants_list = generated
+    variants_list = generated.get("variants", []) if isinstance(generated, dict) else generated
 
     candidates: list[dict] = []
     for v in variants_list[:n_variants]:
@@ -243,7 +245,8 @@ async def l1_evaluate(
     for idx, c in enumerate(osp_candidates):
         _on_result = None
         if callbacks and callbacks.on_query_eval:
-            def _on_result(result, qi, qt, _ci=idx, _ct=len(osp_candidates)):
+            _n_cand = len(osp_candidates)
+            def _on_result(result, qi, qt, _ci=idx, _ct=_n_cand):
                 callbacks.on_query_eval(_ci, _ct, qi, qt, result)
 
         if candidate_pp[idx]:

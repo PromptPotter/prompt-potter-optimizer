@@ -8,7 +8,7 @@ Stores campaign metadata and per-trial results to disk:
 """
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def generate_campaign_id() -> str:
     """Generate a unique campaign identifier."""
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     short = uuid.uuid4().hex[:8]
     return f"campaign_{ts}_{short}"
 
@@ -62,7 +62,7 @@ class CampaignStore:
         path = self._campaign_path(backend_id, campaign_id)
         if path.exists():
             raise FileExistsError(f"Campaign already exists: {campaign_id}")
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         data = {
             "campaign_id": campaign_id,
             "created_at": now,
@@ -91,7 +91,7 @@ class CampaignStore:
         path = self._campaign_path(backend_id, campaign_id)
         data = read_json(path)
         data.update(updates)
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(path, data)
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
@@ -165,7 +165,7 @@ class CampaignStore:
         if round_num == 0:
             data["baseline_accuracy"] = trial["accuracy"]
 
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(campaign_path, data)
 
         return detail_path
@@ -239,7 +239,7 @@ class CampaignStore:
     ) -> dict[str, Any]:
         """Record a single optimization trial.  Returns the trial detail dict."""
         trial_id = generate_trial_id(round_num)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         trial = {
             "trial_id": trial_id,

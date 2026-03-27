@@ -14,8 +14,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from api.config.settings import load_variant_library
 from api.config.optimizer_pipeline import get_node_config, llm_call
+from api.config.settings import load_variant_library
 
 if TYPE_CHECKING:
     from api.services.llm_client import LLMClientBase
@@ -141,7 +141,7 @@ def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
     # Collect queries that have any warnings
     by_warning: dict[str, list[tuple[str, dict]]] = {}
     for query, entry in tracker.items():
-        for wtype, count in entry.get("warnings", {}).items():
+        for wtype, _count in entry.get("warnings", {}).items():
             by_warning.setdefault(wtype, []).append((query, entry))
 
     if not by_warning:
@@ -371,7 +371,7 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
 
     # --- Emit anomalies ---
     if total > 0 and anomalies:
-        sections.insert(1, "## ANOMALY FLAGS ({0})\n{1}".format(
+        sections.insert(1, "## ANOMALY FLAGS ({})\n{}".format(
             len(anomalies), "\n".join(f"  {a}" for a in anomalies),
         ))
 
@@ -478,7 +478,7 @@ class CritiqueAgent:
 
     def __init__(
         self,
-        llm_client: "LLMClientBase",
+        llm_client: LLMClientBase,
         model: str | None = None,
     ):
         self.llm_client = llm_client

@@ -31,7 +31,7 @@ def load_excel_ground_truth(
         Rows where query or ground_truth is empty/NaN are dropped.
     """
     try:
-        import openpyxl  # noqa: E402 — lazy import to avoid hard dep at module level
+        import openpyxl
     except ModuleNotFoundError:
         raise ModuleNotFoundError(
             "openpyxl is required to load Excel files. Install it: pip install openpyxl"

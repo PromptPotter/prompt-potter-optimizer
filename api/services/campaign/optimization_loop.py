@@ -16,29 +16,37 @@ import asyncio
 import hashlib
 import logging
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from api.shared.hashing import HASH_TRUNCATE
-from api.models.phase_event import PhaseEvent
+from api.models.eval_context import EvalContext
 from api.models.opt_search_point import OptSearchPoint
+from api.models.phase_event import PhaseEvent
 from api.services.backend_client import BackendClient
-from api.services.campaign.critique import sample_thinking_styles
-from api.services.campaign.helpers import graceful, emit_phase, _get_obs_trace
 from api.services.campaign.campaign_lifecycle import (
-    _init_obs, _resume_or_create_campaign, _finalize_campaign,
+    _finalize_campaign,
+    _init_obs,
+    _resume_or_create_campaign,
 )
-from api.services.campaign.models import (
-    CycleCallbacks, CycleConfig, CycleInitResult, CycleResult,
-    CycleRoundResult, StopReason, LoopState,
-)
+from api.services.campaign.critique import sample_thinking_styles
 from api.services.campaign.escalation import _escalate_l2
+from api.services.campaign.helpers import _get_obs_trace, emit_phase, graceful
+from api.services.campaign.models import (
+    CycleCallbacks,
+    CycleConfig,
+    CycleInitResult,
+    CycleResult,
+    CycleRoundResult,
+    LoopState,
+    StopReason,
+)
 from api.services.campaign.round_execution import (
-    _execute_round, _update_round_state,
+    _execute_round,
+    _update_round_state,
 )
 from api.services.metrics import compute_composite_score
-from api.models.eval_context import EvalContext
 from api.services.prompt_eval import subsample_queries
+from api.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
     from api.services.stores.campaign_store import CampaignStore
@@ -388,7 +396,7 @@ async def run_optimization(
     """
     if scan_context is not None:
         config = config.model_copy(update={"scan_context": scan_context})
-    started_at = datetime.now(timezone.utc).isoformat()
+    started_at = datetime.now(UTC).isoformat()
 
     cb = callbacks or CycleCallbacks()
 
@@ -498,10 +506,7 @@ async def run_optimization(
                         "prompt_fields": round_result.prompt_fields,
                         "results": round_result.results,
                         "candidates_evaluated": round_result.candidates_evaluated,
-                        "candidate_scores": [
-                            s if isinstance(s, dict) else s
-                            for s in round_result.candidate_scores
-                        ],
+                        "candidate_scores": list(round_result.candidate_scores),
                         "stall_count": state.stall_count,
                         "l2_stall_count": state.escalation.l2_stall_count,
                         "l3_stall_count": state.escalation.l3_stall_count,
@@ -537,10 +542,7 @@ async def run_optimization(
 
         # Loop completed without break
         if stop_reason is None:
-            if round_num >= _HARD_CAP:
-                stop_reason = StopReason.HARD_CAP
-            else:
-                stop_reason = StopReason.MAX_ROUNDS
+            stop_reason = StopReason.HARD_CAP if round_num >= _HARD_CAP else StopReason.MAX_ROUNDS
 
     except (KeyboardInterrupt, asyncio.CancelledError):
         stop_reason = StopReason.INTERRUPTED
@@ -551,7 +553,7 @@ async def run_optimization(
         )
 
     # -- Finalize --
-    finished_at = datetime.now(timezone.utc).isoformat()
+    finished_at = datetime.now(UTC).isoformat()
     obs = state.eval_ctx.obs if state.eval_ctx else None
     campaign_status = "interrupted" if stop_reason == StopReason.INTERRUPTED else "completed"
     _finalize_campaign(

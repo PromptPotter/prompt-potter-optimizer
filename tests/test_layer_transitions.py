@@ -12,20 +12,21 @@ Covers:
 import json
 
 import pytest
-
-from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.models import CycleConfig
-from api.services.campaign.optimization_loop import run_optimization
-from api.services.campaign.layer_transitions import (
-    TransitionResult, modify_plan, refine_context,
-)
-from tests.mock_llm_client import MockLLMClient
-
 from _helpers import (
     apply_eval_mock,
     apply_grow_mock,
     apply_llm_mock,
 )
+
+from api.models.opt_search_point import OptSearchPoint
+from api.services.campaign.layer_transitions import (
+    TransitionResult,
+    modify_plan,
+    refine_context,
+)
+from api.services.campaign.models import CycleConfig
+from api.services.campaign.optimization_loop import run_optimization
+from tests.mock_llm_client import MockLLMClient
 
 
 def _mock_client(response_dict: dict) -> MockLLMClient:

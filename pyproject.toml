@@ -68,4 +68,29 @@ target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F"]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort (import ordering)
+    "N",      # pep8-naming
+    "UP",     # pyupgrade (modern Python idioms)
+    "B",      # bugbear (common pitfalls)
+    "SIM",    # simplify
+    "C4",     # flake8-comprehensions
+    "RUF",    # ruff-specific
+    "C90",    # mccabe complexity
+]
+ignore = [
+    "E501",   # line length (handled by formatter)
+    "N802",   # function name lowercase (allows test_GET_style names)
+    "N803",   # argument name lowercase (allows API-matching names)
+    "N806",   # variable name lowercase (allows DataFrame, etc.)
+    "UP007",  # X | None already used everywhere via PEP 604
+    "RUF003", # ambiguous unicode in comments (multiplication sign × is intentional)
+    "RUF002", # ambiguous unicode in docstrings
+    "UP040",  # type keyword aliases — TypeAlias is clearer for callback signatures
+    "C901",   # complexity — tracked separately, not a lint gate
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15

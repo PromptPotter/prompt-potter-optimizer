@@ -6,8 +6,8 @@ and registry metadata flow.
 
 from api.models.pipeline_schema import (
     ObservationMapping,
-    PipelineSchema,
     PipelineNode,
+    PipelineSchema,
 )
 from api.services.pipeline_discovery import parse_pipeline_response
 

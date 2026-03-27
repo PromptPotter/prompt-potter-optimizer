@@ -32,6 +32,6 @@ class EvalContext:
     source: str = ""
     experiment_id: str = ""
     # Escalation checks (passed through to evaluate_prompt_batch)
-    escalation_checks: "list[EscalationCheck] | None" = None
+    escalation_checks: list[EscalationCheck] | None = None
     candidate_idx: int = 0
     n_total_candidates: int = 1

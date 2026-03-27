@@ -14,8 +14,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.optimizer_pipeline import get_node_config, llm_call
+from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.critique import summarize_warning_inventory
 from api.services.campaign.formatting import format_failure_lines
@@ -304,7 +304,7 @@ def _build_escalation_prompt_section(
     escalation_context: dict | None,
     escalation_journal: list[dict] | None,
     pipeline_params: dict | None = None,
-    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> str:
     """Build the escalation diagnostics section for L2 prompts.
 

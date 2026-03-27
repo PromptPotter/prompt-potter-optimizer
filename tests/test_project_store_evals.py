@@ -2,11 +2,11 @@
 import json
 
 import pytest
+from _helpers import make_dataset_run
+from _helpers import rp_hash as _rp_hash
 
 from api.services.search import build_prompt_result_index
 from api.services.stores.dataset_run_store import DatasetRunStore
-
-from _helpers import make_dataset_run, rp_hash as _rp_hash
 
 
 def _make_run_data(run_id="baseline_aabbccdd", content_hash="aabbccdd11223344", name="Baseline"):

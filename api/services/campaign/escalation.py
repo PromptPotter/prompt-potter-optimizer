@@ -20,7 +20,7 @@ from api.models.phase_event import PhaseEvent
 from api.services.campaign.helpers import emit_phase
 
 if TYPE_CHECKING:
-    from api.services.campaign.models import CycleConfig, StopReason, LoopState
+    from api.services.campaign.models import CycleConfig, LoopState, StopReason
     from api.services.obs.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
@@ -177,7 +177,7 @@ def collect_warning_types(results: list[dict]) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 
 
-def build_escalation_checks(config: "CycleConfig") -> list[EscalationCheck]:
+def build_escalation_checks(config: CycleConfig) -> list[EscalationCheck]:
     """Build enabled escalation checks from CycleConfig."""
     checks: list[EscalationCheck] = []
     threshold = getattr(config, "degradation_threshold", 0.0)
@@ -192,8 +192,8 @@ def build_escalation_checks(config: "CycleConfig") -> list[EscalationCheck]:
 
 
 def _maybe_emit_backend_warning(
-    state: "LoopState",
-    config: "CycleConfig",
+    state: LoopState,
+    config: CycleConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
 ) -> None:
@@ -236,8 +236,8 @@ def _maybe_emit_backend_warning(
 
 
 def _degradation_reset(
-    state: "LoopState",
-    config: "CycleConfig",
+    state: LoopState,
+    config: CycleConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
@@ -254,20 +254,20 @@ def _degradation_reset(
 
 
 async def _do_l2_transition(
-    state: "LoopState",
-    config: "CycleConfig",
+    state: LoopState,
+    config: CycleConfig,
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
-    obs: "ObsLogger | None" = None,
+    obs: ObsLogger | None = None,
     trace_id: str | None = None,
     escalation_context: dict | None = None,
 ) -> Any:
     """Perform L2 refine_context transition. Updates state in-place."""
-    from api.services.campaign import layer_transitions
     from api.services import llm_client as _llm_client
-    from api.services.obs.node_tracer import observed_node
+    from api.services.campaign import layer_transitions
     from api.services.campaign.critique import warning_summary
+    from api.services.obs.node_tracer import observed_node
 
     current_pp = state.current_sp.pipeline_params
 
@@ -341,17 +341,17 @@ async def _do_l2_transition(
 
 
 async def _do_l3_transition(
-    state: "LoopState",
-    config: "CycleConfig",
+    state: LoopState,
+    config: CycleConfig,
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
-    obs: "ObsLogger | None" = None,
+    obs: ObsLogger | None = None,
     trace_id: str | None = None,
 ) -> Any:
     """Perform L3 modify_plan transition. Updates state in-place."""
-    from api.services.campaign import layer_transitions
     from api.services import llm_client as _llm_client
+    from api.services.campaign import layer_transitions
     from api.services.obs.node_tracer import observed_node
 
     current_pp = state.current_sp.pipeline_params
@@ -404,16 +404,16 @@ async def _do_l3_transition(
 
 
 async def _escalate_l2(
-    state: "LoopState",
-    config: "CycleConfig",
+    state: LoopState,
+    config: CycleConfig,
     round_num: int,
     eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
-    obs: "ObsLogger | None" = None,
+    obs: ObsLogger | None = None,
     trace_id: str | None = None,
     from_degradation: bool = False,
     escalation_context: dict | None = None,
-) -> "StopReason | None":
+) -> StopReason | None:
     """Handle L1→L2 escalation and optionally L2→L3.
 
     Returns a StopReason if the cycle should stop, or None to continue.
@@ -422,7 +422,7 @@ async def _escalate_l2(
     """
     from api.services.campaign.models import StopReason
 
-    _l2_kwargs = dict(obs=obs, trace_id=trace_id, escalation_context=escalation_context)
+    _l2_kwargs = {"obs": obs, "trace_id": trace_id, "escalation_context": escalation_context}
     esc = state.escalation
 
     # Track L2 stall

@@ -2,12 +2,11 @@
 
 from unittest.mock import MagicMock
 
-from api.models.pipeline_schema import ObservationMapping, PipelineSchema, PipelineNode
+from api.models.pipeline_schema import ObservationMapping, PipelineNode, PipelineSchema
 from api.services.search.eval_dataset import (
     _extract_eval_from_traces,
     load_eval_dataset,
 )
-
 
 # Minimal test schema matching TermNorm's observation structure
 _TEST_SCHEMA = PipelineSchema(

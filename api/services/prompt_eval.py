@@ -10,22 +10,23 @@ import asyncio
 import hashlib
 import logging
 import signal
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import httpx
 
-from api.models.evaluator import EvalResult, ExactMatchEvaluator
-from api.shared.hashing import HASH_TRUNCATE
 from api.config.settings import NO_RESULT
+from api.models.evaluator import EvalResult, ExactMatchEvaluator
 from api.services.metrics import compute_composite_score
+from api.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
+    from api.models.eval_context import EvalContext
     from api.models.pipeline_schema import PipelineSchema
     from api.models.search_point import SearchPoint
     from api.services.backend_client import BackendClient
-    from api.models.eval_context import EvalContext
     from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
 
@@ -88,7 +89,7 @@ def build_dataset_run_data(
     run_id: str,
     name: str,
     content_hash: str,
-    search_point: "SearchPoint",
+    search_point: SearchPoint,
     scores: dict,
     results: list,
     *,
@@ -110,7 +111,7 @@ def build_dataset_run_data(
         "item_count": scores["total"],
         "scores": scores,
         "source": source,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "dataset_run_items": results,
     }
     data["sp_hash"] = search_point.sp_hash()
@@ -125,7 +126,7 @@ def build_dataset_run_data(
 def _extract_pipeline_data(
     backend_data: dict,
     ranked_candidates: list,
-    pipeline_schema: "PipelineSchema",
+    pipeline_schema: PipelineSchema,
 ) -> dict:
     """Extract pipeline data fields from a backend /matches response.
 
@@ -181,7 +182,7 @@ async def backend_reranker_evaluate(
     backend_client: BackendClient,
     rendered_prompt: str,
     pipeline_params: dict | None = None,
-    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint."""
     query = query_data["query"]
@@ -232,12 +233,12 @@ async def backend_reranker_evaluate(
 
 
 async def evaluate_prompt_batch(
-    search_point: "SearchPoint",
+    search_point: SearchPoint,
     eval_data: list,
-    backend_client: "BackendClient",
+    backend_client: BackendClient,
     *,
     on_result: Callable | None = None,
-    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_schema: PipelineSchema | None = None,
     escalation_checks: list | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
@@ -379,7 +380,7 @@ async def evaluate_prompt_batch(
 
 
 def _finalize_observability(
-    store: "ProjectStore",
+    store: ProjectStore,
     backend_id: str,
     run_id: str,
     content_hash: str,
@@ -387,7 +388,7 @@ def _finalize_observability(
     model: str,
     temperature: float,
     prompt_fields_id: str,
-    obs: "ObsLogger | None",
+    obs: ObsLogger | None,
 ) -> None:
     """Log eval run to local obs store.
 
@@ -414,13 +415,13 @@ def _finalize_observability(
 
 
 def _try_cached_lookup(
-    store: "ProjectStore",
+    store: ProjectStore,
     backend_id: str,
     content_hash: str,
     rendered: str,
-    search_point: "SearchPoint",
+    search_point: SearchPoint,
     eval_data: list,
-    pipeline_schema: "PipelineSchema | None",
+    pipeline_schema: PipelineSchema | None,
     on_result: Callable | None,
 ) -> tuple[list, dict, bool] | None:
     """Check hash dedup and alias groups for a cached result.
@@ -455,7 +456,7 @@ def _try_cached_lookup(
 
 
 async def evaluate_prompt_cached(
-    search_point: "SearchPoint",
+    search_point: SearchPoint,
     eval_data: list,
     ctx: EvalContext,
     *,

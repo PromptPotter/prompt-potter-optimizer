@@ -61,7 +61,7 @@ def build_pipeline_params(
     *,
     overrides: dict | None = None,
     exclude_nodes: list[str] | None = None,
-    schema: "PipelineSchema | None" = None,
+    schema: PipelineSchema | None = None,
 ) -> dict:
     """Build pipeline_params from a (possibly shortened) pipeline config.
 

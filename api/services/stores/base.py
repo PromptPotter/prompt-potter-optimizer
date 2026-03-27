@@ -1,6 +1,7 @@
 """
 Shared I/O helpers for file-based stores.
 """
+import contextlib
 import json
 import os
 import re
@@ -39,10 +40,8 @@ def write_json(path: Path, data: Any) -> None:
         os.replace(tmp, path)
     except Exception:
         # Clean up temp file on failure (fd already closed by os.fdopen)
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 

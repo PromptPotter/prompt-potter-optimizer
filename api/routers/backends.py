@@ -7,7 +7,7 @@ native format, and exposes pipeline discovery.
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -162,9 +162,9 @@ async def sync_experiments(backend_id: str):
         raise HTTPException(
             status_code=502,
             detail=f"Failed to sync from {backend.base_url}: {e}",
-        )
+        ) from e
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     backend.last_synced_at = now
     store.backends.update(backend)
 

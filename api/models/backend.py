@@ -5,7 +5,7 @@ BackendConnection represents a connected backend (e.g. TermNorm instance).
 Execution captures results from pipeline replays triggered by PromptPotter.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -19,7 +19,7 @@ class BackendConnection(BaseModel):
     backend_type: str = Field(..., description="Backend type, e.g. 'termnorm'")
     base_url: str = Field(..., description="Backend API base URL")
     created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     last_synced_at: str | None = None
 
@@ -59,7 +59,7 @@ class Execution(BaseModel):
     session_terms_count: int | None = None
     limitations: list[str] = Field(default_factory=list)
     created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     pipeline_params: dict[str, Any] = Field(
         default_factory=dict,

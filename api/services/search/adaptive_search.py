@@ -6,17 +6,21 @@ for each.  Axes are resolved when they produce no improvement.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import OptSearchPoint
 from api.models.eval_context import EvalContext
+from api.models.opt_search_point import OptSearchPoint
 from api.services.search.preview import preview as _preview
 from api.services.search.smart_search import (
-    ScanEvent, filter_variant_library, _make_eval_fn,
+    ScanEvent,
+    _make_eval_fn,
+    filter_variant_library,
 )
 
 if TYPE_CHECKING:
     import pandas as pd
+
     from api.models.pipeline_schema import PipelineSchema
     from api.services.backend_client import BackendClient
     from api.services.project_store import ProjectStore
@@ -38,7 +42,7 @@ async def adaptive_search(
     session_terms: list | None = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
     plan_id: str = "",
-    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_schema: PipelineSchema | None = None,
     experiment_id: str = "",
 ) -> tuple[OptSearchPoint, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.

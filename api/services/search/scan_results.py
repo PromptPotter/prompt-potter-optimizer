@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import pandas as pd
 
-from api.models.opt_search_point import OptSearchPoint, PROMPT_STRING_FIELDS
+from api.models.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
 from api.models.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ async def resume_or_build_diagnostic(
     baseline_results: list,
     llm_client: Any,
     model: str,
-    store: "ProjectStore",
+    store: ProjectStore,
     backend_id: str,
     eval_data: list,
     improvement_areas: str = "",
@@ -190,7 +190,7 @@ async def resume_or_build_diagnostic(
 
 
 def select_scan_winner(
-    scan_df: "pd.DataFrame",
+    scan_df: pd.DataFrame,
     axis_profiles: list[dict],
     baseline: JobSearchPoint,
     scan_variants: dict[str, list],
@@ -264,7 +264,7 @@ def select_scan_winner(
 
 
 def prepare_scan_context(
-    scan_df: "pd.DataFrame",
+    scan_df: pd.DataFrame,
     axis_profiles: list[dict],
     scan_variants: dict[str, list],
     baseline_accuracy: float,

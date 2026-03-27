@@ -3,7 +3,7 @@ PromptPotter Optimizer API — main FastAPI application entry point.
 """
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,7 +61,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "PromptPotter Optimizer",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "version": APP_VERSION,
     }
 

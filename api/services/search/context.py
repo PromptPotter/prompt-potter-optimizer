@@ -3,14 +3,14 @@
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
-from api.shared.hashing import HASH_TRUNCATE
 from api.services.llm_client import LLMClientBase
 from api.services.stores.base import read_json_optional, validate_path_component, write_json
+from api.shared.hashing import HASH_TRUNCATE
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ def save_restructure_cache(
     cache[rp_hash] = {
         "improvement_areas": improvement_areas,
         "layer1_fields": layer1_fields,
-        "cached_at": datetime.now(timezone.utc).isoformat(),
+        "cached_at": datetime.now(UTC).isoformat(),
     }
     write_json(path, cache)
 

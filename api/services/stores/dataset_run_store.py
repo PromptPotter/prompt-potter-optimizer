@@ -5,6 +5,7 @@ Performance: in-memory caches for the index, alias groups, and
 rendered-prompt-hash secondary index avoid repeated disk reads during
 scan/grid/feedback-cycle hot loops.  All caches are invalidated on write.
 """
+import contextlib
 import logging
 import os
 import time
@@ -103,10 +104,8 @@ class DatasetRunStore:
                             "Removing stale lock file: %s (age=%.1fs)",
                             lock_path, age,
                         )
-                        try:
+                        with contextlib.suppress(OSError):
                             os.unlink(lock_path)
-                        except OSError:
-                            pass
                         continue
                 except OSError:
                     pass
@@ -114,20 +113,16 @@ class DatasetRunStore:
                     logger.warning(
                         "Lock timeout on %s — breaking stale lock", lock_path,
                     )
-                    try:
+                    with contextlib.suppress(OSError):
                         os.unlink(lock_path)
-                    except OSError:
-                        pass
                     continue
                 time.sleep(LOCK_RETRY_INTERVAL)
 
     @staticmethod
     def _release_lock(lock_path: Path) -> None:
         """Release the lock file."""
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(lock_path)
-        except OSError:
-            pass
 
     def save(
         self, backend_id: str, run_id: str, data: dict[str, Any],

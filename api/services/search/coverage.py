@@ -13,14 +13,13 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from api.shared.hashing import HASH_TRUNCATE, PROMPT_STRING_FIELDS
-from api.models.pipeline_schema import is_result_step_compatible
-from api.models.opt_search_point import OptSearchPoint
-from api.services.project_store import ProjectStore
-from api.services.search.preview import preview
-from api.services.search.plan_persistence import deserialize_smart_search_plan
-
 from api.config.settings import DEFAULT_DIAGNOSTIC_QUERIES
+from api.models.opt_search_point import OptSearchPoint
+from api.models.pipeline_schema import is_result_step_compatible
+from api.services.project_store import ProjectStore
+from api.services.search.plan_persistence import deserialize_smart_search_plan
+from api.services.search.preview import preview
+from api.shared.hashing import HASH_TRUNCATE, PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     from api.models.search_point import JobSearchPoint
@@ -32,7 +31,7 @@ def diagnose_scan_variants(
     store: ProjectStore,
     backend_id: str,
     scan_variants: dict[str, list],
-    baseline_sp: "JobSearchPoint",
+    baseline_sp: JobSearchPoint,
 ) -> dict:
     """Check scan variant coverage using sp_hash matching.
 

@@ -194,6 +194,7 @@ def api_client(store, monkeypatch):
         lambda: store,
     )
     from fastapi.testclient import TestClient
+
     from api.main import app
     return TestClient(app)
 

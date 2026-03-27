@@ -8,15 +8,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from datetime import UTC
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from api.config.settings import DATASET_NAME
 from api.models.backend import BackendConnection
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
-from api.config.settings import DATASET_NAME
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
@@ -303,7 +304,7 @@ async def _verify_matches_liveness(
 
 
 async def run_baseline_eval(
-    baseline: "OptSearchPoint",
+    baseline: OptSearchPoint,
     eval_data: list,
     backend_client: BackendClient,
     pipeline_params: dict | None = None,
@@ -459,7 +460,7 @@ def save_campaign_winner(
     experiment_id: str | None = None,
 ) -> dict:
     """Find best round, save to store + link to campaign. Returns save_data dict."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     winner = campaign_rounds[-1]["prompt_fields"]
     winner_acc = campaign_rounds[-1]["accuracy"]
@@ -477,7 +478,7 @@ def save_campaign_winner(
         "baseline_accuracy": baseline_acc,
         "improvement": (winner_acc - baseline_acc) if baseline_acc is not None else None,
         "config": campaign_config,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "saved_at": datetime.now(UTC).isoformat(),
     }
 
     filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
@@ -530,7 +531,7 @@ def build_all_session_terms(
 
 def create_llm_client(
     campaign_config: dict,
-) -> tuple["LLMClientBase", str]:
+) -> tuple[LLMClientBase, str]:
     """Create LLM client + model from campaign_config['eval_llm'].
 
     Returns:
