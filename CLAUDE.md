@@ -24,7 +24,7 @@ cd docker && docker-compose up --build
 
 Two entry points (FastAPI API + Jupyter notebook), one service core in `api/services/`. The notebook (`notebooks/optimization_campaign.ipynb`) is the primary interface; `campaign_lib` wraps services with display only.
 
-**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup.
+**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup. SearchMemory *(M8)* aggregates all historical evaluation data into a materialized view (parameter impact, query patterns, failure modes) that feeds both loops.
 
 **Two-layer tracing:** Target layer (JobSearchPoint → dataset_runs/) and optimizer layer (OptSearchPoint → campaign trials). Both independently reconstructable from disk.
 
@@ -80,6 +80,7 @@ Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema
 | `search/smart_search.py` | Sensitivity scan (OAT), adaptive search |
 | `search/scan_advisor.py` | LLM-driven scan recommendations |
 | `search/coverage.py` | Historical index, coverage advisor |
+| `search/search_memory.py` | Cross-campaign intelligence materialized view *(M8)* |
 | `obs/observability_logger.py` | Langfuse-compatible traces, MLflow |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
 

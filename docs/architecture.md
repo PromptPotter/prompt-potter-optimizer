@@ -28,11 +28,17 @@ All core logic lives in `api/services/`.
          │  feeds back                          │
          └──────────────◄───────────────────────┘
               richer landscape → better starting point → repeat
+
+         SearchMemory (materialized view) aggregates all historical
+         evaluation data and feeds parameter impact, query patterns,
+         and failure modes to both loops.  *(M8 Wave 5)*
 ```
 
 **Human Loop** — OAT perturbation scan measures which axes matter. You pick the best starting point.
 
 **AI Loop** — Critique-guided feedback cycle. Each round produces a critique (structured failure analysis) feeding the next round's candidate generation alongside sampled thinking styles. `scan_context` provides leaderboard and difficulty analytics when available. L1→L2→L3 escalation on diminishing returns.
+
+**SearchMemory** *(M8)* — cross-campaign intelligence layer. A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Feeds both loops via atomic data accessors: parameter impact rankings, top-5 historically-best values per axis, query tractability, bottleneck distribution, and failure clusters. Refreshed lazily on watermark staleness.
 
 ## Two-Layer Tracing
 
@@ -57,6 +63,8 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, etc.).
 
+**SearchMemory** (`api/services/search/search_memory.py`) *(M8 Wave 5)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark.
+
 Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 
 ## Evaluation Flow
@@ -68,6 +76,7 @@ All paths converge on `evaluate_prompt_cached()` — single gateway for eval per
 - **Content-hash dedup** — same JobSearchPoint + eval data returns cached results instantly
 - **Shared store** — sensitivity scan and feedback cycle both write to `dataset_runs/`; coverage advisor discovers all cached results regardless of source
 - **Write by experiment_id, read by config similarity** — provenance tagged, but reads use alias groups + `pipeline_params` matching. Data shared across experiments.
+- **SearchMemory** *(M8)* — materialized statistical index over `dataset_runs/`, refreshed lazily on watermark staleness. Provides cross-campaign parameter impact, query patterns, and failure mode analysis
 - **Graceful interrupt** — first Ctrl+C finishes in-flight call and saves (`"partial": True`); content-hash cache bridges partial results on re-run
 
 ## Pipeline Composability
@@ -126,6 +135,7 @@ L1 Generate is the sole `pipeline_params` decider. L2 refines context and meta-s
   campaigns/{campaign_id}.json
   campaigns/{campaign_id}/trial_NNNN.json
   obs/langfuse/events.jsonl
+  search_memory.json                          # (M8) materialized view index
 ```
 
 `dataset_runs/` is shared across all eval paths (content-addressed). `campaigns/` holds optimizer-layer trial checkpoints per round.

@@ -5,7 +5,8 @@
 │                                                                        │
 │  L1 GENERATE (LLM)                                                     │
 │    in:  critique (5 fields), task_context, thinking_styles,            │
-│         scan_context, focus_note, failure_examples                     │
+│         scan_context, focus_note, failure_examples,                    │
+│         search_memory (param impact, query patterns, failures) (M8)   │
 │    out: N candidate OptSearchPoints (prompt + pipeline_params)         │
 │         ↓                                                              │
 │  L1 EVALUATE                                                           │
@@ -163,6 +164,7 @@ Threshold: `critique_positive_threshold` in campaign config.
 | **Round evolution** | accuracy trajectory, degraded trend | `compute_round_evolution()` |
 | **Query categories** | failures by termination node, blindspot terms | `compute_query_categories()` |
 | **Scan context** | leaderboard, improving axes | From `CritiqueContext.scan_context` |
+| **Search memory** *(M8)* | axis impact rankings, top-5 values, bottleneck distribution, dead queries | `SearchMemory` atomic accessors |
 
 ### Anomaly Flags
 
@@ -261,6 +263,8 @@ Each round samples 2-3 styles from the variant library (`api/config/prompt_varia
 
 When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate target pipeline param exploration. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
 
+SearchMemory *(M8 Wave 5)* provides historical parameter impact data so the scan advisor prioritizes axes that historically produced signal and suggests text values that historically worked. Each optimizer node (L1, L2, critique) queries SearchMemory's atomic accessors for the subset relevant to its decision.
+
 ## Optimizer Nodes (M7)
 
 See [architecture.md](architecture.md#the-optimizer-pipeline) for the optimizer pipeline table.
@@ -343,3 +347,4 @@ campaign_config = {
 | `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
 | `prompt_eval.py` | `evaluate_prompt_batch` (per-query checks), `_extract_pipeline_data` |
 | `l1_optimizer.py` | L1 generation (sole pipeline_params decider) |
+| `search/search_memory.py` | Cross-campaign intelligence: parameter impact, query patterns, failure modes *(M8)* |

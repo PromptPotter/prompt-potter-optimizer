@@ -41,3 +41,11 @@ All interrupt handlers must catch both `KeyboardInterrupt` and `asyncio.Cancelle
 ## Display parity
 
 Cached and fresh results use the same output format (fields, layout, ordering). A provenance indicator (📖 for cached, no marker for live) distinguishes data source for transparency — the user should know whether results are replayed or freshly computed. All other formatting (accuracy, CI, delta, hit/miss) is identical regardless of source.
+
+## Cross-campaign learning via SearchMemory *(M8)*
+
+Evaluation data compounds across campaigns. SearchMemory is a materialized view over all historical `dataset_runs/` — incrementally updated, queryable by any optimizer node via atomic data accessors (structured data, no formatting).
+
+Three pillars: **parameter impact** (effect size + top-5 values per axis), **query patterns** (tractability, discriminative power), **failure modes** (bottleneck distribution, failure clusters).
+
+Each consumer (scan advisor, L1, L2, critique) composes the accessors it needs and formats results into its own prompt context. SearchMemory never generates LLM-ready text. Statistical method is swappable (start with mean-delta).

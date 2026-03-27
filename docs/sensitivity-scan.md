@@ -38,6 +38,16 @@ Before evaluation, `prepare_scan_baseline()` reports per-axis coverage from hist
 
 **Prompt alias groups** link restructured prompts to their originals so historical pipeline-parameter results are discoverable. Resolution is transitive.
 
+### SearchMemory Integration *(M8)*
+
+When historical data exists, SearchMemory enriches the scan workflow:
+
+- **Scan advisor** receives axis impact rankings and top-5 historically-best values per axis — prioritizes consistently impactful axes, skips dead ones
+- **Diagnostic set** can be stratified using query tractability data (which queries are discriminating vs always-hit/always-miss)
+- **Bottleneck distribution** tells the advisor which pipeline stage accounts for most failures, focusing scan effort on relevant parameters
+
+SearchMemory is a materialized view refreshed lazily — no extra computation during the scan itself.
+
 ### Circuit Breaker
 
 The scan aborts early on cascading failures:
