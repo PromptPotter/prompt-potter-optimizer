@@ -5,7 +5,6 @@ L1 Generate and L1 Evaluate services for the optimizer pipeline, plus
 improvement suggestion generation.
 """
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +27,7 @@ from api.services.campaign.formatting import (
 )
 from api.services.llm_client import LLMClientBase
 from api.services.metrics import compute_composite_score
+from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from api.models.eval_context import EvalContext
@@ -98,7 +98,7 @@ async def l1_generate(
         model=model,
         temperature=creativity,
     )
-    generated = response.parsed or json.loads(response.content)
+    generated = extract_parsed_json(response)
 
     variants_list = generated.get("variants", []) if isinstance(generated, dict) else generated
 

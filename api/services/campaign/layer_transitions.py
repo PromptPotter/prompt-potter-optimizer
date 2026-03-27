@@ -19,6 +19,7 @@ from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.critique import summarize_warning_inventory
 from api.services.campaign.formatting import format_failure_lines
+from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -149,7 +150,7 @@ async def refine_context(
         model=model,
         temperature=temperature,
     )
-    result = response.parsed or json.loads(response.content)
+    result = extract_parsed_json(response)
 
     changes: dict = {}
     if result.get("optimizer_params"):
@@ -246,7 +247,7 @@ async def modify_plan(
         model=model,
         temperature=temperature,
     )
-    result = response.parsed or json.loads(response.content)
+    result = extract_parsed_json(response)
 
     new_plan = result.get("plan", opt_sp.plan)
     rationale = result.get("rationale", "L3 modify_plan transition")

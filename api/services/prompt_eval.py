@@ -20,6 +20,7 @@ import httpx
 from api.config.settings import NO_RESULT
 from api.models.evaluator import EvalResult, ExactMatchEvaluator
 from api.services.metrics import compute_composite_score
+from api.shared.errors import ErrorCategory
 from api.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
@@ -49,16 +50,20 @@ class EvalBatchResult:
     stop_reason: str | None = None  # "graceful" | "force" | None
 
 
-def _error_category(error: str | None) -> str | None:
+def _error_category(error: str | None) -> ErrorCategory | None:
     """Extract error category from a ``[TAG] ...`` prefixed error string."""
     if error and error.startswith("["):
         bracket_end = error.find("]")
         if bracket_end > 0:
-            return error[1:bracket_end]
+            tag = error[1:bracket_end]
+            try:
+                return ErrorCategory(tag)
+            except ValueError:
+                return None
     return None
 
 
-def _dominant_error_category(results: list) -> str | None:
+def _dominant_error_category(results: list) -> ErrorCategory | None:
     """Return the most common error category across errored results."""
     from collections import Counter
     cats = [_error_category(r.get("error")) for r in results if r.get("error")]
@@ -173,8 +178,8 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
     """Classify an HTTP error into a tagged message."""
     code = exc.response.status_code
     if 400 <= code < 500:
-        return f"[CLIENT] HTTP {code}: {exc} — Check pipeline configuration and request parameters."
-    return f"[SERVER] HTTP {code}: {exc} — Backend may be experiencing issues."
+        return f"[{ErrorCategory.CLIENT}] HTTP {code}: {exc} — Check pipeline configuration and request parameters."
+    return f"[{ErrorCategory.SERVER}] HTTP {code}: {exc} — Backend may be experiencing issues."
 
 
 async def backend_reranker_evaluate(
@@ -222,7 +227,7 @@ async def backend_reranker_evaluate(
         logger.warning("backend_reranker_evaluate for %s: %s", query[:60], error_msg)
         return _error_result(query, ground_truth, error_msg)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
-        error_msg = f"[CONNECTION] {exc} — Backend may be down or unreachable."
+        error_msg = f"[{ErrorCategory.CONNECTION}] {exc} — Backend may be down or unreachable."
         logger.warning("backend_reranker_evaluate CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(query, ground_truth, error_msg)
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -312,7 +317,7 @@ async def evaluate_prompt_batch(
             # Cached results don't count toward consecutive error tracking
             if cached is None and result.get("error"):
                 cat = _error_category(result["error"])
-                if cat == "CLIENT":
+                if cat is ErrorCategory.CLIENT:
                     # Client errors are deterministic — same config will
                     # fail for every query.  Abort immediately.
                     logger.warning(

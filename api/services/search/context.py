@@ -11,6 +11,7 @@ from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.services.llm_client import LLMClientBase
 from api.services.stores.base import read_json_optional, validate_path_component, write_json
 from api.shared.hashing import HASH_TRUNCATE
+from api.shared.llm_parsing import extract_parsed_json
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ async def restructure_context(
         max_tokens=2000,
         output_format="json",
     )
-    result = response.parsed or json.loads(response.content)
+    result = extract_parsed_json(response)
 
     for key in ("persona", "task_intent", "problem_description",
                 "instruction", "thinking_style", "answer_format"):

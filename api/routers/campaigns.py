@@ -8,13 +8,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api.services.project_store import ProjectStore
+from api.dependencies import StoreDep
 
 router = APIRouter()
-
-
-def _get_store() -> ProjectStore:
-    return ProjectStore()
 
 
 # ---------------------------------------------------------------------------
@@ -75,10 +71,10 @@ class CampaignDetailResponse(BaseModel):
 
 @router.get("/campaigns", response_model=CampaignListResponse)
 async def list_campaigns(
+    store: StoreDep,
     backend_id: str = Query(..., description="Backend identifier"),
 ):
     """List all campaigns for a backend."""
-    store = _get_store()
     campaigns = store.campaigns.list_all(backend_id)
     return CampaignListResponse(
         campaigns=[CampaignSummary(**c) for c in campaigns],
@@ -88,11 +84,11 @@ async def list_campaigns(
 
 @router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
 async def get_campaign(
+    store: StoreDep,
     campaign_id: str,
     backend_id: str = Query(..., description="Backend identifier"),
 ):
     """Get campaign detail with trial summaries."""
-    store = _get_store()
     data = store.campaigns.load(backend_id, campaign_id)
     if data is None:
         raise HTTPException(404, f"Campaign not found: {campaign_id}")
@@ -104,12 +100,12 @@ async def get_campaign(
     response_model=dict[str, Any],
 )
 async def get_trial(
+    store: StoreDep,
     campaign_id: str,
     round_num: int,
     backend_id: str = Query(..., description="Backend identifier"),
 ):
     """Get full trial detail for a specific round."""
-    store = _get_store()
     trial = store.campaigns.load_trial(backend_id, campaign_id, round_num)
     if trial is None:
         raise HTTPException(404, f"Trial round {round_num} not found")

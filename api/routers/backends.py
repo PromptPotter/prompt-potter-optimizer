@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from api.dependencies import StoreDep
 from api.models.backend import BackendConnection
 from api.services.backend_client import BackendClient
 from api.services.pipeline_discovery import compute_pipeline_view
@@ -21,10 +22,6 @@ from api.services.project_store import ProjectStore
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/backends", tags=["Backends"])
-
-
-def _get_store() -> ProjectStore:
-    return ProjectStore()
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +72,7 @@ def _slugify(name: str) -> str:
     return slug.strip("-")
 
 
-def _get_backend_or_404(backend_id: str, store: ProjectStore | None = None) -> BackendConnection:
-    store = store or _get_store()
+def _get_backend_or_404(backend_id: str, store: ProjectStore) -> BackendConnection:
     backend = store.backends.get(backend_id)
     if not backend:
         raise HTTPException(status_code=404, detail=f"Backend '{backend_id}' not found")
@@ -89,9 +85,8 @@ def _get_backend_or_404(backend_id: str, store: ProjectStore | None = None) -> B
 
 
 @router.post("", response_model=RegisterBackendResponse, status_code=201)
-async def register_backend(request: RegisterBackendRequest):
+async def register_backend(request: RegisterBackendRequest, store: StoreDep):
     """Register a new backend connection."""
-    store = _get_store()
     backend_id = request.id or _slugify(request.name)
     if store.backends.get(backend_id):
         raise HTTPException(
@@ -116,9 +111,8 @@ async def register_backend(request: RegisterBackendRequest):
 
 
 @router.get("", response_model=list[RegisterBackendResponse])
-async def list_backends():
+async def list_backends(store: StoreDep):
     """List all registered backends."""
-    store = _get_store()
     return [
         RegisterBackendResponse(
             id=b.id,
@@ -132,9 +126,9 @@ async def list_backends():
 
 
 @router.get("/{backend_id}", response_model=RegisterBackendResponse)
-async def get_backend(backend_id: str):
+async def get_backend(backend_id: str, store: StoreDep):
     """Get backend details."""
-    b = _get_backend_or_404(backend_id, _get_store())
+    b = _get_backend_or_404(backend_id, store)
     return RegisterBackendResponse(
         id=b.id,
         name=b.name,
@@ -150,9 +144,8 @@ async def get_backend(backend_id: str):
 
 
 @router.post("/{backend_id}/sync", response_model=SyncResponse)
-async def sync_experiments(backend_id: str):
+async def sync_experiments(backend_id: str, store: StoreDep):
     """Sync experiments from backend API into project store (verbatim)."""
-    store = _get_store()
     backend = _get_backend_or_404(backend_id, store)
     client = BackendClient(backend.base_url)
 
@@ -176,9 +169,8 @@ async def sync_experiments(backend_id: str):
 
 
 @router.get("/{backend_id}/experiments")
-async def list_experiments(backend_id: str):
+async def list_experiments(backend_id: str, store: StoreDep):
     """List synced experiments (from local store, native format)."""
-    store = _get_store()
     _get_backend_or_404(backend_id, store)
 
     # First try the experiments list file
@@ -197,9 +189,8 @@ async def list_experiments(backend_id: str):
 
 
 @router.get("/{backend_id}/experiments/{experiment_id}")
-async def get_experiment(backend_id: str, experiment_id: str):
+async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep):
     """Get a synced experiment in native backend format."""
-    store = _get_store()
     _get_backend_or_404(backend_id, store)
     data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
     if not data:
@@ -216,9 +207,8 @@ async def get_experiment(backend_id: str, experiment_id: str):
 
 
 @router.get("/{backend_id}/pipeline", response_model=PipelineViewResponse)
-async def get_pipeline(backend_id: str):
+async def get_pipeline(backend_id: str, store: StoreDep):
     """Dynamic pipeline view from the backend."""
-    store = _get_store()
     backend = _get_backend_or_404(backend_id, store)
     client = BackendClient(backend.base_url)
 

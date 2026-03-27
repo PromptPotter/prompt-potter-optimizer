@@ -190,7 +190,7 @@ def test_lineage_chain(store, campaign, baseline_ps):
 def api_client(store, monkeypatch):
     """FastAPI test client with store pointing at temp dir."""
     monkeypatch.setattr(
-        "api.routers.campaigns._get_store",
+        "api.dependencies.get_store",
         lambda: store,
     )
     from fastapi.testclient import TestClient
