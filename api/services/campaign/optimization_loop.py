@@ -177,54 +177,22 @@ async def _handle_escalation_signal(
 
 
 # ---------------------------------------------------------------------------
-# Init
+# Init helpers
 # ---------------------------------------------------------------------------
 
 
-async def _init_cycle_state(
-    instruction: str,
-    eval_data: list[dict[str, Any]],
+def _build_baseline_state(
     config: CycleConfig,
     baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
     baseline_results: list | None,
-    on_phase: Callable[[PhaseEvent], None] | None,
-    langfuse_session_id: str | None,
-    cycle_id: str | None,
-    experiment_id: str,
-    backend_client: "BackendClient | None",
-    started_at: str,
-) -> CycleInitResult:
-    """Initialize all cycle state: baseline, resume, obs, eval context.
+) -> tuple[LoopState, OptSearchPoint]:
+    """Construct LoopState from baseline config and prompt fields.
 
     Returns:
-        (state, campaign_store, cycle_id, obs_campaign_id,
-         round_eval_data, escalation_checks, resumed_from_round)
+        (state, baseline_osp) — the initial loop state and the parsed
+        baseline OptSearchPoint (needed by caller for resume/alias logic).
     """
-    emit_phase(on_phase, "init", "enter",
-                max_rounds=config.max_rounds,
-                patience=config.patience,
-                n_variants=config.n_variants,
-                model=config.model or "(default)",
-                sample_size=config.sample_size,
-                enable_l2=config.enable_l2,
-                enable_l3=config.enable_l3,
-                eval_data_count=len(eval_data),
-                baseline_accuracy=baseline_accuracy,
-                has_scan_context=config.scan_context is not None,
-                enable_critique=config.enable_critique,
-                pipeline_params=config.pipeline_params,
-                node_param_keys=(
-                    {s: sorted(k) for s, k in config.pipeline_schema.node_param_keys().items()}
-                    if config.pipeline_schema else None
-                ))
-
-    _bc = backend_client or BackendClient(config.backend_url)
-    if config.session_terms:
-        await _bc.init_session(config.session_terms)
-
-    round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
-
     if baseline_prompt_fields is None:
         raise ValueError(
             "baseline_prompt_fields is required. Run baseline evaluation in the "
@@ -238,29 +206,13 @@ async def _init_cycle_state(
     current_results: list = baseline_results or []
     logger.info("Using provided baseline (acc=%.3f)", baseline_accuracy)
 
-    # Resume detection
-    campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
-        config, eval_data, baseline_osp.prompt_field_dict(),
-        baseline_prompt_fields, baseline_accuracy,
-        cycle_id_override=cycle_id,
-    )
-
-    # Observability
-    if not langfuse_session_id and cycle_id:
-        langfuse_session_id = cycle_id
-    obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
-    obs, _dataset_name, _dataset_item_map = _init_obs(
-        config, obs_campaign_id, baseline_accuracy, eval_data, langfuse_session_id,
-    )
-
-    # Loop state
     if current_results:
         _bl_composite = compute_composite_score(
             current_results, config.pipeline_schema,
         )["composite"]
     else:
         _bl_composite = baseline_accuracy
-    # Init OptSearchPoint from baseline + task_context
+
     opt_sp = OptSearchPoint(
         task_context=config.task_context or {},
         persona=baseline_osp.persona,
@@ -287,44 +239,68 @@ async def _init_cycle_state(
         best_sp=baseline_sp,
         opt_sp=opt_sp,
     )
+    return state, baseline_osp
 
-    # Restore optimizer state on resume
-    if resumed_from_round > 0 and campaign_store and cycle_id:
-        _latest_trial = campaign_store.load_trial(
-            config.backend_id, cycle_id, resumed_from_round - 1,
+
+def _restore_from_checkpoint(
+    state: LoopState,
+    config: CycleConfig,
+    campaign_store: "CampaignStore",
+    cycle_id: str,
+    resumed_from_round: int,
+) -> None:
+    """Restore optimizer state from a campaign checkpoint (in-place).
+
+    Only called when ``resumed_from_round > 0``.
+    """
+    _latest_trial = campaign_store.load_trial(
+        config.backend_id, cycle_id, resumed_from_round - 1,
+    )
+    if _latest_trial:
+        _osp = _latest_trial.get("opt_search_point", {})
+        if _osp:
+            state.opt_sp = OptSearchPoint(**{
+                k: v for k, v in _osp.items()
+                if k in OptSearchPoint.model_fields
+            })
+        state.escalation.l2_round = _latest_trial.get("l2_round", 0)
+        state.escalation.l3_round = _latest_trial.get("l3_round", 0)
+        state.escalation.l2_stall_count = _latest_trial.get("l2_stall_count", 0)
+        state.escalation.l3_stall_count = _latest_trial.get("l3_stall_count", 0)
+        state.stall_count = _latest_trial.get("stall_count", 0)
+        logger.info(
+            "Restored optimizer state from round %d "
+            "(critique=%d chars, task_context=%d keys, "
+            "escalation_journal=%d entries, l2_round=%d)",
+            resumed_from_round - 1,
+            len(state.opt_sp.critique_text),
+            len(state.opt_sp.task_context),
+            len(state.opt_sp.escalation_journal),
+            state.escalation.l2_round,
         )
-        if _latest_trial:
-            _osp = _latest_trial.get("opt_search_point", {})
-            if _osp:
-                state.opt_sp = OptSearchPoint(**{
-                    k: v for k, v in _osp.items()
-                    if k in OptSearchPoint.model_fields
-                })
-            state.escalation.l2_round = _latest_trial.get("l2_round", 0)
-            state.escalation.l3_round = _latest_trial.get("l3_round", 0)
-            state.escalation.l2_stall_count = _latest_trial.get("l2_stall_count", 0)
-            state.escalation.l3_stall_count = _latest_trial.get("l3_stall_count", 0)
-            state.stall_count = _latest_trial.get("stall_count", 0)
-            logger.info(
-                "Restored optimizer state from round %d "
-                "(critique=%d chars, task_context=%d keys, "
-                "escalation_journal=%d entries, l2_round=%d)",
-                resumed_from_round - 1,
-                len(state.opt_sp.critique_text),
-                len(state.opt_sp.task_context),
-                len(state.opt_sp.escalation_journal),
-                state.escalation.l2_round,
-            )
 
-    state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
-    # EvalContext (shared across all rounds)
+def _setup_eval_context(
+    state: LoopState,
+    config: CycleConfig,
+    instruction: str,
+    baseline_osp: OptSearchPoint,
+    backend_client: BackendClient,
+    obs: Any,
+    experiment_id: str,
+    cycle_id: str | None,
+) -> list:
+    """Wire up EvalContext on state and build escalation checks.
+
+    Returns:
+        escalation_checks list.
+    """
     _store = None
     if config.project_root:
         from api.services.project_store import ProjectStore
         _store = ProjectStore(config.project_root)
     state.eval_ctx = EvalContext(
-        backend_client=_bc,
+        backend_client=backend_client,
         store=_store,
         backend_id=config.backend_id,
         pipeline_schema=config.pipeline_schema,
@@ -349,7 +325,81 @@ async def _init_cycle_state(
             )
 
     from api.services.campaign.escalation import build_escalation_checks
-    escalation_checks = build_escalation_checks(config)
+    return build_escalation_checks(config)
+
+
+# ---------------------------------------------------------------------------
+# Init coordinator
+# ---------------------------------------------------------------------------
+
+
+async def _init_cycle_state(
+    instruction: str,
+    eval_data: list[dict[str, Any]],
+    config: CycleConfig,
+    baseline_prompt_fields: dict | None,
+    baseline_accuracy: float,
+    baseline_results: list | None,
+    on_phase: Callable[[PhaseEvent], None] | None,
+    langfuse_session_id: str | None,
+    cycle_id: str | None,
+    experiment_id: str,
+    backend_client: "BackendClient | None",
+    started_at: str,
+) -> CycleInitResult:
+    """Initialize all cycle state: baseline, resume, obs, eval context."""
+    emit_phase(on_phase, "init", "enter",
+                max_rounds=config.max_rounds,
+                patience=config.patience,
+                n_variants=config.n_variants,
+                model=config.model or "(default)",
+                sample_size=config.sample_size,
+                enable_l2=config.enable_l2,
+                enable_l3=config.enable_l3,
+                eval_data_count=len(eval_data),
+                baseline_accuracy=baseline_accuracy,
+                has_scan_context=config.scan_context is not None,
+                enable_critique=config.enable_critique,
+                pipeline_params=config.pipeline_params,
+                node_param_keys=(
+                    {s: sorted(k) for s, k in config.pipeline_schema.node_param_keys().items()}
+                    if config.pipeline_schema else None
+                ))
+
+    _bc = backend_client or BackendClient(config.backend_url)
+    if config.session_terms:
+        await _bc.init_session(config.session_terms)
+
+    round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
+
+    # 1. Build baseline state
+    state, baseline_osp = _build_baseline_state(
+        config, baseline_prompt_fields, baseline_accuracy, baseline_results,
+    )
+
+    # 2. Resume detection + checkpoint restore
+    campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
+        config, eval_data, baseline_osp.prompt_field_dict(),
+        baseline_prompt_fields, baseline_accuracy,
+        cycle_id_override=cycle_id,
+    )
+    if not langfuse_session_id and cycle_id:
+        langfuse_session_id = cycle_id
+    obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
+    obs, _dataset_name, _dataset_item_map = _init_obs(
+        config, obs_campaign_id, baseline_accuracy, eval_data, langfuse_session_id,
+    )
+    if resumed_from_round > 0 and campaign_store and cycle_id:
+        _restore_from_checkpoint(
+            state, config, campaign_store, cycle_id, resumed_from_round,
+        )
+    state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
+
+    # 3. Eval context + escalation checks
+    escalation_checks = _setup_eval_context(
+        state, config, instruction, baseline_osp,
+        _bc, obs, experiment_id, cycle_id,
+    )
 
     emit_phase(on_phase, "init", "exit",
                 cycle_id=cycle_id,
@@ -368,6 +418,76 @@ async def _init_cycle_state(
         escalation_checks=escalation_checks,
         resumed_from_round=resumed_from_round,
     )
+
+
+# ---------------------------------------------------------------------------
+# Round loop helpers
+# ---------------------------------------------------------------------------
+
+
+def _checkpoint_round(
+    campaign_store: "CampaignStore",
+    cycle_id: str,
+    config: CycleConfig,
+    state: LoopState,
+    round_result: CycleRoundResult,
+    round_num: int,
+) -> None:
+    """Persist round results to the campaign store."""
+    with graceful("Round checkpoint failed"):
+        campaign_store.add_trial(config.backend_id, cycle_id, {
+            "trial_id": f"round_{round_num}",
+            "round": round_num,
+            "label": round_result.label,
+            "accuracy": round_result.accuracy,
+            "composite": round_result.composite,
+            "hits": round_result.hits,
+            "total": round_result.total,
+            "improved": round_result.improved,
+            "next_action": round_result.next_action,
+            "prompt_fields": round_result.prompt_fields,
+            "results": round_result.results,
+            "candidates_evaluated": round_result.candidates_evaluated,
+            "candidate_scores": list(round_result.candidate_scores),
+            "stall_count": state.stall_count,
+            "l2_stall_count": state.escalation.l2_stall_count,
+            "l3_stall_count": state.escalation.l3_stall_count,
+            "l2_round": state.escalation.l2_round,
+            "l3_round": state.escalation.l3_round,
+            "opt_search_point": state.opt_sp.model_dump(),
+        })
+
+
+async def _check_stopping_conditions(
+    state: LoopState,
+    config: CycleConfig,
+    round_result: CycleRoundResult,
+    round_num: int,
+    round_eval_data: list[dict],
+    on_phase: Callable[[PhaseEvent], None] | None,
+    obs_campaign_id: str,
+) -> StopReason | None:
+    """Check patience, max_rounds, perfect score, and next_action stop.
+
+    Returns a StopReason if the cycle should stop, None to continue.
+    """
+    if state.current_accuracy >= 1.0:
+        return StopReason.PERFECT
+    if round_result.next_action == "stop":
+        return StopReason.NEXT_ACTION
+    if state.stall_count >= config.patience:
+        if config.enable_l2:
+            _obs, _tid = _get_obs_trace(state, obs_campaign_id)
+            _l2_stop = await _escalate_l2(
+                state, config, round_num, round_eval_data, on_phase,
+                obs=_obs, trace_id=_tid,
+            )
+            if _l2_stop:
+                return _l2_stop
+            state.stall_count = 0  # L2/L3 changed prompt — fresh window
+        else:
+            return StopReason.PATIENCE
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -493,50 +613,19 @@ async def run_optimization(
 
             # Checkpoint round to disk
             if campaign_store and cycle_id:
-                with graceful("Round checkpoint failed"):
-                    campaign_store.add_trial(config.backend_id, cycle_id, {
-                        "trial_id": f"round_{round_num}",
-                        "round": round_num,
-                        "label": round_result.label,
-                        "accuracy": round_result.accuracy,
-                        "composite": round_result.composite,
-                        "hits": round_result.hits,
-                        "total": round_result.total,
-                        "improved": round_result.improved,
-                        "next_action": round_result.next_action,
-                        "prompt_fields": round_result.prompt_fields,
-                        "results": round_result.results,
-                        "candidates_evaluated": round_result.candidates_evaluated,
-                        "candidate_scores": list(round_result.candidate_scores),
-                        "stall_count": state.stall_count,
-                        "l2_stall_count": state.escalation.l2_stall_count,
-                        "l3_stall_count": state.escalation.l3_stall_count,
-                        "l2_round": state.escalation.l2_round,
-                        "l3_round": state.escalation.l3_round,
-                        "opt_search_point": state.opt_sp.model_dump(),
-                    })
+                _checkpoint_round(
+                    campaign_store, cycle_id, config, state,
+                    round_result, round_num,
+                )
 
             # Stopping conditions
-            if state.current_accuracy >= 1.0:
-                stop_reason = StopReason.PERFECT
+            _stop = await _check_stopping_conditions(
+                state, config, round_result, round_num,
+                round_eval_data, cb.on_phase, obs_campaign_id,
+            )
+            if _stop:
+                stop_reason = _stop
                 break
-            if round_result.next_action == "stop":
-                stop_reason = StopReason.NEXT_ACTION
-                break
-            if state.stall_count >= config.patience:
-                if config.enable_l2:
-                    _obs, _tid = _get_obs_trace(state, obs_campaign_id)
-                    _l2_stop = await _escalate_l2(
-                        state, config, round_num, round_eval_data, cb.on_phase,
-                        obs=_obs, trace_id=_tid,
-                    )
-                    if _l2_stop:
-                        stop_reason = _l2_stop
-                        break
-                    state.stall_count = 0  # L2/L3 changed prompt — fresh window
-                else:
-                    stop_reason = StopReason.PATIENCE
-                    break
 
             round_num += 1
             clean_rounds += 1

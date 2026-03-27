@@ -187,16 +187,17 @@ def test_lineage_chain(store, campaign, baseline_ps):
 
 
 @pytest.fixture
-def api_client(store, monkeypatch):
+def api_client(store):
     """FastAPI test client with store pointing at temp dir."""
-    monkeypatch.setattr(
-        "api.dependencies.get_store",
-        lambda: store,
-    )
     from fastapi.testclient import TestClient
 
+    from api.dependencies import get_store
     from api.main import app
-    return TestClient(app)
+
+    app.dependency_overrides[get_store] = lambda: store
+    client = TestClient(app)
+    yield client
+    app.dependency_overrides.pop(get_store, None)
 
 
 def test_api_crud_lifecycle(api_client, store, baseline_ps):

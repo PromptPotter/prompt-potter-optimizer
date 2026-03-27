@@ -237,6 +237,35 @@ async def backend_reranker_evaluate(
         return _error_result(query, ground_truth, str(exc))
 
 
+async def _evaluate_single_query(
+    search_point: JobSearchPoint,
+    query_data: dict,
+    backend_client: BackendClient,
+    rendered_prompt: str,
+    pipeline_schema: PipelineSchema | None,
+    cached_queries: dict[str, dict] | None,
+) -> tuple[dict, bool]:
+    """Evaluate a single query, checking per-query cache first.
+
+    Returns:
+        Tuple of (result_dict, was_cached).  ``was_cached`` is True when
+        the result came from ``cached_queries`` rather than a live backend call.
+    """
+    cached = (
+        cached_queries.get(query_data["query"])
+        if cached_queries else None
+    )
+    if cached is not None and not cached.get("error"):
+        return {**cached, "cached": True}, True
+
+    result = await backend_reranker_evaluate(
+        query_data, backend_client, rendered_prompt,
+        pipeline_params=search_point.pipeline_params,
+        pipeline_schema=pipeline_schema,
+    )
+    return result, False
+
+
 async def evaluate_prompt_batch(
     search_point: JobSearchPoint,
     eval_data: list,
@@ -298,24 +327,16 @@ async def evaluate_prompt_batch(
                 )
                 break
 
-            # Per-query cache reuse — skip backend call if result exists
-            cached = (
-                cached_queries.get(qd["query"])
-                if cached_queries else None
+            result, was_cached = await _evaluate_single_query(
+                search_point, qd, backend_client, rendered,
+                pipeline_schema, cached_queries,
             )
-            if cached is not None and not cached.get("error"):
-                result = {**cached, "cached": True}
+            if was_cached:
                 n_reused += 1
-            else:
-                result = await backend_reranker_evaluate(
-                    qd, backend_client, rendered,
-                    pipeline_params=search_point.pipeline_params,
-                    pipeline_schema=pipeline_schema,
-                )
             results.append(result)
 
             # Cached results don't count toward consecutive error tracking
-            if cached is None and result.get("error"):
+            if not was_cached and result.get("error"):
                 cat = _error_category(result["error"])
                 if cat is ErrorCategory.CLIENT:
                     # Client errors are deterministic — same config will
@@ -419,7 +440,7 @@ def _finalize_observability(
         )
 
 
-def _try_cached_lookup(
+def _lookup_cached_or_aliased_result(
     store: ProjectStore,
     backend_id: str,
     content_hash: str,
@@ -501,7 +522,7 @@ async def evaluate_prompt_cached(
 
     # --- dedup lookup (content hash + alias group fallback) ---
     if store and backend_id and not force:
-        cached = _try_cached_lookup(
+        cached = _lookup_cached_or_aliased_result(
             store, backend_id, content_hash, rendered,
             search_point, eval_data, pipeline_schema, on_result,
         )
