@@ -148,9 +148,12 @@ def _make_eval_fn(
 ) -> Callable:
     """Factory for the ``_eval_opt`` closure used by scan and adaptive search."""
 
+    _pn = ctx.pipeline_schema.prompt_node_names()[0] if ctx.pipeline_schema and ctx.pipeline_schema.prompt_node_names() else ""
+
     async def _eval_opt(opt: OptSearchPoint, pp: dict | None = None) -> dict:
         sp = opt.to_job_search_point(
             base_pipeline_params=pp or get_params(),
+            prompt_node=_pn,
         )
         results, scores, cached = await eval_search_point(
             sp, eval_data, ctx,

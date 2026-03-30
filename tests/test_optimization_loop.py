@@ -17,6 +17,7 @@ from _helpers import (
     apply_llm_mock,
     run_simple_cycle,
 )
+from conftest import TEST_PIPELINE_SCHEMA
 
 from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.campaign_lifecycle import (
@@ -185,11 +186,11 @@ class TestCycleConfigIdentity:
         rendered = "You are an expert."
         c1 = CycleConfig(
             max_rounds=5, l1_patience=2, n_variants=3, creativity=0.5,
-            backend_url="http://mock:8000",
+            backend_url="http://mock:8000", pipeline_schema=TEST_PIPELINE_SCHEMA,
         )
         c2 = CycleConfig(
             max_rounds=10, l1_patience=2, n_variants=3, creativity=0.5,
-            backend_url="http://mock:8000",
+            backend_url="http://mock:8000", pipeline_schema=TEST_PIPELINE_SCHEMA,
         )
         assert cycle_config_identity(c1, rendered, eval_data) != \
             cycle_config_identity(c2, rendered, eval_data)
@@ -291,6 +292,8 @@ async def test_resume_from_interrupted_cycle(
         enable_l2=False,
         project_root=str(tmp_path),
         backend_id="test_backend",
+        pipeline_schema=TEST_PIPELINE_SCHEMA,
+        prompt_node="llm_ranking",
     )
 
     _bl = OptSearchPoint(instruction="Rank candidates.").model_dump()
@@ -370,6 +373,8 @@ async def test_interrupt_writes_interrupted_status(
         enable_l2=False,
         project_root=str(tmp_path),
         backend_id="test_backend",
+        pipeline_schema=TEST_PIPELINE_SCHEMA,
+        prompt_node="llm_ranking",
     )
 
     result = await run_optimization(
@@ -426,6 +431,8 @@ async def test_mid_round_resume_uses_persisted_candidates(
         enable_l2=False,
         project_root=str(tmp_path),
         backend_id="test_backend",
+        pipeline_schema=TEST_PIPELINE_SCHEMA,
+        prompt_node="llm_ranking",
     )
 
     _bl = OptSearchPoint(instruction="Rank candidates.").model_dump()

@@ -20,6 +20,7 @@ from api.models.backend import BackendConnection
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
 from api.services.project_store import ProjectStore
+from api.shared.dict_mixin import MutableDictAccessMixin
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class InitResult:
+class InitResult(MutableDictAccessMixin):
     """Return value from ``init_services()``.
 
     Supports dict-style access (``result["key"]``, ``result.get("key")``)
@@ -45,15 +46,6 @@ class InitResult:
     queries: list[dict] = field(default_factory=list)
     exp_data: dict = field(default_factory=dict)
     session_terms: list[str] = field(default_factory=list)
-
-    def __getitem__(self, key: str) -> Any:
-        return getattr(self, key)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return getattr(self, key, default)
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        setattr(self, key, value)
 
 
 @dataclass
@@ -104,36 +96,47 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
     )
 
 
-def load_baseline_prompt(exp_data: dict) -> OptSearchPoint:
-    """Extract the llm_ranking prompt from experiment data, wrap in OptSearchPoint.
+def load_baseline_prompt(
+    exp_data: dict,
+    prompt_node_names: list[str] | None = None,
+) -> OptSearchPoint:
+    """Extract the prompt-bearing node's template from experiment data.
+
+    Searches ``dependencies.prompts`` for a key matching any name in
+    ``prompt_node_names`` (from ``PipelineSchema.prompt_node_names()``).
 
     Args:
         exp_data: Synced experiment data dict with ``dependencies.prompts``.
+        prompt_node_names: Node names to search for in prompt registry keys.
 
     Returns:
-        OptSearchPoint with the baseline reranker prompt as ``instruction``.
+        OptSearchPoint with the baseline prompt as ``instruction``.
 
     Raises:
-        RuntimeError: If no llm_ranking prompt is found.
+        RuntimeError: If no matching prompt is found.
     """
     dependencies = exp_data.get("dependencies", {})
     prompts = dependencies.get("prompts", {})
+    names = prompt_node_names or []
 
-    reranker_prompt = None
-    for key, prompt_info in prompts.items():
-        if "llm_ranking" in key:  # TermNorm prompt registry key; replaced by ConnectorProtocol in M9
-            reranker_prompt = prompt_info
+    matched_prompt = None
+    for node_name in names:
+        for key, prompt_info in prompts.items():
+            if node_name in key:
+                matched_prompt = prompt_info
+                break
+        if matched_prompt:
             break
 
-    if reranker_prompt is None:
+    if matched_prompt is None:
         raise RuntimeError(
-            "No llm_ranking prompt found in synced experiment data. "
-            "Re-sync the experiment after TermNorm prompt registry is initialized."
+            f"No prompt found for nodes {names} in synced experiment data. "
+            "Re-sync the experiment after the prompt registry is initialized."
         )
 
     return OptSearchPoint(
-        instruction=reranker_prompt["template"],
-        changes_description="Baseline reranker_v1 from TermNorm prompt registry",
+        instruction=matched_prompt["template"],
+        changes_description=f"Baseline prompt from {names[0]} registry",
     )
 
 
@@ -400,6 +403,7 @@ async def run_baseline_eval(
     on_result: Callable | None = None,
     obs: Any | None = None,
     session_terms: list[str] | None = None,
+    prompt_node: str = "",
 ) -> tuple[list, list]:
     """Evaluate baseline prompt and build initial campaign_rounds list.
 
@@ -455,6 +459,7 @@ async def run_baseline_eval(
 
     sp = baseline.to_job_search_point(
         base_pipeline_params=pipeline_params,
+        prompt_node=prompt_node,
     )
     ctx = EvalContext(
         backend_client=backend_client,

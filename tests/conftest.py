@@ -2,10 +2,18 @@
 import pytest
 
 import api.services.llm_client as llm_mod
+from api.models.pipeline_schema import PipelineNode, PipelineSchema
 from api.services.campaign.config import CycleConfig
 from api.services.obs.langfuse_client import LangfuseLogger
 from api.services.project_store import ProjectStore
 from tests.mock_llm_client import MockLLMClient
+
+# Minimal typed schema for tests that need composite scoring.
+TEST_PIPELINE_SCHEMA = PipelineSchema(nodes=[
+    PipelineNode(name="cache_lookup", node_type="cache"),
+    PipelineNode(name="token_matching", node_type="candidate_source"),
+    PipelineNode(name="llm_ranking", node_type="ranker"),
+])
 
 
 @pytest.fixture
@@ -59,4 +67,6 @@ def cycle_config():
         backend_url="http://mock:8000",
         enable_critique=False,
         enable_l2=False,
+        pipeline_schema=TEST_PIPELINE_SCHEMA,
+        prompt_node="llm_ranking",
     )

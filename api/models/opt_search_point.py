@@ -157,7 +157,7 @@ class OptSearchPoint(SearchPoint):
         self,
         base_pipeline_params: dict | None = None,
         *,
-        prompt_node: str = "llm_ranking",  # TermNorm default; pass schema.prompt_node_names()[0] when M9 ConnectorProtocol lands
+        prompt_node: str = "",
     ) -> JobSearchPoint:
         """Project into a JobSearchPoint for target-layer evaluation.
 
@@ -169,7 +169,7 @@ class OptSearchPoint(SearchPoint):
 
         pp = dict(base_pipeline_params or {})
         rendered = self.render()
-        if rendered:
+        if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
         # Build prompt_fields for variant derivation in JobSearchPoint

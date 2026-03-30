@@ -255,8 +255,10 @@ async def l1_evaluate(
             pp: dict | None = {**(_sp_pipeline_params or {}), **_cpp}
         else:
             pp = _sp_pipeline_params
+        _pn = ctx.pipeline_schema.prompt_node_names()[0] if ctx.pipeline_schema and ctx.pipeline_schema.prompt_node_names() else ""
         sp = osp_c.to_job_search_point(
             base_pipeline_params=pp,
+            prompt_node=_pn,
         )
         ctx.candidate_idx = idx
         results, scores, cached = await eval_search_point(

@@ -56,6 +56,9 @@ class CritiqueContext:
     # L2 domain context (so critique understands L2's problem framing)
     task_context: dict | None = None
 
+    # Schema-driven candidate keys (from PipelineNode.output_keys for ranker/candidate_source nodes)
+    candidate_keys: list[str] = field(default_factory=list)
+
     # Configurable thresholds
     degradation_threshold: float = 0.4
     near_miss_ratio: float = 0.3
@@ -81,9 +84,14 @@ def find_rank(candidates: list, ground_truth: str) -> int | None:
     return None
 
 
-def get_candidates(r: dict) -> list:
+def get_candidates(r: dict, candidate_keys: list[str] | None = None) -> list:
+    """Extract candidates from a result dict, checking keys in order."""
     pd = r.get("pipeline_data") or {}
-    return pd.get("ranked_candidates") or pd.get("token_matched_candidates") or []
+    for key in candidate_keys or []:
+        val = pd.get(key)
+        if val:
+            return val
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +290,7 @@ def _pipeline_health_section(
 def _rank_analysis_section(
     results: list[dict],
     anomalies: list[str],
+    candidate_keys: list[str] | None = None,
     *,
     near_miss_ratio: float = 0.3,
 ) -> str:
@@ -289,7 +298,7 @@ def _rank_analysis_section(
     rank_map: dict[int, int | None] = {}
     for i, r in enumerate(results):
         if not r.get("error"):
-            rank_map[i] = find_rank(get_candidates(r), r.get("ground_truth", ""))
+            rank_map[i] = find_rank(get_candidates(r, candidate_keys), r.get("ground_truth", ""))
 
     rank_buckets = {"1": 0, "2-5": 0, "6-10": 0, "11-20": 0, "not_found": 0}
     near_misses: list[dict] = []
@@ -454,7 +463,7 @@ def _task_context_section(task_context: dict | None) -> str:
     return f"## TASK CONTEXT\n{tc_lines}" if tc_lines else ""
 
 
-def _failure_details_section(results: list[dict]) -> str:
+def _failure_details_section(results: list[dict], candidate_keys: list[str] | None = None) -> str:
     """Per-query failure breakdown with rank and degradation info."""
     failures = [r for r in results if not r.get("hit") and not r.get("error")]
     if not failures:
@@ -464,7 +473,7 @@ def _failure_details_section(results: list[dict]) -> str:
     for r in failures[:15]:
         pd = r.get("pipeline_data") or {}
         gt = r.get("ground_truth", "?")
-        rank = find_rank(get_candidates(r), gt)
+        rank = find_rank(get_candidates(r, candidate_keys), gt)
         rank_str = f"rank {rank}" if rank else "not in candidates"
         diag = pd.get("diagnostics") or {}
         warn = "⚠ degraded" if diag.get("warnings") else ""
@@ -511,6 +520,7 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
         _rank_analysis_section(
             results,
             anomalies,
+            candidate_keys=ctx.candidate_keys or None,
             near_miss_ratio=ctx.near_miss_ratio,
         ),
         _round_evolution_section(ctx.round_history, anomalies),
@@ -521,7 +531,7 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
     if ctx.warning_inventory:
         sections.append(summarize_warning_inventory(ctx.warning_inventory))
     sections += [
-        _failure_details_section(results),
+        _failure_details_section(results, candidate_keys=ctx.candidate_keys or None),
         _success_details_section(results),
         CRITIQUE_TASK,
     ]

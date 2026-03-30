@@ -36,15 +36,18 @@ def sp_identity_hash(
     prompt variants with the same pipeline config share the same SP hash.
 
     ``prompt_node_names`` lists the nodes whose output depends on the
-    prompt text (default: ``["llm_ranking"]`` for legacy TermNorm compat).
+    prompt text.  When empty or None, prompt is always included in the
+    hash (safe default — assumes prompt matters).
 
     Uses ``rendered_prompt_hash`` (not the full prompt text) so the hash
     can be computed from stored index data without loading detail files.
     """
-    names = prompt_node_names or ["llm_ranking"]
+    names = prompt_node_names or []
     pp = pipeline_params or {}
     steps = pp.get("steps")
-    prompt_matters = steps is None or any(n in steps for n in names)
+    # Prompt matters unless steps explicitly excludes all prompt nodes.
+    # When names is empty (no schema info), assume prompt matters (safe default).
+    prompt_matters = not names or steps is None or any(n in steps for n in names)
 
     blob_dict: dict = {}
     if prompt_matters:

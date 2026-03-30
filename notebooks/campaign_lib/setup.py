@@ -309,7 +309,8 @@ async def prepare_eval_context(
     """
     from api.services.campaign.campaign_init import load_baseline_prompt
 
-    baseline = load_baseline_prompt(svc.exp_data)
+    _pn = svc.pipeline_schema.prompt_node_names() if svc.pipeline_schema else []
+    baseline = load_baseline_prompt(svc.exp_data, prompt_node_names=_pn)
     eval_data = train_data or []
 
     print(f"\nEvaluation data: {len(eval_data)} queries")

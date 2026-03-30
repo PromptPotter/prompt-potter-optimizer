@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from api.models.phase_event import PhaseEvent
 from api.services.campaign.critique import extract_warning_types
 from api.services.campaign.helpers import emit_phase
+from api.services.metrics import count_degraded_queries
 
 if TYPE_CHECKING:
     from api.services.campaign.config import CycleConfig
@@ -113,7 +114,7 @@ class DegradationCheck:
         if not results_so_far:
             return None
 
-        degraded = _count_degraded(results_so_far)
+        degraded = count_degraded_queries(results_so_far)
         rate = degraded / len(results_so_far)
 
         if rate < self.threshold:
@@ -142,12 +143,6 @@ class DegradationCheck:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _count_degraded(results: list[dict]) -> int:
-    return sum(
-        1 for r in results if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
-    )
 
 
 def collect_warning_types(results: list[dict]) -> dict[str, int]:
@@ -226,13 +221,15 @@ def _maybe_emit_backend_warning(
 def _rebuild_current_sp(
     state: LoopState,
     tr: Any,
+    *,
+    prompt_node: str = "",
 ) -> None:
     """Update opt_sp from a transition result and rebuild current_sp."""
     state.opt_sp = tr.opt_search_point
     cur = state.current_sp
     assert cur is not None
     pp = getattr(tr, "pipeline_params", None) or cur.pipeline_params
-    state.current_sp = state.opt_sp.to_job_search_point(base_pipeline_params=pp)
+    state.current_sp = state.opt_sp.to_job_search_point(base_pipeline_params=pp, prompt_node=prompt_node)
 
 
 def _degradation_reset(
@@ -311,7 +308,7 @@ async def _do_l2_transition(
     # Store L2 directive for next L1 round (sliding window=1)
     state.opt_sp.l2_directive = tr.l2_directive
     # L2 does NOT set pipeline_params — only L1 Generate does that
-    _rebuild_current_sp(state, tr)
+    _rebuild_current_sp(state, tr, prompt_node=config.prompt_node)
     state.escalation.l2_round += 1
     state.escalation.best_accuracy_at_l2_entry = state.best_accuracy
     state.escalation.best_composite_at_l2_entry = state.best_composite
@@ -398,7 +395,7 @@ async def _do_l3_transition(
             pipeline_params=current_pp,
             pipeline_schema=config.pipeline_schema,
         )
-    _rebuild_current_sp(state, tr)
+    _rebuild_current_sp(state, tr, prompt_node=config.prompt_node)
     state.escalation.l3_round += 1
     state.escalation.best_accuracy_at_l3_entry = state.best_accuracy
     state.escalation.best_composite_at_l3_entry = state.best_composite

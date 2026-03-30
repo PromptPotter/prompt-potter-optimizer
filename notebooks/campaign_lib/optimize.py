@@ -579,6 +579,8 @@ async def run_optimization_notebook(
                 from collections import Counter
 
                 from api.services.campaign.critique import find_rank, get_candidates
+                from api.services.campaign.round_execution import _candidate_keys_from_schema
+                _ck = _candidate_keys_from_schema(config.pipeline_schema)
 
                 _results = round_result.results
                 _total = len(_results)
@@ -604,7 +606,7 @@ async def run_optimization_notebook(
                         return sum(
                             1 for _r in _valid
                             if (_rk := find_rank(
-                                get_candidates(_r),
+                                get_candidates(_r, _ck),
                                 _r.get("ground_truth", ""),
                             )) is not None and _rk <= k
                         ) / len(_valid)

@@ -116,6 +116,16 @@ class PipelineNode(BaseModel):
     prompt_meta: NodePromptMeta | None = None
     current_config: dict[str, Any] = Field(default_factory=dict)
 
+    @property
+    def output_keys(self) -> list[str]:
+        """Pipeline_data keys this node writes (derived from observation_mappings)."""
+        return [m.pipeline_key for m in self.observation_mappings]
+
+    @property
+    def is_llm(self) -> bool:
+        """Whether this node makes an LLM call (any mapping has ``is_llm``)."""
+        return any(m.is_llm for m in self.observation_mappings)
+
 
 # ---------------------------------------------------------------------------
 # Intermediate metrics
@@ -252,24 +262,22 @@ class PipelineSchema(BaseModel):
         """Node names whose output is affected by the prompt text.
 
         A node is prompt-bearing if it has ``prompt_meta`` set.
-        Returns ``["llm_ranking"]`` when schema has no matching nodes
-        (legacy fallback).
+        Returns empty list when no nodes match — callers must handle this
+        (empty means prompt doesn't affect pipeline output).
         """
-        names = [node.name for node in self.nodes if node.prompt_meta is not None]
-        return names or ["llm_ranking"]
+        return [node.name for node in self.nodes if node.prompt_meta is not None]
 
     def required_pipeline_key(self) -> str:
         """The pipeline_data key that gates trace validity.
 
         Returns the first observation mapping's pipeline_key from the first
-        LLM node, or ``"entity_profile"`` as legacy TermNorm fallback for
-        schemas that predate observation mappings.
+        LLM node, or ``""`` when no LLM mappings exist.
         """
         for node in self.nodes:
             for mapping in node.observation_mappings:
                 if mapping.is_llm:
                     return mapping.pipeline_key
-        return "entity_profile"
+        return ""
 
 
 

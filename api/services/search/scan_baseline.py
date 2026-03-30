@@ -45,6 +45,7 @@ async def prepare_scan_baseline(
     backend_id: str = "",
     scan_variants: dict | None = None,
     force_restructure: bool = False,
+    prompt_node: str = "",
 ) -> ScanBaselineResult:
     """Restructure baseline instruction into PromptPotter's internal fields.
 
@@ -93,6 +94,7 @@ async def prepare_scan_baseline(
     # Build JobSearchPoint for evaluation
     baseline_jsp = search_baseline.to_job_search_point(
         base_pipeline_params=pipeline_params,
+        prompt_node=prompt_node,
     )
 
     # Historical data diagnostic via sp_hash matching

@@ -5,6 +5,8 @@ logic (L2/L3) lives in ``escalation.py``; campaign lifecycle
 (create/resume/finalize) lives in ``campaign_lifecycle.py``.
 """
 
+from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING
 
@@ -32,12 +34,24 @@ from api.services.obs.node_tracer import observed_node
 from api.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
     from api.services.campaign.escalation import DegradationCheck
     from api.services.l1_optimizer import L1EvalResult
     from api.services.obs.observability_logger import ObsLogger
     from api.services.stores.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
+
+
+def _candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
+    """Derive pipeline_data candidate keys from schema's ranker/candidate_source nodes."""
+    if not schema:
+        return []
+    keys: list[str] = []
+    for node in schema.nodes:
+        if node.node_type in ("ranker", "candidate_source"):
+            keys.extend(node.output_keys)
+    return keys
 
 
 # ---------------------------------------------------------------------------
@@ -49,14 +63,14 @@ async def _generate_or_load_candidates(
     round_num: int,
     state: LoopState,
     config: CycleConfig,
-    campaign_store: "CampaignStore | None",
+    campaign_store: CampaignStore | None,
     cycle_id: str | None,
     on_phase=None,
     n_eval_queries: int = 0,
     *,
     n_variants: int | None = None,
     creativity: float | None = None,
-    obs: "ObsLogger | None" = None,
+    obs: ObsLogger | None = None,
     trace_id: str | None = None,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
@@ -152,10 +166,10 @@ async def _evaluate_candidates(
     round_eval_data: list[dict],
     config: CycleConfig,
     callbacks: CycleCallbacks,
-    obs: "ObsLogger | None" = None,
+    obs: ObsLogger | None = None,
     trace_id: str | None = None,
-    escalation_checks: "list[DegradationCheck] | None" = None,
-) -> "L1EvalResult":
+    escalation_checks: list[DegradationCheck] | None = None,
+) -> L1EvalResult:
     """Evaluate candidates and run critique analysis."""
     from api.services.l1_optimizer import l1_evaluate
 
@@ -226,6 +240,7 @@ async def _evaluate_candidates(
                 pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),
                 warning_inventory=state.opt_sp.warning_inventory or None,
                 task_context=state.opt_sp.task_context or None,
+                candidate_keys=_candidate_keys_from_schema(config.pipeline_schema),
                 degradation_threshold=config.critique_degradation_threshold,
                 near_miss_ratio=config.critique_near_miss_ratio,
             )
@@ -261,10 +276,10 @@ async def execute_round(
     round_eval_data: list[dict],
     config: CycleConfig,
     obs_campaign_id: str,
-    campaign_store: "CampaignStore | None",
+    campaign_store: CampaignStore | None,
     cycle_id: str | None,
     callbacks: CycleCallbacks,
-    escalation_checks: "list[DegradationCheck] | None" = None,
+    escalation_checks: list[DegradationCheck] | None = None,
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     obs = state.eval_ctx.obs if state.eval_ctx else None
@@ -368,6 +383,8 @@ def update_round_state(
     state: LoopState,
     rr: CycleRoundResult,
     round_num: int,
+    *,
+    prompt_node: str = "",
 ) -> None:
     """Apply round result to loop state (shared by escalation + normal paths)."""
     state.rounds.append(rr)
@@ -380,6 +397,7 @@ def update_round_state(
     _pp = rr.pipeline_params if rr.pipeline_params is not None else state.current_sp.pipeline_params
     state.current_sp = state.opt_sp.to_job_search_point(
         base_pipeline_params=_pp,
+        prompt_node=prompt_node,
     )
     state.current_accuracy = rr.accuracy
     state.current_composite = rr.composite

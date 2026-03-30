@@ -3,9 +3,9 @@ Push dataset runs to cloud Langfuse.
 
 Dataset-first structure: registers dataset items with ground truth, then
 creates one trace per *query* linked to the dataset via Dataset Runs.
-Each trace shows the backend pipeline graph (web_search → entity_profiling
-→ token_matching → llm_ranking) — standard Langfuse pattern: 1 trace =
-1 pipeline invocation.
+Each trace shows the backend pipeline graph as child spans — standard
+Langfuse pattern: 1 trace = 1 pipeline invocation. Node discovery is
+schema-driven via ``PipelineNode.output_keys``.
 
 Single entry point: ``push_all_runs()`` — batch push all historical runs
 (called from the notebook's ``push_langfuse()`` cell). Internally delegates
@@ -53,15 +53,6 @@ class LangfuseObservation:
     usage_details: dict[str, int] | None = None
 
 
-def _profile_summary(profile: dict) -> str:
-    """One-line summary of an entity profile for token_matching input."""
-    name = profile.get("entity_name", "")
-    concept = profile.get("core_concept", "")
-    if name and concept:
-        return f"{name} ({concept})"
-    return name or concept or ""
-
-
 def _node_meta(
     timings: dict,
     node_params: dict,
@@ -86,80 +77,30 @@ def extract_pipeline_nodes(
 ) -> list[LangfuseObservation]:
     """Parse pipeline_data into an ordered list of typed nodes.
 
-    Missing nodes are simply absent from the returned list.
-
-    NOTE: Node discovery and output extraction are TermNorm-specific.
-    Schema-driven Langfuse push is a separate task (post-M8).
+    Schema-driven: walks ``schema.nodes`` in pipeline order and checks each
+    node's ``output_keys`` (derived from ``observation_mappings``) against
+    ``pipeline_data``.  Nodes without matching keys are omitted.
     """
     nodes: list[LangfuseObservation] = []
     timings = pipeline_data.get("step_timings") or {}
     llm_provider = pipeline_data.get("llm_provider", "")
     node_params = pipeline_data.get("pipeline_params") or {}
-    lf_types = schema.langfuse_type_map() if schema else {}
 
-    # 1. web_search — tool
-    if pipeline_data.get("web_search_status"):
-        meta = _node_meta(timings, node_params, "web_search", schema)
+    for node in schema.nodes:
+        output = {
+            k: pipeline_data[k]
+            for k in node.output_keys
+            if pipeline_data.get(k) is not None
+        }
+        if not output:
+            continue
         nodes.append(LangfuseObservation(
-            name="web_search",
-            as_type=lf_types.get("web_search", "tool"),
+            name=node.name,
+            as_type=node.langfuse_type,
             input={"query": query},
-            output={
-                "status": pipeline_data["web_search_status"],
-                "error": pipeline_data.get("web_search_error"),
-                "sources": pipeline_data.get("web_sources") or [],
-                "n_sources": len(pipeline_data.get("web_sources") or []),
-            },
-            metadata=meta,
-        ))
-
-    # 2. entity_profiling — generation (LLM call 1)
-    if pipeline_data.get("entity_profile"):
-        profile = pipeline_data["entity_profile"]
-        meta = _node_meta(timings, node_params, "entity_profiling", schema)
-        nodes.append(LangfuseObservation(
-            name="entity_profiling",
-            as_type=lf_types.get("entity_profiling", "generation"),
-            input={"query": query},
-            output=profile,
-            metadata=meta,
-            model=llm_provider or None,
-        ))
-
-    # 3. token_matching — retriever
-    if pipeline_data.get("token_matched_candidates"):
-        candidates = pipeline_data["token_matched_candidates"]
-        meta = _node_meta(timings, node_params, "token_matching", schema)
-        nodes.append(LangfuseObservation(
-            name="token_matching",
-            as_type=lf_types.get("token_matching", "retriever"),
-            input={
-                "query": query,
-                "profile": _profile_summary(
-                    pipeline_data.get("entity_profile") or {},
-                ),
-            },
-            output={
-                "n_candidates": len(candidates),
-                "candidates": candidates,
-            },
-            metadata=meta,
-        ))
-
-    # 4. llm_ranking — generation (LLM call 2, conditional)
-    if pipeline_data.get("ranked_candidates"):
-        ranked = pipeline_data["ranked_candidates"]
-        meta = _node_meta(timings, node_params, "llm_ranking", schema)
-        nodes.append(LangfuseObservation(
-            name="llm_ranking",
-            as_type=lf_types.get("llm_ranking", "generation"),
-            input={"n_candidates": len(ranked)},
-            output={
-                "n_candidates": len(ranked),
-                "candidates": ranked,
-            },
-            metadata=meta,
-            model=llm_provider or None,
+            output=output,
+            metadata=_node_meta(timings, node_params, node.name, schema),
+            model=llm_provider or None if node.is_llm else None,
         ))
 
     return nodes
@@ -379,8 +320,9 @@ def push_run(
         if pp:
             trace_metadata["pipeline_params"] = pp
 
+        trace_name = f"{schema.name}_pipeline" if schema and schema.name else "pipeline"
         trace_id = lf.create_trace(
-            name="termnorm_pipeline",
+            name=trace_name,
             input={"query": query, "ground_truth": it.get("ground_truth", "")},
             session_id=sid,
             tags=["eval", origin, "pipeline"],
@@ -399,17 +341,19 @@ def push_run(
                 )
 
         lf.create_score(trace_id, "hit", 1.0 if hit else 0.0)
-        lf.update_trace(trace_id, output={
+        trace_output: dict[str, Any] = {
             "predicted": it.get("predicted", ""),
             "ground_truth": it.get("ground_truth", ""),
             "hit": hit,
-            "entity_profile": pipeline.get("entity_profile"),
-            "n_token_candidates": len(pipeline.get("token_matched_candidates") or []),
-            "n_ranked_candidates": len(pipeline.get("ranked_candidates") or []),
-            "web_search_status": pipeline.get("web_search_status"),
-            "web_sources": pipeline.get("web_sources"),
             "total_time": pipeline.get("total_time"),
-        })
+        }
+        if schema:
+            for node in schema.nodes:
+                for k in node.output_keys:
+                    val = pipeline.get(k)
+                    if val is not None:
+                        trace_output[k] = val
+        lf.update_trace(trace_id, output=trace_output)
         lf.end_trace(trace_id)
 
         # Link trace to dataset item

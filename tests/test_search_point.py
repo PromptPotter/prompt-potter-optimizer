@@ -107,7 +107,7 @@ def test_prompt_fields_render_ordering_and_few_shot():
 def test_derive_with_prompt_fields():
     """derive(prompt_fields=...) merges fields, re-renders, preserves others."""
     osp = OptSearchPoint(persona="Expert", instruction="Rank by relevance.")
-    sp = osp.to_job_search_point()
+    sp = osp.to_job_search_point(prompt_node="llm_ranking")
 
     sp2 = sp.derive(prompt_fields={"instruction": "Sort by name."})
     assert sp2.prompt_fields["instruction"] == "Sort by name."
@@ -119,14 +119,14 @@ def test_derive_with_prompt_fields():
 def test_derive_prompt_fields_sp_hash_consistency():
     """derive(prompt_fields=...) produces the same sp_hash as a fresh projection."""
     osp = OptSearchPoint(persona="Expert", instruction="Rank items.")
-    sp = osp.to_job_search_point()
+    sp = osp.to_job_search_point(prompt_node="llm_ranking")
 
     # Derive with a field change
     sp_derived = sp.derive(prompt_fields={"instruction": "Sort items."})
 
     # Fresh projection with the same change
     osp2 = osp.derive_candidate(instruction="Sort items.")
-    sp_fresh = osp2.to_job_search_point()
+    sp_fresh = osp2.to_job_search_point(prompt_node="llm_ranking")
 
     assert sp_derived.sp_hash() == sp_fresh.sp_hash()
     assert sp_derived.render() == sp_fresh.render()

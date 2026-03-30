@@ -29,6 +29,7 @@ class CycleConfig(BaseModel):
     seed: int = Field(42, description="Random seed for subsampling")
 
     pipeline_schema: PipelineSchema | None = Field(None, description="Pipeline schema for eval")
+    prompt_node: str = Field("", description="Prompt-bearing node name (from schema.prompt_node_names())")
 
     # Critique-guided generation
     enable_critique: bool = Field(True, description="Enable critique agent between rounds")
@@ -123,6 +124,7 @@ class CycleConfig(BaseModel):
             sample_size=campaign_config["sample_size"],
             seed=opt["seed"],
             pipeline_schema=pipeline_schema,
+            prompt_node=pipeline_schema.prompt_node_names()[0] if pipeline_schema and pipeline_schema.prompt_node_names() else "",
             scan_context=scan_context,
             task_context=task_context,
             enable_l2=opt["enable_l2"],

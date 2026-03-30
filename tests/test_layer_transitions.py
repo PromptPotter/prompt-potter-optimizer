@@ -17,6 +17,7 @@ from _helpers import (
     apply_grow_mock,
     apply_llm_mock,
 )
+from conftest import TEST_PIPELINE_SCHEMA
 
 from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.config import CycleConfig
@@ -132,6 +133,8 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
         enable_l2=True,
         enable_l3=False,
         l2_patience=2,
+        pipeline_schema=TEST_PIPELINE_SCHEMA,
+        prompt_node="llm_ranking",
     )
 
     result = await run_optimization(
@@ -193,6 +196,8 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
         enable_l3=True,
         l2_patience=2,
         l3_patience=1,
+        pipeline_schema=TEST_PIPELINE_SCHEMA,
+        prompt_node="llm_ranking",
     )
 
     result = await run_optimization(
@@ -252,6 +257,8 @@ async def test_l2_meta_param_overrides(monkeypatch, eval_data):
         backend_url="http://mock:8000",
         enable_critique=False,
         enable_l2=False,
+        pipeline_schema=TEST_PIPELINE_SCHEMA,
+        prompt_node="llm_ranking",
     )
 
     await run_optimization(
@@ -306,6 +313,8 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
         backend_url="http://mock:8000",
         enable_critique=False,
         enable_l2=False,
+        pipeline_schema=TEST_PIPELINE_SCHEMA,
+        prompt_node="llm_ranking",
     )
 
     await run_optimization(

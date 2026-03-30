@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
 from api.shared.constants import PROMPT_STRING_FIELDS
+from api.shared.dict_mixin import DictAccessMixin
 
 if TYPE_CHECKING:
     from api.services.project_store import ProjectStore
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ScanContext:
+class ScanContext(DictAccessMixin):
     """Structured scan context for the LLM meta-prompt.
 
     Supports dict-style access for backward compatibility with code
@@ -42,12 +43,6 @@ class ScanContext:
     has_prompt_axes: bool = False
     tested_values: str = ""
     baseline_accuracy: float = 0.0
-
-    def __getitem__(self, key: str) -> Any:
-        return getattr(self, key)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return getattr(self, key, default)
 
 
 @dataclass
@@ -258,6 +253,7 @@ def select_scan_winner(
     scan_variants: dict[str, list],
     *,
     baseline_opt: OptSearchPoint | None = None,
+    prompt_node: str = "",
 ) -> JobSearchPoint:
     """Pick best variant per sensitive axis from OAT scan results.
 
@@ -308,6 +304,7 @@ def select_scan_winner(
         )
         best = best_opt.to_job_search_point(
             base_pipeline_params=baseline.pipeline_params,
+            prompt_node=prompt_node,
         )
     if param_changes:
         best = best.derive(

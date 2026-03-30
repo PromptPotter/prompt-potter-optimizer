@@ -158,11 +158,14 @@ async def test_full_langfuse_integration(monkeypatch, eval_data, tmp_path):
 
     store_base = tmp_path / ".promptpotter" / "projects"
     store_base.mkdir(parents=True)
+    from conftest import TEST_PIPELINE_SCHEMA
     config = CycleConfig(
         max_rounds=3, l1_patience=2, n_variants=2,
         backend_url="http://mock:8000",
         enable_critique=False, enable_l2=False,
         project_root=str(store_base), backend_id="test-backend",
+        pipeline_schema=TEST_PIPELINE_SCHEMA,
+        prompt_node="llm_ranking",
     )
 
     monkeypatch.setattr(_settings_mod.settings, "OBS_ENABLED", True)

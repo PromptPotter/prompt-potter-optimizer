@@ -186,10 +186,12 @@ async def sensitivity_scan(
                 assert baseline_opt is not None, (
                     "baseline_opt required for prompt_field perturbation"
                 )
+                _pn = pipeline_schema.prompt_node_names()[0] if pipeline_schema and pipeline_schema.prompt_node_names() else ""
                 perturbed = baseline_opt.derive_candidate(
                     **{axis_name: value},
                 ).to_job_search_point(
                     base_pipeline_params=baseline.pipeline_params,
+                    prompt_node=_pn,
                 )
             else:
                 # Resolve flat param name → nested node dict
