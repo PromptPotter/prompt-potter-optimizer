@@ -168,10 +168,10 @@ def load_eval_dataset(
                 eval_data = rng.sample(eval_data, sample_size)
             return eval_data
 
-    executions = store.executions.list_all(backend_id)
+    executions = store.backends.list_executions(backend_id)
     for ex_summary in executions:
         if ex_summary.get("experiment_id") == experiment_id:
-            execution = store.executions.load(
+            execution = store.backends.load_execution(
                 backend_id, ex_summary["execution_id"],
             )
             if execution:

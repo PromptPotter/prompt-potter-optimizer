@@ -100,7 +100,6 @@ async def decompose_task_context(
     llm_model = model
     store = svc.store
     backend_id = svc.backend_id
-    improvement_areas = campaign_config.get("improvement_areas", "")
 
     # Content-hash for caching
     rp_hash = hashlib.sha256(
@@ -111,7 +110,6 @@ async def decompose_task_context(
         task_description,
         llm_client,
         model=llm_model,
-        improvement_areas=improvement_areas,
         store_base_dir=store.base_dir if store else None,
         backend_id=backend_id,
         rp_hash=rp_hash,
@@ -129,9 +127,6 @@ async def decompose_task_context(
             print(f"  {field}: {val}")
         else:
             print(f"  {field}: (empty)")
-
-    if result.get("consultation"):
-        print(f"  Consultation: {result['consultation']}")
 
     return task_context
 
@@ -381,7 +376,7 @@ def show_dataset_summary(store: "ProjectStore", backend_id: str) -> dict:
     """
     result: dict[str, list[dict]] = {}
     for name in ("train", "test_processes", "test_material"):
-        ds = store.datasets.load(backend_id, name)
+        ds = store.backends.load_dataset(backend_id, name)
         result[name] = ds["items"] if ds and ds.get("items") else []
 
     all_queries: set[str] = set()
@@ -428,21 +423,21 @@ def prepare_datasets(
     if excel_path:
         excel_path = Path(excel_path)
         col_map = SHEET_COLUMN_MAP
-        existing = store.datasets.load(backend_id, "train")
+        existing = store.backends.load_dataset(backend_id, "train")
         needs_create = force or not (existing and existing.get("items"))
 
         if needs_create:
             print(f"Loading ground truth from {excel_path.name} ...")
             all_rows = _load_excel_gt(excel_path, col_map)
             train, test_sets = _train_test_split(all_rows)
-            store.datasets.save(backend_id, "train", train, source_file=excel_path.name)
+            store.backends.save_dataset(backend_id, "train", train, source_file=excel_path.name)
             for name, items in test_sets.items():
-                store.datasets.save(backend_id, name, items, source_file=excel_path.name)
+                store.backends.save_dataset(backend_id, name, items, source_file=excel_path.name)
 
     # Load all splits from store (whether just created or pre-existing)
     splits: dict[str, list[dict]] = {}
     for name in ("train", "test_processes", "test_material"):
-        ds = store.datasets.load(backend_id, name)
+        ds = store.backends.load_dataset(backend_id, name)
         splits[name] = ds["items"] if ds and ds.get("items") else []
 
     train_data = splits["train"] or None
@@ -488,11 +483,11 @@ def load_or_create_datasets(
 
     # Check if already stored
     if not force:
-        existing = store.datasets.load(backend_id, "train")
+        existing = store.backends.load_dataset(backend_id, "train")
         if existing and existing.get("items"):
             result = {"train": existing["items"]}
             for name in ("test_processes", "test_material"):
-                ds = store.datasets.load(backend_id, name)
+                ds = store.backends.load_dataset(backend_id, name)
                 if ds:
                     result[name] = ds["items"]
                 else:
@@ -514,9 +509,9 @@ def load_or_create_datasets(
 
     # Save all splits
     source = excel_path.name
-    store.datasets.save(backend_id, "train", train, source_file=source)
+    store.backends.save_dataset(backend_id, "train", train, source_file=source)
     for name, items in test_sets.items():
-        store.datasets.save(backend_id, name, items, source_file=source)
+        store.backends.save_dataset(backend_id, name, items, source_file=source)
 
     result = {"train": train, **test_sets}
     print("\nDatasets saved:")
@@ -535,7 +530,7 @@ def load_stored_dataset(
 
     Returns list of items, or empty list if not found.
     """
-    ds = store.datasets.load(backend_id, name)
+    ds = store.backends.load_dataset(backend_id, name)
     if not ds or not ds.get("items"):
         print(f"Dataset '{name}' not found for backend '{backend_id}'.")
         return []

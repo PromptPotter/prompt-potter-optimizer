@@ -58,53 +58,115 @@ def cycle_config_identity(
     return f"cycle_{digest}"
 
 
-def _init_obs(
+def _init_campaign(
     config: CycleConfig,
-    obs_campaign_id: str,
-    baseline_accuracy: float,
     eval_data: list[dict],
-    langfuse_session_id: str | None,
-) -> tuple[Any | None, str | None, dict[str, str] | None]:
-    """Create ObsLogger, log campaign start, register dataset.
+    current_ps: dict,
+    baseline_prompt_fields: dict | None,
+    baseline_accuracy: float,
+    started_at: str,
+    *,
+    cycle_id_override: str | None = None,
+    langfuse_session_id: str | None = None,
+) -> tuple[Any | None, str | None, int, Any | None, str]:
+    """Resume/create campaign + init observability in one call.
 
     Returns:
-        (obs, dataset_name, dataset_item_map)
+        (campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id)
     """
     from api.services.obs.observability_logger import ObsLogger  # lazy: heavy dep
 
+    # --- Resume detection ---
+    campaign_store = None
+    cycle_id: str | None = None
+    resumed_from_round = 0
+
+    if config.project_root and config.backend_id:
+        try:
+            from api.services.stores.campaign_store import CampaignStore
+
+            store_base = Path(config.project_root)
+            campaign_store = CampaignStore(store_base)
+
+            if cycle_id_override:
+                cycle_id = cycle_id_override
+            else:
+                bl_ps = baseline_prompt_fields if baseline_prompt_fields is not None else current_ps
+                bl_osp = OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
+                cycle_id = cycle_config_identity(config, bl_osp.render(), eval_data)
+            logger.info("Cycle identity: %s", cycle_id)
+
+            existing = campaign_store.load(config.backend_id, cycle_id)
+            if existing is not None:
+                if cycle_id_override:
+                    stored_cfg = existing.get("config", {})
+                    if stored_cfg:
+                        _validate_config_match(config, stored_cfg, cycle_id)
+                        _LOOP_CONTROL_KEYS = [
+                            "max_rounds", "l1_patience", "l2_patience",
+                            "l3_patience", "degradation_threshold",
+                        ]
+                        current_cfg = config.model_dump(mode="json")
+                        cfg_updated = False
+                        for k in _LOOP_CONTROL_KEYS:
+                            if stored_cfg.get(k) != current_cfg.get(k):
+                                stored_cfg[k] = current_cfg.get(k)
+                                cfg_updated = True
+                        if cfg_updated:
+                            campaign_store.update(
+                                config.backend_id, cycle_id, {"config": stored_cfg},
+                            )
+                            logger.info("Updated loop-control config for %s", cycle_id)
+                resumed_from_round = len(existing.get("trials", []))
+                if resumed_from_round:
+                    logger.info(
+                        "Resuming cycle %s — %d prior round(s) on disk",
+                        cycle_id, resumed_from_round,
+                    )
+            else:
+                campaign_store.create(config.backend_id, cycle_id, {
+                    "type": "optimization_loop",
+                    "config": config.model_dump(mode="json"),
+                    "baseline_accuracy": baseline_accuracy,
+                })
+        except ValueError:
+            raise
+        except Exception:
+            logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
+            campaign_store, cycle_id, resumed_from_round = None, None, 0
+
+    # --- Derive obs campaign ID ---
+    if not langfuse_session_id and cycle_id:
+        langfuse_session_id = cycle_id
+    obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
+
+    # --- Observability init ---
     obs: ObsLogger | None = None
     if config.project_root and config.backend_id:
         with graceful("Failed to create ObsLogger"):
             obs = ObsLogger(config.project_root, config.backend_id)
 
-    dataset_name: str | None = None
-    dataset_item_map: dict[str, str] | None = None
-    if not obs:
-        return obs, dataset_name, dataset_item_map
-
-    with graceful("ObsLogger.log_campaign_start failed"):
-        obs.log_campaign_start(
-            campaign_id=obs_campaign_id,
-            config=config.model_dump(mode="json"),
-            baseline_accuracy=baseline_accuracy,
-            session_id=langfuse_session_id,
-        )
-
-    try:
-        dataset_name = DATASET_NAME
-        dataset_item_map = obs.register_dataset(dataset_name, eval_data)
-        if dataset_item_map:
-            logger.info(
-                "Registered %d dataset items for '%s'",
-                len(dataset_item_map), dataset_name,
+    if obs:
+        with graceful("ObsLogger.log_campaign_start failed"):
+            obs.log_campaign_start(
+                campaign_id=obs_campaign_id,
+                config=config.model_dump(mode="json"),
+                baseline_accuracy=baseline_accuracy,
+                session_id=langfuse_session_id,
             )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception:
-        logger.warning("Dataset registration failed", exc_info=True)
-        dataset_item_map = None
+        try:
+            dataset_item_map = obs.register_dataset(DATASET_NAME, eval_data)
+            if dataset_item_map:
+                logger.info(
+                    "Registered %d dataset items for '%s'",
+                    len(dataset_item_map), DATASET_NAME,
+                )
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
+        except Exception:
+            logger.warning("Dataset registration failed", exc_info=True)
 
-    return obs, dataset_name, dataset_item_map
+    return campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id
 
 
 def _validate_config_match(
@@ -138,86 +200,6 @@ def _validate_config_match(
             + "\n".join(mismatches)
         )
 
-
-def _resume_or_create_campaign(
-    config: CycleConfig,
-    eval_data: list[dict],
-    current_ps: dict,
-    baseline_prompt_fields: dict | None,
-    baseline_accuracy: float,
-    *,
-    cycle_id_override: str | None = None,
-) -> tuple[Any | None, str | None, int]:
-    """Handle campaign resume detection.
-
-    Args:
-        cycle_id_override: Explicit campaign ID (skips hash computation).
-            Used when the user sets EXPERIMENT_ID in the notebook.
-            When set and campaign exists, validates config matches stored.
-
-    Returns:
-        (campaign_store, cycle_id, resumed_from_round)
-    """
-    if not (config.project_root and config.backend_id):
-        return None, None, 0
-
-    try:
-        from api.services.stores.campaign_store import CampaignStore  # lazy: heavy dep
-
-        store_base = Path(config.project_root)
-        campaign_store = CampaignStore(store_base)
-
-        if cycle_id_override:
-            cycle_id = cycle_id_override
-        else:
-            bl_ps = baseline_prompt_fields if baseline_prompt_fields is not None else current_ps
-            bl_osp = OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
-            cycle_id = cycle_config_identity(config, bl_osp.render(), eval_data)
-        logger.info("Cycle identity: %s", cycle_id)
-
-        existing = campaign_store.load(config.backend_id, cycle_id)
-        if existing is not None:
-            # Validate config matches when resuming with explicit ID
-            if cycle_id_override:
-                stored_cfg = existing.get("config", {})
-                if stored_cfg:
-                    _validate_config_match(config, stored_cfg, cycle_id)
-                    # Update loop-control fields in stored config
-                    _LOOP_CONTROL_KEYS = [
-                        "max_rounds", "l1_patience", "l2_patience",
-                        "l3_patience", "degradation_threshold",
-                    ]
-                    current_cfg = config.model_dump(mode="json")
-                    cfg_updated = False
-                    for k in _LOOP_CONTROL_KEYS:
-                        if stored_cfg.get(k) != current_cfg.get(k):
-                            stored_cfg[k] = current_cfg.get(k)
-                            cfg_updated = True
-                    if cfg_updated:
-                        campaign_store.update(
-                            config.backend_id, cycle_id, {"config": stored_cfg},
-                        )
-                        logger.info("Updated loop-control config for %s", cycle_id)
-            resumed_from = len(existing.get("trials", []))
-            if resumed_from:
-                logger.info(
-                    "Resuming cycle %s — %d prior round(s) on disk",
-                    cycle_id, resumed_from,
-                )
-        else:
-            resumed_from = 0
-            campaign_store.create(config.backend_id, cycle_id, {
-                "type": "optimization_loop",
-                "config": config.model_dump(mode="json"),
-                "baseline_accuracy": baseline_accuracy,
-            })
-
-        return campaign_store, cycle_id, resumed_from
-    except ValueError:
-        raise  # config mismatch — propagate to user
-    except Exception:
-        logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
-        return None, None, 0
 
 
 def _finalize_campaign(

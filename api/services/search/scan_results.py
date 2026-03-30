@@ -74,7 +74,6 @@ async def resume_or_build_diagnostic(
     store: ProjectStore,
     backend_id: str,
     eval_data: list,
-    improvement_areas: str = "",
     variant_library: dict | None = None,
 ) -> DiagnosticResult:
     """Resume or build smart search diagnostic set.
@@ -106,7 +105,6 @@ async def resume_or_build_diagnostic(
         baseline.instruction,
         variant_library,
         ss,
-        improvement_areas,
         seed=ss.get("seed", 42),
     )
 
@@ -205,10 +203,9 @@ async def resume_or_build_diagnostic(
         baseline.instruction,
         llm_client,
         model=model,
-        improvement_areas=improvement_areas,
     )
     search_baseline = baseline.derive_candidate(
-        **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
+        **{k: v for k, v in layer1_fields.items() if v},
         changes_description="search_baseline (decomposed)",
     )
 

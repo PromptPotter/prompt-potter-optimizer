@@ -20,7 +20,6 @@ async def restructure_context(
     context_input: Any,
     llm_client: LLMClientBase,
     model: str | None = None,
-    improvement_areas: str = "",
 ) -> dict:
     """LLM-assisted restructuring of user context into Layer 1 fields.
 
@@ -29,14 +28,11 @@ async def restructure_context(
             Layer 1 fields.
         llm_client: LLM client implementing LLMClientBase.
         model: Model identifier (uses client default if None).
-        improvement_areas: Optional domain-expert observations about where
-            improvement is most likely.
 
     Returns:
-        Dict of structured Layer 1 field values, a ``task_context`` sub-dict
+        Dict of structured Layer 1 field values and a ``task_context`` sub-dict
         with domain fields (domain, pipeline_purpose, data_characteristics,
-        optimization_goals, key_challenges), and a ``consultation`` string
-        when improvement_areas is provided.
+        optimization_goals, key_challenges).
     """
     if isinstance(context_input, dict):
         user_content = (
@@ -51,28 +47,10 @@ async def restructure_context(
             f"Context:\n{context_input}"
         )
 
-    if improvement_areas:
-        user_content += (
-            "\n\nThe user has identified the following areas where improvement "
-            "is most likely:\n"
-            f"{improvement_areas}\n\n"
-            "Take these observations into account when structuring the fields "
-            "and provide strategic advice in the consultation field."
-        )
-
-    if improvement_areas:
-        consultation_instruction = (
-            "Return a JSON object with these keys plus a \"consultation\" key. "
-            "The consultation value should be a natural-language paragraph of "
-            "strategic advice on how to approach optimization given the user's "
-            "identified improvement areas. Use empty string for Layer 1 fields "
-            "that don't apply. Be concise and actionable."
-        )
-    else:
-        consultation_instruction = (
-            "Return a JSON object with exactly these keys. Use empty string for "
-            "fields that don't apply. Be concise and actionable."
-        )
+    consultation_instruction = (
+        "Return a JSON object with exactly these keys. Use empty string for "
+        "fields that don't apply. Be concise and actionable."
+    )
 
     system_prompt = load_optimizer_prompt("restructure").compile_prompt(
         consultation_instruction=consultation_instruction,
@@ -93,9 +71,6 @@ async def restructure_context(
     for key in ("persona", "task_intent", "problem_description",
                 "instruction", "thinking_style", "answer_format"):
         result.setdefault(key, "")
-
-    if improvement_areas:
-        result.setdefault("consultation", "")
 
     # Ensure task_context sub-dict exists with domain fields
     tc = result.setdefault("task_context", {})
@@ -121,15 +96,14 @@ def load_cached_restructure(
     base_dir: Path,
     backend_id: str,
     alias_hashes: set[str],
-    improvement_areas: str,
 ) -> dict | None:
-    """Scan *alias_hashes* for a cached restructure matching *improvement_areas*."""
+    """Scan *alias_hashes* for a cached restructure result."""
     cache = read_json_optional(_restructure_cache_path(base_dir, backend_id))
     if not cache:
         return None
     for h in alias_hashes:
         entry = cache.get(h)
-        if entry and entry.get("improvement_areas", "") == improvement_areas:
+        if entry:
             return entry["layer1_fields"]
     return None
 
@@ -138,14 +112,12 @@ def save_restructure_cache(
     base_dir: Path,
     backend_id: str,
     rp_hash: str,
-    improvement_areas: str,
     layer1_fields: dict,
 ) -> None:
     """Persist restructure output keyed by *rp_hash*."""
     path = _restructure_cache_path(base_dir, backend_id)
     cache = read_json_optional(path) or {}
     cache[rp_hash] = {
-        "improvement_areas": improvement_areas,
         "layer1_fields": layer1_fields,
         "cached_at": datetime.now(UTC).isoformat(),
     }
@@ -157,7 +129,6 @@ async def restructure_context_cached(
     llm_client: LLMClientBase,
     *,
     model: str | None = None,
-    improvement_areas: str = "",
     store_base_dir: Path | None = None,
     backend_id: str = "",
     alias_hashes: set[str] | None = None,
@@ -179,7 +150,7 @@ async def restructure_context_cached(
     if can_cache and not force and alias_hashes:
         assert store_base_dir is not None
         cached = load_cached_restructure(
-            store_base_dir, backend_id, alias_hashes, improvement_areas,
+            store_base_dir, backend_id, alias_hashes,
         )
         if cached is not None:
             logger.debug("restructure_context_cached: hit (alias group)")
@@ -189,7 +160,6 @@ async def restructure_context_cached(
     layer1_fields = await restructure_context(
         context_input, llm_client,
         model=model,
-        improvement_areas=improvement_areas,
     )
 
     # --- save to cache ---
@@ -203,7 +173,7 @@ async def restructure_context_cached(
             )
             save_key = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
         save_restructure_cache(
-            store_base_dir, backend_id, save_key, improvement_areas, layer1_fields,
+            store_base_dir, backend_id, save_key, layer1_fields,
         )
 
     return layer1_fields, False

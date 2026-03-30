@@ -261,45 +261,6 @@ async def _evaluate_candidates(
     return eval_out
 
 
-def _log_round_obs(
-    eval_out: "L1EvalResult",
-    round_num: int,
-    config: CycleConfig,
-    obs: "ObsLogger",
-    obs_campaign_id: str,
-) -> None:
-    """Log round-end metrics and prompt version to observability."""
-    with graceful("ObsLogger.log_round_end failed"):
-        obs.log_round_end(
-            campaign_id=obs_campaign_id,
-            round_num=round_num,
-            accuracy=eval_out.winner_accuracy,
-            hits=eval_out.winner.hits,
-            total=eval_out.winner.total,
-            improved=eval_out.improved,
-            next_action=eval_out.next_action,
-            winner_prompt_fields_id=eval_out.winner_prompt_fields.get("id", ""),
-            candidate_scores=eval_out.candidate_scores,
-            model=config.model or "",
-            temperature=config.temperature,
-            n_variants=config.n_variants,
-            optimizer_templates=[
-                "meta_scan_aware",
-                "critique_negative",
-            ],
-        )
-
-    with graceful("ObsLogger.log_prompt_version failed"):
-        winner_fields = eval_out.winner_prompt_fields
-        winner_osp = OptSearchPoint.from_prompt_fields(winner_fields)
-        obs.log_prompt_version(
-            prompt_fields_id=winner_osp.id,
-            rendered_prompt=winner_osp.render(),
-            layer1_fields={f: getattr(winner_osp, f) for f in PROMPT_STRING_FIELDS},
-            parent_id=winner_osp.parent_id,
-        )
-
-
 async def _execute_round(
     round_num: int,
     state: LoopState,
@@ -379,7 +340,31 @@ async def _execute_round(
         update_query_tracker(state.opt_sp.warning_inventory, _all_results)
 
     if obs:
-        _log_round_obs(eval_out, round_num, config, obs, obs_campaign_id)
+        with graceful("ObsLogger.log_round_end failed"):
+            obs.log_round_end(
+                campaign_id=obs_campaign_id,
+                round_num=round_num,
+                accuracy=eval_out.winner_accuracy,
+                hits=eval_out.winner.hits,
+                total=eval_out.winner.total,
+                improved=eval_out.improved,
+                next_action=eval_out.next_action,
+                winner_prompt_fields_id=eval_out.winner_prompt_fields.get("id", ""),
+                candidate_scores=eval_out.candidate_scores,
+                model=config.model or "",
+                temperature=config.temperature,
+                n_variants=config.n_variants,
+                optimizer_templates=["meta_scan_aware", "critique_negative"],
+            )
+        with graceful("ObsLogger.log_prompt_version failed"):
+            winner_fields = eval_out.winner_prompt_fields
+            winner_osp = OptSearchPoint.from_prompt_fields(winner_fields)
+            obs.log_prompt_version(
+                prompt_fields_id=winner_osp.id,
+                rendered_prompt=winner_osp.render(),
+                layer1_fields={f: getattr(winner_osp, f) for f in PROMPT_STRING_FIELDS},
+                parent_id=winner_osp.parent_id,
+            )
 
     return round_result
 

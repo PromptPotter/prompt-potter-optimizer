@@ -25,8 +25,7 @@ from api.models.phase_event import PhaseEvent
 from api.services.backend_client import BackendClient
 from api.services.campaign.campaign_lifecycle import (
     _finalize_campaign,
-    _init_obs,
-    _resume_or_create_campaign,
+    _init_campaign,
 )
 from api.services.campaign.critique import sample_thinking_styles
 from api.services.campaign.escalation import _escalate_l2
@@ -415,24 +414,16 @@ async def _init_cycle_state(
         baseline_results,
     )
 
-    # 2. Resume detection + checkpoint restore
-    campaign_store, cycle_id, resumed_from_round = _resume_or_create_campaign(
+    # 2. Resume detection + obs init
+    campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id = _init_campaign(
         config,
         eval_data,
         baseline_osp.prompt_field_dict(),
         baseline_prompt_fields,
         baseline_accuracy,
+        started_at,
         cycle_id_override=cycle_id,
-    )
-    if not langfuse_session_id and cycle_id:
-        langfuse_session_id = cycle_id
-    obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
-    obs, _dataset_name, _dataset_item_map = _init_obs(
-        config,
-        obs_campaign_id,
-        baseline_accuracy,
-        eval_data,
-        langfuse_session_id,
+        langfuse_session_id=langfuse_session_id,
     )
     if resumed_from_round > 0 and campaign_store and cycle_id:
         _restore_from_checkpoint(

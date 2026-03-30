@@ -74,7 +74,6 @@ async def prepare_scan_baseline(
     layer1_fields, was_cached = await _restructure_context_cached(
         baseline.instruction, llm_client,
         model=llm_model,
-        improvement_areas=campaign_config.get("improvement_areas", ""),
         store_base_dir=store.base_dir if can_cache else None,
         backend_id=backend_id,
         alias_hashes=alias_hashes,
@@ -83,7 +82,7 @@ async def prepare_scan_baseline(
     )
 
     search_baseline = baseline.derive_candidate(
-        **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
+        **{k: v for k, v in layer1_fields.items() if v},
         changes_description="search_baseline (decomposed)",
     )
 

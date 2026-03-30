@@ -19,7 +19,8 @@ from api.models.pipeline_schema import is_result_step_compatible
 from api.services.project_store import ProjectStore
 from api.services.search.plan_persistence import deserialize_smart_search_plan
 from api.services.search.preview import preview
-from api.shared.hashing import HASH_TRUNCATE, PROMPT_STRING_FIELDS
+from api.shared.constants import PROMPT_STRING_FIELDS
+from api.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
     from api.models.search_point import JobSearchPoint

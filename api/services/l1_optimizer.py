@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from api.config.optimizer_pipeline import get_node_config, llm_call
+from api.config.optimizer_pipeline import llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import DISPLAY_TRUNCATE
 from api.models.opt_search_point import OptSearchPoint
@@ -142,7 +142,7 @@ async def l1_generate(
     response = await llm_call(
         llm_client,
         messages=[{"role": "user", "content": meta_prompt}],
-        config=get_node_config("l1_generate"),
+        node="l1_generate",
         model=model,
         temperature=creativity,
     )

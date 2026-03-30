@@ -62,7 +62,6 @@ async def resume_or_build_diagnostic(
         svc["store"],
         svc["backend_id"],
         eval_data,
-        improvement_areas=campaign_config.get("improvement_areas", ""),
         variant_library=variant_library,
     )
     plan_id = result.plan_id

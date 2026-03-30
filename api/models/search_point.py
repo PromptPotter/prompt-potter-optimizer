@@ -18,9 +18,9 @@ import hashlib
 
 from pydantic import BaseModel
 
+from api.shared.constants import PROMPT_STRING_FIELDS
 from api.shared.hashing import (
     HASH_TRUNCATE,
-    PROMPT_STRING_FIELDS,
     eval_content_hash,
     sp_identity_hash,
 )

@@ -276,7 +276,7 @@ def test_load_eval_dataset():
 
     mock_store = MagicMock()
     mock_store.backends.load_sync.return_value = exp_data
-    mock_store.executions.list_all.return_value = []
+    mock_store.backends.list_executions.return_value = []
 
     result = load_eval_dataset(mock_store, "backend-1", "exp-1", schema=_TEST_SCHEMA)
 

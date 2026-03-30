@@ -9,14 +9,12 @@ from __future__ import annotations
 import hashlib
 import json
 
-from api.shared.constants import PROMPT_STRING_FIELDS
-
 # SHA256 truncated to 16 hex chars (64 bits) — sufficient for content-addressed
 # deduplication within a single project.  Collision probability stays negligible
 # for the expected dataset sizes (<100k eval runs).
 HASH_TRUNCATE = 16
 
-__all__ = ["HASH_TRUNCATE", "PROMPT_STRING_FIELDS", "eval_content_hash", "sp_identity_hash"]
+__all__ = ["HASH_TRUNCATE", "eval_content_hash", "sp_identity_hash"]
 
 
 def sp_identity_hash(

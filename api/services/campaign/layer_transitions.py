@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from api.config.optimizer_pipeline import get_node_config, llm_call
+from api.config.optimizer_pipeline import llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.critique import summarize_warning_inventory
@@ -154,7 +154,7 @@ async def refine_context(
     response = await llm_call(
         llm_client,
         messages=[{"role": "user", "content": prompt}],
-        config=get_node_config("l2_refine_context"),
+        node="l2_refine_context",
         model=model,
         temperature=temperature,
     )
@@ -251,7 +251,7 @@ async def modify_plan(
     response = await llm_call(
         llm_client,
         messages=[{"role": "user", "content": prompt}],
-        config=get_node_config("l3_modify_plan"),
+        node="l3_modify_plan",
         model=model,
         temperature=temperature,
     )

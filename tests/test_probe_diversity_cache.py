@@ -13,7 +13,7 @@ def _capture_llm_prompts(monkeypatch):
     """Mock llm_call and return list of captured system prompts."""
     captured: list[str] = []
 
-    async def mock_llm_call(client, *, messages, config, model=None, temperature=None):
+    async def mock_llm_call(client, messages, *, node=None, config=None, model=None, temperature=None):
         captured.append(messages[0]["content"])
         _parsed = {"variants": [{"instruction": "v1", "variant_name": "v1"}]}
 

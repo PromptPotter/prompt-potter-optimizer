@@ -14,7 +14,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from api.config.optimizer_pipeline import get_node_config, llm_call
+from api.config.optimizer_pipeline import llm_call
 from api.config.settings import load_variant_library
 
 if TYPE_CHECKING:
@@ -575,7 +575,7 @@ class CritiqueAgent:
         response = await llm_call(
             self.llm_client,
             messages=[{"role": "user", "content": prompt}],
-            config=get_node_config("critique"),
+            node="critique",
             model=self.model,
         )
 

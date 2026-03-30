@@ -169,7 +169,7 @@ async def init_services(
 
     # --- Dataset store path (preferred when available) ---
     if dataset_name:
-        ds = store.datasets.load(backend_id, dataset_name)
+        ds = store.backends.load_dataset(backend_id, dataset_name)
         if ds and ds.get("items"):
             items = ds["items"]
             session_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
@@ -574,7 +574,7 @@ def build_all_session_terms(
     """
     gt_set: set[str] = set()
     for name in ("train", "test_processes", "test_material"):
-        ds = store.datasets.load(backend_id, name)
+        ds = store.backends.load_dataset(backend_id, name)
         if ds and ds.get("items"):
             for item in ds["items"]:
                 gt = item.get("ground_truth", "").strip()

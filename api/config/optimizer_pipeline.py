@@ -41,29 +41,31 @@ def get_node_config(node_name: str) -> dict:
     return node.current_config
 
 
+_LLM_DEFAULTS = {"temperature": 0.0, "max_tokens": 1000, "output_format": "text"}
+
+
 async def llm_call(
     llm_client: LLMClientBase,
     messages: list[dict[str, str]],
-    config: dict,
+    *,
+    node: str | None = None,
+    config: dict | None = None,
     **overrides,
 ) -> LLMResponse:
     """Execute an LLM call with config defaults and runtime overrides.
 
-    Args:
-        llm_client: The LLM client instance.
-        messages: Chat messages (role/content dicts).
-        config: Node config dict (from ``PipelineNode.current_config``).
-            Provides defaults for model, temperature, max_tokens, output_format.
-        **overrides: Runtime overrides — any key present here wins over config.
-            Common: ``model``, ``temperature``.
+    Provide ``node`` to auto-load config from ``optimizer_pipeline.json``,
+    or ``config`` to pass a config dict directly.  At least one is required.
 
-    Returns:
-        LLMResponse from the underlying chat() call.
+    Precedence: ``_LLM_DEFAULTS < config < overrides``.
     """
+    if config is None:
+        config = get_node_config(node) if node else {}
+    merged = {**_LLM_DEFAULTS, **config, **overrides}
     return await llm_client.chat(
         messages=messages,
-        model=overrides.get("model", config.get("model")),
-        temperature=overrides.get("temperature", config.get("temperature", 0.0)),
-        max_tokens=overrides.get("max_tokens", config.get("max_tokens", 1000)),
-        output_format=overrides.get("output_format", config.get("output_format", "text")),
+        model=merged.get("model"),
+        temperature=merged["temperature"],
+        max_tokens=merged["max_tokens"],
+        output_format=merged["output_format"],
     )

@@ -20,7 +20,6 @@ def smart_search_plan_identity(
     baseline_instruction: str,
     variant_library: dict,
     smart_search_config: dict,
-    improvement_areas: str,
     seed: int = 42,
 ) -> str:
     """Compute a stable identity hash for a smart search plan."""
@@ -31,7 +30,6 @@ def smart_search_plan_identity(
             "n_diagnostic": smart_search_config.get("n_diagnostic", 6),
             "max_rounds": smart_search_config.get("max_rounds", 3),
             "stop_threshold": smart_search_config.get("stop_threshold", 0.0),
-            "improvement_areas": improvement_areas,
             "seed": seed,
         },
         sort_keys=True,

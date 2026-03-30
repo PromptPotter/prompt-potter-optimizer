@@ -33,32 +33,6 @@ from api.services.stores.plan_store import PlanStore
 BASE_DIR = Path(".promptpotter") / "projects"
 
 
-class _DatasetAdapter:
-    """Thin adapter — delegates to BackendStore.{save,load}_dataset()."""
-
-    def __init__(self, backend_store: BackendStore):
-        self._bs = backend_store
-
-    def save(self, backend_id, name, items, *, source_file=""):
-        return self._bs.save_dataset(backend_id, name, items, source_file=source_file)
-
-    def load(self, backend_id, name):
-        return self._bs.load_dataset(backend_id, name)
-
-
-class _ExecutionAdapter:
-    """Thin adapter — delegates to BackendStore.{load,list}_execution(s)."""
-
-    def __init__(self, backend_store: BackendStore):
-        self._bs = backend_store
-
-    def load(self, backend_id, execution_id):
-        return self._bs.load_execution(backend_id, execution_id)
-
-    def list_all(self, backend_id):
-        return self._bs.list_executions(backend_id)
-
-
 class ProjectStore:
     """Composite store — access domain stores as public attributes."""
 
@@ -66,7 +40,5 @@ class ProjectStore:
         self.base_dir = Path(base_dir) if base_dir else BASE_DIR
         self.backends = BackendStore(self.base_dir)
         self.campaigns = CampaignStore(self.base_dir)
-        self.datasets = _DatasetAdapter(self.backends)
-        self.executions = _ExecutionAdapter(self.backends)
         self.dataset_runs = DatasetRunStore(self.base_dir)
         self.smart_search = PlanStore(self.base_dir)
