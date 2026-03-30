@@ -301,7 +301,7 @@ async def _do_l2_transition(
         best_accuracy=state.best_accuracy,
     )
 
-    client = _llm_client.get_llm_client(config.provider)
+    client = _llm_client.get_llm_client()
     async with observed_node(f"l2_refine_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
         tr = await layer_transitions.refine_context(
             state.opt_sp,
@@ -399,7 +399,7 @@ async def _do_l3_transition(
         current_plan_preview=str(state.opt_sp.plan)[:120],
     )
 
-    client = _llm_client.get_llm_client(config.provider)
+    client = _llm_client.get_llm_client()
     async with observed_node(
         f"l3_modify_plan_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id
     ):

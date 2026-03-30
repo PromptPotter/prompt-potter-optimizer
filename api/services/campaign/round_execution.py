@@ -109,7 +109,7 @@ async def _generate_or_load_candidates(
 
     from api.services.l1_optimizer import l1_generate
 
-    client = _llm_client.get_llm_client(config.provider)
+    client = _llm_client.get_llm_client()
     async with observed_node(f"l1_generate_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
         candidates = await l1_generate(
             state.opt_sp,
@@ -201,7 +201,7 @@ async def _evaluate_candidates(
         critique_result: dict = {}
         critique_text = ""
         if config.enable_critique and eval_out.winner_results:
-            crit_llm = _llm_client.get_llm_client(config.provider)
+            crit_llm = _llm_client.get_llm_client()
             agent = CritiqueAgent(crit_llm, model=config.model)
             cctx = CritiqueContext(
                 results=eval_out.winner_results,

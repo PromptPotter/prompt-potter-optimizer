@@ -149,7 +149,7 @@ Formatted by `format_critique_for_prompt()` and injected into:
 | Positive | `accuracy >= 0.7` | Success examples + remaining failures. Extend what works. |
 | Negative | `accuracy < 0.7` | Rich target pipeline stats + failure examples. Diagnose root causes. |
 
-Threshold: `critique_positive_threshold` in campaign config.
+Threshold: hardcoded at 0.7.
 
 ### Pre-Computed Stats (Negative Path)
 
@@ -305,7 +305,6 @@ campaign_config = {
         "patience": 3,
         "max_rounds": 10,
         "enable_critique": True,               # critique-guided generation
-        "critique_positive_threshold": 0.7,    # positive vs negative critique path
         "degradation_threshold": 0.4,          # 0 = disabled
         "enable_l2": False,            # opt-in: refine task_context on L1 stall
         "l2_patience": 2,             # None = unlimited during degradation

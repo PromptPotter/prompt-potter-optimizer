@@ -53,7 +53,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 - **Prompt decomposition** (L1): `persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`, `few_shot_examples`
 - **L2 state**: `optimizer_params`, `task_context`
 - **L3 state**: `plan`
-- **Optimization memory**: `critique_text`, `critique`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`, `content_hashes`
+- **Optimization memory**: `critique_text`, `critique`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`
 
 Key methods: `render()` assembles prompt fields into a string. `to_job_search_point()` projects into a JobSearchPoint by injecting the rendered prompt into `pipeline_params`. `derive_candidate()` creates child points. `compile_prompt()` substitutes `{{variables}}`.
 

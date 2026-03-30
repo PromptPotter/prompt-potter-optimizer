@@ -109,10 +109,6 @@ class OptSearchPoint(SearchPoint):
         default="",
         description="L2's diagnostic reasoning + action guidance for L1.",
     )
-    content_hashes: list[str] = Field(
-        default_factory=list,
-        description="Content hashes of dataset_runs produced under this config.",
-    )
     degradation_reset_count: int = Field(
         0,
         description="How many times L2/L3 patience exhausted during degradation.",

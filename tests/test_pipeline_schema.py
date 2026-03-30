@@ -62,9 +62,6 @@ def test_derivation_methods():
         "search": "tool", "rank": "generation", "cache": "span",
     }
 
-    # runtime filtering
-    assert [s.name for s in schema.backend_nodes()] == ["search", "rank"]
-    assert [s.name for s in schema.frontend_nodes()] == ["cache"]
 
 
 class TestParsePipelineResponse:

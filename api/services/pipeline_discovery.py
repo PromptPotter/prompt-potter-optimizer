@@ -149,7 +149,6 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 k: v for k, v in nc.items()
                 if k in pk or k in set(opt.get("override_map", {}).values())
             },
-            "input_keys": set(opt.get("input_keys", [])),
             "langfuse_type": opt.get("langfuse_type", "span"),
             "current_config": {
                 k: v for k, v in nc.items()

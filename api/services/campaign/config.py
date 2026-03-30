@@ -20,7 +20,6 @@ class CycleConfig(BaseModel):
     creativity: float = Field(0.7, description="Temperature for candidate generation")
     improvement_threshold: float = Field(0.01, description="Min accuracy delta")
     model: str | None = Field(None, description="LLM model identifier")
-    provider: str | None = Field(None, description="LLM provider")
     backend_url: str = Field(..., description="Backend URL for evaluation")
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
@@ -33,10 +32,6 @@ class CycleConfig(BaseModel):
 
     # Critique-guided generation
     enable_critique: bool = Field(True, description="Enable critique agent between rounds")
-    critique_positive_threshold: float = Field(
-        0.7,
-        description="Accuracy threshold for positive vs negative critique",
-    )
 
     # Scan-aware optimization
     scan_context: dict | None = Field(None, description="Scan analytics context for candidate gen")
@@ -120,7 +115,6 @@ class CycleConfig(BaseModel):
             creativity=opt["creativity"],
             improvement_threshold=opt["improvement_threshold"],
             model=eval_llm["model"],
-            provider=None,
             backend_url=backend_url,
             backend_id=backend_id,
             project_root=project_root,
@@ -138,7 +132,6 @@ class CycleConfig(BaseModel):
             l2_temperature=opt["l2_temperature"],
             l3_temperature=opt["l3_temperature"],
             enable_critique=opt["enable_critique"],
-            critique_positive_threshold=opt["critique_positive_threshold"],
             degradation_threshold=opt["degradation_threshold"],
             backend_warning_threshold=opt["backend_warning_threshold"],
             max_failures=opt["max_failures"],

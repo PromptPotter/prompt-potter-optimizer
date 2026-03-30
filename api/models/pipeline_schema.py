@@ -9,8 +9,7 @@ Derivation methods:
   node_param_keys()       → node name → param keys
   obs_extraction_map()    → observation name → extraction rules
   langfuse_type_map()     → node name → Langfuse as_type
-  backend_nodes()         → runtime filtering
-  frontend_nodes()        → runtime filtering
+  (runtime filtering removed — no production consumers)
 """
 
 import enum
@@ -120,7 +119,6 @@ class PipelineNode(BaseModel):
     prompt_meta: NodePromptMeta | None = None
     current_config: dict[str, Any] = Field(default_factory=dict)
     default_config: dict[str, Any] = Field(default_factory=dict)
-    input_keys: set[str] = Field(default_factory=set)
 
 
 # ---------------------------------------------------------------------------
@@ -258,13 +256,6 @@ class PipelineSchema(BaseModel):
         """
         return {step.name: step.langfuse_type for step in self.nodes}
 
-    def backend_nodes(self) -> list[PipelineNode]:
-        """Steps that run on the backend."""
-        return [s for s in self.nodes if s.runtime == NodeRuntime.BACKEND]
-
-    def frontend_nodes(self) -> list[PipelineNode]:
-        """Steps that run on the frontend."""
-        return [s for s in self.nodes if s.runtime == NodeRuntime.FRONTEND]
 
 
 def is_result_step_compatible(

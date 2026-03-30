@@ -42,7 +42,6 @@ def cycle_config_identity(
             "creativity": config.creativity,
             "improvement_threshold": config.improvement_threshold,
             "model": config.model,
-            "provider": config.provider,
             "sample_size": config.sample_size,
             "seed": config.seed,
             "baseline_rendered": baseline_rendered,

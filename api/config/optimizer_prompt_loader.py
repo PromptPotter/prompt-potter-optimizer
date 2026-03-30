@@ -123,7 +123,7 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
                 config=osp.model_dump(
                     exclude={"critique_text", "critique", "thinking_styles",
                              "escalation_journal", "warning_inventory",
-                             "l2_directive", "content_hashes",
+                             "l2_directive",
                              "degradation_reset_count", "backend_warning_emitted"},
                 ),
                 labels=[label],
