@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from api.models.phase_event import PhaseEvent
+from api.services.campaign.critique import extract_warning_types
 from api.services.campaign.helpers import emit_phase
 
 if TYPE_CHECKING:
@@ -151,12 +152,7 @@ def collect_warning_types(results: list[dict]) -> dict[str, int]:
     """Count occurrences of each warning type across results."""
     counts: Counter[str] = Counter()
     for r in results:
-        for w in (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings") or []:
-            if isinstance(w, dict):
-                wtype = f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}"
-            else:
-                wtype = "unknown"
-            counts[wtype] += 1
+        counts.update(extract_warning_types(r))
     return dict(counts)
 
 

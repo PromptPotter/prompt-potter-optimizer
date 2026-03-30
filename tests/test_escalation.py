@@ -120,6 +120,6 @@ class TestCollectWarningTypes:
     def test_handles_non_dict_warnings(self):
         results = [_make_result(warnings=["some string warning"])]
         types = collect_warning_types(results)
-        assert types["unknown"] == 1
+        assert types["some string warning"] == 1
 
 

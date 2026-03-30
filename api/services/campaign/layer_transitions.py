@@ -53,28 +53,15 @@ class TransitionResult:
     debug_response: dict | None = None
 
 
-async def refine_context(
+def _build_l2_prompt(
     opt_sp: OptSearchPoint,
     stalled_rounds: list[dict],
-    eval_data: list[dict],
-    llm_client: LLMClientBase,
-    model: str | None = None,
-    temperature: float = 0.3,
-    pipeline_params: dict | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-    escalation_context: dict | None = None,
-) -> TransitionResult:
-    """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
-
-    Analyzes L1 failure patterns from the last stalled rounds and recommends
-    changes to ``parameters`` (creativity, n_variants, variant_strategy),
-    ``context`` (domain grounding text), and optionally ``pipeline_params``
-    when a pipeline schema is available.
-
-    Returns:
-        TransitionResult with derived OptSearchPoint and optional pipeline_params.
-    """
-    failure_lines = []
+    pipeline_params: dict | None,
+    pipeline_schema: PipelineSchema | None,
+    escalation_context: dict | None,
+) -> str:
+    """Assemble the L2 refine_context prompt from all context sources."""
+    failure_lines: list[str] = []
     for rd in stalled_rounds[-3:]:
         failure_lines.extend(format_failure_lines(rd.get("results", []), max_lines=5))
 
@@ -97,14 +84,12 @@ async def refine_context(
             + json.dumps(opt_sp.task_context, indent=2)
         )
 
-    # Inject cross-round warning inventory
     warning_section = ""
     if opt_sp.warning_inventory:
         warning_section = summarize_warning_inventory(opt_sp.warning_inventory)
         if warning_section:
             warning_section = "\n\n" + warning_section + "\n"
 
-    # Inject previous critique so L2 builds on it rather than re-analyzing
     critique_section = ""
     if opt_sp.critique_text:
         critique_section = (
@@ -112,7 +97,6 @@ async def refine_context(
             + opt_sp.critique_text
         )
 
-    # Sliding window: L2 sees only its own previous directive (window=1)
     prev_directive_section = ""
     if opt_sp.l2_directive:
         prev_directive_section = (
@@ -138,7 +122,7 @@ async def refine_context(
         "based on the data above."
     )
 
-    prompt = load_optimizer_prompt("l2_refine_context").compile_prompt(
+    return load_optimizer_prompt("l2_refine_context").compile_prompt(
         round_summary=round_summary,
         rendered_prompt=opt_sp.render(),
         failure_lines="\n".join(failure_lines[:15]),
@@ -151,15 +135,13 @@ async def refine_context(
         response_schema_suffix=response_schema_suffix,
     )
 
-    response = await llm_call(
-        llm_client,
-        messages=[{"role": "user", "content": prompt}],
-        node="l2_refine_context",
-        model=model,
-        temperature=temperature,
-    )
-    result = extract_parsed_json(response)
 
+def _parse_l2_response(
+    result: dict,
+    opt_sp: OptSearchPoint,
+    prompt: str,
+) -> TransitionResult:
+    """Parse LLM response into a TransitionResult with derived OptSearchPoint."""
     changes: dict = {}
     if result.get("optimizer_params"):
         new_params = {**opt_sp.optimizer_params, **result["optimizer_params"]}
@@ -167,20 +149,17 @@ async def refine_context(
     rationale = result.get("rationale", "L2 refine_context transition")
     changes["changes_description"] = f"L2: {rationale[:80]}"
 
-    # Parse refined task_context (merge with current, only non-empty updates)
     new_task_context = None
     if result.get("task_context") and isinstance(result["task_context"], dict):
         merged = {**(opt_sp.task_context or {}), **result["task_context"]}
         if merged != (opt_sp.task_context or {}):
             new_task_context = merged
 
-    # Parse action classification
     try:
         action = TransitionAction(result.get("action", "continue"))
     except ValueError:
         action = TransitionAction.CONTINUE
 
-    # Extract L2 directive for L1 injection
     l2_directive = result.get("directive", "")
     if not isinstance(l2_directive, str):
         l2_directive = ""
@@ -202,6 +181,39 @@ async def refine_context(
         debug_prompt=prompt,
         debug_response=result,
     )
+
+
+async def refine_context(
+    opt_sp: OptSearchPoint,
+    stalled_rounds: list[dict],
+    eval_data: list[dict],
+    llm_client: LLMClientBase,
+    model: str | None = None,
+    temperature: float = 0.3,
+    pipeline_params: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
+    escalation_context: dict | None = None,
+) -> TransitionResult:
+    """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
+
+    Analyzes L1 failure patterns from the last stalled rounds and recommends
+    changes to ``parameters`` (creativity, n_variants, variant_strategy),
+    ``context`` (domain grounding text), and optionally ``pipeline_params``
+    when a pipeline schema is available.
+    """
+    prompt = _build_l2_prompt(
+        opt_sp, stalled_rounds, pipeline_params, pipeline_schema, escalation_context,
+    )
+
+    response = await llm_call(
+        llm_client,
+        messages=[{"role": "user", "content": prompt}],
+        node="l2_refine_context",
+        model=model,
+        temperature=temperature,
+    )
+
+    return _parse_l2_response(extract_parsed_json(response), opt_sp, prompt)
 
 
 async def modify_plan(

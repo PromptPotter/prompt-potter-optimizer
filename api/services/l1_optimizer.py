@@ -14,18 +14,12 @@ from api.config.optimizer_pipeline import llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.opt_search_point import OptSearchPoint
 from api.models.pipeline_schema import PipelineSchema
-from api.services.campaign.formatting import ContextData
 from api.services.campaign.formatting import (
-    format_context_sections as _format_context_sections,
-)
-from api.services.campaign.formatting import (
-    format_failure_examples as _format_failure_examples,
-)
-from api.services.campaign.formatting import (
-    format_focus_note as _format_focus_note,
-)
-from api.services.campaign.formatting import (
-    format_scan_analytics as _format_scan_analytics,
+    ContextData,
+    format_context_sections,
+    format_failure_examples,
+    format_focus_note,
+    format_scan_analytics,
 )
 from api.services.llm_client import LLMClientBase
 from api.services.metrics import compute_composite_score, count_degraded_queries
@@ -96,7 +90,7 @@ async def l1_generate(
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
-    failure_examples = _format_failure_examples(
+    failure_examples = format_failure_examples(
         current_results,
         opt_sp.warning_inventory or None,
         is_probe_round,
@@ -110,9 +104,9 @@ async def l1_generate(
         n_queries=str(len(current_results)),
         rendered_prompt=opt_sp.render(),
         failure_examples=failure_examples,
-        scan_analytics=_format_scan_analytics(scan_context),
-        focus_note=_format_focus_note(opt_sp.escalation_journal or None),
-        context_sections=_format_context_sections(
+        scan_analytics=format_scan_analytics(scan_context),
+        focus_note=format_focus_note(opt_sp.escalation_journal or None),
+        context_sections=format_context_sections(
             ContextData(
                 task_context=opt_sp.task_context or None,
                 critique_text=opt_sp.critique_text,

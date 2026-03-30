@@ -91,7 +91,7 @@ def get_candidates(r: dict) -> list:
 # ---------------------------------------------------------------------------
 
 
-def _extract_warning_types(result: dict) -> list[str]:
+def extract_warning_types(result: dict) -> list[str]:
     """Extract warning type strings from a single eval result."""
     pd = result.get("pipeline_data") or {}
     diag = pd.get("diagnostics") or {}
@@ -136,7 +136,7 @@ def update_query_tracker(
         terminated = pd.get("terminated_at", "")
         if terminated:
             entry["last_terminated_at"] = terminated
-        for wtype in _extract_warning_types(r):
+        for wtype in extract_warning_types(r):
             entry["warnings"][wtype] = entry["warnings"].get(wtype, 0) + 1
 
 

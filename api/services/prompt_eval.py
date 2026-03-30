@@ -173,6 +173,23 @@ def _error_result(query: str, ground_truth: str, error_msg: str) -> dict:
     }
 
 
+def _fill_remaining_errors(
+    results: list[dict],
+    eval_data: list[dict],
+    start_idx: int,
+    reason: str,
+) -> None:
+    """Append error results for all eval queries from start_idx onward."""
+    for remaining_qd in eval_data[start_idx:]:
+        results.append(
+            _error_result(
+                remaining_qd["query"],
+                remaining_qd.get("ground_truth", ""),
+                reason,
+            )
+        )
+
+
 def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
     """Classify an HTTP error into a tagged message."""
     code = exc.response.status_code
@@ -349,14 +366,7 @@ async def _run_eval_batch(
                         i + 1,
                         len(eval_data) - i - 1,
                     )
-                    for remaining_qd in eval_data[i + 1 :]:
-                        results.append(
-                            _error_result(
-                                remaining_qd["query"],
-                                remaining_qd.get("ground_truth", ""),
-                                "skipped_after_client_error",
-                            )
-                        )
+                    _fill_remaining_errors(results, eval_data, i + 1, "skipped_after_client_error")
                     break
                 consecutive_errors += 1
                 if consecutive_errors >= max_consecutive_errors:
@@ -366,14 +376,7 @@ async def _run_eval_batch(
                         consecutive_errors,
                         len(eval_data) - i - 1,
                     )
-                    for remaining_qd in eval_data[i + 1 :]:
-                        results.append(
-                            _error_result(
-                                remaining_qd["query"],
-                                remaining_qd.get("ground_truth", ""),
-                                "skipped_after_consecutive_errors",
-                            )
-                        )
+                    _fill_remaining_errors(results, eval_data, i + 1, "skipped_after_consecutive_errors")
                     break
             else:
                 consecutive_errors = 0
