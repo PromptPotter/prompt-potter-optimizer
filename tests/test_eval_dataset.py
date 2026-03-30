@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from api.models.pipeline_schema import ObservationMapping, PipelineNode, PipelineSchema
 from api.services.search.eval_dataset import (
     _extract_eval_from_traces,
@@ -135,41 +137,33 @@ def test_full_trace_extracts_all_fields():
     assert pd["web_search_status"] == "completed"
 
 
-def test_minimal_trace_only_required():
-
+@pytest.mark.parametrize("obs_list,present_keys,absent_keys", [
+    # Only entity_profiling
+    (
+        [("entity_profiling", ENTITY_PROFILE_OUTPUT)],
+        ["entity_profile"],
+        ["token_matched_candidates", "ranked_candidates", "web_sources"],
+    ),
+    # Entity + token_matching, no web/llm
+    (
+        [("entity_profiling", ENTITY_PROFILE_OUTPUT),
+         ("token_matching", TOKEN_MATCHING_OUTPUT)],
+        ["entity_profile", "token_matched_candidates"],
+        ["web_sources", "web_search_status", "ranked_candidates"],
+    ),
+])
+def test_partial_observations(obs_list, present_keys, absent_keys):
     trace = _make_trace(
         query="STEEL-001 / hot rolled",
-        observations=[
-            _make_obs("entity_profiling", ENTITY_PROFILE_OUTPUT),
-        ],
+        observations=[_make_obs(name, output) for name, output in obs_list],
     )
     result = _extract_eval_from_traces(_make_exp([trace]), schema=_TEST_SCHEMA)
-
     assert len(result) == 1
     pd = result[0]["pipeline_data"]
-    assert pd["entity_profile"] == ENTITY_PROFILE_OUTPUT
-    assert "token_matched_candidates" not in pd
-    assert "ranked_candidates" not in pd
-    assert "web_sources" not in pd
-
-
-def test_optional_observations_missing():
-
-    trace = _make_trace(
-        query="STEEL-001 / hot rolled",
-        observations=[
-            _make_obs("entity_profiling", ENTITY_PROFILE_OUTPUT),
-            _make_obs("token_matching", TOKEN_MATCHING_OUTPUT),
-        ],
-    )
-    result = _extract_eval_from_traces(_make_exp([trace]), schema=_TEST_SCHEMA)
-
-    pd = result[0]["pipeline_data"]
-    assert "web_sources" not in pd
-    assert "web_search_status" not in pd
-    assert "ranked_candidates" not in pd
-    assert pd["entity_profile"] is not None
-    assert pd["token_matched_candidates"] is not None
+    for k in present_keys:
+        assert k in pd
+    for k in absent_keys:
+        assert k not in pd
 
 
 def test_missing_entity_profile_skips():

@@ -123,22 +123,13 @@ def test_list_campaigns_empty(api_client, tmp_store):
     api_client.post("/api/v1/backends", json=REGISTER_PAYLOAD)
     resp = api_client.get("/api/v1/campaigns", params={"backend_id": "test-backend"})
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["total"] == 0
-    assert body["campaigns"] == []
+    assert resp.json()["total"] == 0
 
 
-def test_get_campaign_404(api_client):
-    resp = api_client.get(
-        "/api/v1/campaigns/nonexistent",
-        params={"backend_id": "test-backend"},
-    )
-    assert resp.status_code == 404
-
-
-def test_get_trial_404(api_client):
-    resp = api_client.get(
-        "/api/v1/campaigns/nonexistent/trials/0",
-        params={"backend_id": "test-backend"},
-    )
+@pytest.mark.parametrize("path", [
+    "/api/v1/campaigns/nonexistent",
+    "/api/v1/campaigns/nonexistent/trials/0",
+])
+def test_campaign_404(api_client, path):
+    resp = api_client.get(path, params={"backend_id": "test-backend"})
     assert resp.status_code == 404

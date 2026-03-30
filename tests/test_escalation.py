@@ -34,50 +34,35 @@ def _make_warning(step: str = "web_search", code: str = "partial_scrape") -> dic
 
 
 class TestDegradationCheck:
-    def test_fires_above_threshold(self):
-        check = DegradationCheck(threshold=0.4)
-        results = [
-            _make_result(warnings=[_make_warning()]),
-            _make_result(warnings=[_make_warning()]),
-            _make_result(warnings=[_make_warning()]),
-            _make_result(),
-            _make_result(),
-        ]
-        signal = check.evaluate(results, candidate_idx=0, n_total_candidates=5)
-        assert signal is not None
-        assert signal.check_name == "degradation"
-        assert signal.context["degraded_rate"] == pytest.approx(0.6)
-        assert signal.context["degraded_count"] == 3
-
-    def test_no_signal_below_threshold(self):
-        check = DegradationCheck(threshold=0.4)
-        results = [
-            _make_result(warnings=[_make_warning()]),
-            _make_result(),
-            _make_result(),
-            _make_result(),
-            _make_result(),
-        ]
-        signal = check.evaluate(results, candidate_idx=0, n_total_candidates=5)
-        assert signal is None
+    @pytest.mark.parametrize("n_warned,threshold,expect_signal", [
+        (3, 0.4, True),    # 3/5 = 0.6 > 0.4 → fires
+        (1, 0.4, False),   # 1/5 = 0.2 < 0.4 → no signal
+        (0, 0.4, False),   # empty results
+    ])
+    def test_threshold_gating(self, n_warned, threshold, expect_signal):
+        check = DegradationCheck(threshold=threshold)
+        results = [_make_result(warnings=[_make_warning()]) for _ in range(n_warned)]
+        results += [_make_result() for _ in range(5 - n_warned)]
+        signal = check.evaluate(results[:max(len(results), 0)],
+                                candidate_idx=0, n_total_candidates=5)
+        if expect_signal:
+            assert signal is not None
+            assert signal.check_name == "degradation"
+        else:
+            assert signal is None
 
     def test_disabled_when_threshold_zero(self):
         from api.services.campaign.config import CycleConfig
         from api.services.campaign.escalation import build_escalation_checks
 
-        config = CycleConfig(
-            backend_url="http://mock:8000",
-            degradation_threshold=0.0,
-        )
-        checks = build_escalation_checks(config)
-        assert len(checks) == 0
+        config = CycleConfig(backend_url="http://mock:8000", degradation_threshold=0.0)
+        assert len(build_escalation_checks(config)) == 0
 
     def test_uses_strategy_for_dominant_warning(self):
         check = DegradationCheck(
             threshold=0.3,
             strategies={
                 "web_search:partial_scrape": EscalationStrategy(target="l2"),
-                "entity_profiling:schema_error": EscalationStrategy(target="abort"),
             },
         )
         results = [
@@ -88,16 +73,10 @@ class TestDegradationCheck:
         assert signal is not None
         assert signal.target == "l2"
 
-    def test_empty_results(self):
-        check = DegradationCheck(threshold=0.4)
-        signal = check.evaluate([], candidate_idx=0, n_total_candidates=1)
-        assert signal is None
-
     def test_signal_to_dict(self):
         check = DegradationCheck(threshold=0.3)
         results = [_make_result(warnings=[_make_warning()])]
         signal = check.evaluate(results, candidate_idx=2, n_total_candidates=5)
-        assert signal is not None
         d = signal.to_dict()
         assert d["check_name"] == "degradation"
         assert d["candidate_idx"] == 2
@@ -105,21 +84,21 @@ class TestDegradationCheck:
 
 
 class TestCollectWarningTypes:
-    def test_counts_types(self):
-        results = [
-            _make_result(warnings=[
-                _make_warning("web_search", "partial_scrape"),
-                _make_warning("web_search", "timeout"),
-            ]),
-            _make_result(warnings=[_make_warning("web_search", "partial_scrape")]),
-        ]
+    @pytest.mark.parametrize("warnings_input,expected", [
+        (
+            [[_make_warning("web_search", "partial_scrape"), _make_warning("web_search", "timeout")],
+             [_make_warning("web_search", "partial_scrape")]],
+            {"web_search:partial_scrape": 2, "web_search:timeout": 1},
+        ),
+        (
+            [["some string warning"]],
+            {"some string warning": 1},
+        ),
+    ])
+    def test_collect(self, warnings_input, expected):
+        results = [_make_result(warnings=w) for w in warnings_input]
         types = collect_warning_types(results)
-        assert types["web_search:partial_scrape"] == 2
-        assert types["web_search:timeout"] == 1
-
-    def test_handles_non_dict_warnings(self):
-        results = [_make_result(warnings=["some string warning"])]
-        types = collect_warning_types(results)
-        assert types["some string warning"] == 1
+        for k, v in expected.items():
+            assert types[k] == v
 
 

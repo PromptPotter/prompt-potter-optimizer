@@ -49,32 +49,12 @@ async def test_critique_falls_through_on_non_json():
 
 
 
-def test_sample_thinking_styles_returns_requested_count():
-
-    styles = sample_thinking_styles(n=3, seed=42)
-    assert len(styles) == 3
-    assert all(s.strip() for s in styles)
-
-
-def test_sample_thinking_styles_no_empty():
-
-    styles = sample_thinking_styles(n=5, seed=0)
+def test_sample_thinking_styles():
+    styles = sample_thinking_styles(n=5, seed=42)
     assert len(styles) == 5
-    for s in styles:
-        assert isinstance(s, str)
-        assert s.strip()
+    assert all(isinstance(s, str) and s.strip() for s in styles)
 
-
-def test_sample_thinking_styles_deterministic():
-
-    a = sample_thinking_styles(n=3, seed=99)
-    b = sample_thinking_styles(n=3, seed=99)
-    assert a == b
-
-
-def test_sample_thinking_styles_different_seeds():
-
-    a = sample_thinking_styles(n=3, seed=1)
-    b = sample_thinking_styles(n=3, seed=2)
-    # Could coincidentally match, but very unlikely with 30+ styles
-    assert a != b
+    # Deterministic
+    assert sample_thinking_styles(n=3, seed=99) == sample_thinking_styles(n=3, seed=99)
+    # Different seeds → different results
+    assert sample_thinking_styles(n=3, seed=1) != sample_thinking_styles(n=3, seed=2)

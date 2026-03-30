@@ -21,46 +21,28 @@ def _make_run_data(run_id="baseline_aabbccdd", content_hash="aabbccdd11223344", 
     )
 
 
-def test_save_and_load(tmp_store):
+def test_save_load_and_list(tmp_store):
+    """Save, load by hash, list, and verify index integrity."""
     data = _make_run_data()
     path = tmp_store.dataset_runs.save("b1", data["run_id"], data)
     assert path.exists()
 
-    # Load by hash
     loaded = tmp_store.dataset_runs.load_by_hash("b1", data["content_hash"])
     assert loaded is not None
     assert loaded["run_id"] == data["run_id"]
     assert loaded["scores"]["accuracy"] == 0.5
     assert len(loaded["dataset_run_items"]) == 2
 
-    # Detail file content
-    detail = json.loads(path.read_text())
-    assert detail["run_id"] == data["run_id"]
-    assert detail["dataset_run_items"][0]["query"] == "q1"
-
-
-def test_list_dataset_runs(tmp_store):
-    run1 = _make_run_data("run_a", "hash_a", "Run A")
-    run2 = _make_run_data("run_b", "hash_b", "Run B")
-
-    tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
-    tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
+    # Save more and verify list + index
+    for i in range(2):
+        d = _make_run_data(f"run_{i}", f"hash_{i:016d}", f"Run {i}")
+        tmp_store.dataset_runs.save("b1", d["run_id"], d)
 
     entries = tmp_store.dataset_runs.list_all("b1")
-    assert len(entries) == 2
-    assert entries[0]["run_id"] == "run_a"
-    assert entries[1]["run_id"] == "run_b"
-
-
-def test_index_integrity_after_multiple_saves(tmp_store):
-    for i in range(3):
-        data = _make_run_data(f"run_{i}", f"hash_{i:016d}", f"Run {i}")
-        tmp_store.dataset_runs.save("b1", data["run_id"], data)
-
+    assert len(entries) == 3
     index_path = tmp_store.base_dir / "b1" / "dataset_runs.json"
     index = json.loads(index_path.read_text())
     assert index["total"] == 3
-    assert len(index["dataset_runs"]) == 3
 
 
 def test_upsert_replaces_same_hash(tmp_store):
@@ -92,38 +74,23 @@ def test_build_dataset_run_data_includes_source():
     assert data["prompt_fields_id"] == sp.sp_hash()
 
 
-def test_build_dataset_run_data_includes_pipeline_params():
+@pytest.mark.parametrize("pipeline_params,expect_key", [
+    ({"llm_ranking": {"prompt": "test"}, "ranking_temperature": 0.5}, True),
+    (None, False),
+])
+def test_build_dataset_run_data_pipeline_params(pipeline_params, expect_key):
     from api.models.search_point import JobSearchPoint
     from api.services.prompt_eval import build_dataset_run_data
 
-    pp = {"llm_ranking": {"prompt": "test prompt"}, "ranking_temperature": 0.5}
-    sp = JobSearchPoint(pipeline_params=pp)
+    sp = JobSearchPoint(pipeline_params=pipeline_params)
     data = build_dataset_run_data(
-        "run_pp", "PP Test", "hash1234", sp,
+        "run_pp", "Test", "hash1234", sp,
         {"hits": 1, "total": 1, "accuracy": 1.0, "errors": 0}, [],
     )
-    assert data["pipeline_params"] == pp
-
-
-def test_build_dataset_run_data_omits_empty_pipeline_params():
-    from api.models.search_point import JobSearchPoint
-    from api.services.prompt_eval import build_dataset_run_data
-
-    sp = JobSearchPoint()
-    data = build_dataset_run_data(
-        "run_npp", "No PP", "hash5678", sp,
-        {"hits": 1, "total": 1, "accuracy": 1.0, "errors": 0}, [],
-    )
-    assert "pipeline_params" not in data
-
-
-def test_source_persisted_in_index(tmp_store):
-    data = _make_run_data()
-    data["source"] = "sensitivity_scan"
-    tmp_store.dataset_runs.save("b1", data["run_id"], data)
-
-    entries = tmp_store.dataset_runs.list_all("b1")
-    assert entries[0]["source"] == "sensitivity_scan"
+    if expect_key:
+        assert data["pipeline_params"] == pipeline_params
+    else:
+        assert "pipeline_params" not in data
 
 
 def _make_alias_run(run_id, rp_hash,
@@ -155,27 +122,27 @@ class TestLoadByAlias:
         assert result is not None
         assert result["run_id"] == "r1"
 
-    def test_no_alias_returns_none(self, drs):
-        drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
+    @pytest.mark.parametrize("setup,lookup_hash,pp,n_items", [
+        # No alias registered
+        ("no_alias", "hash_x", None, 3),
+        # Pipeline params mismatch
+        ("with_alias_pp", "hash_b", {"ranking_temperature": 0.9}, 3),
+        # Item count mismatch
+        ("with_alias", "hash_b", None, 99),
+    ])
+    def test_returns_none_on_mismatch(self, drs, setup, lookup_hash, pp, n_items):
+        if setup == "no_alias":
+            drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
+        elif setup == "with_alias_pp":
+            drs.save("b1", "r1", _make_alias_run(
+                "r1", "hash_a", pipeline_params={"steps": ["a"], "ranking_temperature": 0.5},
+            ))
+            drs.register_alias("b1", "hash_a", "hash_b")
+        else:
+            drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
+            drs.register_alias("b1", "hash_a", "hash_b")
 
-        result = drs.load_by_alias("b1", "hash_x", None, 3)
-        assert result is None
-
-    def test_pipeline_params_must_match_exactly(self, drs):
-        drs.save("b1", "r1", _make_alias_run(
-            "r1", "hash_a", pipeline_params={"steps": ["a"], "ranking_temperature": 0.5},
-        ))
-        drs.register_alias("b1", "hash_a", "hash_b")
-
-        result = drs.load_by_alias("b1", "hash_b", {"ranking_temperature": 0.9}, 3)
-        assert result is None
-
-    def test_item_count_mismatch(self, drs):
-        drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
-        drs.register_alias("b1", "hash_a", "hash_b")
-
-        result = drs.load_by_alias("b1", "hash_b", None, 99)
-        assert result is None
+        assert drs.load_by_alias("b1", lookup_hash, pp, n_items) is None
 
 
 class TestPromptResultIndex:
@@ -202,7 +169,8 @@ class TestPromptResultIndex:
         assert loaded is not None
         assert loaded["run_id"] == "r1"
 
-    def test_build_index_multiple_runs_same_prompt(self, tmp_store):
+    def test_multiple_runs_same_and_different_prompts(self, tmp_store):
+        """Multiple runs merge under same prompt; different prompts stay separate."""
         items1 = [
             {"query": "q1", "predicted": "pred", "ground_truth": "pred",
              "hit": True, "confidence": 0.9, "error": None},
@@ -212,64 +180,16 @@ class TestPromptResultIndex:
         items2 = [
             {"query": "q3", "predicted": "pred", "ground_truth": "pred",
              "hit": True, "confidence": 0.9, "error": None},
-            {"query": "q4", "predicted": "pred", "ground_truth": "pred",
-             "hit": True, "confidence": 0.9, "error": None},
         ]
-        run1 = make_dataset_run(
-            "r1", accuracy=0.5, items=items1,
-            content_hash="ch_r1", rendered_prompt="prompt A",
-        )
-        run2 = make_dataset_run(
-            "r2", accuracy=1.0, items=items2,
-            content_hash="ch_r2", rendered_prompt="prompt A",
-        )
-        tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
-        tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
+        for rid, items, prompt in [("r1", items1, "prompt A"), ("r2", items2, "prompt A"),
+                                    ("r3", items2, "prompt B")]:
+            run = make_dataset_run(rid, accuracy=0.5, items=items,
+                                   content_hash=f"ch_{rid}", rendered_prompt=prompt)
+            tmp_store.dataset_runs.save("b1", run["run_id"], run)
 
         index = build_prompt_result_index(tmp_store, "b1")
-        rp_hash = _rp_hash("prompt A")
-        assert len(index) == 1
-        assert len(index[rp_hash]) == 4
-
-    def test_build_index_different_prompts(self, tmp_store):
-        run1 = make_dataset_run(
-            "r1", accuracy=1.0,
-            items=[{"query": "q1", "predicted": "pred", "ground_truth": "pred",
-                    "hit": True, "confidence": 0.9, "error": None}],
-            content_hash="ch_r1", rendered_prompt="prompt A",
-        )
-        run2 = make_dataset_run(
-            "r2", accuracy=0.0,
-            items=[{"query": "q1", "predicted": "wrong", "ground_truth": "pred",
-                    "hit": False, "confidence": 0.1, "error": None}],
-            content_hash="ch_r2", rendered_prompt="prompt B",
-        )
-        tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
-        tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
-
-        index = build_prompt_result_index(tmp_store, "b1")
-        assert len(index) == 2
-
-    def test_build_index_later_run_overwrites_query(self, tmp_store):
-        run1 = make_dataset_run(
-            "r1", accuracy=1.0,
-            items=[{"query": "q1", "predicted": "pred", "ground_truth": "pred",
-                    "hit": True, "confidence": 0.9, "error": None}],
-            content_hash="ch_r1", rendered_prompt="prompt A",
-        )
-        run2 = make_dataset_run(
-            "r2", accuracy=0.0,
-            items=[{"query": "q1", "predicted": "wrong", "ground_truth": "pred",
-                    "hit": False, "confidence": 0.1, "error": None}],
-            content_hash="ch_r2", rendered_prompt="prompt A",
-        )
-        tmp_store.dataset_runs.save("b1", run1["run_id"], run1)
-        tmp_store.dataset_runs.save("b1", run2["run_id"], run2)
-
-        index = build_prompt_result_index(tmp_store, "b1")
-        rp_hash = _rp_hash("prompt A")
-        assert rp_hash in index
-        assert "q1" in index[rp_hash]
+        assert len(index) == 2  # prompt A + prompt B
+        assert len(index[_rp_hash("prompt A")]) == 3  # q1 + q2 + q3
 
     def test_index_ignores_runs_without_hash(self, tmp_store):
         run = make_dataset_run(

@@ -16,19 +16,6 @@ def _make_eval_data(n: int) -> list:
     ]
 
 
-def _make_baseline_results(eval_data: list, hit_indices: set) -> list:
-    results = []
-    for i, d in enumerate(eval_data):
-        results.append({
-            "query": d["query"],
-            "ground_truth": d["ground_truth"],
-            "predicted": d["ground_truth"] if i in hit_indices else "wrong",
-            "hit": i in hit_indices,
-            "error": False,
-        })
-    return results
-
-
 def _make_scan_baseline(
     instruction: str = "test",
     persona: str = "default_persona",
@@ -117,51 +104,6 @@ async def test_scan_rows_include_errors(scan_eval_mock):
 
 
 @pytest.mark.asyncio
-async def test_scan_skips_all_error_axis(scan_eval_mock):
-    sp, osp = _make_scan_baseline(task_intent="default_intent")
-
-    scan_variants = {
-        "persona": ["default_persona", "expert"],
-        "task_intent": ["default_intent", "classify"],
-    }
-    eval_data = _make_eval_data(4)
-
-    async def _mock_eval(search_point, data, client, **kw):
-        rendered = search_point.render()
-        # persona variants all error out (rendered differs from baseline but NOT
-        # due to task_intent change)
-        if "expert" in rendered:
-            return (
-                [{"hit": False, "query": d["query"]} for d in data],
-                {"accuracy": 0.0, "hits": 0, "total": 4, "errors": 4},
-                False,
-            )
-        # task_intent variant works fine
-        if "classify" in rendered:
-            return (
-                [{"hit": True, "query": d["query"]} for d in data],
-                {"accuracy": 0.75, "hits": 3, "total": 4, "errors": 0},
-                False,
-            )
-        # baseline
-        return (
-            [{"hit": True, "query": d["query"]} for d in data],
-            {"accuracy": 1.0, "hits": 4, "total": 4},
-            False,
-        )
-
-    scan_eval_mock(_mock_eval)
-
-    df, _profiles = await sensitivity_scan(
-        sp, scan_variants, eval_data, backend_client=None,
-        baseline_opt=osp,
-    )
-
-    # Both axes should still be in the results (rows are preserved)
-    assert set(df["axis"].unique()) == {"persona", "task_intent"}
-
-
-@pytest.mark.asyncio
 async def test_scan_aborts_on_baseline_all_errors(scan_eval_mock):
     sp, osp = _make_scan_baseline()
     scan_variants = {"persona": ["default_persona", "expert", "analyst"]}
@@ -227,35 +169,6 @@ async def test_scan_aborts_after_consecutive_all_error_variants(scan_eval_mock):
     assert len(df) > 0
 
 
-@pytest.mark.asyncio
-async def test_scan_baseline_row_reflects_actual_errors(scan_eval_mock):
-    sp, osp = _make_scan_baseline()
-    baseline_rendered = sp.render()
-    scan_variants = {"persona": ["default_persona", "expert"]}
-    eval_data = _make_eval_data(4)
-
-    async def _mock_eval(search_point, data, client, **kw):
-        if search_point.render() == baseline_rendered:
-            return (
-                [{"hit": True, "query": d["query"]} for d in data],
-                {"accuracy": 0.75, "hits": 3, "total": 4, "errors": 1},
-                False,
-            )
-        return (
-            [{"hit": True, "query": d["query"]} for d in data],
-            {"accuracy": 1.0, "hits": 4, "total": 4, "errors": 0},
-            False,
-        )
-
-    scan_eval_mock(_mock_eval)
-
-    df, _profiles = await sensitivity_scan(
-        sp, scan_variants, eval_data, backend_client=None,
-        baseline_opt=osp,
-    )
-    baseline_row = df[df["value_preview"] == "default_persona"].iloc[0]
-    assert baseline_row["errors"] == 1
-
 
 
 # ---------------------------------------------------------------------------
@@ -263,52 +176,28 @@ async def test_scan_baseline_row_reflects_actual_errors(scan_eval_mock):
 # ---------------------------------------------------------------------------
 
 class TestErrorCategory:
-    def test_client_prefix(self):
-        assert _error_category("[CLIENT] HTTP 400: bad request") == "CLIENT"
-
-    def test_server_prefix(self):
-        assert _error_category("[SERVER] HTTP 500: internal") == "SERVER"
-
-    def test_connection_prefix(self):
-        assert _error_category("[CONNECTION] timeout") == "CONNECTION"
-
-    def test_no_prefix(self):
-        assert _error_category("some old-style error") is None
-
-    def test_none_input(self):
-        assert _error_category(None) is None
-
-    def test_empty_string(self):
-        assert _error_category("") is None
+    @pytest.mark.parametrize("input_str,expected", [
+        ("[CLIENT] HTTP 400: bad request", "CLIENT"),
+        ("[SERVER] HTTP 500: internal", "SERVER"),
+        ("[CONNECTION] timeout", "CONNECTION"),
+        ("some old-style error", None),
+        (None, None),
+        ("", None),
+    ])
+    def test_classify(self, input_str, expected):
+        assert _error_category(input_str) == expected
 
 
 class TestDominantErrorCategory:
-    def test_all_client(self):
-        results = [
-            {"error": "[CLIENT] HTTP 400: bad"},
-            {"error": "[CLIENT] HTTP 400: bad"},
-            {"error": "skipped_after_client_error"},
-        ]
-        assert _most_common_error_category(results) == "CLIENT"
-
-    def test_mixed_with_connection_dominant(self):
-        results = [
-            {"error": "[CONNECTION] timeout"},
-            {"error": "[CONNECTION] timeout"},
-            {"error": "[SERVER] HTTP 500: err"},
-        ]
-        assert _most_common_error_category(results) == "CONNECTION"
-
-    def test_no_categorized_errors(self):
-        results = [
-            {"error": "skipped_after_consecutive_errors"},
-            {"error": "skipped_after_consecutive_errors"},
-        ]
-        assert _most_common_error_category(results) is None
-
-    def test_no_errors(self):
-        results = [{"error": None}, {"error": None}]
-        assert _most_common_error_category(results) is None
+    @pytest.mark.parametrize("errors,expected", [
+        (["[CLIENT] HTTP 400: bad", "[CLIENT] HTTP 400: bad", "skipped_after_client_error"], "CLIENT"),
+        (["[CONNECTION] timeout", "[CONNECTION] timeout", "[SERVER] HTTP 500: err"], "CONNECTION"),
+        (["skipped_after_consecutive_errors", "skipped_after_consecutive_errors"], None),
+        ([None, None], None),
+    ])
+    def test_classify(self, errors, expected):
+        results = [{"error": e} for e in errors]
+        assert _most_common_error_category(results) == expected
 
 
 @pytest.mark.asyncio

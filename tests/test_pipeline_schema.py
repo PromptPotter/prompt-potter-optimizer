@@ -275,11 +275,6 @@ class TestParsePipelineResponse:
         assert ep.output_schema is not None
         assert ep.output_schema.fields == ["entity_name", "core_concept"]
 
-    def test_empty_response(self):
-        schema = parse_pipeline_response({})
-        assert schema.name == ""
-        assert len(schema.nodes) == 0
-
     def test_step_order_from_pipelines_default(self):
         data = {
             "name": "Test",

@@ -1,5 +1,6 @@
 """Tests for assess_scan_coverage()."""
 
+import pytest
 from _helpers import make_baseline_osp as _make_baseline
 from _helpers import rp_hash as _rp_hash
 
@@ -165,81 +166,33 @@ def test_sufficient_axes_excluded_from_needed():
     assert result["summary"]["backend_calls_saved"] == 2 * 6
 
 
-def test_pipeline_param_historical_discovery():
-
+@pytest.mark.parametrize("index_builder,expected_cached,expected_compat,note_contains", [
+    # Full history, all compatible
+    (
+        lambda bl_hash, qs: {bl_hash: {
+            q: {"query": q, "hit": True, "pipeline_data": {"terminated_at": "llm_ranking"}}
+            for q in qs
+        }},
+        6, 6, "6 step-compatible",
+    ),
+    # No historical data
+    (lambda bl_hash, qs: {}, 0, 0, "No historical data"),
+    # Partial compatibility: 4 llm_ranking, 2 web_search
+    (
+        lambda bl_hash, qs: {bl_hash: {
+            q: {"query": q, "hit": True,
+                "pipeline_data": {"terminated_at": "llm_ranking" if i < 4 else "web_search"}}
+            for i, q in enumerate(qs)
+        }},
+        6, 4, None,
+    ),
+])
+def test_pipeline_param_historical_variants(index_builder, expected_cached, expected_compat, note_contains):
     baseline = _make_baseline()
     diag = _diagnostic(6)
     query_strings = [d["query"] for d in diag]
-
-    # Put baseline results into the index with terminated_at annotations
-    bl_rendered = baseline.render()
-    bl_hash = _rp_hash(bl_rendered)
-    index = {
-        bl_hash: {
-            q: {
-                "query": q,
-                "hit": True,
-                "pipeline_data": {"terminated_at": "llm_ranking"},
-            }
-            for q in query_strings
-        },
-    }
-
-    result = assess_scan_coverage(
-        baseline, VARIANT_LIBRARY, diag, index,
-        pipeline_params={"steps": ["token_matching", "llm_ranking"]},
-        min_queries=6,
-    )
-
-    pp_axes = [a for a in result["axes"] if a["axis_type"] == "pipeline_param"]
-    assert len(pp_axes) == 1
-    pp = pp_axes[0]
-
-    # All 6 diagnostic queries found in index
-    assert pp["n_cached_historical"] == 6
-    # All terminated at llm_ranking which is in target steps
-    assert pp["n_step_compatible"] == 6
-    assert "6 historical results found" in pp["note"]
-    assert "6 step-compatible" in pp["note"]
-    # Still not "sufficient" — pipeline params always need fresh eval
-    assert pp["sufficient"] is False
-
-
-def test_pipeline_param_no_historical_data():
-
-    baseline = _make_baseline()
-    diag = _diagnostic(6)
-
-    result = assess_scan_coverage(
-        baseline, VARIANT_LIBRARY, diag, {},
-        pipeline_params={"steps": ["token_matching", "llm_ranking"]},
-        min_queries=6,
-    )
-
-    pp_axes = [a for a in result["axes"] if a["axis_type"] == "pipeline_param"]
-    assert len(pp_axes) == 1
-    pp = pp_axes[0]
-    assert pp["n_cached_historical"] == 0
-    assert pp["n_step_compatible"] == 0
-    assert "No historical data" in pp["note"]
-
-
-def test_pipeline_param_partial_compatibility():
-
-    baseline = _make_baseline()
-    diag = _diagnostic(6)
-    query_strings = [d["query"] for d in diag]
-
     bl_hash = _rp_hash(baseline.render())
-    items = {}
-    for i, q in enumerate(query_strings):
-        # First 4 terminated at llm_ranking (compatible), last 2 at web_search (not)
-        terminated = "llm_ranking" if i < 4 else "web_search"
-        items[q] = {
-            "query": q, "hit": True,
-            "pipeline_data": {"terminated_at": terminated},
-        }
-    index = {bl_hash: items}
+    index = index_builder(bl_hash, query_strings)
 
     result = assess_scan_coverage(
         baseline, VARIANT_LIBRARY, diag, index,
@@ -248,5 +201,8 @@ def test_pipeline_param_partial_compatibility():
     )
 
     pp = next(a for a in result["axes"] if a["axis_type"] == "pipeline_param")
-    assert pp["n_cached_historical"] == 6
-    assert pp["n_step_compatible"] == 4
+    assert pp["n_cached_historical"] == expected_cached
+    assert pp["n_step_compatible"] == expected_compat
+    assert pp["sufficient"] is False
+    if note_contains:
+        assert note_contains in pp["note"]

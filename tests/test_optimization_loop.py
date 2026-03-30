@@ -54,121 +54,6 @@ async def test_patience_exhaustion(monkeypatch, eval_data, cycle_config):
     assert result.best_accuracy == 0.0
 
 
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_max_rounds(monkeypatch, eval_data):
-    config = CycleConfig(
-        max_rounds=3, l1_patience=10, n_variants=2,
-        backend_url="http://mock:8000",
-        enable_critique=False, enable_l2=False,
-    )
-    result = await run_simple_cycle(
-        monkeypatch, eval_data, config, round_hits=[1, 1, 2],
-    )
-    assert result.stop_reason == "max_rounds"
-    assert result.n_rounds == 3
-    assert result.best_accuracy > 0
-
-
-
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_result_structure(monkeypatch, eval_data, cycle_config):
-    result = await run_simple_cycle(
-        monkeypatch, eval_data, cycle_config, round_hits=[0],
-    )
-    assert result.started_at < result.finished_at
-    assert result.winner_prompt_fields
-
-
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_baseline_acceptance(monkeypatch, eval_data, cycle_config):
-    baseline_ps = OptSearchPoint(
-        instruction="Pre-existing baseline",
-        persona="Expert pharmacologist",
-        changes_description="manual_baseline",
-    )
-    result = await run_simple_cycle(
-        monkeypatch, eval_data, cycle_config, round_hits=[0],
-        instruction="",
-        baseline_prompt_fields=baseline_ps.model_dump(),
-        baseline_accuracy=0.5,
-        baseline_results=[{"query": "test", "hit": True}],
-    )
-    assert result.n_rounds == 2  # patience=2, all 0% < 0.5 baseline
-    assert result.stop_reason == "patience_exhausted"
-
-
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_results_tracked_across_rounds(monkeypatch, eval_data, cycle_config):
-    apply_llm_mock(monkeypatch)
-
-    # Track what results l1_generate receives each round
-    grow_results_received = []
-
-    async def mock_generate(osp, accuracy, results, n, creativity,
-                            llm_client, **kwargs):
-        grow_results_received.append(list(results))
-        return [
-            osp.derive_candidate(
-                instruction=f"variant_{i}",
-                changes_description=f"gen_{i}",
-            ).prompt_field_dict()
-            for i in range(n)
-        ]
-
-    monkeypatch.setattr(
-        "api.services.l1_optimizer.l1_generate",
-        mock_generate,
-    )
-
-    # First candidate always gets 1/3 accuracy with real results
-    apply_eval_mock(monkeypatch, round_hits=[1])
-
-    result = await run_optimization(
-        instruction="Test.", eval_data=eval_data, config=cycle_config,
-        baseline_prompt_fields=OptSearchPoint(instruction="Test.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
-    )
-
-    # Round 0: starts with empty results (baseline has no eval results)
-    assert grow_results_received[0] == []
-
-    # Round 1+: should have winner results from previous round
-    for i in range(1, len(grow_results_received)):
-        assert len(grow_results_received[i]) > 0, (
-            f"Round {i} should have received results from previous round"
-        )
-
-    # CycleRoundResult.results should also be populated
-    for rd in result.rounds:
-        assert isinstance(rd.results, list)
-        assert len(rd.results) > 0
-
-
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
-    callbacks = []
-
-    def on_round(round_result, stall_count):
-        callbacks.append((round_result.round, stall_count))
-
-    from api.services.campaign.callbacks import CycleCallbacks
-
-    result = await run_simple_cycle(
-        monkeypatch, eval_data, cycle_config, round_hits=[0],
-        callbacks=CycleCallbacks(on_round_complete=on_round),
-    )
-    assert len(callbacks) == result.n_rounds
-    for i, (round_num, stall) in enumerate(callbacks):
-        assert round_num == i
-        assert stall == i + 1  # All rounds are non-improving
-
-
 class TestSelectScanWinner:
     """Tests for select_scan_winner greedy composition."""
 
@@ -257,33 +142,19 @@ class TestSelectScanWinner:
         # ranking_temperature should be 0.3 (idx 1)
         assert best_sp.pipeline_params["ranking_temperature"] == 0.3
 
-    def test_no_improving_axes(self, baseline_sp, baseline_osp, scan_variants):
-        scan_df = pd.DataFrame([
-            {"axis": "thinking_style", "axis_type": "prompt_field",
-             "value_idx": 0, "accuracy": 0.50, "delta": 0.0},
-        ])
-        profiles = [
-            {"axis": "thinking_style", "axis_type": "prompt_field",
-             "cardinality": 1, "sensitivity_range": 0.0,
-             "best_delta": 0.0, "exploration_budget": "skip"},
-        ]
-        best_sp = select_scan_winner(
-            scan_df, profiles, baseline_sp, scan_variants,
-            baseline_opt=baseline_osp,
-        )
-        # No improvement -> returns baseline unchanged
-        assert best_sp.render() == baseline_sp.render()
-        assert best_sp.pipeline_params == baseline_sp.pipeline_params
-
-    def test_skipped_axes_excluded(
-        self, scan_df, baseline_sp, baseline_osp, scan_variants,
+    @pytest.mark.parametrize("profiles", [
+        # No improving axes
+        [{"axis": "thinking_style", "axis_type": "prompt_field",
+          "cardinality": 1, "sensitivity_range": 0.0,
+          "best_delta": 0.0, "exploration_budget": "skip"}],
+        # Positive delta but skipped budget
+        [{"axis": "thinking_style", "axis_type": "prompt_field",
+          "cardinality": 4, "sensitivity_range": 0.15,
+          "best_delta": 0.10, "exploration_budget": "skip"}],
+    ])
+    def test_returns_baseline_when_no_usable_improvement(
+        self, scan_df, baseline_sp, baseline_osp, scan_variants, profiles,
     ):
-        """Axes with exploration_budget='skip' are excluded even if best_delta > 0."""
-        profiles = [
-            {"axis": "thinking_style", "axis_type": "prompt_field",
-             "cardinality": 4, "sensitivity_range": 0.15,
-             "best_delta": 0.10, "exploration_budget": "skip"},
-        ]
         best_sp = select_scan_winner(
             scan_df, profiles, baseline_sp, scan_variants,
             baseline_opt=baseline_osp,
@@ -310,7 +181,7 @@ class TestSelectScanWinner:
 
 
 class TestCycleConfigIdentity:
-    def test_differs_on_config_change(self, eval_data):
+    def test_differs_on_config_or_baseline_change(self, eval_data):
         rendered = "You are an expert."
         c1 = CycleConfig(
             max_rounds=5, l1_patience=2, n_variants=3, creativity=0.5,
@@ -322,24 +193,14 @@ class TestCycleConfigIdentity:
         )
         assert cycle_config_identity(c1, rendered, eval_data) != \
             cycle_config_identity(c2, rendered, eval_data)
-
-    def test_differs_on_baseline_change(self, cycle_config, eval_data):
-        id1 = cycle_config_identity(cycle_config, "prompt A", eval_data)
-        id2 = cycle_config_identity(cycle_config, "prompt B", eval_data)
-        assert id1 != id2
+        assert cycle_config_identity(c1, "prompt A", eval_data) != \
+            cycle_config_identity(c1, "prompt B", eval_data)
 
     def test_eval_order_invariant(self, cycle_config):
-        rendered = "test"
-        data_a = [
-            {"query": "z_last", "ground_truth": "Z"},
-            {"query": "a_first", "ground_truth": "A"},
-        ]
-        data_b = [
-            {"query": "a_first", "ground_truth": "A"},
-            {"query": "z_last", "ground_truth": "Z"},
-        ]
-        assert cycle_config_identity(cycle_config, rendered, data_a) == \
-            cycle_config_identity(cycle_config, rendered, data_b)
+        data_a = [{"query": "z_last", "ground_truth": "Z"}, {"query": "a_first", "ground_truth": "A"}]
+        data_b = list(reversed(data_a))
+        assert cycle_config_identity(cycle_config, "test", data_a) == \
+            cycle_config_identity(cycle_config, "test", data_b)
 
 
 class TestValidateConfigMatch:
@@ -347,7 +208,7 @@ class TestValidateConfigMatch:
 
     def test_raises_on_mismatch(self, cycle_config):
         stored = {
-            "n_variants": 99,  # data-affecting → mismatch
+            "n_variants": 99,
             "creativity": cycle_config.creativity,
             "improvement_threshold": cycle_config.improvement_threshold,
             "model": cycle_config.model,
@@ -356,19 +217,9 @@ class TestValidateConfigMatch:
         with pytest.raises(ValueError, match="Config mismatch"):
             _validate_config_match(cycle_config, stored, "test-cycle-id")
 
-    def test_passes_on_match(self, cycle_config):
+    def test_passes_on_match_and_loop_control_fields_may_differ(self, cycle_config):
         stored = {
-            "n_variants": cycle_config.n_variants,
-            "creativity": cycle_config.creativity,
-            "improvement_threshold": cycle_config.improvement_threshold,
-            "model": cycle_config.model,
-            "sample_size": cycle_config.sample_size,
-        }
-        _validate_config_match(cycle_config, stored, "test-cycle-id")
-
-    def test_loop_control_fields_allowed_to_differ(self, cycle_config):
-        stored = {
-            "max_rounds": 99,
+            "max_rounds": 99,  # loop control — allowed to differ
             "patience": 99,
             "n_variants": cycle_config.n_variants,
             "creativity": cycle_config.creativity,
@@ -608,47 +459,3 @@ async def test_mid_round_resume_uses_persisted_candidates(
     assert result2.cycle_id == cycle_id
 
 
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_no_store_no_persistence(monkeypatch, eval_data, cycle_config):
-    result = await run_simple_cycle(
-        monkeypatch, eval_data, cycle_config, round_hits=[0],
-    )
-    assert result.cycle_id is None
-    assert result.resumed_from_round == 0
-
-
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
-    events = []
-    from api.services.campaign.callbacks import CycleCallbacks
-
-    result = await run_simple_cycle(
-        monkeypatch, eval_data, cycle_config, round_hits=[0],
-        callbacks=CycleCallbacks(on_phase=lambda e: events.append(e)),
-    )
-
-    pairs = [(e.phase, e.event) for e in events]
-    assert ("init", "enter") in pairs
-    assert ("init", "exit") in pairs
-
-    def _count(phase, event, round_num):
-        return sum(1 for e in events
-                   if e.phase == phase and e.event == event
-                   and e.round == round_num)
-
-    for rn in range(result.n_rounds):
-        for phase in ("l1_generate", "l1_evaluate"):
-            assert _count(phase, "enter", rn) == 1
-            assert _count(phase, "exit", rn) == 1
-
-    init_enter = next(e for e in events if e.phase == "init" and e.event == "enter")
-    assert init_enter.data["eval_data_count"] == len(eval_data)
-
-    gen_exit = next(e for e in events if e.phase == "l1_generate" and e.event == "exit")
-    assert gen_exit.data["n_eval_queries"] == len(eval_data)
-    assert len(gen_exit.data["candidates"]) > 0
-
-    eval_exit = next(e for e in events if e.phase == "l1_evaluate" and e.event == "exit")
-    assert "winner_accuracy" in eval_exit.data

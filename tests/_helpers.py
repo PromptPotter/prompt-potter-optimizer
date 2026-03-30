@@ -95,6 +95,152 @@ def apply_eval_mock(monkeypatch, round_hits=None):
 # ---------------------------------------------------------------------------
 
 
+class MockLangfuseLogger:
+    """Records Langfuse calls for test verification."""
+
+    def __init__(self, *, enabled=True):
+        self.enabled = enabled
+        self.traces: list[dict] = []
+        self.trace_ids: list[str] = []
+        self.spans: list[dict] = []
+        self.scores: list[dict] = []
+        self.trace_updates: list[dict] = []
+        self.end_trace_calls: list[str] = []
+        self.flush_count = 0
+        self._counter = 0
+        self.top_level_observations: list[dict] = []
+        self.datasets_created: list[dict] = []
+        self.dataset_items_created: list[dict] = []
+        self.dataset_run_links: list[dict] = []
+        self._item_counter = 0
+
+    @property
+    def rate_limited(self) -> bool:
+        return False
+
+    def create_trace_id(self):
+        if not self.enabled:
+            return None
+        self._counter += 1
+        tid = f"mock_trace_{self._counter:03d}"
+        self.trace_ids.append(tid)
+        return tid
+
+    def create_trace(self, name, input, metadata=None, user_id=None,
+                     session_id=None, tags=None):
+        if not self.enabled:
+            return None
+        self._counter += 1
+        tid = f"mock_trace_{self._counter:03d}"
+        self.traces.append({
+            "id": tid, "name": name, "input": input, "metadata": metadata,
+            "session_id": session_id, "tags": tags,
+        })
+        return tid
+
+    def start_span(self, trace_id, name, input=None, metadata=None,
+                   *, parent_observation_id=None, as_type="span"):
+        self._counter += 1
+        obs_id = f"open_obs_{self._counter:03d}"
+        self.spans.append({
+            "trace_id": trace_id, "name": name,
+            "input": input, "output": None, "metadata": metadata,
+            "obs_id": obs_id, "open": True,
+            "as_type": as_type, "parent_observation_id": parent_observation_id,
+        })
+        return obs_id
+
+    def end_observation(self, obs_id, output=None, metadata=None):
+        for span in self.spans:
+            if span.get("obs_id") == obs_id and span.get("open"):
+                span["output"] = output
+                if metadata:
+                    span["metadata"] = metadata
+                span["open"] = False
+                break
+
+    def create_span(self, trace_id, name, input, output, metadata=None,
+                    *, parent_observation_id=None, as_type="span",
+                    model=None, usage_details=None):
+        self.spans.append({
+            "trace_id": trace_id, "name": name,
+            "input": input, "output": output, "metadata": metadata,
+            "as_type": as_type, "parent_observation_id": parent_observation_id,
+            "model": model, "usage_details": usage_details,
+        })
+        return f"span_{name}"
+
+    def create_top_level_observation(
+        self, trace_id, name, as_type, input, output,
+        metadata=None, model=None, usage_details=None,
+        *, trace_params=None,
+    ):
+        self.top_level_observations.append({
+            "trace_id": trace_id, "name": name, "as_type": as_type,
+            "input": input, "output": output, "metadata": metadata,
+            "model": model, "usage_details": usage_details,
+            "top_level": True, "trace_params": trace_params,
+        })
+        return f"tl_{name}"
+
+    def create_generation(self, trace_id, name, model, input, output,
+                          usage=None, metadata=None):
+        return f"gen_{name}"
+
+    def create_score(self, trace_id, name, value, data_type="NUMERIC",
+                     comment=None):
+        self.scores.append({
+            "trace_id": trace_id, "name": name,
+            "value": value, "comment": comment,
+        })
+        return True
+
+    def update_trace(self, trace_id, output=None, metadata=None):
+        self.trace_updates.append({
+            "trace_id": trace_id, "output": output, "metadata": metadata,
+        })
+        return True
+
+    def end_trace(self, trace_id):
+        self.end_trace_calls.append(trace_id)
+
+    def flush(self):
+        self.flush_count += 1
+
+    def create_dataset(self, name, description=None, metadata=None):
+        self.datasets_created.append({
+            "name": name, "description": description, "metadata": metadata,
+        })
+        return True
+
+    def create_dataset_item(self, dataset_name, input, expected_output=None,
+                            metadata=None):
+        self._item_counter += 1
+        item_id = f"item_{self._item_counter:03d}"
+        self.dataset_items_created.append({
+            "id": item_id, "dataset_name": dataset_name,
+            "input": input, "expected_output": expected_output,
+        })
+        return item_id
+
+    def get_dataset(self, name):
+        return type("Dataset", (), {"name": name, "items": []})()
+
+    def update_dataset_item(self, item_id, expected_output=None, metadata=None):
+        return True
+
+    def link_item_to_run(self, dataset_item_id, trace_id,
+                         observation_id=None, run_name="", run_metadata=None):
+        self.dataset_run_links.append({
+            "dataset_item_id": dataset_item_id,
+            "trace_id": trace_id,
+            "observation_id": observation_id,
+            "run_name": run_name,
+            "run_metadata": run_metadata,
+        })
+        return True
+
+
 class MockCompletion:
     """Fake OpenAI-compatible completion response for LLM tests."""
 

@@ -58,28 +58,7 @@ class TestProbeRoundEnrichment:
         ]
 
     @pytest.mark.asyncio
-    async def test_probe_meta_prompt_contains_warning_summary(
-        self, monkeypatch, warning_inventory,
-    ):
-        captured = _capture_llm_prompts(monkeypatch)
-
-        osp = OptSearchPoint(instruction="test prompt",
-                              warning_inventory=warning_inventory)
-        await l1_generate(
-            osp, 0.5, [
-                {"query": "aspirin", "predicted": "wrong", "ground_truth": "Aspirin", "hit": False},
-            ],
-            n_variants=1, creativity=0.5, llm_client=None,
-            is_probe_round=True,
-        )
-
-        prompt = captured[0]
-        assert "RECURRING PIPELINE WARNINGS" in prompt
-        assert "web_search:timeout" in prompt
-        assert "Dominant problem step: web_search" in prompt
-
-    @pytest.mark.asyncio
-    async def test_probe_includes_escalation_journal(
+    async def test_probe_meta_prompt_contains_warnings_and_journal(
         self, monkeypatch, warning_inventory, escalation_journal,
     ):
         captured = _capture_llm_prompts(monkeypatch)
@@ -96,12 +75,16 @@ class TestProbeRoundEnrichment:
         )
 
         prompt = captured[0]
+        assert "RECURRING PIPELINE WARNINGS" in prompt
+        assert "web_search:timeout" in prompt
+        assert "Dominant problem step: web_search" in prompt
         assert "Previous attempts targeting web_search" in prompt
         assert "degraded_rate=40%" in prompt
 
     @pytest.mark.asyncio
-    async def test_probe_lowers_annotation_threshold(
-        self, monkeypatch, warning_inventory,
+    @pytest.mark.parametrize("is_probe,expect_annotation", [(True, True), (False, False)])
+    async def test_annotation_threshold_depends_on_probe(
+        self, monkeypatch, is_probe, expect_annotation,
     ):
         captured = _capture_llm_prompts(monkeypatch)
 
@@ -113,43 +96,19 @@ class TestProbeRoundEnrichment:
             },
         }
 
-        osp = OptSearchPoint(instruction="test prompt",
-                              warning_inventory=inv)
+        osp = OptSearchPoint(instruction="test prompt", warning_inventory=inv)
         await l1_generate(
             osp, 0.5, [
                 {"query": "aspirin", "predicted": "wrong", "ground_truth": "Aspirin", "hit": False},
             ],
             n_variants=1, creativity=0.5, llm_client=None,
-            is_probe_round=True,
+            is_probe_round=is_probe,
         )
 
-        assert "[web_search:timeout 1/1 rounds]" in captured[0]
-
-    @pytest.mark.asyncio
-    async def test_non_probe_does_not_annotate_single_occurrence(
-        self, monkeypatch,
-    ):
-        captured = _capture_llm_prompts(monkeypatch)
-
-        inv = {
-            "aspirin": {
-                "rounds_seen": 1, "hits": 0, "misses": 1,
-                "warnings": {"web_search:timeout": 1},
-                "last_terminated_at": "token_matching",
-            },
-        }
-
-        osp = OptSearchPoint(instruction="test prompt",
-                              warning_inventory=inv)
-        await l1_generate(
-            osp, 0.5, [
-                {"query": "aspirin", "predicted": "wrong", "ground_truth": "Aspirin", "hit": False},
-            ],
-            n_variants=1, creativity=0.5, llm_client=None,
-            is_probe_round=False,
-        )
-
-        assert "[web_search:timeout" not in captured[0]
+        if expect_annotation:
+            assert "[web_search:timeout 1/1 rounds]" in captured[0]
+        else:
+            assert "[web_search:timeout" not in captured[0]
 
 
 class TestValueDiversity:

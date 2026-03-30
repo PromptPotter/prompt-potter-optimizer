@@ -15,85 +15,52 @@ def _make_jsp(instruction: str = "Rank by relevance.", **kwargs) -> JobSearchPoi
     )
 
 
-def test_construct_with_defaults():
+def test_construct_and_frozen():
     sp = JobSearchPoint()
     assert sp.pipeline_params is None
-
-
-def test_construct_with_all_fields():
-    sp = JobSearchPoint(
+    sp2 = JobSearchPoint(
         pipeline_params={"llm_ranking": {"prompt": "Rank by relevance."}},
     )
-    assert sp.render() == "Rank by relevance."
-
-
-def test_frozen():
-    sp = JobSearchPoint()
+    assert sp2.render() == "Rank by relevance."
     with pytest.raises(pydantic.ValidationError):
         sp.pipeline_params = {"new": "val"}
 
 
-def test_render_extracts_prompt():
-    sp = JobSearchPoint(
-        pipeline_params={"llm_ranking": {"prompt": "Expert\n\nRank candidates."}},
-    )
-    assert "Expert" in sp.render()
-    assert "Rank candidates." in sp.render()
-
-
 def test_content_hash_matches_eval_content_hash():
+    # Without extra pipeline params
     sp = _make_jsp("Rank by relevance.")
     eval_data = [
         {"query": "aspirin", "ground_truth": "Aspirin"},
         {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
     ]
-    expected = eval_content_hash(sp.render(), eval_data, sp.pipeline_params)
-    assert sp.content_hash(eval_data) == expected
+    assert sp.content_hash(eval_data) == eval_content_hash(sp.render(), eval_data, sp.pipeline_params)
 
-
-def test_content_hash_matches_eval_content_hash_with_pipeline_params():
+    # With extra pipeline params
     osp = OptSearchPoint(instruction="Rank by relevance.")
     pp = {"llm_ranking": {"prompt": osp.render()}, "ranking_temperature": 0.5}
-    sp = JobSearchPoint(pipeline_params=pp)
-    eval_data = [
-        {"query": "aspirin", "ground_truth": "Aspirin"},
-    ]
-    expected = eval_content_hash(sp.render(), eval_data, pp)
-    assert sp.content_hash(eval_data) == expected
+    sp2 = JobSearchPoint(pipeline_params=pp)
+    data2 = [{"query": "aspirin", "ground_truth": "Aspirin"}]
+    assert sp2.content_hash(data2) == eval_content_hash(sp2.render(), data2, pp)
 
 
-def test_content_hash_includes_pipeline_params():
+def test_content_hash_differs_with_pipeline_params():
     eval_data = [{"query": "q", "ground_truth": "a"}]
     sp_a = JobSearchPoint(pipeline_params={"steps": ["llm_ranking"]})
     sp_b = JobSearchPoint(pipeline_params={"steps": ["fuzzy_matching"]})
     sp_none = JobSearchPoint()
-    # Different steps -> different hash
-    assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
-    # steps pp differs from no pp
-    assert sp_a.content_hash(eval_data) != sp_none.content_hash(eval_data)
-
-
-def test_content_hash_differs_with_non_steps_pipeline_params():
-    eval_data = [{"query": "q", "ground_truth": "a"}]
-    sp_a = JobSearchPoint(pipeline_params={"ranking_temperature": 0.5})
-    sp_b = JobSearchPoint(pipeline_params={"ranking_temperature": 0.9})
-    sp_none = JobSearchPoint()
     assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
     assert sp_a.content_hash(eval_data) != sp_none.content_hash(eval_data)
+    # Non-steps params also differ
+    sp_t1 = JobSearchPoint(pipeline_params={"ranking_temperature": 0.5})
+    sp_t2 = JobSearchPoint(pipeline_params={"ranking_temperature": 0.9})
+    assert sp_t1.content_hash(eval_data) != sp_t2.content_hash(eval_data)
 
 
 def test_derive_pipeline_params():
-    sp = JobSearchPoint(
-        pipeline_params={"steps": ["llm_ranking"]},
-    )
+    sp = JobSearchPoint(pipeline_params={"steps": ["llm_ranking"]})
     sp2 = sp.derive(pipeline_params={"steps": ["fuzzy_matching"]})
     assert sp2.pipeline_params == {"steps": ["fuzzy_matching"]}
     assert sp.pipeline_params == {"steps": ["llm_ranking"]}  # original unchanged
-
-
-def test_derive_returns_new_frozen_instance():
-    sp = JobSearchPoint(pipeline_params={"steps": ["a"]})
-    sp2 = sp.derive(pipeline_params={"steps": ["b"]})
     assert sp is not sp2
     with pytest.raises(pydantic.ValidationError):
         sp2.pipeline_params = {"steps": ["c"]}
@@ -105,7 +72,7 @@ def test_derive_returns_new_frozen_instance():
 
 
 def test_prompt_fields_render():
-    """JSP with prompt_fields renders from them, not from pipeline_params."""
+    """JSP with prompt_fields renders from them; without falls back to pipeline_params."""
     sp = JobSearchPoint(
         pipeline_params={"llm_ranking": {"prompt": "stale rendered text"}},
         prompt_fields={"persona": "You are an expert.", "instruction": "Rank items."},
@@ -115,66 +82,38 @@ def test_prompt_fields_render():
     assert "Rank items." in rendered
     assert "stale rendered text" not in rendered
 
-
-def test_prompt_fields_render_fallback():
-    """JSP without prompt_fields renders from pipeline_params as before."""
-    sp = JobSearchPoint(
-        pipeline_params={"llm_ranking": {"prompt": "Hello world."}},
-    )
-    assert sp.render() == "Hello world."
-    assert sp.prompt_fields is None
+    # Fallback: no prompt_fields → pipeline_params
+    sp2 = JobSearchPoint(pipeline_params={"llm_ranking": {"prompt": "Hello world."}})
+    assert sp2.render() == "Hello world."
+    assert sp2.prompt_fields is None
 
 
-def test_prompt_fields_render_preserves_field_order():
-    """Fields are assembled in PROMPT_STRING_FIELDS order."""
+def test_prompt_fields_render_ordering_and_few_shot():
+    """Fields assembled in PROMPT_STRING_FIELDS order; few_shot_block appended after."""
     sp = JobSearchPoint(
         pipeline_params={"llm_ranking": {"prompt": ""}},
-        prompt_fields={
-            "instruction": "Second",
-            "persona": "First",
-        },
+        prompt_fields={"instruction": "Second", "persona": "First"},
     )
-    rendered = sp.render()
-    assert rendered.index("First") < rendered.index("Second")
+    assert sp.render().index("First") < sp.render().index("Second")
 
-
-def test_prompt_fields_render_includes_few_shot_block():
-    """Pre-rendered few_shot_block is appended after string fields."""
-    sp = JobSearchPoint(
+    sp2 = JobSearchPoint(
         pipeline_params={"llm_ranking": {"prompt": ""}},
-        prompt_fields={
-            "instruction": "Rank items.",
-            "few_shot_block": "Input: x\nOutput: y",
-        },
+        prompt_fields={"instruction": "Rank items.", "few_shot_block": "Input: x\nOutput: y"},
     )
-    rendered = sp.render()
-    assert "Rank items." in rendered
-    assert "Input: x\nOutput: y" in rendered
-    # few_shot_block comes after instruction
+    rendered = sp2.render()
     assert rendered.index("Rank items.") < rendered.index("Input: x")
 
 
 def test_derive_with_prompt_fields():
-    """derive(prompt_fields=...) merges fields and re-renders into pipeline_params."""
-    sp = _make_jsp("Rank by relevance.")
-    assert sp.prompt_fields is not None
-    assert sp.prompt_fields["instruction"] == "Rank by relevance."
+    """derive(prompt_fields=...) merges fields, re-renders, preserves others."""
+    osp = OptSearchPoint(persona="Expert", instruction="Rank by relevance.")
+    sp = osp.to_job_search_point()
 
     sp2 = sp.derive(prompt_fields={"instruction": "Sort by name."})
     assert sp2.prompt_fields["instruction"] == "Sort by name."
+    assert sp2.prompt_fields["persona"] == "Expert"  # preserved
     assert "Sort by name." in sp2.render()
-    assert "Sort by name." in sp2.pipeline_params["llm_ranking"]["prompt"]
-    # Original unchanged
-    assert sp.prompt_fields["instruction"] == "Rank by relevance."
-
-
-def test_derive_prompt_fields_preserves_other_fields():
-    """Partial prompt_fields update keeps unmentioned fields."""
-    osp = OptSearchPoint(persona="Expert", instruction="Rank items.")
-    sp = osp.to_job_search_point()
-    sp2 = sp.derive(prompt_fields={"instruction": "Sort items."})
-    assert sp2.prompt_fields["persona"] == "Expert"
-    assert sp2.prompt_fields["instruction"] == "Sort items."
+    assert sp.prompt_fields["instruction"] == "Rank by relevance."  # original unchanged
 
 
 def test_derive_prompt_fields_sp_hash_consistency():

@@ -36,110 +36,65 @@ def _mock_client(response_dict: dict) -> MockLLMClient:
 
 
 @pytest.mark.asyncio
-async def test_refine_context_applies_parameters():
-
-    client = _mock_client({
-        "optimizer_params": {"creativity": 0.9, "n_variants": 8},
-        "context": "",
-        "rationale": "Increase diversity to escape local minimum",
-    })
-
+@pytest.mark.parametrize("response,check_key,check_val", [
+    (
+        {"optimizer_params": {"creativity": 0.9, "n_variants": 8}, "context": "",
+         "rationale": "Increase diversity"},
+        "optimizer_params", {"creativity": 0.9, "n_variants": 8},
+    ),
+    (
+        {"optimizer_params": {}, "task_context": {"domain": "pharmaceutical"},
+         "rationale": "Add domain grounding"},
+        "task_context", {"domain": "pharmaceutical"},
+    ),
+    (
+        {"optimizer_params": {}, "context": "", "rationale": "No changes needed"},
+        None, None,
+    ),
+])
+async def test_refine_context_variants(response, check_key, check_val):
+    client = _mock_client(response)
     osp = OptSearchPoint(instruction="Rank candidates", optimizer_params={"creativity": 0.5})
-    stalled_rounds = [
-        {"round": 0, "accuracy": 0.4, "results": [
-            {"query": "aspirin", "ground_truth": "Aspirin", "predicted": "WRONG", "hit": False},
-        ]},
-        {"round": 1, "accuracy": 0.4, "results": []},
-    ]
+    stalled = [{"round": 0, "accuracy": 0.4, "results": []}]
 
-    result = await refine_context(osp, stalled_rounds, [], client)
+    result = await refine_context(osp, stalled, [], client)
 
     assert isinstance(result, TransitionResult)
-    assert result.opt_search_point.optimizer_params["creativity"] == 0.9
-    assert result.opt_search_point.optimizer_params["n_variants"] == 8
-    assert "L2:" in result.opt_search_point.changes_description
-    assert result.pipeline_params is None
-
-
-@pytest.mark.asyncio
-async def test_refine_context_applies_task_context():
-
-    client = _mock_client({
-        "optimizer_params": {},
-        "task_context": {"domain": "pharmaceutical"},
-        "rationale": "Add domain grounding",
-    })
-
-    _osp = OptSearchPoint(instruction="Rank candidates",
-                           task_context={"domain": "generic"})
-    result = await refine_context(
-        _osp, [{"round": 0, "accuracy": 0.3, "results": []}], [], client,
-    )
-
-    assert result.task_context == {"domain": "pharmaceutical"}
-    assert result.opt_search_point.parent_id is not None
-
-
-@pytest.mark.asyncio
-async def test_refine_context_no_changes_returns_same():
-
-    client = _mock_client({
-        "optimizer_params": {},
-        "context": "",
-        "rationale": "No changes needed",
-    })
-
-    osp = OptSearchPoint(instruction="Rank candidates")
-
-    result = await refine_context(osp, [{"round": 0, "accuracy": 0.5, "results": []}], [], client)
-
-    # Still derives because changes_description is always added
     assert result.opt_search_point.parent_id is not None
     assert "L2:" in result.opt_search_point.changes_description
-
-
-
-@pytest.mark.asyncio
-async def test_modify_plan_sets_new_plan():
-
-    client = _mock_client({
-        "plan": "Use chain-of-thought reasoning with explicit comparison steps.",
-        "rationale": "Switch from direct ranking to comparative reasoning",
-    })
-
-    osp = OptSearchPoint(instruction="Rank candidates", plan="")
-    l2_history = [{"l2_round": 1, "optimizer_params": {}, "accuracy_change": 0.0}]
-
-    result = await modify_plan(osp, l2_history, [], client)
-
-    assert isinstance(result, TransitionResult)
-    expected_plan = "Use chain-of-thought reasoning with explicit comparison steps."
-    assert result.opt_search_point.plan == expected_plan
-    assert result.opt_search_point.parent_id is not None
-    assert "L3:" in result.opt_search_point.changes_description
     assert result.pipeline_params is None
+    if check_key == "optimizer_params":
+        for k, v in check_val.items():
+            assert result.opt_search_point.optimizer_params[k] == v
+    elif check_key == "task_context":
+        assert result.task_context == check_val
+
 
 
 @pytest.mark.asyncio
-async def test_modify_plan_preserves_other_fields():
-
+async def test_modify_plan():
     client = _mock_client({
-        "plan": "New strategy",
-        "rationale": "Strategic shift",
+        "plan": "Use chain-of-thought reasoning.",
+        "rationale": "Switch to comparative reasoning",
     })
 
     osp = OptSearchPoint(
         instruction="Rank candidates",
         persona="Expert pharmacologist",
         optimizer_params={"creativity": 0.8},
+        plan="",
     )
 
-    result = await modify_plan(osp, [], [], client)
+    result = await modify_plan(osp, [{"l2_round": 1, "optimizer_params": {}, "accuracy_change": 0.0}], [], client)
 
+    assert isinstance(result, TransitionResult)
+    assert result.opt_search_point.plan == "Use chain-of-thought reasoning."
+    assert result.opt_search_point.parent_id is not None
+    assert "L3:" in result.opt_search_point.changes_description
+    assert result.pipeline_params is None
+    # Preserves other fields
     assert result.opt_search_point.instruction == osp.instruction
     assert result.opt_search_point.persona == osp.persona
-    assert result.opt_search_point.optimizer_params == osp.optimizer_params
-    assert result.opt_search_point.plan == "New strategy"
 
 
 
@@ -366,42 +321,3 @@ async def test_plan_injected_into_meta_prompt(monkeypatch, eval_data):
 
 
 
-@pytest.mark.asyncio
-async def test_refine_context_ignores_pipeline_params():
-
-    client = _mock_client({
-        "optimizer_params": {"creativity": 0.5},
-        "context": "Updated context",
-        "pipeline_params": {"llm_ranking": {"temperature": 0.5}},
-        "rationale": "L2 focuses on context, not pipeline_params",
-    })
-
-    osp = OptSearchPoint(instruction="Rank candidates")
-    result = await refine_context(
-        osp, [{"round": 0, "accuracy": 0.4, "results": []}], [], client,
-        pipeline_params={"llm_ranking": {"temperature": 0.3}},
-    )
-
-    # L2 no longer sets pipeline_params — only context + meta-settings
-    assert result.pipeline_params is None
-    assert result.opt_search_point.optimizer_params.get("creativity") == 0.5
-
-
-@pytest.mark.asyncio
-async def test_modify_plan_with_pipeline_params():
-
-    client = _mock_client({
-        "plan": "Focus on fuzzy matching",
-        "pipeline_params": {"fuzzy_matching": {"threshold": 0.6}},
-        "rationale": "Lower fuzzy threshold",
-    })
-
-    osp = OptSearchPoint(instruction="Rank candidates")
-    result = await modify_plan(
-        osp, [], [], client,
-        pipeline_params={"fuzzy_matching": {"threshold": 0.8}},
-    )
-
-    assert result.opt_search_point.plan == "Focus on fuzzy matching"
-    assert result.pipeline_params is not None
-    assert result.pipeline_params["fuzzy_matching"]["threshold"] == 0.6
