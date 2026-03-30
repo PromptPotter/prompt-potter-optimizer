@@ -4,7 +4,6 @@ import pytest
 from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
-from api.services.pipeline_discovery import parse_pipeline_response
 from api.services.prompt_eval import _error_category, _most_common_error_category
 from api.services.search.sensitivity_scan import sensitivity_scan
 from api.services.search.smart_search import _profiles_from_rows
@@ -257,39 +256,6 @@ async def test_scan_baseline_row_reflects_actual_errors(scan_eval_mock):
     baseline_row = df[df["value_preview"] == "default_persona"].iloc[0]
     assert baseline_row["errors"] == 1
 
-
-def test_parse_pipeline_response_available_models():
-    response = {
-        "name": "testpipe",
-        "version": "1.0",
-        "available_models": [
-            "meta-llama/llama-4-maverick-17b-128e-instruct",
-            "qwen/qwen3-32b",
-        ],
-        "nodes": {
-            "step_a": {
-                "type": "tool",
-                "config": {"threshold": 0.5},
-            },
-        },
-    }
-    schema = parse_pipeline_response(response)
-    assert schema.available_models == [
-        "meta-llama/llama-4-maverick-17b-128e-instruct",
-        "qwen/qwen3-32b",
-    ]
-
-
-def test_parse_pipeline_response_no_available_models():
-    response = {
-        "name": "testpipe",
-        "version": "1.0",
-        "nodes": {
-            "step_a": {"type": "tool", "config": {}},
-        },
-    }
-    schema = parse_pipeline_response(response)
-    assert schema.available_models == []
 
 
 # ---------------------------------------------------------------------------

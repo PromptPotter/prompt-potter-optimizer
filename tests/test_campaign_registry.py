@@ -121,69 +121,6 @@ def test_delete(store, campaign):
     assert store.campaigns.delete(BACKEND_ID, cid) is False
 
 
-def test_record_campaign_rounds(store, campaign, baseline_ps):
-
-    cid = campaign["campaign_id"]
-
-    improved_ps = baseline_ps.derive_candidate(
-        instruction="better", changes_description="improved",
-    )
-
-    rounds = [
-        {
-            "round": 0, "label": "baseline",
-            "prompt_fields": baseline_ps,
-            "accuracy": 0.67, "hits": 2, "total": 3,
-            "results": [], "improved": False,
-        },
-        {
-            "round": 1, "label": "improved",
-            "prompt_fields": improved_ps,
-            "accuracy": 0.90, "hits": 9, "total": 10,
-            "results": [], "improved": True,
-            "candidates_evaluated": 5,
-        },
-    ]
-
-    trial_ids = store.campaigns.record_campaign_rounds(BACKEND_ID, cid, rounds)
-    assert len(trial_ids) == 2
-
-    loaded = store.campaigns.load(BACKEND_ID, cid)
-    assert loaded["n_trials"] == 2
-    assert loaded["best_accuracy"] == 0.90
-    assert loaded["baseline_accuracy"] == 0.67
-
-
-
-def test_lineage_chain(store, campaign, baseline_ps):
-
-    cid = campaign["campaign_id"]
-
-    r1_ps = baseline_ps.derive_candidate(instruction="r1", changes_description="round1")
-    r2_ps = r1_ps.derive_candidate(instruction="r2", changes_description="round2")
-
-    store.campaigns.record_trial(
-        BACKEND_ID, cid, round_num=0,
-        prompt_fields=baseline_ps.model_dump(),
-        accuracy=0.50, hits=1, total=2, label="baseline",
-    )
-    store.campaigns.record_trial(
-        BACKEND_ID, cid, round_num=1,
-        prompt_fields=r1_ps.model_dump(),
-        accuracy=0.75, hits=3, total=4, label="round1",
-    )
-    store.campaigns.record_trial(
-        BACKEND_ID, cid, round_num=2,
-        prompt_fields=r2_ps.model_dump(),
-        accuracy=1.0, hits=4, total=4, label="round2",
-    )
-
-    lineage = store.campaigns.get_lineage(BACKEND_ID, cid)
-    assert len(lineage) == 3
-    assert lineage[0]["parent_prompt_fields_id"] is None
-    assert lineage[1]["parent_prompt_fields_id"] == baseline_ps.id
-    assert lineage[2]["parent_prompt_fields_id"] == r1_ps.id
-
 
 
 @pytest.fixture
@@ -344,26 +281,19 @@ async def test_e2e_optimization_with_registry(
     )
     campaign_id = campaign["campaign_id"]
 
-    rounds_for_registry = []
     for rd in result.rounds:
-        ps = OptSearchPoint(**rd.prompt_fields)
-        rounds_for_registry.append({
-            "round": rd.round,
-            "label": rd.label,
-            "prompt_fields": ps,
-            "accuracy": rd.accuracy,
-            "hits": rd.hits,
-            "total": rd.total,
-            "improved": rd.improved,
-            "candidates_evaluated": rd.candidates_evaluated,
-        })
-
-    trial_ids = store.campaigns.record_campaign_rounds(
-        BACKEND_ID, campaign_id, rounds_for_registry,
-    )
+        store.campaigns.record_trial(
+            BACKEND_ID, campaign_id,
+            round_num=rd.round,
+            prompt_fields=rd.prompt_fields,
+            accuracy=rd.accuracy,
+            hits=rd.hits,
+            total=rd.total,
+            label=rd.label,
+            improved=rd.improved,
+            candidates_evaluated=rd.candidates_evaluated,
+        )
     store.campaigns.complete(BACKEND_ID, campaign_id)
-
-    assert len(trial_ids) == result.n_rounds
 
     loaded = store.campaigns.load(BACKEND_ID, campaign_id)
     assert loaded["status"] == "completed"

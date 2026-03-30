@@ -11,7 +11,7 @@ from api.services.search.eval_dataset import (
 # Minimal test schema matching TermNorm's observation structure
 _TEST_SCHEMA = PipelineSchema(
     name="test",
-    required_step="entity_profile",
+
     nodes=[
         PipelineNode(
             name="web_search",
@@ -230,7 +230,7 @@ def test_custom_schema_obs_mapping():
 
     custom_schema = PipelineSchema(
         name="custom",
-        required_step="entity_profile",
+    
         nodes=[
             PipelineNode(
                 name="entity_profiling",

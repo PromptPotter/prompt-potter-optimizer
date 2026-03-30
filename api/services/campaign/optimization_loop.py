@@ -8,7 +8,6 @@ them against the current best.
 Stopping conditions:
 - ``max_rounds`` reached
 - ``patience`` consecutive non-improving rounds exhausted
-- ``next_action == "stop"`` from evaluation
 - ``winner_accuracy >= 1.0`` (perfect score)
 """
 
@@ -179,7 +178,6 @@ async def _handle_escalation_signal(
                 "problem_step": problem_step,
                 "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
                 "warning_types": esc_context.get("warning_types", {}),
-                "l2_action": state.opt_sp.changes_description or "",
                 "outcome_degraded_rate": None,
             }
         )
@@ -495,7 +493,6 @@ def _checkpoint_round(
                 "hits": round_result.hits,
                 "total": round_result.total,
                 "improved": round_result.improved,
-                "next_action": round_result.next_action,
                 "prompt_fields": round_result.prompt_fields,
                 "results": round_result.results,
                 "candidates_evaluated": round_result.candidates_evaluated,
@@ -519,14 +516,12 @@ async def _check_stopping_conditions(
     on_phase: Callable[[PhaseEvent], None] | None,
     obs_campaign_id: str,
 ) -> StopReason | None:
-    """Check patience, max_rounds, perfect score, and next_action stop.
+    """Check patience, max_rounds, and perfect score.
 
     Returns a StopReason if the cycle should stop, None to continue.
     """
     if state.current_accuracy >= 1.0:
         return StopReason.PERFECT
-    if round_result.next_action == "stop":
-        return StopReason.NEXT_ACTION
     if state.stall_count >= config.l1_patience:
         if config.enable_l2:
             _obs, _tid = _get_obs_trace(state, obs_campaign_id)

@@ -10,7 +10,7 @@ from api.services.campaign.results import CycleRoundResult
 
 if TYPE_CHECKING:
     from api.models.eval_context import EvalContext
-    from api.services.campaign.escalation import EscalationCheck
+    from api.services.campaign.escalation import DegradationCheck
 
 __all__ = ["CycleInitResult", "EscalationCounters", "LoopState"]
 
@@ -75,5 +75,5 @@ class CycleInitResult:
     cycle_id: str | None = None
     obs_campaign_id: str = ""
     round_eval_data: list[dict[str, Any]] = field(default_factory=list)
-    escalation_checks: list[EscalationCheck] = field(default_factory=list)
+    escalation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0

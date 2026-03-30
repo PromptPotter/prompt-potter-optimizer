@@ -91,11 +91,6 @@ class OptSearchPoint(SearchPoint):
 
     # -- Optimization memory -----------------------------------------------
     critique_text: str = ""
-    critique: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Full 5-field critique dict (positive_critique, negative_critique, "
-        "priority_fix, suggested_axes, summary).",
-    )
     thinking_styles: list[str] = Field(default_factory=list)
     escalation_journal: list[dict[str, Any]] = Field(
         default_factory=list,

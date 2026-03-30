@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 
 from api.config.optimizer_pipeline import llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
-from api.config.settings import DISPLAY_TRUNCATE
 from api.models.opt_search_point import OptSearchPoint
 from api.models.pipeline_schema import PipelineSchema
 from api.services.campaign.formatting import ContextData
@@ -44,28 +43,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class L1WinnerSummary(BaseModel):
-    """Summary of the selected round winner."""
-
-    label: str
-    accuracy: float
-    composite: float
-    hits: int
-    total: int
-    improved: bool
-    candidates_evaluated: int
-
-
 class L1EvalResult(BaseModel):
     """Structured return value from ``l1_evaluate()``."""
 
-    winner: L1WinnerSummary
+    label: str
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None
     winner_accuracy: float
     winner_composite: float
+    hits: int
+    total: int
     improved: bool
-    next_action: str
+    candidates_evaluated: int
     candidate_scores: list[dict[str, Any]]
     winner_results: list[dict[str, Any]]
     all_eval_results: list[dict[str, Any]] = Field(default_factory=list)
@@ -74,7 +63,6 @@ class L1EvalResult(BaseModel):
 
     # Populated post-eval by round_execution (critique phase)
     critique_text: str = ""
-    critique: dict[str, Any] = Field(default_factory=dict)
     thinking_styles: list[str] = Field(default_factory=list)
 
 
@@ -209,27 +197,6 @@ def _select_round_winner(
             best_label = candidate.changes_description or candidate.id[:12]
             winner_idx = idx
 
-    # Build comparison rows
-    rows = [
-        {
-            "prompt": f"current_best ({current_best['label'][:30]})",
-            "hit@1": f"{current_acc:.1%}",
-            "composite": f"{current_composite:.4f}",
-            "delta": "-",
-        }
-    ]
-    for candidate in candidates:
-        scores = candidate_scores[candidate.id]
-        delta = scores["composite"] - current_composite
-        rows.append(
-            {
-                "prompt": (candidate.changes_description or candidate.id[:12])[:DISPLAY_TRUNCATE],
-                "hit@1": f"{scores['accuracy']:.1%}",
-                "composite": f"{scores['composite']:.4f}",
-                "delta": f"{delta:+.4f}",
-            }
-        )
-
     return {
         "label": best_label,
         "prompt_fields": best_ps,
@@ -239,7 +206,6 @@ def _select_round_winner(
         "total": len(best_results),
         "results": best_results,
         "candidates_evaluated": len(candidates),
-        "comparison_rows": rows,
         "improved": best_composite > current_composite + improvement_threshold,
         "winner_idx": winner_idx,
     }
@@ -372,21 +338,15 @@ async def l1_evaluate(
     else:
         winner_dict = winner_osp.model_dump()
     return L1EvalResult(
-        winner=L1WinnerSummary(
-            label=winner_entry["label"],
-            accuracy=winner_entry["accuracy"],
-            composite=winner_entry.get("composite", winner_entry["accuracy"]),
-            hits=winner_entry["hits"],
-            total=winner_entry["total"],
-            improved=winner_entry["improved"],
-            candidates_evaluated=winner_entry["candidates_evaluated"],
-        ),
+        label=winner_entry["label"],
         winner_prompt_fields=winner_dict,
         winner_pipeline_params=winner_pp,
         winner_accuracy=winner_entry["accuracy"],
         winner_composite=winner_entry.get("composite", winner_entry["accuracy"]),
+        hits=winner_entry["hits"],
+        total=winner_entry["total"],
         improved=winner_entry["improved"],
-        next_action="escalate" if escalation_signal else "generate",
+        candidates_evaluated=winner_entry["candidates_evaluated"],
         candidate_scores=candidate_scores,
         winner_results=winner_entry.get("results", []),
         all_eval_results=[r for results in all_candidate_results.values() for r in results],

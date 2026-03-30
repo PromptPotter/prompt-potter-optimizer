@@ -70,42 +70,6 @@ async def test_max_rounds(monkeypatch, eval_data):
     assert result.best_accuracy > 0
 
 
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_next_action_stop(monkeypatch, eval_data, cycle_config):
-    apply_llm_mock(monkeypatch)
-    apply_grow_mock(monkeypatch)
-
-    # First candidate gets 33%, analysis suggestions say stop
-    apply_eval_mock(monkeypatch, round_hits=[1])
-
-    # Wrap l1_evaluate to force next_action="stop"
-    from api.services.l1_optimizer import l1_evaluate
-
-    original_eval = l1_evaluate
-
-    async def patched_eval(*args, **kwargs):
-        result = await original_eval(*args, **kwargs)
-        result.next_action = "stop"
-        return result
-
-    monkeypatch.setattr(
-        "api.services.l1_optimizer.l1_evaluate",
-        patched_eval,
-    )
-
-    result = await run_optimization(
-        instruction="Rank candidates.",
-        eval_data=eval_data,
-        config=cycle_config,
-        baseline_prompt_fields=OptSearchPoint(instruction="Rank candidates.").model_dump(),
-        baseline_accuracy=0.0,
-        baseline_results=[],
-    )
-
-    assert result.stop_reason == "next_action_stop"
-    assert result.n_rounds == 1
-
 
 @pytest.mark.slow
 @pytest.mark.asyncio

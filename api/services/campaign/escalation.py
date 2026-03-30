@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import enum
 import logging
-from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from api.models.phase_event import PhaseEvent
@@ -85,29 +84,11 @@ class EscalationError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# EscalationCheck ABC + DegradationCheck
+# DegradationCheck — mid-evaluation escalation check
 # ---------------------------------------------------------------------------
 
 
-class EscalationCheck(ABC):
-    """Base class for mid-evaluation escalation checks."""
-
-    name: str = ""
-    enabled: bool = True
-    strategies: dict[str, EscalationStrategy] = field(default_factory=dict)
-
-    @abstractmethod
-    def evaluate(
-        self,
-        results_so_far: list[dict],
-        candidate_idx: int,
-        n_total_candidates: int,
-    ) -> EscalationSignal | None:
-        """Check results accumulated so far. Return signal to abort, or None."""
-        ...
-
-
-class DegradationCheck(EscalationCheck):
+class DegradationCheck:
     """Triggers when degraded query fraction exceeds threshold."""
 
     def __init__(
@@ -184,9 +165,9 @@ def collect_warning_types(results: list[dict]) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 
 
-def build_escalation_checks(config: CycleConfig) -> list[EscalationCheck]:
+def build_escalation_checks(config: CycleConfig) -> list[DegradationCheck]:
     """Build enabled escalation checks from CycleConfig."""
-    checks: list[EscalationCheck] = []
+    checks: list[DegradationCheck] = []
     threshold = getattr(config, "degradation_threshold", 0.0)
     if threshold > 0:
         checks.append(DegradationCheck(threshold=threshold))

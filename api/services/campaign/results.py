@@ -19,7 +19,6 @@ class StopReason(enum.StrEnum):
     L2_PATIENCE = "l2_patience_exhausted"
     L3_PATIENCE = "l3_patience_exhausted"
     HARD_CAP = "hard_cap_reached"
-    NEXT_ACTION = "next_action_stop"
 
 
 class CycleRoundResult(BaseModel):
@@ -32,7 +31,6 @@ class CycleRoundResult(BaseModel):
     hits: int
     total: int
     improved: bool
-    next_action: str
     prompt_fields: dict
     pipeline_params: dict | None = None
     results: list[dict] = Field(default_factory=list)

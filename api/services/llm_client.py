@@ -24,7 +24,7 @@ from api.config.settings import (
     OPENAI_MAX_RETRIES,
     settings,
 )
-from api.shared.llm_parsing import repair_json, try_parse_json
+from api.shared.llm_parsing import try_parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +83,6 @@ class LLMClientBase(ABC):
 
 
 # JSON repair and parsing moved to api.shared.llm_parsing.
-# Local aliases for backward compatibility within this module:
-_repair_json = repair_json
 _try_parse_json = try_parse_json
 
 

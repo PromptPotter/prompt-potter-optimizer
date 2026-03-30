@@ -104,13 +104,10 @@ class PipelineNode(BaseModel):
     model_config = {"frozen": True}
 
     name: str
-    type: str = "tool"
     runtime: NodeRuntime = NodeRuntime.BACKEND
     short_circuit: bool = False
     node_type: NodeType = NodeType.NONE
-    description: str = ""
     param_keys: set[str] = Field(default_factory=set)
-    param_descriptions: dict[str, str] = Field(default_factory=dict)
     override_map: dict[str, str] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
@@ -118,7 +115,6 @@ class PipelineNode(BaseModel):
     output_schema: NodeOutputSchema | None = None
     prompt_meta: NodePromptMeta | None = None
     current_config: dict[str, Any] = Field(default_factory=dict)
-    default_config: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -185,10 +181,6 @@ class PipelineSchema(BaseModel):
     version: str = ""
     description: str = ""
     nodes: list[PipelineNode] = Field(default_factory=list)
-    available_models: list[str] = Field(default_factory=list)
-    required_step: str | None = None
-    template_variables: set[str] = Field(default_factory=set)
-    dataset_name: str = ""
 
     # -------------------------------------------------------------------
     # Lookup helpers
@@ -292,10 +284,7 @@ def load_pipeline_from_dict(data: dict) -> PipelineSchema:
         nodes.append(
             PipelineNode(
                 name=name,
-                type=node_data.get("type", ""),
                 current_config=node_data.get("config", {}),
-                # Snapshot defaults at load time; current_config may diverge at runtime
-                default_config=dict(node_data.get("config", {})),
             )
         )
     return PipelineSchema(

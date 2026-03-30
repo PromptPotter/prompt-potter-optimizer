@@ -268,33 +268,6 @@ class CampaignStore:
         )
         return trial
 
-    def record_campaign_rounds(
-        self,
-        backend_id: str,
-        campaign_id: str,
-        campaign_rounds: list[dict[str, Any]],
-    ) -> list[str]:
-        """Bulk-record campaign round dicts as trials.  Returns trial IDs."""
-        trial_ids = []
-        for rd in campaign_rounds:
-            ps = rd["prompt_fields"]
-            ps_dict = ps.model_dump()
-
-            trial = self.record_trial(
-                backend_id, campaign_id,
-                round_num=rd.get("round", 0),
-                prompt_fields=ps_dict,
-                accuracy=rd.get("accuracy", 0.0),
-                hits=rd.get("hits", 0),
-                total=rd.get("total", 0),
-                results=rd.get("results"),
-                label=rd.get("label", ""),
-                improved=rd.get("improved", False),
-                candidates_evaluated=rd.get("candidates_evaluated", 0),
-            )
-            trial_ids.append(trial["trial_id"])
-        return trial_ids
-
     def complete(self, backend_id: str, campaign_id: str) -> None:
         """Mark a campaign as completed."""
         self.update(backend_id, campaign_id, {"status": "completed"})
@@ -345,28 +318,3 @@ class CampaignStore:
                 round_num,
             )
 
-    def get_lineage(
-        self, backend_id: str, campaign_id: str,
-    ) -> list[dict[str, Any]]:
-        """Reconstruct the full OptSearchPoint lineage chain for a campaign.
-
-        Returns a list of ``{trial_id, round, prompt_fields_id, parent_id,
-        accuracy, label}`` ordered by round.
-        """
-        campaign = self.load(backend_id, campaign_id)
-        if not campaign:
-            return []
-
-        lineage = []
-        for entry in campaign.get("trials", []):
-            trial = self.load_trial(backend_id, campaign_id, entry["round"])
-            parent_id = trial.get("parent_prompt_fields_id") if trial else None
-            lineage.append({
-                "trial_id": entry["trial_id"],
-                "round": entry["round"],
-                "prompt_fields_id": entry.get("prompt_fields_id", ""),
-                "parent_prompt_fields_id": parent_id,
-                "accuracy": entry.get("accuracy", 0.0),
-                "label": entry.get("label", ""),
-            })
-        return lineage

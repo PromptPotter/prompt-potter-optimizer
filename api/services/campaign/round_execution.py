@@ -33,7 +33,7 @@ from api.services.campaign.models import (
 from api.services.obs.node_tracer import observed_node
 
 if TYPE_CHECKING:
-    from api.services.campaign.escalation import EscalationCheck
+    from api.services.campaign.escalation import DegradationCheck
     from api.services.l1_optimizer import L1EvalResult
     from api.services.obs.observability_logger import ObsLogger
     from api.services.stores.campaign_store import CampaignStore
@@ -155,7 +155,7 @@ async def _evaluate_candidates(
     callbacks: CycleCallbacks,
     obs: "ObsLogger | None" = None,
     trace_id: str | None = None,
-    escalation_checks: "list[EscalationCheck] | None" = None,
+    escalation_checks: "list[DegradationCheck] | None" = None,
 ) -> "L1EvalResult":
     """Evaluate candidates and run critique analysis."""
     from api.services.l1_optimizer import l1_evaluate
@@ -238,7 +238,6 @@ async def _evaluate_candidates(
             seed=config.seed + round_num + 1,
         )
         eval_out.critique_text = critique_text
-        eval_out.critique = critique_result
         eval_out.thinking_styles = thinking_styles
 
     emit_phase(
@@ -246,11 +245,10 @@ async def _evaluate_candidates(
         "l1_evaluate",
         "exit",
         round=round_num,
-        winner_label=eval_out.winner.label,
+        winner_label=eval_out.label,
         winner_accuracy=eval_out.winner_accuracy,
         winner_composite=eval_out.winner_composite,
         improved=eval_out.improved,
-        next_action=eval_out.next_action,
         candidate_scores=eval_out.candidate_scores,
         critique_text=eval_out.critique_text,
     )
@@ -267,7 +265,7 @@ async def _execute_round(
     campaign_store: "CampaignStore | None",
     cycle_id: str | None,
     callbacks: CycleCallbacks,
-    escalation_checks: "list[EscalationCheck] | None" = None,
+    escalation_checks: "list[DegradationCheck] | None" = None,
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     obs = state.eval_ctx.obs if state.eval_ctx else None
@@ -309,22 +307,20 @@ async def _execute_round(
 
     # Update state with critique + thinking styles from eval output
     state.opt_sp.critique_text = eval_out.critique_text
-    state.opt_sp.critique = eval_out.critique or {"summary": eval_out.critique_text}
     state.opt_sp.thinking_styles = eval_out.thinking_styles
 
     round_result = CycleRoundResult(
         round=round_num,
-        label=eval_out.winner.label,
+        label=eval_out.label,
         accuracy=eval_out.winner_accuracy,
         composite=eval_out.winner_composite,
-        hits=eval_out.winner.hits,
-        total=eval_out.winner.total,
+        hits=eval_out.hits,
+        total=eval_out.total,
         improved=eval_out.improved,
-        next_action=eval_out.next_action,
         prompt_fields=eval_out.winner_prompt_fields,
         pipeline_params=eval_out.winner_pipeline_params,
         results=eval_out.winner_results,
-        candidates_evaluated=eval_out.winner.candidates_evaluated,
+        candidates_evaluated=eval_out.candidates_evaluated,
         candidate_scores=eval_out.candidate_scores,
         degraded_queries=eval_out.degraded_queries,
         escalation_signal=eval_out.escalation_signal,
@@ -342,10 +338,9 @@ async def _execute_round(
                 campaign_id=obs_campaign_id,
                 round_num=round_num,
                 accuracy=eval_out.winner_accuracy,
-                hits=eval_out.winner.hits,
-                total=eval_out.winner.total,
+                hits=eval_out.hits,
+                total=eval_out.total,
                 improved=eval_out.improved,
-                next_action=eval_out.next_action,
                 winner_prompt_fields_id=eval_out.winner_prompt_fields.get("id", ""),
                 candidate_scores=eval_out.candidate_scores,
                 model=config.model or "",

@@ -137,18 +137,11 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
         step_kwargs: dict[str, Any] = {
             "name": name,
-            "type": node.get("type", "tool"),
             "runtime": node.get("runtime", "backend"),
             "short_circuit": node.get("short_circuit", False),
             "node_type": node.get("node_role", ""),
-            "description": node.get("description", ""),
             "param_keys": pk,
-            "param_descriptions": opt.get("param_descriptions", {}),
             "override_map": opt.get("override_map", {}),
-            "default_config": {
-                k: v for k, v in nc.items()
-                if k in pk or k in set(opt.get("override_map", {}).values())
-            },
             "langfuse_type": opt.get("langfuse_type", "span"),
             "current_config": {
                 k: v for k, v in nc.items()
@@ -184,10 +177,6 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         name=config.get("name", "").lower(),
         version=config.get("version", ""),
         description=config.get("description", ""),
-        required_step=config.get("required_step"),
-        template_variables=set(config.get("template_variables", [])),
-        dataset_name=config.get("dataset_name", ""),
-        available_models=config.get("available_models", []),
         nodes=steps,
     )
 
