@@ -144,8 +144,6 @@ class DatasetRunStore:
             "name": data.get("name", run_id),
             "experiment_id": data.get("experiment_id", ""),
             "prompt_fields_id": data["prompt_fields_id"],
-            "model": data["model"],
-            "temperature": data["temperature"],
             "item_count": data["item_count"],
             "scores": data["scores"],
             "content_hash": data["content_hash"],
@@ -211,8 +209,6 @@ class DatasetRunStore:
         self,
         backend_id: str,
         rp_hash: str,
-        model: str,
-        temperature: float,
         pipeline_params: dict | None,
         item_count: int,
     ) -> dict[str, Any] | None:
@@ -226,10 +222,6 @@ class DatasetRunStore:
 
         for h in alias_set:
             for entry in rp_idx.get(h, []):
-                if entry.get("model") != model:
-                    continue
-                if entry.get("temperature") != temperature:
-                    continue
                 if entry.get("pipeline_params") != pipeline_params:
                     continue
                 if entry.get("item_count") != item_count:
@@ -293,8 +285,6 @@ class DatasetRunStore:
                 continue
             entry["sp_hash"] = sp_identity_hash(
                 rp_hash,
-                entry.get("model", ""),
-                entry.get("temperature", 0.0),
                 entry.get("pipeline_params"),
             )
             updated += 1

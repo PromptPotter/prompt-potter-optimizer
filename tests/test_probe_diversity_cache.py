@@ -192,7 +192,6 @@ class TestFindCachedQueries:
         run["sp_hash"] = sp_hash
         run["rendered_prompt_hash"] = "rph1"
         run["model"] = "m1"
-        run["temperature"] = 0.5
         run["source"] = "test"
         if pipeline_params:
             run["pipeline_params"] = pipeline_params
@@ -234,7 +233,6 @@ class TestEvaluatePromptBatchCaching:
         from api.services.prompt_eval import evaluate_prompt_batch
 
         sp = JobSearchPoint(
-            model="m1", temperature=0.0,
             pipeline_params={"llm_ranking": {"prompt": "test"}},
         )
 

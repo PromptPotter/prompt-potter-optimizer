@@ -11,34 +11,26 @@ def _make_jsp(instruction: str = "Rank by relevance.", **kwargs) -> JobSearchPoi
     """Helper: build a JobSearchPoint from an instruction string."""
     osp = OptSearchPoint(instruction=instruction)
     return osp.to_job_search_point(
-        model=kwargs.get("model", ""),
-        temperature=kwargs.get("temperature", 0.0),
         base_pipeline_params=kwargs.get("pipeline_params"),
     )
 
 
 def test_construct_with_defaults():
     sp = JobSearchPoint()
-    assert sp.model == ""
-    assert sp.temperature == 0.0
     assert sp.pipeline_params is None
 
 
 def test_construct_with_all_fields():
     sp = JobSearchPoint(
-        model="llama-3",
-        temperature=0.5,
         pipeline_params={"llm_ranking": {"prompt": "Rank by relevance."}},
     )
-    assert sp.model == "llama-3"
-    assert sp.temperature == 0.5
     assert sp.render() == "Rank by relevance."
 
 
 def test_frozen():
     sp = JobSearchPoint()
     with pytest.raises(pydantic.ValidationError):
-        sp.model = "new-model"
+        sp.pipeline_params = {"new": "val"}
 
 
 def test_render_extracts_prompt():
@@ -50,38 +42,24 @@ def test_render_extracts_prompt():
 
 
 def test_content_hash_matches_eval_content_hash():
-    sp = _make_jsp("Rank by relevance.", model="llama-3", temperature=0.5)
+    sp = _make_jsp("Rank by relevance.")
     eval_data = [
         {"query": "aspirin", "ground_truth": "Aspirin"},
         {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
     ]
-    expected = eval_content_hash(sp.render(), eval_data, "llama-3", 0.5, sp.pipeline_params)
+    expected = eval_content_hash(sp.render(), eval_data, sp.pipeline_params)
     assert sp.content_hash(eval_data) == expected
 
 
 def test_content_hash_matches_eval_content_hash_with_pipeline_params():
     osp = OptSearchPoint(instruction="Rank by relevance.")
     pp = {"llm_ranking": {"prompt": osp.render()}, "ranking_temperature": 0.5}
-    sp = JobSearchPoint(model="llama-3", temperature=0.5, pipeline_params=pp)
+    sp = JobSearchPoint(pipeline_params=pp)
     eval_data = [
         {"query": "aspirin", "ground_truth": "Aspirin"},
     ]
-    expected = eval_content_hash(sp.render(), eval_data, "llama-3", 0.5, pp)
+    expected = eval_content_hash(sp.render(), eval_data, pp)
     assert sp.content_hash(eval_data) == expected
-
-
-def test_content_hash_differs_with_model():
-    eval_data = [{"query": "q", "ground_truth": "a"}]
-    sp_a = _make_jsp(model="model-a")
-    sp_b = _make_jsp(model="model-b")
-    assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
-
-
-def test_content_hash_differs_with_temperature():
-    eval_data = [{"query": "q", "ground_truth": "a"}]
-    sp_a = _make_jsp(temperature=0.0)
-    sp_b = _make_jsp(temperature=0.7)
-    assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
 
 
 def test_content_hash_includes_pipeline_params():
@@ -104,15 +82,6 @@ def test_content_hash_differs_with_non_steps_pipeline_params():
     assert sp_a.content_hash(eval_data) != sp_none.content_hash(eval_data)
 
 
-def test_derive_model_and_temperature():
-    sp = _make_jsp(model="llama-3", temperature=0.5)
-    sp2 = sp.derive(model="gpt-4", temperature=0.9)
-    assert sp2.model == "gpt-4"
-    assert sp2.temperature == 0.9
-    # Original prompt preserved
-    assert sp2.render() == sp.render()
-
-
 def test_derive_pipeline_params():
     sp = JobSearchPoint(
         pipeline_params={"steps": ["llm_ranking"]},
@@ -123,11 +92,11 @@ def test_derive_pipeline_params():
 
 
 def test_derive_returns_new_frozen_instance():
-    sp = JobSearchPoint()
-    sp2 = sp.derive(model="new-model")
+    sp = JobSearchPoint(pipeline_params={"steps": ["a"]})
+    sp2 = sp.derive(pipeline_params={"steps": ["b"]})
     assert sp is not sp2
     with pytest.raises(pydantic.ValidationError):
-        sp2.model = "another"
+        sp2.pipeline_params = {"steps": ["c"]}
 
 
 # ---------------------------------------------------------------------------
@@ -211,14 +180,14 @@ def test_derive_prompt_fields_preserves_other_fields():
 def test_derive_prompt_fields_sp_hash_consistency():
     """derive(prompt_fields=...) produces the same sp_hash as a fresh projection."""
     osp = OptSearchPoint(persona="Expert", instruction="Rank items.")
-    sp = osp.to_job_search_point(model="m", temperature=0.5)
+    sp = osp.to_job_search_point()
 
     # Derive with a field change
     sp_derived = sp.derive(prompt_fields={"instruction": "Sort items."})
 
     # Fresh projection with the same change
     osp2 = osp.derive_candidate(instruction="Sort items.")
-    sp_fresh = osp2.to_job_search_point(model="m", temperature=0.5)
+    sp_fresh = osp2.to_job_search_point()
 
     assert sp_derived.sp_hash() == sp_fresh.sp_hash()
     assert sp_derived.render() == sp_fresh.render()

@@ -339,8 +339,6 @@ def make_dataset_run(
         "name": name or run_id,
         "content_hash": content_hash or f"hash_{run_id}",
         "prompt_fields_id": f"ps_{run_id}",
-        "model": "test-model",
-        "temperature": 0,
         "item_count": total,
         "scores": {
             "hits": hits, "total": total,

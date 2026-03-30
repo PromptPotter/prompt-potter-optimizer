@@ -181,10 +181,6 @@ async def run_baseline_eval(
     Returns:
         (campaign_rounds, baseline_results).
     """
-    eval_llm = campaign_config["eval_llm"]
-    model = eval_llm.get("model", "")
-    temperature = eval_llm.get("temperature", 0.1)
-
     pbar = tqdm(total=len(eval_data) or 1, desc="Baseline eval", unit="query")
 
     def _on_result(result, index, total):
@@ -202,7 +198,6 @@ async def run_baseline_eval(
             pipeline_params=campaign_config.get("pipeline_params"),
             store=svc.get("store"), backend_id=svc.get("backend_id", ""),
             experiment_id=svc.get("experiment_id", ""),
-            model=model, temperature=temperature,
             on_result=_on_result,
             session_terms=svc.get("session_terms"),
             obs=_obs,
@@ -246,14 +241,9 @@ def _print_eval_summary(store: ProjectStore, backend_id: str) -> None:
         scores = r.get("scores", {})
         accuracy = scores.get("accuracy")
         acc_str = f"{accuracy:.1%}" if accuracy is not None else "--"
-        model_str = r.get("model", "")
-        if len(model_str) > 25:
-            model_str = model_str[:22] + "..."
         rows.append({
             "run_id": r["run_id"],
             "name": r.get("name", ""),
-            "model": model_str,
-            "temp": r.get("temperature", ""),
             "accuracy": acc_str,
             "queries": str(r.get("item_count", "?")),
         })
@@ -261,13 +251,7 @@ def _print_eval_summary(store: ProjectStore, backend_id: str) -> None:
     if not rows:
         return
 
-    vary_cols = []
-    for col in ["model", "temp"]:
-        vals = {r[col] for r in rows}
-        if len(vals) > 1:
-            vary_cols.append(col)
-
-    header_cols = ["run_id", "name"] + vary_cols + ["accuracy", "queries"]
+    header_cols = ["run_id", "name", "accuracy", "queries"]
     col_labels = {
         "run_id": "run_id", "name": "name", "model": "model",
         "temp": "temp", "accuracy": "accuracy", "queries": "queries",

@@ -44,8 +44,6 @@ async def adaptive_search(
     plan_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
     experiment_id: str = "",
-    model: str = "",
-    temperature: float = 0.0,
 ) -> tuple[OptSearchPoint, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.
 
@@ -107,8 +105,6 @@ async def adaptive_search(
     _eval_opt = _make_eval_fn(
         eval_data, _scan_ctx,
         get_params=lambda: current_params,
-        model=model,
-        temperature=temperature,
     )
 
     # Get baseline accuracy

@@ -19,8 +19,6 @@ __all__ = ["HASH_TRUNCATE", "eval_content_hash", "sp_identity_hash"]
 
 def sp_identity_hash(
     rendered_prompt_hash: str,
-    model: str,
-    temperature: float,
     pipeline_params: dict | None = None,
 ) -> str:
     """SearchPoint identity hash — hashes only dimensions that affect the result.
@@ -37,7 +35,7 @@ def sp_identity_hash(
     steps = pp.get("steps")
     prompt_matters = steps is None or "llm_ranking" in steps
 
-    blob_dict: dict = {"model": model, "temperature": temperature}
+    blob_dict: dict = {}
     if prompt_matters:
         blob_dict["rp_hash"] = rendered_prompt_hash
     if pipeline_params:
@@ -49,13 +47,11 @@ def sp_identity_hash(
 def eval_content_hash(
     rendered_prompt: str,
     eval_data: list,
-    model: str,
-    temperature: float,
     pipeline_params: dict | None = None,
 ) -> str:
     """Content-addressed hash for evaluation deduplication.
 
-    ``sha256(rendered_prompt + sorted_query_gt_pairs + model + temperature
+    ``sha256(rendered_prompt + sorted_query_gt_pairs
     + pipeline_params)[:16]``
 
     Order of eval_data queries does not affect the hash.
@@ -66,8 +62,6 @@ def eval_content_hash(
     blob_dict: dict = {
         "prompt": rendered_prompt,
         "pairs": pairs,
-        "model": model,
-        "temperature": temperature,
     }
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params

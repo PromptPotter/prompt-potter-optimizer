@@ -392,8 +392,6 @@ async def run_baseline_eval(
     store: ProjectStore | None = None,
     backend_id: str = "",
     experiment_id: str = "",
-    model: str = "",
-    temperature: float = 0.0,
     on_result: Callable | None = None,
     obs: Any | None = None,
     session_terms: list[str] | None = None,
@@ -409,8 +407,6 @@ async def run_baseline_eval(
         store: Optional ProjectStore.
         backend_id: Backend identifier.
         experiment_id: Experiment to load eval data from if eval_data is empty.
-        model: Model identifier for content hash.
-        temperature: Temperature for content hash.
         on_result: Optional callback for progress reporting.
         obs: Optional ObsLogger for dataset registration.
 
@@ -453,8 +449,6 @@ async def run_baseline_eval(
             obs.register_dataset(DATASET_NAME, eval_data)
 
     sp = baseline.to_job_search_point(
-        model=model,
-        temperature=temperature,
         base_pipeline_params=pipeline_params,
     )
     ctx = EvalContext(
@@ -711,7 +705,7 @@ def diff_campaign_config(
 
     keys = [
         "max_rounds", "patience", "n_variants", "creativity",
-        "improvement_threshold", "model", "temperature",
+        "improvement_threshold", "model",
         "sample_size", "seed",
     ]
 

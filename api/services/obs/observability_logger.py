@@ -337,8 +337,6 @@ class ObsLogger:
         accuracy: float,
         total: int,
         hits: int,
-        model: str,
-        temperature: float,
         prompt_fields_id: str = "",
         dataset_name: str | None = None,
         dataset_item_map: dict[str, str] | None = None,
@@ -352,8 +350,6 @@ class ObsLogger:
                 input_data={
                     "run_id": run_id,
                     "content_hash": content_hash,
-                    "model": model,
-                    "temperature": temperature,
                     "prompt_fields_id": prompt_fields_id,
                 },
                 output_data={
@@ -373,7 +369,6 @@ class ObsLogger:
                 "accuracy": accuracy,
                 "hits": hits,
                 "total": total,
-                "model": model,
                 "prompt_fields_id": prompt_fields_id,
             })
 

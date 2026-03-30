@@ -251,8 +251,6 @@ async def l1_evaluate(
     current_best: dict[str, Any],
     ctx: "EvalContext",
     *,
-    model: str = "",
-    temperature: float = 0.0,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
     callbacks: "CycleCallbacks | None" = None,
@@ -261,8 +259,6 @@ async def l1_evaluate(
     """Evaluate candidates and select the round winner."""
     from api.services.prompt_eval import evaluate_prompt_cached
 
-    _sp_model = model
-    _sp_temperature = temperature
     _sp_pipeline_params = pipeline_params
 
     candidate_pp: list[dict | None] = []
@@ -299,8 +295,6 @@ async def l1_evaluate(
         else:
             pp = _sp_pipeline_params
         sp = osp_c.to_job_search_point(
-            model=_sp_model,
-            temperature=_sp_temperature,
             base_pipeline_params=pp,
         )
         ctx.candidate_idx = idx

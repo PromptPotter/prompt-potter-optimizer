@@ -3,9 +3,9 @@
 SearchPoint is the abstract base for any point in a pipeline's search space.
 Two concrete subclasses:
 
-  - ``JobSearchPoint`` — the user's evaluation space (model + temperature +
-    pipeline_params). Frozen, content-hashable. The rendered prompt lives
-    inside ``pipeline_params`` as a node config value.
+  - ``JobSearchPoint`` — the user's evaluation space (pipeline_params).
+    Frozen, content-hashable. The rendered prompt lives inside
+    ``pipeline_params`` as a node config value.
 
   - ``OptSearchPoint`` (in opt_search_point.py) — the optimizer's working
     state (prompt decomposition, L2/L3 state, optimization memory). Mutable.
@@ -49,7 +49,7 @@ class JobSearchPoint(SearchPoint):
     """A point in the target evaluation space.
 
     Frozen (immutable). Use ``derive()`` to create variants.
-    Carries model + temperature + pipeline_params + optional prompt_fields.
+    Carries pipeline_params + optional prompt_fields.
     The rendered prompt lives inside ``pipeline_params`` as a node config
     value — the prompt is just another tunable pipeline parameter.
 
@@ -60,8 +60,6 @@ class JobSearchPoint(SearchPoint):
 
     model_config = {"frozen": True}
 
-    model: str = ""
-    temperature: float = 0.0
     pipeline_params: dict | None = None
     prompt_fields: dict | None = None
 
@@ -86,8 +84,6 @@ class JobSearchPoint(SearchPoint):
         rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
         return sp_identity_hash(
             rp_hash,
-            self.model,
-            self.temperature,
             self.pipeline_params,
         )
 
@@ -96,8 +92,6 @@ class JobSearchPoint(SearchPoint):
         return eval_content_hash(
             self.render(),
             eval_data,
-            self.model,
-            self.temperature,
             self.pipeline_params,
         )
 
@@ -133,8 +127,6 @@ class JobSearchPoint(SearchPoint):
                 )
 
         return JobSearchPoint(
-            model=changes.get("model", self.model),
-            temperature=changes.get("temperature", self.temperature),
             pipeline_params=new_pp,
             prompt_fields=new_pf,
         )

@@ -29,8 +29,6 @@ async def prepare_scan_baseline(
     scan_variants: dict | None = None,
     force_restructure: bool = False,
     svc: dict | None = None,
-    model: str = "",
-    temperature: float = 0.0,
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
@@ -60,8 +58,6 @@ async def prepare_scan_baseline(
         backend_id=backend_id,
         scan_variants=scan_variants,
         force_restructure=force_restructure,
-        model=model,
-        temperature=temperature,
     )
 
     # Print decomposed fields

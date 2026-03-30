@@ -26,7 +26,6 @@ class CycleConfig(BaseModel):
     project_root: str = Field("", description="Project root for store")
     pipeline_params: dict | None = Field(None, description="Pipeline parameter overrides")
     session_terms: list[str] | None = Field(None, description="Backend session terms")
-    temperature: float = Field(0.0, description="Temperature for content hash")
     sample_size: int = Field(0, description="Subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
 
@@ -127,7 +126,6 @@ class CycleConfig(BaseModel):
             project_root=project_root,
             pipeline_params=pipeline_params,
             session_terms=session_terms,
-            temperature=eval_llm["temperature"],
             sample_size=campaign_config["sample_size"],
             seed=opt["seed"],
             pipeline_schema=pipeline_schema,

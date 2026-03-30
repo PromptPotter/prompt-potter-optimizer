@@ -110,7 +110,7 @@ def _pp_val(v) -> str:
 
 
 def _flatten_sp_summary(
-    pp: dict | None, model: str = "", temperature: float = 0.0,
+    pp: dict | None,
 ) -> dict[str, str]:
     """Flatten SearchPoint dimensions into dot-notation display dict.
 
@@ -118,13 +118,8 @@ def _flatten_sp_summary(
     - JSON Schema params (type=object with properties): expand to
       ``key.field_name`` → description string
     - Mutation-tuple lists: expand ``['+', name, ...]`` to ``key.name`` → desc
-    - Top-level model/temperature included when non-default.
     """
     flat: dict[str, str] = {}
-    if model:
-        flat["model"] = model
-    if temperature:
-        flat["temperature"] = f"{temperature:g}"
 
     for k, v in (pp or {}).items():
         if k == "steps":
@@ -380,7 +375,7 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
 
     # Rotate SP diff state
     new_flat = _flatten_sp_summary(
-        d.get("pipeline_params"), model, d.get("temperature", 0.0),
+        d.get("pipeline_params"),
     )
     if state.round_num == 0:
         state.previous_sp_flat = state.original_sp_flat.copy()

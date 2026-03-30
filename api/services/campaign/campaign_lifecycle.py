@@ -43,7 +43,6 @@ def cycle_config_identity(
             "improvement_threshold": config.improvement_threshold,
             "model": config.model,
             "provider": config.provider,
-            "temperature": config.temperature,
             "sample_size": config.sample_size,
             "seed": config.seed,
             "baseline_rendered": baseline_rendered,

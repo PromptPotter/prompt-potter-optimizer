@@ -54,7 +54,7 @@ async def sensitivity_scan(
     and an axis profile sorted by sensitivity.
 
     Args:
-        baseline: Baseline JobSearchPoint (model + temperature + pipeline_params).
+        baseline: Baseline JobSearchPoint (pipeline_params).
         scan_variants: Flat dict mapping axis names to value lists.
             Prompt fields (in ``PROMPT_STRING_FIELDS``) and pipeline
             params are auto-detected.
@@ -188,8 +188,6 @@ async def sensitivity_scan(
                 perturbed = baseline_opt.derive_candidate(
                     **{axis_name: value},
                 ).to_job_search_point(
-                    model=baseline.model,
-                    temperature=baseline.temperature,
                     base_pipeline_params=baseline.pipeline_params,
                 )
             else:

@@ -21,8 +21,7 @@ class EvalContext:
     """Infrastructure bundle shared across evaluation calls.
 
     Pure infrastructure — does NOT carry search-space dimensions
-    (model, temperature, pipeline_params).  Those live on the
-    SearchPoint passed alongside.
+    (pipeline_params).  Those live on the SearchPoint passed alongside.
     """
 
     backend_client: BackendClient

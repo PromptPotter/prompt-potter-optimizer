@@ -306,8 +306,6 @@ def select_scan_winner(
             changes_description="scan_winner",
         )
         best = best_opt.to_job_search_point(
-            model=baseline.model,
-            temperature=baseline.temperature,
             base_pipeline_params=baseline.pipeline_params,
         )
     if param_changes:

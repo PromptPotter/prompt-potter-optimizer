@@ -82,7 +82,7 @@ def test_build_dataset_run_data_includes_source():
     from api.services.prompt_eval import build_dataset_run_data
 
     osp = OptSearchPoint(instruction="test prompt")
-    sp = osp.to_job_search_point(model="model", temperature=0.0)
+    sp = osp.to_job_search_point()
     data = build_dataset_run_data(
         "baseline_aabb", "Baseline", "aabb1122", sp,
         {"hits": 1, "total": 1, "accuracy": 1.0, "errors": 0}, [],
@@ -90,8 +90,6 @@ def test_build_dataset_run_data_includes_source():
     )
     assert data["source"] == "baseline"
     assert data["prompt_fields_id"] == sp.sp_hash()
-    assert data["model"] == "model"
-    assert data["temperature"] == 0.0
 
 
 def test_build_dataset_run_data_includes_pipeline_params():
@@ -128,7 +126,7 @@ def test_source_persisted_in_index(tmp_store):
     assert entries[0]["source"] == "sensitivity_scan"
 
 
-def _make_alias_run(run_id, rp_hash, model="m1", temperature=0.5,
+def _make_alias_run(run_id, rp_hash,
                     pipeline_params=None, item_count=3):
     items = [{"query": f"q{i}", "hit": True, "confidence": 0.9, "error": None}
              for i in range(item_count)]
@@ -137,8 +135,6 @@ def _make_alias_run(run_id, rp_hash, model="m1", temperature=0.5,
         items=items, content_hash=f"ch_{run_id}",
     )
     run["rendered_prompt_hash"] = rp_hash
-    run["model"] = model
-    run["temperature"] = temperature
     run["source"] = "test"
     run["scores"] = {"accuracy": 0.8, "hits": 2, "total": item_count}
     if pipeline_params:
@@ -155,21 +151,14 @@ class TestLoadByAlias:
         drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
         drs.register_alias("b1", "hash_a", "hash_b")
 
-        result = drs.load_by_alias("b1", "hash_b", "m1", 0.5, None, 3)
+        result = drs.load_by_alias("b1", "hash_b", None, 3)
         assert result is not None
         assert result["run_id"] == "r1"
 
     def test_no_alias_returns_none(self, drs):
         drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
 
-        result = drs.load_by_alias("b1", "hash_x", "m1", 0.5, None, 3)
-        assert result is None
-
-    def test_model_mismatch_returns_none(self, drs):
-        drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
-        drs.register_alias("b1", "hash_a", "hash_b")
-
-        result = drs.load_by_alias("b1", "hash_b", "wrong_model", 0.5, None, 3)
+        result = drs.load_by_alias("b1", "hash_x", None, 3)
         assert result is None
 
     def test_pipeline_params_must_match_exactly(self, drs):
@@ -178,14 +167,14 @@ class TestLoadByAlias:
         ))
         drs.register_alias("b1", "hash_a", "hash_b")
 
-        result = drs.load_by_alias("b1", "hash_b", "m1", 0.5, {"ranking_temperature": 0.9}, 3)
+        result = drs.load_by_alias("b1", "hash_b", {"ranking_temperature": 0.9}, 3)
         assert result is None
 
     def test_item_count_mismatch(self, drs):
         drs.save("b1", "r1", _make_alias_run("r1", "hash_a"))
         drs.register_alias("b1", "hash_a", "hash_b")
 
-        result = drs.load_by_alias("b1", "hash_b", "m1", 0.5, None, 99)
+        result = drs.load_by_alias("b1", "hash_b", None, 99)
         assert result is None
 
 

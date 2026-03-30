@@ -247,8 +247,6 @@ def _build_baseline_state(
         optimizer_params=dict(baseline_osp.optimizer_params),
     )
     baseline_sp = opt_sp.to_job_search_point(
-        model=config.model or "",
-        temperature=config.temperature,
         base_pipeline_params=config.pipeline_params,
     )
     state = LoopState(

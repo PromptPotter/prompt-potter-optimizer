@@ -218,7 +218,7 @@ def test_finalize_obs_with_explicit_obs(tmp_path):
     _finalize_observability(
         store, backend_id, "baseline_aabb", "aabb1122",
         {"accuracy": 1.0, "total": 1, "hits": 1},
-        "model", 0.0, "ps-1",
+        "ps-1",
         obs=obs,
     )
 

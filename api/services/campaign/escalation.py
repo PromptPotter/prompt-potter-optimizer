@@ -325,8 +325,6 @@ async def _do_l2_transition(
     _cur = state.current_sp
     assert _cur is not None
     state.current_sp = state.opt_sp.to_job_search_point(
-        model=_cur.model,
-        temperature=_cur.temperature,
         base_pipeline_params=_cur.pipeline_params,
     )
     state.escalation.l2_round += 1
@@ -421,8 +419,6 @@ async def _do_l3_transition(
     assert _cur_l3 is not None
     _pp = tr.pipeline_params or _cur_l3.pipeline_params
     state.current_sp = state.opt_sp.to_job_search_point(
-        model=_cur_l3.model,
-        temperature=_cur_l3.temperature,
         base_pipeline_params=_pp,
     )
     state.escalation.l3_round += 1

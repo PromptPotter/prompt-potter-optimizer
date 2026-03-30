@@ -113,8 +113,6 @@ def build_dataset_run_data(
         "rendered_prompt_hash": hashlib.sha256(
             rendered_prompt.encode(),
         ).hexdigest()[:HASH_TRUNCATE],
-        "model": search_point.model,
-        "temperature": search_point.temperature,
         "item_count": scores["total"],
         "scores": scores,
         "source": source,
@@ -425,8 +423,6 @@ def _finalize_observability(
     run_id: str,
     content_hash: str,
     scores: dict,
-    model: str,
-    temperature: float,
     prompt_fields_id: str,
     obs: ObsLogger | None,
 ) -> None:
@@ -449,8 +445,6 @@ def _finalize_observability(
             accuracy=scores["accuracy"],
             total=scores["total"],
             hits=scores["hits"],
-            model=model,
-            temperature=temperature,
             prompt_fields_id=prompt_fields_id,
         )
 
@@ -490,8 +484,6 @@ def _lookup_cached_or_aliased_result(
     alias_match = store.dataset_runs.load_by_alias(
         backend_id,
         rp_hash,
-        search_point.model,
-        search_point.temperature,
         search_point.pipeline_params,
         len(eval_data),
     )
@@ -519,16 +511,12 @@ async def evaluate_prompt_cached(
     - Final run storage
 
     The ``search_point`` bundles the search-space dimensions
-    (model, temperature, pipeline_params).  Infrastructure
-    params (backend_client, store, obs, …) live on ``ctx``.
+    (pipeline_params).  Infrastructure params (backend_client,
+    store, obs, …) live on ``ctx``.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
     """
-    # Extract search-space params from SearchPoint
-    model = search_point.model
-    temperature = search_point.temperature
-
     # Unpack infrastructure from ctx
     backend_client = ctx.backend_client
     store = ctx.store
@@ -580,7 +568,7 @@ async def evaluate_prompt_cached(
     from api.services.campaign.escalation import EscalationError as _EscalationError
 
     # SP-hash query cache: find individual query results from prior runs
-    # with the same SearchPoint (prompt + model + temp + pipeline_params).
+    # with the same SearchPoint (prompt + pipeline_params).
     # Bridges different sample sizes automatically.
     sp_cache: dict[str, dict] | None = None
     if store and backend_id:
@@ -653,8 +641,6 @@ async def evaluate_prompt_cached(
             run_id,
             content_hash,
             scores,
-            model,
-            temperature,
             search_point.sp_hash(),
             obs,
         )

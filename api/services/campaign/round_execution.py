@@ -79,7 +79,6 @@ async def _generate_or_load_candidates(
         has_scan_context=config.scan_context is not None,
         has_critique=bool(state.opt_sp.critique_text),
         pipeline_params=state.current_sp.pipeline_params,
-        temperature=state.current_sp.temperature,
     )
 
     if campaign_store and cycle_id:
@@ -192,8 +191,6 @@ async def _evaluate_candidates(
             round_eval_data,
             current_best,
             state.eval_ctx,
-            model=state.current_sp.model,
-            temperature=state.current_sp.temperature,
             pipeline_params=state.current_sp.pipeline_params,
             improvement_threshold=config.improvement_threshold,
             callbacks=callbacks,
@@ -352,7 +349,6 @@ async def _execute_round(
                 winner_prompt_fields_id=eval_out.winner_prompt_fields.get("id", ""),
                 candidate_scores=eval_out.candidate_scores,
                 model=config.model or "",
-                temperature=config.temperature,
                 n_variants=config.n_variants,
                 optimizer_templates=["meta_scan_aware", "critique_negative"],
             )
@@ -389,8 +385,6 @@ def _update_round_state(
     assert state.current_sp is not None
     _pp = rr.pipeline_params if rr.pipeline_params is not None else state.current_sp.pipeline_params
     state.current_sp = state.opt_sp.to_job_search_point(
-        model=state.current_sp.model,
-        temperature=state.current_sp.temperature,
         base_pipeline_params=_pp,
     )
     state.current_accuracy = rr.accuracy

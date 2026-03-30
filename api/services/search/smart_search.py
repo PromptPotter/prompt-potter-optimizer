@@ -145,16 +145,11 @@ def _make_eval_fn(
     ctx: EvalContext,
     get_params: Callable[[], dict],
     on_result: Callable | None = None,
-    *,
-    model: str = "",
-    temperature: float = 0.0,
 ) -> Callable:
     """Factory for the ``_eval_opt`` closure used by scan and adaptive search."""
 
     async def _eval_opt(opt: OptSearchPoint, pp: dict | None = None) -> dict:
         sp = opt.to_job_search_point(
-            model=model,
-            temperature=temperature,
             base_pipeline_params=pp or get_params(),
         )
         results, scores, cached = await evaluate_prompt_cached(

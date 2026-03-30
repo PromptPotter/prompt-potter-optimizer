@@ -67,7 +67,7 @@ def list_campaigns(
         if cfg:
             print("\n  Config (copy to campaign_config):")
             for k in ["max_rounds", "patience", "n_variants", "creativity",
-                       "improvement_threshold", "model", "temperature",
+                       "improvement_threshold", "model",
                        "sample_size", "seed"]:
                 if k in cfg:
                     print(f"    {k}: {cfg[k]}")
@@ -258,7 +258,7 @@ def show_experiment_dashboard(
         if cfg:
             print("\n  Config (copy to campaign_config to resume):")
             for k in ["max_rounds", "patience", "n_variants", "creativity",
-                       "improvement_threshold", "model", "temperature",
+                       "improvement_threshold", "model",
                        "sample_size", "seed"]:
                 if k in cfg:
                     print(f"    {k}: {cfg[k]}")

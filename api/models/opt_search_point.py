@@ -168,8 +168,6 @@ class OptSearchPoint(SearchPoint):
 
     def to_job_search_point(
         self,
-        model: str = "",
-        temperature: float = 0.0,
         base_pipeline_params: dict | None = None,
         *,
         prompt_node: str = "llm_ranking",
@@ -194,8 +192,6 @@ class OptSearchPoint(SearchPoint):
             pf["few_shot_block"] = block
 
         return JobSearchPoint(
-            model=model,
-            temperature=temperature,
             pipeline_params=pp,
             prompt_fields=pf or None,
         )

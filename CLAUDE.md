@@ -40,13 +40,13 @@ All services follow: `f(SearchPoint, PipelineSchema, eval_data) → scores`.
 
 ```
 SearchPoint (base)           — abstract base, "a point in a search space"
-    ├── JobSearchPoint       — user's job: model + temp + pipeline_params (frozen)
+    ├── JobSearchPoint       — user's job: pipeline_params (frozen)
     └── OptSearchPoint       — optimizer state: prompt fields + L2/L3 + memory (mutable)
 ```
 
 **SearchPoint** (`api/models/search_point.py`) — abstract base class defining the search space contract.
 
-**JobSearchPoint** (`api/models/search_point.py`) — flat, frozen, content-hashable target evaluation specification. Fields: `model` + `temperature` + `pipeline_params`. The rendered prompt lives inside `pipeline_params` as a node config value (e.g., `{"llm_ranking": {"prompt": "..."}}`). Methods: `render()`, `content_hash(eval_data)`, `sp_hash()`, `derive()`.
+**JobSearchPoint** (`api/models/search_point.py`) — flat, frozen, content-hashable target evaluation specification. Fields: `pipeline_params` (+ optional `prompt_fields`). The rendered prompt lives inside `pipeline_params` as a node config value (e.g., `{"llm_ranking": {"prompt": "..."}}`). Methods: `render()`, `content_hash(eval_data)`, `sp_hash()`, `derive()`.
 
 **OptSearchPoint** (`api/models/opt_search_point.py`) — inherits from SearchPoint. Full optimizer working state:
 - **Lineage**: `id`, `parent_id`, `changes_description`
@@ -63,7 +63,7 @@ Describes a pipeline — target or optimizer. Both TermNorm's `GET /pipeline` re
 
 ### EvalContext (`api/models/eval_context.py`)
 
-Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema`, `obs`, `source`, `model`, `temperature`, `pipeline_params`, `experiment_id`, `escalation_checks`, `candidate_idx`, `n_total_candidates`.
+Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema`, `obs`, `source`, `experiment_id`, `escalation_checks`, `candidate_idx`, `n_total_candidates`.
 
 ## Service Catalog
 
