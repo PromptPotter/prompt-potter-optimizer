@@ -225,6 +225,18 @@ def _maybe_emit_backend_warning(
     )
 
 
+def _rebuild_current_sp(
+    state: LoopState,
+    tr: Any,
+) -> None:
+    """Update opt_sp from a transition result and rebuild current_sp."""
+    state.opt_sp = tr.opt_search_point
+    cur = state.current_sp
+    assert cur is not None
+    pp = getattr(tr, "pipeline_params", None) or cur.pipeline_params
+    state.current_sp = state.opt_sp.to_job_search_point(base_pipeline_params=pp)
+
+
 def _degradation_reset(
     state: LoopState,
     config: CycleConfig,
@@ -301,13 +313,7 @@ async def _do_l2_transition(
     # Store L2 directive for next L1 round (sliding window=1)
     state.opt_sp.l2_directive = tr.l2_directive
     # L2 does NOT set pipeline_params — only L1 Generate does that
-    # Update opt_sp from L2 result, then rebuild JobSearchPoint
-    state.opt_sp = tr.opt_search_point
-    _cur = state.current_sp
-    assert _cur is not None
-    state.current_sp = state.opt_sp.to_job_search_point(
-        base_pipeline_params=_cur.pipeline_params,
-    )
+    _rebuild_current_sp(state, tr)
     state.escalation.l2_round += 1
     state.escalation.best_accuracy_at_l2_entry = state.best_accuracy
     state.escalation.best_composite_at_l2_entry = state.best_composite
@@ -394,14 +400,7 @@ async def _do_l3_transition(
             pipeline_params=current_pp,
             pipeline_schema=config.pipeline_schema,
         )
-    # Update opt_sp from L3 result, then rebuild JobSearchPoint
-    state.opt_sp = tr.opt_search_point
-    _cur_l3 = state.current_sp
-    assert _cur_l3 is not None
-    _pp = tr.pipeline_params or _cur_l3.pipeline_params
-    state.current_sp = state.opt_sp.to_job_search_point(
-        base_pipeline_params=_pp,
-    )
+    _rebuild_current_sp(state, tr)
     state.escalation.l3_round += 1
     state.escalation.best_accuracy_at_l3_entry = state.best_accuracy
     state.escalation.best_composite_at_l3_entry = state.best_composite
@@ -467,29 +466,26 @@ async def _escalate_l2(
         )
         return None
 
+    async def _reset_and_do_l2(*, reset_l3: bool = False) -> None:
+        layer = "L2/L3" if reset_l3 else "L2"
+        logger.info(
+            "%s patience exhausted during degradation — resetting at round %d",
+            layer, round_num,
+        )
+        _degradation_reset(state, config, round_num, on_phase, reset_l3=reset_l3)
+        await _do_l2_transition(
+            state, config, round_num, eval_data, on_phase,
+            obs=obs, trace_id=trace_id, escalation_context=escalation_context,
+        )
+
     # L2 stalled, L3 disabled → exhaust or reset
     if not config.enable_l3:
         if from_degradation:
-            logger.info(
-                "L2 patience exhausted during degradation — resetting at round %d",
-                round_num,
-            )
-            _degradation_reset(state, config, round_num, on_phase)
-            await _do_l2_transition(
-                state,
-                config,
-                round_num,
-                eval_data,
-                on_phase,
-                obs=obs,
-                trace_id=trace_id,
-                escalation_context=escalation_context,
-            )
+            await _reset_and_do_l2()
             return None
         logger.info(
             "L2 patience exhausted (%d stalls) at round %d",
-            esc.l2_stall_count,
-            round_num,
+            esc.l2_stall_count, round_num,
         )
         return StopReason.L2_PATIENCE
 
@@ -500,37 +496,17 @@ async def _escalate_l2(
     l3_exhausted = config.l3_patience is not None and esc.l3_stall_count >= config.l3_patience
     if not l3_exhausted:
         await _do_l3_transition(
-            state,
-            config,
-            round_num,
-            eval_data,
-            on_phase,
-            obs=obs,
-            trace_id=trace_id,
+            state, config, round_num, eval_data, on_phase,
+            obs=obs, trace_id=trace_id,
         )
         return None
 
     # L3 exhausted → exhaust or reset
     if from_degradation:
-        logger.info(
-            "L3 patience exhausted during degradation — resetting L2/L3 at round %d",
-            round_num,
-        )
-        _degradation_reset(state, config, round_num, on_phase, reset_l3=True)
-        await _do_l2_transition(
-            state,
-            config,
-            round_num,
-            eval_data,
-            on_phase,
-            obs=obs,
-            trace_id=trace_id,
-            escalation_context=escalation_context,
-        )
+        await _reset_and_do_l2(reset_l3=True)
         return None
     logger.info(
         "L3 patience exhausted (%d stalls) at round %d",
-        esc.l3_stall_count,
-        round_num,
+        esc.l3_stall_count, round_num,
     )
     return StopReason.L3_PATIENCE

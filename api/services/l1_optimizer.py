@@ -228,18 +228,19 @@ async def l1_evaluate(
     _sp_pipeline_params = pipeline_params
 
     candidate_pp: list[dict | None] = []
-    clean_candidates: list[dict] = []
+    osp_candidates: list[OptSearchPoint] = []
     for c in candidates:
         if isinstance(c, dict):
             candidate_pp.append(c.get("__pipeline_params_override__"))
-            clean_candidates.append(
+            osp_candidates.append(OptSearchPoint.from_prompt_fields(
                 {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
-            )
+            ))
         else:
             candidate_pp.append(None)
-            clean_candidates.append(c.model_dump() if hasattr(c, "model_dump") else c)
-
-    osp_candidates = [OptSearchPoint.from_prompt_fields(c) for c in clean_candidates]
+            osp_candidates.append(
+                c if isinstance(c, OptSearchPoint)
+                else OptSearchPoint.from_prompt_fields(c.model_dump()),
+            )
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []
 

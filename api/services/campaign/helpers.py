@@ -11,8 +11,8 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from api.models.opt_search_point import PROMPT_STRING_FIELDS
 from api.models.phase_event import PhaseEvent
+from api.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     from api.services.campaign.models import LoopState

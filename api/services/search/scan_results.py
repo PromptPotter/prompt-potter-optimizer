@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import pandas as pd
 
-from api.models.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
+from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
+from api.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     from api.services.project_store import ProjectStore

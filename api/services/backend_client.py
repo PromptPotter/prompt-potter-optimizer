@@ -132,6 +132,14 @@ class BackendClient:
             self._http = httpx.AsyncClient(timeout=self.timeout)
         return self._http
 
+    async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
+        """GET ``{base_url}{path}`` and return parsed JSON."""
+        resp = await self._get_http().get(
+            f"{self.base_url}{path}", **({"params": params} if params else {}),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     async def aclose(self) -> None:
         """Close the shared HTTP client."""
         if self._http and not self._http.is_closed:
@@ -173,40 +181,23 @@ class BackendClient:
     # -- pipeline config ---------------------------------------------------
 
     async def fetch_pipeline(self) -> dict[str, Any]:
-        """GET /pipeline — returns full pipeline configuration.
-
-        Includes node configs, models, temperatures, and resolved schema/prompt
-        registry data (if the backend supports enrichment).
-        """
-        resp = await self._get_http().get(f"{self.base_url}/pipeline")
-        resp.raise_for_status()
-        return resp.json()
+        """GET /pipeline — full pipeline configuration with registry data."""
+        return await self._get_json("/pipeline")
 
     # -- sync operations (fetch verbatim API responses) -------------------
 
     async def fetch_experiments(self) -> dict[str, Any]:
-        """GET /experiments — returns full response verbatim."""
-        resp = await self._get_http().get(f"{self.base_url}/experiments")
-        resp.raise_for_status()
-        return resp.json()
+        """GET /experiments — full response verbatim."""
+        return await self._get_json("/experiments")
 
     async def fetch_experiment(
         self, experiment_id: str, include_traces: bool = True,
     ) -> dict[str, Any]:
-        """GET /experiments/{id}/mappings — returns full response verbatim.
-
-        Uses the /mappings sub-endpoint which includes mappings, runs,
-        and evaluation_results needed for replay.
-        """
-        params: dict[str, str] = {}
-        if include_traces:
-            params["include_traces"] = "true"
-        resp = await self._get_http().get(
-            f"{self.base_url}/experiments/{experiment_id}/mappings",
-            params=params,
+        """GET /experiments/{id}/mappings — includes mappings, runs, eval results."""
+        return await self._get_json(
+            f"/experiments/{experiment_id}/mappings",
+            **({"include_traces": "true"} if include_traces else {}),
         )
-        resp.raise_for_status()
-        return resp.json()
 
     # -- replay operations ------------------------------------------------
 

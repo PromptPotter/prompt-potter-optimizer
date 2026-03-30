@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from api.models.eval_context import EvalContext
-from api.models.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
+from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
 from api.services.prompt_eval import _most_common_error_category, eval_search_point
 from api.services.search.preview import preview as _preview
@@ -21,6 +21,7 @@ from api.services.search.smart_search import (
     ScanEvent,
     _profiles_from_rows,
 )
+from api.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     import pandas as pd

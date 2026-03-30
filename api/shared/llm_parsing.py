@@ -13,40 +13,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def repair_json(text: str) -> str:
-    """Best-effort repair of malformed JSON from LLM output.
-
-    Handles common Groq/kimi artifacts:
-    - Unquoted keys (``key:`` → ``"key":``)
-    - Trailing commas before ``}`` or ``]``
-    - Truncated tail (strip to last complete ``}`` or ``]``)
-    - Double-escaped newlines (``\\\\n`` → ``\\n``)
-    """
-    # Normalize double-escaped sequences back to single-escaped
-    text = text.replace("\\\\n", "\\n").replace("\\\\t", "\\t")
-
-    # Unquoted keys: word before colon not already quoted
-    text = re.sub(r'(?<=[{,\s])(\w+)\s*:', r'"\1":', text)
-
-    # Trailing commas
-    text = re.sub(r",\s*([}\]])", r"\1", text)
-
-    # Truncated JSON: find last balanced closing brace
-    depth = 0
-    last_valid = -1
-    for i, ch in enumerate(text):
-        if ch in "{[":
-            depth += 1
-        elif ch in "}]":
-            depth -= 1
-            if depth == 0:
-                last_valid = i
-    if last_valid > 0 and last_valid < len(text) - 1:
-        text = text[: last_valid + 1]
-
-    return text
-
-
 def try_parse_json(content: str, provider: str) -> Any | None:
     """Parse JSON from response content, return None on failure."""
     text = content.strip()
@@ -63,9 +29,23 @@ def try_parse_json(content: str, provider: str) -> Any | None:
     except json.JSONDecodeError:
         pass
 
-    # Attempt repair
+    # Best-effort repair of malformed JSON (Groq/kimi artifacts)
     try:
-        repaired = repair_json(text)
+        repaired = text.replace("\\\\n", "\\n").replace("\\\\t", "\\t")
+        repaired = re.sub(r'(?<=[{,\s])(\w+)\s*:', r'"\1":', repaired)
+        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+        # Truncate after last balanced closing brace
+        depth = 0
+        last_valid = -1
+        for i, ch in enumerate(repaired):
+            if ch in "{[":
+                depth += 1
+            elif ch in "}]":
+                depth -= 1
+                if depth == 0:
+                    last_valid = i
+        if 0 < last_valid < len(repaired) - 1:
+            repaired = repaired[: last_valid + 1]
         result = json.loads(repaired)
         logger.info("%s JSON repaired successfully", provider)
         return result

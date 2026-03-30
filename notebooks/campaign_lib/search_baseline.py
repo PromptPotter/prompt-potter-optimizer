@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from api.models.opt_search_point import LAYER1_STRING_FIELDS
 from api.services.search.scan_baseline import (
     prepare_scan_baseline as _prepare_scan_baseline,
 )
+from api.shared.constants import LAYER1_STRING_FIELDS
 
 from .display import CYAN, DIM, RESET
 from .setup import setup_llm

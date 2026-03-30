@@ -8,7 +8,7 @@ logic (L2/L3) lives in ``escalation.py``; campaign lifecycle
 import logging
 from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
+from api.models.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client
@@ -31,6 +31,7 @@ from api.services.campaign.models import (
     LoopState,
 )
 from api.services.obs.node_tracer import observed_node
+from api.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     from api.services.campaign.escalation import DegradationCheck

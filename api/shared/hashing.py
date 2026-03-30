@@ -17,6 +17,12 @@ HASH_TRUNCATE = 16
 __all__ = ["HASH_TRUNCATE", "eval_content_hash", "sp_identity_hash"]
 
 
+def _hash_dict(blob_dict: dict) -> str:
+    """SHA256-truncate a JSON-serialized dict."""
+    blob = json.dumps(blob_dict, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
+
+
 def sp_identity_hash(
     rendered_prompt_hash: str,
     pipeline_params: dict | None = None,
@@ -40,8 +46,7 @@ def sp_identity_hash(
         blob_dict["rp_hash"] = rendered_prompt_hash
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params
-    blob = json.dumps(blob_dict, sort_keys=True)
-    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
+    return _hash_dict(blob_dict)
 
 
 def eval_content_hash(
@@ -65,5 +70,4 @@ def eval_content_hash(
     }
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params
-    blob = json.dumps(blob_dict, sort_keys=True)
-    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
+    return _hash_dict(blob_dict)

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from api.services.stores.base import (
+    EntityStore,
     read_json,
     read_json_optional,
     validate_path_component,
@@ -35,23 +36,15 @@ def generate_trial_id(round_num: int) -> str:
     return f"trial_{round_num:04d}_{short}"
 
 
-class CampaignStore:
+class CampaignStore(EntityStore):
     """File I/O for campaign registry persistence."""
 
     def __init__(self, base_dir: Path):
-        self._base_dir = base_dir
-
-    def _campaigns_dir(self, backend_id: str) -> Path:
-        validate_path_component(backend_id)
-        return self._base_dir / backend_id / "campaigns"
-
-    def _campaign_path(self, backend_id: str, campaign_id: str) -> Path:
-        validate_path_component(campaign_id)
-        return self._campaigns_dir(backend_id) / f"{campaign_id}.json"
+        super().__init__(base_dir, "campaigns")
 
     def _trial_dir(self, backend_id: str, campaign_id: str) -> Path:
         validate_path_component(campaign_id)
-        return self._campaigns_dir(backend_id) / campaign_id
+        return self._entity_dir(backend_id) / campaign_id
 
     # -- Campaign CRUD --
 
@@ -59,7 +52,7 @@ class CampaignStore:
         self, backend_id: str, campaign_id: str, metadata: dict[str, Any],
     ) -> Path:
         """Create a new campaign file with initial metadata."""
-        path = self._campaign_path(backend_id, campaign_id)
+        path = self._entity_path(backend_id, campaign_id)
         if path.exists():
             raise FileExistsError(f"Campaign already exists: {campaign_id}")
         now = datetime.now(UTC).isoformat()
@@ -78,17 +71,11 @@ class CampaignStore:
         write_json(path, data)
         return path
 
-    def load(
-        self, backend_id: str, campaign_id: str,
-    ) -> dict[str, Any] | None:
-        """Load campaign metadata + trial index.  Returns None if not found."""
-        return read_json_optional(self._campaign_path(backend_id, campaign_id))
-
     def update(
         self, backend_id: str, campaign_id: str, updates: dict[str, Any],
     ) -> None:
-        """Merge *updates* into the campaign file and write back."""
-        path = self._campaign_path(backend_id, campaign_id)
+        """Merge *updates* into the campaign file and write back (+ timestamp)."""
+        path = self._entity_path(backend_id, campaign_id)
         data = read_json(path)
         data.update(updates)
         data["updated_at"] = datetime.now(UTC).isoformat()
@@ -96,7 +83,7 @@ class CampaignStore:
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return summary for every campaign under *backend_id*."""
-        campaigns_dir = self._campaigns_dir(backend_id)
+        campaigns_dir = self._entity_dir(backend_id)
         if not campaigns_dir.exists():
             return []
         results = []
@@ -135,7 +122,7 @@ class CampaignStore:
         write_json(detail_path, trial)
 
         # Update campaign index
-        campaign_path = self._campaign_path(backend_id, campaign_id)
+        campaign_path = self._entity_path(backend_id, campaign_id)
         data = read_json(campaign_path)
 
         summary = {
@@ -185,7 +172,7 @@ class CampaignStore:
         """Delete a campaign and its trial directory.  Returns True if deleted."""
         import shutil
 
-        campaign_path = self._campaign_path(backend_id, campaign_id)
+        campaign_path = self._entity_path(backend_id, campaign_id)
         trial_dir = self._trial_dir(backend_id, campaign_id)
 
         deleted = False

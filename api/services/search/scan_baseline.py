@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import LAYER1_STRING_FIELDS
+from api.shared.constants import LAYER1_STRING_FIELDS
 
 if TYPE_CHECKING:
     from api.models.opt_search_point import OptSearchPoint

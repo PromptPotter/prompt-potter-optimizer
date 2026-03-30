@@ -443,50 +443,6 @@ def _log_eval_to_obs(
         )
 
 
-def _lookup_cached_or_aliased_result(
-    store: ProjectStore,
-    backend_id: str,
-    content_hash: str,
-    rendered: str,
-    search_point: JobSearchPoint,
-    eval_data: list,
-    pipeline_schema: PipelineSchema | None,
-    on_result: Callable | None,
-) -> tuple[list, dict, bool] | None:
-    """Check hash dedup and alias groups for a cached result.
-
-    Returns (results, scores, True) on cache hit, or None on miss.
-    """
-
-    def _use_cached(run: dict) -> tuple[list, dict, bool] | None:
-        results = run["dataset_run_items"]
-        if results and all(r.get("error") for r in results):
-            return None  # all-error — let per-query cache retry
-        scores = compute_composite_score(results, pipeline_schema)
-        if on_result is not None:
-            for i, r in enumerate(results):
-                on_result({**r, "cached": True}, i, len(results))
-        return results, scores, True
-
-    # Direct content-hash lookup
-    existing = store.dataset_runs.load_by_hash(backend_id, content_hash)
-    if existing and not existing.get("partial"):
-        return _use_cached(existing)
-
-    # Alias-group fallback (semantically equivalent prompt forms)
-    rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
-    alias_match = store.dataset_runs.load_by_alias(
-        backend_id,
-        rp_hash,
-        search_point.pipeline_params,
-        len(eval_data),
-    )
-    if alias_match:
-        return _use_cached(alias_match)
-
-    return None
-
-
 async def eval_search_point(
     search_point: JobSearchPoint,
     eval_data: list,
@@ -524,26 +480,27 @@ async def eval_search_point(
 
     # --- dedup lookup (content hash + alias group fallback) ---
     if store and backend_id and not force:
-        cached = _lookup_cached_or_aliased_result(
-            store,
-            backend_id,
-            content_hash,
-            rendered,
-            search_point,
-            eval_data,
-            pipeline_schema,
-            on_result,
-        )
-        if cached is not None:
-            # Run escalation checks on cached results too — the per-query
-            # check in _run_eval_batch only fires on live calls.
-            results, scores, was_cached = cached
-            esc_signal = _run_escalation_checks(
-                ctx.escalation_checks, results, ctx.candidate_idx, ctx.n_total_candidates,
+        _cached_run = store.dataset_runs.load_by_hash(backend_id, content_hash)
+        if _cached_run and _cached_run.get("partial"):
+            _cached_run = None
+        if not _cached_run:
+            rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
+            _cached_run = store.dataset_runs.load_by_alias(
+                backend_id, rp_hash, search_point.pipeline_params, len(eval_data),
             )
-            if esc_signal:
-                scores["escalation_signal"] = esc_signal.to_dict()
-            return results, scores, was_cached
+        if _cached_run:
+            results = _cached_run["dataset_run_items"]
+            if not (results and all(r.get("error") for r in results)):
+                scores = compute_composite_score(results, pipeline_schema)
+                if on_result is not None:
+                    for i, r in enumerate(results):
+                        on_result({**r, "cached": True}, i, len(results))
+                esc_signal = _run_escalation_checks(
+                    ctx.escalation_checks, results, ctx.candidate_idx, ctx.n_total_candidates,
+                )
+                if esc_signal:
+                    scores["escalation_signal"] = esc_signal.to_dict()
+                return results, scores, True
 
     # --- evaluate via backend ---
     safe_label = label.lower().replace(" ", "_")

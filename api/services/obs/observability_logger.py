@@ -15,7 +15,8 @@ Adapted from TermNorm-excel's zero-dependency file patterns:
 No external dependencies (pure JSON/YAML file I/O). PromptPotter has zero MLflow
 dependency — the viewer runs in a separate throwaway venv.
 
-Cloud Langfuse delegation is handled by ``CloudDelegate`` (see ``cloud_delegate.py``).
+Cloud Langfuse operations are inlined with try/except guards — observability
+must never crash the main flow.
 
 Usage::
 
@@ -26,6 +27,8 @@ Usage::
     obs.log_prompt_version(prompt_fields_id, rendered_prompt, layer1_fields)
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
@@ -33,8 +36,8 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from api.services.obs.cloud_delegate import CloudDelegate
 from api.services.stores.base import (
     append_jsonl,
     append_text,
@@ -42,6 +45,9 @@ from api.services.stores.base import (
     write_text,
     write_yaml_kv,
 )
+
+if TYPE_CHECKING:
+    from api.services.obs.langfuse_client import LangfuseLogger
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +77,7 @@ def _utcnow_iso() -> str:
 
 
 # ---------------------------------------------------------------------------
-# ObsLogger — file writes + thin cloud delegation
+# ObsLogger — file writes + inline cloud Langfuse
 # ---------------------------------------------------------------------------
 
 
@@ -85,7 +91,7 @@ class ObsLogger:
     ``events.jsonl`` flat navigation log. Every public method also appends
     to ``events.jsonl`` — the human starting point for data exploration.
 
-    Cloud Langfuse operations are delegated to ``CloudDelegate``.
+    Cloud Langfuse calls are inlined with try/except guards.
     Pass ``langfuse=None`` in tests to get file-only behaviour.
 
     All methods are no-ops when ``OBS_ENABLED = False``. All methods are
@@ -115,19 +121,26 @@ class ObsLogger:
         self._enabled = settings.OBS_ENABLED
         self._campaign_traces: dict[str, str] = {}
 
-        # Cloud Langfuse delegate (None = file-only mode)
-        self._cloud: CloudDelegate | None = None
+        # Cloud Langfuse client (None = file-only mode)
+        self._cloud_lf: LangfuseLogger | None = None
+
+        # Cloud Langfuse state (formerly on CloudDelegate)
+        self._cloud_trace_ids: dict[str, str] = {}
+        self._cloud_active_trace_id: str | None = None
+        self._cloud_active_session_id: str | None = None
+        self._cloud_active_round_obs_id: str | None = None
+        self._cloud_active_step_obs_ids: dict[str, str] = {}
 
         if langfuse is _UNSET:
             try:
                 from api.services.obs.langfuse_client import LangfuseLogger
                 lf = LangfuseLogger.get_instance()
                 if lf.enabled:
-                    self._cloud = CloudDelegate(lf)
+                    self._cloud_lf = lf
             except Exception:
                 logger.debug("Cloud backend init failed; file-only mode", exc_info=True)
         elif langfuse is not None:
-            self._cloud = CloudDelegate(langfuse)  # type: ignore[arg-type]
+            self._cloud_lf = langfuse  # type: ignore[assignment]
 
     # --- Internal helpers ---
 
@@ -321,9 +334,35 @@ class ObsLogger:
                 "n_skipped": n_skipped,
             })
 
-            if self._cloud:
-                cloud_ids = self._cloud.on_register_dataset(dataset_name, eval_data)
-                query_to_item_id.update(cloud_ids)
+            if self._cloud_lf:
+                try:
+                    if len(eval_data) > 100:
+                        logger.warning(
+                            "Skipping Langfuse cloud dataset registration for %d items "
+                            "(rate-limit risk). Use the dedicated Langfuse sync cell instead.",
+                            len(eval_data),
+                        )
+                    else:
+                        self._cloud_lf.create_dataset(
+                            name=dataset_name,
+                            description="Ground truth queries for prompt evaluation",
+                            metadata={"n_items": len(eval_data)},
+                        )
+                        for entry in eval_data:
+                            query = entry.get("query", "")
+                            ground_truth = entry.get("ground_truth", "")
+                            if not query:
+                                continue
+                            cloud_id = self._cloud_lf.create_dataset_item(
+                                dataset_name=dataset_name,
+                                input={"query": query},
+                                expected_output=ground_truth,
+                                metadata={"source": "eval_data"},
+                            )
+                            if cloud_id:
+                                query_to_item_id[query] = cloud_id
+                except Exception:
+                    logger.debug("Cloud Langfuse register_dataset failed", exc_info=True)
 
         except Exception:
             logger.warning("ObsLogger.register_dataset failed", exc_info=True)
@@ -372,10 +411,27 @@ class ObsLogger:
                 "prompt_fields_id": prompt_fields_id,
             })
 
-            if self._cloud:
-                self._cloud.on_dataset_run(
-                    run_id, content_hash, accuracy, hits, total, prompt_fields_id,
-                )
+            if self._cloud_lf:
+                try:
+                    if self._cloud_active_trace_id:
+                        self._cloud_lf.create_span(
+                            trace_id=self._cloud_active_trace_id,
+                            name=f"eval_{run_id[:8]}",
+                            input={
+                                "run_id": run_id,
+                                "content_hash": content_hash,
+                                "prompt_fields_id": prompt_fields_id,
+                            },
+                            output={
+                                "accuracy": accuracy,
+                                "hits": hits,
+                                "total": total,
+                            },
+                            parent_observation_id=self._cloud_active_round_obs_id,
+                            as_type="tool",
+                        )
+                except Exception:
+                    logger.debug("Cloud Langfuse dataset_run failed", exc_info=True)
 
             return self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"
         except Exception:
@@ -414,10 +470,24 @@ class ObsLogger:
                 "baseline_accuracy": baseline_accuracy,
             })
 
-            if self._cloud:
-                self._cloud.on_campaign_start(
-                    campaign_id, config, baseline_accuracy, session_id,
-                )
+            if self._cloud_lf:
+                try:
+                    cloud_id = self._cloud_lf.create_trace(
+                        name="optimization_loop",
+                        input={
+                            "campaign_id": campaign_id,
+                            "baseline_accuracy": baseline_accuracy,
+                            "config": config,
+                        },
+                        session_id=session_id,
+                        tags=["campaign", "optimization_loop"],
+                    )
+                    if cloud_id:
+                        self._cloud_trace_ids[campaign_id] = cloud_id
+                        self._cloud_active_trace_id = cloud_id
+                        self._cloud_active_session_id = session_id
+                except Exception:
+                    logger.debug("Cloud Langfuse campaign_start failed", exc_info=True)
 
             return self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"
         except Exception:
@@ -457,10 +527,22 @@ class ObsLogger:
                 "node_type": node_type,
             })
 
-            if self._cloud:
-                self._cloud.on_node_start(
-                    node_id, node_type, obs_type, input_data, metadata,
-                )
+            if self._cloud_lf:
+                try:
+                    if self._cloud_active_trace_id:
+                        as_type = obs_type if obs_type in ("generation", "span") else "span"
+                        cloud_obs_id = self._cloud_lf.start_span(
+                            trace_id=self._cloud_active_trace_id,
+                            name=node_id,
+                            input=input_data,
+                            metadata={"node_type": node_type, **(metadata or {})},
+                            parent_observation_id=self._cloud_active_round_obs_id,
+                            as_type=as_type,
+                        )
+                        if cloud_obs_id:
+                            self._cloud_active_step_obs_ids[node_id] = cloud_obs_id
+                except Exception:
+                    logger.debug("Cloud Langfuse node_start failed", exc_info=True)
 
             return obs_id
         except Exception:
@@ -500,8 +582,22 @@ class ObsLogger:
                 "error": error,
             })
 
-            if self._cloud:
-                self._cloud.on_node_end(node_id, output_data, metrics, error)
+            if self._cloud_lf:
+                try:
+                    cloud_obs_id = self._cloud_active_step_obs_ids.pop(node_id, None)
+                    if cloud_obs_id:
+                        meta: dict = {}
+                        if metrics:
+                            meta["metrics"] = metrics
+                        if error:
+                            meta["error"] = error
+                        self._cloud_lf.end_observation(
+                            cloud_obs_id,
+                            output=output_data,
+                            metadata=meta or None,
+                        )
+                except Exception:
+                    logger.debug("Cloud Langfuse node_end failed", exc_info=True)
         except Exception:
             logger.warning("ObsLogger.log_node_end failed", exc_info=True)
 
@@ -523,8 +619,20 @@ class ObsLogger:
                     input_data={"round": round_num},
                 )
 
-            if self._cloud:
-                self._cloud.on_round_start(campaign_id, round_num)
+            if self._cloud_lf:
+                try:
+                    cloud_trace_id = self._cloud_trace_ids.get(campaign_id)
+                    if cloud_trace_id:
+                        obs_id = self._cloud_lf.start_span(
+                            trace_id=cloud_trace_id,
+                            name=f"round_{round_num}",
+                            input={"round": round_num},
+                            metadata={"round": round_num},
+                            as_type="span",
+                        )
+                        self._cloud_active_round_obs_id = obs_id
+                except Exception:
+                    logger.debug("Cloud Langfuse round_start failed", exc_info=True)
         except Exception:
             logger.warning("ObsLogger.log_round_start failed", exc_info=True)
 
@@ -616,11 +724,37 @@ class ObsLogger:
                    if optimizer_templates else {}),
             })
 
-            if self._cloud:
-                self._cloud.on_round_end(
-                    campaign_id, round_num, accuracy, improved,
-                    next_action, candidate_scores, optimizer_templates,
-                )
+            if self._cloud_lf:
+                try:
+                    cloud_trace_id = self._cloud_trace_ids.get(campaign_id)
+                    if cloud_trace_id:
+                        if self._cloud_active_round_obs_id:
+                            round_meta: dict = {
+                                "round": round_num,
+                                "candidates_evaluated": len(candidate_scores),
+                            }
+                            if optimizer_templates:
+                                round_meta["optimizer_templates"] = optimizer_templates
+                            self._cloud_lf.end_observation(
+                                self._cloud_active_round_obs_id,
+                                output={
+                                    "winner_accuracy": accuracy,
+                                    "improved": improved,
+                                    "next_action": next_action,
+                                    "candidates_evaluated": len(candidate_scores),
+                                },
+                                metadata=round_meta,
+                            )
+                        self._cloud_lf.create_score(
+                            trace_id=cloud_trace_id,
+                            name=f"accuracy_round_{round_num}",
+                            value=accuracy,
+                            comment=f"Round {round_num}: {'improved' if improved else 'no change'}",
+                        )
+                except Exception:
+                    logger.debug("Cloud Langfuse round_end failed", exc_info=True)
+                finally:
+                    self._cloud_active_round_obs_id = None
 
             obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
             return obs_dir if trace_id else None
@@ -663,10 +797,27 @@ class ObsLogger:
                 "parent_id": parent_id,
             })
 
-            if self._cloud:
-                self._cloud.on_prompt_version(
-                    prompt_fields_id, layer1_fields, parent_id,
-                )
+            if self._cloud_lf:
+                try:
+                    if self._cloud_trace_ids:
+                        cloud_trace_id = next(reversed(self._cloud_trace_ids.values()))
+                        self._cloud_lf.create_span(
+                            trace_id=cloud_trace_id,
+                            name="prompt_version",
+                            input={
+                                "prompt_fields_id": prompt_fields_id,
+                                "parent_id": parent_id,
+                            },
+                            output={
+                                "family": "ranking_prompt",
+                                "version": prompt_fields_id[:8] if prompt_fields_id else "unknown",
+                            },
+                            metadata={"layer1_fields": layer1_fields},
+                            parent_observation_id=self._cloud_active_round_obs_id,
+                            as_type="tool",
+                        )
+                except Exception:
+                    logger.debug("Cloud Langfuse prompt_version failed", exc_info=True)
 
             return prompt_dir / "prompt.txt"
         except Exception:
@@ -714,20 +865,45 @@ class ObsLogger:
                 "best_round": best_round,
             })
 
-            if self._cloud:
-                self._cloud.on_campaign_end(
-                    campaign_id, best_accuracy, n_rounds, stop_reason, best_round,
-                )
+            if self._cloud_lf:
+                try:
+                    cloud_trace_id = self._cloud_trace_ids.get(campaign_id)
+                    if cloud_trace_id:
+                        self._cloud_lf.create_score(
+                            trace_id=cloud_trace_id,
+                            name="best_accuracy",
+                            value=best_accuracy,
+                            comment=f"Best at round {best_round}, stop: {stop_reason}",
+                        )
+                        self._cloud_lf.update_trace(
+                            trace_id=cloud_trace_id,
+                            output={
+                                "best_accuracy": best_accuracy,
+                                "n_rounds": n_rounds,
+                                "stop_reason": stop_reason,
+                            },
+                            metadata={
+                                "stop_reason": stop_reason,
+                                "best_round": best_round,
+                            },
+                        )
+                        self._cloud_lf.end_trace(cloud_trace_id)
+                except Exception:
+                    logger.debug("Cloud Langfuse campaign_end failed", exc_info=True)
+                finally:
+                    self._cloud_active_trace_id = None
+                    self._cloud_active_session_id = None
         except Exception:
             logger.warning("ObsLogger.log_campaign_end failed", exc_info=True)
 
     def flush(self) -> None:
         """Flush cloud Langfuse (file I/O is already synchronous)."""
-        if self._cloud:
-            self._cloud.flush()
+        if self._cloud_lf:
+            try:
+                self._cloud_lf.flush()
+            except Exception:
+                logger.debug("Cloud Langfuse flush failed", exc_info=True)
 
     def get_cloud_trace_id(self, campaign_id: str) -> str | None:
         """Return cloud Langfuse trace ID for a campaign, or None."""
-        if self._cloud:
-            return self._cloud.get_trace_id(campaign_id)
-        return None
+        return self._cloud_trace_ids.get(campaign_id)

@@ -27,11 +27,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from api.models.search_point import SearchPoint
-from api.shared.constants import (  # noqa: F401
-    LAYER1_STRING_FIELDS,
-    LAYER_FIELDS,
-    PROMPT_STRING_FIELDS,
-)
+from api.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     from api.models.search_point import JobSearchPoint

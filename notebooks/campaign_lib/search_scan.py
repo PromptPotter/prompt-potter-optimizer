@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from api.models.opt_search_point import LAYER1_STRING_FIELDS, OptSearchPoint
+from api.models.opt_search_point import OptSearchPoint
 from api.services.search.adaptive_search import adaptive_search as _adaptive_search
 from api.services.search.sensitivity_scan import sensitivity_scan as _sensitivity_scan
+from api.shared.constants import LAYER1_STRING_FIELDS
 
 from .display import (
     CYAN,
