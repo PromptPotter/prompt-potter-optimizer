@@ -18,7 +18,7 @@ from api.config.settings import (
 )
 from api.models.eval_context import EvalContext
 from api.models.opt_search_point import OptSearchPoint
-from api.services.prompt_eval import evaluate_prompt_cached
+from api.services.prompt_eval import eval_search_point
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -152,7 +152,7 @@ def _make_eval_fn(
         sp = opt.to_job_search_point(
             base_pipeline_params=pp or get_params(),
         )
-        results, scores, cached = await evaluate_prompt_cached(
+        results, scores, cached = await eval_search_point(
             sp, eval_data, ctx,
             label="scan",
             on_result=on_result,

@@ -36,29 +36,29 @@ if TYPE_CHECKING:
     from api.services.llm_client import LLMClientBase
 
 __all__ = [
-    # Service init
-    "init_services",
-    "setup_llm",
-    "load_variant_library",
-    # Backend status & datasets
-    "show_backend_status",
     "build_all_session_terms",
-    "prepare_datasets",
-    "prepare_eval_context",
-    # Pipeline config
-    "configure_pipeline",
-    # Pipeline snapshot
-    "show_pipeline_snapshot",
-    # Task context
-    "decompose_task_context",
-    # Re-exports
-    "save_campaign_winner",
     # Langfuse
     "configure_langfuse",
-    "sync_langfuse",
-    "push_langfuse",
+    # Pipeline config
+    "configure_pipeline",
+    # Task context
+    "decompose_task_context",
     # Dev
     "dev_reload",
+    # Service init
+    "init_services",
+    "load_variant_library",
+    "prepare_datasets",
+    "prepare_eval_context",
+    "push_langfuse",
+    # Re-exports
+    "save_campaign_winner",
+    "setup_llm",
+    # Backend status & datasets
+    "show_backend_status",
+    # Pipeline snapshot
+    "show_pipeline_snapshot",
+    "sync_langfuse",
 ]
 
 
@@ -146,7 +146,17 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     """
     import json
 
-    pipeline_raw = await svc.backend_client.fetch_pipeline()
+    import httpx
+
+    try:
+        pipeline_raw = await svc.backend_client.fetch_pipeline()
+    except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
+        base = svc.backend_client.base_url
+        print("WARNING: Backend unreachable — is TermNorm running?")
+        print(f"  Could not connect to {base}/pipeline")
+        print(f"  Error: {exc}")
+        return {}
+
     config = pipeline_raw.get("data", pipeline_raw)
 
     name = config.get("name", "?")

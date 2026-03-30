@@ -257,7 +257,7 @@ async def l1_evaluate(
     escalation_checks: list | None = None,
 ) -> L1EvalResult:
     """Evaluate candidates and select the round winner."""
-    from api.services.prompt_eval import evaluate_prompt_cached
+    from api.services.prompt_eval import eval_search_point
 
     _sp_pipeline_params = pipeline_params
 
@@ -298,7 +298,7 @@ async def l1_evaluate(
             base_pipeline_params=pp,
         )
         ctx.candidate_idx = idx
-        results, scores, cached = await evaluate_prompt_cached(
+        results, scores, cached = await eval_search_point(
             sp,
             eval_data,
             ctx,

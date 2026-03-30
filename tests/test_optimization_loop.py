@@ -541,7 +541,7 @@ async def test_interrupt_writes_interrupted_status(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached", mock_eval_interrupt,
+        "api.services.prompt_eval.eval_search_point", mock_eval_interrupt,
     )
 
     config = CycleConfig(

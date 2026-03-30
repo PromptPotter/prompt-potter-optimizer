@@ -332,7 +332,7 @@ def show_experiment_dashboard(
     else:
         print("\n  Campaigns (most recent first):")
         sorted_camps = sorted(campaigns, key=lambda x: x["updated_at"], reverse=True)
-        for i, c in enumerate(sorted_camps):
+        for _i, c in enumerate(sorted_camps):
             cid = c["campaign_id"]
             status = c["status"]
             n = c["n_trials"]

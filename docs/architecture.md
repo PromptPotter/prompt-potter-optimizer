@@ -44,7 +44,7 @@ All core logic lives in `api/services/`.
 
 Every piece of state is traced at both layers, independently reconstructable from disk:
 
-- **Target layer**: `JobSearchPoint` → `evaluate_prompt_cached()` → `dataset_runs/` (content-addressed, shared across all eval paths)
+- **Target layer**: `JobSearchPoint` → `eval_search_point()` → `dataset_runs/` (content-addressed, shared across all eval paths)
 - **Optimizer layer**: `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint)
 
 ## Data Models
@@ -69,7 +69,7 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 
 ## Evaluation Flow
 
-All paths converge on `evaluate_prompt_cached()` — single gateway for eval persistence. Content-addressed dedup via `eval_content_hash()`. Prompt alias groups link semantically equivalent prompts so historical data is discoverable across forms (transitive resolution).
+All paths converge on `eval_search_point()` — single gateway for eval persistence. Content-addressed dedup via `eval_content_hash()`. Prompt alias groups link semantically equivalent prompts so historical data is discoverable across forms (transitive resolution).
 
 ## Caching & Crash Recovery
 

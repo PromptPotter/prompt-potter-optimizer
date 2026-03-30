@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from pathlib import Path
 
 from api.services.search import (
     advise_scan_config as _advise_scan_config,
-    preview_advisor_prompt as _preview_advisor_prompt,
+)
+from api.services.search import (
     load_filtered_variant_library as _load_filtered_variants,
+)
+from api.services.search import (
+    preview_advisor_prompt as _preview_advisor_prompt,
 )
 
 from .search_variants import advisory_to_scan_variants
@@ -18,10 +23,10 @@ from .setup import setup_llm
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "preview_advisor_prompt",
     "load_task_description",
-    "scan_advisor",
+    "preview_advisor_prompt",
     "run_scan_advisor",
+    "scan_advisor",
 ]
 
 
@@ -38,7 +43,8 @@ def preview_advisor_prompt(
         raw: When True, print the exact prompt string instead of
             rendering as Markdown. Useful for debugging.
     """
-    from IPython.display import display as ipy_display, Markdown
+    from IPython.display import Markdown
+    from IPython.display import display as ipy_display
 
     if svc is not None:
         pipeline_schema = svc.get("pipeline_schema")
@@ -225,10 +231,8 @@ async def run_scan_advisor(
             for variant in raw_mutations:
                 # LLMs sometimes return mutation arrays as JSON strings — parse them
                 if isinstance(variant, str):
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError, ValueError):
                         variant = json.loads(variant)
-                    except (json.JSONDecodeError, ValueError):
-                        pass
                 print(f"        {variant!r},")
             print("    ],")
         else:

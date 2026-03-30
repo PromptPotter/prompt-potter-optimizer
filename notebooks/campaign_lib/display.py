@@ -14,20 +14,39 @@ def _visible_len(text: str) -> int:
     return len(_ANSI_RE.sub("", text))
 
 __all__ = [
+    "BLUE",
+    "BOLD",
+    "CYAN",
+    "DIM",
+    "GREEN",
+    "MAGENTA",
+    "RED",
     # Constants
-    "RESET", "BOLD", "DIM", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN",
+    "RESET",
+    "YELLOW",
+    "_box_bottom",
+    "_box_line",
     # Box-drawing helpers
-    "_box_top", "_box_bottom", "_box_line",
-    "_dbox_top", "_dbox_bottom", "_dbox_line", "_dbox_sep",
-    "_dotted_line", "_fmt_delta", "_scoreboard",
-    # Display functions
-    "show_progress", "show_axis_profiles",
-    # Scan analytics
-    "show_scan_leaderboard", "show_scan_query_difficulty",
-    # Campaign results display
-    "show_campaign_summary", "show_flip_tracking", "show_lineage_chain",
+    "_box_top",
+    "_dbox_bottom",
+    "_dbox_line",
+    "_dbox_sep",
+    "_dbox_top",
+    "_dotted_line",
+    "_fmt_delta",
     # Interrupt handling
     "_print_interrupt_banner",
+    "_scoreboard",
+    "show_axis_profiles",
+    # Campaign results display
+    "show_campaign_summary",
+    "show_flip_tracking",
+    "show_lineage_chain",
+    # Display functions
+    "show_progress",
+    # Scan analytics
+    "show_scan_leaderboard",
+    "show_scan_query_difficulty",
 ]
 
 # ANSI foreground colors
@@ -54,14 +73,8 @@ _W = BOX_WIDTH          # internal alias
 def _box_top(label: str = "", label_right: str = "", width: int = _W) -> str:
     """Single-line top: ``┌─ label ───── label_right ─┐``."""
     inner = width - 4  # minus ┌─ prefix and ─┐ suffix
-    if label:
-        left = f" {label} "
-    else:
-        left = ""
-    if label_right:
-        right = f" {label_right} "
-    else:
-        right = ""
+    left = f" {label} " if label else ""
+    right = f" {label_right} " if label_right else ""
     fill = inner - len(left) - len(right)
     return f"\u250c\u2500{left}{'─' * max(fill, 1)}{right}\u2500\u2510"
 
@@ -582,7 +595,7 @@ def show_flip_tracking(campaign_rounds: list) -> None:
     from IPython.display import display as ipy_display
 
     flips = []
-    for br, fr in zip(base_r, final_r):
+    for br, fr in zip(base_r, final_r, strict=False):
         b_hit = br["hit"]
         f_hit = fr["hit"]
         if b_hit != f_hit:

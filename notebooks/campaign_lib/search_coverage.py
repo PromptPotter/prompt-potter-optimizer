@@ -5,9 +5,13 @@ from __future__ import annotations
 import logging
 
 from api.services.search import (
-    build_prompt_result_index as build_historical_index,
     assess_scan_coverage as _assess_scan_coverage,
+)
+from api.services.search import (
     build_data_inventory as _build_data_inventory,
+)
+from api.services.search import (
+    build_prompt_result_index as build_historical_index,
 )
 
 from .display import BOX_WIDTH, CYAN, DIM, RESET
@@ -15,9 +19,9 @@ from .display import BOX_WIDTH, CYAN, DIM, RESET
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "show_scan_coverage",
-    "show_data_inventory",
     "audit_historical_data",
+    "show_data_inventory",
+    "show_scan_coverage",
 ]
 
 _BLOCK_WIDTH = BOX_WIDTH  # single source of truth

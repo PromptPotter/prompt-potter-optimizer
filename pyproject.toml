@@ -114,5 +114,8 @@ ignore = [
     "C901",   # complexity — tracked separately, not a lint gate
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*.ipynb" = ["F403", "F405"]  # star imports are intentional in notebooks
+
 [tool.ruff.lint.mccabe]
 max-complexity = 15

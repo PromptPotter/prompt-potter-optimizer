@@ -236,7 +236,7 @@ async def backend_reranker_evaluate(
 |----|-----------|
 | 9.1 | `api/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
 | 9.2 | `api/services/llm_client.py` (singleton pattern reference: `get_llm_client()`) |
-| 9.3 | `api/services/prompt_eval.py` (backend_reranker_evaluate, evaluate_prompt_cached), `api/services/campaign/optimization_loop.py` (BackendClient usage) |
+| 9.3 | `api/services/prompt_eval.py` (backend_reranker_evaluate, eval_search_point), `api/services/campaign/optimization_loop.py` (BackendClient usage) |
 | 9.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_campaign_registry.py` (E2E test pattern) |
 
 ---

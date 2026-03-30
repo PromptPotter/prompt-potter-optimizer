@@ -13,14 +13,26 @@ from dataclasses import dataclass, field
 from api.models.phase_event import PhaseEvent
 
 from .display import (
-    BOLD, CYAN, DIM, GREEN, NODE_FRAME_WIDTH, RED, RESET, YELLOW,
-    _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
-    _fmt_delta, _scoreboard,
+    BOLD,
+    CYAN,
+    DIM,
+    GREEN,
+    NODE_FRAME_WIDTH,
+    RED,
+    RESET,
+    YELLOW,
+    _dbox_bottom,
+    _dbox_line,
+    _dbox_sep,
+    _dbox_top,
+    _fmt_delta,
+    _scoreboard,
 )
 from .stats import (
-    fmt_pvalue, min_detectable_effect, proportion_test,
+    fmt_pvalue,
+    min_detectable_effect,
+    proportion_test,
 )
-
 
 # ---------------------------------------------------------------------------
 # Display state — tracks cycle metadata across callbacks (display-only)
@@ -272,7 +284,7 @@ def _print_sp_diff(
 
     # Rows — grouped by pipeline node
     groups = _group_diff_keys(diff_keys, node_param_keys)
-    for gi, (node_name, group_keys) in enumerate(groups):
+    for _gi, (node_name, group_keys) in enumerate(groups):
         if node_name and len(groups) > 1:
             sep = f"{'─── ' + node_name + ' ':─<{max_key + 2}}"
             print(_node_line(f"{DIM}{sep}{RESET}"))
@@ -320,7 +332,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_dbox_line(
         f"Baseline       {d.get('baseline_accuracy', 0):.1%}"))
     print(_dbox_line(
-        f"Max rounds     {str(state.max_rounds or 999):<15s}"
+        f"Max rounds     {state.max_rounds or 999!s:<15s}"
         f"Patience    {state.patience}"))
     print(_dbox_line(
         f"Candidates     {d.get('n_variants', 0)}"))

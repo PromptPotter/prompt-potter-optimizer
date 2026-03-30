@@ -493,7 +493,7 @@ def _lookup_cached_or_aliased_result(
     return None
 
 
-async def evaluate_prompt_cached(
+async def eval_search_point(
     search_point: JobSearchPoint,
     eval_data: list,
     ctx: EvalContext,

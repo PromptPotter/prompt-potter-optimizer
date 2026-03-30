@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from api.models.eval_context import EvalContext
 from api.models.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
 from api.models.search_point import JobSearchPoint
-from api.services.prompt_eval import _dominant_error_category, evaluate_prompt_cached
+from api.services.prompt_eval import _dominant_error_category, eval_search_point
 from api.services.search.preview import preview as _preview
 from api.services.search.smart_search import (
     ScanEvent,
@@ -100,7 +100,7 @@ async def sensitivity_scan(
         axes.append((name, axis_type, values))
 
     # Evaluate baseline
-    baseline_results, baseline_scores, baseline_cached = await evaluate_prompt_cached(
+    baseline_results, baseline_scores, baseline_cached = await eval_search_point(
         baseline, eval_data, scan_ctx,
         label="scan",
         on_result=on_result,
@@ -204,7 +204,7 @@ async def sensitivity_scan(
                     pp[axis_name] = value
                 perturbed = baseline.derive(pipeline_params=pp)
 
-            results, scores, cached = await evaluate_prompt_cached(
+            results, scores, cached = await eval_search_point(
                 perturbed, eval_data, scan_ctx,
                 label="scan",
                 on_result=on_result,

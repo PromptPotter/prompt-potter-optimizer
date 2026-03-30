@@ -6,20 +6,24 @@ import asyncio
 import logging
 
 from api.models.opt_search_point import LAYER1_STRING_FIELDS, OptSearchPoint
-from api.services.search.sensitivity_scan import sensitivity_scan as _sensitivity_scan
 from api.services.search.adaptive_search import adaptive_search as _adaptive_search
+from api.services.search.sensitivity_scan import sensitivity_scan as _sensitivity_scan
 
 from .display import (
-    CYAN, DIM, RESET,
-    _fmt_query_result, _print_interrupt_banner, show_axis_profiles,
+    CYAN,
+    DIM,
+    RESET,
+    _fmt_query_result,
+    _print_interrupt_banner,
+    show_axis_profiles,
 )
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "sensitivity_scan",
     "adaptive_search",
     "run_sensitivity_scan",
+    "sensitivity_scan",
 ]
 
 
@@ -101,7 +105,7 @@ async def sensitivity_scan(
     except (KeyboardInterrupt, asyncio.CancelledError):
         _print_interrupt_banner(
             "Sensitivity scan",
-            saved="completed evaluations saved via evaluate_prompt_cached",
+            saved="completed evaluations saved via eval_search_point",
             resume_hint="re-run this cell -- cached evals will be reused",
         )
         return None, []
@@ -259,7 +263,7 @@ async def adaptive_search(
         import pandas as _pd
         _print_interrupt_banner(
             "Adaptive search",
-            saved="completed evaluations saved via evaluate_prompt_cached",
+            saved="completed evaluations saved via eval_search_point",
             resume_hint="re-run this cell to restart (cached evals will be reused)",
         )
         return baseline_ps, dict(pipeline_params or {}), _pd.DataFrame()

@@ -45,11 +45,11 @@ def _make_scan_baseline(
 
 @pytest.fixture
 def scan_eval_mock(monkeypatch):
-    """Fixture that returns a function to patch evaluate_prompt_cached for scan tests."""
+    """Fixture that returns a function to patch eval_search_point for scan tests."""
     import api.services.search.sensitivity_scan as _scan
 
     def _apply(mock_eval):
-        monkeypatch.setattr(_scan, "evaluate_prompt_cached", mock_eval)
+        monkeypatch.setattr(_scan, "eval_search_point", mock_eval)
 
     return _apply
 

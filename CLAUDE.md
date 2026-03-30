@@ -86,7 +86,7 @@ Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema
 
 ### Evaluation gateway
 
-`evaluate_prompt_cached()` in `prompt_eval.py` is the **single entry point** for all eval persistence. All evaluation paths converge here.
+`eval_search_point()` in `prompt_eval.py` is the **single entry point** for all eval persistence. All evaluation paths converge here.
 
 ### Pipeline discovery — ownership principle
 

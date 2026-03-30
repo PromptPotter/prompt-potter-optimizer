@@ -296,7 +296,7 @@ def _apply_e2e_mocks(monkeypatch):
         return results, scores, False
 
     monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
+        "api.services.prompt_eval.eval_search_point",
         mock_eval,
     )
 

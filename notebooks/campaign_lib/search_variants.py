@@ -67,10 +67,7 @@ def show_variant_library(
     for field_name, variants in all_fields.items():
         field_variants = []
         for v in variants:
-            if isinstance(v, dict):
-                v_source = v.get("source", "")
-            else:
-                v_source = "PromptPotter"
+            v_source = v.get("source", "") if isinstance(v, dict) else "PromptPotter"
 
             if source and v_source != source:
                 continue

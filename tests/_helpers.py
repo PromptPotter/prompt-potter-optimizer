@@ -43,7 +43,7 @@ def apply_grow_mock(monkeypatch):
 
 
 def apply_eval_mock(monkeypatch, round_hits=None):
-    """Mock evaluate_prompt_cached with configurable per-round hit counts.
+    """Mock eval_search_point with configurable per-round hit counts.
 
     The first positional arg is now a ``SearchPoint`` (not a raw OptSearchPoint).
     Returns a ``call_count`` list ([int]) so callers can track invocations.
@@ -84,7 +84,7 @@ def apply_eval_mock(monkeypatch, round_hits=None):
         return results, scores, False
 
     monkeypatch.setattr(
-        "api.services.prompt_eval.evaluate_prompt_cached",
+        "api.services.prompt_eval.eval_search_point",
         mock_eval,
     )
     return call_count

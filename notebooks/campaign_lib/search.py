@@ -1,55 +1,72 @@
 """Smart search: re-exports from focused submodules."""
 
-from api.services.search import (  # noqa: F401
+from api.services.search import (
     build_diagnostic_set,
-    build_prompt_result_index as build_historical_index,
+    build_llm_context,
     build_pipeline_overview,
     build_tunable_params,
-    build_llm_context,
 )
-from .display import show_axis_profiles  # noqa: F401
+from api.services.search import (
+    build_prompt_result_index as build_historical_index,
+)
 
-from .search_variants import (  # noqa: F401
-    show_variant_library,
-    advisory_to_scan_variants,
-    resolve_scan_variants,
+from .display import show_axis_profiles
+from .search_advisor import (
+    load_task_description,
+    preview_advisor_prompt,
+    run_scan_advisor,
+    scan_advisor,
 )
-from .search_baseline import (  # noqa: F401
+from .search_baseline import (
     prepare_scan_baseline,
 )
-from .search_coverage import (  # noqa: F401
-    show_scan_coverage,
-    show_data_inventory,
+from .search_coverage import (
     audit_historical_data,
+    show_data_inventory,
+    show_scan_coverage,
 )
-from .search_advisor import (  # noqa: F401
-    preview_advisor_prompt,
-    load_task_description,
-    scan_advisor,
-    run_scan_advisor,
+from .search_results import (
+    resume_or_build_diagnostic,
+    seed_campaign_from_scan,
+    select_scan_winner_notebook,
+    show_scan_analytics,
 )
-from .search_scan import (  # noqa: F401
-    sensitivity_scan,
+from .search_scan import (
     adaptive_search,
     run_sensitivity_scan,
+    sensitivity_scan,
 )
-from .search_results import (  # noqa: F401
-    resume_or_build_diagnostic,
-    select_scan_winner_notebook,
-    seed_campaign_from_scan,
-    show_scan_analytics,
+from .search_variants import (
+    advisory_to_scan_variants,
+    resolve_scan_variants,
+    show_variant_library,
 )
 
 __all__ = [
+    "adaptive_search",
+    "advisory_to_scan_variants",
+    "audit_historical_data",
     # Smart search
-    "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
-    "show_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",
-    "advisory_to_scan_variants", "resolve_scan_variants",
-    "select_scan_winner_notebook", "build_historical_index", "load_task_description",
-    "show_scan_coverage", "show_data_inventory",
-    "audit_historical_data", "preview_advisor_prompt",
+    "build_diagnostic_set",
+    "build_historical_index",
+    "build_llm_context",
+    "build_pipeline_overview",
+    "build_tunable_params",
+    "load_task_description",
     # Notebook-facing wrappers
-    "prepare_scan_baseline", "run_scan_advisor", "seed_campaign_from_scan",
-    "build_pipeline_overview", "build_tunable_params", "build_llm_context",
-    "show_variant_library", "show_scan_analytics", "run_sensitivity_scan",
+    "prepare_scan_baseline",
+    "preview_advisor_prompt",
+    "resolve_scan_variants",
+    "resume_or_build_diagnostic",
+    "run_scan_advisor",
+    "run_sensitivity_scan",
+    "scan_advisor",
+    "seed_campaign_from_scan",
+    "select_scan_winner_notebook",
+    "sensitivity_scan",
+    "show_axis_profiles",
+    "show_data_inventory",
+    "show_scan_analytics",
+    "show_scan_coverage",
+    "show_variant_library",
 ]

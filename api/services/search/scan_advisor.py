@@ -10,6 +10,7 @@ backend-agnostic — a different PipelineSchema automatically surfaces its own a
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from typing import Any
@@ -522,10 +523,8 @@ def advisory_to_scan_variants(
             parsed = []
             for v in vals:
                 if isinstance(v, str):
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError, ValueError):
                         v = json.loads(v)
-                    except (json.JSONDecodeError, ValueError):
-                        pass
                 parsed.append(v)
             vals = parsed
         raw[ax["axis"]] = vals
