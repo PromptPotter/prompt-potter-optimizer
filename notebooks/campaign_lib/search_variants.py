@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
-from api.models.pipeline_schema import PipelineSchema
 from api.config.settings import load_variant_library_rich
+from api.models.pipeline_schema import PipelineSchema
+from api.services.search.scan_advisor import (
+    _resolve_schema_axes,
+    advisory_to_scan_variants,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "show_variant_library",
     "advisory_to_scan_variants",
     "resolve_scan_variants",
+    "show_variant_library",
 ]
 
 
@@ -39,7 +42,7 @@ def show_variant_library(
     Returns:
         The filtered rich variant dict (objects with ``text``/``source``/``year``).
     """
-    from .display import BOLD, RESET, CYAN, GREEN, YELLOW
+    from .display import BOLD, CYAN, GREEN, RESET, YELLOW
 
     rich = load_variant_library_rich()
     all_fields = rich.get("prompt_fields", {})
@@ -99,93 +102,6 @@ def show_variant_library(
         print()
 
     return {"prompt_fields": filtered}
-
-
-# ---------------------------------------------------------------------------
-# Schema resolution helpers
-# ---------------------------------------------------------------------------
-
-
-def _resolve_schema_axes(
-    raw_variants: dict,
-    pipeline_schema: PipelineSchema | None,
-) -> tuple[dict, dict[str, list[str]]]:
-    """Resolve schema mutation tuples in *raw_variants* into concrete JSON Schema dicts.
-
-    Non-schema axes pass through unchanged.  Returns ``(resolved, schema_labels)``.
-    """
-    from api.shared.schema_mutation import (
-        baseline_schema_from_node,
-        parse_mutation_tuples,
-        resolve_schema_variants,
-    )
-
-    resolved: dict = {}
-    schema_labels: dict[str, list[str]] = {}
-
-    for axis_name, vals in raw_variants.items():
-        if (
-            axis_name.endswith("_schema")
-            and pipeline_schema is not None
-            and vals
-            and isinstance(vals[0], list)
-        ):
-            node_name = pipeline_schema.node_for_flat_param(axis_name)
-            node = pipeline_schema.get_node(node_name) if node_name else None
-            if node and node.output_schema:
-                try:
-                    variants = [parse_mutation_tuples(sv) for sv in vals]
-                    baseline = baseline_schema_from_node(node.output_schema)
-                    resolved[axis_name] = resolve_schema_variants(baseline, variants)
-                    schema_labels[axis_name] = (
-                        ["(baseline)"] + [v.render_label() for v in variants]
-                    )
-                    continue
-                except (ValueError, KeyError) as e:
-                    logger.warning(
-                        "Schema axis '%s' mutation parse failed, "
-                        "falling through to raw values: %s",
-                        axis_name, e,
-                    )
-        resolved[axis_name] = vals
-
-    return resolved, schema_labels
-
-
-def advisory_to_scan_variants(
-    advisory: dict,
-    pipeline_schema: PipelineSchema | None = None,
-) -> tuple[dict, dict[str, list[str]]]:
-    """Convert scan advisory into editable pipeline_params dict.
-
-    Extracts ``priority_axes`` entries whose ``source`` is ``"pipeline_param"``
-    and that carry ``suggested_values``.
-
-    For schema axes (name ends with ``_schema``), parses mutation tuples,
-    resolves against the baseline JSON Schema, and returns concrete dicts.
-
-    Returns ``(scan_variants, schema_labels)`` where ``schema_labels`` maps
-    schema axis names to human-readable labels (``"(baseline)"`` at index 0).
-    """
-    raw: dict[str, list] = {}
-    for ax in advisory.get("priority_axes", []):
-        if ax.get("source") != "pipeline_param" or not ax.get("suggested_values"):
-            continue
-        vals = ax["suggested_values"]
-        # LLMs sometimes return mutation arrays as JSON strings — parse them
-        if ax["axis"].endswith("_schema"):
-            parsed = []
-            for v in vals:
-                if isinstance(v, str):
-                    try:
-                        v = json.loads(v)
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-                parsed.append(v)
-            vals = parsed
-        raw[ax["axis"]] = vals
-
-    return _resolve_schema_axes(raw, pipeline_schema)
 
 
 def resolve_scan_variants(

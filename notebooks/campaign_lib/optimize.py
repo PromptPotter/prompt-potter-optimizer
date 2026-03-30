@@ -6,21 +6,42 @@ from typing import TYPE_CHECKING
 
 from api.models.opt_search_point import OptSearchPoint
 from api.models.phase_event import PhaseEvent
-from api.services.campaign.campaign_init import resolve_experiment_id as _resolve_experiment_id
+from api.services.campaign.campaign_init import (
+    extract_campaign_baseline as _extract_campaign_baseline,
+)
+from api.services.campaign.campaign_init import (
+    resolve_experiment_id as _resolve_experiment_id,
+)
 
 from .display import (
-    BOLD, CYAN, GREEN, RED, RESET, YELLOW,
-    _box_bottom, _box_line, _box_top,
-    _dbox_bottom, _dbox_line, _dbox_sep, _dbox_top,
-    _fmt_delta, _fmt_query_result,
+    BOLD,
+    CYAN,
+    GREEN,
+    RED,
+    RESET,
+    YELLOW,
+    _box_bottom,
+    _box_line,
+    _box_top,
+    _dbox_bottom,
+    _dbox_line,
+    _dbox_sep,
+    _dbox_top,
+    _fmt_delta,
+    _fmt_query_result,
     show_progress,
 )
-from .stats import (
-    fmt_ci, wilson_ci,
-)
 from .phase_display import (
-    _CycleDisplayState, _dispatch_phase, _pp_val,
-    _node_bottom, _node_line, _node_top,
+    _CycleDisplayState,
+    _dispatch_phase,
+    _node_bottom,
+    _node_line,
+    _node_top,
+    _pp_val,
+)
+from .stats import (
+    fmt_ci,
+    wilson_ci,
 )
 
 if TYPE_CHECKING:
@@ -28,8 +49,8 @@ if TYPE_CHECKING:
     from api.services.project_store import ProjectStore
 
 __all__ = [
-    "show_feedback_preflight",
     "run_optimization_notebook",
+    "show_feedback_preflight",
     "show_progress",
 ]
 
@@ -39,37 +60,14 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def _extract_campaign_baseline(campaign_rounds: list) -> dict:
-    """Extract baseline prompt state, accuracy, and results from campaign rounds.
-
-    Searches reversed rounds for the last with actual eval ``results``,
-    then overrides the prompt_fields with the tip (most recent round).
-
-    Returns dict with keys: baseline_ps, baseline_acc, baseline_results, instruction.
-    """
-    baseline_ps = None
-    baseline_acc = 0.0
-    baseline_results = None
-    instruction = ""
-    if campaign_rounds:
-        # Find the last round with actual eval results (for accuracy + results)
-        last = campaign_rounds[-1]
-        for rd in reversed(campaign_rounds):
-            if rd.get("results"):
-                last = rd
-                break
-        baseline_acc = last.get("accuracy", 0.0)
-        baseline_results = last.get("results", [])
-        # Use prompt_fields from the tip (most recent round) — may differ from
-        # the round with results (e.g. search winner with derived prompt)
-        tip_ps = campaign_rounds[-1]["prompt_fields"]
-        baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
-        instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else ""
+def _campaign_baseline_as_dict(campaign_rounds: list) -> dict:
+    """Thin wrapper: delegate to service, return as dict for local callers."""
+    bl = _extract_campaign_baseline(campaign_rounds)
     return {
-        "baseline_ps": baseline_ps,
-        "baseline_acc": baseline_acc,
-        "baseline_results": baseline_results,
-        "instruction": instruction,
+        "baseline_ps": bl.baseline_ps,
+        "baseline_acc": bl.baseline_acc,
+        "baseline_results": bl.baseline_results,
+        "instruction": bl.instruction,
     }
 
 
@@ -78,13 +76,13 @@ def show_feedback_preflight(
     eval_data: list,
     campaign_config: dict,
     *,
-    pipeline_params: "dict | None" = None,
-    pipeline_schema: "PipelineSchema | None" = None,
+    pipeline_params: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
     scan_df=None,
     axis_profiles=None,
     scan_variants=None,
     difficulty_df=None,
-) -> "dict | None":
+) -> dict | None:
     """Display a rich pre-flight walkthrough for the feedback cycle.
 
     Builds scan context from raw DataFrames when available, then prints
@@ -124,7 +122,7 @@ def show_feedback_preflight(
         pipeline_schema=pipeline_schema,
     )
 
-    bl = _extract_campaign_baseline(campaign_rounds)
+    bl = _campaign_baseline_as_dict(campaign_rounds)
 
     _print_preflight_sections(
         config, bl, eval_data,
@@ -335,17 +333,17 @@ async def run_optimization_notebook(
     eval_data: list,
     campaign_config: dict,
     *,
-    store: "ProjectStore | None" = None,
+    store: ProjectStore | None = None,
     backend_id: str = "",
     backend_url: str = "http://127.0.0.1:8000",
-    pipeline_params: "dict | None" = None,
-    pipeline_schema: "PipelineSchema | None" = None,
-    session_terms: "list[str] | None" = None,
+    pipeline_params: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
+    session_terms: list[str] | None = None,
     langfuse_session_id: str | None = None,
-    scan_context: "dict | None" = None,
+    scan_context: dict | None = None,
     experiment_id: str | None = None,
     svc: dict | None = None,
-    task_context: "dict | None" = None,
+    task_context: dict | None = None,
 ) -> list:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
@@ -381,7 +379,7 @@ async def run_optimization_notebook(
         task_context=task_context,
     )
 
-    bl = _extract_campaign_baseline(campaign_rounds)
+    bl = _campaign_baseline_as_dict(campaign_rounds)
     baseline_ps = bl["baseline_ps"]
     baseline_acc = bl["baseline_acc"]
     baseline_results = bl["baseline_results"]
@@ -579,6 +577,7 @@ async def run_optimization_notebook(
         if round_result.results:
             try:
                 from collections import Counter
+
                 from api.services.campaign.critique import _find_rank, _get_candidates
 
                 _results = round_result.results

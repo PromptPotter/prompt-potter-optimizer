@@ -7,18 +7,28 @@ from typing import TYPE_CHECKING
 
 from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
-from api.services.backend_client import extract_pipeline_config
 from api.services.campaign.campaign_init import (
     InitResult,
-    init_services as _init_services,
     build_all_session_terms,
-    create_llm_client as setup_llm,
     save_campaign_winner,
+)
+from api.services.campaign.campaign_init import (
+    configure_pipeline as _configure_pipeline,
+)
+from api.services.campaign.campaign_init import (
+    create_llm_client as setup_llm,
+)
+from api.services.campaign.campaign_init import (
+    init_services as _init_services,
+)
+from api.services.dataset_builder import (
+    SHEET_COLUMN_MAP,
 )
 from api.services.dataset_builder import (
     load_excel_ground_truth as _load_excel_gt,
+)
+from api.services.dataset_builder import (
     train_test_split as _train_test_split,
-    SHEET_COLUMN_MAP,
 )
 from api.services.project_store import ProjectStore
 
@@ -60,34 +70,25 @@ __all__ = [
 # Task context decomposition
 # ---------------------------------------------------------------------------
 
-TASK_CONTEXT_FIELDS = (
-    "domain",
-    "pipeline_purpose",
-    "data_characteristics",
-    "optimization_goals",
-    "key_challenges",
-)
-
-
 async def decompose_task_context(
     task_description: str,
     campaign_config: dict,
     svc: dict,
     *,
-    llm_client: "LLMClientBase | None" = None,
+    llm_client: LLMClientBase | None = None,
     model: str | None = None,
 ) -> dict:
     """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
 
-    Calls ``restructure_context_cached()`` and extracts the ``task_context``
-    sub-dict. Prints the decomposed fields for visibility.
-
-    Returns:
-        Dict with keys: domain, pipeline_purpose, data_characteristics,
-        optimization_goals, key_challenges.
+    Delegates to ``api.services.search.context.decompose_task_context()``
+    and prints the decomposed fields for visibility.
     """
-    import hashlib
-    from api.services.search.context import restructure_context_cached
+    from api.services.search.context import (
+        TASK_CONTEXT_FIELDS,
+    )
+    from api.services.search.context import (
+        decompose_task_context as _decompose_task_context,
+    )
 
     if not task_description:
         print("  (no task description provided)")
@@ -97,38 +98,27 @@ async def decompose_task_context(
         _client, _model = setup_llm(campaign_config)
         llm_client = llm_client or _client
         model = model or _model
-    llm_model = model
-    store = svc.store
-    backend_id = svc.backend_id
 
-    # Content-hash for caching
-    rp_hash = hashlib.sha256(
-        f"task_ctx:{task_description}".encode(),
-    ).hexdigest()[:16]
-
-    result, was_cached = await restructure_context_cached(
+    result = await _decompose_task_context(
         task_description,
         llm_client,
-        model=llm_model,
-        store_base_dir=store.base_dir if store else None,
-        backend_id=backend_id,
-        rp_hash=rp_hash,
+        model,
+        improvement_areas=campaign_config.get("improvement_areas", ""),
+        store_base_dir=svc.store.base_dir if svc.store else None,
+        backend_id=svc.backend_id,
     )
 
-    task_context = result.get("task_context", {})
-    task_context["raw_description"] = task_description
-    cache_tag = " (cached)" if was_cached else ""
-
+    cache_tag = " (cached)" if result.was_cached else ""
     print(f"TASK CONTEXT DECOMPOSITION{cache_tag}")
     print("-" * 50)
-    for field in TASK_CONTEXT_FIELDS:
-        val = task_context.get(field, "")
-        if val:
-            print(f"  {field}: {val}")
-        else:
-            print(f"  {field}: (empty)")
+    for f in TASK_CONTEXT_FIELDS:
+        val = result.task_context.get(f, "")
+        print(f"  {f}: {val or '(empty)'}")
 
-    return task_context
+    if result.consultation:
+        print(f"  Consultation: {result.consultation}")
+
+    return result.task_context
 
 
 # ---------------------------------------------------------------------------
@@ -182,51 +172,19 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
 def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
-    Uses ``svc.pipeline_schema`` (from ``GET /pipeline``) as the source of
-    truth for node names, falling back to experiment data only when the schema
-    is unavailable.  Reads ``exclude_nodes`` and ``pipeline_overrides`` from
-    *campaign_config*, stores the result back into
-    ``campaign_config["pipeline_params"]``, and returns the params dict.
+    Delegates to ``api.services.campaign.campaign_init.configure_pipeline()``
+    and prints a summary of active/excluded nodes.
     """
-    pipeline_schema = svc.pipeline_schema
-    exclude = campaign_config.get("exclude_nodes", [])
-    overrides = campaign_config.get("pipeline_overrides")
+    result = _configure_pipeline(
+        svc.pipeline_schema, campaign_config,
+        exp_data=getattr(svc, "exp_data", None),
+    )
 
-    if pipeline_schema:
-        all_names = [n.name for n in pipeline_schema.nodes]
-    else:
-        pipeline_config = extract_pipeline_config(svc.exp_data)
-        all_names = [s["name"] for s in pipeline_config["steps"]]
-
-    active = [n for n in all_names if n not in (exclude or [])]
-    pipeline_params: dict = {"steps": active}
-
-    # Seed with live config from GET /pipeline (no hidden defaults)
-    if pipeline_schema:
-        for node in pipeline_schema.nodes:
-            if node.name in active and node.current_config:
-                pipeline_params[node.name] = dict(node.current_config)
-
-    # Apply overrides for active nodes only
-    if overrides and pipeline_schema:
-        for flat_name, value in overrides.items():
-            resolved = pipeline_schema.resolve_flat_param(flat_name)
-            if resolved:
-                node, wire_key = resolved
-                if node in active:
-                    pipeline_params.setdefault(node, {})[wire_key] = value
-            else:
-                pipeline_params[flat_name] = value
-    elif overrides:
-        pipeline_params.update(overrides)
-
-    campaign_config["pipeline_params"] = pipeline_params
-
-    nodes_str = ", ".join(active)
-    excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
+    nodes_str = ", ".join(result.active_nodes)
+    excl_str = f"  Excluded: {', '.join(result.excluded_nodes)}" if result.excluded_nodes else ""
     print(f"Active nodes: {nodes_str}{excl_str}")
 
-    return pipeline_params
+    return result.pipeline_params
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +326,7 @@ async def prepare_eval_context(
 # api.services.campaign.campaign_init (see imports above)
 
 
-def show_dataset_summary(store: "ProjectStore", backend_id: str) -> dict:
+def show_dataset_summary(store: ProjectStore, backend_id: str) -> dict:
     """Load all stored datasets and display combined summary.
 
     Returns dict with keys: train, test_processes, test_material,
@@ -406,7 +364,7 @@ def show_dataset_summary(store: "ProjectStore", backend_id: str) -> dict:
 
 
 def prepare_datasets(
-    store: "ProjectStore",
+    store: ProjectStore,
     backend_id: str,
     excel_path: str | Path | None = None,
     *,
@@ -464,7 +422,7 @@ def prepare_datasets(
 
 
 def load_or_create_datasets(
-    store: "ProjectStore",
+    store: ProjectStore,
     backend_id: str,
     excel_path: str | Path,
     *,
@@ -522,7 +480,7 @@ def load_or_create_datasets(
 
 
 def load_stored_dataset(
-    store: "ProjectStore",
+    store: ProjectStore,
     backend_id: str,
     name: str,
 ) -> list[dict]:

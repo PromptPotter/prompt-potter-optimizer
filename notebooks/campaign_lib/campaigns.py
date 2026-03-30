@@ -6,8 +6,13 @@ import logging
 from typing import TYPE_CHECKING
 
 from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.campaign_init import (  # noqa: F401
+from api.services.campaign.campaign_init import (
     apply_experiment_overrides,
+)
+from api.services.campaign.campaign_init import (
+    diff_campaign_config as _diff_campaign_config,
+)
+from api.services.campaign.campaign_init import (
     resolve_experiment_id as _resolve_experiment_id,
 )
 
@@ -18,17 +23,17 @@ if TYPE_CHECKING:
 
 
 __all__ = [
-    "list_campaigns",
+    "apply_experiment_overrides",
     "diff_campaign_config",
+    "list_campaigns",
+    "load_and_apply_experiment",
     "load_experiment_config",
     "show_experiment_dashboard",
-    "apply_experiment_overrides",
-    "load_and_apply_experiment",
 ]
 
 
 def list_campaigns(
-    store: "ProjectStore",
+    store: ProjectStore,
     backend_id: str,
     *,
     campaign_id: str | None = None,
@@ -112,65 +117,36 @@ def list_campaigns(
 
 
 def diff_campaign_config(
-    store: "ProjectStore",
+    store: ProjectStore,
     backend_id: str,
     campaign_id: str,
     campaign_config: dict,
     pipeline_params: dict | None = None,
 ) -> dict:
     """Show parameter differences between current config and a stored campaign."""
-    from api.services.campaign.models import CycleConfig
-
     campaign = store.campaigns.load(backend_id, campaign_id)
     if campaign is None:
         print(f"Campaign {campaign_id} not found.")
         return {}
 
-    stored = campaign.get("config", {})
-    current = CycleConfig.from_campaign_config(
-        campaign_config, pipeline_params=pipeline_params,
-    ).model_dump()
+    diffs = _diff_campaign_config(
+        campaign.get("config", {}), campaign_config, pipeline_params,
+    )
 
-    keys = ["max_rounds", "patience", "n_variants", "creativity",
-            "improvement_threshold", "model", "temperature",
-            "sample_size", "seed"]
-
-    diffs: dict = {}
     print(f"\nDiff: current config vs {campaign_id}")
     print("=" * 60)
-    any_diff = False
-    for k in keys:
-        sv = stored.get(k)
-        cv = current.get(k)
-        if sv != cv:
-            print(f"  {k}: {sv} (stored) → {cv} (current)")
-            diffs[k] = {"stored": sv, "current": cv}
-            any_diff = True
-
-    # Pipeline params diff
-    sp = stored.get("pipeline_params")
-    cp = current.get("pipeline_params")
-    if sp != cp:
-        sp_keys = set(sp or {})
-        cp_keys = set(cp or {})
-        for pk in sorted(sp_keys | cp_keys):
-            sv = (sp or {}).get(pk)
-            cv = (cp or {}).get(pk)
-            if sv != cv:
-                sv_str = str(sv)[:40] if sv is not None else "(none)"
-                cv_str = str(cv)[:40] if cv is not None else "(none)"
-                print(f"  pp.{pk}: {sv_str} → {cv_str}")
-                diffs[f"pp.{pk}"] = {"stored": sv, "current": cv}
-                any_diff = True
-
-    if not any_diff:
+    for k, v in diffs.items():
+        sv_str = str(v["stored"])[:40] if v["stored"] is not None else "(none)"
+        cv_str = str(v["current"])[:40] if v["current"] is not None else "(none)"
+        print(f"  {k}: {sv_str} → {cv_str}")
+    if not diffs:
         print("  (identical — will resume this campaign)")
     print("=" * 60)
     return diffs
 
 
 def load_experiment_config(
-    store: "ProjectStore",
+    store: ProjectStore,
     backend_id: str,
     experiment_id: str,
 ) -> dict | None:
@@ -210,7 +186,7 @@ def load_and_apply_experiment(
 
 
 def show_experiment_dashboard(
-    store: "ProjectStore | None" = None,
+    store: ProjectStore | None = None,
     backend_id: str = "",
     *,
     experiment_id: str | None = None,

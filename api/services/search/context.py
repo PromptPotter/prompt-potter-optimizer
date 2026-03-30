@@ -1,8 +1,11 @@
 """LLM-assisted context restructuring into Layer 1 fields and domain context."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +17,23 @@ from api.shared.hashing import HASH_TRUNCATE
 from api.shared.llm_parsing import extract_parsed_json
 
 logger = logging.getLogger(__name__)
+
+TASK_CONTEXT_FIELDS = (
+    "domain",
+    "pipeline_purpose",
+    "data_characteristics",
+    "optimization_goals",
+    "key_challenges",
+)
+
+
+@dataclass
+class TaskContextResult:
+    """Result from ``decompose_task_context()``."""
+
+    task_context: dict
+    consultation: str | None
+    was_cached: bool
 
 
 async def restructure_context(
@@ -177,3 +197,48 @@ async def restructure_context_cached(
         )
 
     return layer1_fields, False
+
+
+async def decompose_task_context(
+    task_description: str,
+    llm_client: LLMClientBase,
+    model: str,
+    improvement_areas: str = "",
+    store_base_dir: Path | None = None,
+    backend_id: str = "",
+) -> TaskContextResult:
+    """Decompose a task description into structured domain context fields via LLM.
+
+    Calls ``restructure_context_cached()`` and extracts the ``task_context``
+    sub-dict.
+
+    Returns:
+        TaskContextResult with task_context dict, optional consultation text,
+        and cache-hit flag.
+    """
+    if not task_description:
+        return TaskContextResult(task_context={}, consultation=None, was_cached=False)
+
+    # Content-hash for caching
+    rp_hash = hashlib.sha256(
+        f"task_ctx:{task_description}".encode(),
+    ).hexdigest()[:16]
+
+    result, was_cached = await restructure_context_cached(
+        task_description,
+        llm_client,
+        model=model,
+        improvement_areas=improvement_areas,
+        store_base_dir=store_base_dir,
+        backend_id=backend_id,
+        rp_hash=rp_hash,
+    )
+
+    task_context = result.get("task_context", {})
+    task_context["raw_description"] = task_description
+
+    return TaskContextResult(
+        task_context=task_context,
+        consultation=result.get("consultation"),
+        was_cached=was_cached,
+    )

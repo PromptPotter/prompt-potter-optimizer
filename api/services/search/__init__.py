@@ -39,16 +39,21 @@ from api.services.search.preview import preview
 # scan_advisor
 from api.services.search.scan_advisor import (
     advise_scan_config,
+    advisory_to_scan_variants,
     build_llm_context,
     build_pipeline_overview,
     build_tunable_params,
     preview_advisor_prompt,
 )
 
+# scan_baseline
+from api.services.search.scan_baseline import prepare_scan_baseline
+
 # scan_results
 from api.services.search.scan_results import (
     prepare_scan_context,
     resume_or_build_diagnostic,
+    seed_campaign_from_scan,
     select_scan_winner,
 )
 from api.services.search.smart_search import (
@@ -61,6 +66,7 @@ from api.services.search.smart_search import (
 __all__ = [
     "ScanEvent",
     "advise_scan_config",
+    "advisory_to_scan_variants",
     "analyze_candidate_coverage",
     "assess_scan_coverage",
     "build_data_inventory",
@@ -74,12 +80,14 @@ __all__ = [
     "filter_variant_library",
     "load_eval_dataset",
     "load_filtered_variant_library",
+    "prepare_scan_baseline",
     "prepare_scan_context",
     "preview",
     "preview_advisor_prompt",
     "restructure_context",
     "restructure_context_cached",
     "resume_or_build_diagnostic",
+    "seed_campaign_from_scan",
     "select_scan_winner",
     "serialize_smart_search_plan",
     "smart_search_plan_identity",

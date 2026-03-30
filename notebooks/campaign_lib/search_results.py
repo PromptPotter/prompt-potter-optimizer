@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import logging
 
-from api.models.opt_search_point import OptSearchPoint
+from api.services.search import (
+    load_filtered_variant_library as _load_filtered_variants,
+)
+from api.services.search import (
+    resume_or_build_diagnostic as _resume_or_build_diagnostic,
+)
 from api.services.search import (
     select_scan_winner as _select_scan_winner,
-    resume_or_build_diagnostic as _resume_or_build_diagnostic,
-    load_filtered_variant_library as _load_filtered_variants,
+)
+from api.services.search.scan_results import (
+    seed_campaign_from_scan as _seed_campaign_from_scan,
 )
 
 from .display import (
@@ -22,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "resume_or_build_diagnostic",
-    "select_scan_winner_notebook",
     "seed_campaign_from_scan",
+    "select_scan_winner_notebook",
     "show_scan_analytics",
 ]
 
@@ -136,32 +142,37 @@ def seed_campaign_from_scan(
 ):
     """Select scan winner, update pipeline_params, seed campaign_rounds.
 
-    Returns:
-        SearchPoint with best values composed in.
+    Delegates to ``api.services.search.scan_results.seed_campaign_from_scan()``
+    and prints summary + progress.
     """
-    best_sp = select_scan_winner_notebook(
-        scan_df,
-        axis_profiles,
-        baseline,
-        scan_variants,
+    if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
+        print("No scan data available. Run sensitivity scan first.")
+        return baseline
+
+    result = _seed_campaign_from_scan(
+        scan_df, axis_profiles, baseline, scan_variants,
+        campaign_rounds, campaign_config,
     )
 
-    if best_sp.pipeline_params:
-        existing_pp = campaign_config.get("pipeline_params", {})
-        # Merge scan winner's params into existing pipeline_params, preserving
-        # the steps list set by configure_pipeline()
-        merged = {**existing_pp, **best_sp.pipeline_params}
-        if "steps" in existing_pp:
-            merged["steps"] = existing_pp["steps"]
-            # Strip node-level config for excluded nodes so the backend
-            # doesn't run them despite being absent from the steps list.
-            excluded = set(campaign_config.get("exclude_nodes", []))
-            for node_name in excluded:
-                merged.pop(node_name, None)
-        campaign_config["pipeline_params"] = merged
-        # Summarize — avoid dumping full JSON schemas
+    # Print improving axes summary
+    if result.improving_axes:
+        print(f"Selected best from {len(result.improving_axes)} improving axes:")
+        for p in result.improving_axes:
+            axis_rows = scan_df[scan_df["axis"] == p["axis"]]
+            if not axis_rows.empty:
+                best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
+                print(
+                    f"  {p['axis']:<25s} best_delta=+{p['best_delta']:.1%}  "
+                    f"value_idx={int(best_row['value_idx'])}  "
+                    f"acc={best_row['accuracy']:.1%}"
+                )
+    else:
+        print("No axes improved over baseline -- using baseline as-is.")
+
+    # Print pipeline_params update
+    if result.merged_pipeline_params:
         display_pp = {}
-        for k, v in merged.items():
+        for k, v in result.merged_pipeline_params.items():
             if isinstance(v, dict) and len(str(v)) > 100:
                 n_keys = len(v.get("properties", v))
                 display_pp[k] = f"<{n_keys} fields>"
@@ -169,32 +180,12 @@ def seed_campaign_from_scan(
                 display_pp[k] = v
         print(f"Updated pipeline_params: {display_pp}")
 
-    # Get scan baseline accuracy as fallback when campaign_rounds is empty
-    scan_baseline_acc = 0.0
-    baseline_rows = scan_df[scan_df["delta"] == 0.0]
-    if not baseline_rows.empty:
-        scan_baseline_acc = baseline_rows.iloc[0]["accuracy"]
+    if result.best_sp.sp_hash() != baseline.sp_hash():
+        print(f"\nComposed winner: sp_hash={result.best_sp.sp_hash()[:12]}")
 
-    bl = campaign_rounds[0] if campaign_rounds else {}
-    # Create an OptSearchPoint for campaign_rounds lineage (from rendered prompt)
-    search_opt = OptSearchPoint(
-        instruction=best_sp.render(),
-        changes_description=f"scan_winner (sp_hash={best_sp.sp_hash()[:12]})",
-    )
-    campaign_rounds.append(
-        {
-            "round": "search",
-            "label": f"smart_search ({search_opt.changes_description or search_opt.id[:12]})",
-            "prompt_fields": search_opt,
-            "accuracy": bl.get("accuracy", scan_baseline_acc),
-            "hits": bl.get("hits", 0),
-            "total": bl.get("total", 0),
-            "results": bl.get("results", []),
-        }
-    )
     show_progress(campaign_rounds)
 
-    return best_sp
+    return result.best_sp
 
 
 def show_scan_analytics(scan_df, axis_profiles, svc: dict):

@@ -55,6 +55,50 @@ class InitResult:
         return getattr(self, key, default)
 
 
+@dataclass
+class CampaignBaseline:
+    """Extracted baseline state from campaign_rounds."""
+
+    baseline_ps: dict | None
+    baseline_acc: float
+    baseline_results: list | None
+    instruction: str
+
+
+def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
+    """Extract baseline prompt state, accuracy, and results from campaign rounds.
+
+    Searches reversed rounds for the last with actual eval ``results``,
+    then overrides the prompt_fields with the tip (most recent round).
+    """
+    if not campaign_rounds:
+        return CampaignBaseline(
+            baseline_ps=None, baseline_acc=0.0,
+            baseline_results=None, instruction="",
+        )
+
+    # Find the last round with actual eval results (for accuracy + results)
+    last = campaign_rounds[-1]
+    for rd in reversed(campaign_rounds):
+        if rd.get("results"):
+            last = rd
+            break
+    baseline_acc = last.get("accuracy", 0.0)
+    baseline_results = last.get("results", [])
+    # Use prompt_fields from the tip (most recent round) — may differ from
+    # the round with results (e.g. search winner with derived prompt)
+    tip_ps = campaign_rounds[-1]["prompt_fields"]
+    baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
+    instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else ""
+
+    return CampaignBaseline(
+        baseline_ps=baseline_ps,
+        baseline_acc=baseline_acc,
+        baseline_results=baseline_results,
+        instruction=instruction,
+    )
+
+
 def load_baseline_prompt(exp_data: dict) -> OptSearchPoint:
     """Extract the llm_ranking prompt from experiment data, wrap in OptSearchPoint.
 
@@ -581,6 +625,116 @@ def build_all_session_terms(
                 if gt:
                     gt_set.add(gt)
     return sorted(gt_set)
+
+
+@dataclass
+class PipelineConfigResult:
+    """Result from ``configure_pipeline()``."""
+
+    pipeline_params: dict
+    active_nodes: list[str]
+    excluded_nodes: list[str]
+
+
+def configure_pipeline(
+    pipeline_schema: PipelineSchema | None,
+    campaign_config: dict,
+    exp_data: dict | None = None,
+) -> PipelineConfigResult:
+    """Build pipeline_params from live pipeline schema and campaign_config.
+
+    Uses *pipeline_schema* (from ``GET /pipeline``) as the source of
+    truth for node names, falling back to *exp_data* only when the schema
+    is unavailable.  Reads ``exclude_nodes`` and ``pipeline_overrides`` from
+    *campaign_config*, stores the result back into
+    ``campaign_config["pipeline_params"]``, and returns a typed result.
+    """
+    from api.services.backend_client import extract_pipeline_config
+
+    exclude = campaign_config.get("exclude_nodes", [])
+    overrides = campaign_config.get("pipeline_overrides")
+
+    if pipeline_schema:
+        all_names = [n.name for n in pipeline_schema.nodes]
+    elif exp_data:
+        pipeline_config = extract_pipeline_config(exp_data)
+        all_names = [s["name"] for s in pipeline_config["steps"]]
+    else:
+        all_names = []
+
+    active = [n for n in all_names if n not in (exclude or [])]
+    pipeline_params: dict = {"steps": active}
+
+    # Seed with live config from GET /pipeline (no hidden defaults)
+    if pipeline_schema:
+        for node in pipeline_schema.nodes:
+            if node.name in active and node.current_config:
+                pipeline_params[node.name] = dict(node.current_config)
+
+    # Apply overrides for active nodes only
+    if overrides and pipeline_schema:
+        for flat_name, value in overrides.items():
+            resolved = pipeline_schema.resolve_flat_param(flat_name)
+            if resolved:
+                node, wire_key = resolved
+                if node in active:
+                    pipeline_params.setdefault(node, {})[wire_key] = value
+            else:
+                pipeline_params[flat_name] = value
+    elif overrides:
+        pipeline_params.update(overrides)
+
+    campaign_config["pipeline_params"] = pipeline_params
+
+    return PipelineConfigResult(
+        pipeline_params=pipeline_params,
+        active_nodes=active,
+        excluded_nodes=list(exclude) if exclude else [],
+    )
+
+
+def diff_campaign_config(
+    stored_config: dict,
+    campaign_config: dict,
+    pipeline_params: dict | None = None,
+) -> dict[str, dict]:
+    """Compute parameter differences between stored and current campaign config.
+
+    Returns dict of ``{param_name: {"stored": value, "current": value}}``.
+    Includes nested pipeline_params diffs as ``pp.<key>`` entries.
+    """
+    from api.services.campaign.models import CycleConfig
+
+    current = CycleConfig.from_campaign_config(
+        campaign_config, pipeline_params=pipeline_params,
+    ).model_dump()
+
+    keys = [
+        "max_rounds", "patience", "n_variants", "creativity",
+        "improvement_threshold", "model", "temperature",
+        "sample_size", "seed",
+    ]
+
+    diffs: dict[str, dict] = {}
+    for k in keys:
+        sv = stored_config.get(k)
+        cv = current.get(k)
+        if sv != cv:
+            diffs[k] = {"stored": sv, "current": cv}
+
+    # Pipeline params diff
+    sp = stored_config.get("pipeline_params")
+    cp = current.get("pipeline_params")
+    if sp != cp:
+        sp_keys = set(sp or {})
+        cp_keys = set(cp or {})
+        for pk in sorted(sp_keys | cp_keys):
+            sv = (sp or {}).get(pk)
+            cv = (cp or {}).get(pk)
+            if sv != cv:
+                diffs[f"pp.{pk}"] = {"stored": sv, "current": cv}
+
+    return diffs
 
 
 def create_llm_client(

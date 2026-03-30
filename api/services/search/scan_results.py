@@ -410,3 +410,85 @@ def prepare_scan_context(
         tested_values=tested_values,
         baseline_accuracy=baseline_accuracy,
     )
+
+
+# ---------------------------------------------------------------------------
+# Campaign seeding from scan results
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SeedResult:
+    """Result from ``seed_campaign_from_scan()``."""
+
+    best_sp: JobSearchPoint
+    merged_pipeline_params: dict | None
+    round_entry: dict
+    improving_axes: list[dict]
+
+
+def seed_campaign_from_scan(
+    scan_df: pd.DataFrame,
+    axis_profiles: list[dict],
+    baseline: JobSearchPoint,
+    scan_variants: dict[str, list],
+    campaign_rounds: list[dict],
+    campaign_config: dict,
+) -> SeedResult:
+    """Select scan winner, update pipeline_params, seed campaign_rounds.
+
+    Mutates ``campaign_config["pipeline_params"]`` and appends to
+    ``campaign_rounds``.
+
+    Returns:
+        SeedResult with best_sp, merged params, new round entry, and
+        improving axes for display.
+    """
+    best_sp = select_scan_winner(
+        scan_df, axis_profiles, baseline, scan_variants,
+    )
+
+    improving = [
+        p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
+    ]
+
+    merged_pp = None
+    if best_sp.pipeline_params:
+        existing_pp = campaign_config.get("pipeline_params", {})
+        merged = {**existing_pp, **best_sp.pipeline_params}
+        if "steps" in existing_pp:
+            merged["steps"] = existing_pp["steps"]
+            excluded = set(campaign_config.get("exclude_nodes", []))
+            for node_name in excluded:
+                merged.pop(node_name, None)
+        campaign_config["pipeline_params"] = merged
+        merged_pp = merged
+
+    # Get scan baseline accuracy as fallback
+    scan_baseline_acc = 0.0
+    baseline_rows = scan_df[scan_df["delta"] == 0.0]
+    if not baseline_rows.empty:
+        scan_baseline_acc = baseline_rows.iloc[0]["accuracy"]
+
+    bl = campaign_rounds[0] if campaign_rounds else {}
+    search_opt = OptSearchPoint(
+        instruction=best_sp.render(),
+        changes_description=f"scan_winner (sp_hash={best_sp.sp_hash()[:12]})",
+    )
+    round_entry = {
+        "round": "search",
+        "label": f"smart_search ({search_opt.changes_description or search_opt.id[:12]})",
+        "prompt_fields": search_opt,
+        "accuracy": bl.get("accuracy", scan_baseline_acc),
+        "hits": bl.get("hits", 0),
+        "total": bl.get("total", 0),
+        "results": bl.get("results", []),
+    }
+    campaign_rounds.append(round_entry)
+
+    return SeedResult(
+        best_sp=best_sp,
+        merged_pipeline_params=merged_pp,
+        round_entry=round_entry,
+        improving_axes=improving,
+    )
