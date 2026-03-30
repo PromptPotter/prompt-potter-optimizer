@@ -1,4 +1,4 @@
-"""Helper library for optimization_campaign.ipynb and evaluation.ipynb.
+"""Helper library for optimization_campaign.ipynb.
 
 Thin notebook-facing layer that delegates to ``api.services`` for core logic
 and adds tqdm progress bars, print statements, and IPython display for
@@ -13,21 +13,12 @@ from .display import (
 )
 from .setup import (
     init_services, setup_llm, load_variant_library, decompose_task_context,
-    show_backend_status, show_dataset_summary, build_all_session_terms,
-    load_or_create_datasets, load_stored_dataset, prepare_datasets,
-    prepare_eval_context,
-    SHEET_COLUMN_MAP,
+    show_backend_status, build_all_session_terms,
+    prepare_datasets, prepare_eval_context,
     configure_pipeline, show_pipeline_snapshot,
     save_campaign_winner,
     configure_langfuse, sync_langfuse, push_langfuse,
     dev_reload,
-)
-from .eval import (
-    load_baseline_prompt, run_baseline_eval,
-    analyze_candidate_coverage, load_eval_dataset,
-    run_coverage_diagnostic,
-    l1_generate,
-    show_entity_profiles,
 )
 from .search import (
     build_diagnostic_set, sensitivity_scan, adaptive_search,
@@ -55,10 +46,8 @@ __all__ = [
     # Service init (setup)
     "init_services", "setup_llm", "load_variant_library", "decompose_task_context",
     # Backend status & datasets (setup)
-    "show_backend_status", "show_dataset_summary", "build_all_session_terms",
-    "load_or_create_datasets", "load_stored_dataset", "prepare_datasets",
-    "prepare_eval_context",
-    "SHEET_COLUMN_MAP",
+    "show_backend_status", "build_all_session_terms",
+    "prepare_datasets", "prepare_eval_context",
     # Pipeline config (setup)
     "configure_pipeline", "show_pipeline_snapshot",
     "save_campaign_winner",
@@ -66,12 +55,6 @@ __all__ = [
     "configure_langfuse", "push_langfuse", "sync_langfuse",
     # Dev (setup)
     "dev_reload",
-    # Baseline & eval (eval)
-    "load_baseline_prompt", "run_baseline_eval",
-    "analyze_candidate_coverage", "load_eval_dataset",
-    "run_coverage_diagnostic",
-    "l1_generate",
-    "show_entity_profiles",
     # Smart search (search)
     "build_diagnostic_set", "sensitivity_scan", "adaptive_search",
     "show_axis_profiles", "resume_or_build_diagnostic", "scan_advisor",

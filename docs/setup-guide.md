@@ -26,7 +26,7 @@ LLM_MODEL=your-model-id
 
 ### Notebook (primary interface)
 
-Open `notebooks/optimization_campaign.ipynb` for the full HITL optimization workflow. For standalone test-set evaluation, use `notebooks/evaluation.ipynb`.
+Open `notebooks/optimization_campaign.ipynb` for the full HITL optimization workflow.
 
 ### API server
 
@@ -56,7 +56,7 @@ cd docker && docker-compose up --build
 
 ## Troubleshooting
 
-**"No synced experiment data"** — Run the sync cell in `evaluation.ipynb` first, or call `await client.sync_experiments(store, backend_id)`.
+**"No synced experiment data"** — Call `await client.sync_experiments(store, backend_id)` to sync experiment data from the backend.
 
 **"No llm_ranking prompt found"** — Your backend needs to expose prompts in the experiment data. Ensure TermNorm's prompt registry is initialized before syncing.
 

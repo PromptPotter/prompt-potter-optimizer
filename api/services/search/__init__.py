@@ -22,7 +22,6 @@ from api.services.search.eval_dataset import load_eval_dataset
 
 # plan_persistence
 from api.services.search.plan_persistence import (
-    analyze_candidate_coverage,
     deserialize_smart_search_plan,
     serialize_smart_search_plan,
     smart_search_plan_identity,
@@ -67,7 +66,6 @@ __all__ = [
     "ScanEvent",
     "advise_scan_config",
     "advisory_to_scan_variants",
-    "analyze_candidate_coverage",
     "assess_scan_coverage",
     "build_data_inventory",
     "build_diagnostic_set",

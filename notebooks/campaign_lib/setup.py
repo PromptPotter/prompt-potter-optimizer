@@ -42,13 +42,9 @@ __all__ = [
     "load_variant_library",
     # Backend status & datasets
     "show_backend_status",
-    "show_dataset_summary",
     "build_all_session_terms",
-    "load_or_create_datasets",
-    "load_stored_dataset",
     "prepare_datasets",
     "prepare_eval_context",
-    "SHEET_COLUMN_MAP",
     # Pipeline config
     "configure_pipeline",
     # Pipeline snapshot
@@ -226,7 +222,7 @@ async def init_services(
     if not svc.exp_data:
         print(
             "WARNING: No experiment data available. "
-            "Use load_or_create_datasets() to load from Excel, "
+            "Use prepare_datasets() to load from Excel, "
             "or sync from backend."
         )
         return svc
@@ -326,43 +322,6 @@ async def prepare_eval_context(
 # api.services.campaign.campaign_init (see imports above)
 
 
-def show_dataset_summary(store: ProjectStore, backend_id: str) -> dict:
-    """Load all stored datasets and display combined summary.
-
-    Returns dict with keys: train, test_processes, test_material,
-    all_session_terms, total_queries.
-    """
-    result: dict[str, list[dict]] = {}
-    for name in ("train", "test_processes", "test_material"):
-        ds = store.backends.load_dataset(backend_id, name)
-        result[name] = ds["items"] if ds and ds.get("items") else []
-
-    all_queries: set[str] = set()
-    for items in result.values():
-        for item in items:
-            q = item.get("query", "").strip()
-            if q:
-                all_queries.add(q)
-
-    session_terms = build_all_session_terms(store, backend_id)
-
-    print("\nDATASET SUMMARY")
-    print("=" * 50)
-    print(f"  Train              : {len(result['train'])} queries")
-    print(f"  Test (processes)   : {len(result['test_processes'])} queries")
-    print(f"  Test (material)    : {len(result['test_material'])} queries")
-    print(f"  {'-' * 48}")
-    print(f"  Combined queries   : {len(all_queries)} (deduplicated)")
-    print(f"  Session identifiers: {len(session_terms)} unique targets")
-    print("=" * 50)
-
-    return {
-        **result,
-        "all_session_terms": session_terms,
-        "total_queries": len(all_queries),
-    }
-
-
 def prepare_datasets(
     store: ProjectStore,
     backend_id: str,
@@ -419,82 +378,6 @@ def prepare_datasets(
     print(f"{'=' * 50}")
 
     return train_data, session_terms
-
-
-def load_or_create_datasets(
-    store: ProjectStore,
-    backend_id: str,
-    excel_path: str | Path,
-    *,
-    sheet_column_map: dict | None = None,
-    test_fraction: float = 0.2,
-    seed: int = 42,
-    force: bool = False,
-) -> dict[str, list[dict]]:
-    """Load datasets from store, or create from Excel + save.
-
-    Returns:
-        Dict with keys "train", "test_processes", "test_material",
-        each a list of ``{"query", "ground_truth", ...}`` dicts.
-    """
-    col_map = sheet_column_map or SHEET_COLUMN_MAP
-
-    # Check if already stored
-    if not force:
-        existing = store.backends.load_dataset(backend_id, "train")
-        if existing and existing.get("items"):
-            result = {"train": existing["items"]}
-            for name in ("test_processes", "test_material"):
-                ds = store.backends.load_dataset(backend_id, name)
-                if ds:
-                    result[name] = ds["items"]
-                else:
-                    result[name] = []
-                    print(f"  WARNING: {name} not found on disk -- run with force=True to recreate")
-            total = sum(len(v) for v in result.values())
-            print(f"Loaded stored datasets: {total} total rows")
-            for name, items in result.items():
-                print(f"  {name}: {len(items)} rows")
-            return result
-
-    # Create from Excel
-    excel_path = Path(excel_path)
-    print(f"Loading ground truth from {excel_path.name} ...")
-    all_rows = _load_excel_gt(excel_path, col_map)
-    print(f"  Total rows: {len(all_rows)}")
-
-    train, test_sets = _train_test_split(all_rows, test_fraction=test_fraction, seed=seed)
-
-    # Save all splits
-    source = excel_path.name
-    store.backends.save_dataset(backend_id, "train", train, source_file=source)
-    for name, items in test_sets.items():
-        store.backends.save_dataset(backend_id, name, items, source_file=source)
-
-    result = {"train": train, **test_sets}
-    print("\nDatasets saved:")
-    for name, items in result.items():
-        print(f"  {name}: {len(items)} rows")
-
-    return result
-
-
-def load_stored_dataset(
-    store: ProjectStore,
-    backend_id: str,
-    name: str,
-) -> list[dict]:
-    """Load a single named dataset from the store.
-
-    Returns list of items, or empty list if not found.
-    """
-    ds = store.backends.load_dataset(backend_id, name)
-    if not ds or not ds.get("items"):
-        print(f"Dataset '{name}' not found for backend '{backend_id}'.")
-        return []
-    items = ds["items"]
-    print(f"Loaded dataset '{name}': {len(items)} rows (source: {ds.get('source_file', '?')})")
-    return items
 
 
 # ---------------------------------------------------------------------------

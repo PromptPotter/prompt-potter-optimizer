@@ -427,7 +427,7 @@ async def run_baseline_eval(
     if not eval_data:
         raise RuntimeError(
             "No evaluation data available. "
-            "Generate data first (e.g. run evaluation.ipynb or load from DatasetStore)."
+            "Generate data first (e.g. load from DatasetStore or sync from backend)."
         )
 
     # Initialize backend session so /matches doesn't 400
