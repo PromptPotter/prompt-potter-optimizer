@@ -83,12 +83,12 @@ def _compute_cache_hit_rate(step: PipelineNode, results: list[dict]) -> float:
     return cache_hits / non_error if non_error else 0.0
 
 
-def _compute_role_metric(
+def _compute_type_metric(
     metric_def: IntermediateMetric,
     step: PipelineNode,
     results: list[dict],
 ) -> float:
-    """Compute a single role-based metric value."""
+    """Compute a single type-based metric value."""
     if metric_def.name in ("source_recall", "candidate_recall"):
         return _compute_recall(step, results)
     if metric_def.name == "cache_hit_rate":
@@ -103,36 +103,36 @@ def derive_metrics(
     metric_weights: dict[str, float] | None = None,
     accuracy_weight: float = 0.9,
 ) -> dict[str, float]:
-    """Compute intermediate metrics from pipeline step node_roles.
+    """Compute intermediate metrics from pipeline node types.
 
-    Walks ``pipeline_schema.nodes``; for each with a ``node_role`` in the
+    Walks ``pipeline_schema.nodes``; for each with a ``node_type`` in the
     registry, computes the corresponding metric scoped to queries where
     the step ran.
 
     Returns dict with per-metric values and a weighted ``composite`` score.
     """
-    from api.models.pipeline_schema import ROLE_METRIC_REGISTRY
+    from api.models.pipeline_schema import NODE_TYPE_METRICS
 
     base = compute_accuracy(results)
     accuracy = base["accuracy"]
     weights = dict(metric_weights or {})
     metric_values: dict[str, float] = {}
 
-    # Collect steps by role (namespace when >1 step shares a role)
-    role_steps: dict[str, list] = {}
+    # Collect steps by type (namespace when >1 step shares a type)
+    type_steps: dict[str, list] = {}
     for step in pipeline_schema.nodes:
-        if step.node_role and step.node_role in ROLE_METRIC_REGISTRY:
-            role_steps.setdefault(step.node_role, []).append(step)
+        if step.node_type and step.node_type in NODE_TYPE_METRICS:
+            type_steps.setdefault(step.node_type, []).append(step)
 
-    for role, steps in role_steps.items():
-        metrics = ROLE_METRIC_REGISTRY.get(role, [])
+    for ntype, steps in type_steps.items():
+        metrics = NODE_TYPE_METRICS.get(ntype, [])
         needs_namespace = len(steps) > 1
         for step in steps:
             for metric_def in metrics:
                 metric_name = (
                     f"{step.name}_{metric_def.name}" if needs_namespace else metric_def.name
                 )
-                metric_values[metric_name] = _compute_role_metric(
+                metric_values[metric_name] = _compute_type_metric(
                     metric_def,
                     step,
                     results,
@@ -165,16 +165,16 @@ def compute_composite_score(
 ) -> dict:
     """Compute composite score combining accuracy with intermediate metrics.
 
-    When ``pipeline_schema`` is provided and has nodes with ``node_role``,
-    uses ``derive_metrics()`` for role-based metrics.
+    When ``pipeline_schema`` is provided and has nodes with ``node_type``,
+    uses ``derive_metrics()`` for type-based metrics.
     Otherwise falls back to hardcoded ``token_recall``.
 
     Returns dict with at least: hits, total, accuracy, errors, composite,
-    and optionally token_recall or other role-derived metrics.
+    and optionally token_recall or other type-derived metrics.
     """
     if pipeline_schema is not None:
-        has_roles = any(s.node_role for s in pipeline_schema.nodes)
-        if has_roles:
+        has_types = any(s.node_type for s in pipeline_schema.nodes)
+        if has_types:
             return derive_metrics(
                 pipeline_schema,
                 results,

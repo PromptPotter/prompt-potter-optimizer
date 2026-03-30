@@ -30,7 +30,7 @@ Three compounding weaknesses prevent this:
 **Design principles:**
 
 - **Breadth over depth.** Failure analysis should surface MULTIPLE distinct improvement directions (e.g., "60% of failures are upstream retrieval gaps" AND "20% are ranking errors on long entity names"). L1 should generate candidates targeting different directions, not N variations on the same theme.
-- **Schema-driven diagnostics.** Per-sample signal extraction must be derived from `PipelineSchema` nodes and `ROLE_METRIC_REGISTRY`, not hardcoded failure categories. If the pipeline changes (new node, new role), the diagnostics change automatically.
+- **Schema-driven diagnostics.** Per-sample signal extraction must be derived from `PipelineSchema` nodes and `NODE_TYPE_METRICS`, not hardcoded failure categories. If the pipeline changes (new node, new node type), the diagnostics change automatically.
 - **Two levels of analysis.** *Sample diagnostics* (Level A) extract signals from each individual query result. *Evaluation profiles* (Level B) aggregate sample diagnostics across all samples for one SearchPoint evaluation into structured failure analysis. Level A feeds Level B; they are implementation layers of one feature, not separate concerns.
 - **Tailored context per consumer.** Each decision-making step (L1/L2/L3/advisor) needs a tailored analysis context — the right information for that step's decision, not the same dump for everyone.
 - **Freshly compiled each round.** Every time L1, L2, L3, or the scan advisor runs, the data context must be freshly compiled from all accumulated rounds. The system gets more data each round — the prompts must reflect that.
@@ -41,16 +41,16 @@ Three compounding weaknesses prevent this:
 
 New function `extract_sample_diagnostics(result, pipeline_schema) -> dict[str, float|bool]`:
 
-- Walks `pipeline_schema.nodes`; for each node with `node_role` in `ROLE_METRIC_REGISTRY`, reads the corresponding `pipeline_data_key` from the result dict and computes **per-query** signals (the per-query complement to `derive_metrics()` which only does aggregates):
-  - `candidate_source` role: `gt_in_source` (bool), `n_source_candidates` (int), `gt_source_rank` (int|None)
-  - `ranker` role: `gt_in_ranked` (bool), `n_ranked_candidates` (int), `gt_rank` (int|None), `top_score_gap` (float)
-  - `enricher` role: `n_enriched_fields` (int) from `output_schema.fields` count vs populated count
-  - `cache` role: `cache_hit` (bool)
+- Walks `pipeline_schema.nodes`; for each node with `node_type` in `NODE_TYPE_METRICS`, reads the corresponding `pipeline_data_key` from the result dict and computes **per-query** signals (the per-query complement to `derive_metrics()` which only does aggregates):
+  - `candidate_source` type: `gt_in_source` (bool), `n_source_candidates` (int), `gt_source_rank` (int|None)
+  - `ranker` type: `gt_in_ranked` (bool), `n_ranked_candidates` (int), `gt_rank` (int|None), `top_score_gap` (float)
+  - `enricher` type: `n_enriched_fields` (int) from `output_schema.fields` count vs populated count
+  - `cache` type: `cache_hit` (bool)
 - Infrastructure diagnostics (always extracted, any pipeline): `terminated_at` (str), `total_time_ms` (float), `degraded` (bool), `error` (bool)
 - Output: flat dict of named diagnostic values. Names are deterministic: `{node_name}_{metric}` when namespacing needed, `{metric}` when unique.
 
 **Extends existing pattern:**
-- `ROLE_METRIC_REGISTRY` (`pipeline_schema.py:141`) already maps role -> metrics -> `pipeline_data_key`
+- `NODE_TYPE_METRICS` (`pipeline_schema.py:141`) already maps node type → metrics → `pipeline_data_key`
 - `_extract_pipeline_data()` (`prompt_eval.py:130`) already collects everything the schema describes
 - Same registry, same keys, per-result instead of aggregate
 
@@ -150,7 +150,7 @@ The feedback cycle should pick queries that maximise information about which pro
 - Parameter-failure correlation (which dimensions correlate with failure modes)
 - Trend (is the dominant bottleneck shifting across campaigns?)
 
-All analysis is **schema-driven** via `PipelineSchema.nodes` and `node_role`. Statistical method is behind a **swappable strategy** (start with mean-delta, easily replaced with marginal effect estimation).
+All analysis is **schema-driven** via `PipelineSchema.nodes` and `node_type`. Statistical method is behind a **swappable strategy** (start with mean-delta, easily replaced with marginal effect estimation).
 
 ### Incremental update
 
@@ -276,9 +276,9 @@ All four wave groups are independent at their roots.
 
 | Code | Role | Location |
 |------|------|----------|
-| `ROLE_METRIC_REGISTRY` | Maps node_role -> metrics -> pipeline_data_key | `api/models/pipeline_schema.py:141` |
-| `IntermediateMetric` | Per-role metric definition | `api/models/pipeline_schema.py` |
-| `derive_metrics()` | Aggregate metrics from node roles | `api/services/metrics.py:99` |
+| `NODE_TYPE_METRICS` | Maps node_type → metrics → pipeline_data_key | `api/models/pipeline_schema.py:141` |
+| `IntermediateMetric` | Per-type metric definition | `api/models/pipeline_schema.py` |
+| `derive_metrics()` | Aggregate metrics from node types | `api/services/metrics.py:99` |
 | `_extract_pipeline_data()` | Assembles per-query pipeline_data from schema | `api/services/prompt_eval.py:130` |
 | `obs_extraction_map()` | Schema -> observation mapping | `api/models/pipeline_schema.py` |
 | `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `notebooks/campaign_lib/stats.py` |
@@ -295,7 +295,7 @@ All four wave groups are independent at their roots.
 ## Entry Criteria
 
 - M7 exit gate passed
-- `PipelineSchema` with `node_role` populated (M6 Wave 6)
+- `PipelineSchema` with `node_type` populated (M6 Wave 6)
 
 ## Exit Criteria
 

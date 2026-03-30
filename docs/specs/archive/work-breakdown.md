@@ -75,11 +75,11 @@ See [M6 spec](m6-pipeline-composability.md) for full details. Cross-repo: TermNo
 |----|-------------|:--------:|---------|---------|--------|
 | 6.7 | `compute_composite_score()` + rank display + integration | 1 | P1.14 | 6.2 | Planned |
 
-**Wave 6: Node-Role-Driven Intermediate Metrics**
+**Wave 6: Node-Type-Driven Intermediate Metrics**
 
 | ID | Work Package | Sessions | PRD Ref | Depends | Status |
 |----|-------------|:--------:|---------|---------|--------|
-| 6.8 | IntermediateMetric model + PipelineStep.node_role | 1 | P1.14 | 6.7 | Planned |
+| 6.8 | IntermediateMetric model + PipelineNode.node_type | 1 | P1.14 | 6.7 | Planned |
 | 6.9 | `derive_metrics()` + composite scoring | 1 | P1.14 | 6.8 | Planned |
 | 6.10 | Wire through eval/search/feedback paths | 1 | P1.14 | 6.9 | Planned |
 

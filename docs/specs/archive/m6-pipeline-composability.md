@@ -49,16 +49,16 @@ Eliminated hardcoded pipeline assumptions from PromptPotter by introducing `Pipe
 | 3 | Unified tracing (one trace per query) | Complete |
 | 4 | Workflow nodes (runtime_config, DatasetLoadNode, FeedbackCycleNode, ScanNode) | Deferred → M9 |
 | 5 | Composite scoring + rank display | Complete |
-| 6 | `node_role`, `IntermediateMetric`, `derive_metrics()` | Complete |
+| 6 | `node_type`, `IntermediateMetric`, `derive_metrics()` | Complete |
 | 7 | Consolidated pipeline control surfaces (`pipeline_params`) | Complete |
 
 ---
 
 ## Key Design Artifacts
 
-**Node role taxonomy:** `candidate_source` (produces candidate set), `ranker` (ranks/selects), `enricher` (adds context), `cache` (short-circuits). `PipelineStep.node_role` drives auto-wired intermediate metrics via `derive_metrics()`.
+**Node type taxonomy:** `candidate_source` (produces candidate set), `ranker` (ranks/selects), `enricher` (adds context), `cache` (short-circuits). `PipelineNode.node_type` drives auto-wired intermediate metrics via `derive_metrics()`.
 
-**Composite scoring:** `composite = accuracy_weight * accuracy + sum(metric.weight * metric.value)`. When PipelineSchema has role-bearing steps, delegates to `derive_metrics()`; otherwise uses hardcoded `token_recall`.
+**Composite scoring:** `composite = accuracy_weight * accuracy + sum(metric.weight * metric.value)`. When PipelineSchema has typed nodes, delegates to `derive_metrics()`; otherwise uses hardcoded `token_recall`.
 
 **Self-describing pipeline:** `TERMNORM_DEFAULT_SCHEMA` deleted. TermNorm's `pipeline.json` carries full step metadata + `optimizer` sub-object. `parse_pipeline_response()` builds PipelineSchema entirely from `GET /pipeline`.
 

@@ -140,7 +140,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "type": node.get("type", "tool"),
             "runtime": node.get("runtime", "backend"),
             "short_circuit": node.get("short_circuit", False),
-            "node_role": node.get("node_role", ""),
+            "node_type": node.get("node_role", ""),
             "description": node.get("description", ""),
             "param_keys": pk,
             "param_descriptions": opt.get("param_descriptions", {}),

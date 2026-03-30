@@ -1,13 +1,13 @@
-"""Tests for pipeline metrics: composite scoring, node roles, and derive_metrics().
+"""Tests for pipeline metrics: composite scoring, node types, and derive_metrics().
 
-Merged from test_composite_score.py and test_node_role_metrics.py.
+Merged from test_composite_score.py and test_node_type_metrics.py.
 """
 
 import pydantic
 import pytest
 
 from api.models.pipeline_schema import (
-    ROLE_METRIC_REGISTRY,
+    NODE_TYPE_METRICS,
     IntermediateMetric,
     PipelineNode,
     PipelineSchema,
@@ -85,9 +85,9 @@ class TestComputeCompositeScore:
 
     def test_with_pipeline_schema(self):
         schema = PipelineSchema(nodes=[
-            PipelineNode(name="cache_lookup", node_role="cache"),
-            PipelineNode(name="token_matching", node_role="candidate_source"),
-            PipelineNode(name="llm_ranking", node_role="ranker"),
+            PipelineNode(name="cache_lookup", node_type="cache"),
+            PipelineNode(name="token_matching", node_type="candidate_source"),
+            PipelineNode(name="llm_ranking", node_type="ranker"),
         ])
         results = _make_results(3, 5)
         scores = compute_composite_score(results, schema)
@@ -96,49 +96,49 @@ class TestComputeCompositeScore:
 
 
 
-class TestNodeRole:
-    def test_pipeline_step_has_node_role(self):
-        step = PipelineNode(name="test", node_role="ranker")
-        assert step.node_role == "ranker"
+class TestNodeType:
+    def test_pipeline_step_has_node_type(self):
+        step = PipelineNode(name="test", node_type="ranker")
+        assert step.node_type == "ranker"
 
     def test_pipeline_step_default_empty(self):
         step = PipelineNode(name="test")
-        assert step.node_role == ""
+        assert step.node_type == ""
 
-    def test_schema_roles(self):
+    def test_schema_node_types(self):
         schema = PipelineSchema(nodes=[
-            PipelineNode(name="cache_lookup", node_role="cache"),
-            PipelineNode(name="fuzzy_matching", node_role="candidate_source"),
-            PipelineNode(name="web_search", node_role="enricher"),
-            PipelineNode(name="entity_profiling", node_role="enricher"),
-            PipelineNode(name="token_matching", node_role="candidate_source"),
-            PipelineNode(name="llm_ranking", node_role="ranker"),
+            PipelineNode(name="cache_lookup", node_type="cache"),
+            PipelineNode(name="fuzzy_matching", node_type="candidate_source"),
+            PipelineNode(name="web_search", node_type="enricher"),
+            PipelineNode(name="entity_profiling", node_type="enricher"),
+            PipelineNode(name="token_matching", node_type="candidate_source"),
+            PipelineNode(name="llm_ranking", node_type="ranker"),
         ])
-        roles = {s.name: s.node_role for s in schema.nodes}
-        assert roles["cache_lookup"] == "cache"
-        assert roles["fuzzy_matching"] == "candidate_source"
-        assert roles["web_search"] == "enricher"
-        assert roles["entity_profiling"] == "enricher"
-        assert roles["token_matching"] == "candidate_source"
-        assert roles["llm_ranking"] == "ranker"
+        types = {s.name: s.node_type for s in schema.nodes}
+        assert types["cache_lookup"] == "cache"
+        assert types["fuzzy_matching"] == "candidate_source"
+        assert types["web_search"] == "enricher"
+        assert types["entity_profiling"] == "enricher"
+        assert types["token_matching"] == "candidate_source"
+        assert types["llm_ranking"] == "ranker"
 
 
 class TestIntermediateMetric:
     def test_frozen(self):
         m = IntermediateMetric(
-            name="test", node_role="ranker", pipeline_data_key="ranked_candidates",
+            name="test", node_type="ranker", pipeline_data_key="ranked_candidates",
         )
         with pytest.raises(pydantic.ValidationError):
             m.name = "changed"
 
-    def test_registry_has_expected_roles(self):
-        assert "candidate_source" in ROLE_METRIC_REGISTRY
-        assert "ranker" in ROLE_METRIC_REGISTRY
-        assert "cache" in ROLE_METRIC_REGISTRY
-        assert "enricher" in ROLE_METRIC_REGISTRY
+    def test_registry_has_expected_types(self):
+        assert "candidate_source" in NODE_TYPE_METRICS
+        assert "ranker" in NODE_TYPE_METRICS
+        assert "cache" in NODE_TYPE_METRICS
+        assert "enricher" in NODE_TYPE_METRICS
 
     def test_source_recall_metric_exists(self):
-        metrics = ROLE_METRIC_REGISTRY["candidate_source"]
+        metrics = NODE_TYPE_METRICS["candidate_source"]
         assert any(m.name == "source_recall" for m in metrics)
 
 
@@ -146,8 +146,8 @@ class TestIntermediateMetric:
 class TestDeriveMetrics:
     def test_basic_derive(self):
         schema = PipelineSchema(nodes=[
-            PipelineNode(name="token_matching", node_role="candidate_source"),
-            PipelineNode(name="llm_ranking", node_role="ranker"),
+            PipelineNode(name="token_matching", node_type="candidate_source"),
+            PipelineNode(name="llm_ranking", node_type="ranker"),
         ])
         results = _make_results(3, 5, gt_in_candidates=True)
         metrics = derive_metrics(schema, results)
@@ -167,8 +167,8 @@ class TestDeriveMetrics:
 
     def test_namespaced_when_multiple_same_role(self):
         schema = PipelineSchema(nodes=[
-            PipelineNode(name="fuzzy_matching", node_role="candidate_source"),
-            PipelineNode(name="token_matching", node_role="candidate_source"),
+            PipelineNode(name="fuzzy_matching", node_type="candidate_source"),
+            PipelineNode(name="token_matching", node_type="candidate_source"),
         ])
         results = _make_results(3, 5)
         metrics = derive_metrics(schema, results)
@@ -178,7 +178,7 @@ class TestDeriveMetrics:
 
     def test_empty_results(self):
         schema = PipelineSchema(nodes=[
-            PipelineNode(name="llm_ranking", node_role="ranker"),
+            PipelineNode(name="llm_ranking", node_type="ranker"),
         ])
         metrics = derive_metrics(schema, [])
         assert metrics["accuracy"] == 0.0
@@ -186,7 +186,7 @@ class TestDeriveMetrics:
 
     def test_cache_hit_rate(self):
         schema = PipelineSchema(nodes=[
-            PipelineNode(name="cache_lookup", node_role="cache"),
+            PipelineNode(name="cache_lookup", node_type="cache"),
         ])
         results = _make_results(2, 4)
         metrics = derive_metrics(schema, results)
@@ -195,7 +195,7 @@ class TestDeriveMetrics:
 
     def test_custom_weights(self):
         schema = PipelineSchema(nodes=[
-            PipelineNode(name="token_matching", node_role="candidate_source"),
+            PipelineNode(name="token_matching", node_type="candidate_source"),
         ])
         results = _make_results(3, 5, gt_in_candidates=True)
         metrics = derive_metrics(

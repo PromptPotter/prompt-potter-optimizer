@@ -22,7 +22,7 @@ Archived specs (M0-M7, governance docs): [`docs/specs/archive/`](archive/)
 
 ## M6: PipelineSchema + Pipeline Composability -- Complete
 
-PipelineSchema model, `GET /pipeline` self-describing config, schema derivation (6 chokepoints resolved), unified tracing, composite scoring, node_role-driven intermediate metrics, consolidated pipeline control surfaces. Wave 4 (workflow nodes) deferred to M9. Spec: [`archive/m6-pipeline-composability.md`](archive/m6-pipeline-composability.md)
+PipelineSchema model, `GET /pipeline` self-describing config, schema derivation (6 chokepoints resolved), unified tracing, composite scoring, node_type-driven intermediate metrics, consolidated pipeline control surfaces. Wave 4 (workflow nodes) deferred to M9. Spec: [`archive/m6-pipeline-composability.md`](archive/m6-pipeline-composability.md)
 
 ---
 

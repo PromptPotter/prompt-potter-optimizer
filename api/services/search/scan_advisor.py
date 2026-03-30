@@ -40,13 +40,13 @@ def build_pipeline_overview(
 ) -> list[dict[str, Any]]:
     """Layer 1 — high-level pipeline structure.
 
-    Node name, role, short_circuit flag. No config details.
+    Node name, type, short_circuit flag. No config details.
     """
     overview = []
     for node in _active_nodes(schema, excluded_nodes):
         entry: dict[str, Any] = {"name": node.name}
-        if node.node_role:
-            entry["node_role"] = node.node_role
+        if node.node_type:
+            entry["node_type"] = node.node_type
         if node.short_circuit:
             entry["short_circuit"] = True
         overview.append(entry)

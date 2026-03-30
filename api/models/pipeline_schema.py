@@ -25,8 +25,8 @@ class NodeRuntime(enum.StrEnum):
     FRONTEND = "frontend"
 
 
-class NodeRole(enum.StrEnum):
-    """Semantic role of a pipeline node (empty string = no role)."""
+class NodeType(enum.StrEnum):
+    """Pipeline node type classification (empty string = untyped)."""
 
     NONE = ""
     CANDIDATE_SOURCE = "candidate_source"
@@ -107,7 +107,7 @@ class PipelineNode(BaseModel):
     type: str = "tool"
     runtime: NodeRuntime = NodeRuntime.BACKEND
     short_circuit: bool = False
-    node_role: NodeRole = NodeRole.NONE
+    node_type: NodeType = NodeType.NONE
     description: str = ""
     param_keys: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
@@ -127,22 +127,22 @@ class PipelineNode(BaseModel):
 
 
 class IntermediateMetric(BaseModel):
-    """A metric derived from a pipeline step's node_role."""
+    """A metric derived from a pipeline node's type."""
 
     model_config = {"frozen": True}
 
     name: str
-    node_role: str
+    node_type: str
     pipeline_data_key: str
     description: str = ""
     default_weight: float = 0.0  # 0 = display-only
 
 
-ROLE_METRIC_REGISTRY: dict[str, list[IntermediateMetric]] = {
+NODE_TYPE_METRICS: dict[str, list[IntermediateMetric]] = {
     "candidate_source": [
         IntermediateMetric(
             name="source_recall",
-            node_role="candidate_source",
+            node_type="candidate_source",
             pipeline_data_key="token_matched_candidates",
             description="Fraction of queries where ground truth appears in candidate list",
         ),
@@ -150,7 +150,7 @@ ROLE_METRIC_REGISTRY: dict[str, list[IntermediateMetric]] = {
     "ranker": [
         IntermediateMetric(
             name="candidate_recall",
-            node_role="ranker",
+            node_type="ranker",
             pipeline_data_key="ranked_candidates",
             description="Fraction of LLM-ranked queries where ground truth was available",
         ),
@@ -158,7 +158,7 @@ ROLE_METRIC_REGISTRY: dict[str, list[IntermediateMetric]] = {
     "cache": [
         IntermediateMetric(
             name="cache_hit_rate",
-            node_role="cache",
+            node_type="cache",
             pipeline_data_key="step_timings",
             description="Fraction of queries resolved by cache",
         ),

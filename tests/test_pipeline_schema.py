@@ -150,13 +150,13 @@ class TestParsePipelineResponse:
         cache = schema.nodes[0]
         assert cache.runtime == "frontend"
         assert cache.short_circuit is True
-        assert cache.node_role == "cache"
+        assert cache.node_type == "cache"
         assert cache.langfuse_type == "span"
 
         # Web search step — full optimizer metadata
         ws = schema.nodes[1]
         assert ws.runtime == "backend"
-        assert ws.node_role == "enricher"
+        assert ws.node_type == "enricher"
         assert ws.param_keys == {"max_sites", "num_results"}
         assert ws.override_map == {"max_sites": "max_sites", "num_results": "num_results"}
         assert ws.observation_name == "web_search"
@@ -168,7 +168,7 @@ class TestParsePipelineResponse:
 
         # LLM ranking step
         lr = schema.nodes[2]
-        assert lr.node_role == "ranker"
+        assert lr.node_type == "ranker"
         assert lr.param_keys == {"ranking_temperature"}
         assert lr.override_map == {"ranking_temperature": "temperature"}
 
