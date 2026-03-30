@@ -33,6 +33,7 @@ def diagnose_scan_variants(
     backend_id: str,
     scan_variants: dict[str, list],
     baseline_sp: JobSearchPoint,
+    prompt_node_names: list[str] | None = None,
 ) -> dict:
     """Check scan variant coverage using sp_hash matching.
 
@@ -56,7 +57,7 @@ def diagnose_scan_variants(
             sp_index.setdefault(sp_h, []).append(entry)
 
     # Baseline sp_hash → matching runs
-    baseline_hash = baseline_sp.sp_hash()
+    baseline_hash = baseline_sp.sp_hash(prompt_node_names)
     baseline_entries = sp_index.get(baseline_hash, [])
     n_baseline_results = sum(e.get("item_count", 0) for e in baseline_entries)
 
@@ -82,7 +83,7 @@ def diagnose_scan_variants(
                 perturbed = baseline_sp.derive(
                     pipeline_params={**(baseline_sp.pipeline_params or {}), axis_name: v},
                 )
-            sp_h = perturbed.sp_hash()
+            sp_h = perturbed.sp_hash(prompt_node_names)
             entries = sp_index.get(sp_h, [])
             value_counts[key] = sum(e.get("item_count", 0) for e in entries)
 

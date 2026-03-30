@@ -26,20 +26,25 @@ def _hash_dict(blob_dict: dict) -> str:
 def sp_identity_hash(
     rendered_prompt_hash: str,
     pipeline_params: dict | None = None,
+    prompt_node_names: list[str] | None = None,
 ) -> str:
     """SearchPoint identity hash — hashes only dimensions that affect the result.
 
-    When ``pipeline_params`` has a ``steps`` list that excludes ``llm_ranking``,
-    the prompt is never executed by the backend.  In that case the prompt is
-    excluded from the hash so that different prompt variants with the same
-    pipeline config share the same SP hash.
+    When ``pipeline_params`` has a ``steps`` list that excludes all
+    prompt-bearing nodes, the prompt is never executed by the backend.
+    In that case the prompt is excluded from the hash so that different
+    prompt variants with the same pipeline config share the same SP hash.
+
+    ``prompt_node_names`` lists the nodes whose output depends on the
+    prompt text (default: ``["llm_ranking"]`` for legacy TermNorm compat).
 
     Uses ``rendered_prompt_hash`` (not the full prompt text) so the hash
     can be computed from stored index data without loading detail files.
     """
+    names = prompt_node_names or ["llm_ranking"]
     pp = pipeline_params or {}
     steps = pp.get("steps")
-    prompt_matters = steps is None or "llm_ranking" in steps
+    prompt_matters = steps is None or any(n in steps for n in names)
 
     blob_dict: dict = {}
     if prompt_matters:

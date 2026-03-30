@@ -19,6 +19,7 @@ from api.services.stores.base import (
     validate_path_component,
     write_json,
 )
+from api.shared.constants import DEFAULT_CONNECTOR_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class CampaignStore(EntityStore):
             "created_at": now,
             "updated_at": now,
             "status": "active",
+            "connector_type": metadata.get("connector_type", DEFAULT_CONNECTOR_TYPE),
             "n_trials": 0,
             "best_accuracy": 0.0,
             "best_trial_id": None,

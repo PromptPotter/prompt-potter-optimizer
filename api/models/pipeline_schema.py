@@ -233,7 +233,7 @@ class PipelineSchema(BaseModel):
     def obs_extraction_map(self) -> dict[str, list[ObservationMapping]]:
         """Map observation name → extraction rules.
 
-        Replaces ``OBS_EXTRACTION_MAP`` in ``eval_dataset.py``.
+        Used by ``_extract_eval_from_traces()`` in ``eval_dataset.py``.
         """
         return {
             step.observation_name: step.observation_mappings
@@ -247,6 +247,29 @@ class PipelineSchema(BaseModel):
         Replaces the implicit mapping in ``pipeline_nodes.py``.
         """
         return {step.name: step.langfuse_type for step in self.nodes}
+
+    def prompt_node_names(self) -> list[str]:
+        """Node names whose output is affected by the prompt text.
+
+        A node is prompt-bearing if it has ``prompt_meta`` set.
+        Returns ``["llm_ranking"]`` when schema has no matching nodes
+        (legacy fallback).
+        """
+        names = [node.name for node in self.nodes if node.prompt_meta is not None]
+        return names or ["llm_ranking"]
+
+    def required_pipeline_key(self) -> str:
+        """The pipeline_data key that gates trace validity.
+
+        Returns the first observation mapping's pipeline_key from the first
+        LLM node, or ``"entity_profile"`` as legacy TermNorm fallback for
+        schemas that predate observation mappings.
+        """
+        for node in self.nodes:
+            for mapping in node.observation_mappings:
+                if mapping.is_llm:
+                    return mapping.pipeline_key
+        return "entity_profile"
 
 
 

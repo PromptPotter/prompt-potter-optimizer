@@ -19,6 +19,7 @@ from api.services.stores.base import (
     validate_path_component,
     write_json,
 )
+from api.shared.constants import DATASET_RUNS_SCHEMA_VERSION, DEFAULT_CONNECTOR_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class DatasetRunStore:
         if backend_id not in self._index_cache:
             self._index_cache[backend_id] = (
                 read_json_optional(self._index_path(backend_id))
-                or {"dataset_runs": [], "total": 0}
+                or {"dataset_runs": [], "total": 0, "schema_version": DATASET_RUNS_SCHEMA_VERSION}
             )
         return self._index_cache[backend_id]
 
@@ -151,6 +152,7 @@ class DatasetRunStore:
             "sp_hash": data.get("sp_hash", ""),
             "pipeline_params": data.get("pipeline_params"),
             "source": data.get("source", ""),
+            "connector_type": data.get("connector_type", DEFAULT_CONNECTOR_TYPE),
             "created_at": data["created_at"],
         }
 

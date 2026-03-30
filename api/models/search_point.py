@@ -78,13 +78,14 @@ class JobSearchPoint(SearchPoint):
                 return node_config["prompt"]
         return ""
 
-    def sp_hash(self) -> str:
+    def sp_hash(self, prompt_node_names: list[str] | None = None) -> str:
         """SearchPoint identity hash — eval_data independent."""
         rendered = self.render()
         rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
         return sp_identity_hash(
             rp_hash,
             self.pipeline_params,
+            prompt_node_names,
         )
 
     def content_hash(self, eval_data: list) -> str:

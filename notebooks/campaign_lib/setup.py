@@ -99,7 +99,6 @@ async def decompose_task_context(
         task_description,
         llm_client,
         model,
-        improvement_areas=campaign_config.get("improvement_areas", ""),
         store_base_dir=svc.store.base_dir if svc.store else None,
         backend_id=svc.backend_id,
     )

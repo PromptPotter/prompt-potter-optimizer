@@ -54,6 +54,9 @@ class InitResult:
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
 
+    def __setitem__(self, key: str, value: Any) -> None:
+        setattr(self, key, value)
+
 
 @dataclass
 class CampaignBaseline:
@@ -120,7 +123,7 @@ def load_baseline_prompt(exp_data: dict) -> OptSearchPoint:
 
     reranker_prompt = None
     for key, prompt_info in prompts.items():
-        if "llm_ranking" in key:
+        if "llm_ranking" in key:  # TermNorm prompt registry key; replaced by ConnectorProtocol in M9
             reranker_prompt = prompt_info
             break
 

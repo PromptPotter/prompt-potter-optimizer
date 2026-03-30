@@ -22,22 +22,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def split_query_parts(query: str) -> tuple[str, str]:
-    """Split a query string into (bom_material, process).
-
-    TermNorm queries use the format ``bom_material / process``.
-    If no slash is present, process is an empty string.
-    """
-    if "/" in query:
-        last_slash = query.rfind("/")
-        bom_material = query[:last_slash].strip()
-        process = query[last_slash + 1:].strip()
-    else:
-        bom_material = query.strip()
-        process = ""
-    return bom_material, process
-
-
 def extract_pipeline_config(exp_data: dict) -> dict:
     """Extract pipeline config (steps + params) from synced experiment data."""
     runs = exp_data.get("runs", [])
@@ -131,6 +115,25 @@ class BackendClient:
         if self._http is None or self._http.is_closed:
             self._http = httpx.AsyncClient(timeout=self.timeout)
         return self._http
+
+    @staticmethod
+    def split_query_parts(query: str) -> tuple[str, str]:
+        """Split a TermNorm query string into (bom_material, process).
+
+        TermNorm queries use the format ``bom_material / process``.
+        If no slash is present, process is an empty string.
+
+        Connector-specific: other backends implement their own query
+        parsing inside their ``extract_replay_queries()`` method.
+        """
+        if "/" in query:
+            last_slash = query.rfind("/")
+            bom_material = query[:last_slash].strip()
+            process = query[last_slash + 1:].strip()
+        else:
+            bom_material = query.strip()
+            process = ""
+        return bom_material, process
 
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         """GET ``{base_url}{path}`` and return parsed JSON."""
@@ -365,7 +368,7 @@ class BackendClient:
 
         for er in eval_results:
             query = er["query"]
-            bom_material, process = split_query_parts(query)
+            bom_material, process = BackendClient.split_query_parts(query)
 
             if bom_material not in bom_to_gt:
                 continue

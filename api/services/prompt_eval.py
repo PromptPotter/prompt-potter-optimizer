@@ -102,14 +102,16 @@ def build_dataset_run_data(
     *,
     source: str = "",
     experiment_id: str = "",
+    prompt_node_names: list[str] | None = None,
 ) -> dict:
     """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
     rendered_prompt = search_point.render()
+    sp_h = search_point.sp_hash(prompt_node_names)
     data: dict = {
         "run_id": run_id,
         "name": name,
         "content_hash": content_hash,
-        "prompt_fields_id": search_point.sp_hash(),
+        "prompt_fields_id": sp_h,
         "rendered_prompt_hash": hashlib.sha256(
             rendered_prompt.encode(),
         ).hexdigest()[:HASH_TRUNCATE],
@@ -119,7 +121,7 @@ def build_dataset_run_data(
         "created_at": datetime.now(UTC).isoformat(),
         "dataset_run_items": results,
     }
-    data["sp_hash"] = search_point.sp_hash()
+    data["sp_hash"] = sp_h
     if search_point.pipeline_params:
         data["pipeline_params"] = search_point.pipeline_params
     if experiment_id:
@@ -217,7 +219,8 @@ async def eval_query_via_backend(
     try:
         pp = pipeline_params or {}
         steps = pp.get("steps")
-        include_ranking = steps is None or "llm_ranking" in steps
+        prompt_names = pipeline_schema.prompt_node_names()
+        include_ranking = steps is None or any(n in steps for n in prompt_names)
 
         resp = await backend_client.run_match(
             query,
@@ -475,6 +478,7 @@ async def eval_search_point(
     store = ctx.store
     backend_id = ctx.backend_id
     pipeline_schema = ctx.pipeline_schema
+    prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else None
     obs = ctx.obs
     source = source or ctx.source
 
@@ -518,7 +522,7 @@ async def eval_search_point(
     # Bridges different sample sizes automatically.
     sp_cache: dict[str, dict] | None = None
     if store and backend_id:
-        sp_h = search_point.sp_hash()
+        sp_h = search_point.sp_hash(prompt_nodes)
         sp_cache = store.dataset_runs.find_cached_queries(backend_id, sp_h)
         if sp_cache:
             logger.info(
@@ -540,6 +544,7 @@ async def eval_search_point(
             results,
             source=source,
             experiment_id=ctx.experiment_id,
+            prompt_node_names=prompt_nodes,
         )
         if partial:
             run_data["partial"] = True
@@ -583,7 +588,7 @@ async def eval_search_point(
             run_id,
             content_hash,
             scores,
-            search_point.sp_hash(),
+            search_point.sp_hash(prompt_nodes),
             obs,
         )
 

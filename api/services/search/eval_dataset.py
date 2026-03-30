@@ -3,49 +3,13 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from api.services.backend_client import split_query_parts
+from api.services.backend_client import BackendClient
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
-
-
-# ---------------------------------------------------------------------------
-# Declarative observation → pipeline_data mapping
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class _ObsField:
-    """Maps one trace observation field to a pipeline_data key."""
-
-    pipeline_key: str
-    output_field: str | None = None  # None → use full output dict
-    is_llm: bool = False             # True → also extract model from metadata
-
-
-# Declarative mapping: observation name → extraction rules.
-# Schema-driven extraction available via schema.obs_extraction_map(); this constant is the fallback.
-OBS_EXTRACTION_MAP: dict[str, list[_ObsField]] = {
-    "entity_profiling": [
-        _ObsField("entity_profile", output_field=None, is_llm=True),
-    ],
-    "token_matching": [
-        _ObsField("token_matched_candidates", output_field="candidates"),
-    ],
-    "llm_ranking": [
-        _ObsField("ranked_candidates", output_field="ranked_candidates", is_llm=True),
-    ],
-    "web_search": [
-        _ObsField("web_sources", output_field="sources"),
-        _ObsField("web_search_status", output_field="status"),
-    ],
-}
-
-# The pipeline_data key that must be present for a trace to be valid.
-REQUIRED_PIPELINE_KEY = "entity_profile"
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +52,7 @@ def _extract_eval_from_traces(
         if not query:
             continue
 
-        bom_material, _ = split_query_parts(query)
+        bom_material, _ = BackendClient.split_query_parts(query)
         ground_truth = bom_to_gt.get(bom_material)
         if not ground_truth:
             continue
@@ -117,7 +81,7 @@ def _extract_eval_from_traces(
                     llm_provider = (obs.get("metadata") or {}).get("model")
 
         # Gate: required pipeline key must be present
-        if not pipeline_data.get(REQUIRED_PIPELINE_KEY):
+        if not pipeline_data.get(schema.required_pipeline_key()):
             continue
 
         if llm_provider:
@@ -175,11 +139,12 @@ def load_eval_dataset(
                 backend_id, ex_summary["execution_id"],
             )
             if execution:
+                req_key = schema.required_pipeline_key()
                 eval_data = [
                     r.model_dump() for r in execution.results
                     if r.status == "success"
                     and r.pipeline_data
-                    and r.pipeline_data.get("entity_profile")
+                    and r.pipeline_data.get(req_key)
                 ]
                 if eval_data:
                     if sample_size > 0 and len(eval_data) > sample_size:

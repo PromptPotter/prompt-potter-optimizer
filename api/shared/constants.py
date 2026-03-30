@@ -31,3 +31,7 @@ LAYER_FIELDS: dict[str, list[str]] = {
 
 # Layer 1 string fields (all generate fields except few_shot_examples).
 LAYER1_STRING_FIELDS = [f for f in LAYER_FIELDS["generate"] if f != "few_shot_examples"]
+
+# Persistence versioning
+DATASET_RUNS_SCHEMA_VERSION = 1
+DEFAULT_CONNECTOR_TYPE = "termnorm"

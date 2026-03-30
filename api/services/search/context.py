@@ -203,7 +203,6 @@ async def decompose_task_context(
     task_description: str,
     llm_client: LLMClientBase,
     model: str,
-    improvement_areas: str = "",
     store_base_dir: Path | None = None,
     backend_id: str = "",
 ) -> TaskContextResult:
@@ -228,7 +227,6 @@ async def decompose_task_context(
         task_description,
         llm_client,
         model=model,
-        improvement_areas=improvement_areas,
         store_base_dir=store_base_dir,
         backend_id=backend_id,
         rp_hash=rp_hash,

@@ -87,6 +87,9 @@ def extract_pipeline_nodes(
     """Parse pipeline_data into an ordered list of typed nodes.
 
     Missing nodes are simply absent from the returned list.
+
+    NOTE: Node discovery and output extraction are TermNorm-specific.
+    Schema-driven Langfuse push is a separate task (post-M8).
     """
     nodes: list[LangfuseObservation] = []
     timings = pipeline_data.get("step_timings") or {}

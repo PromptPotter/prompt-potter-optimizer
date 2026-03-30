@@ -185,7 +185,12 @@ def compute_composite_score(
     base = compute_accuracy(results)
     accuracy = base["accuracy"]
 
-    # token_recall: for queries that reached llm_ranking, was GT in candidates?
+    # token_recall: for queries that reached the ranker, was GT in candidates?
+    ranker_names = (
+        {n.name for n in pipeline_schema.nodes if n.node_type == "ranker"}
+        if pipeline_schema is not None
+        else {"llm_ranking"}
+    )
     n_llm = 0
     found = 0
     for r in results:
@@ -193,7 +198,7 @@ def compute_composite_score(
             continue
         pd = r.get("pipeline_data") or {}
         terminated = pd.get("terminated_at")
-        if terminated != "llm_ranking":
+        if terminated not in ranker_names:
             continue
         n_llm += 1
         gt = r.get("ground_truth", "")
