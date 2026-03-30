@@ -180,7 +180,7 @@ Threshold: hardcoded at 0.7.
 ```
 Backend /matches → diagnostics.warnings[]
     ↓
-_extract_pipeline_data()                    ← prompt_eval.py
+_parse_backend_response()                    ← prompt_eval.py
     ↓
 result["pipeline_data"]["diagnostics"]["warnings"]
     ↓
@@ -344,6 +344,6 @@ campaign_config = {
 | `campaign/escalation.py` | `DegradationCheck`, `DEFAULT_STRATEGIES`, `classify_warnings` |
 | `campaign/optimization_loop.py` | Orchestration, escalation journal, critique threading |
 | `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
-| `prompt_eval.py` | `_run_eval_batch` (per-query checks), `_extract_pipeline_data` |
+| `prompt_eval.py` | `_run_eval_batch` (per-query checks), `_parse_backend_response` |
 | `l1_optimizer.py` | L1 generation (sole pipeline_params decider) |
 | `search/search_memory.py` | Cross-campaign intelligence: parameter impact, query patterns, failure modes *(M8)* |

@@ -96,7 +96,7 @@ def _compute_type_metric(
     return 0.0
 
 
-def derive_metrics(
+def compute_pipeline_metrics(
     pipeline_schema: PipelineSchema,
     results: list[dict],
     *,
@@ -166,7 +166,7 @@ def compute_composite_score(
     """Compute composite score combining accuracy with intermediate metrics.
 
     When ``pipeline_schema`` is provided and has nodes with ``node_type``,
-    uses ``derive_metrics()`` for type-based metrics.
+    uses ``compute_pipeline_metrics()`` for type-based metrics.
     Otherwise falls back to hardcoded ``token_recall``.
 
     Returns dict with at least: hits, total, accuracy, errors, composite,
@@ -175,7 +175,7 @@ def compute_composite_score(
     if pipeline_schema is not None:
         has_types = any(s.node_type for s in pipeline_schema.nodes)
         if has_types:
-            return derive_metrics(
+            return compute_pipeline_metrics(
                 pipeline_schema,
                 results,
                 accuracy_weight=accuracy_weight,

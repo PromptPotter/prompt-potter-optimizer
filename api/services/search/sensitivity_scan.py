@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from api.models.eval_context import EvalContext
 from api.models.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
 from api.models.search_point import JobSearchPoint
-from api.services.prompt_eval import _dominant_error_category, eval_search_point
+from api.services.prompt_eval import _most_common_error_category, eval_search_point
 from api.services.search.preview import preview as _preview
 from api.services.search.smart_search import (
     ScanEvent,
@@ -119,7 +119,7 @@ async def sensitivity_scan(
     # Circuit breaker: abort if baseline eval is all-errors
     baseline_errors = baseline_scores.get("errors", 0)
     if baseline_errors == baseline_scores["total"] > 0:
-        dominant = _dominant_error_category(baseline_results)
+        dominant = _most_common_error_category(baseline_results)
         if dominant == "CLIENT":
             reason = (
                 f"Baseline eval failed: all {baseline_scores['total']} queries "
@@ -240,7 +240,7 @@ async def sensitivity_scan(
             if not cached and variant_errors == scores["total"] > 0:
                 _consecutive_all_error += 1
                 if _consecutive_all_error >= 2:
-                    dominant = _dominant_error_category(results)
+                    dominant = _most_common_error_category(results)
                     if dominant == "CLIENT":
                         detail = "Client errors (HTTP 4xx). Check pipeline configuration."
                     elif dominant == "CONNECTION":

@@ -64,7 +64,7 @@ def _error_category(error: str | None) -> ErrorCategory | None:
     return None
 
 
-def _dominant_error_category(results: list) -> ErrorCategory | None:
+def _most_common_error_category(results: list) -> ErrorCategory | None:
     """Return the most common error category across errored results."""
     from collections import Counter
 
@@ -127,7 +127,7 @@ def build_dataset_run_data(
     return data
 
 
-def _extract_pipeline_data(
+def _parse_backend_response(
     backend_data: dict,
     ranked_candidates: list,
     pipeline_schema: PipelineSchema,
@@ -218,7 +218,7 @@ async def eval_query_via_backend(
             "hit": eval_output.result == EvalResult.PASS,
             "score": eval_output.score,
             "error": None,
-            "pipeline_data": _extract_pipeline_data(data, ranked, pipeline_schema),
+            "pipeline_data": _parse_backend_response(data, ranked, pipeline_schema),
         }
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)
@@ -411,7 +411,7 @@ async def _run_eval_batch(
     return EvalBatchResult(results, completed=True)
 
 
-def _finalize_observability(
+def _log_eval_to_obs(
     store: ProjectStore,
     backend_id: str,
     run_id: str,
@@ -617,7 +617,7 @@ async def eval_search_point(
     # --- finalize: save complete run + observability ---
     _save_run(results, scores)
     if store and backend_id:
-        _finalize_observability(
+        _log_eval_to_obs(
             store,
             backend_id,
             run_id,

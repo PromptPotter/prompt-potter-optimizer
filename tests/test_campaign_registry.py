@@ -268,7 +268,7 @@ def _apply_e2e_mocks(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "api.services.search.context.restructure_context",
+        "api.services.search.context.decompose_prompt_fields",
         mock_restructure,
     )
 

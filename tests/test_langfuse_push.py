@@ -204,7 +204,7 @@ class TestPushAllRuns:
 
 def test_finalize_obs_with_explicit_obs(tmp_path):
     from api.services.obs.observability_logger import ObsLogger
-    from api.services.prompt_eval import _finalize_observability
+    from api.services.prompt_eval import _log_eval_to_obs
 
     store = ProjectStore(tmp_path)
     backend_id = "test-backend"
@@ -215,7 +215,7 @@ def test_finalize_obs_with_explicit_obs(tmp_path):
     obs._campaign_traces = {}
     obs._cloud = None
 
-    _finalize_observability(
+    _log_eval_to_obs(
         store, backend_id, "baseline_aabb", "aabb1122",
         {"accuracy": 1.0, "total": 1, "hits": 1},
         "ps-1",

@@ -80,7 +80,7 @@ See [M6 spec](m6-pipeline-composability.md) for full details. Cross-repo: TermNo
 | ID | Work Package | Sessions | PRD Ref | Depends | Status |
 |----|-------------|:--------:|---------|---------|--------|
 | 6.8 | IntermediateMetric model + PipelineNode.node_type | 1 | P1.14 | 6.7 | Planned |
-| 6.9 | `derive_metrics()` + composite scoring | 1 | P1.14 | 6.8 | Planned |
+| 6.9 | `compute_pipeline_metrics()` + composite scoring | 1 | P1.14 | 6.8 | Planned |
 | 6.10 | Wire through eval/search/feedback paths | 1 | P1.14 | 6.9 | Planned |
 
 ---

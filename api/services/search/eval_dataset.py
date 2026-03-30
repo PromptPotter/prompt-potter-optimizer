@@ -6,7 +6,7 @@ import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from api.services.backend_client import parse_bom_material
+from api.services.backend_client import split_query_parts
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
@@ -88,7 +88,7 @@ def _extract_eval_from_traces(
         if not query:
             continue
 
-        bom_material, _ = parse_bom_material(query)
+        bom_material, _ = split_query_parts(query)
         ground_truth = bom_to_gt.get(bom_material)
         if not ground_truth:
             continue

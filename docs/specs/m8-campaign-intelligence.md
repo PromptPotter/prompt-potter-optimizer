@@ -41,7 +41,7 @@ Three compounding weaknesses prevent this:
 
 New function `extract_sample_diagnostics(result, pipeline_schema) -> dict[str, float|bool]`:
 
-- Walks `pipeline_schema.nodes`; for each node with `node_type` in `NODE_TYPE_METRICS`, reads the corresponding `pipeline_data_key` from the result dict and computes **per-query** signals (the per-query complement to `derive_metrics()` which only does aggregates):
+- Walks `pipeline_schema.nodes`; for each node with `node_type` in `NODE_TYPE_METRICS`, reads the corresponding `pipeline_data_key` from the result dict and computes **per-query** signals (the per-query complement to `compute_pipeline_metrics()` which only does aggregates):
   - `candidate_source` type: `gt_in_source` (bool), `n_source_candidates` (int), `gt_source_rank` (int|None)
   - `ranker` type: `gt_in_ranked` (bool), `n_ranked_candidates` (int), `gt_rank` (int|None), `top_score_gap` (float)
   - `enricher` type: `n_enriched_fields` (int) from `output_schema.fields` count vs populated count
@@ -51,10 +51,10 @@ New function `extract_sample_diagnostics(result, pipeline_schema) -> dict[str, f
 
 **Extends existing pattern:**
 - `NODE_TYPE_METRICS` (`pipeline_schema.py:141`) already maps node type → metrics → `pipeline_data_key`
-- `_extract_pipeline_data()` (`prompt_eval.py:130`) already collects everything the schema describes
+- `_parse_backend_response()` (`prompt_eval.py:130`) already collects everything the schema describes
 - Same registry, same keys, per-result instead of aggregate
 
-**Location:** `api/services/metrics.py` (alongside existing `derive_metrics()`)
+**Location:** `api/services/metrics.py` (alongside existing `compute_pipeline_metrics()`)
 
 ### 1b. Evaluation profiles (Level B) — failure analysis compilation
 
@@ -278,8 +278,8 @@ All four wave groups are independent at their roots.
 |------|------|----------|
 | `NODE_TYPE_METRICS` | Maps node_type → metrics → pipeline_data_key | `api/models/pipeline_schema.py:141` |
 | `IntermediateMetric` | Per-type metric definition | `api/models/pipeline_schema.py` |
-| `derive_metrics()` | Aggregate metrics from node types | `api/services/metrics.py:99` |
-| `_extract_pipeline_data()` | Assembles per-query pipeline_data from schema | `api/services/prompt_eval.py:130` |
+| `compute_pipeline_metrics()` | Aggregate metrics from node types | `api/services/metrics.py:99` |
+| `_parse_backend_response()` | Assembles per-query pipeline_data from schema | `api/services/prompt_eval.py:130` |
 | `obs_extraction_map()` | Schema -> observation mapping | `api/models/pipeline_schema.py` |
 | `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `notebooks/campaign_lib/stats.py` |
 | `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `api/services/search/smart_search.py:169` |

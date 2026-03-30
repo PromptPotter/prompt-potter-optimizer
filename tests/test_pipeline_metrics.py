@@ -1,4 +1,4 @@
-"""Tests for pipeline metrics: composite scoring, node types, and derive_metrics().
+"""Tests for pipeline metrics: composite scoring, node types, and compute_pipeline_metrics().
 
 Merged from test_composite_score.py and test_node_type_metrics.py.
 """
@@ -12,7 +12,7 @@ from api.models.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from api.services.metrics import compute_composite_score, derive_metrics
+from api.services.metrics import compute_composite_score, compute_pipeline_metrics
 
 
 def _make_results(hits, total, *, terminated_at="llm_ranking", gt_in_candidates=True):
@@ -150,7 +150,7 @@ class TestDeriveMetrics:
             PipelineNode(name="llm_ranking", node_type="ranker"),
         ])
         results = _make_results(3, 5, gt_in_candidates=True)
-        metrics = derive_metrics(schema, results)
+        metrics = compute_pipeline_metrics(schema, results)
         assert "composite" in metrics
         assert "source_recall" in metrics
         assert "candidate_recall" in metrics
@@ -161,7 +161,7 @@ class TestDeriveMetrics:
             PipelineNode(name="step1"),
         ])
         results = _make_results(2, 4)
-        metrics = derive_metrics(schema, results)
+        metrics = compute_pipeline_metrics(schema, results)
         assert metrics["accuracy"] == pytest.approx(0.5)
         assert "composite" in metrics
 
@@ -171,7 +171,7 @@ class TestDeriveMetrics:
             PipelineNode(name="token_matching", node_type="candidate_source"),
         ])
         results = _make_results(3, 5)
-        metrics = derive_metrics(schema, results)
+        metrics = compute_pipeline_metrics(schema, results)
         has_ns = ("fuzzy_matching_source_recall" in metrics
                   or "token_matching_source_recall" in metrics)
         assert has_ns
@@ -180,7 +180,7 @@ class TestDeriveMetrics:
         schema = PipelineSchema(nodes=[
             PipelineNode(name="llm_ranking", node_type="ranker"),
         ])
-        metrics = derive_metrics(schema, [])
+        metrics = compute_pipeline_metrics(schema, [])
         assert metrics["accuracy"] == 0.0
         assert metrics["composite"] == 0.0
 
@@ -189,7 +189,7 @@ class TestDeriveMetrics:
             PipelineNode(name="cache_lookup", node_type="cache"),
         ])
         results = _make_results(2, 4)
-        metrics = derive_metrics(schema, results)
+        metrics = compute_pipeline_metrics(schema, results)
         assert "cache_hit_rate" in metrics
         assert metrics["cache_hit_rate"] == pytest.approx(0.0)
 
@@ -198,7 +198,7 @@ class TestDeriveMetrics:
             PipelineNode(name="token_matching", node_type="candidate_source"),
         ])
         results = _make_results(3, 5, gt_in_candidates=True)
-        metrics = derive_metrics(
+        metrics = compute_pipeline_metrics(
             schema, results,
             metric_weights={"source_recall": 0.05},
             accuracy_weight=0.95,

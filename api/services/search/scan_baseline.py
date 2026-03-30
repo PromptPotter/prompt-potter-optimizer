@@ -56,7 +56,7 @@ async def prepare_scan_baseline(
         for display/prompt fields, scan variant diagnosis, cache flag,
         and restructured field values.
     """
-    from api.services.search.context import restructure_context_cached
+    from api.services.search.context import decompose_prompt_fields_cached
 
     # Resolve alias group for cache lookup
     can_cache = bool(store and backend_id)
@@ -70,7 +70,7 @@ async def prepare_scan_baseline(
             backend_id, original_hash,
         )
 
-    layer1_fields, was_cached = await restructure_context_cached(
+    layer1_fields, was_cached = await decompose_prompt_fields_cached(
         baseline.instruction, llm_client,
         model=llm_model,
         improvement_areas=campaign_config.get("improvement_areas", ""),

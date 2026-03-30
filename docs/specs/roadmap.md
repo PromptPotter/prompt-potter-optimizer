@@ -51,7 +51,7 @@ Generalize beyond TermNorm to support arbitrary LLM application backends. Resolv
 - **Connector interface** — abstract `BackendClient` into a connector protocol
 - **Connector registry** — discover and configure connectors at runtime
 - **Backend-agnostic evaluation** — `eval_search_point()` works with any connector
-- **Query parser registry** — replace `parse_bom_material()` with connector-specific parsers
+- **Query parser registry** — replace `split_query_parts()` with connector-specific parsers
 - **Generic eval config** — replace hardcoded hit@1 exact match with `schema.eval_config`
 - **Notebook migration + Docker** (absorbed from former M6 Wave 5)
 - **Workflow nodes** (absorbed from M6 Wave 4)

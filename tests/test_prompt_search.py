@@ -5,7 +5,7 @@ from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
 from api.services.pipeline_discovery import parse_pipeline_response
-from api.services.prompt_eval import _dominant_error_category, _error_category
+from api.services.prompt_eval import _error_category, _most_common_error_category
 from api.services.search.sensitivity_scan import sensitivity_scan
 from api.services.search.smart_search import _profiles_from_rows
 
@@ -323,7 +323,7 @@ class TestDominantErrorCategory:
             {"error": "[CLIENT] HTTP 400: bad"},
             {"error": "skipped_after_client_error"},
         ]
-        assert _dominant_error_category(results) == "CLIENT"
+        assert _most_common_error_category(results) == "CLIENT"
 
     def test_mixed_with_connection_dominant(self):
         results = [
@@ -331,18 +331,18 @@ class TestDominantErrorCategory:
             {"error": "[CONNECTION] timeout"},
             {"error": "[SERVER] HTTP 500: err"},
         ]
-        assert _dominant_error_category(results) == "CONNECTION"
+        assert _most_common_error_category(results) == "CONNECTION"
 
     def test_no_categorized_errors(self):
         results = [
             {"error": "skipped_after_consecutive_errors"},
             {"error": "skipped_after_consecutive_errors"},
         ]
-        assert _dominant_error_category(results) is None
+        assert _most_common_error_category(results) is None
 
     def test_no_errors(self):
         results = [{"error": None}, {"error": None}]
-        assert _dominant_error_category(results) is None
+        assert _most_common_error_category(results) is None
 
 
 @pytest.mark.asyncio

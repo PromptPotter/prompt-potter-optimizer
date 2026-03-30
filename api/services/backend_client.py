@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def parse_bom_material(query: str) -> tuple[str, str]:
+def split_query_parts(query: str) -> tuple[str, str]:
     """Split a query string into (bom_material, process).
 
     TermNorm queries use the format ``bom_material / process``.
@@ -374,7 +374,7 @@ class BackendClient:
 
         for er in eval_results:
             query = er["query"]
-            bom_material, process = parse_bom_material(query)
+            bom_material, process = split_query_parts(query)
 
             if bom_material not in bom_to_gt:
                 continue

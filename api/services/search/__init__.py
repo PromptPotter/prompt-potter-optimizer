@@ -7,7 +7,7 @@ Re-exports entry-point functions so callers use one import path::
 
 # smart_search
 # context
-from api.services.search.context import restructure_context, restructure_context_cached
+from api.services.search.context import decompose_prompt_fields, decompose_prompt_fields_cached
 
 # coverage
 from api.services.search.coverage import (
@@ -73,6 +73,8 @@ __all__ = [
     "build_pipeline_overview",
     "build_prompt_result_index",
     "build_tunable_params",
+    "decompose_prompt_fields",
+    "decompose_prompt_fields_cached",
     "deserialize_smart_search_plan",
     "diagnose_scan_variants",
     "filter_variant_library",
@@ -82,8 +84,6 @@ __all__ = [
     "prepare_scan_context",
     "preview",
     "preview_advisor_prompt",
-    "restructure_context",
-    "restructure_context_cached",
     "resume_or_build_diagnostic",
     "seed_campaign_from_scan",
     "select_scan_winner",

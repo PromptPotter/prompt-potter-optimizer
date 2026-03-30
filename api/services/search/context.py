@@ -1,4 +1,4 @@
-"""LLM-assisted context restructuring into Layer 1 fields and domain context."""
+"""LLM-assisted decomposition into Layer 1 prompt fields and domain context."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class TaskContextResult:
     was_cached: bool
 
 
-async def restructure_context(
+async def decompose_prompt_fields(
     context_input: Any,
     llm_client: LLMClientBase,
     model: str | None = None,
@@ -107,18 +107,18 @@ async def restructure_context(
 
 
 
-def _restructure_cache_path(base_dir: Path, backend_id: str) -> Path:
+def _decomposition_cache_path(base_dir: Path, backend_id: str) -> Path:
     validate_path_component(backend_id)
     return base_dir / backend_id / "restructure_cache.json"
 
 
-def load_cached_restructure(
+def load_cached_decomposition(
     base_dir: Path,
     backend_id: str,
     alias_hashes: set[str],
 ) -> dict | None:
     """Scan *alias_hashes* for a cached restructure result."""
-    cache = read_json_optional(_restructure_cache_path(base_dir, backend_id))
+    cache = read_json_optional(_decomposition_cache_path(base_dir, backend_id))
     if not cache:
         return None
     for h in alias_hashes:
@@ -128,14 +128,14 @@ def load_cached_restructure(
     return None
 
 
-def save_restructure_cache(
+def save_decomposition_cache(
     base_dir: Path,
     backend_id: str,
     rp_hash: str,
     layer1_fields: dict,
 ) -> None:
     """Persist restructure output keyed by *rp_hash*."""
-    path = _restructure_cache_path(base_dir, backend_id)
+    path = _decomposition_cache_path(base_dir, backend_id)
     cache = read_json_optional(path) or {}
     cache[rp_hash] = {
         "layer1_fields": layer1_fields,
@@ -144,7 +144,7 @@ def save_restructure_cache(
     write_json(path, cache)
 
 
-async def restructure_context_cached(
+async def decompose_prompt_fields_cached(
     context_input: Any,
     llm_client: LLMClientBase,
     *,
@@ -169,15 +169,15 @@ async def restructure_context_cached(
     # --- cache lookup ---
     if can_cache and not force and alias_hashes:
         assert store_base_dir is not None
-        cached = load_cached_restructure(
+        cached = load_cached_decomposition(
             store_base_dir, backend_id, alias_hashes,
         )
         if cached is not None:
-            logger.debug("restructure_context_cached: hit (alias group)")
+            logger.debug("decompose_prompt_fields_cached: hit (alias group)")
             return cached, True
 
     # --- cache miss: call LLM ---
-    layer1_fields = await restructure_context(
+    layer1_fields = await decompose_prompt_fields(
         context_input, llm_client,
         model=model,
     )
@@ -192,7 +192,7 @@ async def restructure_context_cached(
                 else json.dumps(context_input, sort_keys=True)
             )
             save_key = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
-        save_restructure_cache(
+        save_decomposition_cache(
             store_base_dir, backend_id, save_key, layer1_fields,
         )
 
@@ -209,7 +209,7 @@ async def decompose_task_context(
 ) -> TaskContextResult:
     """Decompose a task description into structured domain context fields via LLM.
 
-    Calls ``restructure_context_cached()`` and extracts the ``task_context``
+    Calls ``decompose_prompt_fields_cached()`` and extracts the ``task_context``
     sub-dict.
 
     Returns:
@@ -224,7 +224,7 @@ async def decompose_task_context(
         f"task_ctx:{task_description}".encode(),
     ).hexdigest()[:16]
 
-    result, was_cached = await restructure_context_cached(
+    result, was_cached = await decompose_prompt_fields_cached(
         task_description,
         llm_client,
         model=model,

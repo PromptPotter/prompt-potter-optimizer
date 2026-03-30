@@ -18,7 +18,7 @@ Pre-M7, artifacts like critique_text, thinking_styles, plan, L2/L3 transition ra
 Critique output feeds the next round's generation — it's part of l1_evaluate's output contract. Keeps Langfuse traces clean.
 
 ### ADR-2: `baseline_rendered` in `cycle_config_identity()`
-Removing it orphans existing campaign data (cycle_id changes). Non-determinism from restructure_context() is acceptable.
+Removing it orphans existing campaign data (cycle_id changes). Non-determinism from decompose_prompt_fields() is acceptable.
 
 ### ADR-3: `scan_context` as runtime input, not node config
 Scan context can change between rounds (e.g., after L2 transition). Node config is declaration-time; input data varies per invocation.

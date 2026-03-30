@@ -66,7 +66,7 @@ The AI Loop is itself a 4-step pipeline, implemented by `optimization_loop.py`:
 
 | Step | Purpose | Wraps |
 |------|---------|-------|
-| **l1_generate** | Candidate generation (also init mode) | `l1_generate()` / `restructure_context()` in `l1_optimizer.py` |
+| **l1_generate** | Candidate generation (also init mode) | `l1_generate()` / `decompose_prompt_fields()` in `l1_optimizer.py` |
 | **l1_evaluate** | Eval + winner selection + critique + styles | `l1_evaluate()` + `CritiqueAgent.run()` + `sample_thinking_styles()` |
 | **l2_refine_context** | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` |
 | **l3_modify_plan** | Strategic replanning on L2 stall | `modify_plan()` in `layer_transitions.py` |

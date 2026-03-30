@@ -89,7 +89,7 @@ async def resume_or_build_diagnostic(
     import json as _json
 
     from api.config.settings import load_variant_library
-    from api.services.search.context import restructure_context
+    from api.services.search.context import decompose_prompt_fields
     from api.services.search.plan_persistence import (
         deserialize_smart_search_plan,
         serialize_smart_search_plan,
@@ -199,7 +199,7 @@ async def resume_or_build_diagnostic(
 
     # Build new plan: LLM restructure + diagnostic set
     logger.info("Building new smart search plan: %s", plan_id)
-    layer1_fields = await restructure_context(
+    layer1_fields = await decompose_prompt_fields(
         baseline.instruction,
         llm_client,
         model=model,
