@@ -2,7 +2,7 @@
 
 Two layers:
 1. **EscalationCheck framework** — per-query checks run during
-   ``evaluate_prompt_batch()`` that can abort evaluation early.
+   ``_run_eval_batch()`` that can abort evaluation early.
 2. **Escalation execution** — L1→L2→L3 layer transition orchestration
    triggered when the feedback cycle stalls.
 """
@@ -75,7 +75,7 @@ DEFAULT_STRATEGIES: dict[str, EscalationStrategy] = {
 
 
 class EscalationError(Exception):
-    """Raised inside evaluate_prompt_batch when a check fires."""
+    """Raised inside _run_eval_batch when a check fires."""
 
     def __init__(self, signal: EscalationSignal, partial_results: list[dict]):
         self.signal = signal

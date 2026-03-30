@@ -258,7 +258,7 @@ async def _run_eval_batch(
     eval_data: list,
     backend_client: BackendClient,
     *,
-    on_result: Callable | None = None,
+    on_result: Callable[[dict, int, int], None] | None = None,
     ctx: EvalContext | None = None,
     cached_queries: dict[str, dict] | None = None,
 ) -> EvalBatchResult:
@@ -450,7 +450,7 @@ async def eval_search_point(
     *,
     force: bool = False,
     label: str = "Eval",
-    on_result: Callable | None = None,
+    on_result: Callable[[dict, int, int], None] | None = None,
     source: str = "",
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt with deduplication and finalization.

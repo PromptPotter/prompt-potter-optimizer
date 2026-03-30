@@ -88,8 +88,12 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
     # Use prompt_fields from the tip (most recent round) — may differ from
     # the round with results (e.g. search winner with derived prompt)
     tip_ps = campaign_rounds[-1]["prompt_fields"]
-    baseline_ps = tip_ps.model_dump() if hasattr(tip_ps, "model_dump") else tip_ps
-    instruction = tip_ps.instruction if hasattr(tip_ps, "instruction") else ""
+    if isinstance(tip_ps, dict):
+        baseline_ps = tip_ps
+        instruction = tip_ps.get("instruction", "")
+    else:
+        baseline_ps = tip_ps.model_dump()
+        instruction = tip_ps.instruction or ""
 
     return CampaignBaseline(
         baseline_ps=baseline_ps,

@@ -337,7 +337,7 @@ async def l1_evaluate(
     elif isinstance(winner_osp, dict):
         winner_dict = winner_osp
     else:
-        winner_dict = winner_osp.model_dump()
+        raise TypeError(f"Unexpected winner type: {type(winner_osp)}")
     return L1EvalResult(
         label=winner_entry["label"],
         winner_prompt_fields=winner_dict,

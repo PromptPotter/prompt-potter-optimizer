@@ -55,15 +55,15 @@ SearchPoint (base)           — abstract base, "a point in a search space"
     └── OptSearchPoint       — optimizer state: prompt fields + L2/L3 + memory (mutable)
 ```
 
-**JobSearchPoint** — flat, frozen, content-hashable target evaluation specification: `model` + `temperature` + `pipeline_params` (the rendered prompt lives inside `pipeline_params` as a node config value).
+**JobSearchPoint** — flat, frozen, content-hashable target evaluation specification: `pipeline_params` (the rendered prompt lives inside `pipeline_params` as a node config value).
 
-**OptSearchPoint** — inherits from SearchPoint. Prompt decomposition fields (`persona`, `task_intent`, etc.) + lineage (`id`, `parent_id`, `changes_description`) + L2 state (`optimizer_params`, `task_context`) + L3 state (`plan`) + optimization memory (`critique`, `thinking_styles`, `escalation_journal`). Mutable. `render_prompt()` assembles fields; `to_job_search_point()` projects into JobSearchPoint for evaluation.
+**OptSearchPoint** — inherits from SearchPoint. Prompt decomposition fields (`persona`, `task_intent`, etc.) + lineage (`id`, `parent_id`, `changes_description`) + L2 state (`optimizer_params`, `task_context`) + L3 state (`plan`) + optimization memory (`critique_text`, `thinking_styles`, `escalation_journal`). Mutable. `render()` assembles fields; `to_job_search_point()` projects into JobSearchPoint for evaluation.
 
 **PipelineSchema** / **PipelineNode** — describes a pipeline (target or optimizer). Both TermNorm and the optimizer pipeline parse into PipelineSchema.
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, etc.).
 
-**SearchMemory** (`api/services/search/search_memory.py`) *(M8 Wave 5)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark.
+**SearchMemory** *(planned — M8 Wave 5, not yet implemented)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark.
 
 Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 
@@ -135,7 +135,7 @@ L1 Generate is the sole `pipeline_params` decider. L2 refines context and meta-s
   campaigns/{campaign_id}.json
   campaigns/{campaign_id}/trial_NNNN.json
   obs/langfuse/events.jsonl
-  search_memory.json                          # (M8) materialized view index
+  search_memory.json                          # (M8, planned) materialized view index
 ```
 
 `dataset_runs/` is shared across all eval paths (content-addressed). `campaigns/` holds optimizer-layer trial checkpoints per round.

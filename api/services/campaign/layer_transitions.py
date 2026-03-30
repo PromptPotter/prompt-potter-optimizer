@@ -141,7 +141,7 @@ async def refine_context(
     prompt = load_optimizer_prompt("l2_refine_context").compile_prompt(
         round_summary=round_summary,
         rendered_prompt=opt_sp.render(),
-        failure_lines=chr(10).join(failure_lines[:15]),
+        failure_lines="\n".join(failure_lines[:15]),
         current_params=json.dumps(opt_sp.optimizer_params),
         task_context_section=task_context_section,
         pipeline_section=pipeline_section,

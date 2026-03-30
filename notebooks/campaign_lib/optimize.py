@@ -578,7 +578,7 @@ async def run_optimization_notebook(
             try:
                 from collections import Counter
 
-                from api.services.campaign.critique import _find_rank, _get_candidates
+                from api.services.campaign.critique import find_rank, get_candidates
 
                 _results = round_result.results
                 _total = len(_results)
@@ -603,8 +603,8 @@ async def run_optimization_notebook(
                     def _recall_at_k(k):
                         return sum(
                             1 for _r in _valid
-                            if (_rk := _find_rank(
-                                _get_candidates(_r),
+                            if (_rk := find_rank(
+                                get_candidates(_r),
                                 _r.get("ground_truth", ""),
                             )) is not None and _rk <= k
                         ) / len(_valid)

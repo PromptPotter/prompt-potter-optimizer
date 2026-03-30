@@ -66,7 +66,7 @@ class CritiqueContext:
 # ---------------------------------------------------------------------------
 
 
-def _find_rank(candidates: list, ground_truth: str) -> int | None:
+def find_rank(candidates: list, ground_truth: str) -> int | None:
     """Find 1-based rank of ground_truth in candidates list."""
     if not candidates or not ground_truth:
         return None
@@ -81,7 +81,7 @@ def _find_rank(candidates: list, ground_truth: str) -> int | None:
     return None
 
 
-def _get_candidates(r: dict) -> list:
+def get_candidates(r: dict) -> list:
     pd = r.get("pipeline_data") or {}
     return pd.get("ranked_candidates") or pd.get("token_matched_candidates") or []
 
@@ -289,7 +289,7 @@ def _rank_analysis_section(
     rank_map: dict[int, int | None] = {}
     for i, r in enumerate(results):
         if not r.get("error"):
-            rank_map[i] = _find_rank(_get_candidates(r), r.get("ground_truth", ""))
+            rank_map[i] = find_rank(get_candidates(r), r.get("ground_truth", ""))
 
     rank_buckets = {"1": 0, "2-5": 0, "6-10": 0, "11-20": 0, "not_found": 0}
     near_misses: list[dict] = []
@@ -464,7 +464,7 @@ def _failure_details_section(results: list[dict]) -> str:
     for r in failures[:15]:
         pd = r.get("pipeline_data") or {}
         gt = r.get("ground_truth", "?")
-        rank = _find_rank(_get_candidates(r), gt)
+        rank = find_rank(get_candidates(r), gt)
         rank_str = f"rank {rank}" if rank else "not in candidates"
         diag = pd.get("diagnostics") or {}
         warn = "⚠ degraded" if diag.get("warnings") else ""

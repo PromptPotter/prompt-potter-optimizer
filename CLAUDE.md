@@ -22,7 +22,7 @@ cd docker && docker-compose up --build
 
 ## Mental Model
 
-Two entry points (FastAPI API + Jupyter notebook), one service core in `api/services/`. The notebook (`notebooks/optimization_campaign.ipynb`) is the primary interface; `campaign_lib` wraps services with display only.
+Two entry points (FastAPI API + Jupyter notebook), one service core in `api/services/`. The sole notebook is `notebooks/optimization_campaign.ipynb` (handles both optimization and evaluation); `campaign_lib` wraps services with display only. (`evaluation.ipynb` was removed — it was never production-used.)
 
 **Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup. SearchMemory *(M8)* aggregates all historical evaluation data into a materialized view (parameter impact, query patterns, failure modes) that feeds both loops.
 
@@ -53,7 +53,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 - **Prompt decomposition** (L1): `persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`, `few_shot_examples`
 - **L2 state**: `optimizer_params`, `task_context`
 - **L3 state**: `plan`
-- **Optimization memory**: `critique_text`, `critique`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`
+- **Optimization memory**: `critique_text`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`
 
 Key methods: `render()` assembles prompt fields into a string. `to_job_search_point()` projects into a JobSearchPoint by injecting the rendered prompt into `pipeline_params`. `derive_candidate()` creates child points. `compile_prompt()` substitutes `{{variables}}`.
 
@@ -80,7 +80,7 @@ Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema
 | `search/smart_search.py` | Sensitivity scan (OAT), adaptive search |
 | `search/scan_advisor.py` | LLM-driven scan recommendations |
 | `search/coverage.py` | Historical index, coverage advisor |
-| `search/search_memory.py` | Cross-campaign intelligence materialized view *(M8)* |
+| `search/search_memory.py` | **Planned (M8 Wave 5)** — cross-campaign intelligence materialized view |
 | `obs/observability_logger.py` | Langfuse-compatible traces, MLflow |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
 
