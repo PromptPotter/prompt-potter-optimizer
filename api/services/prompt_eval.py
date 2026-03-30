@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EvalBatchResult:
-    """Return value from ``evaluate_prompt_batch()``.
+    """Return value from ``_run_eval_batch()``.
 
     Replaces the former exception-as-data pattern (``_GracefulStop`` /
     ``_ForceStop``).  Data always flows through return values; interrupts
@@ -75,7 +75,7 @@ def _dominant_error_category(results: list) -> ErrorCategory | None:
     return Counter(cats).most_common(1)[0][0]
 
 
-def subsample_queries(
+def subsample_eval_data(
     eval_data: list[dict],
     sample_size: int,
     seed: int = 42,
@@ -181,7 +181,7 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
     return f"[{ErrorCategory.SERVER}] HTTP {code}: {exc} — Backend may be experiencing issues."
 
 
-async def backend_reranker_evaluate(
+async def eval_query_via_backend(
     query_data: dict,
     backend_client: BackendClient,
     rendered_prompt: str,
@@ -222,59 +222,45 @@ async def backend_reranker_evaluate(
         }
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)
-        logger.warning("backend_reranker_evaluate for %s: %s", query[:60], error_msg)
+        logger.warning("eval_query_via_backend for %s: %s", query[:60], error_msg)
         return _error_result(query, ground_truth, error_msg)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         error_msg = f"[{ErrorCategory.CONNECTION}] {exc} — Backend may be down or unreachable."
-        logger.warning("backend_reranker_evaluate CONNECTION for %s: %s", query[:60], error_msg)
+        logger.warning("eval_query_via_backend CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(query, ground_truth, error_msg)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception as exc:
-        logger.warning("backend_reranker_evaluate failed for %s: %s", query[:60], exc)
+        logger.warning("eval_query_via_backend failed for %s: %s", query[:60], exc)
         return _error_result(query, ground_truth, str(exc))
 
 
-async def _evaluate_single_query(
-    search_point: JobSearchPoint,
-    query_data: dict,
-    backend_client: BackendClient,
-    rendered_prompt: str,
-    pipeline_schema: PipelineSchema | None,
-    cached_queries: dict[str, dict] | None,
-) -> tuple[dict, bool]:
-    """Evaluate a single query, checking per-query cache first.
-
-    Returns:
-        Tuple of (result_dict, was_cached).  ``was_cached`` is True when
-        the result came from ``cached_queries`` rather than a live backend call.
-    """
-    cached = cached_queries.get(query_data["query"]) if cached_queries else None
-    if cached is not None and not cached.get("error"):
-        return {**cached, "cached": True}, True
-
-    result = await backend_reranker_evaluate(
-        query_data,
-        backend_client,
-        rendered_prompt,
-        pipeline_params=search_point.pipeline_params,
-        pipeline_schema=pipeline_schema,
-    )
-    return result, False
+def _run_escalation_checks(
+    checks: list | None,
+    results: list[dict],
+    candidate_idx: int,
+    n_total_candidates: int,
+) -> object | None:
+    """Run escalation checks and return the first triggered signal, or None."""
+    if not checks:
+        return None
+    for check in checks:
+        if not check.enabled:
+            continue
+        sig = check.evaluate(results, candidate_idx, n_total_candidates)
+        if sig:
+            return sig
+    return None
 
 
-async def evaluate_prompt_batch(
+async def _run_eval_batch(
     search_point: JobSearchPoint,
     eval_data: list,
     backend_client: BackendClient,
     *,
     on_result: Callable | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-    escalation_checks: list | None = None,
-    candidate_idx: int = 0,
-    n_total_candidates: int = 1,
+    ctx: EvalContext | None = None,
     cached_queries: dict[str, dict] | None = None,
-    max_consecutive_errors: int = 3,
 ) -> EvalBatchResult:
     """Evaluate a prompt on all eval_data queries via the backend.
 
@@ -284,9 +270,9 @@ async def evaluate_prompt_batch(
         backend_client: BackendClient with ``run_match()`` method.
         on_result: Optional callback ``(result, index, total)`` called after
             each query evaluation.
-        escalation_checks: Optional list of ``EscalationCheck`` instances.
-            Checked after each query result — raises ``EscalationError``
-            on threshold breach to abort immediately.
+        ctx: Optional EvalContext carrying pipeline_schema, escalation_checks,
+            and other infrastructure.  When None (e.g. in tests), defaults
+            are used (no escalation, max 3 consecutive errors).
         cached_queries: Optional ``{query_string: result_dict}`` from prior
             runs with the same SearchPoint.  Matching queries skip the
             backend call.
@@ -298,6 +284,13 @@ async def evaluate_prompt_batch(
         EscalationError: If an escalation check triggers mid-batch.
     """
     from api.services.campaign.escalation import EscalationError
+
+    # Unpack ctx with defaults for test compatibility
+    pipeline_schema = ctx.pipeline_schema if ctx else None
+    escalation_checks = ctx.escalation_checks if ctx else None
+    candidate_idx = ctx.candidate_idx if ctx else 0
+    n_total_candidates = ctx.n_total_candidates if ctx else 1
+    max_consecutive_errors = ctx.max_consecutive_errors if ctx else 3
 
     results: list = []
     rendered = search_point.render()
@@ -325,14 +318,21 @@ async def evaluate_prompt_batch(
                 )
                 break
 
-            result, was_cached = await _evaluate_single_query(
-                search_point,
-                qd,
-                backend_client,
-                rendered,
-                pipeline_schema,
-                cached_queries,
-            )
+            # Per-query cache check (inlined from former _evaluate_single_query)
+            cached = cached_queries.get(qd["query"]) if cached_queries else None
+            if cached is not None and not cached.get("error"):
+                result = {**cached, "cached": True}
+                was_cached = True
+            else:
+                result = await eval_query_via_backend(
+                    qd,
+                    backend_client,
+                    rendered,
+                    pipeline_params=search_point.pipeline_params,
+                    pipeline_schema=pipeline_schema,
+                )
+                was_cached = False
+
             if was_cached:
                 n_reused += 1
             results.append(result)
@@ -382,17 +382,11 @@ async def evaluate_prompt_batch(
                 on_result(result, i, len(eval_data))
 
             # Escalation checks — run after display
-            if escalation_checks:
-                for check in escalation_checks:
-                    if not check.enabled:
-                        continue
-                    esc_signal = check.evaluate(
-                        results,
-                        candidate_idx,
-                        n_total_candidates,
-                    )
-                    if esc_signal:
-                        raise EscalationError(esc_signal, results)
+            esc_signal = _run_escalation_checks(
+                escalation_checks, results, candidate_idx, n_total_candidates,
+            )
+            if esc_signal:
+                raise EscalationError(esc_signal, results)
     except (KeyboardInterrupt, asyncio.CancelledError):
         # Force quit (2nd Ctrl+C) or task cancellation
         logger.warning(
@@ -542,22 +536,14 @@ async def eval_search_point(
         )
         if cached is not None:
             # Run escalation checks on cached results too — the per-query
-            # check in evaluate_prompt_batch only fires on live calls.
-            if ctx.escalation_checks:
-                results, scores, was_cached = cached
-                for check in ctx.escalation_checks:
-                    if not check.enabled:
-                        continue
-                    signal = check.evaluate(
-                        results,
-                        ctx.candidate_idx,
-                        ctx.n_total_candidates,
-                    )
-                    if signal:
-                        scores["escalation_signal"] = signal.to_dict()
-                        break
-                return results, scores, was_cached
-            return cached
+            # check in _run_eval_batch only fires on live calls.
+            results, scores, was_cached = cached
+            esc_signal = _run_escalation_checks(
+                ctx.escalation_checks, results, ctx.candidate_idx, ctx.n_total_candidates,
+            )
+            if esc_signal:
+                scores["escalation_signal"] = esc_signal.to_dict()
+            return results, scores, was_cached
 
     # --- evaluate via backend ---
     safe_label = label.lower().replace(" ", "_")
@@ -601,17 +587,13 @@ async def eval_search_point(
 
     escalation_signal = None
     try:
-        batch = await evaluate_prompt_batch(
+        batch = await _run_eval_batch(
             search_point,
             eval_data,
             backend_client,
             on_result=on_result,
-            pipeline_schema=pipeline_schema,
-            escalation_checks=ctx.escalation_checks,
-            candidate_idx=ctx.candidate_idx,
-            n_total_candidates=ctx.n_total_candidates,
+            ctx=ctx,
             cached_queries=sp_cache,
-            max_consecutive_errors=ctx.max_consecutive_errors,
         )
         results = batch.results
         if not batch.completed:

@@ -221,7 +221,7 @@ class SearchMemory:
 **PromptPotter changes:**
 - `upstream_config_hash()` in `hashing.py`, `split_at_ranker()` on `PipelineSchema`
 - New `IntermediateCache` store in `stores/intermediate_cache.py` (disk-backed, `{backend_id}/intermediate_cache/{upstream_hash}.json`)
-- `backend_reranker_evaluate()`: check cache -> build `precomputed` -> call `run_match()` -> store `node_outputs`
+- `eval_query_via_backend()`: check cache -> build `precomputed` -> call `run_match()` -> store `node_outputs`
 - `run_match()`: thread `precomputed` to wire payload
 
 ---
@@ -245,7 +245,7 @@ class SearchMemory:
 | 3f | Docs: SearchMemory in architecture.md, sensitivity-scan.md, optimization.md | 3c | PP |
 | 4a | Upstream hash + `split_at_ranker()` + `IntermediateCache` store | — | PP |
 | 4b | TermNorm: `node_outputs` response + `precomputed` request | 4a | TN |
-| 4c | Eval gateway integration (cache lookup/populate in `backend_reranker_evaluate`) | 4a, 4b | PP |
+| 4c | Eval gateway integration (cache lookup/populate in `eval_query_via_backend`) | 4a, 4b | PP |
 
 ### Dependency graph
 

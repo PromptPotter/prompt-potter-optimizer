@@ -230,7 +230,7 @@ class TestEvaluatePromptBatchCaching:
         from unittest.mock import AsyncMock
 
         from api.models.search_point import JobSearchPoint
-        from api.services.prompt_eval import evaluate_prompt_batch
+        from api.services.prompt_eval import _run_eval_batch
 
         sp = JobSearchPoint(
             pipeline_params={"llm_ranking": {"prompt": "test"}},
@@ -257,7 +257,7 @@ class TestEvaluatePromptBatchCaching:
             },
         }
 
-        batch = await evaluate_prompt_batch(
+        batch = await _run_eval_batch(
             sp, eval_data, backend,
             cached_queries=cached,
         )

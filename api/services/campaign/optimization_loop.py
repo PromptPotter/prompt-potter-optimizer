@@ -44,7 +44,7 @@ from api.services.campaign.round_execution import (
     _update_round_state,
 )
 from api.services.metrics import compute_composite_score
-from api.services.prompt_eval import subsample_queries
+from api.services.prompt_eval import subsample_eval_data
 from api.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
@@ -402,7 +402,7 @@ async def _init_cycle_state(
     if config.session_terms:
         await _bc.init_session(config.session_terms)
 
-    round_eval_data = subsample_queries(eval_data, config.sample_size, config.seed)
+    round_eval_data = subsample_eval_data(eval_data, config.sample_size, config.seed)
 
     # 1. Build baseline state
     state, baseline_osp = _build_baseline_state(

@@ -379,7 +379,7 @@ async def test_scan_baseline_client_error_message(scan_eval_mock):
 
 @pytest.mark.asyncio
 async def test_batch_fast_abort_on_client_error(monkeypatch):
-    """evaluate_prompt_batch should abort after first CLIENT error."""
+    """_run_eval_batch should abort after first CLIENT error."""
     import api.services.prompt_eval as _pe
 
     call_count = 0
@@ -397,14 +397,14 @@ async def test_batch_fast_abort_on_client_error(monkeypatch):
             "pipeline_data": None,
         }
 
-    monkeypatch.setattr(_pe, "backend_reranker_evaluate", _counting_eval)
+    monkeypatch.setattr(_pe, "eval_query_via_backend", _counting_eval)
 
     sp = JobSearchPoint(
         pipeline_params={"llm_ranking": {"prompt": "test"}},
     )
     eval_data = _make_eval_data(10)
 
-    batch = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    batch = await _pe._run_eval_batch(sp, eval_data, backend_client=None)
     results = batch.results
     # Only 1 actual backend call — the rest are skipped
     assert call_count == 1
@@ -436,14 +436,14 @@ async def test_batch_server_errors_use_consecutive_threshold(monkeypatch):
             "pipeline_data": None,
         }
 
-    monkeypatch.setattr(_pe, "backend_reranker_evaluate", _server_error_eval)
+    monkeypatch.setattr(_pe, "eval_query_via_backend", _server_error_eval)
 
     sp = JobSearchPoint(
         pipeline_params={"llm_ranking": {"prompt": "test"}},
     )
     eval_data = _make_eval_data(10)
 
-    batch = await _pe.evaluate_prompt_batch(sp, eval_data, backend_client=None)
+    batch = await _pe._run_eval_batch(sp, eval_data, backend_client=None)
     results = batch.results
     # 3 actual calls (consecutive threshold), then 7 skipped
     assert call_count == 3
