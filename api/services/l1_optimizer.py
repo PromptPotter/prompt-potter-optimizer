@@ -27,7 +27,7 @@ from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from api.models.eval_context import EvalContext
-    from api.services.campaign.models import CycleCallbacks
+    from api.services.campaign.callbacks import CycleCallbacks
 
 logger = logging.getLogger(__name__)
 

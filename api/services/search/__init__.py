@@ -32,9 +32,6 @@ from api.services.search.plan_persistence import (
 # from their submodules directly:
 #   from api.services.search.sensitivity_scan import sensitivity_scan
 #   from api.services.search.adaptive_search import adaptive_search
-# preview
-from api.services.search.preview import preview
-
 # scan_advisor
 from api.services.search.scan_advisor import (
     advise_scan_config,
@@ -82,7 +79,6 @@ __all__ = [
     "load_filtered_variant_library",
     "prepare_scan_baseline",
     "prepare_scan_context",
-    "preview",
     "preview_advisor_prompt",
     "resume_or_build_diagnostic",
     "seed_campaign_from_scan",

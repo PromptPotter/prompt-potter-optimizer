@@ -19,12 +19,12 @@ from _helpers import (
 )
 
 from api.models.opt_search_point import OptSearchPoint
+from api.services.campaign.config import CycleConfig
 from api.services.campaign.layer_transitions import (
     TransitionResult,
     modify_plan,
     refine_context,
 )
-from api.services.campaign.models import CycleConfig
 from api.services.campaign.optimization_loop import run_optimization
 from tests.mock_llm_client import MockLLMClient
 

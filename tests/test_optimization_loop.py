@@ -23,7 +23,7 @@ from api.services.campaign.campaign_lifecycle import (
     _validate_config_match,
     cycle_config_identity,
 )
-from api.services.campaign.models import CycleConfig
+from api.services.campaign.config import CycleConfig
 from api.services.campaign.optimization_loop import run_optimization
 from api.services.search import select_scan_winner
 
@@ -157,7 +157,7 @@ async def test_on_round_complete_callback(monkeypatch, eval_data, cycle_config):
     def on_round(round_result, stall_count):
         callbacks.append((round_result.round, stall_count))
 
-    from api.services.campaign.models import CycleCallbacks
+    from api.services.campaign.callbacks import CycleCallbacks
 
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[0],
@@ -622,7 +622,7 @@ async def test_no_store_no_persistence(monkeypatch, eval_data, cycle_config):
 @pytest.mark.asyncio
 async def test_on_phase_callback(monkeypatch, eval_data, cycle_config):
     events = []
-    from api.services.campaign.models import CycleCallbacks
+    from api.services.campaign.callbacks import CycleCallbacks
 
     result = await run_simple_cycle(
         monkeypatch, eval_data, cycle_config, round_hits=[0],

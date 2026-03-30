@@ -62,8 +62,8 @@ class TestDegradationCheck:
         assert signal is None
 
     def test_disabled_when_threshold_zero(self):
+        from api.services.campaign.config import CycleConfig
         from api.services.campaign.escalation import build_escalation_checks
-        from api.services.campaign.models import CycleConfig
 
         config = CycleConfig(
             backend_url="http://mock:8000",

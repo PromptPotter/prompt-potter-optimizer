@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 from api.config.settings import DATASET_NAME
 from api.models.opt_search_point import OptSearchPoint
+from api.services.campaign.config import CycleConfig
 from api.services.campaign.helpers import graceful
-from api.services.campaign.models import CycleConfig
 
 if TYPE_CHECKING:
-    from api.services.campaign.models import LoopState
+    from api.services.campaign.state import LoopState
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def cycle_config_identity(
     return f"cycle_{digest}"
 
 
-def _init_campaign(
+def init_campaign(
     config: CycleConfig,
     eval_data: list[dict],
     current_ps: dict,
@@ -200,7 +200,7 @@ def _validate_config_match(
 
 
 
-def _finalize_campaign(
+def finalize_campaign(
     campaign_store,
     cycle_id: str | None,
     config: CycleConfig,

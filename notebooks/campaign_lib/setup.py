@@ -7,19 +7,21 @@ from typing import TYPE_CHECKING
 
 from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.campaign_init import (
-    InitResult,
-    build_all_session_terms,
-    save_campaign_winner,
-)
-from api.services.campaign.campaign_init import (
+from api.services.campaign.campaign_factories import (
     configure_pipeline as _configure_pipeline,
 )
-from api.services.campaign.campaign_init import (
+from api.services.campaign.campaign_factories import (
     create_llm_client as setup_llm,
 )
 from api.services.campaign.campaign_init import (
+    InitResult,
+    build_all_session_terms,
+)
+from api.services.campaign.campaign_init import (
     init_services as _init_services,
+)
+from api.services.campaign.campaign_persistence import (
+    save_campaign_winner,
 )
 from api.services.dataset_builder import (
     SHEET_COLUMN_MAP,

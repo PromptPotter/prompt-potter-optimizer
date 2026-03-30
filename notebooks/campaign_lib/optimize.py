@@ -9,7 +9,7 @@ from api.models.phase_event import PhaseEvent
 from api.services.campaign.campaign_init import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
-from api.services.campaign.campaign_init import (
+from api.services.campaign.campaign_persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
 
@@ -95,7 +95,7 @@ def show_feedback_preflight(
     Returns:
         scan_context dict (or None) for passing to the run cell.
     """
-    from api.services.campaign.models import CycleConfig
+    from api.services.campaign.config import CycleConfig
 
     # Build scan context from scan data when available
     scan_context = None
@@ -356,7 +356,7 @@ async def run_optimization_notebook(
     Returns:
         Updated campaign_rounds list.
     """
-    from api.services.campaign.models import CycleConfig
+    from api.services.campaign.config import CycleConfig
     from api.services.campaign.optimization_loop import run_optimization
 
     # svc shorthand
@@ -650,7 +650,7 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from api.services.campaign.models import CycleCallbacks
+    from api.services.campaign.callbacks import CycleCallbacks
 
     result = await run_optimization(
         instruction=instruction,

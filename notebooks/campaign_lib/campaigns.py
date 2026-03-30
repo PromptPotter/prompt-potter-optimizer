@@ -6,13 +6,13 @@ import logging
 from typing import TYPE_CHECKING
 
 from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.campaign_init import (
+from api.services.campaign.campaign_persistence import (
     apply_experiment_overrides,
 )
-from api.services.campaign.campaign_init import (
+from api.services.campaign.campaign_persistence import (
     diff_campaign_config as _diff_campaign_config,
 )
-from api.services.campaign.campaign_init import (
+from api.services.campaign.campaign_persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
 
@@ -224,7 +224,7 @@ def show_experiment_dashboard(
     if campaign_config is not None and eval_data is not None:
         try:
             from api.services.campaign.campaign_lifecycle import cycle_config_identity
-            from api.services.campaign.models import CycleConfig
+            from api.services.campaign.config import CycleConfig
 
             config = CycleConfig.from_campaign_config(
                 campaign_config, pipeline_params=pipeline_params,

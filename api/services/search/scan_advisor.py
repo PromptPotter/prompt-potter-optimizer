@@ -355,7 +355,7 @@ def _validate_advisory(
 
     Returns list of warning strings (empty = valid).
     """
-    from api.shared.schema_mutation import parse_mutation_tuples
+    from api.services.search.schema_mutation import parse_mutation_tuples
 
     warnings: list[str] = []
 
@@ -460,7 +460,7 @@ def _resolve_schema_axes(
 
     Non-schema axes pass through unchanged.  Returns ``(resolved, schema_labels)``.
     """
-    from api.shared.schema_mutation import (
+    from api.services.search.schema_mutation import (
         baseline_schema_from_node,
         parse_mutation_tuples,
         resolve_schema_variants,

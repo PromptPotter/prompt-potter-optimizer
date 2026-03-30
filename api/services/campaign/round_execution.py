@@ -12,6 +12,8 @@ from api.models.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client
+from api.services.campaign.callbacks import CycleCallbacks
+from api.services.campaign.config import CycleConfig
 from api.services.campaign.critique import (
     CritiqueAgent,
     CritiqueContext,
@@ -20,16 +22,12 @@ from api.services.campaign.critique import (
     update_query_tracker,
 )
 from api.services.campaign.helpers import (
-    _candidate_summaries,
+    candidate_summaries,
     emit_phase,
     graceful,
 )
-from api.services.campaign.models import (
-    CycleCallbacks,
-    CycleConfig,
-    CycleRoundResult,
-    LoopState,
-)
+from api.services.campaign.results import CycleRoundResult
+from api.services.campaign.state import LoopState
 from api.services.obs.node_tracer import observed_node
 from api.shared.constants import PROMPT_STRING_FIELDS
 
@@ -102,7 +100,7 @@ async def _generate_or_load_candidates(
                 n_candidates=len(persisted),
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=True,
-                candidates=_candidate_summaries(persisted, state.opt_sp.prompt_field_dict()),
+                candidates=candidate_summaries(persisted, state.opt_sp.prompt_field_dict()),
             )
             return persisted
 
@@ -141,7 +139,7 @@ async def _generate_or_load_candidates(
         n_candidates=len(candidates),
         n_eval_queries=n_eval_queries,
         loaded_from_disk=False,
-        candidates=_candidate_summaries(candidates, state.opt_sp.prompt_field_dict()),
+        candidates=candidate_summaries(candidates, state.opt_sp.prompt_field_dict()),
     )
 
     return candidates
@@ -257,7 +255,7 @@ async def _evaluate_candidates(
     return eval_out
 
 
-async def _execute_round(
+async def execute_round(
     round_num: int,
     state: LoopState,
     round_eval_data: list[dict],
@@ -366,7 +364,7 @@ async def _execute_round(
 # ---------------------------------------------------------------------------
 
 
-def _update_round_state(
+def update_round_state(
     state: LoopState,
     rr: CycleRoundResult,
     round_num: int,

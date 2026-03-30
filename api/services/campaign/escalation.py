@@ -21,7 +21,9 @@ from api.services.campaign.critique import extract_warning_types
 from api.services.campaign.helpers import emit_phase
 
 if TYPE_CHECKING:
-    from api.services.campaign.models import CycleConfig, LoopState, StopReason
+    from api.services.campaign.config import CycleConfig
+    from api.services.campaign.results import StopReason
+    from api.services.campaign.state import LoopState
     from api.services.obs.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
@@ -422,7 +424,7 @@ async def _do_l3_transition(
     return tr
 
 
-async def _escalate_l2(
+async def escalate_l2(
     state: LoopState,
     config: CycleConfig,
     round_num: int,
@@ -439,7 +441,7 @@ async def _escalate_l2(
     When *from_degradation* is True, L2/L3 patience exhaustion resets counters
     instead of stopping — the degradation investigation loop continues.
     """
-    from api.services.campaign.models import StopReason
+    from api.services.campaign.results import StopReason
 
     esc = state.escalation
 

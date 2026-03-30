@@ -22,26 +22,21 @@ from api.models.eval_context import EvalContext
 from api.models.opt_search_point import OptSearchPoint
 from api.models.phase_event import PhaseEvent
 from api.services.backend_client import BackendClient
+from api.services.campaign.callbacks import CycleCallbacks
 from api.services.campaign.campaign_lifecycle import (
-    _finalize_campaign,
-    _init_campaign,
+    finalize_campaign,
+    init_campaign,
 )
+from api.services.campaign.config import CycleConfig
 from api.services.campaign.critique import sample_thinking_styles
-from api.services.campaign.escalation import _escalate_l2
-from api.services.campaign.helpers import _get_obs_trace, emit_phase, graceful
-from api.services.campaign.models import (
-    CycleCallbacks,
-    CycleConfig,
-    CycleInitResult,
-    CycleResult,
-    CycleRoundResult,
-    LoopState,
-    StopReason,
-)
+from api.services.campaign.escalation import escalate_l2
+from api.services.campaign.helpers import emit_phase, get_obs_trace, graceful
+from api.services.campaign.results import CycleResult, CycleRoundResult, StopReason
 from api.services.campaign.round_execution import (
-    _execute_round,
-    _update_round_state,
+    execute_round,
+    update_round_state,
 )
+from api.services.campaign.state import CycleInitResult, LoopState
 from api.services.metrics import compute_composite_score
 from api.services.prompt_eval import subsample_eval_data
 from api.shared.hashing import HASH_TRUNCATE
@@ -85,8 +80,8 @@ async def _handle_post_probe(
     """After a probe round: reset flag and force L2 if enabled."""
     state.probe_next_round = False
     if config.enable_l2:
-        _obs, _tid = _get_obs_trace(state, obs_campaign_id)
-        return await _escalate_l2(
+        _obs, _tid = get_obs_trace(state, obs_campaign_id)
+        return await escalate_l2(
             state,
             config,
             round_num,
@@ -144,9 +139,9 @@ async def _handle_escalation_signal(
         if journal and journal[-1].get("outcome_degraded_rate") is None:
             journal[-1]["outcome_degraded_rate"] = esc_context.get("degraded_rate", 0)
 
-        _obs, _tid = _get_obs_trace(state, obs_campaign_id)
+        _obs, _tid = get_obs_trace(state, obs_campaign_id)
         try:
-            l2_stop = await _escalate_l2(
+            l2_stop = await escalate_l2(
                 state,
                 config,
                 round_num,
@@ -411,7 +406,7 @@ async def _init_cycle_state(
     )
 
     # 2. Resume detection + obs init
-    campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id = _init_campaign(
+    campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id = init_campaign(
         config,
         eval_data,
         baseline_osp.prompt_field_dict(),
@@ -524,8 +519,8 @@ async def _check_stopping_conditions(
         return StopReason.PERFECT
     if state.stall_count >= config.l1_patience:
         if config.enable_l2:
-            _obs, _tid = _get_obs_trace(state, obs_campaign_id)
-            _l2_stop = await _escalate_l2(
+            _obs, _tid = get_obs_trace(state, obs_campaign_id)
+            _l2_stop = await escalate_l2(
                 state,
                 config,
                 round_num,
@@ -629,7 +624,7 @@ async def run_optimization(
                 ", PROBE" if is_probe else "",
             )
 
-            round_result = await _execute_round(
+            round_result = await execute_round(
                 round_num,
                 state,
                 _round_data,
@@ -640,7 +635,7 @@ async def run_optimization(
                 cb,
                 escalation_checks=_round_checks,
             )
-            _update_round_state(state, round_result, round_num)
+            update_round_state(state, round_result, round_num)
 
             # --- After probe round: reset flag + force L2 ---
             if is_probe:
@@ -731,7 +726,7 @@ async def run_optimization(
     finished_at = datetime.now(UTC).isoformat()
     obs = state.eval_ctx.obs if state.eval_ctx else None
     campaign_status = "interrupted" if stop_reason == StopReason.INTERRUPTED else "completed"
-    _finalize_campaign(
+    finalize_campaign(
         campaign_store,
         cycle_id,
         config,

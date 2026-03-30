@@ -15,7 +15,7 @@ from api.models.phase_event import PhaseEvent
 from api.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
-    from api.services.campaign.models import LoopState
+    from api.services.campaign.state import LoopState
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def emit_phase(
     on_phase(pe)
 
 
-def _get_obs_trace(
+def get_obs_trace(
     state: "LoopState", obs_campaign_id: str,
 ) -> tuple[Any | None, str | None]:
     """Extract obs logger and trace_id from loop state."""
@@ -55,7 +55,7 @@ def _get_obs_trace(
     return obs, trace_id
 
 
-def _candidate_summaries(
+def candidate_summaries(
     candidates: list[dict],
     current_prompt_fields: dict,
 ) -> list[dict]:

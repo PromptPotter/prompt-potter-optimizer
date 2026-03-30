@@ -252,7 +252,7 @@ async def test_e2e_optimization_with_registry(
 
     _apply_e2e_mocks(monkeypatch)
 
-    from api.services.campaign.models import CycleConfig
+    from api.services.campaign.config import CycleConfig
     from api.services.campaign.optimization_loop import run_optimization
 
     config = CycleConfig(
