@@ -209,6 +209,7 @@ async def eval_query_via_backend(
     intermediate_cache: object | None = None,
     backend_id: str = "",
     upstream_hash: str = "",
+    upstream_nodes: set[str] | None = None,
 ) -> dict:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint."""
     query = query_data["query"]
@@ -226,11 +227,16 @@ async def eval_query_via_backend(
         include_ranking = steps is None or any(n in steps for n in prompt_names)
 
         # Wave 4: intermediate cache lookup
+        # Filter cached outputs to upstream nodes only — downstream nodes
+        # may depend on the prompt or other config that changed.
         precomputed = None
         if intermediate_cache and upstream_hash:
             cached_outputs = intermediate_cache.get(backend_id, upstream_hash, query)
             if cached_outputs:
-                precomputed = cached_outputs
+                if upstream_nodes:
+                    precomputed = {k: v for k, v in cached_outputs.items() if k in upstream_nodes}
+                else:
+                    precomputed = cached_outputs
 
         resp = await backend_client.run_match(
             query,
@@ -240,7 +246,8 @@ async def eval_query_via_backend(
         )
         data = resp.get("data", {})
 
-        # Wave 4: cache populate from response node_outputs
+        # Wave 4: cache populate from response node_outputs (store all,
+        # not just upstream — different perturbation targets may need different subsets)
         node_outputs = data.get("node_outputs")
         if intermediate_cache and upstream_hash and node_outputs and not precomputed:
             intermediate_cache.put(backend_id, upstream_hash, query, node_outputs)
@@ -248,7 +255,7 @@ async def eval_query_via_backend(
         ranked = data.get("ranked_candidates", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
         eval_output = _evaluator.evaluate(ground_truth, predicted)
-        return {
+        result = {
             "query": query,
             "predicted": predicted,
             "ground_truth": ground_truth,
@@ -257,6 +264,9 @@ async def eval_query_via_backend(
             "error": None,
             "pipeline_data": _parse_backend_response(data, ranked, pipeline_schema),
         }
+        if precomputed:
+            result["precomputed_through"] = list(precomputed.keys())
+        return result
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)
         logger.warning("eval_query_via_backend for %s: %s", query[:60], error_msg)
@@ -335,17 +345,25 @@ async def _run_eval_batch(
     n_reused = 0
 
     # Wave 4: compute upstream hash and cache reference for batch
+    # Split at the first prompt-bearing node — everything before it is
+    # stable when only the prompt changes and can be cached.
     _intermediate_cache = None
     _upstream_hash = ""
+    _upstream_nodes: set[str] = set()
     _backend_id = ctx.backend_id if ctx else ""
     if ctx and ctx.store and pipeline_schema:
         _intermediate_cache = ctx.store.intermediate_cache
-        upstream_nodes, _ = pipeline_schema.split_at_ranker()
-        if upstream_nodes:
+        prompt_nodes = pipeline_schema.prompt_node_names()
+        if prompt_nodes:
+            _upstream_list = pipeline_schema.upstream_of(prompt_nodes[0])
+        else:
+            _upstream_list, _ = pipeline_schema.split_at_ranker()
+        _upstream_nodes = set(_upstream_list)
+        if _upstream_list:
             from api.shared.hashing import upstream_config_hash
 
             _upstream_hash = upstream_config_hash(
-                search_point.pipeline_params, upstream_nodes,
+                search_point.pipeline_params, _upstream_list,
             )
 
     # -- Graceful interrupt: 1st Ctrl+C sets flag (current query finishes),
@@ -384,6 +402,7 @@ async def _run_eval_batch(
                     intermediate_cache=_intermediate_cache,
                     backend_id=_backend_id,
                     upstream_hash=_upstream_hash,
+                    upstream_nodes=_upstream_nodes or None,
                 )
                 was_cached = False
 

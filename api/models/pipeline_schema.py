@@ -267,6 +267,19 @@ class PipelineSchema(BaseModel):
         """
         return [node.name for node in self.nodes if node.prompt_meta is not None]
 
+    def upstream_of(self, node_name: str) -> list[str]:
+        """Node names strictly before *node_name* in pipeline order.
+
+        Used by partial pipeline caching to determine which node outputs
+        are stable when *node_name*'s config changes.
+        """
+        result: list[str] = []
+        for node in self.nodes:
+            if node.name == node_name:
+                break
+            result.append(node.name)
+        return result
+
     def split_at_ranker(self) -> tuple[list[str], list[str]]:
         """Split node names into (upstream, ranker_and_downstream).
 

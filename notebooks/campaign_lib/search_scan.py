@@ -195,6 +195,12 @@ def _make_scan_progress_cb():
             print(f"  >> {event['axis']}: range={sr:.1%}, "
                   f"best={bd:+.1%}, worst={wd:+.1%}, budget={budget}")
 
+        elif t == "axis_pruned":
+            tested = event["variants_tested"]
+            remaining = event["remaining_skipped"]
+            print(f"  >> PRUNED: {event['axis']} — {tested} variants "
+                  f"overlap baseline CI, skipping {remaining} remaining")
+
         elif t == "scan_aborted":
             reason = event.get("reason", "unknown")
             print(f"\n{'!' * 70}")

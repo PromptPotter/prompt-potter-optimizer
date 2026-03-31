@@ -101,6 +101,24 @@ async def sensitivity_scan(
         axis_type = "prompt_field" if name in PROMPT_STRING_FIELDS else "pipeline_param"
         axes.append((name, axis_type, values))
 
+    # Sort axes by pipeline node order (prompt fields under their owning node)
+    if pipeline_schema:
+        _node_order = {node.name: i for i, node in enumerate(pipeline_schema.nodes)}
+        _prompt_nodes = pipeline_schema.prompt_node_names()
+        _prompt_pos = (
+            _node_order[_prompt_nodes[0]] if _prompt_nodes and _prompt_nodes[0] in _node_order
+            else len(_node_order)
+        )
+
+        def _axis_sort_key(axis: tuple[str, str, list]) -> int:
+            name, axis_type, _ = axis
+            if axis_type == "prompt_field":
+                return _prompt_pos
+            owner = pipeline_schema.node_for_flat_param(name)
+            return _node_order.get(owner, len(_node_order)) if owner else len(_node_order)
+
+        axes.sort(key=_axis_sort_key)
+
     # Evaluate baseline
     baseline_results, baseline_scores, baseline_cached = await eval_search_point(
         baseline, eval_data, scan_ctx,
