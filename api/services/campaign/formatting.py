@@ -74,19 +74,22 @@ def format_failure_examples(
 
 
 def format_scan_analytics(scan_context: dict | None) -> str:
-    """Format scan analytics section (empty when no scan data)."""
+    """Format scan analytics section (empty when no scan data).
+
+    Only includes tested value ranges and sensitivity ranking — the full
+    leaderboard and difficulty analysis are already digested by the critique
+    agent into suggested_axes / priority_fix.
+    """
     if not scan_context:
         return "(no scan data available)"
-    return (
-        f"### Variant leaderboard (ranked by accuracy)\n"
-        f"{scan_context['leaderboard_text']}\n\n"
-        f"### Axis sensitivity (most impactful parameters)\n"
-        f"{scan_context['sensitivity_text']}\n\n"
-        f"### Query difficulty\n"
-        f"{scan_context['difficulty_text']}\n\n"
-        f"### Tested values per axis\n"
-        f"{scan_context['tested_values']}"
-    )
+    sections = [
+        f"### Tested values per axis\n{scan_context['tested_values']}",
+    ]
+    if scan_context.get("sensitivity_text"):
+        sections.append(
+            f"### Top sensitivity drivers\n{scan_context['sensitivity_text']}"
+        )
+    return "\n\n".join(sections)
 
 
 def format_focus_note(escalation_journal: list[dict] | None) -> str:
@@ -178,8 +181,8 @@ def format_context_sections(ctx: ContextData) -> str:
             f"guidance for this round):\n{l2_directive}"
         )
 
-    # Critique
-    if critique_text:
+    # Critique — skip when L2 directive is present (L2 already absorbed critique)
+    if critique_text and not l2_directive:
         sections.append(
             "CRITIQUE (from previous evaluation — use this to guide "
             f"your changes):\n{critique_text}"

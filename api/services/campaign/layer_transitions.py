@@ -19,7 +19,6 @@ from api.config.optimizer_pipeline import llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.opt_search_point import OptSearchPoint
 from api.services.campaign.critique import summarize_warning_inventory
-from api.services.campaign.formatting import format_failure_lines
 from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
@@ -55,20 +54,11 @@ class TransitionResult:
 
 def _build_l2_prompt(
     opt_sp: OptSearchPoint,
-    stalled_rounds: list[dict],
     pipeline_params: dict | None,
     pipeline_schema: PipelineSchema | None,
     escalation_context: dict | None,
 ) -> str:
     """Assemble the L2 refine_context prompt from all context sources."""
-    failure_lines: list[str] = []
-    for rd in stalled_rounds[-3:]:
-        failure_lines.extend(format_failure_lines(rd.get("results", []), max_lines=5))
-
-    round_summary = "\n".join(
-        f"  Round {rd.get('round', '?')}: acc={rd.get('accuracy', 0):.1%}" for rd in stalled_rounds
-    )
-
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
     escalation_section = _build_escalation_prompt_section(
         escalation_context,
@@ -123,9 +113,7 @@ def _build_l2_prompt(
     )
 
     return load_optimizer_prompt("l2_refine_context").compile_prompt(
-        round_summary=round_summary,
         rendered_prompt=opt_sp.render(),
-        failure_lines="\n".join(failure_lines[:15]),
         current_params=json.dumps(opt_sp.optimizer_params),
         task_context_section=task_context_section,
         pipeline_section=pipeline_section,
@@ -185,8 +173,6 @@ def _parse_l2_response(
 
 async def refine_context(
     opt_sp: OptSearchPoint,
-    stalled_rounds: list[dict],
-    eval_data: list[dict],
     llm_client: LLMClientBase,
     model: str | None = None,
     temperature: float = 0.3,
@@ -196,13 +182,13 @@ async def refine_context(
 ) -> TransitionResult:
     """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
 
-    Analyzes L1 failure patterns from the last stalled rounds and recommends
-    changes to ``parameters`` (creativity, n_variants, variant_strategy),
-    ``context`` (domain grounding text), and optionally ``pipeline_params``
-    when a pipeline schema is available.
+    Analyzes critique findings and recommends changes to ``parameters``
+    (creativity, n_variants, variant_strategy), ``context`` (domain grounding
+    text), and optionally ``pipeline_params`` when a pipeline schema is
+    available.
     """
     prompt = _build_l2_prompt(
-        opt_sp, stalled_rounds, pipeline_params, pipeline_schema, escalation_context,
+        opt_sp, pipeline_params, pipeline_schema, escalation_context,
     )
 
     response = await llm_call(
@@ -219,7 +205,6 @@ async def refine_context(
 async def modify_plan(
     opt_sp: OptSearchPoint,
     l2_history: list[dict],
-    eval_data: list[dict],
     llm_client: LLMClientBase,
     model: str | None = None,
     temperature: float = 0.5,

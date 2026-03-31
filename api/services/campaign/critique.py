@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CritiqueContext:
-    """Bundles current-round results, round history, and scan context."""
+    """Bundles current-round results and round history for diagnostic analysis."""
 
     results: list[dict]
     accuracy: float
@@ -44,17 +44,8 @@ class CritiqueContext:
     best_accuracy: float = 0.0
     best_round: int = -1
 
-    # Scan context (optional)
-    scan_context: dict | None = None
-
     # Current pipeline config
     pipeline_params: dict | None = None
-
-    # Cross-round warning inventory (from OptSearchPoint.warning_inventory)
-    warning_inventory: dict | None = None
-
-    # L2 domain context (so critique understands L2's problem framing)
-    task_context: dict | None = None
 
     # Schema-driven candidate keys (from PipelineNode.output_keys for ranker/candidate_source nodes)
     candidate_keys: list[str] = field(default_factory=list)
@@ -432,36 +423,6 @@ def _query_category_section(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _scan_context_section(scan_context: dict | None) -> str:
-    """Sensitivity analysis results (leaderboard, axis sensitivity, difficulty)."""
-    if not scan_context:
-        return ""
-
-    lines = ["## SCAN CONTEXT (from sensitivity analysis)"]
-    if scan_context.get("leaderboard_text"):
-        lines.append("Leaderboard (tested values ranked by accuracy):")
-        lines.append(scan_context["leaderboard_text"])
-    if scan_context.get("sensitivity_text"):
-        lines.append("\nAxis sensitivity:")
-        lines.append(scan_context["sensitivity_text"])
-    if scan_context.get("difficulty_text"):
-        lines.append("\nQuery difficulty:")
-        lines.append(scan_context["difficulty_text"])
-    if scan_context.get("improving_axes"):
-        lines.append(f"\nImproving axes: {', '.join(scan_context['improving_axes'])}")
-    if scan_context.get("tested_values"):
-        lines.append("\nTested values per axis:")
-        lines.append(scan_context["tested_values"])
-    return "\n".join(lines)
-
-
-def _task_context_section(task_context: dict | None) -> str:
-    """L2 domain framing."""
-    if not task_context:
-        return ""
-    tc_lines = "\n".join(f"  {k}: {v}" for k, v in task_context.items() if v)
-    return f"## TASK CONTEXT\n{tc_lines}" if tc_lines else ""
-
 
 def _failure_details_section(results: list[dict], candidate_keys: list[str] | None = None) -> str:
     """Per-query failure breakdown with rank and degradation info."""
@@ -525,11 +486,7 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
         ),
         _round_evolution_section(ctx.round_history, anomalies),
         _query_category_section(results),
-        _scan_context_section(ctx.scan_context),
-        _task_context_section(ctx.task_context),
     ]
-    if ctx.warning_inventory:
-        sections.append(summarize_warning_inventory(ctx.warning_inventory))
     sections += [
         _failure_details_section(results, candidate_keys=ctx.candidate_keys or None),
         _success_details_section(results),

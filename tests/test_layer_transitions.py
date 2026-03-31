@@ -56,9 +56,8 @@ def _mock_client(response_dict: dict) -> MockLLMClient:
 async def test_refine_context_variants(response, check_key, check_val):
     client = _mock_client(response)
     osp = OptSearchPoint(instruction="Rank candidates", optimizer_params={"creativity": 0.5})
-    stalled = [{"round": 0, "accuracy": 0.4, "results": []}]
 
-    result = await refine_context(osp, stalled, [], client)
+    result = await refine_context(osp, client)
 
     assert isinstance(result, TransitionResult)
     assert result.opt_search_point.parent_id is not None
@@ -86,7 +85,7 @@ async def test_modify_plan():
         plan="",
     )
 
-    result = await modify_plan(osp, [{"l2_round": 1, "optimizer_params": {}, "accuracy_change": 0.0}], [], client)
+    result = await modify_plan(osp, [{"l2_round": 1, "optimizer_params": {}, "accuracy_change": 0.0}], client)
 
     assert isinstance(result, TransitionResult)
     assert result.opt_search_point.plan == "Use chain-of-thought reasoning."
@@ -112,8 +111,8 @@ async def test_l1_l2_escalation(monkeypatch, eval_data):
     # Mock refine_context to return a slightly modified PS
     l2_calls = []
 
-    async def mock_refine_context(osp, stalled_rounds, eval_d, llm_client, **kwargs):
-        l2_calls.append({"n_stalled": len(stalled_rounds)})
+    async def mock_refine_context(osp, llm_client, **kwargs):
+        l2_calls.append(True)
         return TransitionResult(opt_search_point=osp.derive_candidate(
             optimizer_params={"creativity": 0.9},
             changes_description="L2: mock refine",
@@ -163,14 +162,14 @@ async def test_l2_l3_escalation(monkeypatch, eval_data):
     l2_calls = []
     l3_calls = []
 
-    async def mock_refine_context(osp, stalled_rounds, eval_d, llm_client, **kwargs):
+    async def mock_refine_context(osp, llm_client, **kwargs):
         l2_calls.append(True)
         return TransitionResult(opt_search_point=osp.derive_candidate(
             optimizer_params={"creativity": 0.9},
             changes_description="L2: mock",
         ))
 
-    async def mock_modify_plan(osp, l2_history, eval_d, llm_client, **kwargs):
+    async def mock_modify_plan(osp, l2_history, llm_client, **kwargs):
         l3_calls.append(True)
         return TransitionResult(opt_search_point=osp.derive_candidate(
             plan="New strategy",

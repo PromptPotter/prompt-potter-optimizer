@@ -254,7 +254,6 @@ async def _do_l2_transition(
     state: LoopState,
     config: CycleConfig,
     round_num: int,
-    eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
@@ -269,14 +268,6 @@ async def _do_l2_transition(
     assert state.current_sp is not None
     current_pp = state.current_sp.pipeline_params
 
-    stalled_rounds = [
-        {
-            "round": r.round,
-            "accuracy": r.accuracy,
-            "results": r.results,
-        }
-        for r in state.rounds[-config.l1_patience :]
-    ]
     emit_phase(
         on_phase,
         "refine_context",
@@ -293,8 +284,6 @@ async def _do_l2_transition(
     async with observed_node(f"l2_refine_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
         tr = await layer_transitions.refine_context(
             state.opt_sp,
-            stalled_rounds,
-            eval_data,
             client,
             model=config.model,
             temperature=config.l2_temperature,
@@ -351,7 +340,6 @@ async def _do_l3_transition(
     state: LoopState,
     config: CycleConfig,
     round_num: int,
-    eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
@@ -388,7 +376,6 @@ async def _do_l3_transition(
         tr = await layer_transitions.modify_plan(
             state.opt_sp,
             l2_history,
-            eval_data,
             client,
             model=config.model,
             temperature=config.l3_temperature,
@@ -425,7 +412,6 @@ async def escalate_l2(
     state: LoopState,
     config: CycleConfig,
     round_num: int,
-    eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
@@ -453,7 +439,6 @@ async def escalate_l2(
             state,
             config,
             round_num,
-            eval_data,
             on_phase,
             obs=obs,
             trace_id=trace_id,
@@ -469,7 +454,7 @@ async def escalate_l2(
         )
         _degradation_reset(state, config, round_num, on_phase, reset_l3=reset_l3)
         await _do_l2_transition(
-            state, config, round_num, eval_data, on_phase,
+            state, config, round_num, on_phase,
             obs=obs, trace_id=trace_id, escalation_context=escalation_context,
         )
 
@@ -491,7 +476,7 @@ async def escalate_l2(
     l3_exhausted = config.l3_patience is not None and esc.l3_stall_count >= config.l3_patience
     if not l3_exhausted:
         await _do_l3_transition(
-            state, config, round_num, eval_data, on_phase,
+            state, config, round_num, on_phase,
             obs=obs, trace_id=trace_id,
         )
         return None

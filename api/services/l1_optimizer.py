@@ -105,7 +105,7 @@ async def l1_generate(
         rendered_prompt=opt_sp.render(),
         failure_examples=failure_examples,
         scan_analytics=format_scan_analytics(scan_context),
-        focus_note=format_focus_note(opt_sp.escalation_journal or None),
+        focus_note="" if is_probe_round else format_focus_note(opt_sp.escalation_journal or None),
         context_sections=format_context_sections(
             ContextData(
                 task_context=opt_sp.task_context or None,
