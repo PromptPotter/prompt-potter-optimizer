@@ -1,5 +1,10 @@
 # PromptPotter Optimizer
 
+[![CI](https://github.com/runfish5/prompt-potter-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/runfish5/prompt-potter-optimizer/actions/workflows/ci.yml)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.6.1-orange.svg)](CHANGELOG.md)
+
 **Automatic prompt optimization for any LLM pipeline.**
 
 ## The 4-Step Workflow
@@ -72,7 +77,7 @@ Every evaluation point is a **SearchPoint** — an immutable bundle of prompt + 
 ## Getting Started
 
 ```bash
-pip install -r requirements.txt  # then configure .env (see .env.example)
+pip install -e ".[dev,jupyter,stats]"  # then configure .env (see .env.example)
 ```
 
 - Open `notebooks/optimization_campaign.ipynb` for the full HITL optimization workflow

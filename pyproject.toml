@@ -47,8 +47,10 @@ stats = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0",
     "ruff>=0.3.0",
     "mypy>=1.10.0",
+    "pre-commit>=4.0",
 ]
 
 [project.urls]
@@ -61,7 +63,7 @@ include = ["api*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["tests"]
-addopts = "-q --tb=short"
+addopts = "-q --tb=short --cov=api --cov-report=term-missing"
 markers = ["slow: orchestrator integration tests (>1s each)"]
 
 [tool.mypy]
@@ -119,3 +121,15 @@ ignore = [
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15
+
+[tool.coverage.run]
+branch = true
+source = ["api"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "@abstractmethod",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
+show_missing = true

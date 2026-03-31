@@ -31,4 +31,4 @@ jobs:
         run: mypy api/
 
       - name: Tests
-        run: pytest tests/ -q --tb=short
+        run: pytest tests/ -q --tb=short --cov=api --cov-report=term-missing

@@ -5,8 +5,10 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 
 from api.config.logging import setup_logging
@@ -43,6 +45,17 @@ async def scalar_docs():
         openapi_url=app.openapi_url,
         title=app.title,
     )
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 # CORS middleware
 app.add_middleware(
