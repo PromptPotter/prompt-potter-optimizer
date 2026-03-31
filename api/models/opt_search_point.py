@@ -121,6 +121,8 @@ class OptSearchPoint(SearchPoint):
         block = self._render_few_shot_block()
         if block:
             parts.append(block)
+        if self.plan:
+            parts.append(self.plan)
         return "\n\n".join(parts)
 
     # -- Rendering helpers -------------------------------------------------

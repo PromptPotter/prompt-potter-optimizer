@@ -10,15 +10,16 @@ PromptPotter decomposes a monolithic prompt into independent fields so each can 
 |---|-------|-------|-----------|---------|
 | 1 | `persona` | L1 | Yes (6) | Who the LLM is — role framing |
 | 2 | `task_intent` | L1 | Yes | What the LLM should accomplish |
-| 3 | `problem_description` | L1 | Yes | Domain context for the task |
+| 3 | `problem_description` | L1 | Yes | Domain context / situational state / analytical evidence |
 | 4 | `instruction` | L1 | No | Core prompt template (primary L1 mutation target) |
 | 5 | `thinking_style` | L1 | Yes (35+) | Reasoning strategy guidance |
 | 6 | `answer_format` | L1 | Yes | Output structure constraints |
 | 7 | `few_shot_examples` | L1 | No | Input/Output demonstration pairs (rendered separately) |
+| 8 | `plan` | L3 | No | Strategic optimization framework (rendered at end) |
 
-Source of truth: `PROMPT_STRING_FIELDS` in `api/shared/constants.py`.
+Source of truth: `PROMPT_STRING_FIELDS` in `api/shared/constants.py` (fields 1–6). `few_shot_examples` and `plan` are rendered explicitly after the string fields.
 
-`instruction` has no pre-built variants because it is always LLM-generated — it is the primary mutation surface. `few_shot_examples` is excluded from `PROMPT_STRING_FIELDS` and rendered via its own block formatter.
+`instruction` has no pre-built variants because it is always LLM-generated — it is the primary mutation surface. `few_shot_examples` is excluded from `PROMPT_STRING_FIELDS` and rendered via its own block formatter. `plan` is set by L3 and rendered last — empty by default (skipped).
 
 ---
 
@@ -33,21 +34,43 @@ Source of truth: `PROMPT_STRING_FIELDS` in `api/shared/constants.py`.
 │  5. thinking_style                       │
 │  6. answer_format                        │
 │  7. few_shot_examples                    │
-│                                          │
-│  +/- [???]                               │
+│  8. plan                                 │
 └──────────────────────────────────────────┘
          │ render()
          ▼
    skip empties → join("\n\n") → prompt string
 ```
 
-`render()` (`opt_search_point.py:114`) iterates `PROMPT_STRING_FIELDS` in order, collects non-empty values, appends the few-shot block if present, and joins with `\n\n`. Empty fields are skipped — setting a field to `""` effectively removes it from the rendered prompt.
+`render()` (`opt_search_point.py:114`) iterates `PROMPT_STRING_FIELDS` in order, collects non-empty values, appends the few-shot block if present, appends `plan` if present, and joins with `\n\n`. Empty fields are skipped — setting a field to `""` effectively removes it from the rendered prompt.
 
 ```python
 parts = [v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))]
 ```
 
-`compile_prompt()` (`opt_search_point.py:139`) adds a second pass: substitutes `{{variable}}` placeholders with runtime values (Langfuse-compatible).
+`compile_prompt()` (`opt_search_point.py:141`) adds a second pass: substitutes `{{variable}}` placeholders with runtime values (Langfuse-compatible).
+
+---
+
+## Type Hierarchy
+
+The 8 field types are shared by **all** prompts — both job prompts (the prompt being optimized) and optimizer prompts (L1/L2/L3/Critique meta-prompts). Each prompt subtype uses the fields it needs; empty fields are skipped by `render()`.
+
+```
+┌────────────────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+│                │pers. │t.int.│p.desc│instr.│think.│a.fmt │f.shot│ plan │
+├────────────────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┤
+│ Job prompt     │  ✓   │  ✓   │  ✓   │  ✓   │  ✓   │  ✓   │  ✓   │      │
+│ L1 Generate    │  ✓   │  ✓   │  ✓   │  ✓   │  ✓   │  ✓   │      │  ✓   │
+│ L2 Refine      │  ✓   │  ✓   │  ✓   │  ✓   │      │  ✓   │      │      │
+│ L3 Plan        │  ✓   │  ✓   │  ✓   │  ✓   │  ✓   │  ✓   │      │  ✓   │
+│ Critique       │  ✓   │  ✓   │  ✓   │      │      │  ✓   │      │      │
+│ Restructure    │  ✓   │  ✓   │      │  ✓   │      │  ✓   │      │      │
+└────────────────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+```
+
+In optimizer prompts, `problem_description` carries all analytical evidence (eval stats, scan data, pipeline state, critique, escalation). `instruction` carries the task directives (including L2's directive when set). `plan` carries L3's strategic framework.
+
+All optimizer prompts follow the same pattern: JSON template → `load_optimizer_prompt()` → `compile_prompt()` → `llm_call()`. Templates live in `api/config/optimizer_prompts/`.
 
 ---
 
@@ -121,7 +144,7 @@ Loaded via `api/config/settings.py:84`. `filter_variant_library()` (`smart_searc
 
 ### Current constraint
 
-`PROMPT_STRING_FIELDS` is a static list in `constants.py`. Each field is a Pydantic attribute on `OptSearchPoint`. The set of 6 fields is fixed at code-definition time.
+`PROMPT_STRING_FIELDS` is a static list in `constants.py` (6 string fields). `few_shot_examples` and `plan` are rendered explicitly. The set of 8 fields is fixed at code-definition time.
 
 ### Vision
 

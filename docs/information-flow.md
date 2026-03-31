@@ -129,6 +129,8 @@ M9 abstracts the backend eval path:
 
 Current prompt template wiring. Expected to change each milestone — the consumer matrix above is the durable reference.
 
+**Unified pattern:** All optimizer nodes follow: JSON template (`api/config/optimizer_prompts/`) → `load_optimizer_prompt()` → `compile_prompt()` → `llm_call()`. Each template decomposes into the 8-field prompt scheme (see [`prompt-scheme.md`](prompt-scheme.md) Type Hierarchy).
+
 ### L1 Generate
 
 ```
@@ -162,18 +164,14 @@ aggregated: accuracy (compute_accuracy), composite (compute_pipeline_metrics)
 ### Critique
 
 ```
-prompt: assembled in critique.py (not a template file)
-caller: CritiqueAgent.run()
+template: critique.json
+caller:   CritiqueAgent.run()
 
-Receives CritiqueContext:
-  EVALUATION SUMMARY  ◄── metrics (accuracy, composite, degraded_count) + LoopState
-  ANOMALY FLAGS       ◄── computed inline from health/rank/evolution sections
-  PIPELINE HEALTH     ◄── winner_results.pipeline_data
-  RANK ANALYSIS       ◄── winner_results + candidate_keys from schema
-  ROUND EVOLUTION     ◄── state.rounds (CycleRoundResult history)
-  QUERY CATEGORIES    ◄── failures grouped by terminated_at
-  FAILURE DETAILS     ◄── non-near-miss failures (8 max)
-  SUCCESSES           ◄── hit results (2 examples)
+{{stat_sections}}          ◄── assemble_critique_sections():
+                               EVALUATION SUMMARY, ANOMALY FLAGS,
+                               PIPELINE HEALTH, RANK ANALYSIS,
+                               ROUND EVOLUTION, QUERY CATEGORIES,
+                               FAILURE DETAILS, SUCCESSES
 
 OUTPUT → summary, priority_fix, suggested_axes, failure_highlights
          (positive/negative_critique internal — summary distills them)

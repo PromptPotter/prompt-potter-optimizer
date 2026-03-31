@@ -1,0 +1,8 @@
+{
+  "persona": "You are a pipeline evaluation analyst.",
+  "task_intent": "Analyze the evaluation results below and produce a structured critique for the next optimization round.",
+  "problem_description": "{{stat_sections}}",
+  "instruction": "",
+  "thinking_style": "",
+  "answer_format": "Analyze all data above and return JSON:\n{\n  \"positive_critique\": \"<what is working well — patterns to extend>\",\n  \"negative_critique\": \"<what is failing — root causes and blockers>\",\n  \"priority_fix\": \"<what change(s) would have the most impact>\",\n  \"suggested_axes\": [\"<pipeline_param or prompt_field to try next>\"],\n  \"failure_highlights\": [\"<Query: ... | Predicted: ... | GT: ...>\", ...],\n  \"summary\": \"<2-3 sentence actionable critique for the next candidate generator>\"\n}\nRules:\n- positive_critique: identify success patterns from the data (hits, near-misses, rank distribution)\n- negative_critique: reference specific stats from the sections above\n- suggested_axes: name parameters or fields visible in the data above\n- failure_highlights: pick 3-5 most actionable failures (Query/Predicted/GT). These are the ONLY failure examples the next generator sees — choose ones that best illustrate fixable patterns\n- summary, priority_fix, suggested_axes, and failure_highlights are fed to the next generation round — be concise and actionable"
+}

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from api.config.optimizer_pipeline import llm_call
+from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import load_variant_library
 
 if TYPE_CHECKING:
@@ -198,23 +199,6 @@ def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
 # ---------------------------------------------------------------------------
 
 
-CRITIQUE_TASK = """\
-Analyze all data above and return JSON:
-{
-  "positive_critique": "<what is working well — patterns to extend>",
-  "negative_critique": "<what is failing — root causes and blockers>",
-  "priority_fix": "<what change(s) would have the most impact>",
-  "suggested_axes": ["<pipeline_param or prompt_field to try next>"],
-  "failure_highlights": ["<Query: ... | Predicted: ... | GT: ...>", ...],
-  "summary": "<2-3 sentence actionable critique for the next candidate generator>"
-}
-Rules:
-- positive_critique: identify success patterns from the data (hits, near-misses, rank distribution)
-- negative_critique: reference specific stats from the sections above
-- suggested_axes: name parameters or fields visible in the data above
-- failure_highlights: pick 3-5 most actionable failures (Query/Predicted/GT). These are the ONLY failure examples the next generator sees — choose ones that best illustrate fixable patterns
-- summary, priority_fix, suggested_axes, and failure_highlights are fed to the next generation round — be concise and actionable
-"""
 
 
 def _summary_section(ctx: CritiqueContext) -> str:
@@ -466,11 +450,12 @@ def _success_details_section(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def assemble_critique_prompt(ctx: CritiqueContext) -> str:
-    """Build the full critique prompt from stat-rich sections.
+def assemble_critique_sections(ctx: CritiqueContext) -> str:
+    """Build stat-rich sections for the critique template.
 
     Each section is computed by a dedicated helper; this function orchestrates
     the assembly order and inserts anomaly flags after the summary.
+    The task/output instructions live in the ``critique.json`` template.
     """
     results = ctx.results
     anomalies: list[str] = []
@@ -500,7 +485,6 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
             near_miss_queries=nm_queries,
         ),
         _success_details_section(results),
-        CRITIQUE_TASK,
     ]
 
     # Insert anomaly flags right after the summary
@@ -522,9 +506,9 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
 class CritiqueAgent:
     """Analyzes eval results via pipeline-aware critique stats.
 
-    Returns a 5-field dict (positive_critique, negative_critique,
-    priority_fix, suggested_axes, summary) fed to both L1 Generate
-    and L2 Refine Context.
+    Returns a 6-field dict (positive_critique, negative_critique,
+    priority_fix, suggested_axes, failure_highlights, summary) fed
+    to both L1 Generate and L2 Refine Context.
     """
 
     def __init__(
@@ -539,9 +523,12 @@ class CritiqueAgent:
         """Build critique from pipeline stats + LLM analysis.
 
         Returns dict with keys: positive_critique, negative_critique,
-        priority_fix, suggested_axes, summary.
+        priority_fix, suggested_axes, failure_highlights, summary.
         """
-        prompt = assemble_critique_prompt(ctx)
+        sections = assemble_critique_sections(ctx)
+        prompt = load_optimizer_prompt("critique").compile_prompt(
+            stat_sections=sections,
+        )
         logger.info(
             "Rich critique: %d chars prompt, round %d, acc=%.3f",
             len(prompt),

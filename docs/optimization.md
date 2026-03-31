@@ -146,7 +146,7 @@ Formatted by `format_critique_for_prompt()` (emits only actionable fields: summa
 
 ### Stat-Rich Analysis
 
-`assemble_critique_prompt()` in `critique.py` builds the meta-prompt from section helper functions. Critique is the **sole reader** of raw eval results — all other nodes receive its digested output (see [`information-flow.md`](information-flow.md) consumer matrix).
+`assemble_critique_sections()` in `critique.py` builds the stat sections from section helper functions. The critique template (`critique.json`) wraps these sections with persona, task_intent, and answer_format. Critique is the **sole reader** of raw eval results — all other nodes receive its digested output (see [`information-flow.md`](information-flow.md) consumer matrix).
 
 | Section | Key metrics | Source |
 |---------|------------|--------|
