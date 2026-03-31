@@ -70,6 +70,9 @@ class LoopState:
     # Failure analysis from previous round (ephemeral, not checkpointed)
     failure_analysis: FailureAnalysis | None = None
 
+    # SearchMemory instance (M8 Wave 3c — not checkpointed, rebuilt from disk)
+    search_memory: Any = None
+
     # L2/L3 escalation counters
     escalation: EscalationCounters = field(default_factory=EscalationCounters)
 
@@ -89,3 +92,4 @@ class CycleInitResult:
     round_eval_data: list[dict[str, Any]] = field(default_factory=list)
     escalation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
+    search_memory: Any = None

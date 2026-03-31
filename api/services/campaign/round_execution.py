@@ -8,7 +8,7 @@ logic (L2/L3) lives in ``escalation.py``; campaign lifecycle
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from api.models.opt_search_point import OptSearchPoint
 
@@ -70,6 +70,7 @@ async def _generate_or_load_candidates(
     *,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
+    search_memory: Any = None,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
     # Resolve L2 meta-param overrides from OptSearchPoint.optimizer_params
@@ -120,7 +121,10 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
+    from api.services.campaign.formatting import build_l1_search_memory_context
     from api.services.l1_optimizer import l1_generate
+
+    sm_ctx = build_l1_search_memory_context(search_memory)
 
     client = _llm_client.get_llm_client()
     async with observed_node(f"l1_generate_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
@@ -136,6 +140,7 @@ async def _generate_or_load_candidates(
             is_probe_round=state.probe_next_round,
             scan_compact=(round_num > 0),
             failure_analysis=state.failure_analysis,
+            search_memory_context=sm_ctx,
         )
 
     if campaign_store and cycle_id:
@@ -217,6 +222,23 @@ async def _evaluate_candidates(
         if config.enable_critique and eval_out.winner_results:
             crit_llm = _llm_client.get_llm_client()
             agent = CritiqueAgent(crit_llm, model=config.model)
+            # Build critique-specific SearchMemory context
+            _crit_sm_ctx = None
+            _sm = state.search_memory
+            if _sm:
+                _crit_sm_ctx = {}
+                _disc = _sm.discriminating_queries()
+                if _disc:
+                    _crit_sm_ctx["discriminating_queries"] = (
+                        f"{len(_disc)} queries vary across configs"
+                    )
+                _fc = _sm.failure_clusters(3)
+                if _fc:
+                    _crit_sm_ctx["failure_clusters"] = "; ".join(
+                        f"{c.failure_mode} ({c.fraction:.0%})" for c in _fc
+                    )
+                if not _crit_sm_ctx:
+                    _crit_sm_ctx = None
             cctx = CritiqueContext(
                 results=eval_out.winner_results,
                 accuracy=eval_out.winner_accuracy,
@@ -242,6 +264,7 @@ async def _evaluate_candidates(
                 pipeline_schema=config.pipeline_schema,
                 degradation_threshold=config.critique_degradation_threshold,
                 near_miss_ratio=config.critique_near_miss_ratio,
+                search_memory_context=_crit_sm_ctx,
             )
             critique_result = await agent.run(cctx)
             critique_text = format_critique_for_prompt(critique_result)
@@ -279,6 +302,7 @@ async def execute_round(
     cycle_id: str | None,
     callbacks: CycleCallbacks,
     escalation_checks: list[DegradationCheck] | None = None,
+    search_memory: Any = None,
 ) -> CycleRoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     obs = state.eval_ctx.obs if state.eval_ctx else None
@@ -297,6 +321,7 @@ async def execute_round(
         n_eval_queries=len(round_eval_data),
         obs=obs,
         trace_id=trace_id,
+        search_memory=search_memory,
     )
 
     eval_out = await _evaluate_candidates(

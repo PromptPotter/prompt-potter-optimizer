@@ -38,15 +38,33 @@ Before evaluation, `prepare_scan_baseline()` reports per-axis coverage from hist
 
 **Prompt alias groups** link restructured prompts to their originals so historical pipeline-parameter results are discoverable. Resolution is transitive.
 
-### SearchMemory Integration *(M8)*
+### SearchMemory Integration (M8)
 
 When historical data exists, SearchMemory enriches the scan workflow:
 
-- **Scan advisor** receives axis impact rankings and top-5 historically-best values per axis — prioritizes consistently impactful axes, skips dead ones
-- **Diagnostic set** can be stratified using query tractability data (which queries are discriminating vs always-hit/always-miss)
-- **Bottleneck distribution** tells the advisor which pipeline stage accounts for most failures, focusing scan effort on relevant parameters
+- **Scan advisor** receives `axis_rankings()` (effect size + consistency classification), `top_k_values()` (historically-best values per axis), and `bottleneck_distribution()` (failure fraction per pipeline step). It prioritizes consistently impactful axes, skips dead ones, and suggests values with historical evidence.
+- **Diagnostic set** can be stratified using query tractability data (`discriminating_queries()` returns queries whose outcome varies across configurations, vs always-hit/always-miss).
+- **Bottleneck attribution** (`attribute_bottleneck()` in `metrics.py`) maps each `terminated_at` step to the `param_keys` of that node plus all upstream nodes. The scan advisor uses this to order axes by causal pipeline depth -- parameters that feed into the dominant bottleneck are scanned first.
 
-SearchMemory is a materialized view refreshed lazily — no extra computation during the scan itself.
+SearchMemory is a materialized view refreshed lazily via watermark -- no extra computation during the scan itself.
+
+### Cohort Sensitivity (M8 Wave 3e)
+
+Standard sensitivity scan measures per-axis accuracy deltas over the full query set. Cohort sensitivity (`cohort_analysis.py`) slices those results by failure mode to answer: "Which axes matter most for which failure types?"
+
+**How it works:**
+
+1. Failure clusters from SearchMemory group queries by `terminated_at` step (e.g., `web_search`, `token_matching`).
+2. Per-query hit/miss results from scan rows are aggregated per cohort.
+3. For each (axis, cohort) pair, the delta between baseline hit rate and best-value hit rate is computed.
+4. Results are ranked by absolute delta and ingested into SearchMemory via `ingest_cohort_analysis()`.
+
+**What it enables:**
+- The scan advisor can recommend different axes for different failure modes (e.g., `query_prefix` matters for `web_search` failures but not `token_matching` failures).
+- `query_sensitive_axes(query)` returns the axes most relevant to a specific query based on its cohort membership.
+- `parameter_failure_correlation(axis)` returns per-failure-mode deltas for an axis.
+
+Implementation: `api/services/search/cohort_analysis.py`. Data models: `CohortSensitivity`, `CohortAnalysisResult`.
 
 ### Circuit Breaker
 

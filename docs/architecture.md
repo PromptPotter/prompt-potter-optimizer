@@ -66,7 +66,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, etc.).
 
-**SearchMemory** *(planned — M8 Wave 3, not yet implemented)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark.
+**SearchMemory** *(M8 Wave 3)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark. See [SearchMemory section](#searchmemory-m8-wave-3) below.
 
 Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 
@@ -79,7 +79,8 @@ All paths converge on `eval_search_point()` — single gateway for eval persiste
 - **Content-hash dedup** — same JobSearchPoint + eval data returns cached results instantly
 - **Shared store** — sensitivity scan and feedback cycle both write to `dataset_runs/`; coverage advisor discovers all cached results regardless of source
 - **Write by experiment_id, read by config similarity** — provenance tagged, but reads use alias groups + `pipeline_params` matching. Data shared across experiments.
-- **SearchMemory** *(M8)* — materialized statistical index over `dataset_runs/`, refreshed lazily on watermark staleness. Provides cross-campaign parameter impact, query patterns, and failure mode analysis
+- **SearchMemory** *(M8)* — materialized statistical index over `dataset_runs/`, refreshed lazily on watermark staleness. Provides cross-campaign parameter impact, query patterns, and failure mode analysis. See [SearchMemory section](#searchmemory-m8-wave-3)
+- **Intermediate Cache** *(M8 Wave 4)* — per-node output cache keyed by `(upstream_config_hash, query)`. Avoids re-running stable upstream nodes when only ranker params change. See [Intermediate Cache section](#intermediate-cache-m8-wave-4)
 - **Graceful interrupt** — first Ctrl+C finishes in-flight call and saves (`"partial": True`); content-hash cache bridges partial results on re-run
 
 ## Pipeline Composability
@@ -138,7 +139,43 @@ L1 Generate is the sole `pipeline_params` decider. L2 refines context and meta-s
   campaigns/{campaign_id}.json
   campaigns/{campaign_id}/trial_NNNN.json
   obs/langfuse/events.jsonl
-  search_memory.json                          # (M8, planned) materialized view index
+  search_memory.json                          # (M8) materialized view index
+  intermediate_cache/{hash}.json               # (M8 Wave 4) per-node output cache
 ```
 
 `dataset_runs/` is shared across all eval paths (content-addressed). `campaigns/` holds optimizer-layer trial checkpoints per round.
+
+### SearchMemory (M8 Wave 3)
+
+A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Persisted at `{backend_id}/search_memory.json` and updated incrementally via watermark (only new dataset runs since last refresh are processed).
+
+**Three analysis pillars:**
+
+| Pillar | What it tracks | Key accessors |
+|--------|---------------|---------------|
+| Parameter Impact | Effect size + consistency per axis, top-5 historically-best values | `axis_rankings()`, `top_k_values(axis)`, `axis_impact(axis)` |
+| Query Patterns | Hit rate, variance (discriminative power), dominant failure mode per query | `query_tractability()`, `discriminating_queries()`, `dead_queries()` |
+| Failure Modes | Bottleneck distribution by terminated_at step, failure clusters | `bottleneck_distribution()`, `failure_clusters()` |
+
+**Design:** Atomic data accessors only -- no LLM text formatting. Each consumer (scan_advisor, L1, L2, critique) queries the subset it needs and composes its own prompt section. This avoids coupling SearchMemory to any particular prompt format.
+
+**Consumer matrix:**
+
+| Consumer | What it reads | Purpose |
+|----------|--------------|---------|
+| Scan advisor | `axis_rankings()`, `top_k_values()`, `bottleneck_distribution()` | Prioritize impactful axes, suggest historically-best values |
+| L1 Generate | `failure_clusters()`, `dead_queries()`, `top_k_values()` | Focus candidates on failure modes, avoid dead-end values |
+| L2 Refine | `axis_rankings()`, `bottleneck_distribution()` | Inform context refinement with parameter landscape |
+| Critique | `discriminating_queries()`, `failure_clusters()` | Enrich failure analysis with cross-campaign patterns |
+
+Cohort analysis (`cohort_analysis.py`) extends the model: per-query hit/miss results from scans are sliced by failure mode cohort to determine which axes matter most for which failure types. Results are ingested via `ingest_cohort_analysis()`.
+
+Implementation: `api/services/search/search_memory.py`, `api/services/search/cohort_analysis.py`.
+
+### Intermediate Cache (M8 Wave 4)
+
+Partial pipeline caching that avoids re-running upstream nodes when only the ranker config changes. The `IntermediateCache` (`api/services/stores/intermediate_cache.py`) stores per-node outputs keyed by `(upstream_config_hash, query)`.
+
+When a pipeline has stable upstream nodes (e.g., `fuzzy_matching`, `web_search`) and only the ranker (`llm_ranking`) parameters vary across candidates, cached upstream outputs can be injected as `precomputed` inputs, skipping redundant computation. `PipelineSchema.upstream_config_hash()` computes the cache key from upstream node configs.
+
+Gracefully no-ops until the target backend supports `node_outputs` in responses and `precomputed` in requests.

@@ -206,6 +206,9 @@ async def eval_query_via_backend(
     rendered_prompt: str,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
+    intermediate_cache: object | None = None,
+    backend_id: str = "",
+    upstream_hash: str = "",
 ) -> dict:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint."""
     query = query_data["query"]
@@ -222,12 +225,26 @@ async def eval_query_via_backend(
         prompt_names = pipeline_schema.prompt_node_names()
         include_ranking = steps is None or any(n in steps for n in prompt_names)
 
+        # Wave 4: intermediate cache lookup
+        precomputed = None
+        if intermediate_cache and upstream_hash:
+            cached_outputs = intermediate_cache.get(backend_id, upstream_hash, query)
+            if cached_outputs:
+                precomputed = cached_outputs
+
         resp = await backend_client.run_match(
             query,
             pipeline_params=pipeline_params,
             ranking_prompt=rendered_prompt if include_ranking else None,
+            precomputed=precomputed,
         )
         data = resp.get("data", {})
+
+        # Wave 4: cache populate from response node_outputs
+        node_outputs = data.get("node_outputs")
+        if intermediate_cache and upstream_hash and node_outputs and not precomputed:
+            intermediate_cache.put(backend_id, upstream_hash, query, node_outputs)
+
         ranked = data.get("ranked_candidates", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
         eval_output = _evaluator.evaluate(ground_truth, predicted)
@@ -317,6 +334,20 @@ async def _run_eval_batch(
     consecutive_errors = 0
     n_reused = 0
 
+    # Wave 4: compute upstream hash and cache reference for batch
+    _intermediate_cache = None
+    _upstream_hash = ""
+    _backend_id = ctx.backend_id if ctx else ""
+    if ctx and ctx.store and pipeline_schema:
+        _intermediate_cache = ctx.store.intermediate_cache
+        upstream_nodes, _ = pipeline_schema.split_at_ranker()
+        if upstream_nodes:
+            from api.shared.hashing import upstream_config_hash
+
+            _upstream_hash = upstream_config_hash(
+                search_point.pipeline_params, upstream_nodes,
+            )
+
     # -- Graceful interrupt: 1st Ctrl+C sets flag (current query finishes),
     #    2nd Ctrl+C force-quits immediately. --
     _stop_requested = False
@@ -350,6 +381,9 @@ async def _run_eval_batch(
                     rendered,
                     pipeline_params=search_point.pipeline_params,
                     pipeline_schema=pipeline_schema,
+                    intermediate_cache=_intermediate_cache,
+                    backend_id=_backend_id,
+                    upstream_hash=_upstream_hash,
                 )
                 was_cached = False
 

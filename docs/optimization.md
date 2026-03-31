@@ -7,7 +7,7 @@
 │    in:  critique OR l2_directive (mutual exclusion),                   │
 │         task_context, thinking_styles, scan_context, plan,            │
 │         escalation_journal + warning_inventory (probe rounds only),   │
-│         search_memory (param impact, query patterns) (M8, planned)    │
+│         search_memory (param impact, query patterns, failure modes)   │
 │    out: N candidate OptSearchPoints (prompt + pipeline_params)         │
 │         ↓                                                              │
 │  L1 EVALUATE                                                           │
@@ -158,7 +158,7 @@ Formatted by `format_critique_for_prompt()` (emits only actionable fields: summa
 | **Query categories** | failures by termination node | `winner_results.terminated_at` |
 | **Failure details** | non-near-miss failures (8 max, deduped) | `winner_results` |
 | **Successes** | hit results (2 examples) | `winner_results` |
-| **Search memory** *(M8, planned)* | axis impact rankings, top-5 values, bottleneck distribution | `SearchMemory` atomic accessors |
+| **Search memory** *(M8)* | axis impact rankings, top-5 values, bottleneck distribution | `SearchMemory` atomic accessors |
 
 ### Anomaly Flags
 
@@ -260,7 +260,29 @@ Each round samples 2-3 styles from the variant library (`api/config/prompt_varia
 
 When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate target pipeline param exploration. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
 
-SearchMemory *(planned — M8 Wave 3, not yet implemented)* will provide historical parameter impact data so the scan advisor prioritizes axes that historically produced signal and suggests text values that historically worked. Each optimizer node (L1, L2, critique) will query SearchMemory's atomic accessors for the subset relevant to its decision.
+### SearchMemory in the Optimization Loop (M8)
+
+SearchMemory is a materialized view over all historical evaluation data that feeds cross-campaign intelligence into the optimization loop. See [architecture.md](architecture.md#searchmemory-m8-wave-3) for the full data model.
+
+**Lifecycle:**
+
+1. **Init** -- loaded from disk (`search_memory.json`), refreshed after baseline eval so the first round has historical context.
+2. **Per-round refresh** -- `refresh()` ingests new dataset runs since the last watermark. Lightweight (incremental, no recomputation of existing stats).
+3. **Persist** -- saved after each refresh so progress survives interrupts.
+
+**Per-node context injection:**
+
+| Node | SearchMemory data | How it's used |
+|------|------------------|---------------|
+| L1 Generate | `failure_clusters()`, `dead_queries()`, `top_k_values()` | Focus candidates on persistent failure modes; avoid values that historically never worked; seed from historically-best values |
+| L2 Refine | `axis_rankings()`, `bottleneck_distribution()` | Inform context refinement with which axes matter and where the pipeline bottleneck is |
+| Critique | `discriminating_queries()`, `failure_clusters()` | Enrich failure analysis with cross-campaign query patterns and persistent failure clusters |
+
+**Adaptive eval set (round 3+):** `adapt_eval_set()` uses SearchMemory to swap always-hit/always-miss queries for discriminating ones (queries whose outcome varies across configurations). This concentrates evaluation budget on queries that actually differentiate candidate prompts.
+
+### Bottleneck Attribution (M8 Wave 3d)
+
+`attribute_bottleneck()` in `metrics.py` maps each `terminated_at` step to the `param_keys` of that node plus all upstream nodes. This enables causal scan ordering: the scan advisor prioritizes parameters that belong to or feed into the dominant bottleneck node, rather than scanning axes in arbitrary order.
 
 ## Optimizer Nodes (M7)
 
@@ -343,4 +365,4 @@ campaign_config = {
 | `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
 | `prompt_eval.py` | `_run_eval_batch` (per-query checks), `_parse_backend_response` |
 | `l1_optimizer.py` | L1 generation (sole pipeline_params decider) |
-| `search/search_memory.py` | **Planned (M8 Wave 3)** — cross-campaign intelligence: parameter impact, query patterns, failure modes |
+| `search/search_memory.py` | Cross-campaign intelligence (M8 Wave 3): parameter impact, query patterns, failure modes |

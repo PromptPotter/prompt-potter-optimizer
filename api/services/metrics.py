@@ -488,3 +488,52 @@ def compile_temporal_trends(
         ))
 
     return TrendAnalysis(snapshots=snapshots)
+
+
+def attribute_bottleneck(
+    results: list[dict],
+    pipeline_schema: PipelineSchema,
+) -> dict[str, list[str]]:
+    """Map terminated_at steps to relevant param_keys (Wave 3d).
+
+    For each distinct terminated_at value in results, returns the param_keys
+    of that node plus all upstream nodes. This tells the scan advisor which
+    parameters to explore for the dominant bottleneck.
+
+    Returns:
+        {terminated_at_step: [relevant_param_keys]}
+    """
+    from collections import Counter
+
+    # Count terminated_at values from failures
+    termination_counts: Counter[str] = Counter()
+    for r in results:
+        if not r.get("hit") and not r.get("error"):
+            pd = r.get("pipeline_data") or {}
+            terminated = pd.get("terminated_at", "")
+            if terminated:
+                termination_counts[terminated] += 1
+
+    if not termination_counts:
+        return {}
+
+    # Build node → index + param_keys mapping from schema
+    node_index: dict[str, int] = {}
+    node_params: dict[str, set[str]] = {}
+    for i, node in enumerate(pipeline_schema.nodes):
+        node_index[node.name] = i
+        node_params[node.name] = set(node.param_keys)
+
+    result: dict[str, list[str]] = {}
+    for step in termination_counts:
+        if step not in node_index:
+            continue
+        step_idx = node_index[step]
+        # Include param_keys from this node + all upstream nodes
+        relevant: list[str] = []
+        for node in pipeline_schema.nodes:
+            if node_index[node.name] <= step_idx and node.param_keys:
+                relevant.extend(sorted(node.param_keys))
+        result[step] = relevant
+
+    return result

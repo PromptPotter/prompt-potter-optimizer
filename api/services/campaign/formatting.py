@@ -7,7 +7,7 @@ l1_optimizer (L1 generate) for prompt assembly.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from api.services.campaign.critique import summarize_warning_inventory
 
@@ -30,6 +30,7 @@ class ContextData:
     scan_context: dict | None = None
     scan_compact: bool = False
     failure_analysis: FailureAnalysis | None = None
+    search_memory_context: dict | None = None
 
 
 def format_context_sections(ctx: ContextData) -> str:
@@ -73,6 +74,21 @@ def format_context_sections(ctx: ContextData) -> str:
         for i, pat in enumerate(fa.patterns[:3], 1):
             fa_lines.append(f"  {i}. Address {pat.name} ({pat.fraction:.0%} of failures)")
         sections.append("\n".join(fa_lines))
+
+    # Historical intelligence from SearchMemory (Wave 3c)
+    smc = ctx.search_memory_context
+    if smc:
+        hi_lines = ["HISTORICAL INTELLIGENCE:"]
+        if smc.get("failure_clusters"):
+            hi_lines.append(f"  Common failure patterns: {smc['failure_clusters']}")
+        if smc.get("dead_queries"):
+            hi_lines.append(f"  Dead queries (never hit): {smc['dead_queries']}")
+        if smc.get("top_axes"):
+            hi_lines.append(f"  High-impact axes: {smc['top_axes']}")
+        if smc.get("top_values"):
+            hi_lines.append(f"  Best-performing values: {smc['top_values']}")
+        if len(hi_lines) > 1:
+            sections.append("\n".join(hi_lines))
 
     # Task context
     if ctx.task_context:
@@ -166,6 +182,7 @@ class L2IntelligenceData:
     warning_inventory: dict | None = None
     critique_text: str = ""
     l2_directive: str = ""
+    search_memory_context: dict | None = None
 
 
 def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
@@ -197,4 +214,78 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
     if ctx.l2_directive:
         sections.append("PREVIOUS DIRECTIVE:\n" + ctx.l2_directive)
 
+    # Historical intelligence from SearchMemory (Wave 3c)
+    smc = ctx.search_memory_context
+    if smc:
+        hi_lines = ["HISTORICAL INTELLIGENCE:"]
+        if smc.get("axis_rankings"):
+            hi_lines.append(f"  Axis impact rankings: {smc['axis_rankings']}")
+        if smc.get("bottleneck_distribution"):
+            hi_lines.append(f"  Bottleneck distribution: {smc['bottleneck_distribution']}")
+        if len(hi_lines) > 1:
+            sections.append("\n".join(hi_lines))
+
     return "\n\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# SearchMemory context builders (Wave 3c)
+# ---------------------------------------------------------------------------
+
+
+def build_l1_search_memory_context(search_memory: Any) -> dict | None:
+    """Build SearchMemory context dict for L1 generation prompt."""
+    if search_memory is None:
+        return None
+
+    ctx: dict[str, str] = {}
+
+    clusters = search_memory.failure_clusters(3)
+    if clusters:
+        ctx["failure_clusters"] = "; ".join(
+            f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)"
+            for c in clusters
+        )
+
+    dead = search_memory.dead_queries()
+    if dead:
+        ctx["dead_queries"] = f"{len(dead)} queries never hit"
+
+    rankings = search_memory.axis_rankings()[:3]
+    if rankings:
+        ctx["top_axes"] = "; ".join(
+            f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})"
+            for a in rankings
+        )
+        # Top values for the highest-impact axis
+        top_vals = search_memory.top_k_values(rankings[0].axis, k=3)
+        if top_vals:
+            ctx["top_values"] = "; ".join(
+                f"{v.value_preview} (acc={v.mean_accuracy:.1%})"
+                for v in top_vals
+            )
+
+    return ctx if ctx else None
+
+
+def build_l2_search_memory_context(search_memory: Any) -> dict | None:
+    """Build SearchMemory context dict for L2 refine prompt."""
+    if search_memory is None:
+        return None
+
+    ctx: dict[str, str] = {}
+
+    rankings = search_memory.axis_rankings()[:5]
+    if rankings:
+        ctx["axis_rankings"] = "; ".join(
+            f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})"
+            for a in rankings
+        )
+
+    bottleneck = search_memory.bottleneck_distribution()
+    if bottleneck:
+        ctx["bottleneck_distribution"] = "; ".join(
+            f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
+        )
+
+    return ctx if ctx else None

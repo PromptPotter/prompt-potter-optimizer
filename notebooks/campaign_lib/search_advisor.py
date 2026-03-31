@@ -189,6 +189,7 @@ async def scan_advisor(
         pipeline_params=pipeline_params,
         task_description=task_description,
         exclude_nodes=user_excluded or None,
+        search_memory=svc.get("search_memory"),
     )
 
     _display_scan_advisory(advisory)

@@ -22,6 +22,7 @@ from api.models.eval_context import EvalContext
 from api.models.opt_search_point import OptSearchPoint
 from api.models.phase_event import PhaseEvent
 from api.services.backend_client import BackendClient
+from api.services.campaign.adaptive_eval import adapt_eval_set
 from api.services.campaign.callbacks import CycleCallbacks
 from api.services.campaign.campaign_lifecycle import (
     finalize_campaign,
@@ -37,8 +38,9 @@ from api.services.campaign.round_execution import (
     update_round_state,
 )
 from api.services.campaign.state import CycleInitResult, LoopState
-from api.services.metrics import compute_composite_score
+from api.services.metrics import compile_query_difficulty, compute_composite_score
 from api.services.prompt_eval import subsample_eval_data
+from api.services.search.search_memory import SearchMemory
 from api.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
@@ -444,6 +446,17 @@ async def _init_cycle_state(
         cycle_id,
     )
 
+    # 4. SearchMemory — load + refresh from historical data
+    search_memory: SearchMemory | None = None
+    _store = state.eval_ctx.store if state.eval_ctx else None
+    if _store and config.backend_id:
+        from pathlib import Path
+
+        _sm_path = Path(_store.base_dir) / config.backend_id / "search_memory.json"
+        search_memory = SearchMemory.load(_sm_path)
+        if search_memory.refresh(_store, config.backend_id):
+            search_memory.save(_sm_path)
+
     emit_phase(
         on_phase,
         "init",
@@ -464,6 +477,7 @@ async def _init_cycle_state(
         round_eval_data=round_eval_data,
         escalation_checks=escalation_checks,
         resumed_from_round=resumed_from_round,
+        search_memory=search_memory,
     )
 
 
@@ -593,6 +607,8 @@ async def run_optimization(
     round_eval_data = init.round_eval_data
     escalation_checks = init.escalation_checks
     resumed_from_round = init.resumed_from_round
+    search_memory = init.search_memory
+    state.search_memory = search_memory
 
     # -- Round loop --
     stop_reason: StopReason | None = None
@@ -637,6 +653,7 @@ async def run_optimization(
                 cycle_id,
                 cb,
                 escalation_checks=_round_checks,
+                search_memory=search_memory,
             )
             update_round_state(state, round_result, round_num, prompt_node=config.prompt_node)
 
@@ -695,6 +712,27 @@ async def run_optimization(
                     round_result,
                     round_num,
                 )
+
+            # SearchMemory refresh — pick up results from this round
+            if search_memory and state.eval_ctx and state.eval_ctx.store:
+                from pathlib import Path
+
+                _sm_store = state.eval_ctx.store
+                if search_memory.refresh(_sm_store, config.backend_id):
+                    _sm_path = Path(_sm_store.base_dir) / config.backend_id / "search_memory.json"
+                    search_memory.save(_sm_path)
+
+            # Adaptive eval set — swap dead queries for discriminating ones
+            if round_num >= 2 and not is_probe:
+                _hist = [r.results for r in state.rounds if r.results]
+                if len(_hist) >= 3:
+                    _qd = compile_query_difficulty(_hist)
+                    round_eval_data, _adapt = adapt_eval_set(
+                        round_eval_data, _qd, eval_data,
+                        seed=config.seed + round_num,
+                    )
+                    if not _adapt.get("unchanged"):
+                        logger.info("Adaptive eval: %s", _adapt)
 
             # Stopping conditions
             _stop = await _check_stopping_conditions(

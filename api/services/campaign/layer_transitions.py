@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING
 from api.config.optimizer_pipeline import llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.formatting import L2IntelligenceData, format_l2_intelligence
+from api.services.campaign.formatting import (
+    L2IntelligenceData,
+    build_l2_search_memory_context,
+    format_l2_intelligence,
+)
 from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
@@ -57,6 +61,7 @@ def _build_l2_prompt(
     pipeline_params: dict | None,
     pipeline_schema: PipelineSchema | None,
     escalation_context: dict | None,
+    search_memory: object | None = None,
 ) -> str:
     """Assemble the L2 refine_context prompt from all context sources."""
     pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
@@ -79,6 +84,7 @@ def _build_l2_prompt(
         warning_inventory=opt_sp.warning_inventory or None,
         critique_text=opt_sp.critique_text,
         l2_directive=opt_sp.l2_directive,
+        search_memory_context=build_l2_search_memory_context(search_memory),
     ))
 
     response_schema_suffix = (
@@ -164,6 +170,7 @@ async def refine_context(
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
     escalation_context: dict | None = None,
+    search_memory: object | None = None,
 ) -> TransitionResult:
     """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
 
@@ -174,6 +181,7 @@ async def refine_context(
     """
     prompt = _build_l2_prompt(
         opt_sp, pipeline_params, pipeline_schema, escalation_context,
+        search_memory=search_memory,
     )
 
     response = await llm_call(

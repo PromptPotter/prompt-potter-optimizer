@@ -231,6 +231,7 @@ class BackendClient:
         query: str,
         pipeline_params: dict[str, Any] | None = None,
         ranking_prompt: str | None = None,
+        precomputed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """POST /matches — translate pipeline_params to TermNorm wire format.
 
@@ -260,6 +261,10 @@ class BackendClient:
 
         if wire_overrides:
             payload["node_config"] = wire_overrides
+
+        # Wave 4: pass precomputed node outputs (gracefully ignored by older backends)
+        if precomputed:
+            payload["precomputed"] = precomputed
 
         client = self._get_http()
         resp = await client.post(

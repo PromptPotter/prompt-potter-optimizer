@@ -290,6 +290,7 @@ async def _do_l2_transition(
             pipeline_params=current_pp,
             pipeline_schema=config.pipeline_schema,
             escalation_context=escalation_context,
+            search_memory=state.search_memory,
         )
     # Update task_context if L2 refined it
     if tr.task_context:

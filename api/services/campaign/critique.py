@@ -59,6 +59,9 @@ class CritiqueContext:
     degradation_threshold: float = 0.4
     near_miss_ratio: float = 0.3
 
+    # SearchMemory context (M8 Wave 3c)
+    search_memory_context: dict | None = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -517,6 +520,16 @@ def assemble_critique_sections(ctx: CritiqueContext) -> str:
             "\n".join(f"  {a}" for a in anomalies),
         )
         sections.insert(1, anomaly_block)
+
+    # SearchMemory historical context (Wave 3c)
+    smc = ctx.search_memory_context
+    if smc:
+        sm_lines = ["## HISTORICAL INTELLIGENCE"]
+        if smc.get("discriminating_queries"):
+            sm_lines.append(f"  Discriminating queries: {smc['discriminating_queries']}")
+        if smc.get("failure_clusters"):
+            sm_lines.append(f"  Failure clusters: {smc['failure_clusters']}")
+        sections.append("\n".join(sm_lines))
 
     return "\n\n".join(s for s in sections if s)
 

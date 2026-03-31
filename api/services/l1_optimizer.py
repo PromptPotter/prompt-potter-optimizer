@@ -77,6 +77,7 @@ async def l1_generate(
     is_probe_round: bool = False,
     scan_compact: bool = False,
     failure_analysis: FailureAnalysis | None = None,
+    search_memory_context: dict | None = None,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -111,6 +112,7 @@ async def l1_generate(
                 scan_context=scan_context,
                 scan_compact=scan_compact,
                 failure_analysis=failure_analysis,
+                search_memory_context=search_memory_context,
             )
         ),
         instruction_spec=instruction_spec,

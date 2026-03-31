@@ -164,10 +164,12 @@ class SearchMemory:
     def query_sensitive_axes(self, query: str) -> list[str]:
         """Return axes that most affect this query's outcome.
 
-        Placeholder — full implementation requires per-query × per-axis
-        tracking (Wave 3e). Returns empty list for now.
+        Uses cohort analysis results if available. Falls back to empty list
+        when no per-query scan data has been ingested.
         """
-        return []
+        if not hasattr(self, "_query_axis_sensitivity"):
+            return []
+        return self._query_axis_sensitivity.get(query, [])
 
     # --- Failure Modes ---
 
@@ -207,8 +209,32 @@ class SearchMemory:
         return clusters
 
     def parameter_failure_correlation(self, axis: str) -> dict[str, float]:
-        """Placeholder — requires per-axis × failure-mode cross-tabulation (Wave 3e)."""
-        return {}
+        """Return failure-mode correlation for an axis (Wave 3e).
+
+        Returns {failure_mode: delta} from cohort analysis if available.
+        """
+        if not hasattr(self, "_axis_cohort_deltas"):
+            return {}
+        return self._axis_cohort_deltas.get(axis, {})
+
+    def ingest_cohort_analysis(self, cohort_result: Any) -> None:
+        """Ingest cohort sensitivity analysis results (Wave 3e).
+
+        Populates per-query sensitive axes and per-axis failure correlations
+        from ``CohortAnalysisResult``.
+        """
+        self._query_axis_sensitivity: dict[str, list[str]] = {}
+        self._axis_cohort_deltas: dict[str, dict[str, float]] = {}
+
+        for cs in cohort_result.cohort_sensitivities:
+            # Per-axis → failure mode deltas
+            self._axis_cohort_deltas.setdefault(cs.axis, {})[cs.cohort] = cs.delta
+            # Per-query → sensitive axes (for queries in this cohort)
+            for query in cohort_result.cohorts.get(cs.cohort, []):
+                if query not in self._query_axis_sensitivity:
+                    self._query_axis_sensitivity[query] = []
+                if cs.axis not in self._query_axis_sensitivity[query]:
+                    self._query_axis_sensitivity[query].append(cs.axis)
 
     # --- Lifecycle ---
 

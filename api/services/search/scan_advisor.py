@@ -268,6 +268,7 @@ def _build_advisor_prompt(
     prompt_field_axes: list[str],
     pipeline_description: str,
     task_description: str | dict = "",
+    search_memory_section: str = "",
 ) -> str:
     """Build the LLM prompt for scan configuration advice.
 
@@ -285,6 +286,7 @@ def _build_advisor_prompt(
             f"{json.dumps(prompt_field_axes, indent=2)}"
         ),
         _advisor_llm_context_section(llm_context),
+        search_memory_section,
         _ADVISOR_ANALYSIS_APPROACH,
         _ADVISOR_OUTPUT_FORMAT,
     ]
@@ -343,6 +345,35 @@ def _extract_prompt_field_axes(variant_library: dict) -> list[str]:
     """Extract prompt field axis names from variant library."""
     pf = variant_library.get("prompt_fields", {})
     return sorted(pf.keys())
+
+
+def _build_search_memory_section(search_memory: Any) -> str:
+    """Build the SearchMemory context section for the advisor prompt."""
+    if search_memory is None:
+        return ""
+
+    lines = ["## Historical Intelligence (from previous evaluations)"]
+
+    rankings = search_memory.axis_rankings()[:5]
+    if rankings:
+        lines.append("Parameter impact rankings (by effect size):")
+        for a in rankings:
+            top_vals = search_memory.top_k_values(a.axis, k=3)
+            val_str = ", ".join(
+                f"{v.value_preview} ({v.mean_accuracy:.1%})" for v in top_vals
+            )
+            lines.append(
+                f"  - {a.axis}: effect={a.effect_size:.3f}, "
+                f"{a.classification} [{val_str}]"
+            )
+
+    bottleneck = search_memory.bottleneck_distribution()
+    if bottleneck:
+        lines.append("Pipeline bottleneck distribution:")
+        for step, frac in bottleneck.items():
+            lines.append(f"  - {step}: {frac:.0%} of failures")
+
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def _validate_advisory(
@@ -541,6 +572,7 @@ async def advise_scan_config(
     pipeline_params: dict | None = None,
     task_description: str | dict = "",
     exclude_nodes: list[str] | None = None,
+    search_memory: Any = None,
 ) -> dict:
     """Generate LLM-powered scan configuration advice.
 
@@ -574,6 +606,8 @@ async def advise_scan_config(
     llm_context = build_llm_context(schema=pipeline_schema, excluded_nodes=excluded_nodes)
     prompt_field_axes = _extract_prompt_field_axes(variant_library)
 
+    sm_section = _build_search_memory_section(search_memory)
+
     prompt = _build_advisor_prompt(
         pipeline_overview=pipeline_overview,
         tunable_params=tunable_params,
@@ -581,6 +615,7 @@ async def advise_scan_config(
         prompt_field_axes=prompt_field_axes,
         pipeline_description=pipeline_schema.description,
         task_description=task_description,
+        search_memory_section=sm_section,
     )
 
     response = await llm_client.chat(

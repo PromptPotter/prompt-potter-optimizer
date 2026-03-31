@@ -267,6 +267,25 @@ class PipelineSchema(BaseModel):
         """
         return [node.name for node in self.nodes if node.prompt_meta is not None]
 
+    def split_at_ranker(self) -> tuple[list[str], list[str]]:
+        """Split node names into (upstream, ranker_and_downstream).
+
+        The first node with ``node_type == "ranker"`` marks the split point.
+        Used by partial pipeline caching (Wave 4) to compute upstream config
+        hashes.  When no ranker exists, all nodes are upstream.
+        """
+        upstream: list[str] = []
+        downstream: list[str] = []
+        found_ranker = False
+        for node in self.nodes:
+            if not found_ranker and node.node_type == NodeType.RANKER:
+                found_ranker = True
+            if found_ranker:
+                downstream.append(node.name)
+            else:
+                upstream.append(node.name)
+        return upstream, downstream
+
     def required_pipeline_key(self) -> str:
         """The pipeline_data key that gates trace validity.
 

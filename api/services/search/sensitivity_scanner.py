@@ -177,6 +177,10 @@ async def sensitivity_scan(
                 current_val = (baseline.pipeline_params or {}).get(axis_name)
 
             if value == current_val:
+                _bl_pq_hits = {
+                    r.get("query", ""): bool(r.get("hit"))
+                    for r in baseline_results if r.get("query")
+                }
                 rows.append({
                     "axis": axis_name, "axis_type": axis_type,
                     "value_idx": vi,
@@ -185,6 +189,7 @@ async def sensitivity_scan(
                     "total": baseline_scores["total"],
                     "accuracy": baseline_acc, "delta": 0.0,
                     "errors": baseline_errors,
+                    "per_query_hits": _bl_pq_hits,
                 })
                 _cb({
                     "type": "variant_done",
@@ -234,6 +239,11 @@ async def sensitivity_scan(
             composite = scores.get("composite", acc)
             delta = composite - baseline_composite
             variant_errors = scores.get("errors", 0)
+            # Per-query hit map for cohort sensitivity (Wave 3e)
+            _pq_hits = {
+                r.get("query", ""): bool(r.get("hit"))
+                for r in results if r.get("query")
+            }
             rows.append({
                 "axis": axis_name, "axis_type": axis_type,
                 "value_idx": vi,
@@ -243,6 +253,7 @@ async def sensitivity_scan(
                 "accuracy": acc, "delta": delta,
                 "composite": composite,
                 "errors": variant_errors,
+                "per_query_hits": _pq_hits,
             })
             _cb({
                 "type": "variant_done",
