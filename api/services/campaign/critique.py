@@ -205,13 +205,15 @@ Analyze all data above and return JSON:
   "negative_critique": "<what is failing — root causes and blockers>",
   "priority_fix": "<what change(s) would have the most impact>",
   "suggested_axes": ["<pipeline_param or prompt_field to try next>"],
+  "failure_highlights": ["<Query: ... | Predicted: ... | GT: ...>", ...],
   "summary": "<2-3 sentence actionable critique for the next candidate generator>"
 }
 Rules:
 - positive_critique: identify success patterns from the data (hits, near-misses, rank distribution)
 - negative_critique: reference specific stats from the sections above
 - suggested_axes: name parameters or fields visible in the data above
-- All 5 fields are fed to the next generation round — be concise and actionable
+- failure_highlights: pick 3-5 most actionable failures (Query/Predicted/GT). These are the ONLY failure examples the next generator sees — choose ones that best illustrate fixable patterns
+- summary, priority_fix, suggested_axes, and failure_highlights are fed to the next generation round — be concise and actionable
 """
 
 
@@ -239,7 +241,6 @@ def _pipeline_health_section(
 
     web_warning_count = 0
     termination: Counter[str] = Counter()
-    times: list[float] = []
     error_count = 0
 
     for r in results:
@@ -248,9 +249,6 @@ def _pipeline_health_section(
         if diag.get("warnings"):
             web_warning_count += 1
         termination[pd.get("terminated_at", "unknown")] += 1
-        t = pd.get("total_time")
-        if t is not None:
-            times.append(float(t))
         if r.get("error"):
             error_count += 1
 
@@ -261,13 +259,6 @@ def _pipeline_health_section(
         for step, count in termination.most_common():
             lines.append(f"  {step}: {count}/{total}")
     lines.append(f"Step degradation: {deg_rate:.0%} of queries")
-    if times:
-        ts = sorted(times)
-        lines.append(
-            f"Timing: p50={ts[len(ts) // 2]:.0f}ms "
-            f"p90={ts[int(len(ts) * 0.9)]:.0f}ms "
-            f"max={ts[-1]:.0f}ms"
-        )
     lines.append(f"Error rate: {error_count / total:.0%}")
 
     if deg_rate > degradation_threshold:
@@ -284,8 +275,12 @@ def _rank_analysis_section(
     candidate_keys: list[str] | None = None,
     *,
     near_miss_ratio: float = 0.3,
-) -> str:
-    """Rank buckets, top-k recall, and near-miss patterns."""
+) -> tuple[str, set[str]]:
+    """Rank buckets, top-k recall, and near-miss patterns.
+
+    Returns ``(section_text, near_miss_queries)`` so failure_details can
+    skip queries already shown here.
+    """
     rank_map: dict[int, int | None] = {}
     for i, r in enumerate(results):
         if not r.get("error"):
@@ -324,9 +319,11 @@ def _rank_analysis_section(
         else:
             rank_buckets["not_found"] += 1
 
+    nm_queries = {nm["query"] for nm in near_misses}
+
     n_valid = sum(1 for r in results if not r.get("error"))
     if n_valid == 0:
-        return ""
+        return "", nm_queries
 
     lines = ["## CANDIDATE RANK ANALYSIS"]
     lines.append("Where does ground truth appear in candidate list?")
@@ -353,7 +350,7 @@ def _rank_analysis_section(
             f"{len(near_misses)}/{len(misses)} misses but not ranked first."
         )
 
-    return "\n".join(lines)
+    return "\n".join(lines), nm_queries
 
 
 def _round_evolution_section(
@@ -402,36 +399,43 @@ def _round_evolution_section(
 
 
 def _query_category_section(results: list[dict]) -> str:
-    """Failures grouped by termination step."""
-    failures_by_step: dict[str, list[str]] = {}
+    """Failures grouped by termination step (counts only)."""
+    step_counts: Counter[str] = Counter()
     for r in results:
         if r.get("hit") or r.get("error"):
             continue
         pd = r.get("pipeline_data") or {}
-        step = pd.get("terminated_at", "unknown")
-        failures_by_step.setdefault(step, []).append(r.get("query", "?")[:80])
+        step_counts[pd.get("terminated_at", "unknown")] += 1
 
-    if not failures_by_step:
+    if not step_counts:
         return ""
 
-    lines = ["## QUERY CATEGORY ANALYSIS"]
+    lines = ["## QUERY CATEGORIES"]
     lines.append("Failures by termination step:")
-    for step, queries in failures_by_step.items():
-        lines.append(f"  {step}: {len(queries)}")
-        for q in queries[:5]:
-            lines.append(f"    - {q}")
+    for step, count in step_counts.most_common():
+        lines.append(f"  {step}: {count}")
     return "\n".join(lines)
 
 
 
-def _failure_details_section(results: list[dict], candidate_keys: list[str] | None = None) -> str:
-    """Per-query failure breakdown with rank and degradation info."""
+def _failure_details_section(
+    results: list[dict],
+    candidate_keys: list[str] | None = None,
+    near_miss_queries: set[str] | None = None,
+) -> str:
+    """Per-query failure breakdown with rank and degradation info.
+
+    Skips queries already shown in rank_analysis near-miss section to
+    avoid duplication.
+    """
     failures = [r for r in results if not r.get("hit") and not r.get("error")]
+    if near_miss_queries:
+        failures = [r for r in failures if r.get("query", "") not in near_miss_queries]
     if not failures:
         return ""
 
-    lines = [f"## FAILURE DETAILS ({len(failures)} queries)"]
-    for r in failures[:15]:
+    lines = [f"## FAILURE DETAILS ({len(failures)} non-near-miss failures)"]
+    for r in failures[:8]:
         pd = r.get("pipeline_data") or {}
         gt = r.get("ground_truth", "?")
         rank = find_rank(get_candidates(r, candidate_keys), gt)
@@ -447,13 +451,13 @@ def _failure_details_section(results: list[dict], candidate_keys: list[str] | No
 
 
 def _success_details_section(results: list[dict]) -> str:
-    """Per-query success samples."""
+    """Per-query success count + brief samples."""
     successes = [r for r in results if r.get("hit")]
     if not successes:
         return ""
 
-    lines = [f"## SUCCESS DETAILS ({len(successes)} queries)"]
-    for r in successes[:10]:
+    lines = [f"## SUCCESSES ({len(successes)} queries)"]
+    for r in successes[:2]:
         pd = r.get("pipeline_data") or {}
         lines.append(
             f"  HIT  [{pd.get('terminated_at', '?')}]  "
@@ -471,6 +475,13 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
     results = ctx.results
     anomalies: list[str] = []
 
+    rank_text, nm_queries = _rank_analysis_section(
+        results,
+        anomalies,
+        candidate_keys=ctx.candidate_keys or None,
+        near_miss_ratio=ctx.near_miss_ratio,
+    )
+
     sections = [
         _summary_section(ctx),
         _pipeline_health_section(
@@ -478,17 +489,16 @@ def assemble_critique_prompt(ctx: CritiqueContext) -> str:
             anomalies,
             degradation_threshold=ctx.degradation_threshold,
         ),
-        _rank_analysis_section(
-            results,
-            anomalies,
-            candidate_keys=ctx.candidate_keys or None,
-            near_miss_ratio=ctx.near_miss_ratio,
-        ),
+        rank_text,
         _round_evolution_section(ctx.round_history, anomalies),
         _query_category_section(results),
     ]
     sections += [
-        _failure_details_section(results, candidate_keys=ctx.candidate_keys or None),
+        _failure_details_section(
+            results,
+            candidate_keys=ctx.candidate_keys or None,
+            near_miss_queries=nm_queries,
+        ),
         _success_details_section(results),
         CRITIQUE_TASK,
     ]
@@ -550,7 +560,7 @@ class CritiqueAgent:
 
 
 def _parse_critique(content: str) -> dict:
-    """Parse LLM critique response into the 5-field dict."""
+    """Parse LLM critique response into the 6-field dict."""
     try:
         result = json.loads(content)
         return {
@@ -558,6 +568,7 @@ def _parse_critique(content: str) -> dict:
             "negative_critique": result.get("negative_critique", ""),
             "priority_fix": result.get("priority_fix", ""),
             "suggested_axes": result.get("suggested_axes", []),
+            "failure_highlights": result.get("failure_highlights", []),
             "summary": result.get("summary", content),
         }
     except (json.JSONDecodeError, TypeError):
@@ -566,23 +577,30 @@ def _parse_critique(content: str) -> dict:
             "negative_critique": "",
             "priority_fix": "",
             "suggested_axes": [],
+            "failure_highlights": [],
             "summary": content,
         }
 
 
 def format_critique_for_prompt(critique: dict) -> str:
-    """Format critique dict into text for injection into L1/L2 prompts."""
+    """Format critique dict into compact text for injection into L1/L2 prompts.
+
+    Emits only the actionable fields: summary, priority_fix, suggested_axes,
+    and failure_highlights. Diagnostic detail (positive/negative_critique) stays
+    internal to critique — ``summary`` already distills it.
+    """
     parts = []
-    if critique.get("positive_critique"):
-        parts.append(f"Strengths: {critique['positive_critique']}")
-    if critique.get("negative_critique"):
-        parts.append(f"Weaknesses: {critique['negative_critique']}")
+    if critique.get("summary"):
+        parts.append(critique["summary"])
     if critique.get("priority_fix"):
         parts.append(f"Priority fix: {critique['priority_fix']}")
     if critique.get("suggested_axes"):
         parts.append(f"Suggested axes: {', '.join(critique['suggested_axes'])}")
-    if critique.get("summary"):
-        parts.append(f"Summary: {critique['summary']}")
+    highlights = critique.get("failure_highlights", [])
+    if highlights:
+        parts.append("Key failures:")
+        for h in highlights[:5]:
+            parts.append(f"  {h}")
     return "\n".join(parts)
 
 

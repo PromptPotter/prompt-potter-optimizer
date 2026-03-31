@@ -17,7 +17,6 @@ from api.models.pipeline_schema import PipelineSchema
 from api.services.campaign.formatting import (
     ContextData,
     format_context_sections,
-    format_failure_examples,
 )
 from api.services.llm_client import LLMClientBase
 from api.services.metrics import compute_composite_score, count_degraded_queries
@@ -73,7 +72,7 @@ async def l1_generate(
     model: str | None = None,
     scan_context: dict | None = None,
     is_probe_round: bool = False,
-    max_failures: int = 15,
+    scan_compact: bool = False,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -88,12 +87,6 @@ async def l1_generate(
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
-    failure_examples = format_failure_examples(
-        current_results,
-        opt_sp.warning_inventory or None,
-        is_probe_round,
-        max_failures=max_failures,
-    )
     instruction_spec = '  - "instruction": full prompt template text (keep template variables)\n'
 
     meta_prompt = load_optimizer_prompt("meta_scan_aware").compile_prompt(
@@ -101,7 +94,6 @@ async def l1_generate(
         accuracy_pct=f"{current_accuracy:.1%}",
         n_queries=str(len(current_results)),
         rendered_prompt=opt_sp.render(),
-        failure_examples=failure_examples,
         context_sections=format_context_sections(
             ContextData(
                 task_context=opt_sp.task_context or None,
@@ -113,6 +105,7 @@ async def l1_generate(
                 escalation_journal=opt_sp.escalation_journal or None,
                 is_probe_round=is_probe_round,
                 scan_context=scan_context,
+                scan_compact=scan_compact,
             )
         ),
         instruction_spec=instruction_spec,

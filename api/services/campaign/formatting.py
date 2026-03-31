@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from api.config.settings import DISPLAY_TRUNCATE
 from api.services.campaign.critique import summarize_warning_inventory
 
 
@@ -25,34 +24,7 @@ class ContextData:
     escalation_journal: list[dict] | None = None
     is_probe_round: bool = False
     scan_context: dict | None = None
-
-
-def format_failure_examples(
-    current_results: list,
-    warning_inventory: dict | None,
-    is_probe_round: bool,
-    max_failures: int = 15,
-) -> str:
-    """Format failure examples with optional warning annotations."""
-    failures = [r for r in current_results if not r["hit"] and not r.get("error")]
-    lines = []
-    for r in failures[:max_failures]:
-        line = (
-            f"  Query: {r['query'][:DISPLAY_TRUNCATE]}  |  "
-            f"Predicted: {r['predicted'][:DISPLAY_TRUNCATE]}  |  "
-            f"GT: {r['ground_truth'][:DISPLAY_TRUNCATE]}"
-        )
-        if warning_inventory:
-            entry = warning_inventory.get(r["query"])
-            if entry and entry.get("warnings"):
-                top_warn = max(entry["warnings"], key=entry["warnings"].get)
-                wcount = entry["warnings"][top_warn]
-                seen = entry.get("rounds_seen", 0)
-                threshold = 1 if is_probe_round else 2
-                if wcount >= threshold:
-                    line += f"  [{top_warn} {wcount}/{seen} rounds]"
-        lines.append(line)
-    return "\n".join(lines)
+    scan_compact: bool = False
 
 
 def format_context_sections(ctx: ContextData) -> str:
@@ -65,22 +37,22 @@ def format_context_sections(ctx: ContextData) -> str:
     """
     sections: list[str] = []
 
-    # Scan analytics (tested ranges + sensitivity)
+    # Scan analytics — full on first round, sensitivity-only thereafter
     sc = ctx.scan_context
     if sc:
-        scan_parts = [f"SCAN ANALYTICS (sensitivity scan results):\n"
-                      f"Tested values per axis:\n{sc['tested_values']}"]
-        if sc.get("sensitivity_text"):
-            scan_parts.append(f"Top sensitivity drivers:\n{sc['sensitivity_text']}")
-        sections.append("\n".join(scan_parts))
+        if ctx.scan_compact and sc.get("sensitivity_text"):
+            sections.append(f"SCAN:\n{sc['sensitivity_text']}")
+        else:
+            scan_parts = [f"SCAN:\nTested values per axis:\n{sc['tested_values']}"]
+            if sc.get("sensitivity_text"):
+                scan_parts.append(f"Top sensitivity drivers:\n{sc['sensitivity_text']}")
+            sections.append("\n".join(scan_parts))
 
     # Task context
     if ctx.task_context:
         tc_lines = "\n".join(f"  {k}: {v}" for k, v in ctx.task_context.items() if v)
         if tc_lines:
-            sections.append(
-                f"TASK CONTEXT (domain understanding — use to guide your changes):\n{tc_lines}"
-            )
+            sections.append(f"CONTEXT:\n{tc_lines}")
 
     # Escalation / probe — unified from escalation_journal
     escalation_journal = ctx.escalation_journal
@@ -139,28 +111,20 @@ def format_context_sections(ctx: ContextData) -> str:
 
     # L2 directive
     if ctx.l2_directive:
-        sections.append(
-            "L2 DIRECTIVE (from context refinement — additional "
-            f"guidance for this round):\n{ctx.l2_directive}"
-        )
+        sections.append(f"DIRECTIVE:\n{ctx.l2_directive}")
 
     # Critique — skip when L2 directive is present (L2 already absorbed critique)
     if ctx.critique_text and not ctx.l2_directive:
-        sections.append(
-            "CRITIQUE (from previous evaluation — use this to guide "
-            f"your changes):\n{ctx.critique_text}"
-        )
+        sections.append(f"CRITIQUE:\n{ctx.critique_text}")
 
     # Thinking styles
     if ctx.thinking_styles:
         styles = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(ctx.thinking_styles))
-        sections.append(
-            f"THINKING STYLES (consider these approaches when generating variants):\n{styles}"
-        )
+        sections.append(f"THINKING STYLES:\n{styles}")
 
     # Strategic plan
     if ctx.plan:
-        sections.append(f"STRATEGIC GUIDANCE (from optimization plan):\n{ctx.plan}")
+        sections.append(f"PLAN:\n{ctx.plan}")
 
     return "\n\n".join(sections)
 
@@ -195,16 +159,10 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
 
     # Previous critique
     if ctx.critique_text:
-        sections.append(
-            "PREVIOUS CRITIQUE (build on this analysis, don't repeat it):\n"
-            + ctx.critique_text
-        )
+        sections.append("CRITIQUE:\n" + ctx.critique_text)
 
     # Previous L2 directive
     if ctx.l2_directive:
-        sections.append(
-            "YOUR PREVIOUS DIRECTIVE (evolve or supersede — do not repeat verbatim):\n"
-            + ctx.l2_directive
-        )
+        sections.append("PREVIOUS DIRECTIVE:\n" + ctx.l2_directive)
 
     return "\n\n".join(sections)

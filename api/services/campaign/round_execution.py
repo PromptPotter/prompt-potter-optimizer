@@ -134,7 +134,7 @@ async def _generate_or_load_candidates(
             model=config.model,
             scan_context=config.scan_context,
             is_probe_round=state.probe_next_round,
-            max_failures=config.max_failures,
+            scan_compact=(round_num > 0),
         )
 
     if campaign_store and cycle_id:

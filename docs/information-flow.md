@@ -2,7 +2,7 @@
 
 Every node in the optimization loop is an LLM call with a prompt. This document maps what goes **into** and **out of** each prompt, and what the target backend sees.
 
-**Design principle:** Each node receives only the data it needs. Critique digests raw eval data into structured findings; downstream nodes (L1, L2) consume critique's output rather than re-analyzing raw data.
+**Design principle:** Each node receives only the data it needs. Critique digests raw eval data into structured findings; downstream nodes (L1, L2) consume critique's compact output rather than re-analyzing raw data. Critique is the **sole intelligence bridge** between eval results and the generation loop — L1 never sees raw failure lists.
 
 ---
 
@@ -16,15 +16,14 @@ Every node in the optimization loop is an LLM call with a prompt. This document 
 │  │                                                                           │  │
 │  │  PROMPT INPUTS:                                                           │  │
 │  │    {{rendered_prompt}}    ◄── opt_sp.render() (6 fields assembled)        │  │
-│  │    {{failure_examples}}   ◄── Q/Pred/GT lines + warning annotations      │  │
 │  │    {{context_sections}}   ◄── intelligence bundle (formatting.py):       │  │
-│  │                               SCAN ANALYTICS — tested values + sensitivity│  │
-│  │                               TASK CONTEXT — domain fields (if non-empty) │  │
+│  │                               SCAN — sensitivity ranking (full on r0)     │  │
+│  │                               CONTEXT — domain fields (if non-empty)      │  │
 │  │                               ESCALATION — journal + warnings (if any)    │  │
-│  │                               L2 DIRECTIVE — from L2 (if L2 ran)          │  │
-│  │                               CRITIQUE — only when l2_directive absent    │  │
+│  │                               DIRECTIVE — from L2 (if L2 ran)             │  │
+│  │                               CRITIQUE — only when directive absent       │  │
 │  │                               THINKING STYLES — sampled (if available)    │  │
-│  │                               STRATEGIC GUIDANCE — plan (if L3 ran)       │  │
+│  │                               PLAN — from L3 (if L3 ran)                  │  │
 │  │    {{accuracy_pct}}       ◄── "85.3%"                                    │  │
 │  │    {{n_variants}}         ◄── how many candidates to generate            │  │
 │  │    {{n_queries}}          ◄── eval dataset size                          │  │
@@ -75,28 +74,27 @@ Every node in the optimization loop is an LLM call with a prompt. This document 
 │         │  _select_round_winner()                                              │
 │         │    best composite >= current + improvement_threshold                 │
 │         ▼                                                                       │
-│  ┌─ CRITIQUE (LLM) ─────────────────────────────────────────────────────────┐  │
+│  ┌─ CRITIQUE (LLM) — sole intelligence bridge ──────────────────────────────┐  │
 │  │  prompt: assembled in critique.py (not a template file)                   │  │
 │  │                                                                           │  │
 │  │  PROMPT INPUTS:                                                           │  │
 │  │    EVALUATION SUMMARY     ◄── accuracy, composite, degraded_count,       │  │
 │  │                               round_num, stall_count, best_accuracy      │  │
 │  │    ANOMALY FLAGS          ◄── [HIGH] / [MEDIUM] flags                    │  │
-│  │    PIPELINE HEALTH        ◄── termination distribution, step             │  │
-│  │                               degradation%, timing p50/p90, error rate   │  │
-│  │    RANK ANALYSIS          ◄── rank buckets (1, 2-5, 6-10, 11-20,        │  │
-│  │                               not_found), top-k recall, near-miss        │  │
+│  │    PIPELINE HEALTH        ◄── termination distribution, degradation%,    │  │
+│  │                               error rate                                 │  │
+│  │    RANK ANALYSIS          ◄── rank buckets, top-k recall, near-miss      │  │
 │  │    ROUND EVOLUTION        ◄── accuracy trajectory, param changes         │  │
-│  │    QUERY CATEGORIES       ◄── failures grouped by termination step       │  │
-│  │    FAILURE DETAILS        ◄── per-query: Q/Pred/GT + rank + degradation  │  │
-│  │    SUCCESS DETAILS        ◄── per-query: what worked                     │  │
+│  │    QUERY CATEGORIES       ◄── failure counts by termination step         │  │
+│  │    FAILURE DETAILS        ◄── non-near-miss failures (8 max, deduped)    │  │
+│  │    SUCCESSES              ◄── count + 2 examples                         │  │
 │  │                                                                           │  │
-│  │  OUTPUT:                                                                  │  │
-│  │    positive_critique  → patterns to extend                               │  │
-│  │    negative_critique  → root causes and blockers                         │  │
+│  │  OUTPUT (compact downstream via format_critique_for_prompt):              │  │
+│  │    summary            → 2-3 sentence actionable for next L1              │  │
 │  │    priority_fix       → highest-impact change                            │  │
 │  │    suggested_axes     → ["param or field to try next", ...]              │  │
-│  │    summary            → 2-3 sentence actionable for next L1              │  │
+│  │    failure_highlights → 3-5 most actionable Q/Pred/GT lines              │  │
+│  │    (positive/negative_critique kept internal — summary distills them)     │  │
 │  └───────────────────────────────────────────────────────────────────────────┘  │
 │         │                                                                       │
 │         │  update_round_state()                                                │
@@ -163,10 +161,11 @@ OUTPUT:
 
 | Node | File | Line |
 |------|------|------|
-| L1 Generate | `api/services/l1_optimizer.py` | `l1_generate():68` |
-| Eval gateway | `api/services/prompt_eval.py` | `eval_search_point():452` |
-| Backend wire | `api/services/backend_client.py` | `run_match():229` |
-| Critique | `api/services/campaign/critique.py` | `CritiqueAgent.run():528` |
-| L2 Refine | `api/services/campaign/layer_transitions.py` | `refine_context():174` |
-| L3 Plan | `api/services/campaign/layer_transitions.py` | `modify_plan():205` |
+| L1 Generate | `api/services/l1_optimizer.py` | `l1_generate():66` |
+| Eval gateway | `api/services/prompt_eval.py` | `eval_search_point()` |
+| Backend wire | `api/services/backend_client.py` | `run_match()` |
+| Critique | `api/services/campaign/critique.py` | `CritiqueAgent.run()` |
+| L2 Refine | `api/services/campaign/layer_transitions.py` | `refine_context()` |
+| L3 Plan | `api/services/campaign/layer_transitions.py` | `modify_plan()` |
+| Formatting | `api/services/campaign/formatting.py` | `format_context_sections()`, `format_l2_intelligence()` |
 | Prompt templates | `api/config/optimizer_prompts/` | `meta_scan_aware.json`, `l2_*.json`, `l3_*.json` |

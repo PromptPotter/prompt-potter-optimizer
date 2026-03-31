@@ -82,10 +82,11 @@ class TestProbeRoundEnrichment:
         assert "degraded_rate=40%" in prompt
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("is_probe,expect_annotation", [(True, True), (False, False)])
-    async def test_annotation_threshold_depends_on_probe(
-        self, monkeypatch, is_probe, expect_annotation,
+    @pytest.mark.parametrize("is_probe,expect_probe_section", [(True, True), (False, False)])
+    async def test_probe_round_injects_warning_context(
+        self, monkeypatch, is_probe, expect_probe_section,
     ):
+        """Probe rounds inject warning inventory context; normal rounds don't."""
         captured = _capture_llm_prompts(monkeypatch)
 
         inv = {
@@ -95,8 +96,13 @@ class TestProbeRoundEnrichment:
                 "last_terminated_at": "token_matching",
             },
         }
+        ej = [{"problem_step": "web_search", "degraded_rate": 0.4, "warning_types": {"web_search:timeout": 1}}]
 
-        osp = OptSearchPoint(instruction="test prompt", warning_inventory=inv)
+        osp = OptSearchPoint(
+            instruction="test prompt",
+            warning_inventory=inv,
+            escalation_journal=ej,
+        )
         await l1_generate(
             osp, 0.5, [
                 {"query": "aspirin", "predicted": "wrong", "ground_truth": "Aspirin", "hit": False},
@@ -105,10 +111,12 @@ class TestProbeRoundEnrichment:
             is_probe_round=is_probe,
         )
 
-        if expect_annotation:
-            assert "[web_search:timeout 1/1 rounds]" in captured[0]
+        if expect_probe_section:
+            assert "PROBE ROUND" in captured[0]
+            assert "web_search:timeout" in captured[0]
         else:
-            assert "[web_search:timeout" not in captured[0]
+            # Normal escalation — compact alert, not probe
+            assert "PROBE ROUND" not in captured[0]
 
 
 class TestValueDiversity:
