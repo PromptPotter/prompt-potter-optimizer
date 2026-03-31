@@ -129,7 +129,7 @@ def init_campaign(
                 })
         except ValueError:
             raise
-        except Exception:
+        except (OSError, json.JSONDecodeError, KeyError):
             logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
             campaign_store, cycle_id, resumed_from_round = None, None, 0
 

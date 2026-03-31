@@ -260,7 +260,7 @@ Each round samples 2-3 styles from the variant library (`api/config/prompt_varia
 
 When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate target pipeline param exploration. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
 
-SearchMemory *(planned — M8 Wave 5, not yet implemented)* will provide historical parameter impact data so the scan advisor prioritizes axes that historically produced signal and suggests text values that historically worked. Each optimizer node (L1, L2, critique) will query SearchMemory's atomic accessors for the subset relevant to its decision.
+SearchMemory *(planned — M8 Wave 3, not yet implemented)* will provide historical parameter impact data so the scan advisor prioritizes axes that historically produced signal and suggests text values that historically worked. Each optimizer node (L1, L2, critique) will query SearchMemory's atomic accessors for the subset relevant to its decision.
 
 ## Optimizer Nodes (M7)
 
@@ -343,4 +343,4 @@ campaign_config = {
 | `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
 | `prompt_eval.py` | `_run_eval_batch` (per-query checks), `_parse_backend_response` |
 | `l1_optimizer.py` | L1 generation (sole pipeline_params decider) |
-| `search/search_memory.py` | **Planned (M8 Wave 5)** — cross-campaign intelligence: parameter impact, query patterns, failure modes |
+| `search/search_memory.py` | **Planned (M8 Wave 3)** — cross-campaign intelligence: parameter impact, query patterns, failure modes |

@@ -31,7 +31,7 @@ All core logic lives in `api/services/`.
 
          SearchMemory (materialized view) aggregates all historical
          evaluation data and feeds parameter impact, query patterns,
-         and failure modes to both loops.  *(M8 Wave 5)*
+         and failure modes to both loops.  *(M8 Wave 3)*
 ```
 
 **Human Loop** — OAT perturbation scan measures which axes matter. You pick the best starting point.
@@ -66,7 +66,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, etc.).
 
-**SearchMemory** *(planned — M8 Wave 5, not yet implemented)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark.
+**SearchMemory** *(planned — M8 Wave 3, not yet implemented)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark.
 
 Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 

@@ -5,12 +5,11 @@ Performance: in-memory caches for the index, alias groups, and
 rendered-prompt-hash secondary index avoid repeated disk reads during
 scan/grid/feedback-cycle hot loops.  All caches are invalidated on write.
 """
-import contextlib
 import logging
-import os
-import time
 from pathlib import Path
 from typing import Any
+
+from filelock import FileLock
 
 from api.services.stores.base import (
     read_json,
@@ -21,7 +20,6 @@ from api.services.stores.base import (
 from api.shared.constants import (
     DATASET_RUNS_SCHEMA_VERSION,
     DEFAULT_CONNECTOR_TYPE,
-    LOCK_RETRY_INTERVAL,
     LOCK_TIMEOUT,
 )
 
@@ -75,6 +73,15 @@ class DatasetRunStore:
         self._alias_cache.pop(backend_id, None)
         self._rp_index.pop(backend_id, None)
 
+    def clear_caches(self) -> None:
+        """Drop all in-memory caches across all backends.
+
+        Call between campaign cycles or when memory pressure is a concern.
+        """
+        self._index_cache.clear()
+        self._alias_cache.clear()
+        self._rp_index.clear()
+
     # -- path helpers ---------------------------------------------------------
 
     def _runs_dir(self, backend_id: str) -> Path:
@@ -86,49 +93,6 @@ class DatasetRunStore:
 
     # -- complete runs --------------------------------------------------------
 
-    @staticmethod
-    def _acquire_lock(lock_path: Path) -> None:
-        """Acquire an exclusive lock file, retrying on contention.
-
-        Uses short non-blocking retries so KeyboardInterrupt (Jupyter cell
-        interrupt) is never swallowed by a blocking sleep.
-        """
-        deadline = time.monotonic() + LOCK_TIMEOUT
-        while True:
-            try:
-                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(fd)
-                return
-            except FileExistsError:
-                # Check for stale lock (file mtime older than timeout)
-                try:
-                    mtime = os.path.getmtime(lock_path)
-                    age = time.time() - mtime
-                    if age > LOCK_TIMEOUT:
-                        logger.warning(
-                            "Removing stale lock file: %s (age=%.1fs)",
-                            lock_path, age,
-                        )
-                        with contextlib.suppress(OSError):
-                            os.unlink(lock_path)
-                        continue
-                except OSError:
-                    pass
-                if time.monotonic() >= deadline:
-                    logger.warning(
-                        "Lock timeout on %s — breaking stale lock", lock_path,
-                    )
-                    with contextlib.suppress(OSError):
-                        os.unlink(lock_path)
-                    continue
-                time.sleep(LOCK_RETRY_INTERVAL)
-
-    @staticmethod
-    def _release_lock(lock_path: Path) -> None:
-        """Release the lock file."""
-        with contextlib.suppress(OSError):
-            os.unlink(lock_path)
-
     def save(
         self, backend_id: str, run_id: str, data: dict[str, Any],
     ) -> Path:
@@ -138,8 +102,8 @@ class DatasetRunStore:
         ``scores``.
 
         The detail file is written atomically (via ``write_json``).  The
-        index update is protected by an exclusive lock file to prevent
-        concurrent writers from losing entries.
+        index update is protected by ``filelock`` to prevent concurrent
+        writers from losing entries.
         """
         detail_path = self._runs_dir(backend_id) / f"{run_id}.json"
         write_json(detail_path, data)
@@ -164,8 +128,7 @@ class DatasetRunStore:
         lock_path = index_path.with_suffix(".json.lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self._acquire_lock(lock_path)
-        try:
+        with FileLock(lock_path, timeout=LOCK_TIMEOUT):
             if index_path.exists():
                 index = read_json(index_path)
             else:
@@ -184,8 +147,6 @@ class DatasetRunStore:
 
             index["total"] = len(entries)
             write_json(index_path, index)
-        finally:
-            self._release_lock(lock_path)
 
         self._invalidate_cache(backend_id)
         return detail_path

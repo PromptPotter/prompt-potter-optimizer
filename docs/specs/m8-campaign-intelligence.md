@@ -19,7 +19,7 @@ Three compounding weaknesses prevent this:
 
 3. **Redundant computation** — Every prompt variant re-runs the entire backend pipeline, even though upstream nodes (web_search, token_matching) produce identical output when only the prompt changes. A 20-variant x 100-query campaign wastes ~1,900 upstream calls.
 
-**Priority order:** Data-guided exploration (1) > enriched failure context (1) > smarter scan (2) > caching (3) > cross-campaign memory (4).
+**Priority order:** Data-guided exploration (1) > enriched failure context (1) > smarter scan (2) > cross-campaign memory (3) > caching (4). Wave numbering reflects implementation order: SearchMemory (Wave 3) can proceed without external dependencies; caching (Wave 4) is blocked on TermNorm wire protocol changes.
 
 ---
 
@@ -66,14 +66,19 @@ Deterministic analysis functions that compile sample diagnostics into structured
 
 Each function is pure computation (no I/O, no LLM calls).
 
+**Return types** (defined at implementation time in `api/services/metrics.py` or a new `api/models/analysis.py`):
+- `FailureAnalysis`: `patterns: list[FailurePattern]` (each with `name`, `description`, `query_count`, `fraction`, `example_queries`, `diagnostic_signals`), `total_failures: int`
+- `QueryDifficulty`: `queries: list[QueryProfile]` (each with `query`, `hit_rate`, `n_evals`, `classification: "easy"|"discriminating"|"hard"|"dead"`)
+- `TrendAnalysis`: `rounds: list[RoundSnapshot]` (each with `round_idx`, `improved_queries`, `regressed_queries`, `diagnostic_shifts`)
+
 ### 1c. Enriched failure context in LLM prompts
 
-- Failure examples currently formatted as `Q -> predicted -> GT` (via `format_failure_examples()`)
+- Failure examples currently formatted as `Q -> predicted -> GT` (via `_failure_details_section()` in `critique.py` and `format_context_sections()` in `formatting.py`)
 - Enrich with sample diagnostics: `Q -> predicted -> GT | gt_in_source=False, n_candidates=20, terminated_at=token_matching`
 - Add failure analysis summary as a structured section: "Dominant failure pattern: GT not retrieved by candidate_source (60% of failures) — focus on web_search/entity_profiling params"
 - **Multi-direction injection:** surface 2-3 distinct improvement directions ranked by failure count, not just the dominant one. L1 should see all directions and generate candidates across them.
-- Inject via existing `{{failure_examples}}` and `{{focus_note}}` template slots in meta-prompts
-- Location: `api/services/campaign/formatting.py` (modify `format_failure_examples()`)
+- Inject via `{{context_sections}}` in meta-prompts (assembled by `format_context_sections()`)
+- Location: `api/services/campaign/formatting.py` (modify `format_context_sections()`)
 
 ### 1d. Adaptive sampling in optimizer feedback cycle
 
@@ -85,6 +90,8 @@ The feedback cycle should pick queries that maximise information about which pro
 - Implementation in `optimization_loop.py` or a new `adaptive_eval.py` module called by the cycle
 - Uses `LoopState.current_results` (already tracked per round) as input
 - If the method works, it can later be offered to the sensitivity scan as an option
+
+**Execution model:** M8 maintains the current single-threaded sequential round execution. All state mutations (adaptive sampling, SearchMemory refresh, diagnostic extraction) occur within the round loop body. Async L2/L3 execution is a future milestone concern.
 
 ---
 
@@ -102,7 +109,7 @@ The feedback cycle should pick queries that maximise information about which pro
 
 ### 2a. Statistically grounded sample sizing
 
-- `build_diagnostic_set()` uses `min_detectable_effect(n)` (already in `_stats.py`) to compute minimum n for a target MDE
+- `build_diagnostic_set()` uses `min_detectable_effect(n)` (in `api/services/search/_stats.py`) to compute minimum n for a target MDE
 - If user-specified `scan_sample_size` is below minimum for detecting a 15% effect, auto-adjust upward with a warning
 - This alone would have prevented the "3 queries = no signal" problem
 
@@ -281,10 +288,10 @@ All four wave groups are independent at their roots.
 | `compute_pipeline_metrics()` | Aggregate metrics from node types | `api/services/metrics.py:99` |
 | `_parse_backend_response()` | Assembles per-query pipeline_data from schema | `api/services/prompt_eval.py:130` |
 | `obs_extraction_map()` | Schema -> observation mapping | `api/models/pipeline_schema.py` |
-| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `notebooks/campaign_lib/stats.py` |
+| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `api/services/search/_stats.py` (re-exported by `notebooks/campaign_lib/stats.py`) |
 | `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `api/services/search/smart_search.py:169` |
 | `LoopState` | Feedback cycle state (has `current_results` per round) | `api/services/campaign/state.py:38` |
-| `format_failure_examples()` | Current failure formatting for LLM prompts | `api/services/campaign/formatting.py:48` |
+| `format_context_sections()` | Context injection point for LLM prompts | `api/services/campaign/formatting.py` |
 | `DatasetRunStore` | All historical evaluations (per-query results with pipeline_data) | `api/services/stores/dataset_run_store.py` |
 | `CampaignStore` | Campaign trials, lineage, configs | `api/services/stores/campaign_store.py` |
 | `PlanStore` | Smart search plans with axis_profiles | `api/services/stores/plan_store.py` |
@@ -296,6 +303,8 @@ All four wave groups are independent at their roots.
 
 - M7 exit gate passed
 - `PipelineSchema` with `node_type` populated (M6 Wave 6)
+- `scipy` available in service layer (Wave 2 prerequisite — install via `pip install -e ".[stats]"`)
+- Wave 4b-4c require TermNorm `node_outputs` support — PromptPotter must gracefully skip caching when TermNorm lacks this capability
 
 ## Exit Criteria
 

@@ -42,6 +42,10 @@ class LoopState:
     escalation_journal, warning_inventory) lives on ``opt_sp``
     — a mutable ``OptSearchPoint`` that is serialized at checkpoint
     time and hydrated on resume.
+
+    **Mutation contract:** All mutations to ``opt_sp`` must occur within
+    the sequential round loop body (round_execution, critique, escalation).
+    The optimization loop is single-threaded — no concurrent access.
     """
 
     rounds: list[CycleRoundResult] = field(default_factory=list)
@@ -64,6 +68,10 @@ class LoopState:
 
     # L2/L3 escalation counters
     escalation: EscalationCounters = field(default_factory=EscalationCounters)
+
+    # Checkpoint schema version — incremented when LoopState/OptSearchPoint
+    # fields change, so resume can detect stale checkpoints.
+    state_version: int = 1
 
 
 @dataclass

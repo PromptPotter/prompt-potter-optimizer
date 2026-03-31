@@ -466,3 +466,40 @@ async def test_mid_round_resume_uses_persisted_candidates(
     assert result2.cycle_id == cycle_id
 
 
+def test_opt_search_point_checkpoint_roundtrip():
+    """OptSearchPoint survives model_dump → re-hydrate (checkpoint round-trip)."""
+    osp = OptSearchPoint(
+        persona="You are a ranking expert.",
+        task_intent="Rank candidates by relevance.",
+        problem_description="Drug name matching.",
+        instruction="Return top match.",
+        thinking_style="step-by-step",
+        answer_format="JSON list",
+        plan="1. Parse query\n2. Score candidates",
+        optimizer_params={"temperature": 0.7},
+        task_context={"domain": "pharma", "pipeline_purpose": "termnorm"},
+        critique_text="Misses partial matches.",
+        thinking_styles=["chain-of-thought", "contrastive"],
+        escalation_journal=[{"round": 1, "action": "refine_context"}],
+        warning_inventory={"q1": {"count": 2, "last_round": 3}},
+        l2_directive="Focus on partial string matching.",
+        degradation_reset_count=1,
+        backend_warning_emitted=True,
+        changes_description="Initial baseline",
+    )
+
+    dump = osp.model_dump()
+    # Simulate checkpoint filter (same as _restore_from_checkpoint)
+    known = {k: v for k, v in dump.items() if k in OptSearchPoint.model_fields}
+    restored = OptSearchPoint(**known)
+
+    # Every field must survive the round-trip
+    for field_name in OptSearchPoint.model_fields:
+        original = getattr(osp, field_name)
+        restored_val = getattr(restored, field_name)
+        # Skip auto-generated fields (id, created_at) — they differ by design
+        if field_name in ("id", "created_at"):
+            continue
+        assert restored_val == original, (
+            f"Field {field_name!r} changed: {original!r} → {restored_val!r}"
+        )

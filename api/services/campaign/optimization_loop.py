@@ -274,9 +274,15 @@ def _restore_from_checkpoint(
     if _latest_trial:
         _osp = _latest_trial.get("opt_search_point", {})
         if _osp:
-            state.opt_sp = OptSearchPoint(
-                **{k: v for k, v in _osp.items() if k in OptSearchPoint.model_fields}
-            )
+            known = {k: v for k, v in _osp.items() if k in OptSearchPoint.model_fields}
+            missing = set(OptSearchPoint.model_fields) - set(_osp)
+            if missing:
+                logger.warning(
+                    "Checkpoint missing %d OptSearchPoint field(s): %s "
+                    "(will use defaults — checkpoint may predate schema changes)",
+                    len(missing), ", ".join(sorted(missing)),
+                )
+            state.opt_sp = OptSearchPoint(**known)
         state.escalation.l2_round = _latest_trial.get("l2_round", 0)
         state.escalation.l3_round = _latest_trial.get("l3_round", 0)
         state.escalation.l2_stall_count = _latest_trial.get("l2_stall_count", 0)

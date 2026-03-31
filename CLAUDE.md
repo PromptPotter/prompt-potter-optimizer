@@ -81,7 +81,7 @@ Infrastructure bundle: `backend_client`, `store`, `backend_id`, `pipeline_schema
 | `search/smart_search.py` | Sensitivity scan (OAT), adaptive search |
 | `search/scan_advisor.py` | LLM-driven scan recommendations |
 | `search/coverage.py` | Historical index, coverage advisor |
-| `search/search_memory.py` | **Planned (M8 Wave 5)** — cross-campaign intelligence materialized view |
+| `search/search_memory.py` | **Planned (M8 Wave 3)** — cross-campaign intelligence materialized view |
 | `obs/observability_logger.py` | Langfuse-compatible traces, MLflow |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
 

@@ -9,10 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 
-# SHA256 truncated to 16 hex chars (64 bits) — sufficient for content-addressed
-# deduplication within a single project.  Collision probability stays negligible
-# for the expected dataset sizes (<100k eval runs).
-HASH_TRUNCATE = 16
+# SHA256 truncated to 24 hex chars (96 bits) — sufficient for content-addressed
+# deduplication across campaigns.  Birthday-bound collision probability stays
+# negligible up to ~280 billion items.
+HASH_TRUNCATE = 24
 
 __all__ = ["HASH_TRUNCATE", "eval_content_hash", "sp_identity_hash"]
 
