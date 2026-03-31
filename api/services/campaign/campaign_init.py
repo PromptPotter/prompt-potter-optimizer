@@ -120,13 +120,19 @@ def load_baseline_prompt(
     names = prompt_node_names or []
 
     matched_prompt = None
+    matched_key = None
     for node_name in names:
         for key, prompt_info in prompts.items():
             if node_name in key:
                 matched_prompt = prompt_info
+                matched_key = key
                 break
         if matched_prompt:
             break
+
+    # Fallback: no node names provided but prompts exist — use the first one
+    if matched_prompt is None and not names and prompts:
+        matched_key, matched_prompt = next(iter(prompts.items()))
 
     if matched_prompt is None:
         raise RuntimeError(
@@ -134,9 +140,10 @@ def load_baseline_prompt(
             "Re-sync the experiment after the prompt registry is initialized."
         )
 
+    label = names[0] if names else matched_key
     return OptSearchPoint(
         instruction=matched_prompt["template"],
-        changes_description=f"Baseline prompt from {names[0]} registry",
+        changes_description=f"Baseline prompt from {label} registry",
     )
 
 

@@ -135,6 +135,7 @@ async def _generate_or_load_candidates(
             scan_context=config.scan_context,
             is_probe_round=state.probe_next_round,
             scan_compact=(round_num > 0),
+            failure_analysis=state.failure_analysis,
         )
 
     if campaign_store and cycle_id:
@@ -238,6 +239,7 @@ async def _evaluate_candidates(
                 best_round=state.best_round,
                 pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),
                 candidate_keys=_candidate_keys_from_schema(config.pipeline_schema),
+                pipeline_schema=config.pipeline_schema,
                 degradation_threshold=config.critique_degradation_threshold,
                 near_miss_ratio=config.critique_near_miss_ratio,
             )
@@ -312,6 +314,16 @@ async def execute_round(
     # Update state with critique + thinking styles from eval output
     state.opt_sp.critique_text = eval_out.critique_text
     state.opt_sp.thinking_styles = eval_out.thinking_styles
+
+    # Compute failure analysis for next round's L1 context (Wave 1c)
+    if eval_out.winner_results and config.pipeline_schema:
+        from api.services.metrics import compile_failure_analysis
+
+        state.failure_analysis = compile_failure_analysis(
+            eval_out.winner_results, config.pipeline_schema,
+        )
+    else:
+        state.failure_analysis = None
 
     round_result = CycleRoundResult(
         round=round_num,

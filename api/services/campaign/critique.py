@@ -19,6 +19,7 @@ from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import load_variant_library
 
 if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
     from api.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,9 @@ class CritiqueContext:
 
     # Schema-driven candidate keys (from PipelineNode.output_keys for ranker/candidate_source nodes)
     candidate_keys: list[str] = field(default_factory=list)
+
+    # Pipeline schema for diagnostic enrichment (Wave 1c)
+    pipeline_schema: PipelineSchema | None = None
 
     # Configurable thresholds
     degradation_threshold: float = 0.4
@@ -406,8 +410,12 @@ def _failure_details_section(
     results: list[dict],
     candidate_keys: list[str] | None = None,
     near_miss_queries: set[str] | None = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> str:
-    """Per-query failure breakdown with rank and degradation info.
+    """Per-query failure breakdown with rank, degradation, and diagnostic info.
+
+    When ``pipeline_schema`` is provided, appends sample diagnostic signals
+    (Wave 1c) to each failure line.
 
     Skips queries already shown in rank_analysis near-miss section to
     avoid duplication.
@@ -425,11 +433,25 @@ def _failure_details_section(
         rank = find_rank(get_candidates(r, candidate_keys), gt)
         rank_str = f"rank {rank}" if rank else "not in candidates"
         diag = pd.get("diagnostics") or {}
-        warn = "⚠ degraded" if diag.get("warnings") else ""
+        warn = "degraded" if diag.get("warnings") else ""
+
+        # Diagnostic annotation (Wave 1c)
+        diag_str = ""
+        if pipeline_schema:
+            from api.services.metrics import extract_sample_diagnostics
+
+            sd = extract_sample_diagnostics(r, pipeline_schema)
+            sig_parts = []
+            for k in ("gt_in_source", "gt_in_ranked", "terminated_at"):
+                if k in sd:
+                    sig_parts.append(f"{k}={sd[k]}")
+            if sig_parts:
+                diag_str = " | " + ", ".join(sig_parts)
+
         lines.append(
             f"  MISS  [{pd.get('terminated_at', '?')}]  {r['query'][:70]}\n"
-            f"        → {r.get('predicted', '?')[:70]}\n"
-            f"        GT: {gt[:70]}  |  {rank_str}  {warn}"
+            f"        -> {r.get('predicted', '?')[:70]}\n"
+            f"        GT: {gt[:70]}  |  {rank_str}  {warn}{diag_str}"
         )
     return "\n".join(lines)
 
@@ -483,6 +505,7 @@ def assemble_critique_sections(ctx: CritiqueContext) -> str:
             results,
             candidate_keys=ctx.candidate_keys or None,
             near_miss_queries=nm_queries,
+            pipeline_schema=ctx.pipeline_schema,
         ),
         _success_details_section(results),
     ]

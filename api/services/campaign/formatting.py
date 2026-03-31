@@ -7,8 +7,12 @@ l1_optimizer (L1 generate) for prompt assembly.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from api.services.campaign.critique import summarize_warning_inventory
+
+if TYPE_CHECKING:
+    from api.models.analysis import FailureAnalysis
 
 
 @dataclass
@@ -25,6 +29,7 @@ class ContextData:
     is_probe_round: bool = False
     scan_context: dict | None = None
     scan_compact: bool = False
+    failure_analysis: FailureAnalysis | None = None
 
 
 def format_context_sections(ctx: ContextData) -> str:
@@ -47,6 +52,27 @@ def format_context_sections(ctx: ContextData) -> str:
             if sc.get("sensitivity_text"):
                 scan_parts.append(f"Top sensitivity drivers:\n{sc['sensitivity_text']}")
             sections.append("\n".join(scan_parts))
+
+    # Failure analysis (Wave 1c)
+    fa = ctx.failure_analysis
+    if fa and fa.patterns:
+        fa_lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
+        for i, pat in enumerate(fa.patterns[:3], 1):
+            fa_lines.append(
+                f"  {i}. {pat.name} — {pat.query_count} queries ({pat.fraction:.0%})"
+            )
+            if pat.example_queries:
+                examples = ", ".join(f'"{q}"' for q in pat.example_queries[:2])
+                fa_lines.append(f"     Examples: {examples}")
+            sig = {k: v for k, v in pat.signals.items() if k not in ("error", "degraded", "total_time_ms")}
+            if sig:
+                sig_str = ", ".join(f"{k}={v}" for k, v in list(sig.items())[:4])
+                fa_lines.append(f"     Signals: {sig_str}")
+        # Improvement directions
+        fa_lines.append("IMPROVEMENT DIRECTIONS:")
+        for i, pat in enumerate(fa.patterns[:3], 1):
+            fa_lines.append(f"  {i}. Address {pat.name} ({pat.fraction:.0%} of failures)")
+        sections.append("\n".join(fa_lines))
 
     # Task context
     if ctx.task_context:

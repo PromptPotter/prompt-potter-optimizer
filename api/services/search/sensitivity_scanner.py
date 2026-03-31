@@ -47,6 +47,7 @@ async def sensitivity_scan(
     progress_cb: Callable[[ScanEvent], None] | None = None,
     on_result: Callable | None = None,
     experiment_id: str = "",
+    pruning_enabled: bool = True,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -144,6 +145,18 @@ async def sensitivity_scan(
     rows: list[dict] = []
     _consecutive_all_error = 0
 
+    # Baseline CI for early pruning (Wave 2b)
+    _baseline_ci: tuple[float, float] | None = None
+    if pruning_enabled:
+        try:
+            from api.services.search._stats import wilson_ci
+
+            _baseline_ci = wilson_ci(baseline_scores["hits"], baseline_scores["total"])
+        except ImportError:
+            pass  # scipy not installed
+
+    _pruned_axes: set[str] = set()
+
     for ai, (axis_name, axis_type, values) in enumerate(axes):
         _cb({
             "type": "axis_start",
@@ -151,6 +164,10 @@ async def sensitivity_scan(
             "cardinality": len(values),
             "axis_index": ai, "total_axes": len(axes),
         })
+
+        # Per-axis pruning state (Wave 2b)
+        _axis_variant_cis: list[tuple[float, float]] = []
+        _axis_pruned = False
 
         for vi, value in enumerate(values):
             # Detect baseline value for this axis
@@ -239,6 +256,36 @@ async def sensitivity_scan(
                 "cached": cached,
             })
 
+            # Per-axis early pruning (Wave 2b)
+            if _baseline_ci is not None and not _axis_pruned:
+                from api.services.search._stats import wilson_ci
+
+                var_ci = wilson_ci(scores["hits"], scores["total"])
+                _axis_variant_cis.append(var_ci)
+                # Check if ALL variant CIs overlap with baseline
+                if len(_axis_variant_cis) >= 2:
+                    all_overlap = all(
+                        vc[0] <= _baseline_ci[1] and _baseline_ci[0] <= vc[1]
+                        for vc in _axis_variant_cis
+                    )
+                    if all_overlap:
+                        _axis_pruned = True
+                        remaining = len(values) - vi - 1
+                        if remaining > 0:
+                            _pruned_axes.add(axis_name)
+                            logger.info(
+                                "Pruning axis '%s': all %d variants overlap "
+                                "with baseline CI — skipping %d remaining values",
+                                axis_name, len(_axis_variant_cis), remaining,
+                            )
+                            _cb({
+                                "type": "axis_pruned",
+                                "axis": axis_name,
+                                "variants_tested": len(_axis_variant_cis),
+                                "remaining_skipped": remaining,
+                            })
+                            break
+
             # Circuit breaker: track consecutive non-cached all-error evals
             if not cached and variant_errors == scores["total"] > 0:
                 _consecutive_all_error += 1
@@ -263,9 +310,10 @@ async def sensitivity_scan(
             else:
                 _consecutive_all_error = 0
 
-    # Build axis profiles
+    # Build axis profiles and annotate pruned axes (Wave 2b)
     profiles = _profiles_from_rows(rows, axes, len(eval_data))
     for profile in profiles:
+        profile["pruned"] = profile["axis"] in _pruned_axes
         _cb({"type": "axis_done", **profile})
 
     return pd.DataFrame(rows), profiles

@@ -154,25 +154,27 @@ async def scan_advisor(
     pipeline_params = campaign_config.get("pipeline_params")
     user_excluded = campaign_config.get("exclude_nodes", [])
 
+    print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
+    print("-" * 50)
+
+    if pipeline_schema is None:
+        print("  Pipeline schema unavailable — start the backend and re-run init_services().")
+        return {}
+
     variant_library = _load_filtered_variants(pipeline_params, pipeline_schema)
 
     llm_client, resolved_model = setup_llm(campaign_config)
     model = model or resolved_model
 
-    # --- Display ---
-    print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
-    print("-" * 50)
-    print(f"  Pipeline: {pipeline_schema.name} ({pipeline_schema.version})")
-    print(f"  Nodes: {[s.name for s in pipeline_schema.nodes]}")
-    if user_excluded:
-        print(f"  Excluded: {user_excluded}")
+    nodes = [s.name for s in pipeline_schema.nodes]
+    excluded = f"  excl: {user_excluded}" if user_excluded else ""
+    print(f"  {pipeline_schema.name} v{pipeline_schema.version} — {len(nodes)} nodes{excluded}")
     if task_description:
         if isinstance(task_description, dict):
             domain = task_description.get('domain', '?')
-            purpose = task_description.get('pipeline_purpose', '?')[:60]
-            print(f"  Task context: {domain} — {purpose}")
+            print(f"  Domain: {domain}")
         else:
-            print(f"  Task context: {task_description[:80].strip()}...")
+            print(f"  Task: {task_description[:80].strip()}")
     print(f"  Calling {model or '?'} ...")
 
     eval_llm = campaign_config.get("eval_llm", {})
@@ -211,6 +213,8 @@ async def run_scan_advisor(
         task_description=task_description,
         model=model,
     )
+    if not advisory:
+        return {}, {}, {}
 
     proposed, schema_labels = advisory_to_scan_variants(
         advisory, pipeline_schema=svc.get("pipeline_schema"),

@@ -9,6 +9,7 @@ from api.models.search_point import JobSearchPoint
 from api.services.campaign.results import CycleRoundResult
 
 if TYPE_CHECKING:
+    from api.models.analysis import FailureAnalysis
     from api.models.eval_context import EvalContext
     from api.services.campaign.escalation import DegradationCheck
 
@@ -65,6 +66,9 @@ class LoopState:
 
     # Probe round flag (set by L2 action="probe", reset after probe round)
     probe_next_round: bool = False
+
+    # Failure analysis from previous round (ephemeral, not checkpointed)
+    failure_analysis: FailureAnalysis | None = None
 
     # L2/L3 escalation counters
     escalation: EscalationCounters = field(default_factory=EscalationCounters)

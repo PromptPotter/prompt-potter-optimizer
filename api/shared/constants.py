@@ -34,6 +34,7 @@ PIPELINE_CACHE_TTL: float = 30.0
 # search/smart_search — diagnostic set thresholds
 MIN_DIAGNOSTIC_QUERIES: int = 3
 DIAGNOSTIC_HIT_RATIO: float = 0.75
+SCAN_TARGET_MDE: float = 0.15  # 15% minimum detectable effect for scan sizing
 
 # stores/dataset_run_store — file lock parameters
 LOCK_RETRY_INTERVAL: float = 0.05  # seconds between retries

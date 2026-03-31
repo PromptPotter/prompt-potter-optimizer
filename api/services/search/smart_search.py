@@ -18,6 +18,7 @@ from api.shared.constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,
     DIAGNOSTIC_HIT_RATIO,
     MIN_DIAGNOSTIC_QUERIES,
+    SCAN_TARGET_MDE,
 )
 
 if TYPE_CHECKING:
@@ -174,6 +175,7 @@ def build_diagnostic_set(
     baseline_results: list,
     n_queries: int = DEFAULT_DIAGNOSTIC_QUERIES,
     seed: int = 42,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> tuple[list, dict]:
     """Stratified query set: ~75% baseline hits (regression guard) + ~25% misses.
 
@@ -195,6 +197,23 @@ def build_diagnostic_set(
             f"Need at least {MIN_DIAGNOSTIC_QUERIES} eval queries, "
             f"got {len(eval_data)}."
         )
+
+    # Auto-adjust sample size for statistical power (Wave 2a)
+    try:
+        from api.services.search._stats import min_sample_size
+
+        min_n = min_sample_size(SCAN_TARGET_MDE)
+        if n_queries < min_n:
+            adjusted = min(min_n, len(eval_data))
+            if adjusted > n_queries:
+                logger.warning(
+                    "Scan sample size %d too small to detect %.0f%% effect "
+                    "(need %d); adjusting to %d",
+                    n_queries, SCAN_TARGET_MDE * 100, min_n, adjusted,
+                )
+                n_queries = adjusted
+    except ImportError:
+        pass  # scipy not installed — skip auto-adjustment
 
     # Map queries to eval_data items
     query_to_eval = {d["query"]: d for d in eval_data}
@@ -239,7 +258,11 @@ def build_diagnostic_set(
         n_hits = min(n_queries - n_misses, len(hits))
 
     selected_hits = rng.sample(hits, min(n_hits, len(hits)))
-    selected_misses = rng.sample(misses, min(n_misses, len(misses)))
+
+    # Wave 2c: diagnostic-aware miss stratification
+    selected_misses = _stratify_misses(
+        misses, baseline_results, n_misses, rng, pipeline_schema,
+    )
 
     diagnostic = selected_hits + selected_misses
     rng.shuffle(diagnostic)
@@ -250,9 +273,71 @@ def build_diagnostic_set(
         "n_misses": len(selected_misses),
         "total_pool_hits": len(hits),
         "total_pool_misses": len(misses),
+        "stratified": pipeline_schema is not None,
     }
 
     return diagnostic, summary
+
+
+def _stratify_misses(
+    miss_pool: list[dict],
+    baseline_results: list[dict],
+    n_misses: int,
+    rng: random.Random,
+    pipeline_schema: PipelineSchema | None,
+) -> list[dict]:
+    """Select misses ensuring each failure pattern is represented.
+
+    Falls back to random sampling when ``pipeline_schema`` is not provided
+    or when there are fewer patterns than slots.
+    """
+    if not pipeline_schema or n_misses <= 0 or not miss_pool:
+        return rng.sample(miss_pool, min(n_misses, len(miss_pool)))
+
+    from api.services.metrics import extract_sample_diagnostics
+
+    # Map miss queries to their baseline results for diagnostic extraction
+    result_by_query: dict[str, dict] = {}
+    for r in baseline_results:
+        if not r.get("hit") and not r.get("error"):
+            result_by_query[r.get("query", "")] = r
+
+    # Group miss pool items by failure pattern key
+    pattern_buckets: dict[tuple[str, ...], list[dict]] = defaultdict(list)
+    for item in miss_pool:
+        q = item["query"]
+        r = result_by_query.get(q)
+        if r:
+            diag = extract_sample_diagnostics(r, pipeline_schema)
+            key = tuple(
+                f"{k}={diag[k]}" for k in ("gt_in_source", "gt_in_ranked", "terminated_at")
+                if k in diag
+            )
+        else:
+            key = ("unknown",)
+        pattern_buckets[key].append(item)
+
+    # Round-robin: one from each pattern, then fill remaining randomly
+    selected: list[dict] = []
+    used: set[str] = set()
+    buckets = list(pattern_buckets.values())
+    rng.shuffle(buckets)
+
+    # First pass: one per pattern
+    for bucket in buckets:
+        if len(selected) >= n_misses:
+            break
+        pick = rng.choice(bucket)
+        selected.append(pick)
+        used.add(pick["query"])
+
+    # Second pass: fill remaining from unused pool
+    if len(selected) < n_misses:
+        remaining = [m for m in miss_pool if m["query"] not in used]
+        rng.shuffle(remaining)
+        selected.extend(remaining[: n_misses - len(selected)])
+
+    return selected[:n_misses]
 
 
 # ---------------------------------------------------------------------------

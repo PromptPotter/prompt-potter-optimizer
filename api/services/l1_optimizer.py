@@ -5,6 +5,8 @@ L1 Generate and L1 Evaluate services for the optimizer pipeline, plus
 improvement suggestion generation.
 """
 
+from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +25,7 @@ from api.services.metrics import compute_composite_score, count_degraded_queries
 from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
+    from api.models.analysis import FailureAnalysis
     from api.models.eval_context import EvalContext
     from api.services.campaign.callbacks import CycleCallbacks
 
@@ -73,6 +76,7 @@ async def l1_generate(
     scan_context: dict | None = None,
     is_probe_round: bool = False,
     scan_compact: bool = False,
+    failure_analysis: FailureAnalysis | None = None,
 ) -> list[dict]:
     """Generate candidate prompt variants via LLM meta-prompt.
 
@@ -106,6 +110,7 @@ async def l1_generate(
                 is_probe_round=is_probe_round,
                 scan_context=scan_context,
                 scan_compact=scan_compact,
+                failure_analysis=failure_analysis,
             )
         ),
         instruction_spec=instruction_spec,
@@ -199,11 +204,11 @@ async def l1_evaluate(
     candidates: list[dict],
     eval_data: list,
     current_best: dict[str, Any],
-    ctx: "EvalContext",
+    ctx: EvalContext,
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
-    callbacks: "CycleCallbacks | None" = None,
+    callbacks: CycleCallbacks | None = None,
     escalation_checks: list | None = None,
 ) -> L1EvalResult:
     """Evaluate candidates and select the round winner."""
