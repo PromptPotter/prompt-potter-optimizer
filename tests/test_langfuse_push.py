@@ -48,7 +48,7 @@ class TestClassifyRunOrigin:
         ("any_id", "optimization_loop", "optimization_loop"),
     ])
     def test_classify(self, run_id, source, expected):
-        assert classify_run_origin(run_id, source=source) == expected
+        assert classify_run_origin(source=source) == expected
 
 
 def test_push_run_basic_and_idempotent(tmp_path):

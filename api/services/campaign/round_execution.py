@@ -68,14 +68,14 @@ async def _generate_or_load_candidates(
     on_phase=None,
     n_eval_queries: int = 0,
     *,
-    n_variants: int | None = None,
-    creativity: float | None = None,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
-    _n_variants = n_variants if n_variants is not None else config.n_variants
-    _creativity = creativity if creativity is not None else config.creativity
+    # Resolve L2 meta-param overrides from OptSearchPoint.optimizer_params
+    opt_params = state.opt_sp.optimizer_params
+    _n_variants = opt_params.get("n_variants", config.n_variants)
+    _creativity = opt_params.get("creativity", config.creativity)
     prompt_preview = state.opt_sp.render()[:120]
 
     assert state.current_sp is not None
@@ -285,11 +285,6 @@ async def execute_round(
         with graceful("ObsLogger.log_round_start failed"):
             obs.log_round_start(obs_campaign_id, round_num)
 
-    # Resolve L2 meta-param overrides from OptSearchPoint.optimizer_params
-    opt_params = state.opt_sp.optimizer_params
-    n_variants = opt_params.get("n_variants", config.n_variants)
-    creativity = opt_params.get("creativity", config.creativity)
-
     candidates = await _generate_or_load_candidates(
         round_num,
         state,
@@ -298,8 +293,6 @@ async def execute_round(
         cycle_id,
         callbacks.on_phase,
         n_eval_queries=len(round_eval_data),
-        n_variants=n_variants,
-        creativity=creativity,
         obs=obs,
         trace_id=trace_id,
     )

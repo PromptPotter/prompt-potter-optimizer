@@ -121,7 +121,7 @@ ORIGIN_ORDER = [
     "other",
 ]
 
-def classify_run_origin(run_id: str, source: str = "") -> str:
+def classify_run_origin(source: str = "") -> str:
     """Classify a dataset run's origin from its ``source`` field.
 
     Returns one of the ORIGIN_ORDER values, defaulting to ``"other"``.
@@ -300,7 +300,7 @@ def push_run(
         return None
 
     items = detail.get("dataset_run_items", [])
-    origin = classify_run_origin(run_id, detail.get("source", ""))
+    origin = classify_run_origin(detail.get("source", ""))
     sid = session_id or f"dataset_{backend_id}"
     trace_ids: list[str] = []
 
@@ -482,7 +482,7 @@ def push_all_runs(
         rid = s.get("run_id", "")
         if rid in already_done:
             continue
-        origin = classify_run_origin(rid, s.get("source", ""))
+        origin = classify_run_origin(s.get("source", ""))
         groups[origin].append(s)
 
     new_runs = sum(len(v) for v in groups.values())

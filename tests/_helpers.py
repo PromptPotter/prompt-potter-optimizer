@@ -108,7 +108,6 @@ class MockLangfuseLogger:
         self.end_trace_calls: list[str] = []
         self.flush_count = 0
         self._counter = 0
-        self.top_level_observations: list[dict] = []
         self.datasets_created: list[dict] = []
         self.dataset_items_created: list[dict] = []
         self.dataset_run_links: list[dict] = []
@@ -169,23 +168,6 @@ class MockLangfuseLogger:
             "model": model, "usage_details": usage_details,
         })
         return f"span_{name}"
-
-    def create_top_level_observation(
-        self, trace_id, name, as_type, input, output,
-        metadata=None, model=None, usage_details=None,
-        *, trace_params=None,
-    ):
-        self.top_level_observations.append({
-            "trace_id": trace_id, "name": name, "as_type": as_type,
-            "input": input, "output": output, "metadata": metadata,
-            "model": model, "usage_details": usage_details,
-            "top_level": True, "trace_params": trace_params,
-        })
-        return f"tl_{name}"
-
-    def create_generation(self, trace_id, name, model, input, output,
-                          usage=None, metadata=None):
-        return f"gen_{name}"
 
     def create_score(self, trace_id, name, value, data_type="NUMERIC",
                      comment=None):

@@ -97,7 +97,6 @@ async def _handle_escalation_signal(
     config: CycleConfig,
     round_result: CycleRoundResult,
     round_num: int,
-    round_eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None,
     obs_campaign_id: str,
     campaign_store: "CampaignStore | None",
@@ -506,9 +505,7 @@ def _checkpoint_round(
 async def _check_stopping_conditions(
     state: LoopState,
     config: CycleConfig,
-    round_result: CycleRoundResult,
     round_num: int,
-    round_eval_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None,
     obs_campaign_id: str,
 ) -> StopReason | None:
@@ -661,7 +658,6 @@ async def run_optimization(
                     config,
                     round_result,
                     round_num,
-                    round_eval_data,
                     cb.on_phase,
                     obs_campaign_id,
                     campaign_store,
@@ -698,9 +694,7 @@ async def run_optimization(
             _stop = await _check_stopping_conditions(
                 state,
                 config,
-                round_result,
                 round_num,
-                round_eval_data,
                 cb.on_phase,
                 obs_campaign_id,
             )
