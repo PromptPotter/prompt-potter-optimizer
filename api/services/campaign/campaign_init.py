@@ -15,11 +15,11 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from api.config.settings import DATASET_NAME
 from api.models.backend import BackendConnection
 from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
 from api.services.project_store import ProjectStore
+from api.shared.constants import DATASET_NAME
 from api.shared.dict_mixin import MutableDictAccessMixin
 
 if TYPE_CHECKING:

@@ -12,14 +12,18 @@ import time
 from pathlib import Path
 from typing import Any
 
-from api.config.settings import LOCK_RETRY_INTERVAL, LOCK_TIMEOUT
 from api.services.stores.base import (
     read_json,
     read_json_optional,
     validate_path_component,
     write_json,
 )
-from api.shared.constants import DATASET_RUNS_SCHEMA_VERSION, DEFAULT_CONNECTOR_TYPE
+from api.shared.constants import (
+    DATASET_RUNS_SCHEMA_VERSION,
+    DEFAULT_CONNECTOR_TYPE,
+    LOCK_RETRY_INTERVAL,
+    LOCK_TIMEOUT,
+)
 
 logger = logging.getLogger(__name__)
 

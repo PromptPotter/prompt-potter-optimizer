@@ -11,14 +11,14 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal, TypedDict
 
-from api.config.settings import (
+from api.models.eval_context import EvalContext
+from api.models.opt_search_point import OptSearchPoint
+from api.services.prompt_eval import eval_search_point
+from api.shared.constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,
     DIAGNOSTIC_HIT_RATIO,
     MIN_DIAGNOSTIC_QUERIES,
 )
-from api.models.eval_context import EvalContext
-from api.models.opt_search_point import OptSearchPoint
-from api.services.prompt_eval import eval_search_point
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema

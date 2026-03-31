@@ -5,7 +5,9 @@ Re-exports entry-point functions so callers use one import path::
     from api.services.search import sensitivity_scan, adaptive_search, ...
 """
 
-# smart_search
+# sensitivity_scanner / adaptive_searcher
+from api.services.search.adaptive_searcher import adaptive_search
+
 # context
 from api.services.search.context import decompose_prompt_fields, decompose_prompt_fields_cached
 
@@ -27,11 +29,6 @@ from api.services.search.plan_persistence import (
     smart_search_plan_identity,
 )
 
-# NOTE: sensitivity_scan and adaptive_search are NOT re-exported here
-# because their function names collide with submodule names. Import them
-# from their submodules directly:
-#   from api.services.search.sensitivity_scan import sensitivity_scan
-#   from api.services.search.adaptive_search import adaptive_search
 # scan_advisor
 from api.services.search.scan_advisor import (
     advise_scan_config,
@@ -52,6 +49,9 @@ from api.services.search.scan_results import (
     seed_campaign_from_scan,
     select_scan_winner,
 )
+from api.services.search.sensitivity_scanner import sensitivity_scan
+
+# smart_search
 from api.services.search.smart_search import (
     ScanEvent,
     build_diagnostic_set,
@@ -61,6 +61,7 @@ from api.services.search.smart_search import (
 
 __all__ = [
     "ScanEvent",
+    "adaptive_search",
     "advise_scan_config",
     "advisory_to_scan_variants",
     "assess_scan_coverage",
@@ -83,6 +84,7 @@ __all__ = [
     "resume_or_build_diagnostic",
     "seed_campaign_from_scan",
     "select_scan_winner",
+    "sensitivity_scan",
     "serialize_smart_search_plan",
     "smart_search_plan_identity",
 ]

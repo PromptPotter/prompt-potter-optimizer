@@ -59,6 +59,9 @@ Repository = "https://github.com/runfish5/prompt-potter-optimizer"
 [tool.setuptools.packages.find]
 include = ["api*"]
 
+[tool.setuptools.package-data]
+api = ["py.typed"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
@@ -133,3 +136,4 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 show_missing = true
+fail_under = 50

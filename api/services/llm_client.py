@@ -14,7 +14,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from api.config.settings import (
+from api.config.settings import settings
+from api.shared.constants import (
     GROQ_BASE_URL,
     GROQ_MAX_RETRIES,
     GROQ_TIMEOUT,
@@ -22,7 +23,6 @@ from api.config.settings import (
     LLM_MAX_APP_RETRIES,
     LLM_RETRY_STATUSES,
     OPENAI_MAX_RETRIES,
-    settings,
 )
 from api.shared.llm_parsing import try_parse_json
 

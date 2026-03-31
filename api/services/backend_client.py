@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from api.config.settings import MATCH_TIMEOUT
+from api.shared.constants import MATCH_TIMEOUT
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema

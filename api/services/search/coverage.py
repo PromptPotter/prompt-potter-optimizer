@@ -13,13 +13,12 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from api.config.settings import DEFAULT_DIAGNOSTIC_QUERIES
 from api.models.opt_search_point import OptSearchPoint
 from api.models.pipeline_schema import is_result_step_compatible
 from api.services.project_store import ProjectStore
 from api.services.search.plan_persistence import deserialize_smart_search_plan
 from api.services.search.preview import preview
-from api.shared.constants import PROMPT_STRING_FIELDS
+from api.shared.constants import DEFAULT_DIAGNOSTIC_QUERIES, PROMPT_STRING_FIELDS
 from api.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:

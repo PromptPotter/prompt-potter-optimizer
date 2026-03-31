@@ -27,9 +27,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from api.config.settings import DATASET_NAME
 from api.services.project_store import ProjectStore
 from api.services.stores.base import read_json_optional, write_json
+from api.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema

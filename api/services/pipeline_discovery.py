@@ -14,7 +14,6 @@ import time as _time
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
-from api.config.settings import PIPELINE_CACHE_TTL
 from api.models.pipeline_schema import (
     NodeOutputSchema,
     NodePromptMeta,
@@ -22,6 +21,7 @@ from api.models.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
+from api.shared.constants import PIPELINE_CACHE_TTL
 
 if TYPE_CHECKING:
     from api.services.backend_client import BackendClient

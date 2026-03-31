@@ -18,9 +18,9 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from api.config.settings import NO_RESULT
 from api.models.evaluator import EvalResult, ExactMatchEvaluator
 from api.services.metrics import compute_composite_score
+from api.shared.constants import NO_RESULT
 from api.shared.errors import ErrorCategory
 from api.shared.hashing import HASH_TRUNCATE
 

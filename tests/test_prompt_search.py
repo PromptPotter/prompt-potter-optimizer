@@ -5,7 +5,7 @@ from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
 from api.services.prompt_eval import _error_category, _most_common_error_category
-from api.services.search.sensitivity_scan import sensitivity_scan
+from api.services.search import sensitivity_scan
 from api.services.search.smart_search import _profiles_from_rows
 
 
@@ -32,7 +32,7 @@ def _make_scan_baseline(
 @pytest.fixture
 def scan_eval_mock(monkeypatch):
     """Fixture that returns a function to patch eval_search_point for scan tests."""
-    import api.services.search.sensitivity_scan as _scan
+    import api.services.search.sensitivity_scanner as _scan
 
     def _apply(mock_eval):
         monkeypatch.setattr(_scan, "eval_search_point", mock_eval)

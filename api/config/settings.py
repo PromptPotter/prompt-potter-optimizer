@@ -9,40 +9,6 @@ from pydantic_settings import BaseSettings
 
 APP_VERSION: str = "0.6.1"
 
-# -- Shared constants ---------------------------------------------------------
-
-DATASET_NAME: str = "termnorm_ground_truth"
-NO_RESULT: str = "NO_RESULT"
-DISPLAY_TRUNCATE: int = 60
-DEFAULT_DIAGNOSTIC_QUERIES: int = 6
-
-# -- Service constants --------------------------------------------------------
-
-# backend_client — HTTP timeout for /matches endpoint
-MATCH_TIMEOUT: float = 120.0
-
-# llm_client — provider defaults
-OPENAI_MAX_RETRIES: int = 5
-GROQ_MAX_RETRIES: int = 3
-GROQ_TIMEOUT: float = 60.0
-GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
-
-# llm_client — app-level retry (beyond SDK's own retry)
-LLM_RETRY_STATUSES: frozenset[int] = frozenset({429, 502, 503})
-LLM_MAX_APP_RETRIES: int = 3
-LLM_BASE_DELAY: float = 1.0  # seconds
-
-# pipeline_discovery — TTL for cached GET /pipeline responses
-PIPELINE_CACHE_TTL: float = 30.0
-
-# search/smart_search — diagnostic set thresholds
-MIN_DIAGNOSTIC_QUERIES: int = 3
-DIAGNOSTIC_HIT_RATIO: float = 0.75
-
-# stores/dataset_run_store — file lock parameters
-LOCK_RETRY_INTERVAL: float = 0.05  # seconds between retries
-LOCK_TIMEOUT: float = 5.0  # seconds before treating lock as stale
-
 
 class Settings(BaseSettings):
     """Application configuration settings."""
