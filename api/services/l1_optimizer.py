@@ -18,8 +18,6 @@ from api.services.campaign.formatting import (
     ContextData,
     format_context_sections,
     format_failure_examples,
-    format_focus_note,
-    format_scan_analytics,
 )
 from api.services.llm_client import LLMClientBase
 from api.services.metrics import compute_composite_score, count_degraded_queries
@@ -104,8 +102,6 @@ async def l1_generate(
         n_queries=str(len(current_results)),
         rendered_prompt=opt_sp.render(),
         failure_examples=failure_examples,
-        scan_analytics=format_scan_analytics(scan_context),
-        focus_note="" if is_probe_round else format_focus_note(opt_sp.escalation_journal or None),
         context_sections=format_context_sections(
             ContextData(
                 task_context=opt_sp.task_context or None,
@@ -116,6 +112,7 @@ async def l1_generate(
                 warning_inventory=opt_sp.warning_inventory or None,
                 escalation_journal=opt_sp.escalation_journal or None,
                 is_probe_round=is_probe_round,
+                scan_context=scan_context,
             )
         ),
         instruction_spec=instruction_spec,

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from api.config.optimizer_pipeline import llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.critique import summarize_warning_inventory
+from api.services.campaign.formatting import L2IntelligenceData, format_l2_intelligence
 from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
@@ -74,25 +74,12 @@ def _build_l2_prompt(
             + json.dumps(opt_sp.task_context, indent=2)
         )
 
-    warning_section = ""
-    if opt_sp.warning_inventory:
-        warning_section = summarize_warning_inventory(opt_sp.warning_inventory)
-        if warning_section:
-            warning_section = "\n\n" + warning_section + "\n"
-
-    critique_section = ""
-    if opt_sp.critique_text:
-        critique_section = (
-            "\n\nPREVIOUS CRITIQUE (build on this analysis, don't repeat it):\n"
-            + opt_sp.critique_text
-        )
-
-    prev_directive_section = ""
-    if opt_sp.l2_directive:
-        prev_directive_section = (
-            "\n\nYOUR PREVIOUS DIRECTIVE (evolve or supersede — do not repeat verbatim):\n"
-            + opt_sp.l2_directive
-        )
+    intelligence_sections = format_l2_intelligence(L2IntelligenceData(
+        escalation_section=escalation_section,
+        warning_inventory=opt_sp.warning_inventory or None,
+        critique_text=opt_sp.critique_text,
+        l2_directive=opt_sp.l2_directive,
+    ))
 
     response_schema_suffix = (
         "\nReturn a JSON object with:\n"
@@ -117,9 +104,7 @@ def _build_l2_prompt(
         current_params=json.dumps(opt_sp.optimizer_params),
         task_context_section=task_context_section,
         pipeline_section=pipeline_section,
-        escalation_section=escalation_section + warning_section,
-        critique_section=critique_section,
-        prev_directive_section=prev_directive_section,
+        intelligence_sections=("\n\n" + intelligence_sections) if intelligence_sections else "",
         response_schema_suffix=response_schema_suffix,
     )
 
