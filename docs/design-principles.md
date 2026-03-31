@@ -12,7 +12,7 @@ This is the core architectural move. It turns one opaque prompt into a combinato
 
 ## SearchPoint hierarchy as atomic unit
 
-`SearchPoint` is the abstract base class. `JobSearchPoint` bundles `model` + `temperature` + `pipeline_params` into one frozen object for target evaluation. `OptSearchPoint` extends SearchPoint with prompt decomposition fields, L2/L3 state, and optimization memory. `to_job_search_point()` projects optimizer state into a JobSearchPoint for evaluation. Content-hashable, prevents accidental mutation of shared state.
+`SearchPoint` is the abstract base class. `PromptTemplate` adds the 8-field prompt decomposition scheme (`render()`, `compile_prompt()`). `JobSearchPoint` bundles `pipeline_params` into one frozen object for target evaluation. `OptSearchPoint` inherits from `PromptTemplate` and adds lineage, L2/L3 state, and optimization memory. `to_job_search_point()` projects optimizer state into a JobSearchPoint for evaluation. Content-hashable, prevents accidental mutation of shared state.
 
 ## Prompt alias groups
 

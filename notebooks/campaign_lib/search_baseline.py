@@ -51,6 +51,13 @@ async def prepare_scan_baseline(
 
     llm_client, llm_model = setup_llm(campaign_config)
 
+    # Resolve prompt node from pipeline schema
+    prompt_node = ""
+    if svc is not None:
+        ps = svc.get("pipeline_schema")
+        if ps and ps.prompt_node_names():
+            prompt_node = ps.prompt_node_names()[0]
+
     result = await _prepare_scan_baseline(
         baseline, campaign_config, llm_client, llm_model,
         pipeline_params=pipeline_params,
@@ -58,6 +65,7 @@ async def prepare_scan_baseline(
         backend_id=backend_id,
         scan_variants=scan_variants,
         force_restructure=force_restructure,
+        prompt_node=prompt_node,
     )
 
     # Print decomposed fields

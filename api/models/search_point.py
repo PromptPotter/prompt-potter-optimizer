@@ -1,14 +1,12 @@
 """SearchPoint hierarchy — points in pipeline search spaces.
 
 SearchPoint is the abstract base for any point in a pipeline's search space.
-Two concrete subclasses:
+Three-level hierarchy (see ``opt_search_point.py`` for full tree)::
 
-  - ``JobSearchPoint`` — the user's evaluation space (pipeline_params).
-    Frozen, content-hashable. The rendered prompt lives inside
-    ``pipeline_params`` as a node config value.
-
-  - ``OptSearchPoint`` (in opt_search_point.py) — the optimizer's working
-    state (prompt decomposition, L2/L3 state, optimization memory). Mutable.
+    SearchPoint (abstract — render())
+        ├── JobSearchPoint      — target evaluation space (pipeline_params, frozen)
+        └── PromptTemplate      — 8-field prompt scheme (render/compile)
+                └── OptSearchPoint  — optimizer working state (+ lineage, L2/L3, memory)
 
 Formula: ``f(JobSearchPoint, PipelineSchema, eval_data) → scores``
 """

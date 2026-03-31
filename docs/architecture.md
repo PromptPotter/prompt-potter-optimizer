@@ -51,13 +51,16 @@ Every piece of state is traced at both layers, independently reconstructable fro
 
 ```
 SearchPoint (base)           — abstract base, "a point in a search space"
-    ├── JobSearchPoint       — user's job: model + temp + pipeline_params (frozen)
-    └── OptSearchPoint       — optimizer state: prompt fields + L2/L3 + memory (mutable)
+    ├── JobSearchPoint       — user's job: pipeline_params (frozen)
+    └── PromptTemplate       — 8-field prompt scheme (render/compile)
+            └── OptSearchPoint — + lineage + L2/L3 + memory (mutable)
 ```
 
 **JobSearchPoint** — flat, frozen, content-hashable target evaluation specification: `pipeline_params` (the rendered prompt lives inside `pipeline_params` as a node config value).
 
-**OptSearchPoint** — inherits from SearchPoint. Prompt decomposition fields (`persona`, `task_intent`, etc.) + lineage (`id`, `parent_id`, `changes_description`) + L2 state (`optimizer_params`, `task_context`) + L3 state (`plan`) + optimization memory (`critique_text`, `thinking_styles`, `escalation_journal`). Mutable. `render()` assembles fields; `to_job_search_point()` projects into JobSearchPoint for evaluation.
+**PromptTemplate** — the 8-field prompt decomposition scheme shared by job prompts and optimizer meta-prompts. Fields: `persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`, `few_shot_examples`, `plan`. Methods: `render()`, `compile_prompt()`, `prompt_field_dict()`, `from_prompt_fields()`. `load_optimizer_prompt()` returns `PromptTemplate`.
+
+**OptSearchPoint** — inherits from PromptTemplate. Adds lineage (`id`, `parent_id`, `changes_description`) + L2 state (`optimizer_params`, `task_context`) + optimization memory (`critique_text`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`). Mutable. `to_job_search_point()` projects into JobSearchPoint for evaluation.
 
 **PipelineSchema** / **PipelineNode** — describes a pipeline (target or optimizer). Both TermNorm and the optimizer pipeline parse into PipelineSchema.
 

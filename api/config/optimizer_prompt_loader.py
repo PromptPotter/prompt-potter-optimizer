@@ -1,16 +1,16 @@
 """Loader for optimizer meta-prompt templates.
 
-Optimizer prompts are OptSearchPoint instances with ``{{variable}}`` runtime
-placeholders in their prompt fields. The loader tries Langfuse first
-(by ``production`` label with SDK-side caching), then falls back to local
-JSON defaults in ``optimizer_prompts/``.
+Optimizer prompts are ``PromptTemplate`` instances with ``{{variable}}``
+runtime placeholders in their prompt fields. The loader tries Langfuse
+first (by ``production`` label with SDK-side caching), then falls back to
+local JSON defaults in ``optimizer_prompts/``.
 
 Usage::
 
     from api.config.optimizer_prompt_loader import load_optimizer_prompt
 
-    osp = load_optimizer_prompt("critique_negative")
-    prompt = osp.compile_prompt(accuracy_pct="85.0%", n_failures="5", ...)
+    tpl = load_optimizer_prompt("critique_negative")
+    prompt = tpl.compile_prompt(accuracy_pct="85.0%", n_failures="5", ...)
 """
 
 import functools
@@ -18,7 +18,7 @@ import json
 import logging
 from pathlib import Path
 
-from api.models.opt_search_point import OptSearchPoint
+from api.models.opt_search_point import PromptTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +31,10 @@ _PROMPT_DIR = Path(__file__).parent / "optimizer_prompts"
 
 
 @functools.lru_cache(maxsize=32)
-def _load_local(name: str) -> OptSearchPoint:
+def _load_local(name: str) -> PromptTemplate:
     path = _PROMPT_DIR / f"{name}.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    return OptSearchPoint(**data)
+    return PromptTemplate(**data)
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ _LANGFUSE_PREFIX = "optimizer_"
 _LANGFUSE_CACHE_TTL = 300  # seconds
 
 
-def _try_langfuse(name: str) -> OptSearchPoint | None:
+def _try_langfuse(name: str) -> PromptTemplate | None:
     """Fetch from Langfuse prompt registry by *production* label.
 
     Returns ``None`` on any failure (credentials missing, network error,
@@ -73,7 +73,7 @@ def _try_langfuse(name: str) -> OptSearchPoint | None:
         if not config or not isinstance(config, dict):
             return None
 
-        return OptSearchPoint(**config)
+        return PromptTemplate(**config)
     except Exception:
         logger.debug("Langfuse prompt fetch failed for %s", name, exc_info=True)
         return None
@@ -84,8 +84,8 @@ def _try_langfuse(name: str) -> OptSearchPoint | None:
 # ---------------------------------------------------------------------------
 
 
-def load_optimizer_prompt(name: str) -> OptSearchPoint:
-    """Load an optimizer prompt template as an OptSearchPoint.
+def load_optimizer_prompt(name: str) -> PromptTemplate:
+    """Load an optimizer prompt template as a PromptTemplate.
 
     Resolution order:
     1. Langfuse prompt registry (by ``production`` label, SDK-cached)
@@ -99,8 +99,8 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
     """Push all local JSON defaults to the Langfuse prompt registry.
 
     For each JSON file, creates a new prompt version with:
-    - ``prompt`` = assembled template text (``render_prompt()``) for Langfuse UI display
-    - ``config`` = full OptSearchPoint dict (for reconstruction on fetch)
+    - ``prompt`` = assembled template text (``render()``) for Langfuse UI display
+    - ``config`` = full PromptTemplate dict (for reconstruction on fetch)
     - ``labels`` = ``[label]``
     - ``tags`` = ``["optimizer", "meta-prompt"]``
 
@@ -116,16 +116,11 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
     results: dict[str, bool] = {}
     for name in list_optimizer_prompts():
         try:
-            osp = _load_local(name)
+            tpl = _load_local(name)
             lf.client.create_prompt(
                 name=f"{_LANGFUSE_PREFIX}{name}",
-                prompt=osp.render(),
-                config=osp.model_dump(
-                    exclude={"critique_text", "critique", "thinking_styles",
-                             "escalation_journal", "warning_inventory",
-                             "l2_directive",
-                             "degradation_reset_count", "backend_warning_emitted"},
-                ),
+                prompt=tpl.render(),
+                config=tpl.model_dump(),
                 labels=[label],
                 tags=["optimizer", "meta-prompt"],
                 commit_message=f"Push local default for {name}",

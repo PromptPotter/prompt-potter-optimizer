@@ -295,7 +295,7 @@
     },
     {
       "parameters": {
-        "content": "# Pipeline Parameters (all optional)\n\n- num_results: 20\n- content_char_limit: 800\n- raw_content_limit: 5000\n- profiling_temperature: 0.3\n- profiling_max_tokens: 1800\n- ranking_temperature: 0\n- ranking_max_tokens: 4000\n- ranking_sample_size: 20\n- max_token_candidates: 20\n- relevance_weight_core: 0.7\n- model: meta-llama/llama-4-maverick-17b-128e-instruct\n\nOverride via POST body on /termnorm/matches\n",
+        "content": "# Pipeline Parameters (all optional)\n\n- num_results: 20\n- content_char_limit: 800\n- raw_content_limit: 5000\n- profiling_temperature: 0.3\n- profiling_max_tokens: null (no limit)\n- ranking_temperature: 0\n- ranking_max_tokens: 4000\n- ranking_sample_size: 20\n- max_token_candidates: 20\n- relevance_weight_core: 0.7\n- model: meta-llama/llama-4-maverick-17b-128e-instruct\n\nOverride via POST body on /termnorm/matches\n",
         "height": 280,
         "width": 376
       },

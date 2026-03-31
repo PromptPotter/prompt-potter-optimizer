@@ -1,14 +1,23 @@
 """OptSearchPoint — the optimizer's full working state.
 
-Inherits from ``SearchPoint`` (the shared base for all pipeline search
-points). Where ``JobSearchPoint`` is a flat, frozen, content-hashable
-target-layer specification (model + temperature + pipeline_params),
-OptSearchPoint holds everything the optimizer needs: prompt decomposition
-fields, L2/L3 state, and optimization memory.
+Inherits from ``PromptTemplate`` (the 8-field prompt scheme shared by all
+prompts — job prompts and optimizer meta-prompts alike). Where
+``JobSearchPoint`` is a flat, frozen, content-hashable target-layer
+specification (pipeline_params), OptSearchPoint holds everything the
+optimizer needs: prompt decomposition fields (inherited from
+PromptTemplate), L2/L3 state, and optimization memory.
 
-The rendering bridge: ``render()`` assembles prompt fields into a string;
-``to_job_search_point()`` projects into a JobSearchPoint for evaluation
-by injecting the rendered prompt into ``pipeline_params``.
+Class hierarchy::
+
+    SearchPoint (abstract — render())
+        ├── JobSearchPoint (frozen target layer)
+        └── PromptTemplate (8 prompt fields + render/compile)
+                └── OptSearchPoint (+ lineage, L2/L3, memory)
+
+The rendering bridge: ``render()`` (on PromptTemplate) assembles prompt
+fields into a string; ``to_job_search_point()`` projects into a
+JobSearchPoint for evaluation by injecting the rendered prompt into
+``pipeline_params``.
 
 Two-layer tracing:
   Target layer:    JobSearchPoint  → content_hash → dataset_runs/
@@ -22,7 +31,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, Field
 
@@ -46,25 +55,22 @@ class FewShotExample(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# OptSearchPoint
+# PromptTemplate — the 8-field prompt scheme
 # ---------------------------------------------------------------------------
 
-class OptSearchPoint(SearchPoint):
-    """Optimizer-level search point — the optimizer's full working state.
+class PromptTemplate(SearchPoint):
+    """The 8-field prompt decomposition scheme.
 
-    Persisted in trial checkpoints. Enables L4 to correlate optimizer
-    configuration with target-pipeline evaluation outcomes.
+    Shared by job prompts (the prompt being optimized) and optimizer
+    meta-prompts (L1/L2/L3/Critique templates). Each prompt uses the
+    fields it needs; empty fields are skipped by ``render()``.
+
+    Optimizer templates are loaded via ``load_optimizer_prompt()`` which
+    returns ``PromptTemplate`` — callers use ``compile_prompt()`` to
+    substitute ``{{variable}}`` placeholders, then pass to ``llm_call()``.
     """
 
-    # -- Lineage -------------------------------------------------------------
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
-    parent_id: str | None = None
-    changes_description: str = ""
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
-
-    # -- Prompt decomposition (L1 working representation) ------------------
+    # -- Prompt decomposition fields ---------------------------------------
     persona: str = ""
     task_intent: str = ""
     problem_description: str = ""
@@ -73,41 +79,8 @@ class OptSearchPoint(SearchPoint):
     answer_format: str = ""
     few_shot_examples: list[FewShotExample] = Field(default_factory=list)
 
-    # -- L2 state ----------------------------------------------------------
-    optimizer_params: dict[str, Any] = Field(default_factory=dict)
-    task_context: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Structured domain context (domain, pipeline_purpose, "
-        "data_characteristics, optimization_goals, key_challenges). "
-        "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
-    )
-
-    # -- L3 state ----------------------------------------------------------
+    # -- L3 state (rendered at end of prompt) ------------------------------
     plan: str = ""
-
-    # -- Optimization memory -----------------------------------------------
-    critique_text: str = ""
-    thinking_styles: list[str] = Field(default_factory=list)
-    escalation_journal: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Cross-round degradation investigation memory.",
-    )
-    warning_inventory: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        description="Per-query warning inventory across rounds.",
-    )
-    l2_directive: str = Field(
-        default="",
-        description="L2's diagnostic reasoning + action guidance for L1.",
-    )
-    degradation_reset_count: int = Field(
-        0,
-        description="How many times L2/L3 patience exhausted during degradation.",
-    )
-    backend_warning_emitted: bool = Field(
-        False,
-        description="One-shot flag — True after backend warning has been emitted.",
-    )
 
     # -- SearchPoint interface ---------------------------------------------
 
@@ -152,6 +125,89 @@ class OptSearchPoint(SearchPoint):
         if missing:
             raise KeyError(f"Unsubstituted template variables: {sorted(missing)}")
         return text
+
+    # -- Field extraction --------------------------------------------------
+
+    def prompt_field_dict(self) -> dict[str, Any]:
+        """Return prompt decomposition fields as a dict (for L1 candidate generation)."""
+        d: dict[str, Any] = {}
+        for f in PROMPT_STRING_FIELDS:
+            v = getattr(self, f)
+            if v:
+                d[f] = v
+        if self.few_shot_examples:
+            d["few_shot_examples"] = [ex.model_dump() for ex in self.few_shot_examples]
+        return d
+
+    @classmethod
+    def from_prompt_fields(cls, fields: dict[str, Any], **kwargs: Any) -> Self:
+        """Create an instance from a dict of prompt fields + optional extra state.
+
+        Return type follows ``cls`` — ``PromptTemplate.from_prompt_fields()``
+        returns ``PromptTemplate``; ``OptSearchPoint.from_prompt_fields()``
+        returns ``OptSearchPoint``.
+        """
+        fields = dict(fields)  # don't mutate caller's dict
+        fse = fields.pop("few_shot_examples", [])
+        if fse and isinstance(fse[0], dict):
+            fse = [FewShotExample(**ex) for ex in fse]
+        return cls(few_shot_examples=fse, **fields, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# OptSearchPoint
+# ---------------------------------------------------------------------------
+
+class OptSearchPoint(PromptTemplate):
+    """Optimizer-level search point — the optimizer's full working state.
+
+    Inherits the 8 prompt fields and rendering from ``PromptTemplate``.
+    Adds lineage tracking, L2/L3 optimizer state, and optimization memory.
+
+    Persisted in trial checkpoints. Enables L4 to correlate optimizer
+    configuration with target-pipeline evaluation outcomes.
+    """
+
+    # -- Lineage -------------------------------------------------------------
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    parent_id: str | None = None
+    changes_description: str = ""
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(UTC).isoformat()
+    )
+
+    # -- L2 state ----------------------------------------------------------
+    optimizer_params: dict[str, Any] = Field(default_factory=dict)
+    task_context: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured domain context (domain, pipeline_purpose, "
+        "data_characteristics, optimization_goals, key_challenges). "
+        "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
+    )
+
+    # -- Optimization memory -----------------------------------------------
+    critique_text: str = ""
+    thinking_styles: list[str] = Field(default_factory=list)
+    escalation_journal: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Cross-round degradation investigation memory.",
+    )
+    warning_inventory: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Per-query warning inventory across rounds.",
+    )
+    l2_directive: str = Field(
+        default="",
+        description="L2's diagnostic reasoning + action guidance for L1.",
+    )
+    degradation_reset_count: int = Field(
+        0,
+        description="How many times L2/L3 patience exhausted during degradation.",
+    )
+    backend_warning_emitted: bool = Field(
+        False,
+        description="One-shot flag — True after backend warning has been emitted.",
+    )
 
     # -- Projection to target layer ----------------------------------------
 
@@ -216,25 +272,3 @@ class OptSearchPoint(SearchPoint):
         # Any remaining changes
         data.update(changes)
         return OptSearchPoint(**data)
-
-    # -- Field extraction --------------------------------------------------
-
-    def prompt_field_dict(self) -> dict[str, Any]:
-        """Return prompt decomposition fields as a dict (for L1 candidate generation)."""
-        d: dict[str, Any] = {}
-        for f in PROMPT_STRING_FIELDS:
-            v = getattr(self, f)
-            if v:
-                d[f] = v
-        if self.few_shot_examples:
-            d["few_shot_examples"] = [ex.model_dump() for ex in self.few_shot_examples]
-        return d
-
-    @classmethod
-    def from_prompt_fields(cls, fields: dict[str, Any], **kwargs: Any) -> OptSearchPoint:
-        """Create an OptSearchPoint from a dict of prompt fields + optional extra state."""
-        fields = dict(fields)  # don't mutate caller's dict
-        fse = fields.pop("few_shot_examples", [])
-        if fse and isinstance(fse[0], dict):
-            fse = [FewShotExample(**ex) for ex in fse]
-        return cls(few_shot_examples=fse, **fields, **kwargs)

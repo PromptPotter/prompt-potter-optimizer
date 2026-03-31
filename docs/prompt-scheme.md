@@ -53,7 +53,16 @@ parts = [v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))]
 
 ## Type Hierarchy
 
-The 8 field types are shared by **all** prompts — both job prompts (the prompt being optimized) and optimizer prompts (L1/L2/L3/Critique meta-prompts). Each prompt subtype uses the fields it needs; empty fields are skipped by `render()`.
+The 8 field types live on `PromptTemplate`, the base class shared by **all** prompts — both job prompts (the prompt being optimized) and optimizer meta-prompts (L1/L2/L3/Critique templates). `OptSearchPoint` inherits from `PromptTemplate` and adds optimizer-specific state (lineage, L2/L3, memory). Each prompt subtype uses the fields it needs; empty fields are skipped by `render()`.
+
+```
+SearchPoint (abstract — render())
+    ├── JobSearchPoint (frozen target layer)
+    └── PromptTemplate (8 prompt fields + render/compile)
+            └── OptSearchPoint (+ lineage, L2/L3, memory)
+```
+
+`load_optimizer_prompt()` returns `PromptTemplate` — callers use `.compile_prompt()` to substitute `{{variable}}` placeholders, then pass to `llm_call()`. The type system prevents accidentally accessing optimizer-specific fields (`.escalation_journal`, `.l2_directive`, etc.) on template instances.
 
 ```
 ┌────────────────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
