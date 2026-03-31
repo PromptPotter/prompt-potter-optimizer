@@ -4,9 +4,10 @@
 ┌─ ONE ROUND ────────────────────────────────────────────────────────────┐
 │                                                                        │
 │  L1 GENERATE (LLM)                                                     │
-│    in:  critique (5 fields), task_context, thinking_styles,            │
-│         scan_context, focus_note, failure_examples,                    │
-│         search_memory (param impact, query patterns, failures) (M8, planned) │
+│    in:  critique OR l2_directive (mutual exclusion),                   │
+│         task_context, thinking_styles, scan_context, plan,            │
+│         escalation_journal + warning_inventory (probe rounds only),   │
+│         search_memory (param impact, query patterns) (M8, planned)    │
 │    out: N candidate OptSearchPoints (prompt + pipeline_params)         │
 │         ↓                                                              │
 │  L1 EVALUATE                                                           │
@@ -19,24 +20,24 @@
 │    └────────────────────────────────────────────────────────────────┘  │
 │    Winner selection: best accuracy >= baseline + threshold             │
 │         ↓                                                              │
-│    ┌─ CRITIQUE (LLM) ──────────────────────────────────────────────┐  │
+│    ┌─ CRITIQUE (LLM) — sole intelligence bridge ───────────────────┐  │
 │    │  in:  pipeline_health, rank_analysis, round_evolution,        │  │
-│    │       query_categories, anomaly_flags, scan_context           │  │
+│    │       query_categories, failure_details, successes            │  │
 │    │                                                                │  │
-│    │  acc >= 0.7 → positive path (what's working, extend)          │  │
-│    │  acc < 0.7  → negative path (what's failing, fix)             │  │
-│    │                                                                │  │
-│    │  out: { positive_critique, negative_critique,                  │  │
-│    │         priority_fix, suggested_axes, summary }                │  │
+│    │  out: { summary, priority_fix, suggested_axes,                │  │
+│    │         failure_highlights, positive/negative_critique }       │  │
+│    │  (compact form via format_critique_for_prompt: summary,       │  │
+│    │   priority_fix, axes, highlights — internal fields omitted)   │  │
 │    └────────────────────────────────────────────────────────────────┘  │
 │         ↓                                                              │
-│  ALL 5 fields → next L1 Generate + L2 Refine (on escalation)          │
+│  Compact critique → next L1 Generate (or L2 Refine on escalation)     │
 │                                                                        │
 │  ── ESCALATION (if degradation detected) ──────────────────────────── │
 │                                                                        │
 │  L2 REFINE CONTEXT (LLM) — meta-controller                            │
-│    in:  critique (5 fields), task_context, escalation_journal,         │
-│         round_summary                                                  │
+│    in:  critique, prev l2_directive, escalation report                 │
+│         (OR warning_inventory when no report), task_context,           │
+│         pipeline schema param keys                                     │
 │    out: updated task_context + meta-settings (creativity,              │
 │         n_variants, sample_size)                                       │
 │    L2 does NOT set pipeline_params — that's L1's job.                  │
@@ -126,7 +127,7 @@ Failure analysis is **separated from candidate generation** (PromptWizard patter
 
 ### Critique Output
 
-Both positive and negative paths produce the same 5-field JSON:
+Both positive and negative paths produce the same 6-field JSON:
 
 ```json
 {
@@ -134,46 +135,40 @@ Both positive and negative paths produce the same 5-field JSON:
   "negative_critique": "what's failing — root causes and blockers",
   "priority_fix": "single most impactful change to make",
   "suggested_axes": ["query_prefix", "max_sites"],
+  "failure_highlights": ["Q→Pred→GT lines (3-5 most actionable)"],
   "summary": "2-3 sentence actionable critique"
 }
 ```
 
-Formatted by `format_critique_for_prompt()` and injected into:
-- **L1 Generate** as `critique_text` (next round's meta-prompt)
-- **L2 Refine** as `state.critique` dict (when escalation fires)
+Formatted by `format_critique_for_prompt()` (emits only actionable fields: summary, priority_fix, suggested_axes, failure_highlights — positive/negative_critique stays internal). Injected into:
+- **L1 Generate** as `critique_text` — only when no `l2_directive` (mutual exclusion)
+- **L2 Refine** as `critique_text` in intelligence sections (always, so L2 can build on it)
 
-### Positive / Negative Routing
+### Stat-Rich Analysis
 
-| Path | When | Focus |
-|------|------|-------|
-| Positive | `accuracy >= 0.7` | Success examples + remaining failures. Extend what works. |
-| Negative | `accuracy < 0.7` | Rich target pipeline stats + failure examples. Diagnose root causes. |
-
-Threshold: hardcoded at 0.7.
-
-### Pre-Computed Stats (Negative Path)
-
-`assemble_critique_prompt()` builds the meta-prompt from pure functions in `critique_stats.py`:
+`assemble_critique_prompt()` in `critique.py` builds the meta-prompt from section helper functions. Critique is the **sole reader** of raw eval results — all other nodes receive its digested output (see [`information-flow.md`](information-flow.md) consumer matrix).
 
 | Section | Key metrics | Source |
 |---------|------------|--------|
-| **Evaluation summary** | accuracy, composite, degraded count, stalls | `CritiqueContext` |
-| **Anomaly flags** | `high_degradation`, `web_search_failure`, `near_miss_pattern`, `plateau_signal` | `detect_anomalies()` |
-| **Pipeline health** | `web_search_degradation_rate`, `url_yield`, timing p50/p90/max | `compute_pipeline_health()` |
-| **Rank analysis** | rank buckets, top-k recall, near misses | `compute_rank_analysis()` |
-| **Round evolution** | accuracy trajectory, degraded trend | `compute_round_evolution()` |
-| **Query categories** | failures by termination node, blindspot terms | `compute_query_categories()` |
-| **Scan context** | leaderboard, improving axes | From `CritiqueContext.scan_context` |
-| **Search memory** *(M8, planned)* | axis impact rankings, top-5 values, bottleneck distribution, dead queries | `SearchMemory` atomic accessors |
+| **Evaluation summary** | accuracy, composite, degraded count, stalls | `CritiqueContext` + `LoopState` |
+| **Anomaly flags** | `high_degradation`, `near_miss_pattern`, `plateau_signal` | Computed inline from health/rank/evolution sections |
+| **Pipeline health** | termination distribution, degradation%, error rate | `winner_results.pipeline_data` |
+| **Rank analysis** | rank buckets, top-k recall, near misses | `winner_results` + `candidate_keys` from schema |
+| **Round evolution** | accuracy trajectory, param changes | `state.rounds` (`CycleRoundResult` history) |
+| **Query categories** | failures by termination node | `winner_results.terminated_at` |
+| **Failure details** | non-near-miss failures (8 max, deduped) | `winner_results` |
+| **Successes** | hit results (2 examples) | `winner_results` |
+| **Search memory** *(M8, planned)* | axis impact rankings, top-5 values, bottleneck distribution | `SearchMemory` atomic accessors |
 
 ### Anomaly Flags
 
+Computed inline from the health, rank, and evolution sections:
+
 | Flag | Fires when | Severity |
 |------|-----------|----------|
-| `high_degradation` | `degradation_rate > 0.4` | HIGH |
-| `web_search_failure` | `url_yield < 0.3` | HIGH |
+| `high_degradation` | Degraded query count exceeds threshold | HIGH |
 | `near_miss_pattern` | GT in candidates for >30% of misses but not rank 1 | MEDIUM |
-| `plateau_signal` | 2+ consecutive rounds <1% improvement | MEDIUM |
+| `plateau_signal` | 2+ consecutive rounds with <1% improvement | MEDIUM |
 
 ### Pipeline Data Flow
 
@@ -184,9 +179,9 @@ _parse_backend_response()                    ← prompt_eval.py
     ↓
 result["pipeline_data"]["diagnostics"]["warnings"]
     ↓
-compute_pipeline_health()                   ← critique_stats.py
+_pipeline_health_section()                  ← critique.py
     ↓
-detect_anomalies() → ANOMALY FLAGS          ← injected into critique meta-prompt
+anomaly flags injected after summary        ← critique meta-prompt
 ```
 
 A query is **"degraded"** if it has any non-empty `warnings` list -- regardless of node name.
@@ -220,12 +215,14 @@ DegradationCheck fires mid-eval → ABORT remaining queries + candidates
     ↓
 EscalationSignal(target="l2")    ← DEFAULT_STRATEGIES routes by {step}:{code}
     ↓
-Escalation journal entry recorded (tried config, degradation rate)
+Escalation journal entry recorded BEFORE L2 (tried config, degradation rate)
     ↓
-L2 Refine receives: critique + journal → updates task_context + meta-settings
+L2 Refine receives: critique + journal + escalation report
+    → updates task_context + meta-settings + produces l2_directive
     ↓
-L1 Generate receives: focus_note (degradation data) + critique
+L1 Generate receives: l2_directive (replaces critique)
     → candidates naturally target unstable node's parameters
+    (probe rounds also receive warning_inventory for per-query targeting)
     ↓
 Retry → degradation rate drops? → continue or escalate again
 ```

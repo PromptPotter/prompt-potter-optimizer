@@ -95,7 +95,7 @@ Five nodes, declared in `api/config/optimizer_pipeline.json`:
 |------|---------|---------|
 | `l1_generate` | Candidate generation (sole `pipeline_params` decider) | Every round |
 | `l1_evaluate` | Eval + winner selection | Every round |
-| `critique` | 5-field analysis agent (strengths, weaknesses, thinking styles, warnings) | After L1 evaluate |
+| `critique` | Sole intelligence bridge — structured analysis of eval results (summary, priority_fix, axes, highlights) | After L1 evaluate |
 | `l2_refine_context` | Refine `task_context` + meta-settings (creativity, n_variants, sample_size) | L1 patience exhausted or degradation |
 | `l3_modify_plan` | Strategic replanning | L2 patience exhausted |
 
@@ -103,7 +103,7 @@ Five nodes, declared in `api/config/optimizer_pipeline.json`:
   ┌──────────────────────────────────────────────────────────┐
   │  l1_generate ────► l1_evaluate (+ critique)              │
   │       ▲                 │                                │
-  │       │  critique (5 fields)                             │
+  │       │  critique OR l2_directive                         │
   │       │  + thinking_styles                               │
   │       └──────── ◄───────┘                                │
   │                                                          │

@@ -54,7 +54,10 @@ def format_context_sections(ctx: ContextData) -> str:
         if tc_lines:
             sections.append(f"CONTEXT:\n{tc_lines}")
 
-    # Escalation / probe — unified from escalation_journal
+    # Escalation / probe — unified from escalation_journal.
+    # Probe rounds always show (per-query warning detail IS the actionable data).
+    # Non-probe: skip when l2_directive present — directive already absorbed
+    # escalation data via L2 (no raw+digest double-exposure).
     escalation_journal = ctx.escalation_journal
     if escalation_journal:
         if ctx.is_probe_round:
@@ -91,8 +94,8 @@ def format_context_sections(ctx: ContextData) -> str:
                                 f"  - degraded_rate={ej.get('degraded_rate', 0):.0%}, warnings={wt}"
                             )
             sections.append("\n".join(probe_lines))
-        else:
-            # Normal round — compact escalation alert
+        elif not ctx.l2_directive:
+            # Normal round without directive — compact escalation alert
             latest = escalation_journal[-1]
             rate = latest.get("degraded_rate", 0)
             problem_step = latest.get("problem_step", "unknown")
@@ -148,12 +151,15 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
     """
     sections: list[str] = []
 
-    # Escalation + per-query warnings (complementary granularities)
+    # Escalation OR per-query warnings — never both. The escalation
+    # stability report already contains aggregate warning counts; appending
+    # per-query breakdown is redundant. L2's job is strategic (meta-settings,
+    # directive), not per-query targeting — that's for probe rounds (L1).
     esc = ctx.escalation_section
-    if ctx.warning_inventory:
+    if not esc and ctx.warning_inventory:
         warning_text = summarize_warning_inventory(ctx.warning_inventory)
         if warning_text:
-            esc = esc + "\n\n" + warning_text + "\n" if esc else warning_text + "\n"
+            esc = warning_text + "\n"
     if esc:
         sections.append(esc)
 

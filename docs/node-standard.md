@@ -81,7 +81,7 @@ Subtype of `llm/structured`. Adds multi-source prompt assembly (scan_context, cr
 
 ### `agent` — Multi-step LLM node
 
-Subtype of `llm`. LLM call + analysis loop + tool use. The CritiqueAgent is an example: it assembles rich stats, calls the LLM, parses the 5-field critique dict.
+Subtype of `llm`. LLM call + analysis loop + tool use. The CritiqueAgent is an example: it assembles rich stats, calls the LLM, parses the 6-field critique dict.
 
 ```json
 {

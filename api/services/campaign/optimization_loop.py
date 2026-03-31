@@ -138,6 +138,25 @@ async def _handle_escalation_signal(
         if journal and journal[-1].get("outcome_degraded_rate") is None:
             journal[-1]["outcome_degraded_rate"] = esc_context.get("degraded_rate", 0)
 
+        # Record journal entry BEFORE L2 so L2 sees the current event
+        # in the journal (not just history). Also ensures the entry is
+        # persisted even if L2 returns a stop signal.
+        dominant = esc_context.get("dominant_warning", "unknown:unknown")
+        problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
+        step_cfg = ((state.current_sp.pipeline_params if state.current_sp else None) or {}).get(
+            problem_step, {}
+        )
+        state.opt_sp.escalation_journal.append(
+            {
+                "round": round_num,
+                "degraded_rate": esc_context.get("degraded_rate", 0),
+                "problem_step": problem_step,
+                "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
+                "warning_types": esc_context.get("warning_types", {}),
+                "outcome_degraded_rate": None,
+            }
+        )
+
         _obs, _tid = get_obs_trace(state, obs_campaign_id)
         try:
             l2_stop = await escalate_l2(
@@ -157,23 +176,6 @@ async def _handle_escalation_signal(
             l2_stop = None
         if l2_stop:
             return l2_stop
-
-        # Record journal entry after L2 transition
-        dominant = esc_context.get("dominant_warning", "unknown:unknown")
-        problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
-        step_cfg = ((state.current_sp.pipeline_params if state.current_sp else None) or {}).get(
-            problem_step, {}
-        )
-        state.opt_sp.escalation_journal.append(
-            {
-                "round": round_num,
-                "degraded_rate": esc_context.get("degraded_rate", 0),
-                "problem_step": problem_step,
-                "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
-                "warning_types": esc_context.get("warning_types", {}),
-                "outcome_degraded_rate": None,
-            }
-        )
     elif signal["target"] == EscalationTarget.ABORT:
         return StopReason.ABORT
 
