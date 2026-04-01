@@ -12,7 +12,7 @@ This is the core architectural move. It turns one opaque prompt into a combinato
 
 ## SearchPoint hierarchy as atomic unit
 
-`SearchPoint` is the abstract base class. `PromptTemplate` adds the 8-field prompt decomposition scheme (`render()`, `compile_prompt()`). `JobSearchPoint` bundles `pipeline_params` into one frozen object for target evaluation. `OptSearchPoint` inherits from `PromptTemplate` and adds lineage, L2/L3 state, and optimization memory. `to_job_search_point()` projects optimizer state into a JobSearchPoint for evaluation. Content-hashable, prevents accidental mutation of shared state.
+`SearchPoint` → `PromptTemplate` (8-field scheme) → `OptSearchPoint` (+ lineage, L2/L3, memory). `JobSearchPoint` bundles `pipeline_params` for frozen target eval. Content-hashable, prevents accidental mutation. See [architecture.md § Data Models](architecture.md#data-models).
 
 ## Prompt alias groups
 
@@ -42,10 +42,6 @@ All interrupt handlers must catch both `KeyboardInterrupt` and `asyncio.Cancelle
 
 Cached and fresh results use the same output format (fields, layout, ordering). A provenance indicator (📖 for cached, no marker for live) distinguishes data source for transparency — the user should know whether results are replayed or freshly computed. All other formatting (accuracy, CI, delta, hit/miss) is identical regardless of source.
 
-## Cross-campaign learning via SearchMemory *(M8)*
+## Cross-campaign learning via SearchMemory *(M8 — planned)*
 
-Evaluation data compounds across campaigns. SearchMemory is a materialized view over all historical `dataset_runs/` — incrementally updated, queryable by any optimizer node via atomic data accessors (structured data, no formatting).
-
-Three pillars: **parameter impact** (effect size + top-5 values per axis), **query patterns** (tractability, discriminative power), **failure modes** (bottleneck distribution, failure clusters).
-
-Each consumer (scan advisor, L1, L2, critique) composes the accessors it needs and formats results into its own prompt context. SearchMemory never generates LLM-ready text. Statistical method is swappable (start with mean-delta).
+Evaluation data compounds across campaigns via a materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic data accessors only — each consumer composes what it needs. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3).

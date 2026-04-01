@@ -29,16 +29,16 @@ All core logic lives in `api/services/`.
          └──────────────◄───────────────────────┘
               richer landscape → better starting point → repeat
 
-         SearchMemory (materialized view) aggregates all historical
+         SearchMemory *(M8 — planned)* aggregates all historical
          evaluation data and feeds parameter impact, query patterns,
-         and failure modes to both loops.  *(M8 Wave 3)*
+         and failure modes to both loops.
 ```
 
 **Human Loop** — OAT perturbation scan measures which axes matter. You pick the best starting point.
 
 **AI Loop** — Critique-guided feedback cycle. Each round produces a critique (structured failure analysis) feeding the next round's candidate generation alongside sampled thinking styles. `scan_context` provides leaderboard and difficulty analytics when available. L1→L2→L3 escalation on diminishing returns.
 
-**SearchMemory** *(M8)* — cross-campaign intelligence layer. A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Feeds both loops via atomic data accessors: parameter impact rankings, top-5 historically-best values per axis, query tractability, bottleneck distribution, and failure clusters. Refreshed lazily on watermark staleness.
+**SearchMemory** *(M8 — planned)* — cross-campaign intelligence layer. A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Feeds both loops via atomic data accessors: parameter impact rankings, top-5 historically-best values per axis, query tractability, bottleneck distribution, and failure clusters. Refreshed lazily on watermark staleness.
 
 ## Two-Layer Tracing
 
@@ -88,8 +88,8 @@ All paths converge on `eval_search_point()` — single gateway for eval persiste
 - **Content-hash dedup** — same JobSearchPoint + eval data returns cached results instantly
 - **Shared store** — sensitivity scan and feedback cycle both write to `dataset_runs/`; coverage advisor discovers all cached results regardless of source
 - **Write by experiment_id, read by step-sequence matching** — provenance tagged, but reads use step-sequence matching (which nodes ran) + prompt hash + parameter value extraction. Robust to `pipeline_params` format changes across code versions. Data shared across experiments.
-- **SearchMemory** *(M8)* — materialized statistical index over `dataset_runs/`, refreshed lazily on watermark staleness. Provides cross-campaign parameter impact, query patterns, and failure mode analysis. See [SearchMemory section](#searchmemory-m8-wave-3)
-- **Intermediate Cache** *(M8 Wave 4)* — per-node output cache keyed by `(upstream_config_hash, query)`. Avoids re-running stable upstream nodes when only ranker params change. See [Intermediate Cache section](#intermediate-cache-m8-wave-4)
+- **SearchMemory** *(M8 — planned)* — materialized statistical index over `dataset_runs/`. See [SearchMemory section](#searchmemory-m8-wave-3)
+- **Intermediate Cache** *(M8 — planned)* — per-node output cache. See [Intermediate Cache section](#intermediate-cache-m8-wave-4)
 - **Graceful interrupt** — first Ctrl+C finishes in-flight call and saves (`"partial": True`); content-hash cache bridges partial results on re-run
 
 ## Pipeline Composability
@@ -156,6 +156,8 @@ L1 Generate is the sole `pipeline_params` decider. L2 refines context and meta-s
 
 ### SearchMemory (M8 Wave 3)
 
+> **Planned (M8 Wave 3)** — not yet implemented.
+
 A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Persisted at `{backend_id}/search_memory.json` and updated incrementally via watermark (only new dataset runs since last refresh are processed).
 
 **Three analysis pillars:**
@@ -182,6 +184,8 @@ Cohort analysis (`cohort_analysis.py`) extends the model: per-query hit/miss res
 Implementation: `api/services/search/search_memory.py`, `api/services/search/cohort_analysis.py`.
 
 ### Intermediate Cache (M8 Wave 4)
+
+> **Planned (M8 Wave 4)** — not yet implemented.
 
 Partial pipeline caching that avoids re-running upstream nodes when only the ranker config changes. The `IntermediateCache` (`api/services/stores/intermediate_cache.py`) stores per-node outputs keyed by `(upstream_config_hash, query)`.
 

@@ -108,6 +108,8 @@ The escalation journal entry is appended BEFORE L2 runs. L2 sees the current deg
 
 ## M8/M9 Evolution
 
+> Planned — not yet implemented.
+
 ### M8: Campaign Intelligence
 
 M8 §1 introduces a proper data layer between eval results and LLM nodes:
@@ -130,103 +132,14 @@ M9 abstracts the backend eval path:
 
 ## Implementation Reference
 
-Current prompt template wiring. Expected to change each milestone — the consumer matrix above is the durable reference.
+All optimizer nodes follow: JSON template (`api/config/optimizer_prompts/`) → `load_optimizer_prompt()` → `compile_prompt()` → `llm_call()`. Each template decomposes into the 8-field prompt scheme (see [`prompt-scheme.md`](prompt-scheme.md)).
 
-**Unified pattern:** All optimizer nodes follow: JSON template (`api/config/optimizer_prompts/`) → `load_optimizer_prompt()` → `compile_prompt()` → `llm_call()`. Each template decomposes into the 8-field prompt scheme (see [`prompt-scheme.md`](prompt-scheme.md) Type Hierarchy).
+The consumer matrix above is the durable reference. Template `{{variable}}` wiring changes each milestone — read the template JSON files for current details.
 
-### L1 Generate
-
-```
-template: meta_scan_aware.json
-caller:   l1_optimizer.py:l1_generate()
-
-{{rendered_prompt}}    ◄── opt_sp.render()
-{{context_sections}}   ◄── format_context_sections():
-                           SCAN, CONTEXT, ESCALATION (probe only / no directive),
-                           DIRECTIVE (xor CRITIQUE), THINKING STYLES, PLAN
-{{accuracy_pct}}       ◄── state.current_accuracy
-{{n_variants}}         ◄── config or L2 override
-{{n_queries}}          ◄── len(current_results)
-OUTPUT → variants[]: changes_description, pipeline_params_override,
-                     target_axis, reasoning
-```
-
-### Eval
-
-```
-caller: prompt_eval.py:eval_search_point()
-wire:   backend_client.py:run_match()
-
-JobSearchPoint ──► POST /matches ──► ranked_candidates, timings, diagnostics
-per query:  hit = (top_candidate == ground_truth?)
-aggregated: accuracy (compute_accuracy), composite (compute_pipeline_metrics)
-```
-
-### Critique
-
-```
-template: critique.json
-caller:   CritiqueAgent.run()
-
-{{stat_sections}}          ◄── assemble_critique_sections():
-                               EVALUATION SUMMARY, ANOMALY FLAGS,
-                               PIPELINE HEALTH, RANK ANALYSIS,
-                               ROUND EVOLUTION, QUERY CATEGORIES,
-                               FAILURE DETAILS, SUCCESSES
-
-OUTPUT → summary, priority_fix, suggested_axes, failure_highlights
-         (positive/negative_critique internal — summary distills them)
-```
-
-### L2 Refine Context
-
-```
-template: l2_refine_context.json
-caller:   layer_transitions.py:refine_context()
-
-{{current_params}}         ◄── opt_sp.optimizer_params
-{{task_context_section}}   ◄── opt_sp.task_context (raw_description filtered out)
-{{intelligence_sections}}  ◄── format_l2_intelligence():
-                               ESCALATION report (or WARNING inventory, never both)
-                               CRITIQUE text
-                               PREV DIRECTIVE
-                               HISTORICAL INTELLIGENCE (SearchMemory)
-{{response_schema_suffix}} ◄── hardcoded
-
-OUTPUT → optimizer_params, task_context, action, directive, rationale
-```
-
-Note: L2 does NOT see the rendered prompt or full pipeline parameter listing.
-The rendered prompt is L1's domain; pipeline params are surfaced only via the
-PIPELINE STABILITY REPORT (inside intelligence_sections) when escalation fires.
-
-### L3 Modify Plan
-
-```
-template: l3_modify_plan.json
-caller:   layer_transitions.py:modify_plan()
-
-{{current_plan}}           ◄── opt_sp.plan
-{{l2_summary}}             ◄── last 3 L2 rounds (round, params, acc_change)
-{{rendered_prompt}}        ◄── opt_sp.render()
-{{pipeline_section}}       ◄── param keys from PipelineSchema
-{{response_schema_suffix}} ◄── hardcoded
-
-OUTPUT → plan, pipeline_params, rationale
-```
-
----
-
-## Key Files
-
-| Concern | File |
-|---------|------|
-| L1 Generate | `api/services/l1_optimizer.py` |
-| Eval gateway | `api/services/prompt_eval.py` |
-| Backend wire | `api/services/backend_client.py` |
-| Critique | `api/services/campaign/critique.py` |
-| L2 / L3 | `api/services/campaign/layer_transitions.py` |
-| L1 formatting | `api/services/campaign/formatting.py` |
-| Escalation dispatch | `api/services/campaign/optimization_loop.py` |
-| L2/L3 dispatch | `api/services/campaign/escalation.py` |
-| Prompt templates | `api/config/optimizer_prompts/` |
+| Node | Template | Caller | Key note |
+|------|----------|--------|----------|
+| L1 Generate | `meta_scan_aware.json` | `l1_optimizer.py:l1_generate()` | `format_context_sections()` assembles all L1 context |
+| Eval | — | `prompt_eval.py:eval_search_point()` | `run_match()` translates to wire format |
+| Critique | `critique.json` | `critique.py:CritiqueAgent.run()` | `assemble_critique_sections()` builds stat sections |
+| L2 Refine | `l2_refine_context.json` | `layer_transitions.py:refine_context()` | Does NOT see rendered prompt or full pipeline params |
+| L3 Plan | `l3_modify_plan.json` | `layer_transitions.py:modify_plan()` | Sees only outcomes (l2_summary), not L2 reasoning |

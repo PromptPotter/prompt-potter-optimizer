@@ -94,74 +94,21 @@ Subtype of `llm`. LLM call + analysis loop + tool use. The CritiqueAgent is an e
 }
 ```
 
-### `web_search` — External service node
+### Non-LLM types
 
-```json
-{
-  "type": "web_search",
-  "config": {
-    "max_sites": 7,
-    "num_results": 20
-  }
-}
-```
-
-### `deterministic` — Pure function node
-
-```json
-{
-  "type": "deterministic",
-  "config": {
-    "threshold": 70,
-    "scorer": "WRatio"
-  }
-}
-```
-
-### `evaluation` — Backend evaluation node
-
-Calls external backend, compares results. The `l1_evaluate` node.
-
-```json
-{
-  "type": "evaluation",
-  "config": {
-    "improvement_threshold": 0.01
-  }
-}
-```
+| Type | Purpose | Example config keys |
+|------|---------|-------------------|
+| `web_search` | External HTTP service | `max_sites`, `num_results` |
+| `deterministic` | Pure function | `threshold`, `scorer` |
+| `evaluation` | Backend call + comparison (`l1_evaluate`) | `improvement_threshold` |
 
 ---
 
 ## Composability
 
-Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx, writes to ctx. Each node is self-contained — it handles its own prompt assembly, LLM call, and parsing internally.
+Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx, writes to ctx. Self-contained — handles its own prompt assembly, LLM call, and parsing. A pipeline is a list of nodes; the runner loops through them.
 
-```python
-# Each node is self-contained — no manual wiring of assembly/parse
-l1_node = LLMMetaNode(config=pipeline["l1_generate"])       # llm/meta type
-l2_node = LLMMetaNode(config=pipeline["l2_refine"])          # llm/meta type
-ranking = LLMStructuredNode(config=pipeline["llm_ranking"])  # llm/structured type
-critique = AgentNode(config=pipeline["critique"])             # agent type
-fuzzy   = DeterministicNode(config=pipeline["fuzzy"])         # deterministic type
-
-# Pipeline = list of nodes. Runner just loops:
-async def run_pipeline(nodes: list, ctx: Ctx):
-    for node in nodes:
-        await node.run(ctx)
-
-# TermNorm pipeline:
-termnorm = [fuzzy, web_search, entity_profiling, token_match, ranking]
-
-# Optimizer L1 round:
-optimizer_round = [l1_node, evaluator, critique]
-
-# Recombining is trivial — just change the list:
-optimizer_with_l2 = [l1_node, evaluator, critique, l2_node]
-ranking_with_critique = [ranking, critique]  # drop critique into any pipeline
-```
-
-**Key insight:** `llm/meta` inherits from `llm/structured` which inherits from `llm`. The LLM call is always the same internally — subtypes add prompt assembly and response parsing around it. A new node = configure which subtype + prompt_family + parser.
+**Key insight:** `llm/meta` inherits from `llm/structured` which inherits from `llm`. Subtypes add prompt assembly and response parsing around the same core LLM call. A new node = configure which subtype + prompt_family + parser.
 
 ---
 

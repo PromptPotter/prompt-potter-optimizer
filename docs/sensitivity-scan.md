@@ -38,7 +38,7 @@ Before evaluation, `prepare_scan_baseline()` reports per-axis coverage from hist
 
 **Prompt alias groups** link restructured prompts to their originals so historical pipeline-parameter results are discoverable. Resolution is transitive.
 
-### SearchMemory Integration (M8)
+### SearchMemory Integration (M8 — Planned)
 
 When historical data exists, SearchMemory enriches the scan workflow:
 
@@ -48,7 +48,7 @@ When historical data exists, SearchMemory enriches the scan workflow:
 
 SearchMemory is a materialized view refreshed lazily via watermark -- no extra computation during the scan itself.
 
-### Cohort Sensitivity (M8 Wave 3e)
+### Cohort Sensitivity (M8 — Planned)
 
 Standard sensitivity scan measures per-axis accuracy deltas over the full query set. Cohort sensitivity (`cohort_analysis.py`) slices those results by failure mode to answer: "Which axes matter most for which failure types?"
 

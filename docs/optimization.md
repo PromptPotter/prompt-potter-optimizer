@@ -94,7 +94,32 @@ Optimization strategy -- rarely changed:
 
 `render()` assembles prompt fields into the final rendered prompt. `derive_candidate()` creates child points forming a lineage chain.
 
-> **L4 (meta-optimization):** The escalation hierarchy extends naturally -- when L3 stalls, L4 optimizes the optimizer itself (meta-prompts, critique templates, optimizer parameters). See [M7 spec](specs/archive/m7-optimizer-pipeline.md#l4-meta-optimization).
+### Dynamic Field Set (Design Vision)
+
+The field set is currently fixed (8 fields in `PROMPT_STRING_FIELDS` + `few_shot_examples` + `plan`). The vision is to make it **open**: L2 should be able to add fields (e.g., `domain_constraints`, `negative_examples`) or remove zero-impact fields.
+
+```
+L2 REFINE ──► add_field("domain_constraints")
+              remove_field("persona")
+                    │
+                    ▼
+┌─ PROMPT SCHEME ──────────────────────────┐
+│  1. task_intent                          │
+│  2. problem_description                  │
+│  3. instruction                          │
+│  4. thinking_style                       │
+│  5. answer_format                        │
+│  6. domain_constraints          ← NEW    │
+│                                          │
+│  +/- [???]                               │
+└──────────────────────────────────────────┘
+```
+
+**Why it works architecturally:** `render()` already skips empty fields (removal = set to `""`). `derive_candidate()` and `prompt_field_dict()` iterate a field list — making it dynamic is the key change. An overflow `dict[str, str]` handles additions without new Pydantic attributes.
+
+**Benefit:** L2 field mutations widen or narrow the search space. A prompt with 4 fields searches a fundamentally different space than one with 8 fields.
+
+**Open questions:** How does the variant library adapt? Should scan test dynamic fields? Field ordering for new fields? Persistence through `OptSearchPoint` → `JobSearchPoint` → disk?
 
 ---
 
@@ -148,17 +173,17 @@ Formatted by `format_critique_for_prompt()` (emits only actionable fields: summa
 
 `assemble_critique_sections()` in `critique.py` builds the stat sections from section helper functions. The critique template (`critique.json`) wraps these sections with persona, task_intent, and answer_format. Critique is the **sole reader** of raw eval results — all other nodes receive its digested output (see [`information-flow.md`](information-flow.md) consumer matrix).
 
-| Section | Key metrics | Source |
-|---------|------------|--------|
-| **Evaluation summary** | accuracy, composite, degraded count, stalls | `CritiqueContext` + `LoopState` |
-| **Anomaly flags** | `high_degradation`, `near_miss_pattern`, `plateau_signal` | Computed inline from health/rank/evolution sections |
-| **Pipeline health** | termination distribution, degradation%, error rate | `winner_results.pipeline_data` |
-| **Rank analysis** | rank buckets, top-k recall, near misses | `winner_results` + `candidate_keys` from schema |
-| **Round evolution** | accuracy trajectory, param changes | `state.rounds` (`CycleRoundResult` history) |
-| **Query categories** | failures by termination node | `winner_results.terminated_at` |
-| **Failure details** | non-near-miss failures (8 max, deduped) | `winner_results` |
-| **Successes** | hit results (2 examples) | `winner_results` |
-| **Search memory** *(M8)* | axis impact rankings, top-5 values, bottleneck distribution | `SearchMemory` atomic accessors |
+| Section | Source |
+|---------|--------|
+| **Evaluation summary** | `CritiqueContext` + `LoopState` |
+| **Anomaly flags** | Computed inline from health/rank/evolution |
+| **Pipeline health** | `winner_results.pipeline_data` |
+| **Rank analysis** | `winner_results` + `candidate_keys` from schema |
+| **Round evolution** | `state.rounds` (`CycleRoundResult` history) |
+| **Query categories** | `winner_results.terminated_at` |
+| **Failure details** | `winner_results` (8 max, deduped) |
+| **Successes** | `winner_results` (2 examples) |
+| **Search memory** *(M8 — planned)* | `SearchMemory` atomic accessors |
 
 ### Anomaly Flags
 
@@ -172,35 +197,9 @@ Computed inline from the health, rank, and evolution sections:
 
 ### Pipeline Data Flow
 
-```
-Backend /matches → diagnostics.warnings[]
-    ↓
-_parse_backend_response()                    ← prompt_eval.py
-    ↓
-result["pipeline_data"]["diagnostics"]["warnings"]
-    ↓
-_pipeline_health_section()                  ← critique.py
-    ↓
-anomaly flags injected after summary        ← critique meta-prompt
-```
+Backend `/matches` returns `diagnostics.warnings[]` per query. A query is **"degraded"** if it has any non-empty warnings list. Each warning carries `{step, code, message}` — classified as **`{step}:{code}`** (e.g., `web_search:partial_scrape`).
 
-A query is **"degraded"** if it has any non-empty `warnings` list -- regardless of node name.
-
-**Backend warning contract:**
-
-```json
-{"data": {"diagnostics": {"warnings": [
-  {"step": "web_search", "code": "partial_scrape", "message": "3 of 14 fetched URLs returned content"}
-]}}}
-```
-
-| Field | Purpose | Example |
-|-------|---------|---------|
-| `step` | Target pipeline node that emitted the warning | `"web_search"`, `"entity_profiling"` |
-| `code` | Error classification | `"partial_scrape"`, `"timeout"` |
-| `message` | Human-readable detail | `"3 of 14 fetched URLs returned content"` |
-
-Classified as **`{step}:{code}`** (e.g., `web_search:partial_scrape`).
+Flow: `_parse_backend_response()` (prompt_eval.py) → `_pipeline_health_section()` (critique.py) → anomaly flags in critique meta-prompt.
 
 ---
 
@@ -260,54 +259,34 @@ Each round samples 2-3 styles from the variant library (`api/config/prompt_varia
 
 When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate target pipeline param exploration. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
 
-### SearchMemory in the Optimization Loop (M8)
+### SearchMemory Integration (M8 — Planned)
 
-SearchMemory is a materialized view over all historical evaluation data that feeds cross-campaign intelligence into the optimization loop. See [architecture.md](architecture.md#searchmemory-m8-wave-3) for the full data model.
+Cross-campaign intelligence feeding the optimization loop. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3) for the full data model, consumer matrix, and bottleneck attribution.
 
-**Lifecycle:**
+Loaded at init, refreshed incrementally each round via watermark. Each node queries the subset it needs: L1 gets failure clusters + historically-best values, L2 gets axis rankings + bottleneck distribution, Critique gets discriminating queries. Round 3+ uses `adapt_eval_set()` to swap always-hit/always-miss queries for discriminating ones.
 
-1. **Init** -- loaded from disk (`search_memory.json`), refreshed after baseline eval so the first round has historical context.
-2. **Per-round refresh** -- `refresh()` ingests new dataset runs since the last watermark. Lightweight (incremental, no recomputation of existing stats).
-3. **Persist** -- saved after each refresh so progress survives interrupts.
+## Optimizer Nodes
 
-**Per-node context injection:**
+See [architecture.md § Optimizer Pipeline](architecture.md#optimizer-pipeline) for the node table and flow diagram. Nodes declared in [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json), LLM calls via `llm_call()` primitive.
 
-| Node | SearchMemory data | How it's used |
-|------|------------------|---------------|
-| L1 Generate | `failure_clusters()`, `dead_queries()`, `top_k_values()` | Focus candidates on persistent failure modes; avoid values that historically never worked; seed from historically-best values |
-| L2 Refine | `axis_rankings()`, `bottleneck_distribution()` | Inform context refinement with which axes matter and where the pipeline bottleneck is |
-| Critique | `discriminating_queries()`, `failure_clusters()` | Enrich failure analysis with cross-campaign query patterns and persistent failure clusters |
-
-**Adaptive eval set (round 3+):** `adapt_eval_set()` uses SearchMemory to swap always-hit/always-miss queries for discriminating ones (queries whose outcome varies across configurations). This concentrates evaluation budget on queries that actually differentiate candidate prompts.
-
-### Bottleneck Attribution (M8 Wave 3d)
-
-`attribute_bottleneck()` in `metrics.py` maps each `terminated_at` step to the `param_keys` of that node plus all upstream nodes. This enables causal scan ordering: the scan advisor prioritizes parameters that belong to or feed into the dominant bottleneck node, rather than scanning axes in arbitrary order.
-
-## Optimizer Nodes (M7)
-
-See [architecture.md](architecture.md#the-optimizer-pipeline) for the optimizer pipeline table.
-
-The optimizer nodes are declared in [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json): `l1_generate` (`llm/meta`), `l1_evaluate` (`evaluation`), `critique` (`agent`), `l2_refine_context` (`llm/meta`), `l3_modify_plan` (`llm/meta`). Each node's config (temperature, prompt_family, context_sources) is loaded via `get_node_config()` and LLM calls use the shared `llm_call()` primitive (`api/config/optimizer_pipeline.py`). Node tracing uses `observed_node()`. `OptSearchPoint` checkpoints optimizer state (critique, thinking_styles, plan, `task_context`) per round.
-
-**Critique and thinking styles are tools of `l1_evaluate`, not separate nodes.** The critique agent runs *within* the evaluation node -- its output (`critique_text`) feeds the *next* round's `l1_generate`. Similarly, `sample_thinking_styles()` runs at the end of evaluation to prepare mutation guidance for the next round. Neither has an independent parameter surface or routing decision that would warrant a separate optimizer pipeline node.
+**Critique and thinking styles are tools of `l1_evaluate`, not separate nodes.** Critique runs *within* evaluation; its output feeds the *next* round's `l1_generate`. `sample_thinking_styles()` similarly prepares mutation guidance at evaluation end.
 
 ---
 
 ## Phase Events
 
-The feedback cycle emits structured `PhaseEvent` objects at phase boundaries via the `on_phase` callback. The notebook renders these as ANSI-colored banners (`>>>` enter, `<<<` exit).
+The feedback cycle emits `PhaseEvent` objects at phase boundaries via `on_phase`. The notebook renders these as ANSI-colored banners.
 
-| Phase | Trigger | Key enter data | Key exit data |
-|-------|---------|----------------|---------------|
-| `init` | Cycle start | `max_rounds`, `patience`, `n_variants`, `model`, `sample_size`, `enable_l2`, `enable_l3`, `eval_data_count`, `baseline_accuracy`, `has_scan_context`, `enable_critique` | `cycle_id`, `resumed_from_round`, `baseline_accuracy`, `obs_enabled`, `sample_count`, `critique_text` (bootstrap) |
-| `l1_generate` | Candidate generation | `current_accuracy`, `prompt_preview`, `n_variants`, `creativity`, `model`, `has_scan_context`, `has_critique` | `n_candidates`, `n_eval_queries`, `loaded_from_disk`, candidates list |
-| `l1_evaluate` | Evaluation, winner selection & critique | `n_candidates`, `n_queries`, `current_best_accuracy`, `improvement_threshold` | `winner_label`, `winner_accuracy`, `winner_composite`, `improved`, `next_action`, `critique_text`, `critique_path` |
-| `refine_context` | L2 escalation (when `enable_l2=True`) | `l2_round`, `stall_count`, `current_accuracy`, `best_accuracy` | `param_changes_count`, `context_changed`, `changes_description` |
-| `modify_plan` | L3 escalation (when `enable_l3=True`) | `l3_round`, `l2_stall_count` | `new_plan_preview`, `changes_description` |
-| `escalation` | `EscalationCheck` fires mid-eval | `check_name`, `target`, `context`, `candidate_idx` | (routed to L2/L3/abort) |
+| Phase | Trigger |
+|-------|---------|
+| `init` | Cycle start |
+| `l1_generate` | Candidate generation |
+| `l1_evaluate` | Evaluation, winner selection & critique |
+| `refine_context` | L2 escalation |
+| `modify_plan` | L3 escalation |
+| `escalation` | `EscalationCheck` fires mid-eval |
 
-Each event: `phase` (str), `event` ("enter"/"exit"), `round` (int or None), `data` (dict), `timestamp` (ISO 8601).
+Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestamp` (ISO 8601). See `CycleCallbacks` for the callback interface.
 
 ---
 
