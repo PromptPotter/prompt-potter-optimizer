@@ -19,6 +19,8 @@ PromptPotter decomposes a monolithic prompt into independent fields so each can 
 
 Source of truth: `PROMPT_STRING_FIELDS` in `api/shared/constants.py` (fields 1–6). `few_shot_examples` and `plan` are rendered explicitly after the string fields.
 
+> **Disambiguation:** Prompt scheme fields live on `OptSearchPoint` / `PromptTemplate` and render into a single prompt string. Pipeline node params (`pipeline_params`) are a separate namespace — nested dicts keyed by node name (e.g., `{"token_matching": {"thinking_style": "single_pass"}}`). Some names overlap (e.g., `thinking_style` appears in both). Prompt scheme `thinking_style` is reasoning guidance in the prompt text; pipeline param `thinking_style` is a backend node configuration. L1 candidates target pipeline node params only via `pipeline_params_override` — they do NOT mutate prompt scheme fields.
+
 `instruction` has no pre-built variants because it is always LLM-generated — it is the primary mutation surface. `few_shot_examples` is excluded from `PROMPT_STRING_FIELDS` and rendered via its own block formatter. `plan` is set by L3 and rendered last — empty by default (skipped).
 
 ---
@@ -108,7 +110,7 @@ Three transformations bridge optimizer state to the wire:
 
 ---
 
-## How L1 Mutates Fields
+## How L1 Generates Candidates
 
 `l1_generate()` (`l1_optimizer.py`) assembles a meta-prompt containing:
 
@@ -120,14 +122,11 @@ Three transformations bridge optimizer state to the wire:
 
 See [`docs/information-flow.md`](information-flow.md) for the full consumer matrix.
 
-The LLM returns candidate dicts. Currently, `instruction_spec` explicitly targets the `instruction` field, but `derive_candidate()` (`opt_search_point.py`) accepts changes to **any** `PROMPT_STRING_FIELDS` field via `**changes`:
-
-```python
-for f in PROMPT_STRING_FIELDS:
-    data[f] = changes.pop(f, getattr(self, f))
-```
+The LLM returns candidate dicts with `pipeline_params_override` — pipeline node param changes (e.g., `{"token_matching": {"max_token_candidates": 2}}`). **L1 does not mutate prompt scheme fields.** The prompt text is held constant across candidates so each pipeline param change is evaluated in isolation.
 
 Each candidate becomes a child `OptSearchPoint` with `parent_id` lineage. L2/L3 state (optimizer_params, task_context, plan) is inherited; optimization memory (critique, escalation_journal) is **not** — fresh analysis each round.
+
+Note: `derive_candidate()` (`opt_search_point.py`) accepts changes to **any** `PROMPT_STRING_FIELDS` field via `**changes`, but L1 does not use this capability — only `changes_description` is passed.
 
 ---
 

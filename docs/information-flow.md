@@ -144,9 +144,7 @@ caller:   l1_optimizer.py:l1_generate()
 {{accuracy_pct}}       ◄── state.current_accuracy
 {{n_variants}}         ◄── config or L2 override
 {{n_queries}}          ◄── len(current_results)
-{{instruction_spec}}   ◄── hardcoded literal
-
-OUTPUT → variants[]: instruction, changes_description, pipeline_params_override,
+OUTPUT → variants[]: changes_description, pipeline_params_override,
                      target_axis, reasoning
 ```
 

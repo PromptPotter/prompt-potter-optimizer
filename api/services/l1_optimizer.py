@@ -81,20 +81,18 @@ async def l1_generate(
     failure_analysis: FailureAnalysis | None = None,
     search_memory_context: dict | None = None,
 ) -> list[dict]:
-    """Generate candidate prompt variants via LLM meta-prompt.
+    """Generate candidate pipeline-param variants via LLM meta-prompt.
 
     All optimizer context (critique, thinking_styles, task_context, plan,
     escalation_journal, warning_inventory, l2_directive) is read from the
     ``OptSearchPoint`` — no need to pass them individually.
 
     Returns:
-        List of candidate dicts (prompt field dumps with optional
+        List of candidate dicts (prompt field dumps with
         ``__pipeline_params_override__``).
     """
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
-
-    instruction_spec = '  - "instruction": full prompt template text (keep template variables)\n'
 
     meta_prompt = load_optimizer_prompt("meta_scan_aware").compile_prompt(
         n_variants=str(n_variants),
@@ -117,7 +115,6 @@ async def l1_generate(
                 search_memory_context=search_memory_context,
             )
         ),
-        instruction_spec=instruction_spec,
     )
 
     response = await llm_call(
@@ -133,9 +130,7 @@ async def l1_generate(
 
     candidates: list[dict] = []
     for v in variants_list[:n_variants]:
-        instr = v.get("instruction", "")
         child = opt_sp.derive_candidate(
-            **({"instruction": instr} if instr else {}),
             changes_description=v.get("changes_description", ""),
         )
         c_dict = child.prompt_field_dict()

@@ -30,6 +30,8 @@ Two entry points (FastAPI API + Jupyter notebook), one service core in `api/serv
 
 **Pipeline composability:** `pipeline_params` (nested dicts keyed by node name) throughout PromptPotter. `node_config` only at the TermNorm wire boundary.
 
+**Two parameter namespaces:** Prompt scheme fields (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format` — rendered into a prompt string by `render()`) vs pipeline node params (nested dicts like `{"token_matching": {"thinking_style": "..."}}` — sent to backend nodes). These are orthogonal and may share names. L1 candidates modify pipeline node params via `pipeline_params_override` — they do NOT mutate prompt scheme fields. See [`docs/prompt-scheme.md`](docs/prompt-scheme.md).
+
 See [`docs/architecture.md`](docs/architecture.md) for diagrams, caching, pipeline discovery, and disk layout.
 
 ## Data Model Reference
@@ -129,3 +131,5 @@ See [`docs/design-principles.md`](docs/design-principles.md) for the full princi
 6. [`docs/observability.md`](docs/observability.md) — Langfuse, MLflow, events.jsonl
 7. [`docs/setup-guide.md`](docs/setup-guide.md) — installation, quick start, REST API
 8. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M8, M9) + roadmap; archived specs in `docs/specs/archive/`
+9. [`docs/prompt-scheme.md`](docs/prompt-scheme.md) — prompt decomposition (8 fields), rendering, variant library, projection to target pipeline
+10. [`docs/information-flow.md`](docs/information-flow.md) — data origins, consumer matrix, information compression chain

@@ -115,7 +115,7 @@ async def _generate_or_load_candidates(
                 n_candidates=len(persisted),
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=True,
-                candidates=candidate_summaries(persisted, state.opt_sp.prompt_field_dict()),
+                candidates=candidate_summaries(persisted),
             )
             return persisted
 
@@ -159,7 +159,7 @@ async def _generate_or_load_candidates(
         n_candidates=len(candidates),
         n_eval_queries=n_eval_queries,
         loaded_from_disk=False,
-        candidates=candidate_summaries(candidates, state.opt_sp.prompt_field_dict()),
+        candidates=candidate_summaries(candidates),
     )
 
     return candidates

@@ -281,7 +281,7 @@ def _print_sp_diff(
     # Header
     n_sp = len(columns)
     print(_node_line(
-        f"{CYAN}Settings diff ({len(diff_keys)} params, {n_sp} SPs):{RESET}"))
+        f"{CYAN}Round {n_sp} SPs:{RESET}"))
     hdr = f"{'':>{max_key}}  " + "".join(
         f"{label:<{col_w}}" for label, _ in columns)
     print(_node_line(hdr))
@@ -446,15 +446,6 @@ def _print_l1_generate_exit(d: dict, state: _CycleDisplayState) -> None:
     state.candidates_meta = d.get("candidates", [])
 
     print(f"  {GREEN}✓{RESET} {n} candidates generated ({source})")
-
-    for c in d.get("candidates", []):
-        idx = c.get("idx", 0)
-        desc = c.get("changes_description", "") or "(no description)"
-        if len(desc) > 50:
-            desc = desc[:47] + "..."
-        fields = c.get("changed_fields", [])
-        fields_tag = f" [{', '.join(fields)}]" if fields else ""
-        print(f"    C{int(idx) + 1}: {desc}{fields_tag}")
 
     # Multi-column SP diff: Start | Parent | C1..CN
     columns: list[tuple[str, dict[str, str]]] = [
