@@ -371,7 +371,16 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
         print(f"    {CYAN}Bootstrap critique:{RESET} {preview}")
     resumed = d.get("resumed_from_round", 0)
     if resumed > 0:
-        print(f"    Resumed from round {resumed} ({resumed} rounds cached)")
+        rs = d.get("restored_state", {})
+        state_parts = []
+        if rs.get("critique_chars"):
+            state_parts.append(f"critique={rs['critique_chars']} chars")
+        if rs.get("task_context_keys"):
+            state_parts.append(f"task_context={rs['task_context_keys']} keys")
+        if rs.get("l2_round"):
+            state_parts.append(f"l2_round={rs['l2_round']}")
+        state_suffix = f"  ({', '.join(state_parts)})" if state_parts else ""
+        print(f"    Resumed from round {resumed} ({resumed} rounds cached){state_suffix}")
     else:
         print("    Starting fresh (no prior rounds for this cycle)")
 
@@ -490,10 +499,21 @@ def _print_l1_evaluate_exit(d: dict, state: _CycleDisplayState) -> None:
     )) if non_aborted else {}
     winner = best_s.get("label", "?")
 
-    # Scoreboard (with CI column)
-    board = _scoreboard(scores, winner, state.baseline_accuracy)
-    if board:
-        print(board)
+    # Scoreboard: full table for >3 candidates, compact 1-liner otherwise
+    if len(scores) > 3:
+        board = _scoreboard(scores, winner, state.baseline_accuracy)
+        if board:
+            print(board)
+    elif scores:
+        _ranked = sorted(scores, key=lambda s: (
+            s.get("composite", s["accuracy"]), s["accuracy"]), reverse=True)
+        parts = []
+        for s in _ranked:
+            lbl = s.get("label", "?")
+            acc = s["accuracy"]
+            ab = " (aborted)" if s.get("escalation_aborted") else ""
+            parts.append(f"{lbl}={acc:.1%}{ab}")
+        print(f"  Scoreboard: {' | '.join(parts)}")
 
     # Composite suffix (only when it differs from accuracy)
     comp_tag = ""

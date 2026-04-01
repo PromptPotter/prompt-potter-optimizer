@@ -372,7 +372,7 @@ async def _run_eval_batch(
     try:
         for i, qd in enumerate(eval_data):
             if _stop_requested:
-                logger.info(
+                logger.debug(
                     "Graceful stop after query %d/%d.",
                     len(results),
                     len(eval_data),
@@ -569,7 +569,7 @@ async def eval_search_point(
         sp_h = search_point.sp_hash(prompt_nodes)
         sp_cache = store.dataset_runs.find_cached_queries(backend_id, sp_h)
         if sp_cache:
-            logger.info(
+            logger.debug(
                 "SP cache: %d cached queries for %d eval queries",
                 len(sp_cache),
                 len(eval_data),

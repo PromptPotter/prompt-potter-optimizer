@@ -63,7 +63,7 @@ def _prepare_probe_data(
     """Build eval data for a probe round (warned queries only, no escalation)."""
     warned_queries = {q for q, e in state.opt_sp.warning_inventory.items() if e.get("warnings")}
     round_data = [d for d in eval_data if d.get("query") in warned_queries]
-    logger.info(
+    logger.debug(
         "PROBE round %d: %d warned queries (from %d tracked)",
         round_num,
         len(round_data),
@@ -121,7 +121,7 @@ async def _handle_escalation_signal(
         degraded_rate=signal["context"].get("degraded_rate"),
         warning_types=signal["context"].get("warning_types"),
     )
-    logger.warning(
+    logger.debug(
         "Escalation '%s' at round %d — target=%s, degraded_rate=%.1f%%",
         signal["check_name"],
         round_num,
@@ -220,7 +220,7 @@ def _build_baseline_state(
         else baseline_prompt_fields
     )
     current_results: list = baseline_results or []
-    logger.info("Using provided baseline (acc=%.3f)", baseline_accuracy)
+    logger.debug("Using provided baseline (acc=%.3f)", baseline_accuracy)
 
     if current_results:
         _bl_composite = compute_composite_score(
@@ -291,7 +291,7 @@ def _restore_from_checkpoint(
         state.escalation.l2_stall_count = _latest_trial.get("l2_stall_count", 0)
         state.escalation.l3_stall_count = _latest_trial.get("l3_stall_count", 0)
         state.stall_count = _latest_trial.get("stall_count", 0)
-        logger.info(
+        logger.debug(
             "Restored optimizer state from round %d "
             "(critique=%d chars, task_context=%d keys, "
             "escalation_journal=%d entries, l2_round=%d)",
@@ -458,6 +458,16 @@ async def _init_cycle_state(
         if search_memory.refresh(_store, config.backend_id):
             search_memory.save(_sm_path)
 
+    # Build restored state summary for display
+    _restored = {}
+    if resumed_from_round:
+        _restored = {
+            "critique_chars": len(state.opt_sp.critique_text),
+            "task_context_keys": len(state.opt_sp.task_context),
+            "escalation_journal_entries": len(state.opt_sp.escalation_journal),
+            "l2_round": state.escalation.l2_round,
+        }
+
     emit_phase(
         on_phase,
         "init",
@@ -468,6 +478,7 @@ async def _init_cycle_state(
         obs_enabled=obs is not None,
         sample_count=len(round_eval_data),
         enable_critique=config.enable_critique,
+        restored_state=_restored,
     )
 
     return CycleInitResult(
@@ -633,7 +644,7 @@ async def run_optimization(
                 _round_data = round_eval_data
                 _round_checks = escalation_checks
 
-            logger.info(
+            logger.debug(
                 "Optimization round %d (clean=%d/%d, acc=%.3f, stall=%d/%d%s)",
                 round_num,
                 clean_rounds,

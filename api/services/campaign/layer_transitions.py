@@ -143,7 +143,7 @@ def _parse_l2_response(
     if not isinstance(l2_directive, str):
         l2_directive = ""
 
-    logger.info(
+    logger.debug(
         "L2 refine_context: %d param changes, task_context %s, action=%s, directive=%d chars",
         len(result.get("optimizer_params", {})),
         "updated" if new_task_context else "unchanged",
@@ -252,7 +252,7 @@ async def modify_plan(
 
     new_pipeline_params = _parse_pipeline_params(result, pipeline_params)
 
-    logger.info(
+    logger.debug(
         "L3 modify_plan: %s, pipeline_params %s",
         rationale[:100],
         "updated" if new_pipeline_params else "unchanged",

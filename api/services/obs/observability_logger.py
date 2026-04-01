@@ -531,7 +531,7 @@ class ObsLogger:
 
             n_skipped = len(eval_data) - len(query_to_item_id)
             if n_skipped > 0:
-                logger.info(
+                logger.debug(
                     "Dataset '%s': %d items registered, %d duplicates/empty "
                     "skipped (from %d input)",
                     dataset_name, len(query_to_item_id), n_skipped, len(eval_data),

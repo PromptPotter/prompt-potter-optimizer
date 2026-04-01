@@ -92,7 +92,7 @@ def init_campaign(
                 bl_ps = baseline_prompt_fields if baseline_prompt_fields is not None else current_ps
                 bl_osp = OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
                 cycle_id = cycle_config_identity(config, bl_osp.render(), eval_data)
-            logger.info("Cycle identity: %s", cycle_id)
+            logger.debug("Cycle identity: %s", cycle_id)
 
             existing = campaign_store.load(config.backend_id, cycle_id)
             if existing is not None:
@@ -117,7 +117,7 @@ def init_campaign(
                             logger.info("Updated loop-control config for %s", cycle_id)
                 resumed_from_round = len(existing.get("trials", []))
                 if resumed_from_round:
-                    logger.info(
+                    logger.debug(
                         "Resuming cycle %s — %d prior round(s) on disk",
                         cycle_id, resumed_from_round,
                     )
@@ -155,7 +155,7 @@ def init_campaign(
         try:
             dataset_item_map = obs.register_dataset(DATASET_NAME, eval_data)
             if dataset_item_map:
-                logger.info(
+                logger.debug(
                     "Registered %d dataset items for '%s'",
                     len(dataset_item_map), DATASET_NAME,
                 )

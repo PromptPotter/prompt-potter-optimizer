@@ -70,17 +70,19 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
             baseline_results=None, instruction="",
         )
 
-    # Find the last round with actual eval results (for accuracy + results)
-    last = campaign_rounds[-1]
+    tip = campaign_rounds[-1]
+
+    # Prefer accuracy from the last round with eval results; fall back to
+    # the tip's accuracy (e.g. scan winner carries accuracy but no results).
+    baseline_acc = tip.get("accuracy", 0.0)
+    baseline_results: list = []
     for rd in reversed(campaign_rounds):
         if rd.get("results"):
-            last = rd
+            baseline_acc = rd.get("accuracy", baseline_acc)
+            baseline_results = rd["results"]
             break
-    baseline_acc = last.get("accuracy", 0.0)
-    baseline_results = last.get("results", [])
-    # Use prompt_fields from the tip (most recent round) — may differ from
-    # the round with results (e.g. search winner with derived prompt)
-    tip_ps = campaign_rounds[-1]["prompt_fields"]
+
+    tip_ps = tip["prompt_fields"]
     if isinstance(tip_ps, dict):
         baseline_ps = tip_ps
         instruction = tip_ps.get("instruction", "")

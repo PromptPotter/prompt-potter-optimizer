@@ -258,7 +258,7 @@ class SearchMemory:
             self._ingest_run(detail)
             self._watermark.add(run_id)
 
-        logger.info(
+        logger.debug(
             "SearchMemory refreshed: %d new runs (total watermark: %d)",
             len(new_ids), len(self._watermark),
         )

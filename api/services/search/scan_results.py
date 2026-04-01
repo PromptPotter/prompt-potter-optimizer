@@ -454,13 +454,10 @@ def seed_campaign_from_scan(
         campaign_config["pipeline_params"] = merged
         merged_pp = merged
 
-    # Get scan baseline accuracy as fallback
-    scan_baseline_acc = 0.0
-    baseline_rows = scan_df[scan_df["delta"] == 0.0]
-    if not baseline_rows.empty:
-        scan_baseline_acc = baseline_rows.iloc[0]["accuracy"]
+    # Compute scan winner accuracy from scan_df (best single-variant result)
+    best_row = scan_df.loc[scan_df["accuracy"].idxmax()] if not scan_df.empty else None
+    scan_winner_acc = float(best_row["accuracy"]) if best_row is not None else 0.0
 
-    bl = campaign_rounds[0] if campaign_rounds else {}
     search_opt = OptSearchPoint(
         instruction=best_sp.render(),
         changes_description=f"scan_winner (sp_hash={best_sp.sp_hash()[:12]})",
@@ -469,10 +466,10 @@ def seed_campaign_from_scan(
         "round": "search",
         "label": f"smart_search ({search_opt.changes_description or search_opt.id[:12]})",
         "prompt_fields": search_opt,
-        "accuracy": bl.get("accuracy", scan_baseline_acc),
-        "hits": bl.get("hits", 0),
-        "total": bl.get("total", 0),
-        "results": bl.get("results", []),
+        "accuracy": scan_winner_acc,
+        "hits": int(best_row["hits"]) if best_row is not None else 0,
+        "total": int(best_row["total"]) if best_row is not None else 0,
+        "results": [],
     }
     campaign_rounds.append(round_entry)
 

@@ -108,6 +108,10 @@ def extract_warning_types(result: dict) -> list[str]:
             types.append(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
         elif isinstance(w, str):
             types.append(w)
+    # Fallback: synthesize warning from error field when diagnostics empty
+    if not types and result.get("error"):
+        terminated = pd.get("terminated_at", "unknown")
+        types.append(f"{terminated}:error")
     return types
 
 

@@ -275,7 +275,7 @@ class CampaignStore(EntityStore):
             / f"round_{round_num:04d}_candidates.json"
         )
         write_json(path, candidates)
-        logger.info(
+        logger.debug(
             "Saved %d candidates for round %d → %s",
             len(candidates), round_num, path.name,
         )
@@ -302,7 +302,7 @@ class CampaignStore(EntityStore):
         )
         if path.exists():
             path.unlink()
-            logger.info(
+            logger.debug(
                 "Deleted cached candidates for round %d (escalation invalidation)",
                 round_num,
             )

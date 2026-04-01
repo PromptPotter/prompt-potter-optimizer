@@ -102,7 +102,7 @@ async def _generate_or_load_candidates(
             round_num,
         )
         if persisted is not None:
-            logger.info(
+            logger.debug(
                 "Loaded %d persisted candidates for round %d",
                 len(persisted),
                 round_num,

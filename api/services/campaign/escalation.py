@@ -99,10 +99,12 @@ class DegradationCheck:
         self,
         threshold: float = 0.4,
         strategies: dict[str, EscalationStrategy] | None = None,
+        min_queries: int = 3,
     ):
         self.name = "degradation"
         self.enabled = True
         self.threshold = threshold
+        self.min_queries = min_queries
         self.strategies = strategies or dict(DEFAULT_STRATEGIES)
 
     def evaluate(
@@ -111,7 +113,7 @@ class DegradationCheck:
         candidate_idx: int,
         n_total_candidates: int,
     ) -> EscalationSignal | None:
-        if not results_so_far:
+        if len(results_so_far) < self.min_queries:
             return None
 
         degraded = count_degraded_queries(results_so_far)
@@ -225,7 +227,9 @@ def _rebuild_current_sp(
     prompt_node: str = "",
 ) -> None:
     """Update opt_sp from a transition result and rebuild current_sp."""
-    state.opt_sp = tr.opt_search_point
+    new_opt = tr.opt_search_point
+    new_opt.inherit_memory(state.opt_sp)
+    state.opt_sp = new_opt
     cur = state.current_sp
     assert cur is not None
     pp = getattr(tr, "pipeline_params", None) or cur.pipeline_params
@@ -292,13 +296,12 @@ async def _do_l2_transition(
             escalation_context=escalation_context,
             search_memory=state.search_memory,
         )
-    # Update task_context if L2 refined it
+    # Rebuild first — inherit_memory preserves accumulated state,
+    # then apply L2's new values to the rebuilt opt_sp.
+    _rebuild_current_sp(state, tr, prompt_node=config.prompt_node)
     if tr.task_context:
         state.opt_sp.task_context = tr.task_context
-    # Store L2 directive for next L1 round (sliding window=1)
     state.opt_sp.l2_directive = tr.l2_directive
-    # L2 does NOT set pipeline_params — only L1 Generate does that
-    _rebuild_current_sp(state, tr, prompt_node=config.prompt_node)
     state.escalation.l2_round += 1
     state.escalation.best_accuracy_at_l2_entry = state.best_accuracy
     state.escalation.best_composite_at_l2_entry = state.best_composite
@@ -327,9 +330,9 @@ async def _do_l2_transition(
 
     if tr.action == TransitionAction.PROBE:
         state.probe_next_round = True
-        logger.info("L2 requested probe — next round uses warned queries")
+        logger.debug("L2 requested probe — next round uses warned queries")
 
-    logger.info(
+    logger.debug(
         "L2 refine_context at round %d (l2_round=%d)",
         round_num,
         state.escalation.l2_round,
@@ -401,7 +404,7 @@ async def _do_l3_transition(
         changes_description=tr.opt_search_point.changes_description or "",
         pipeline_params_changed=tr.pipeline_params is not None,
     )
-    logger.info(
+    logger.debug(
         "L3 modify_plan at round %d (l3_round=%d)",
         round_num,
         state.escalation.l3_round,
@@ -449,7 +452,7 @@ async def escalate_l2(
 
     async def _reset_and_do_l2(*, reset_l3: bool = False) -> None:
         layer = "L2/L3" if reset_l3 else "L2"
-        logger.info(
+        logger.debug(
             "%s patience exhausted during degradation — resetting at round %d",
             layer, round_num,
         )
@@ -464,7 +467,7 @@ async def escalate_l2(
         if from_degradation:
             await _reset_and_do_l2()
             return None
-        logger.info(
+        logger.debug(
             "L2 patience exhausted (%d stalls) at round %d",
             esc.l2_stall_count, round_num,
         )
@@ -486,7 +489,7 @@ async def escalate_l2(
     if from_degradation:
         await _reset_and_do_l2(reset_l3=True)
         return None
-    logger.info(
+    logger.debug(
         "L3 patience exhausted (%d stalls) at round %d",
         esc.l3_stall_count, round_num,
     )

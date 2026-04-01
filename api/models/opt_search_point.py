@@ -32,7 +32,7 @@ import copy
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from pydantic import BaseModel, Field
 
@@ -209,6 +209,28 @@ class OptSearchPoint(PromptTemplate):
         False,
         description="One-shot flag — True after backend warning has been emitted.",
     )
+
+    # Canonical list of optimization memory fields.
+    # derive_candidate() intentionally omits these (L1 candidates start fresh).
+    # inherit_memory() copies them (L2/L3 transitions preserve session state).
+    MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
+        "critique_text",
+        "thinking_styles",
+        "escalation_journal",
+        "warning_inventory",
+        "l2_directive",
+        "degradation_reset_count",
+        "backend_warning_emitted",
+    )
+
+    def inherit_memory(self, source: OptSearchPoint) -> None:
+        """Copy optimization memory from *source* into this instance.
+
+        Used after L2/L3 transitions where derive_candidate() created a
+        fresh OptSearchPoint but dropped accumulated memory fields.
+        """
+        for field in self.MEMORY_FIELDS:
+            setattr(self, field, getattr(source, field))
 
     # -- Projection to target layer ----------------------------------------
 
