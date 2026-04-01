@@ -21,6 +21,7 @@ from .display import (
     RESET,
     YELLOW,
     _box_bottom,
+    _box_bottom_info,
     _box_line,
     _box_top,
     _dbox_bottom,
@@ -404,7 +405,6 @@ async def run_optimization_notebook(
         # Reset query counter on escalation exit (on_round is skipped)
         if event.phase == "escalation" and event.event == "exit":
             _query_counter[0] = 0
-            _ds.best_in_round = None
         # On resume: clear stale optimization rounds before replay re-appends them
         if event.phase == "init" and event.event == "exit":
             resumed = event.data.get("resumed_from_round", 0)
@@ -431,67 +431,48 @@ async def run_optimization_notebook(
         ci_lo, ci_hi = wilson_ci(hits, n)
         delta = acc - _ds.baseline_accuracy
 
-        if (_ds.best_in_round is None or acc > _ds.best_in_round[1]):
-            _ds.best_in_round = (label, acc)
-
-        # Header: label + accuracy with CI
+        # Line 1 (top frame): label + accuracy with CI
         acc_tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
-        print(f"\n  {_box_top(f'{label}/{total}', acc_tag, width=w)}")
+        print(f"  {_box_top(f'{label}/{total}', acc_tag, width=w)}")
 
-        # Line 1: description + pp from l1_generate exit metadata
+        # Line 2 (content): cyan mutations + hits + vs baseline
         meta = {}
         if idx < len(_ds.candidates_meta):
             meta = _ds.candidates_meta[idx]
-        desc = (meta.get("changes_description") or "")
-        if len(desc) > 45:
-            desc = desc[:42] + "..."
         pp = meta.get("pipeline_params_override")
+        parts: list[str] = []
         if pp:
-            base_pp = _ds.current_pipeline_params or {}
-            parts = []
-            for k, v in pp.items():
-                old = base_pp.get(k)
-                if old is not None and old != v:
-                    parts.append(f"{k}: {_pp_val(old)}\u2192{_pp_val(v)}")
+            for node, val in pp.items():
+                if isinstance(val, dict):
+                    for k, v in val.items():
+                        parts.append(f"{node}.{k}: {_pp_val(v)}")
                 else:
-                    parts.append(f"{k}: {_pp_val(v)}")
-            pp_line = "  ".join(parts)
-            if len(pp_line) > 55:
-                keys = list(pp.keys())
-                pp_line = f"pp=[{', '.join(keys[:3])}]"
-                if len(keys) > 3:
-                    pp_line += f" +{len(keys) - 3}"
-            desc = f"{desc}  {pp_line}" if desc else pp_line
-        if desc:
-            print(f"  {_box_line(desc, width=w)}")
-
-        # Line 2: hits/total + composite + delta + degraded
+                    parts.append(f"{node}: {_pp_val(val)}")
+        mutations = f"{CYAN}{'  '.join(parts)}{RESET}  " if parts else ""
         if scores.get("escalation_aborted"):
             eval_q = scores.get("eval_queries", n)
             expected_q = scores.get("expected_queries", n)
-            stats = f"{hits}/{eval_q} hits  {YELLOW}⚠ aborted at {eval_q}/{expected_q}{RESET}"
+            hit_str = f"{hits}/{eval_q} hits {YELLOW}⚠ aborted {eval_q}/{expected_q}{RESET}"
         else:
-            stats = f"{hits}/{n} hits"
+            hit_str = f"{hits}/{n} hits"
+        content = f"{mutations}{hit_str}  vs baseline: {_fmt_delta(delta)}"
+        print(f"  {_box_line(content, width=w)}")
+
+        # Line 3 (bottom frame): composite + degraded
+        bottom_parts: list[str] = []
         if comp is not None and comp != acc:
-            stats += f"  composite={comp:.4f}"
+            bottom_parts.append(f"composite={comp:.4f}")
         degraded = scores.get("degraded_queries", 0)
         if degraded:
-            stats += f"  {YELLOW}\u26a0 {degraded}/{n} degraded{RESET}"
-        stats += f"  vs baseline: {_fmt_delta(delta)}"
-        print(f"  {_box_line(stats, width=w)}")
-
-        # Line 3: running best
-        if _ds.best_in_round:
-            bl, ba = _ds.best_in_round
-            best_str = f"best so far: {bl} {ba:.1%}"
-            print(f"  {_box_line(best_str, width=w)}")
-
-        print(f"  {_box_bottom(width=w)}")
+            bottom_parts.append(f"{YELLOW}\u26a0 {degraded}/{n} degraded{RESET}")
+        if bottom_parts:
+            print(f"  {_box_bottom_info('  '.join(bottom_parts), width=w)}")
+        else:
+            print(f"  {_box_bottom(width=w)}")
 
     def _on_round(round_result, stall_count):
         _query_counter[0] = 0
         _ds.stall_count = stall_count
-        _ds.best_in_round = None
 
         round_entry = round_result.model_dump()
         ps_raw = round_entry.get("prompt_fields", {})

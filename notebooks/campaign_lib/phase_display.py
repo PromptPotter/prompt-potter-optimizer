@@ -54,7 +54,6 @@ class _CycleDisplayState:
     round_num: int = 0
     baseline_accuracy: float = 0.0
     baseline_total: int = 0  # sample count for significance tests
-    best_in_round: tuple[str, float] | None = None  # (label, accuracy)
     scan_context: ScanContext | None = None  # cached for scan reasoning display
     candidates_meta: list = field(default_factory=list)  # from l1_generate exit
     n_eval_queries: int = 0  # from generate:exit, used in evaluate:enter banner

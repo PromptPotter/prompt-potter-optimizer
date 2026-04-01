@@ -64,7 +64,6 @@ def _build_l2_prompt(
     search_memory: object | None = None,
 ) -> str:
     """Assemble the L2 refine_context prompt from all context sources."""
-    pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
     escalation_section = _build_escalation_prompt_section(
         escalation_context,
         opt_sp.escalation_journal or None,
@@ -74,9 +73,11 @@ def _build_l2_prompt(
 
     task_context_section = ""
     if opt_sp.task_context:
+        # Filter raw_description — already digested into structured fields
+        tc_display = {k: v for k, v in opt_sp.task_context.items() if k != "raw_description"}
         task_context_section = (
             "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
-            + json.dumps(opt_sp.task_context, indent=2)
+            + json.dumps(tc_display, indent=2)
         )
 
     intelligence_sections = format_l2_intelligence(L2IntelligenceData(
@@ -94,9 +95,9 @@ def _build_l2_prompt(
         '  "task_context": dict of refined domain fields (or {} to keep current)\n'
         '  "action": "continue" (normal L1 cycle) or "probe" '
         "(test warned queries with new settings first)\n"
-        '  "directive": 2-3 sentence instruction for the next candidate '
-        "generator — what to focus on and why (this will be injected into "
-        "the generation prompt as additional guidance)\n"
+        '  "directive": 2-3 sentence strategic guidance for the next candidate '
+        "generator — what problem to solve and why, not specific parameter "
+        "values (L1 decides those)\n"
         '  "rationale": 1-2 sentence explanation\n'
         "\nNote: L1 Generate makes the final decision on pipeline_params. "
         "Your job is to refine the "
@@ -106,10 +107,8 @@ def _build_l2_prompt(
     )
 
     return load_optimizer_prompt("l2_refine_context").compile_prompt(
-        rendered_prompt=opt_sp.render(),
         current_params=json.dumps(opt_sp.optimizer_params),
         task_context_section=task_context_section,
-        pipeline_section=pipeline_section,
         intelligence_sections=("\n\n" + intelligence_sections) if intelligence_sections else "",
         response_schema_suffix=response_schema_suffix,
     )

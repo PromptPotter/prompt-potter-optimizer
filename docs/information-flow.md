@@ -61,9 +61,10 @@ L2 history (summary)  │               │                   │               
 ──────────────────────┼───────────────┼───────────────────┼───────────────────┼────────────────
 Round history         │ ✓ full        │                   │                   │
 ──────────────────────┼───────────────┼───────────────────┼───────────────────┼────────────────
-Pipeline schema       │               │                   │ ✓ param keys      │ ✓ param keys
+Pipeline schema       │               │                   │ via escalation    │ ✓ param keys
+                      │               │                   │ report only (d)   │
 ──────────────────────┼───────────────┼───────────────────┼───────────────────┼────────────────
-Rendered prompt       │               │ ✓                 │ ✓                 │ ✓
+Rendered prompt       │               │ ✓                 │                   │ ✓
 ```
 
 **Legend:**
@@ -73,6 +74,8 @@ Rendered prompt       │               │ ✓                 │ ✓         
 **(b) Probe round exception.** Probe rounds are triggered by L2 (`action="probe"`) to target queries with recurring pipeline warnings. The per-query warning detail (warning_inventory + escalation_journal) IS the actionable data for probe targeting — the directive just says "probe." Non-probe rounds with a directive skip ESCALATION entirely. (`formatting.py:60-98`)
 
 **(c) Escalation/warning mutual exclusion in L2.** L2 receives either the full escalation stability report (which includes aggregate warning counts) OR the per-query warning breakdown — never both. The stability report already contains what L2 needs for strategic decisions. (`formatting.py:155-160`)
+
+**(d) L2 sees pipeline schema only via escalation.** L2 does not receive the full pipeline parameter listing — that's L1's domain. When escalation fires, the stability report surfaces the problem step's available parameters and tried configs. L2's job is meta-settings and directive, not pipeline_params selection.
 
 ---
 
@@ -181,18 +184,21 @@ OUTPUT → summary, priority_fix, suggested_axes, failure_highlights
 template: l2_refine_context.json
 caller:   layer_transitions.py:refine_context()
 
-{{rendered_prompt}}        ◄── opt_sp.render()
 {{current_params}}         ◄── opt_sp.optimizer_params
-{{task_context_section}}   ◄── opt_sp.task_context
-{{pipeline_section}}       ◄── param keys from PipelineSchema
+{{task_context_section}}   ◄── opt_sp.task_context (raw_description filtered out)
 {{intelligence_sections}}  ◄── format_l2_intelligence():
                                ESCALATION report (or WARNING inventory, never both)
                                CRITIQUE text
                                PREV DIRECTIVE
+                               HISTORICAL INTELLIGENCE (SearchMemory)
 {{response_schema_suffix}} ◄── hardcoded
 
 OUTPUT → optimizer_params, task_context, action, directive, rationale
 ```
+
+Note: L2 does NOT see the rendered prompt or full pipeline parameter listing.
+The rendered prompt is L1's domain; pipeline params are surfaced only via the
+PIPELINE STABILITY REPORT (inside intelligence_sections) when escalation fires.
 
 ### L3 Modify Plan
 

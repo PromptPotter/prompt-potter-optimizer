@@ -84,6 +84,14 @@ def _box_bottom(width: int = _W) -> str:
     return f"\u2514{'─' * (width - 2)}\u2518"
 
 
+def _box_bottom_info(text: str, width: int = _W) -> str:
+    """Bottom frame with embedded text: ``└─ text ───...───┘``."""
+    inner = width - 4  # minus └─ prefix and ─┘ suffix
+    label = f" {text} " if text else ""
+    fill = max(inner - _visible_len(label), 0)
+    return f"\u2514\u2500{label}{'─' * fill}\u2500\u2518"
+
+
 def _box_line(text: str, width: int = _W) -> str:
     """Single-line content: ``│  text ...  │``."""
     inner = width - 4  # minus │ + 2 spaces each side
