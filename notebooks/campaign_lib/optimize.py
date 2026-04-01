@@ -30,6 +30,7 @@ from .display import (
     _dbox_top,
     _fmt_delta,
     _fmt_query_result,
+    format_pipeline_overrides,
     show_progress,
 )
 from .phase_display import (
@@ -683,5 +684,7 @@ async def run_optimization_notebook(
     if result.langfuse_trace_id:
         print(_dbox_line(f"Langfuse     {result.langfuse_trace_id}"))
     print(_dbox_bottom())
+
+    format_pipeline_overrides(result.winner_pipeline_params, pipeline_schema)
 
     return campaign_rounds

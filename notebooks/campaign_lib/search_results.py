@@ -18,6 +18,7 @@ from api.services.search.scan_results import (
 )
 
 from .display import (
+    format_pipeline_overrides,
     show_progress,
     show_scan_leaderboard,
     show_scan_query_difficulty,
@@ -139,6 +140,7 @@ def seed_campaign_from_scan(
     scan_variants: dict[str, list],
     campaign_rounds: list,
     campaign_config: dict,
+    pipeline_schema=None,
 ):
     """Select scan winner, update pipeline_params, seed campaign_rounds.
 
@@ -179,6 +181,7 @@ def seed_campaign_from_scan(
             else:
                 display_pp[k] = v
         print(f"Updated pipeline_params: {display_pp}")
+        format_pipeline_overrides(result.merged_pipeline_params, pipeline_schema)
 
     if result.best_sp.sp_hash() != baseline.sp_hash():
         print(f"\nComposed winner: sp_hash={result.best_sp.sp_hash()[:12]}")

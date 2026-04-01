@@ -21,12 +21,10 @@ __all__ = [
     "GREEN",
     "MAGENTA",
     "RED",
-    # Constants
     "RESET",
     "YELLOW",
     "_box_bottom",
     "_box_line",
-    # Box-drawing helpers
     "_box_top",
     "_dbox_bottom",
     "_dbox_line",
@@ -34,17 +32,14 @@ __all__ = [
     "_dbox_top",
     "_dotted_line",
     "_fmt_delta",
-    # Interrupt handling
     "_print_interrupt_banner",
     "_scoreboard",
+    "format_pipeline_overrides",
     "show_axis_profiles",
-    # Campaign results display
     "show_campaign_summary",
     "show_flip_tracking",
     "show_lineage_chain",
-    # Display functions
     "show_progress",
-    # Scan analytics
     "show_scan_leaderboard",
     "show_scan_query_difficulty",
 ]
@@ -305,7 +300,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     precomp = r.get("precomputed_through")
     if precomp and not cached:
         last_cached = _STEP_SHORT_TAGS.get(precomp[-1], precomp[-1][:5])
-        step = f"{DIM}{last_cached}\U0001f4d6{RESET}[]{step}{cache_marker}"
+        step = f"{DIM}[{last_cached}\U0001f4d6]{RESET}->{step}{cache_marker}"
     else:
         step = f"{step}{cache_marker}"
 
@@ -559,6 +554,62 @@ def show_scan_query_difficulty(
     ipy_display(df)
 
     return df
+
+
+# ---------------------------------------------------------------------------
+# Pipeline overrides display
+# ---------------------------------------------------------------------------
+
+
+def format_pipeline_overrides(
+    pipeline_params: dict | None,
+    pipeline_schema=None,
+) -> None:
+    """Print pipeline_params as a copy-paste ready ``pipeline_overrides`` dict.
+
+    Reverse-flattens nested ``pipeline_params`` using the schema's
+    ``override_map`` so the output can be pasted directly into
+    ``campaign_config["pipeline_overrides"]``.
+    """
+    if not pipeline_params:
+        return
+
+    # Build reverse map: (node_name, wire_key) → flat_key
+    reverse: dict[tuple[str, str], str] = {}
+    if pipeline_schema:
+        for node in pipeline_schema.nodes:
+            for flat_key, wire_key in node.override_map.items():
+                reverse[(node.name, wire_key)] = flat_key
+            # Identity mappings (flat_key == wire_key, not in override_map)
+            for pk in node.param_keys:
+                if pk not in node.override_map:
+                    reverse[(node.name, pk)] = pk
+
+    lines: list[str] = []
+    for key, val in pipeline_params.items():
+        if key == "steps":
+            continue
+        if not isinstance(val, dict):
+            lines.append((key, key, repr(val)))
+            continue
+        for wire_key, v in val.items():
+            flat_key = reverse.get((key, wire_key), wire_key)
+            lines.append((key, flat_key, repr(v)))
+
+    if not lines:
+        return
+
+    print(f"\n  {CYAN}Copy-paste pipeline_overrides:{RESET}")
+    print(f"  {DIM}{'─' * 60}{RESET}")
+    print('  "pipeline_overrides": {')
+    current_node = None
+    for node, flat_key, val_repr in lines:
+        if node != current_node:
+            current_node = node
+            print(f"      {DIM}# {node}{RESET}")
+        print(f'      "{flat_key}": {val_repr},')
+    print("  }")
+    print(f"  {DIM}{'─' * 60}{RESET}")
 
 
 # ---------------------------------------------------------------------------
