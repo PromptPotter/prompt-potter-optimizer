@@ -303,7 +303,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
 
     cache_marker = " \U0001f4d6" if cached else ""
     precomp = r.get("precomputed_through")
-    if precomp:
+    if precomp and not cached:
         last_cached = _STEP_SHORT_TAGS.get(precomp[-1], precomp[-1][:5])
         step = f"{DIM}{last_cached}\U0001f4d6{RESET}[]{step}{cache_marker}"
     else:

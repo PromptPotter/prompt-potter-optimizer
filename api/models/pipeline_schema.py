@@ -204,13 +204,18 @@ class PipelineSchema(BaseModel):
         return None
 
     def resolve_flat_param(self, flat_key: str) -> tuple[str, str] | None:
-        """Resolve a single flat param name to ``(node_name, wire_key)``.
+        """Resolve flat param name → ``(node_name, wire_key)``.
 
-        Returns ``None`` if the key is not mapped by any step.
+        Uses ``param_keys`` as authority for param existence.
+        ``override_map`` provides wire-name translation only for
+        non-identity mappings (e.g. ``ranking_temperature → temperature``).
+
+        Returns ``None`` if the key is not owned by any node.
         """
         for step in self.nodes:
-            if flat_key in step.override_map:
-                return (step.name, step.override_map[flat_key])
+            if flat_key in step.param_keys:
+                wire_key = step.override_map.get(flat_key, flat_key)
+                return (step.name, wire_key)
         return None
 
     def node_for_flat_param(self, flat_key: str) -> str | None:

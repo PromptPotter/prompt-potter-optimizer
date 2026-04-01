@@ -214,6 +214,13 @@ async def sensitivity_scan(
             # Detect baseline value for this axis
             if axis_type == "prompt_field":
                 current_val = getattr(baseline_opt, axis_name, "") if baseline_opt else ""
+            elif pipeline_schema:
+                resolved = pipeline_schema.resolve_flat_param(axis_name)
+                if resolved:
+                    node, wire_key = resolved
+                    current_val = (baseline.pipeline_params or {}).get(node, {}).get(wire_key)
+                else:
+                    current_val = (baseline.pipeline_params or {}).get(axis_name)
             else:
                 current_val = (baseline.pipeline_params or {}).get(axis_name)
 

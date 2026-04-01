@@ -253,6 +253,11 @@ class BackendClient:
                 continue
             if isinstance(v, dict):
                 wire_overrides[k] = v
+            else:
+                logger.warning(
+                    "run_match: dropping non-dict pipeline_param %r=%r "
+                    "(flat param not nested under node?)", k, v,
+                )
 
         if wire_overrides:
             payload["node_config"] = wire_overrides
