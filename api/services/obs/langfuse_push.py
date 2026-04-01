@@ -116,6 +116,7 @@ logger = logging.getLogger(__name__)
 ORIGIN_ORDER = [
     "baseline",
     "sensitivity_scan",
+    "feedback_cycle",
     "optimization_loop",
     "smart_search_winner",
     "other",
@@ -126,7 +127,9 @@ def classify_run_origin(source: str = "") -> str:
 
     Returns one of the ORIGIN_ORDER values, defaulting to ``"other"``.
     """
-    return source or "other"
+    if source in ORIGIN_ORDER:
+        return source
+    return "other"
 
 
 def _state_path(store: ProjectStore, backend_id: str) -> Path:

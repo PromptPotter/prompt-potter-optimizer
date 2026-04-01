@@ -203,7 +203,6 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
 async def eval_query_via_backend(
     query_data: dict,
     backend_client: BackendClient,
-    rendered_prompt: str,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
     intermediate_cache: object | None = None,
@@ -221,11 +220,6 @@ async def eval_query_via_backend(
         pipeline_schema = PipelineSchema()
 
     try:
-        pp = pipeline_params or {}
-        steps = pp.get("steps")
-        prompt_names = pipeline_schema.prompt_node_names()
-        include_ranking = steps is None or any(n in steps for n in prompt_names)
-
         # Wave 4: intermediate cache lookup
         # Filter cached outputs to upstream nodes only — downstream nodes
         # may depend on the prompt or other config that changed.
@@ -241,7 +235,6 @@ async def eval_query_via_backend(
         resp = await backend_client.run_match(
             query,
             pipeline_params=pipeline_params,
-            ranking_prompt=rendered_prompt if include_ranking else None,
             precomputed=precomputed,
         )
         data = resp.get("data", {})
@@ -340,7 +333,6 @@ async def _run_eval_batch(
     max_consecutive_errors = ctx.max_consecutive_errors if ctx else 3
 
     results: list = []
-    rendered = search_point.render()
     consecutive_errors = 0
     n_reused = 0
 
@@ -396,7 +388,6 @@ async def _run_eval_batch(
                 result = await eval_query_via_backend(
                     qd,
                     backend_client,
-                    rendered,
                     pipeline_params=search_point.pipeline_params,
                     pipeline_schema=pipeline_schema,
                     intermediate_cache=_intermediate_cache,

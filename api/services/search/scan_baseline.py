@@ -15,6 +15,7 @@ from api.shared.constants import LAYER1_STRING_FIELDS
 
 if TYPE_CHECKING:
     from api.models.opt_search_point import OptSearchPoint
+    from api.models.pipeline_schema import PipelineSchema
     from api.models.search_point import JobSearchPoint
     from api.services.llm_client import LLMClientBase
     from api.services.project_store import ProjectStore
@@ -46,6 +47,7 @@ async def prepare_scan_baseline(
     scan_variants: dict | None = None,
     force_restructure: bool = False,
     prompt_node: str = "",
+    pipeline_schema: PipelineSchema | None = None,
 ) -> ScanBaselineResult:
     """Restructure baseline instruction into PromptPotter's internal fields.
 
@@ -119,6 +121,7 @@ async def prepare_scan_baseline(
         if scan_variants:
             scan_diag = diagnose_scan_variants(
                 store, backend_id, scan_variants, baseline_jsp,
+                pipeline_schema=pipeline_schema,
             )
 
     return ScanBaselineResult(

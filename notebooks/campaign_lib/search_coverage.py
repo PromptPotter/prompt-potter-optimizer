@@ -48,7 +48,7 @@ def _print_historical_diagnostic(
     if scan_diagnosis:
         n_matching = scan_diagnosis["n_matching_runs"]
         n_cached = scan_diagnosis["n_matching_results"]
-        print(f"Matching runs (sp_hash): {n_matching},"
+        print(f"Matching runs (step sequence): {n_matching},"
               f" {n_cached} cached results")
 
     # Scan variant coverage

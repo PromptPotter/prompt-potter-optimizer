@@ -230,15 +230,14 @@ class BackendClient:
         self,
         query: str,
         pipeline_params: dict[str, Any] | None = None,
-        ranking_prompt: str | None = None,
         precomputed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """POST /matches — translate pipeline_params to TermNorm wire format.
 
-        ``pipeline_params`` is the PromptPotter-internal nested dict
-        (e.g. ``{"steps": [...], "llm_ranking": {"temperature": 0.5}}``).
-        This method translates non-``steps`` keys into the ``node_config``
-        wire-format key that TermNorm expects.
+        ``pipeline_params`` carries ``steps`` (which nodes to run) plus
+        per-node override dicts (e.g. ``{"entity_profiling": {"prompt": "..."}}``)
+        which become the ``node_config`` key in the wire payload.  The backend
+        merges overrides with its own defaults — callers only send what changed.
         """
         payload: dict[str, Any] = {"query": query}
 
@@ -254,10 +253,6 @@ class BackendClient:
                 continue
             if isinstance(v, dict):
                 wire_overrides[k] = v
-
-        # ranking_prompt shorthand → inject into llm_ranking.prompt
-        if ranking_prompt:
-            wire_overrides.setdefault("llm_ranking", {})["prompt"] = ranking_prompt
 
         if wire_overrides:
             payload["node_config"] = wire_overrides

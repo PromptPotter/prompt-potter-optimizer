@@ -3,7 +3,7 @@
 assess_scan_coverage checks whether historical data covers OAT scan needs.
 build_data_inventory summarizes what the historical index contains.
 build_prompt_result_index builds the cross-run query lookup.
-diagnose_scan_variants checks scan variant coverage via sp_hash matching.
+diagnose_scan_variants checks scan variant coverage via step-sequence matching.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import hashlib
 import json
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from api.models.opt_search_point import OptSearchPoint
 from api.models.pipeline_schema import is_result_step_compatible
@@ -22,9 +22,59 @@ from api.shared.constants import DEFAULT_DIAGNOSTIC_QUERIES, PROMPT_STRING_FIELD
 from api.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
     from api.models.search_point import JobSearchPoint
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Step-sequence matching helpers
+# ---------------------------------------------------------------------------
+
+def _steps_match(entry: dict, target_steps: frozenset[str]) -> bool:
+    """Match by step sequence — which nodes ran."""
+    entry_steps = frozenset((entry.get("pipeline_params") or {}).get("steps", []))
+    # Both empty → match; otherwise exact set equality
+    return entry_steps == target_steps
+
+
+def _extract_param(
+    pp: dict,
+    param_name: str,
+    pipeline_schema: PipelineSchema | None = None,
+) -> Any:
+    """Extract a parameter value from pipeline_params.
+
+    Checks three locations (in order):
+    1. Flat top-level: ``pp["max_sites"]``  (skips known node names)
+    2. Schema-resolved nested: ``pp["web_search"]["max_sites"]``
+    3. Brute-force scan of all node dicts
+    """
+    # Known node names — skip these in flat lookup (they're node config dicts)
+    node_names: set[str] = set()
+    if pipeline_schema:
+        node_names = {n.name for n in pipeline_schema.nodes}
+    else:
+        # Heuristic: steps list contains node names
+        node_names = set(pp.get("steps") or [])
+
+    # 1. Flat top-level (skip node config dicts and "steps")
+    if param_name in pp and param_name not in node_names and param_name != "steps":
+        return pp[param_name]
+    # 2. Schema-resolved
+    if pipeline_schema:
+        resolved = pipeline_schema.resolve_flat_param(param_name)
+        if resolved:
+            node, wire_key = resolved
+            node_cfg = pp.get(node)
+            if isinstance(node_cfg, dict) and wire_key in node_cfg:
+                return node_cfg[wire_key]
+    # 3. Brute-force: scan all node dicts
+    for _k, v in pp.items():
+        if isinstance(v, dict) and param_name in v:
+            return v[param_name]
+    return None
 
 
 def diagnose_scan_variants(
@@ -33,36 +83,44 @@ def diagnose_scan_variants(
     scan_variants: dict[str, list],
     baseline_sp: JobSearchPoint,
     prompt_node_names: list[str] | None = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
-    """Check scan variant coverage using sp_hash matching.
+    """Check scan variant coverage using step-sequence matching.
 
-    For each axis value, derives a perturbed JobSearchPoint, computes its
-    sp_hash, and counts matching runs in the index.  Uses the same
-    matching logic as the eval cache — no false positives from different
-    pipeline configs.
+    Matches historical runs by:
+    1. **Step sequence** — which nodes ran (frozenset equality)
+    2. **Rendered prompt hash** — for prompt-field variants
+    3. **Parameter value extraction** — for pipeline-param variants,
+       checking both flat and nested formats via ``_extract_param()``
 
     Returns dict with ``n_matching_runs``, ``n_matching_results``,
     and per-axis ``axes`` detail.
     """
-    # Ensure sp_hashes are backfilled
-    store.dataset_runs._ensure_sp_hashes(backend_id)
-
     summaries = store.dataset_runs.list_all(backend_id)
-    # Build sp_hash → [entries] index for fast lookup
-    sp_index: dict[str, list[dict]] = {}
-    for entry in summaries:
-        sp_h = entry.get("sp_hash", "")
-        if sp_h:
-            sp_index.setdefault(sp_h, []).append(entry)
 
-    # Baseline sp_hash → matching runs
-    baseline_hash = baseline_sp.sp_hash(prompt_node_names)
-    baseline_entries = sp_index.get(baseline_hash, [])
+    # Step 1: filter to runs with matching step sequence
+    baseline_steps = frozenset(
+        (baseline_sp.pipeline_params or {}).get("steps", []),
+    )
+    step_matches = [e for e in summaries if _steps_match(e, baseline_steps)]
+
+    # Step 2: index step-matching runs by rendered_prompt_hash
+    rp_index: dict[str, list[dict]] = defaultdict(list)
+    for e in step_matches:
+        rp_h = e.get("rendered_prompt_hash", "")
+        if rp_h:
+            rp_index[rp_h].append(e)
+
+    # Baseline: match by prompt hash among step-matched runs
+    baseline_rp_hash = hashlib.sha256(
+        baseline_sp.render().encode(),
+    ).hexdigest()[:HASH_TRUNCATE]
+    baseline_entries = rp_index.get(baseline_rp_hash, [])
     n_baseline_results = sum(e.get("item_count", 0) for e in baseline_entries)
 
     # Per-axis coverage
     axes: dict[str, dict] = {}
-    all_matching: set[str] = set()  # run_ids that match any variant
+    all_matching: set[str] = set()
 
     for axis_name, values in scan_variants.items():
         value_counts: dict[str, int] = {}
@@ -74,18 +132,25 @@ def diagnose_scan_variants(
 
         for v in values:
             key = json.dumps(v, sort_keys=True) if isinstance(v, dict) else str(v)
-            # Derive perturbed SP — prompt fields re-render the prompt,
-            # pipeline params swap a top-level key.
-            if is_prompt_field:
-                perturbed = baseline_sp.derive(prompt_fields={axis_name: v})
-            else:
-                perturbed = baseline_sp.derive(
-                    pipeline_params={**(baseline_sp.pipeline_params or {}), axis_name: v},
-                )
-            sp_h = perturbed.sp_hash(prompt_node_names)
-            entries = sp_index.get(sp_h, [])
-            value_counts[key] = sum(e.get("item_count", 0) for e in entries)
 
+            if is_prompt_field:
+                # Prompt variant: derive, render, match by rp_hash
+                perturbed = baseline_sp.derive(prompt_fields={axis_name: v})
+                rp_h = hashlib.sha256(
+                    perturbed.render().encode(),
+                ).hexdigest()[:HASH_TRUNCATE]
+                entries = rp_index.get(rp_h, [])
+            else:
+                # Pipeline param variant: match by extracted value
+                entries = [
+                    e for e in step_matches
+                    if _extract_param(
+                        e.get("pipeline_params") or {},
+                        axis_name, pipeline_schema,
+                    ) == v
+                ]
+
+            value_counts[key] = sum(e.get("item_count", 0) for e in entries)
             for e in entries:
                 all_matching.add(e.get("run_id", ""))
                 if key not in value_scores:
@@ -96,7 +161,7 @@ def diagnose_scan_variants(
         axes[axis_name] = {
             "values": value_counts,
             "value_scores": value_scores,
-            "other_count": 0,  # sp_hash is exact — no "other" values
+            "other_count": 0,
             "total_matching": sum(value_counts.values()),
         }
 
@@ -172,6 +237,7 @@ def assess_scan_coverage(
     pipeline_params: dict | None = None,
     min_queries: int = DEFAULT_DIAGNOSTIC_QUERIES,
     axis_requirements: dict[str, int] | None = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Check whether the historical index already covers the OAT scan needs.
 
@@ -262,7 +328,7 @@ def assess_scan_coverage(
         baseline_opt.render().encode(),
     ).hexdigest()[:HASH_TRUNCATE]
     for axis_name, values in pipeline_param_defs.items():
-        current_val = base_params.get(axis_name)
+        current_val = _extract_param(base_params, axis_name, pipeline_schema)
         non_baseline = [v for v in values if v != current_val]
         if not non_baseline:
             continue

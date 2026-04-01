@@ -28,6 +28,7 @@ serialized via ``model_dump()`` at checkpoint time.
 """
 from __future__ import annotations
 
+import copy
 import re
 import uuid
 from datetime import UTC, datetime
@@ -225,7 +226,7 @@ class OptSearchPoint(PromptTemplate):
         """
         from api.models.search_point import JobSearchPoint
 
-        pp = dict(base_pipeline_params or {})
+        pp = copy.deepcopy(base_pipeline_params or {})
         rendered = self.render()
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered

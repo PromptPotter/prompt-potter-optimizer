@@ -70,6 +70,7 @@ async def prepare_scan_baseline(
         scan_variants=scan_variants,
         force_restructure=force_restructure,
         prompt_node=prompt_node,
+        pipeline_schema=ps,
     )
 
     # Print decomposed fields

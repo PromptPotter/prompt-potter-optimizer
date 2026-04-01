@@ -7,6 +7,7 @@ improvement suggestion generation.
 
 from __future__ import annotations
 
+import copy
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -250,7 +251,13 @@ async def l1_evaluate(
 
         _cpp = candidate_pp[idx]
         if _cpp:
-            pp: dict | None = {**(_sp_pipeline_params or {}), **_cpp}
+            # Deep merge: preserve existing node dicts while applying overrides
+            pp: dict | None = copy.deepcopy(_sp_pipeline_params or {})
+            for k, v in _cpp.items():
+                if isinstance(v, dict) and isinstance(pp.get(k), dict):
+                    pp[k] = {**pp[k], **v}
+                else:
+                    pp[k] = v
         else:
             pp = _sp_pipeline_params
         _pn = ctx.pipeline_schema.prompt_node_names()[0] if ctx.pipeline_schema and ctx.pipeline_schema.prompt_node_names() else ""

@@ -74,11 +74,20 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 
 All paths converge on `eval_search_point()` — single gateway for eval persistence. Content-addressed dedup via `eval_content_hash()`. Prompt alias groups link semantically equivalent prompts so historical data is discoverable across forms (transitive resolution).
 
+**Two matching strategies:**
+
+| Strategy | Used by | How it works |
+|----------|---------|-------------|
+| `sp_hash` (exact) | Eval cache (`find_cached_queries`) | Hash of `rendered_prompt_hash` + full `pipeline_params` — within-session dedup |
+| Step-sequence matching | Coverage (`diagnose_scan_variants`) | Filter by step set + prompt hash for prompt variants, step set + `_extract_param()` for pipeline-param variants — robust to `pipeline_params` format changes |
+
+`_extract_param()` (`coverage.py`) resolves parameter values across all historical formats: flat top-level (`pp["max_sites"]`), nested under node (`pp["web_search"]["max_sites"]`), and brute-force scan of node dicts.
+
 ## Caching & Crash Recovery
 
 - **Content-hash dedup** — same JobSearchPoint + eval data returns cached results instantly
 - **Shared store** — sensitivity scan and feedback cycle both write to `dataset_runs/`; coverage advisor discovers all cached results regardless of source
-- **Write by experiment_id, read by config similarity** — provenance tagged, but reads use alias groups + `pipeline_params` matching. Data shared across experiments.
+- **Write by experiment_id, read by step-sequence matching** — provenance tagged, but reads use step-sequence matching (which nodes ran) + prompt hash + parameter value extraction. Robust to `pipeline_params` format changes across code versions. Data shared across experiments.
 - **SearchMemory** *(M8)* — materialized statistical index over `dataset_runs/`, refreshed lazily on watermark staleness. Provides cross-campaign parameter impact, query patterns, and failure mode analysis. See [SearchMemory section](#searchmemory-m8-wave-3)
 - **Intermediate Cache** *(M8 Wave 4)* — per-node output cache keyed by `(upstream_config_hash, query)`. Avoids re-running stable upstream nodes when only ranker params change. See [Intermediate Cache section](#intermediate-cache-m8-wave-4)
 - **Graceful interrupt** — first Ctrl+C finishes in-flight call and saves (`"partial": True`); content-hash cache bridges partial results on re-run
@@ -124,7 +133,7 @@ L1 Generate is the sole `pipeline_params` decider. L2 refines context and meta-s
 `EXPERIMENT_ID` is the single source of truth for the notebook. When set, config MUST match the stored experiment — mismatches raise `ValueError`. When `None`, a new experiment is auto-created from the config hash.
 
 - **Writing**: all `dataset_runs`, campaign data, Langfuse traces tagged with `experiment_id`
-- **Reading**: results found by config similarity (alias groups + `pipeline_params` matching), not `experiment_id`
+- **Reading**: results found by step-sequence matching + prompt hash + parameter value extraction, not `experiment_id`
 
 ## ProjectStore Disk Layout
 
