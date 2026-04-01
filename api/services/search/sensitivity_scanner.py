@@ -93,13 +93,36 @@ async def sensitivity_scan(
         experiment_id=experiment_id,
     )
 
+    # Resolve active prompt node — only if the prompt node is in active steps
+    active_steps = set((baseline.pipeline_params or {}).get("steps", []))
+    _prompt_node = ""
+    _has_prompt_node = False
+    if pipeline_schema:
+        for pn in pipeline_schema.prompt_node_names():
+            if pn in active_steps:
+                _prompt_node = pn
+                _has_prompt_node = True
+                break
+    else:
+        # No schema — infer prompt node from baseline pipeline_params
+        for node_name, node_cfg in (baseline.pipeline_params or {}).items():
+            if isinstance(node_cfg, dict) and "prompt" in node_cfg:
+                _prompt_node = node_name
+                _has_prompt_node = True
+                break
+
     # Classify axes: prompt_field vs pipeline_param
     axes: list[tuple[str, str, list]] = []
     for name, values in scan_variants.items():
         if len(values) <= 1:
             continue
-        axis_type = "prompt_field" if name in PROMPT_STRING_FIELDS else "pipeline_param"
-        axes.append((name, axis_type, values))
+        if name in PROMPT_STRING_FIELDS:
+            if not _has_prompt_node:
+                logger.debug("Skipping prompt_field axis %r: no active prompt node", name)
+                continue
+            axes.append((name, "prompt_field", values))
+        else:
+            axes.append((name, "pipeline_param", values))
 
     # Sort axes by pipeline node order (prompt fields under their owning node)
     if pipeline_schema:
@@ -226,7 +249,7 @@ async def sensitivity_scan(
                 assert baseline_opt is not None, (
                     "baseline_opt required for prompt_field perturbation"
                 )
-                _pn = pipeline_schema.prompt_node_names()[0] if pipeline_schema and pipeline_schema.prompt_node_names() else ""
+                _pn = _prompt_node
                 perturbed = baseline_opt.derive_candidate(
                     **{axis_name: value},
                 ).to_job_search_point(

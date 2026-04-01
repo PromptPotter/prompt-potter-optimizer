@@ -230,11 +230,15 @@ class OptSearchPoint(PromptTemplate):
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
-        # Build prompt_fields for variant derivation in JobSearchPoint
-        pf = {f: v for f, v in self.prompt_field_dict().items() if f != "few_shot_examples"}
-        block = self._render_few_shot_block()
-        if block:
-            pf["few_shot_block"] = block
+        # Build prompt_fields for variant derivation in JobSearchPoint.
+        # Only meaningful when a prompt node exists in pipeline_params —
+        # otherwise derive() can't inject rendered prompts.
+        pf = None
+        if rendered and prompt_node:
+            pf = {f: v for f, v in self.prompt_field_dict().items() if f != "few_shot_examples"}
+            block = self._render_few_shot_block()
+            if block:
+                pf["few_shot_block"] = block
 
         return JobSearchPoint(
             pipeline_params=pp,

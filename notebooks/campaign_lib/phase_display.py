@@ -9,8 +9,12 @@ Unified visual system with three weight levels:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from api.models.phase_event import PhaseEvent
+
+if TYPE_CHECKING:
+    from api.services.search.scan_results import ScanContext
 
 from .display import (
     BOLD,
@@ -51,7 +55,7 @@ class _CycleDisplayState:
     baseline_accuracy: float = 0.0
     baseline_total: int = 0  # sample count for significance tests
     best_in_round: tuple[str, float] | None = None  # (label, accuracy)
-    scan_context: dict | None = None  # cached for scan reasoning display
+    scan_context: ScanContext | None = None  # cached for scan reasoning display
     candidates_meta: list = field(default_factory=list)  # from l1_generate exit
     n_eval_queries: int = 0  # from generate:exit, used in evaluate:enter banner
     current_pipeline_params: dict | None = None   # raw pp for candidate eval callback
@@ -316,7 +320,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     state.patience = d.get("patience", 0)
     state.baseline_accuracy = d.get("baseline_accuracy", 0.0)
     state.original_sp_flat = _flatten_sp_summary(
-        d.get("pipeline_params"), d.get("model", ""), 0.0,
+        d.get("pipeline_params"),
     )
     state.node_param_keys = d.get("node_param_keys")
 
@@ -414,8 +418,8 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
 
     # Scan reasoning inside node frame
     if state.scan_context and d.get("has_scan_context"):
-        axes = state.scan_context.get("improving_axes", [])
-        bl_acc = state.scan_context.get("baseline_accuracy", 0.0)
+        axes = state.scan_context.improving_axes
+        bl_acc = state.scan_context.baseline_accuracy
         if axes:
             print(_node_line(
                 f"{CYAN}Scan focus:{RESET} {len(axes)} improving axes"

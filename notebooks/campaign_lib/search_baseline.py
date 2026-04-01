@@ -51,12 +51,16 @@ async def prepare_scan_baseline(
 
     llm_client, llm_model = setup_llm(campaign_config)
 
-    # Resolve prompt node from pipeline schema
+    # Resolve prompt node from pipeline schema — only if the node is active
     prompt_node = ""
     if svc is not None:
         ps = svc.get("pipeline_schema")
-        if ps and ps.prompt_node_names():
-            prompt_node = ps.prompt_node_names()[0]
+        active_steps = set((pipeline_params or {}).get("steps", []))
+        if ps:
+            for name in ps.prompt_node_names():
+                if name in active_steps:
+                    prompt_node = name
+                    break
 
     result = await _prepare_scan_baseline(
         baseline, campaign_config, llm_client, llm_model,

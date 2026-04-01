@@ -150,11 +150,18 @@ def test_to_job_search_point_populates_prompt_fields():
         thinking_style="Step by step",
         instruction="Rank items.",
     )
-    sp = osp.to_job_search_point()
+    sp = osp.to_job_search_point(prompt_node="llm_ranking")
     assert sp.prompt_fields is not None
     assert sp.prompt_fields["persona"] == "Expert"
     assert sp.prompt_fields["thinking_style"] == "Step by step"
     assert sp.prompt_fields["instruction"] == "Rank items."
+
+
+def test_to_job_search_point_no_prompt_node():
+    """Without prompt_node, prompt_fields should be None."""
+    osp = OptSearchPoint(instruction="Rank items.")
+    sp = osp.to_job_search_point()
+    assert sp.prompt_fields is None
 
 
 def test_to_job_search_point_includes_few_shot_block():
@@ -164,7 +171,7 @@ def test_to_job_search_point_includes_few_shot_block():
         instruction="Rank.",
         few_shot_examples=[FewShotExample(input="a", output="b")],
     )
-    sp = osp.to_job_search_point()
+    sp = osp.to_job_search_point(prompt_node="llm_ranking")
     assert "few_shot_block" in sp.prompt_fields
     assert "Input: a" in sp.prompt_fields["few_shot_block"]
 

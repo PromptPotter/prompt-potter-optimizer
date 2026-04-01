@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from api.models.analysis import FailureAnalysis
     from api.models.eval_context import EvalContext
     from api.services.campaign.callbacks import CycleCallbacks
+    from api.services.search.scan_results import ScanContext
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ async def l1_generate(
     creativity: float,
     llm_client: LLMClientBase,
     model: str | None = None,
-    scan_context: dict | None = None,
+    scan_context: ScanContext | None = None,
     is_probe_round: bool = False,
     scan_compact: bool = False,
     failure_analysis: FailureAnalysis | None = None,

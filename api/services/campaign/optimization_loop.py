@@ -40,6 +40,7 @@ from api.services.campaign.round_execution import (
 from api.services.campaign.state import CycleInitResult, LoopState
 from api.services.metrics import compile_query_difficulty, compute_composite_score
 from api.services.prompt_eval import subsample_eval_data
+from api.services.search.scan_results import ScanContext
 from api.services.search.search_memory import SearchMemory
 from api.shared.hashing import HASH_TRUNCATE
 
@@ -569,7 +570,7 @@ async def run_optimization(
     baseline_results: list | None = None,
     callbacks: CycleCallbacks | None = None,
     langfuse_session_id: str | None = None,
-    scan_context: dict | None = None,
+    scan_context: ScanContext | None = None,
     cycle_id: str | None = None,
     experiment_id: str = "",
     backend_client: "BackendClient | None" = None,

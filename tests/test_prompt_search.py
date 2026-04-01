@@ -25,7 +25,7 @@ def _make_scan_baseline(
     """Build a (JobSearchPoint, OptSearchPoint) pair for scan tests."""
     osp = OptSearchPoint(instruction=instruction, persona=persona, **kwargs)
     pp = pipeline_params or {"steps": ["llm_ranking"]}
-    jsp = osp.to_job_search_point(base_pipeline_params=pp)
+    jsp = osp.to_job_search_point(base_pipeline_params=pp, prompt_node="llm_ranking")
     return jsp, osp
 
 

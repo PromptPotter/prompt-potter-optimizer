@@ -13,6 +13,7 @@ from api.services.campaign.critique import summarize_warning_inventory
 
 if TYPE_CHECKING:
     from api.models.analysis import FailureAnalysis
+    from api.services.search.scan_results import ScanContext
 
 
 @dataclass
@@ -27,7 +28,7 @@ class ContextData:
     warning_inventory: dict | None = None
     escalation_journal: list[dict] | None = None
     is_probe_round: bool = False
-    scan_context: dict | None = None
+    scan_context: ScanContext | None = None
     scan_compact: bool = False
     failure_analysis: FailureAnalysis | None = None
     search_memory_context: dict | None = None
@@ -46,12 +47,12 @@ def format_context_sections(ctx: ContextData) -> str:
     # Scan analytics — full on first round, sensitivity-only thereafter
     sc = ctx.scan_context
     if sc:
-        if ctx.scan_compact and sc.get("sensitivity_text"):
-            sections.append(f"SCAN:\n{sc['sensitivity_text']}")
+        if ctx.scan_compact and sc.sensitivity_text:
+            sections.append(f"SCAN:\n{sc.sensitivity_text}")
         else:
-            scan_parts = [f"SCAN:\nTested values per axis:\n{sc['tested_values']}"]
-            if sc.get("sensitivity_text"):
-                scan_parts.append(f"Top sensitivity drivers:\n{sc['sensitivity_text']}")
+            scan_parts = [f"SCAN:\nTested values per axis:\n{sc.tested_values}"]
+            if sc.sensitivity_text:
+                scan_parts.append(f"Top sensitivity drivers:\n{sc.sensitivity_text}")
             sections.append("\n".join(scan_parts))
 
     # Failure analysis (Wave 1c)

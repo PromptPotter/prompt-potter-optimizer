@@ -68,7 +68,7 @@ class TestSelectScanWinner:
 
     @pytest.fixture
     def baseline_sp(self, baseline_osp):
-        return baseline_osp.to_job_search_point()
+        return baseline_osp.to_job_search_point(prompt_node="llm_ranking")
 
     @pytest.fixture
     def scan_variants(self):
@@ -134,7 +134,7 @@ class TestSelectScanWinner:
     ):
         best_sp = select_scan_winner(
             scan_df, axis_profiles, baseline_sp, scan_variants,
-            baseline_opt=baseline_osp,
+            baseline_opt=baseline_osp, prompt_node="llm_ranking",
         )
         # thinking_style should be "analytical reasoning" (idx 2) — check via rendered prompt
         assert "analytical reasoning" in best_sp.render()
@@ -172,10 +172,11 @@ class TestSelectScanWinner:
         )
         sp = osp.to_job_search_point(
             base_pipeline_params={"existing_key": "keep_me"},
+            prompt_node="llm_ranking",
         )
         best_sp = select_scan_winner(
             scan_df, axis_profiles, sp, scan_variants,
-            baseline_opt=osp,
+            baseline_opt=osp, prompt_node="llm_ranking",
         )
         assert best_sp.pipeline_params["existing_key"] == "keep_me"
         assert best_sp.pipeline_params["ranking_temperature"] == 0.3

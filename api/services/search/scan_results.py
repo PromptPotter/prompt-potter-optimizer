@@ -9,15 +9,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    import pandas as pd
-
 from api.models.opt_search_point import OptSearchPoint
 from api.models.search_point import JobSearchPoint
 from api.shared.constants import PROMPT_STRING_FIELDS
-from api.shared.dict_mixin import DictAccessMixin
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -29,12 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ScanContext(DictAccessMixin):
-    """Structured scan context for the LLM meta-prompt.
-
-    Supports dict-style access for backward compatibility with code
-    that treats scan_context as a dict.
-    """
+class ScanContext:
+    """Structured scan context for the LLM meta-prompt."""
 
     leaderboard_text: str = ""
     sensitivity_text: str = ""

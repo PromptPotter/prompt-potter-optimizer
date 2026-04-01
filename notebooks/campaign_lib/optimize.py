@@ -47,6 +47,7 @@ from .stats import (
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
     from api.services.project_store import ProjectStore
+    from api.services.search.scan_results import ScanContext
 
 __all__ = [
     "run_optimization_notebook",
@@ -82,7 +83,7 @@ def show_feedback_preflight(
     axis_profiles=None,
     scan_variants=None,
     difficulty_df=None,
-) -> dict | None:
+) -> ScanContext | None:
     """Display a rich pre-flight walkthrough for the feedback cycle.
 
     Builds scan context from raw DataFrames when available, then prints
@@ -93,7 +94,7 @@ def show_feedback_preflight(
     so the user can review config before committing to a run.
 
     Returns:
-        scan_context dict (or None) for passing to the run cell.
+        ScanContext (or None) for passing to the run cell.
     """
     from api.services.campaign.config import CycleConfig
 
@@ -181,7 +182,7 @@ def _print_preflight_sections(config, bl, eval_data,
     print(f"  Candidates per round   : {config.n_variants}")
     print(f"  Queries per eval       : {_queries_label}")
     print(f"  Improvement threshold  : {config.improvement_threshold:.1%}")
-    print(f"  Patience (L1)          : {config.patience} rounds")
+    print(f"  Patience (L1)          : {config.l1_patience} rounds")
     print(f"  L2 (refine context)    : {_l2_label}")
     print(f"  L3 (modify plan)       : {_l3_label}")
     print("  " + "-" * 66)
@@ -217,15 +218,15 @@ def _print_preflight_sections(config, bl, eval_data,
     print(f"  {CYAN}3. CONTEXT ASSEMBLY{RESET}")
     print(f"     Strategy: {_strategy}")
     if scan_context:
-        improving = scan_context.get("improving_axes", [])
-        leaderboard = scan_context.get("leaderboard_text", "")
+        improving = scan_context.improving_axes
+        leaderboard = scan_context.leaderboard_text
         n_leaderboard = leaderboard.count("\n") + 1 if leaderboard.strip() else 0
-        tested = scan_context.get("tested_values", "")
+        tested = scan_context.tested_values
         n_tested = sum(1 for line in tested.split("\n")
                        if line.strip() and "values tested" in line) if tested else 0
-        sensitivity = scan_context.get("sensitivity_text", "")
+        sensitivity = scan_context.sensitivity_text
         n_axes = sensitivity.count("\n") + 1 if sensitivity.strip() else 0
-        difficulty = scan_context.get("difficulty_text", "")
+        difficulty = scan_context.difficulty_text
 
         print(f"     Scan leaderboard: {n_leaderboard} entries")
         if n_leaderboard > 0:
@@ -262,7 +263,7 @@ def _print_preflight_sections(config, bl, eval_data,
 
     # Step 7: Loop control
     print(f"  {CYAN}7. LOOP CONTROL{RESET}")
-    print(f"     Patience: {config.patience} stalls → stop  |  "
+    print(f"     Patience: {config.l1_patience} stalls → stop  |  "
           f"L2: {_l2_label}  |  L3: {_l3_label}")
 
     print("  " + "-" * 66)
@@ -283,7 +284,7 @@ def _print_preflight_sections(config, bl, eval_data,
         print("  " + "-" * 66)
 
         # Leaderboard (top 10)
-        leaderboard = scan_context.get("leaderboard_text", "")
+        leaderboard = scan_context.leaderboard_text
         if leaderboard.strip():
             lines = leaderboard.strip().split("\n")
             print(f"  {CYAN}Leaderboard:{RESET}")
@@ -293,25 +294,25 @@ def _print_preflight_sections(config, bl, eval_data,
                 print(f"    ... {len(lines) - 10} more")
 
         # Axis sensitivity
-        sensitivity = scan_context.get("sensitivity_text", "")
+        sensitivity = scan_context.sensitivity_text
         if sensitivity.strip():
             print(f"  {CYAN}Axis sensitivity:{RESET}")
             for line in sensitivity.strip().split("\n"):
                 print(f"  {line}")
 
         # Difficulty
-        difficulty = scan_context.get("difficulty_text", "")
+        difficulty = scan_context.difficulty_text
         if difficulty.strip():
             print(f"  {CYAN}Query difficulty:{RESET}")
             print(f"  {difficulty.strip()}")
 
         # Improving axes
-        improving = scan_context.get("improving_axes", [])
+        improving = scan_context.improving_axes
         if improving:
             print(f"  {CYAN}Improving axes:{RESET} {', '.join(improving)}")
 
         # Tested values
-        tested = scan_context.get("tested_values", "")
+        tested = scan_context.tested_values
         if tested.strip():
             lines = tested.strip().split("\n")
             print(f"  {CYAN}Tested values:{RESET}")
@@ -340,7 +341,7 @@ async def run_optimization_notebook(
     pipeline_schema: PipelineSchema | None = None,
     session_terms: list[str] | None = None,
     langfuse_session_id: str | None = None,
-    scan_context: dict | None = None,
+    scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
     svc: dict | None = None,
     task_context: dict | None = None,
@@ -624,11 +625,11 @@ async def run_optimization_notebook(
         else:
             print(_node_line(
                 f"{YELLOW}⚠ No improvement"
-                f" ({stall_count}/{config.patience} patience){RESET}"))
-            if stall_count >= config.patience:
+                f" ({stall_count}/{config.l1_patience} patience){RESET}"))
+            if stall_count >= config.l1_patience:
                 print(_node_line(
                     f"{RED}Stopping: patience exhausted"
-                    f" ({config.patience} consecutive stalls){RESET}"))
+                    f" ({config.l1_patience} consecutive stalls){RESET}"))
 
         print(_node_bottom())
 

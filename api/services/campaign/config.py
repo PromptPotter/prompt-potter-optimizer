@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from api.models.pipeline_schema import PipelineSchema
+from api.services.search.scan_results import ScanContext
 
 __all__ = ["CycleConfig"]
 
@@ -35,7 +36,7 @@ class CycleConfig(BaseModel):
     enable_critique: bool = Field(True, description="Enable critique agent between rounds")
 
     # Scan-aware optimization
-    scan_context: dict | None = Field(None, description="Scan analytics context for candidate gen")
+    scan_context: ScanContext | None = Field(None, description="Scan analytics context for candidate gen")
 
     # Structured domain context (from TASK_DESCRIPTION decomposition)
     task_context: dict | None = Field(
@@ -98,7 +99,7 @@ class CycleConfig(BaseModel):
         pipeline_params: dict | None = None,
         session_terms: list[str] | None = None,
         pipeline_schema: PipelineSchema | None = None,
-        scan_context: dict | None = None,
+        scan_context: ScanContext | None = None,
         task_context: dict | None = None,
     ) -> CycleConfig:
         """Build from the notebook's ``campaign_config`` dict.

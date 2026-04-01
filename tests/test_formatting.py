@@ -2,6 +2,7 @@
 
 from api.models.analysis import FailureAnalysis, FailurePattern
 from api.services.campaign.formatting import ContextData, format_context_sections
+from api.services.search.scan_results import ScanContext
 
 
 class TestFailureAnalysisFormatting:
@@ -76,7 +77,7 @@ class TestFailureAnalysisFormatting:
         ctx = ContextData(
             failure_analysis=fa,
             critique_text="Focus on ranking quality",
-            scan_context={"tested_values": "persona: 3 values", "sensitivity_text": ""},
+            scan_context=ScanContext(tested_values="persona: 3 values", sensitivity_text=""),
         )
         result = format_context_sections(ctx)
         assert "SCAN:" in result
