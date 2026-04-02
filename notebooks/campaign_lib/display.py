@@ -321,7 +321,12 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     warnings = diag.get("warnings", [])
     if warnings:
         for w in warnings:
-            line += f"\n{_ann_indent}{YELLOW}\u26a0 {w['step']}: {w['message']}{RESET}"
+            stats = w.get("stats")
+            if stats:
+                msg = f"{stats['min']} min, {stats['usable']} usable, {stats['fetched']} fetched, {stats['requested']} requested"
+            else:
+                msg = w["message"]
+            line += f"\n{_ann_indent}{YELLOW}\u26a0 {w['step']}: {msg}{RESET}"
 
     # Stale data protocol actions
     if r.get("retry_of_degraded"):

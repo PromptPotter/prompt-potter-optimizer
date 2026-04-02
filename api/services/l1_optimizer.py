@@ -23,6 +23,7 @@ from api.services.campaign.formatting import (
 )
 from api.services.llm_client import LLMClientBase
 from api.services.metrics import compute_composite_score, count_degraded_queries
+from api.shared.constants import PROMPT_STRING_FIELDS
 from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
@@ -130,16 +131,23 @@ async def l1_generate(
 
     candidates: list[dict] = []
     for v in variants_list[:n_variants]:
+        # Split pipeline_params_override: prompt scheme fields go to
+        # derive_candidate (rendered into the prompt string), the rest
+        # stays as node-level pipeline overrides.
+        pp_override = v.get("pipeline_params_override") or {}
+        prompt_changes = {k: pp_override[k] for k in pp_override if k in PROMPT_STRING_FIELDS}
+        node_overrides = {k: pv for k, pv in pp_override.items() if k not in PROMPT_STRING_FIELDS}
+
         child = opt_sp.derive_candidate(
             changes_description=v.get("changes_description", ""),
+            **prompt_changes,
         )
         c_dict = child.prompt_field_dict()
         c_dict["id"] = child.id
         c_dict["parent_id"] = child.parent_id
         c_dict["changes_description"] = child.changes_description
-        pp_override = v.get("pipeline_params_override")
-        if pp_override and isinstance(pp_override, dict):
-            c_dict["__pipeline_params_override__"] = pp_override
+        if node_overrides:
+            c_dict["__pipeline_params_override__"] = node_overrides
         candidates.append(c_dict)
 
     return candidates

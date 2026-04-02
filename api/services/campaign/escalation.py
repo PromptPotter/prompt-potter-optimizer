@@ -69,7 +69,7 @@ class EscalationStrategy:
 
 
 DEFAULT_STRATEGIES: dict[str, EscalationStrategy] = {
-    "web_search:partial_scrape": EscalationStrategy(target=EscalationTarget.L2),
+    "web_search:low_document_count": EscalationStrategy(target=EscalationTarget.L2),
 }
 
 
