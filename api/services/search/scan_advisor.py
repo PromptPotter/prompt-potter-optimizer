@@ -66,12 +66,8 @@ def build_tunable_params(
     for node in _active_nodes(schema, excluded_nodes):
         if not node.param_keys:
             continue
-        # Identify structural keys via override_map
-        structural_keys: set[str] = set()
-        if node.override_map:
-            for flat_key, wire_key in node.override_map.items():
-                if wire_key in STRUCTURAL_OVERRIDES:
-                    structural_keys.add(flat_key)
+        # Strip structural keys (prompt, output_schema, model)
+        structural_keys = node.param_keys & STRUCTURAL_OVERRIDES
 
         tunable_config = (
             {k: v for k, v in node.current_config.items() if k not in structural_keys}
@@ -507,7 +503,7 @@ def _resolve_schema_axes(
             and vals
             and isinstance(vals[0], list)
         ):
-            node_name = pipeline_schema.node_for_flat_param(axis_name)
+            node_name = pipeline_schema.node_for_param(axis_name)
             node = pipeline_schema.get_node(node_name) if node_name else None
             if node and node.output_schema:
                 try:
@@ -533,10 +529,11 @@ def advisory_to_scan_variants(
     advisory: dict,
     pipeline_schema: PipelineSchema | None = None,
 ) -> tuple[dict, dict[str, list[str]]]:
-    """Convert scan advisory into editable pipeline_params dict.
+    """Convert scan advisory into nested scan_variants dict.
 
     Extracts ``priority_axes`` entries whose ``source`` is ``"pipeline_param"``
-    and that carry ``suggested_values``.
+    and that carry ``suggested_values``.  Groups params under their owning
+    node name: ``{"web_search": {"max_sites": [3, 5, 7]}}``.
 
     For schema axes (name ends with ``_schema``), parses mutation tuples,
     resolves against the baseline JSON Schema, and returns concrete dicts.
@@ -545,6 +542,7 @@ def advisory_to_scan_variants(
     schema axis names to human-readable labels (``"(baseline)"`` at index 0).
     """
     raw: dict[str, list] = {}
+    node_map: dict[str, str] = {}  # axis_name → node_name
     for ax in advisory.get("priority_axes", []):
         if ax.get("source") != "pipeline_param" or not ax.get("suggested_values"):
             continue
@@ -559,8 +557,24 @@ def advisory_to_scan_variants(
                 parsed.append(v)
             vals = parsed
         raw[ax["axis"]] = vals
+        if ax.get("node"):
+            node_map[ax["axis"]] = ax["node"]
 
-    return _resolve_schema_axes(raw, pipeline_schema)
+    resolved, schema_labels = _resolve_schema_axes(raw, pipeline_schema)
+
+    # Group resolved axes under node names (nested format)
+    nested: dict[str, dict] = {}
+    for axis_name, vals in resolved.items():
+        node = node_map.get(axis_name)
+        if not node and pipeline_schema:
+            node = pipeline_schema.node_for_param(axis_name)
+        if node:
+            nested.setdefault(node, {})[axis_name] = vals
+        else:
+            # Fallback: bare key (shouldn't happen with valid advisory)
+            nested[axis_name] = vals
+
+    return nested, schema_labels
 
 
 async def advise_scan_config(

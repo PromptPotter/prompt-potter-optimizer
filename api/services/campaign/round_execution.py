@@ -141,6 +141,7 @@ async def _generate_or_load_candidates(
             scan_compact=(round_num > 0),
             failure_analysis=state.failure_analysis,
             search_memory_context=sm_ctx,
+            pipeline_schema=config.pipeline_schema,
         )
 
     if campaign_store and cycle_id:

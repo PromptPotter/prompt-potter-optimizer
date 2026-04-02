@@ -112,22 +112,60 @@ def resolve_scan_variants(
     Convenience wrapper for notebook use — resolves schema axes via
     ``_resolve_schema_axes`` and prints a summary.
 
+    Accepts nested format: ``{"thinking_style": [...], "web_search": {"max_sites": [...]}}``
+
     If *pipeline_schema* is ``None`` and *svc* is provided, falls back to
     ``svc["pipeline_schema"]``.
 
     Returns ``(resolved_variants, schema_labels)``.
     """
+    from api.shared.constants import PROMPT_STRING_FIELDS
+
     if pipeline_schema is None and svc is not None:
         pipeline_schema = svc.get("pipeline_schema")
 
-    resolved, schema_labels = _resolve_schema_axes(scan_variants, pipeline_schema)
+    # Flatten nested node groups for schema resolution (only applies to _schema axes)
+    flat_for_resolve: dict[str, list] = {}
+    for key, spec in scan_variants.items():
+        if isinstance(spec, list):
+            flat_for_resolve[key] = spec
+        elif isinstance(spec, dict):
+            for param, vals in spec.items():
+                if isinstance(vals, list):
+                    flat_for_resolve[param] = vals
 
-    for axis, vals in resolved.items():
-        if axis in schema_labels:
-            print(f"  {axis}: (baseline + {len(vals) - 1} mutations)")
-            for i, label in enumerate(schema_labels[axis]):
-                print(f"    [{i}] {label}")
-        else:
-            print(f"  {axis}: {vals}")
+    resolved, schema_labels = _resolve_schema_axes(flat_for_resolve, pipeline_schema)
 
-    return resolved, schema_labels
+    # Display: group by prompt fields vs node params
+    for key, spec in scan_variants.items():
+        if key in PROMPT_STRING_FIELDS and isinstance(spec, list):
+            if key in schema_labels:
+                print(f"  {key}: (baseline + {len(spec) - 1} mutations)")
+                for i, label in enumerate(schema_labels[key]):
+                    print(f"    [{i}] {label}")
+            else:
+                print(f"  {key}: {spec}")
+        elif isinstance(spec, dict):
+            for param, vals in spec.items():
+                if isinstance(vals, list):
+                    r_vals = resolved.get(param, vals)
+                    if param in schema_labels:
+                        print(f"  {key}.{param}: (baseline + {len(r_vals) - 1} mutations)")
+                        for i, label in enumerate(schema_labels[param]):
+                            print(f"    [{i}] {label}")
+                    else:
+                        print(f"  {key}.{param}: {r_vals}")
+
+    # Rebuild nested resolved output
+    nested_resolved: dict = {}
+    for key, spec in scan_variants.items():
+        if isinstance(spec, list):
+            nested_resolved[key] = resolved.get(key, spec)
+        elif isinstance(spec, dict):
+            node_group = {}
+            for param, vals in spec.items():
+                if isinstance(vals, list):
+                    node_group[param] = resolved.get(param, vals)
+            nested_resolved[key] = node_group
+
+    return nested_resolved, schema_labels

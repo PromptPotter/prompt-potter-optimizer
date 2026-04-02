@@ -42,35 +42,19 @@ def _steps_match(entry: dict, target_steps: frozenset[str]) -> bool:
 def _extract_param(
     pp: dict,
     param_name: str,
+    node_name: str | None = None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> Any:
     """Extract a parameter value from pipeline_params.
 
-    Checks three locations (in order):
-    1. Flat top-level: ``pp["max_sites"]``  (skips known node names)
-    2. Schema-resolved nested: ``pp["web_search"]["max_sites"]``
-    3. Brute-force scan of all node dicts
+    When *node_name* is provided, looks directly at ``pp[node_name][param_name]``.
+    Otherwise falls back to brute-force scan of all node dicts (for historical data).
     """
-    # Known node names — skip these in flat lookup (they're node config dicts)
-    node_names: set[str] = set()
-    if pipeline_schema:
-        node_names = {n.name for n in pipeline_schema.nodes}
-    else:
-        # Heuristic: steps list contains node names
-        node_names = set(pp.get("steps") or [])
-
-    # 1. Flat top-level (skip node config dicts and "steps")
-    if param_name in pp and param_name not in node_names and param_name != "steps":
-        return pp[param_name]
-    # 2. Schema-resolved
-    if pipeline_schema:
-        resolved = pipeline_schema.resolve_flat_param(param_name)
-        if resolved:
-            node, wire_key = resolved
-            node_cfg = pp.get(node)
-            if isinstance(node_cfg, dict) and wire_key in node_cfg:
-                return node_cfg[wire_key]
-    # 3. Brute-force: scan all node dicts
+    if node_name:
+        node_cfg = pp.get(node_name)
+        if isinstance(node_cfg, dict) and param_name in node_cfg:
+            return node_cfg[param_name]
+    # Brute-force: scan all node dicts (historical data compatibility)
     for _k, v in pp.items():
         if isinstance(v, dict) and param_name in v:
             return v[param_name]
@@ -80,7 +64,7 @@ def _extract_param(
 def diagnose_scan_variants(
     store: ProjectStore,
     backend_id: str,
-    scan_variants: dict[str, list],
+    scan_variants: dict[str, list | dict],
     baseline_sp: JobSearchPoint,
     prompt_node_names: list[str] | None = None,
     pipeline_schema: PipelineSchema | None = None,
@@ -90,8 +74,7 @@ def diagnose_scan_variants(
     Matches historical runs by:
     1. **Step sequence** — which nodes ran (frozenset equality)
     2. **Rendered prompt hash** — for prompt-field variants
-    3. **Parameter value extraction** — for pipeline-param variants,
-       checking both flat and nested formats via ``_extract_param()``
+    3. **Parameter value extraction** — for pipeline-param variants
 
     Returns dict with ``n_matching_runs``, ``n_matching_results``,
     and per-axis ``axes`` detail.
@@ -122,11 +105,25 @@ def diagnose_scan_variants(
     axes: dict[str, dict] = {}
     all_matching: set[str] = set()
 
-    for axis_name, values in scan_variants.items():
+    # Expand nested scan_variants into flat axis list:
+    # [(axis_name, values, node_name | None)]
+    _flat_axes: list[tuple[str, list, str | None]] = []
+    for key, spec in scan_variants.items():
+        if key in PROMPT_STRING_FIELDS and isinstance(spec, list):
+            _flat_axes.append((key, spec, None))
+        elif isinstance(spec, dict):
+            for param, vals in spec.items():
+                if isinstance(vals, list):
+                    _flat_axes.append((param, vals, key))
+        elif isinstance(spec, list):
+            _flat_axes.append((key, spec, None))
+
+    for axis_name, values, axis_node in _flat_axes:
         value_counts: dict[str, int] = {}
         value_scores: dict[str, dict] = {}
         is_prompt_field = (
             axis_name in PROMPT_STRING_FIELDS
+            and axis_node is None
             and baseline_sp.prompt_fields is not None
         )
 
@@ -146,7 +143,7 @@ def diagnose_scan_variants(
                     e for e in step_matches
                     if _extract_param(
                         e.get("pipeline_params") or {},
-                        axis_name, pipeline_schema,
+                        axis_name, node_name=axis_node,
                     ) == v
                 ]
 
@@ -328,7 +325,7 @@ def assess_scan_coverage(
         baseline_opt.render().encode(),
     ).hexdigest()[:HASH_TRUNCATE]
     for axis_name, values in pipeline_param_defs.items():
-        current_val = _extract_param(base_params, axis_name, pipeline_schema)
+        current_val = _extract_param(base_params, axis_name)
         non_baseline = [v for v in values if v != current_val]
         if not non_baseline:
             continue

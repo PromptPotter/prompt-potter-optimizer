@@ -110,8 +110,8 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
     Builds the schema entirely from the response — no hardcoded defaults.
     Each node may carry an ``optimizer`` sub-object with param_keys,
-    override_map, observation_mappings, and other metadata consumed by
-    PromptPotter services.
+    observation_mappings, and other metadata consumed by PromptPotter
+    services.
     """
     if not data:
         logger.warning("Empty pipeline response; returning empty schema")
@@ -141,11 +141,10 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "short_circuit": node.get("short_circuit", False),
             "node_type": node.get("node_role", ""),
             "param_keys": pk,
-            "override_map": opt.get("override_map", {}),
             "langfuse_type": opt.get("langfuse_type", "span"),
             "current_config": {
                 k: v for k, v in nc.items()
-                if k in pk or k in set(opt.get("override_map", {}).values())
+                if k in pk
             },
         }
 

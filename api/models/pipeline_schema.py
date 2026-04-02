@@ -108,7 +108,6 @@ class PipelineNode(BaseModel):
     short_circuit: bool = False
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
-    override_map: dict[str, str] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"
@@ -203,25 +202,10 @@ class PipelineSchema(BaseModel):
                 return step
         return None
 
-    def resolve_flat_param(self, flat_key: str) -> tuple[str, str] | None:
-        """Resolve flat param name → ``(node_name, wire_key)``.
-
-        Uses ``param_keys`` as authority for param existence.
-        ``override_map`` provides wire-name translation only for
-        non-identity mappings (e.g. ``ranking_temperature → temperature``).
-
-        Returns ``None`` if the key is not owned by any node.
-        """
+    def node_for_param(self, param_name: str) -> str | None:
+        """Return the node name that owns *param_name*, or None."""
         for step in self.nodes:
-            if flat_key in step.param_keys:
-                wire_key = step.override_map.get(flat_key, flat_key)
-                return (step.name, wire_key)
-        return None
-
-    def node_for_flat_param(self, flat_key: str) -> str | None:
-        """Return the step name that owns a flat param, or None."""
-        for step in self.nodes:
-            if flat_key in step.param_keys:
+            if param_name in step.param_keys:
                 return step.name
         return None
 
@@ -356,7 +340,6 @@ def load_pipeline_from_dict(data: dict) -> PipelineSchema:
                 name=name,
                 current_config=node_data.get("config", {}),
                 param_keys=pk,
-                override_map=opt.get("override_map", {}),
             )
         )
     return PipelineSchema(

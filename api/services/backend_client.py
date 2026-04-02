@@ -16,7 +16,6 @@ import httpx
 from api.shared.constants import MATCH_TIMEOUT
 
 if TYPE_CHECKING:
-    from api.models.pipeline_schema import PipelineSchema
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -38,67 +37,6 @@ def extract_pipeline_config(exp_data: dict) -> dict:
         "steps": config.get("steps", []),
         "metadata": config.get("metadata", {}),
     }
-
-
-def build_pipeline_params(
-    pipeline_config: dict,
-    *,
-    overrides: dict | None = None,
-    exclude_nodes: list[str] | None = None,
-    schema: PipelineSchema | None = None,
-) -> dict:
-    """Build pipeline_params from a (possibly shortened) pipeline config.
-
-    Returns dict ready for evaluate_prompt(..., pipeline_params=params).
-    Includes ``steps`` list and per-node override dicts (e.g.
-    ``{"steps": [...], "llm_ranking": {"temperature": 0.5}}``).
-    ``BackendClient.run_match()`` translates these to the ``node_config``
-    wire format at the TermNorm boundary.
-
-    Args:
-        pipeline_config: Pipeline config with ``steps`` list.
-        overrides: Optional parameter overrides using flat param names
-            (e.g. ``ranking_temperature``). Translated to per-node dicts
-            via the schema's ``override_map``.
-        exclude_nodes: Node names to remove from the active pipeline
-            (e.g. ``["llm_ranking"]`` for token-matching-only evaluation).
-        schema: PipelineSchema for node-param and flat→wire lookup.
-    """
-    node_names = [s["name"] for s in pipeline_config["steps"]]
-    if exclude_nodes:
-        node_names = [n for n in node_names if n not in exclude_nodes]
-    params: dict = {"steps": node_names}
-
-    # Seed with current config from schema (no hidden defaults)
-    if schema is not None:
-        for node in schema.nodes:
-            if node.name in node_names and node.current_config:
-                params[node.name] = dict(node.current_config)
-
-    if not overrides:
-        return params
-
-    if schema is not None:
-        node_param_map = schema.node_param_keys()
-        active_param_names: set = set()
-        for name in node_names:
-            active_param_names |= node_param_map.get(name, set())
-
-        for k, v in overrides.items():
-            if k not in active_param_names:
-                continue
-            resolved = schema.resolve_flat_param(k)
-            if resolved:
-                node_name, wire_key = resolved
-                params.setdefault(node_name, {})[wire_key] = v
-            else:
-                # No override_map entry — pass through as flat key
-                params[k] = v
-    else:
-        # No schema — pass overrides through as-is (legacy fallback)
-        params.update(overrides)
-
-    return params
 
 
 class BackendClient:
@@ -254,9 +192,8 @@ class BackendClient:
             if isinstance(v, dict):
                 wire_overrides[k] = v
             else:
-                logger.warning(
-                    "run_match: dropping non-dict pipeline_param %r=%r "
-                    "(flat param not nested under node?)", k, v,
+                logger.debug(
+                    "run_match: dropping non-dict pipeline_param %r=%r", k, v,
                 )
 
         if wire_overrides:

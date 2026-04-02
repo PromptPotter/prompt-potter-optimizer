@@ -29,8 +29,7 @@
           "samplescan_candidates",
           "samplescan_threshold",
           "sampleswitch_min_degradation_rate"
-        ],
-        "override_map": {}
+        ]
       }
     },
     "critique": {

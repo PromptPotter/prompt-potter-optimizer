@@ -372,6 +372,7 @@ def _parse_pipeline_params(
 ) -> dict | None:
     """Extract and merge pipeline_params from LLM response.
 
+    Expects nested format: ``{"node_name": {"param": value}}``.
     Returns merged pipeline_params dict if the LLM suggested changes,
     or None if no changes were suggested.
     """
@@ -383,5 +384,6 @@ def _parse_pipeline_params(
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
             merged[key] = {**merged[key], **value}
         else:
+            # Defensive: non-dict values shouldn't appear in nested format
             merged[key] = value
     return merged

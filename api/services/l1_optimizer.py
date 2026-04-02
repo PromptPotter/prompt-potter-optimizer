@@ -81,6 +81,7 @@ async def l1_generate(
     scan_compact: bool = False,
     failure_analysis: FailureAnalysis | None = None,
     search_memory_context: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> list[dict]:
     """Generate candidate pipeline-param variants via LLM meta-prompt.
 
@@ -133,10 +134,19 @@ async def l1_generate(
     for v in variants_list[:n_variants]:
         # Split pipeline_params_override: prompt scheme fields go to
         # derive_candidate (rendered into the prompt string), the rest
-        # stays as node-level pipeline overrides.
+        # stays as node-level pipeline overrides (already nested).
         pp_override = v.get("pipeline_params_override") or {}
         prompt_changes = {k: pp_override[k] for k in pp_override if k in PROMPT_STRING_FIELDS}
         node_overrides = {k: pv for k, pv in pp_override.items() if k not in PROMPT_STRING_FIELDS}
+
+        # Safety net: auto-nest flat params the LLM may still emit
+        if pipeline_schema:
+            _flat_keys = [k for k, v in node_overrides.items() if not isinstance(v, dict)]
+            for fk in _flat_keys:
+                owner = pipeline_schema.node_for_param(fk)
+                if owner:
+                    logger.warning("l1_generate: auto-nesting flat param %r → %s", fk, owner)
+                    node_overrides.setdefault(owner, {})[fk] = node_overrides.pop(fk)
 
         child = opt_sp.derive_candidate(
             changes_description=v.get("changes_description", ""),
@@ -327,7 +337,12 @@ async def l1_evaluate(
     _w_cpp = candidate_pp[w_idx] if w_idx is not None else None
     winner_pp: dict | None
     if w_idx is not None and _w_cpp:
-        winner_pp = {**(_sp_pipeline_params or {}), **_w_cpp}
+        winner_pp = copy.deepcopy(_sp_pipeline_params or {})
+        for k, v in _w_cpp.items():
+            if isinstance(v, dict) and isinstance(winner_pp.get(k), dict):
+                winner_pp[k] = {**winner_pp[k], **v}
+            else:
+                winner_pp[k] = v
     else:
         winner_pp = _sp_pipeline_params
 

@@ -30,7 +30,7 @@ Two entry points (FastAPI API + Jupyter notebook), one service core in `api/serv
 
 **Pipeline composability:** `pipeline_params` (nested dicts keyed by node name) throughout PromptPotter. `node_config` only at the TermNorm wire boundary.
 
-**Two parameter namespaces:** Prompt scheme fields (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format` — rendered into a prompt string by `render()`) vs pipeline node params (nested dicts like `{"token_matching": {"thinking_style": "..."}}` — sent to backend nodes). These are orthogonal and may share names. L1 candidates use `pipeline_params_override` for both: keys matching `PROMPT_STRING_FIELDS` auto-route to `derive_candidate()` (updating prompt scheme fields); all other keys stay as node-level pipeline overrides. See [`docs/prompt-scheme.md`](docs/prompt-scheme.md).
+**Two parameter namespaces:** Prompt scheme fields (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format` — rendered into a prompt string by `render()`) vs pipeline node params (nested dicts like `{"token_matching": {"thinking_style": "..."}}` — sent to backend nodes). These are orthogonal and may share names. L1 candidates use `pipeline_params_override` for both: keys matching `PROMPT_STRING_FIELDS` auto-route to `derive_candidate()` (updating prompt scheme fields); all other keys are nested under their node name (`{"web_search": {"max_sites": 5}}`). **No flat param format** — all pipeline params use nested format from LLM output through to backend. See [`docs/prompt-scheme.md`](docs/prompt-scheme.md).
 
 See [`docs/architecture.md`](docs/architecture.md) for diagrams, caching, pipeline discovery, and disk layout.
 
@@ -116,6 +116,7 @@ global query counter across all candidates
 - **`api/shared/`**: Leaf-level utilities shared by models and services (hashing, schema mutations). No domain model or service dependencies allowed.
 - **`api/shared/constants.py`**: Canonical source for `PROMPT_STRING_FIELDS`, `LAYER_FIELDS`, and `LAYER1_STRING_FIELDS`. All modules must import field lists from here — never define them locally.
 - **`api/config/optimizer_pipeline.py`**: Optimizer pipeline schema loader + `llm_call()` primitive. All optimizer nodes use this instead of calling `chat()` directly.
+- **Nested-only pipeline params**: All pipeline params use nested format (`{"node_name": {"param": value}}`) from LLM output through to backend. No flat-to-nested resolution. LLM prompt instructs nested output; `PROMPT_STRING_FIELDS` split separates prompt fields (inherently flat) from node params. `l1_generate()` has a safety net that auto-nests any flat params the LLM still emits.
 
 ## Design Principles
 

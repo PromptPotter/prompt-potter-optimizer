@@ -588,47 +588,38 @@ def format_pipeline_overrides(
 ) -> None:
     """Print pipeline_params as a copy-paste ready ``pipeline_overrides`` dict.
 
-    Reverse-flattens nested ``pipeline_params`` using the schema's
-    ``override_map`` so the output can be pasted directly into
-    ``campaign_config["pipeline_overrides"]``.
+    Output uses nested format: ``{"node_name": {"param": value}}``.
     """
     if not pipeline_params:
         return
 
-    # Build reverse map: (node_name, wire_key) → flat_key
-    reverse: dict[tuple[str, str], str] = {}
-    if pipeline_schema:
-        for node in pipeline_schema.nodes:
-            for flat_key, wire_key in node.override_map.items():
-                reverse[(node.name, wire_key)] = flat_key
-            # Identity mappings (flat_key == wire_key, not in override_map)
-            for pk in node.param_keys:
-                if pk not in node.override_map:
-                    reverse[(node.name, pk)] = pk
-
-    lines: list[str] = []
+    # Collect node → {param: value} entries
+    node_entries: list[tuple[str, dict]] = []
     for key, val in pipeline_params.items():
-        if key == "steps":
+        if key == "steps" or not isinstance(val, dict):
             continue
-        if not isinstance(val, dict):
-            lines.append((key, key, repr(val)))
-            continue
-        for wire_key, v in val.items():
-            flat_key = reverse.get((key, wire_key), wire_key)
-            lines.append((key, flat_key, repr(v)))
+        # Filter to tunable params only (skip structural keys like prompt, model)
+        tunable = {}
+        if pipeline_schema:
+            node = pipeline_schema.get_node(key)
+            if node:
+                tunable = {k: v for k, v in val.items() if k in node.param_keys}
+        if not tunable:
+            tunable = val
+        if tunable:
+            node_entries.append((key, tunable))
 
-    if not lines:
+    if not node_entries:
         return
 
     print(f"\n  {CYAN}Copy-paste pipeline_overrides:{RESET}")
     print(f"  {DIM}{'─' * 60}{RESET}")
     print('  "pipeline_overrides": {')
-    current_node = None
-    for node, flat_key, val_repr in lines:
-        if node != current_node:
-            current_node = node
-            print(f"      {DIM}# {node}{RESET}")
-        print(f'      "{flat_key}": {val_repr},')
+    for node_name, params in node_entries:
+        print(f'      "{node_name}": {{')
+        for param, val in params.items():
+            print(f'          "{param}": {repr(val)},')
+        print("      },")
     print("  }")
     print(f"  {DIM}{'─' * 60}{RESET}")
 

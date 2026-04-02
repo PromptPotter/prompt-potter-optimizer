@@ -57,18 +57,18 @@ def configure_pipeline(
             if node.name in active and node.current_config:
                 pipeline_params[node.name] = dict(node.current_config)
 
-    # Apply overrides for active nodes only
-    if overrides and pipeline_schema:
-        for flat_name, value in overrides.items():
-            resolved = pipeline_schema.resolve_flat_param(flat_name)
-            if resolved:
-                node, wire_key = resolved
-                if node in active:
-                    pipeline_params.setdefault(node, {})[wire_key] = value
+    # Apply overrides for active nodes only (nested format: {"node": {"param": val}})
+    if overrides:
+        for key, value in overrides.items():
+            if isinstance(value, dict) and key in active:
+                pipeline_params.setdefault(key, {}).update(value)
+            elif isinstance(value, dict):
+                logger.debug("configure_pipeline: skipping override for inactive node %r", key)
             else:
-                pipeline_params[flat_name] = value
-    elif overrides:
-        pipeline_params.update(overrides)
+                logger.warning(
+                    "configure_pipeline: ignoring non-nested override %r=%r "
+                    "(use {\"node_name\": {\"param\": value}} format)", key, value,
+                )
 
     campaign_config["pipeline_params"] = pipeline_params
 

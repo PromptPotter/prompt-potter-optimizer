@@ -103,14 +103,14 @@ class ScanEvent(TypedDict, total=False):
 
 def _profiles_from_rows(
     rows: list[dict],
-    axes: list[tuple[str, str, list]],
+    axes: list[tuple],
     n_eval: int,
 ) -> list[dict]:
     """Build axis profiles from scan rows.
 
     Args:
         rows: Per-variant result dicts with ``axis``, ``delta`` keys.
-        axes: List of ``(axis_name, axis_type, values)`` tuples.
+        axes: List of axis tuples (3 or 4 elements; extra elements ignored).
         n_eval: Number of diagnostic queries (for noise threshold).
 
     Returns:
@@ -121,7 +121,8 @@ def _profiles_from_rows(
         axis_deltas[row["axis"]].append(row["delta"])
 
     profiles: list[dict] = []
-    for axis_name, axis_type, values in axes:
+    for axis_tuple in axes:
+        axis_name, axis_type, values = axis_tuple[0], axis_tuple[1], axis_tuple[2]
         deltas = axis_deltas.get(axis_name, [0.0])
         sens_range = max(deltas) - min(deltas) if deltas else 0.0
         card = len(values)

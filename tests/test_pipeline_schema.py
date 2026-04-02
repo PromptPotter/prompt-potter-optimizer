@@ -102,10 +102,6 @@ class TestParsePipelineResponse:
                                 "max_sites": "Max pages to fetch",
                                 "num_results": "Search results count",
                             },
-                            "override_map": {
-                                "max_sites": "max_sites",
-                                "num_results": "num_results",
-                            },
                             "observation_name": "web_search",
                             "observation_mappings": [
                                 {"pipeline_key": "web_sources", "output_field": "sources"},
@@ -124,7 +120,6 @@ class TestParsePipelineResponse:
                         },
                         "optimizer": {
                             "param_keys": ["ranking_temperature"],
-                            "override_map": {"ranking_temperature": "temperature"},
                             "langfuse_type": "generation",
                         },
                     },
@@ -155,7 +150,6 @@ class TestParsePipelineResponse:
         assert ws.runtime == "backend"
         assert ws.node_type == "enricher"
         assert ws.param_keys == {"max_sites", "num_results"}
-        assert ws.override_map == {"max_sites": "max_sites", "num_results": "num_results"}
         assert ws.observation_name == "web_search"
         assert len(ws.observation_mappings) == 1
         assert ws.observation_mappings[0].pipeline_key == "web_sources"
@@ -165,7 +159,7 @@ class TestParsePipelineResponse:
         lr = schema.nodes[2]
         assert lr.node_type == "ranker"
         assert lr.param_keys == {"ranking_temperature"}
-        assert lr.override_map == {"ranking_temperature": "temperature"}
+        assert lr.param_keys == {"ranking_temperature"}
 
     def test_unknown_pipeline_no_optimizer(self):
         """Unknown pipelines without optimizer metadata still work."""
@@ -249,7 +243,6 @@ class TestParsePipelineResponse:
                         },
                         "optimizer": {
                             "param_keys": ["profiling_temperature"],
-                            "override_map": {"profiling_temperature": "temperature"},
                             "langfuse_type": "generation",
                         },
                     },

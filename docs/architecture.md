@@ -101,7 +101,7 @@ All paths converge on `eval_search_point()` — single gateway for eval persiste
 
 ## Pipeline Discovery
 
-`GET /pipeline` returns the target pipeline config with resolved registry metadata. `parse_pipeline_response()` builds `PipelineSchema` entirely from the live response. Each node carries an `optimizer` sub-object (`param_keys`, `override_map`, `observation_mappings`). Zero backend-specific constants in PromptPotter code.
+`GET /pipeline` returns the target pipeline config with resolved registry metadata. `parse_pipeline_response()` builds `PipelineSchema` entirely from the live response. Each node carries an `optimizer` sub-object (`param_keys`, `observation_mappings`). Zero backend-specific constants in PromptPotter code.
 
 ## Optimizer Pipeline
 

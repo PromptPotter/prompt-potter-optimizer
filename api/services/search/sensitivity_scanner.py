@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 async def sensitivity_scan(
     baseline: JobSearchPoint,
-    scan_variants: dict[str, list],
+    scan_variants: dict[str, list | dict],
     eval_data: list,
     backend_client: BackendClient,
     *,
@@ -57,9 +57,9 @@ async def sensitivity_scan(
 
     Args:
         baseline: Baseline JobSearchPoint (pipeline_params).
-        scan_variants: Flat dict mapping axis names to value lists.
-            Prompt fields (in ``PROMPT_STRING_FIELDS``) and pipeline
-            params are auto-detected.
+        scan_variants: Dict mapping axes to value lists.  Two formats:
+            - Prompt fields: ``{"thinking_style": ["a", "b"]}`` (list → prompt)
+            - Pipeline params: ``{"web_search": {"max_sites": [3, 5]}}`` (dict → node)
         eval_data: Full evaluation dataset.
         backend_client: Backend client for evaluation.
         baseline_opt: OptSearchPoint for prompt-field perturbation. Required
@@ -112,17 +112,29 @@ async def sensitivity_scan(
                 break
 
     # Classify axes: prompt_field vs pipeline_param
-    axes: list[tuple[str, str, list]] = []
-    for name, values in scan_variants.items():
-        if len(values) <= 1:
-            continue
-        if name in PROMPT_STRING_FIELDS:
-            if not _has_prompt_node:
-                logger.debug("Skipping prompt_field axis %r: no active prompt node", name)
+    # Axis tuple: (param_name, axis_type, values, node_name | None)
+    axes: list[tuple[str, str, list, str | None]] = []
+    for key, spec in scan_variants.items():
+        if key in PROMPT_STRING_FIELDS and isinstance(spec, list):
+            if len(spec) <= 1:
                 continue
-            axes.append((name, "prompt_field", values))
-        else:
-            axes.append((name, "pipeline_param", values))
+            if not _has_prompt_node:
+                logger.debug("Skipping prompt_field axis %r: no active prompt node", key)
+                continue
+            axes.append((key, "prompt_field", spec, None))
+        elif isinstance(spec, dict):
+            # Node param group — expand per-param
+            for param, values in spec.items():
+                if not isinstance(values, list) or len(values) <= 1:
+                    continue
+                axes.append((param, "pipeline_param", values, key))
+        elif isinstance(spec, list):
+            # Bare list but not a prompt field — skip with warning
+            logger.warning(
+                "scan_variants: bare list for %r is not a prompt field; "
+                "nest under node name: {\"node\": {\"%s\": [...]}}",
+                key, key,
+            )
 
     # Sort axes by pipeline node order (prompt fields under their owning node)
     if pipeline_schema:
@@ -133,12 +145,11 @@ async def sensitivity_scan(
             else len(_node_order)
         )
 
-        def _axis_sort_key(axis: tuple[str, str, list]) -> int:
-            name, axis_type, _ = axis
+        def _axis_sort_key(axis: tuple[str, str, list, str | None]) -> int:
+            _name, axis_type, _, node_name = axis
             if axis_type == "prompt_field":
                 return _prompt_pos
-            owner = pipeline_schema.node_for_flat_param(name)
-            return _node_order.get(owner, len(_node_order)) if owner else len(_node_order)
+            return _node_order.get(node_name, len(_node_order)) if node_name else len(_node_order)
 
         axes.sort(key=_axis_sort_key)
 
@@ -198,7 +209,7 @@ async def sensitivity_scan(
 
     _pruned_axes: set[str] = set()
 
-    for ai, (axis_name, axis_type, values) in enumerate(axes):
+    for ai, (axis_name, axis_type, values, axis_node) in enumerate(axes):
         _cb({
             "type": "axis_start",
             "axis": axis_name, "axis_type": axis_type,
@@ -214,15 +225,10 @@ async def sensitivity_scan(
             # Detect baseline value for this axis
             if axis_type == "prompt_field":
                 current_val = getattr(baseline_opt, axis_name, "") if baseline_opt else ""
-            elif pipeline_schema:
-                resolved = pipeline_schema.resolve_flat_param(axis_name)
-                if resolved:
-                    node, wire_key = resolved
-                    current_val = (baseline.pipeline_params or {}).get(node, {}).get(wire_key)
-                else:
-                    current_val = (baseline.pipeline_params or {}).get(axis_name)
+            elif axis_node:
+                current_val = (baseline.pipeline_params or {}).get(axis_node, {}).get(axis_name)
             else:
-                current_val = (baseline.pipeline_params or {}).get(axis_name)
+                current_val = None
 
             if value == current_val:
                 _bl_pq_hits = {
@@ -264,17 +270,9 @@ async def sensitivity_scan(
                     prompt_node=_pn,
                 )
             else:
-                # Resolve flat param name → nested node dict
                 pp = copy.deepcopy(baseline.pipeline_params or {})
-                if pipeline_schema:
-                    resolved = pipeline_schema.resolve_flat_param(axis_name)
-                    if resolved:
-                        node, wire_key = resolved
-                        pp.setdefault(node, {})[wire_key] = value
-                    else:
-                        pp[axis_name] = value
-                else:
-                    pp[axis_name] = value
+                if axis_node:
+                    pp.setdefault(axis_node, {})[axis_name] = value
                 perturbed = baseline.derive(pipeline_params=pp)
 
             results, scores, cached = await eval_search_point(

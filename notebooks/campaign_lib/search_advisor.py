@@ -221,27 +221,34 @@ async def run_scan_advisor(
         advisory, pipeline_schema=svc.get("pipeline_schema"),
     )
 
-    # Print copy-pasteable Python dict
+    # Print copy-pasteable Python dict (nested format)
     print("\n--- PROPOSED SCAN VARIANTS (copy-paste into next cell) ---")
     print("scan_variants = {")
-    for axis, values in proposed.items():
-        if axis in schema_labels:
-            # Schema axis: print raw mutation tuples from advisory (one variant per line)
-            raw_mutations = []
-            for ax in advisory.get("priority_axes", []):
-                if ax.get("axis") == axis:
-                    raw_mutations = ax.get("suggested_values", [])
-                    break
-            print(f"    {axis!r}: [")
-            for variant in raw_mutations:
-                # LLMs sometimes return mutation arrays as JSON strings — parse them
-                if isinstance(variant, str):
-                    with contextlib.suppress(json.JSONDecodeError, ValueError):
-                        variant = json.loads(variant)
-                print(f"        {variant!r},")
-            print("    ],")
+    for key, spec in proposed.items():
+        if isinstance(spec, dict):
+            # Node param group
+            print(f"    {key!r}: {{")
+            for param, vals in spec.items():
+                if param in schema_labels:
+                    # Schema axis: print raw mutation tuples
+                    raw_mutations = []
+                    for ax in advisory.get("priority_axes", []):
+                        if ax.get("axis") == param:
+                            raw_mutations = ax.get("suggested_values", [])
+                            break
+                    print(f"        {param!r}: [")
+                    for variant in raw_mutations:
+                        if isinstance(variant, str):
+                            with contextlib.suppress(json.JSONDecodeError, ValueError):
+                                variant = json.loads(variant)
+                        print(f"            {variant!r},")
+                    print("        ],")
+                else:
+                    print(f"        {param!r}: {vals!r},")
+            print("    },")
         else:
-            print(f"    {axis!r}: {values!r},")
+            # Prompt field (list)
+            print(f"    {key!r}: {spec!r},")
     print("}")
 
     n_diag = advisory.get("suggested_n_diagnostic", 10)
