@@ -6,7 +6,7 @@ Exploration tool for understanding the parameter landscape before optimization.
 
 ## Sensitivity Scan
 
-Perturbs one axis at a time (OAT) and measures accuracy deltas against your baseline.
+Perturbs **one axis at a time (OAT)** — adjusts one parameter while holding all others at baseline — and measures accuracy deltas.
 
 **When to use:** Before optimization (identify which axes matter), after optimization (find remaining room), or after backend changes (verify which sensitivities shifted).
 
@@ -38,17 +38,31 @@ Before evaluation, `prepare_scan_baseline()` reports per-axis coverage from hist
 
 **Prompt alias groups** link restructured prompts to their originals so historical pipeline-parameter results are discoverable. Resolution is transitive.
 
-### SearchMemory Integration (M8 — Planned)
+### Circuit Breaker
 
-When historical data exists, SearchMemory enriches the scan workflow:
+The scan aborts early on cascading failures:
+- **Baseline all-errors** — cancels immediately (backend likely down)
+- **2 consecutive all-error variants** — aborts with diagnostic message
 
-- **Scan advisor** receives `axis_rankings()` (effect size + consistency classification), `top_k_values()` (historically-best values per axis), and `bottleneck_distribution()` (failure fraction per pipeline step). It prioritizes consistently impactful axes, skips dead ones, and suggests values with historical evidence.
-- **Diagnostic set** can be stratified using query tractability data (`discriminating_queries()` returns queries whose outcome varies across configurations, vs always-hit/always-miss).
-- **Bottleneck attribution** (`attribute_bottleneck()` in `metrics.py`) maps each `terminated_at` step to the `param_keys` of that node plus all upstream nodes. The scan advisor uses this to order axes by causal pipeline depth -- parameters that feed into the dominant bottleneck are scanned first.
+If the backend restarts mid-scan, `BackendClient` auto-reinitializes the session on 400 and retries transparently.
 
-SearchMemory is a materialized view refreshed lazily via watermark -- no extra computation during the scan itself.
+### Parameters
 
-### Cohort Sensitivity (M8 — Planned)
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `sample_size` | 30 | Queries per variant (0 = all) |
+
+---
+
+## Planned Features (M8)
+
+### SearchMemory Integration
+
+When historical data exists, SearchMemory enriches the scan workflow: the scan advisor receives axis rankings, historically-best values, and bottleneck distribution to prioritize impactful axes and skip dead ones. Diagnostic sets can be stratified using query tractability data. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3) for the full data model and accessor methods.
+
+**Bottleneck attribution** (`attribute_bottleneck()` in `metrics.py`) maps each `terminated_at` step to the `param_keys` of that node plus all upstream nodes. The scan advisor uses this to order axes by causal pipeline depth — parameters that feed into the dominant bottleneck are scanned first.
+
+### Cohort Sensitivity
 
 Standard sensitivity scan measures per-axis accuracy deltas over the full query set. Cohort sensitivity (`cohort_analysis.py`) slices those results by failure mode to answer: "Which axes matter most for which failure types?"
 
@@ -65,18 +79,4 @@ Standard sensitivity scan measures per-axis accuracy deltas over the full query 
 - `parameter_failure_correlation(axis)` returns per-failure-mode deltas for an axis.
 
 Implementation: `api/services/search/cohort_analysis.py`. Data models: `CohortSensitivity`, `CohortAnalysisResult`.
-
-### Circuit Breaker
-
-The scan aborts early on cascading failures:
-- **Baseline all-errors** — cancels immediately (backend likely down)
-- **2 consecutive all-error variants** — aborts with diagnostic message
-
-If the backend restarts mid-scan, `BackendClient` auto-reinitializes the session on 400 and retries transparently.
-
-### Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `sample_size` | 30 | Queries per variant (0 = all) |
 

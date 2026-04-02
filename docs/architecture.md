@@ -29,7 +29,7 @@ All core logic lives in `api/services/`.
          └──────────────◄───────────────────────┘
               richer landscape → better starting point → repeat
 
-         SearchMemory *(M8 — planned)* aggregates all historical
+         SearchMemory *(M8 — live)* aggregates all historical
          evaluation data and feeds parameter impact, query patterns,
          and failure modes to both loops.
 ```
@@ -38,7 +38,7 @@ All core logic lives in `api/services/`.
 
 **AI Loop** — Critique-guided feedback cycle. Each round produces a critique (structured failure analysis) feeding the next round's candidate generation alongside sampled thinking styles. `scan_context` provides leaderboard and difficulty analytics when available. L1→L2→L3 escalation on diminishing returns.
 
-**SearchMemory** *(M8 — planned)* — cross-campaign intelligence layer. A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Feeds both loops via atomic data accessors: parameter impact rankings, top-5 historically-best values per axis, query tractability, bottleneck distribution, and failure clusters. Refreshed lazily on watermark staleness.
+**SearchMemory** *(M8 — live)* — cross-campaign intelligence layer. A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Feeds both loops via atomic data accessors: parameter impact rankings, top-5 historically-best values per axis, query tractability, bottleneck distribution, and failure clusters. Refreshed lazily on watermark staleness.
 
 ## Two-Layer Tracing
 
@@ -66,7 +66,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, etc.). Also carries stale data protocol config (`stale_data_load_protocol`, `search_memory`, `stale_data_observations`).
 
-**SearchMemory** *(M8 Wave 3 — partial)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Also tracks per-query degradation counts (`query_degradation_rate()`), consumed by the stale data protocol's sampleswitch step. Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark. See [SearchMemory section](#searchmemory-m8-wave-3) below.
+**SearchMemory** *(M8 — live)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Also tracks per-query degradation counts (`query_degradation_rate()`), consumed by the stale data protocol's sampleswitch step. Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark. See [SearchMemory section](#searchmemory-m8-wave-3) below.
 
 Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 
@@ -85,13 +85,15 @@ All paths converge on `eval_search_point()` — single gateway for eval persiste
 
 ## Caching & Crash Recovery
 
-- **Content-hash dedup** — same JobSearchPoint + eval data returns cached results instantly
-- **Shared store** — sensitivity scan and feedback cycle both write to `dataset_runs/`; coverage advisor discovers all cached results regardless of source
-- **Write by experiment_id, read by step-sequence matching** — provenance tagged, but reads use step-sequence matching (which nodes ran) + prompt hash + parameter value extraction. Robust to `pipeline_params` format changes across code versions. Data shared across experiments.
-- **Stale data protocol** — fires on **all** degraded results (cached and fresh). Full-run cache hits with degraded queries are invalidated and fall through to per-query eval. Each degraded query walks a 3-step ladder configured on `l1_evaluate`: **rerun** (re-run after N observations) → **samplescan** (probe with no pipeline_params override) → **sampleswitch** (consult SearchMemory, exclude historically unreliable queries). Observations are counted from the first occurrence regardless of cache state, so the rerun threshold accumulates across fresh and cached evaluations. Counters tracked on `OptSearchPoint.stale_data_observations` and persisted across rounds. See [`optimization.md` § Configuration](optimization.md#configuration).
-- **SearchMemory** *(M8 — partial)* — materialized statistical index over `dataset_runs/`. Degradation tracking (`query_degradation_rate()`) implemented; full cross-campaign intelligence planned. See [SearchMemory section](#searchmemory-m8-wave-3)
-- **Intermediate Cache** *(M8 — planned)* — per-node output cache. See [Intermediate Cache section](#intermediate-cache-m8-wave-4)
-- **Graceful interrupt** — first Ctrl+C finishes in-flight call and saves (`"partial": True`); content-hash cache bridges partial results on re-run
+| Strategy | Mechanism | Detail |
+|----------|-----------|--------|
+| **Content-hash dedup** | Same JobSearchPoint + eval data → cached | Instant lookup |
+| **Shared store** | Scan + cycle both write to `dataset_runs/` | Coverage discovers all cached results regardless of source |
+| **Write by experiment, read by step-sequence** | Provenance tagged; reads use step-sequence + prompt hash + param extraction | Robust to `pipeline_params` format changes. Data shared across experiments |
+| **Stale data protocol** | 3-step ladder for degraded queries: rerun → samplescan → sampleswitch | See [optimization.md § Stale Data Load Protocol](optimization.md#stale-data-load-protocol) |
+| **SearchMemory** *(M8 — live)* | Materialized statistical index over `dataset_runs/` | See [SearchMemory section](#searchmemory-m8-wave-3) |
+| **Intermediate Cache** *(M8 — planned)* | Per-node output cache | See [Intermediate Cache section](#intermediate-cache-m8-wave-4) |
+| **Graceful interrupt** | First Ctrl+C finishes in-flight call and saves (`"partial": True`) | Content-hash cache bridges partial results on re-run |
 
 ## Pipeline Composability
 
@@ -159,7 +161,7 @@ L1 Generate is the sole `pipeline_params` decider. L2 refines context and meta-s
 
 ### SearchMemory (M8 Wave 3)
 
-> **Partially implemented (M8 Wave 3)** — degradation tracking live; full cross-campaign intelligence planned.
+> **M8 — live.** Degradation tracking and cross-campaign intelligence operational; incremental refresh via watermark planned.
 
 A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Persisted at `{backend_id}/search_memory.json` and updated incrementally via watermark (only new dataset runs since last refresh are processed).
 

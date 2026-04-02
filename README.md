@@ -34,7 +34,14 @@ Future: non-parametric significance tests and confidence intervals on accuracy d
 
 **Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [variant library](api/config/prompt_variants.json) that includes variants from published research (e.g. PromptWizard's 40 thinking styles). Each variant carries provenance metadata (source, year) for traceability. This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
 
-Every evaluation point is a **SearchPoint** — an immutable bundle of prompt + model + temperature + pipeline params. All mutations via `.derive()`. Content-hashable, so every evaluation is stored once and discoverable by any workflow.
+Every evaluation point is a **SearchPoint** — content-hashable, so every evaluation is stored once and discoverable by any workflow.
+
+```
+SearchPoint (abstract — render())
+    ├── JobSearchPoint      — target evaluation space (pipeline_params, frozen)
+    └── PromptTemplate      — 8-field prompt scheme (render/compile)
+            └── OptSearchPoint  — optimizer working state (+ lineage, L2/L3, memory)
+```
 
 **Prompt alias groups** link the original monolithic prompt to its decomposed form (and any future variants) so all historical evaluations are discoverable across both. Core to the data model and actively evolving.
 
@@ -96,7 +103,6 @@ The notebook uses `notebooks/campaign_lib/` wrapping services with progress bars
 
 - [Setup Guide](docs/setup-guide.md) — Prerequisites, installation, configuration
 - [Architecture](docs/architecture.md) — System overview, two-loop design, data model
-- [Design Principles](docs/design-principles.md) — Core patterns and conventions
 - [Sensitivity Scan](docs/sensitivity-scan.md) — OAT scanning, coverage diagnostic
 - [Optimization](docs/optimization.md) — Feedback cycle, 3-layer optimization model, config reference
 - [Observability](docs/observability.md) — Langfuse integration, MLflow, data exploration

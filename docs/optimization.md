@@ -7,13 +7,16 @@
 │    in:  critique OR l2_directive (mutual exclusion),                   │
 │         task_context, thinking_styles, scan_context, plan,            │
 │         escalation_journal + warning_inventory (probe rounds only),   │
-│         search_memory (param impact, query patterns, failure modes)   │
+│         search_memory (failure clusters, top axes, dead queries)      │
 │    out: N candidate OptSearchPoints (prompt + pipeline_params)         │
 │         ↓                                                              │
 │  L1 EVALUATE                                                           │
 │    ┌─ Backend /matches ──── per candidate × per query ──────────────┐  │
 │    │  in:  query + pipeline_params (per-node overrides)             │  │
 │    │  out: ranked_candidates + diagnostics.warnings                 │  │
+│    │                                                                │  │
+│    │  Stale data protocol (cached degraded queries):                │  │
+│    │    rerun → samplescan → sampleswitch (3-step ladder)           │  │
 │    │                                                                │  │
 │    │  DegradationCheck (per-query):                                 │  │
 │    │    degraded_rate >= 0.4? → ABORT + EscalationSignal            │  │
@@ -148,7 +151,7 @@ Each round:
 
 ## Critique Agent
 
-Failure analysis is **separated from candidate generation** (PromptWizard pattern). The critique agent runs **inside L1 Evaluate**, after backend evaluation and winner selection. Its output feeds forward to **L1 Generate** (next round) and **L2 Refine** (on escalation).
+Failure analysis is **separated from candidate generation** (PromptWizard pattern). Critique and thinking styles are tools of `l1_evaluate`, not separate pipeline nodes — critique runs **inside L1 Evaluate** after backend evaluation and winner selection. Its output feeds forward to **L1 Generate** (next round) and **L2 Refine** (on escalation).
 
 ### Critique Output
 
@@ -183,7 +186,7 @@ Formatted by `format_critique_for_prompt()` (emits only actionable fields: summa
 | **Query categories** | `winner_results.terminated_at` |
 | **Failure details** | `winner_results` (8 max, deduped) |
 | **Successes** | `winner_results` (2 examples) |
-| **Search memory** *(M8 — planned)* | `SearchMemory` atomic accessors |
+| **Search memory** *(M8 — live)* | `SearchMemory` atomic accessors |
 
 ### Anomaly Flags
 
@@ -197,9 +200,7 @@ Computed inline from the health, rank, and evolution sections:
 
 ### Pipeline Data Flow
 
-Backend `/matches` returns `diagnostics.warnings[]` per query. A query is **"degraded"** if it has any non-empty warnings list. Each warning carries `{step, code, message}` — classified as **`{step}:{code}`** (e.g., `web_search:partial_scrape`).
-
-Flow: `_parse_backend_response()` (prompt_eval.py) → `_pipeline_health_section()` (critique.py) → anomaly flags in critique meta-prompt.
+Backend `/matches` returns `diagnostics.warnings[]` per query. A query is **"degraded"** if it has any non-empty warnings list. Each warning carries `{step, code, message}` — classified as **`{step}:{code}`** (e.g., `web_search:partial_scrape`). Flow: `_parse_backend_response()` → `_pipeline_health_section()` → anomaly flags in critique meta-prompt.
 
 ---
 
@@ -257,19 +258,25 @@ Each round samples 2-3 styles from the variant library (`api/config/prompt_varia
 
 ## Scan-Aware Generation
 
-When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate target pipeline param exploration. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
+When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate exploration. Keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields), all other keys stay as node-level pipeline overrides. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
 
-### SearchMemory Integration (M8 — Planned)
+### SearchMemory Integration (M8)
 
-Cross-campaign intelligence feeding the optimization loop. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3) for the full data model, consumer matrix, and bottleneck attribution.
+Cross-campaign intelligence feeding the optimization loop. Loaded at cycle init from historical runs, each consumer receives a tailored subset via atomic data accessors. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3) for the full data model, consumer matrix, and accessor methods.
 
-Loaded at init, refreshed incrementally each round via watermark. Each node queries the subset it needs: L1 gets failure clusters + historically-best values, L2 gets axis rankings + bottleneck distribution, Critique gets discriminating queries. Round 3+ uses `adapt_eval_set()` to swap always-hit/always-miss queries for discriminating ones.
+### Stale Data Load Protocol
 
-## Optimizer Nodes
+When a cached eval result is degraded (non-empty `diagnostics.warnings`), the protocol walks a 3-step ladder before accepting the stale data:
 
-See [architecture.md § Optimizer Pipeline](architecture.md#optimizer-pipeline) for the node table and flow diagram. Nodes declared in [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json), LLM calls via `llm_call()` primitive.
+| Step | What it does | Resolves when |
+|------|-------------|---------------|
+| **rerun** | Count observations per query. Once `rerun_trigger_count` is reached, re-evaluate against the live backend. | Fresh result is not degraded |
+| **samplescan** | Re-evaluate with default pipeline params (no overrides) to test whether degradation is config-dependent. | Default-config result is not degraded |
+| **sampleswitch** | Query SearchMemory for historical degradation rate. If `>= sampleswitch_min_degradation_rate`, mark the query as switched out — it's chronically degraded and should not block optimization. | Degradation rate exceeds threshold |
 
-**Critique and thinking styles are tools of `l1_evaluate`, not separate nodes.** Critique runs *within* evaluation; its output feeds the *next* round's `l1_generate`. `sample_thinking_styles()` similarly prepares mutation guidance at evaluation end.
+If all steps fail, the result is marked `persistently_degraded` and passed through as-is.
+
+Observation counts are persisted on `OptSearchPoint.stale_data_observations` (surviving across rounds) and aggregated cross-campaign by SearchMemory.
 
 ---
 
@@ -311,6 +318,7 @@ campaign_config = {
         "escalation_checks": [         # pluggable mid-eval checks
             {"name": "degradation", "threshold": 0.3, "target": "l3"},
         ],
+        "stale_data_load_protocol": ["rerun", "samplescan", "sampleswitch"],  # 3-step ladder for cached degraded queries
         "plan": None,                 # override optimizer strategy (str)
         "context": None,              # override domain task_context (str)
         "critique": None,             # override bootstrap critique (str)

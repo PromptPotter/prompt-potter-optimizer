@@ -100,13 +100,13 @@ Subtype of `llm`. LLM call + analysis loop + tool use. The CritiqueAgent is an e
 |------|---------|-------------------|
 | `web_search` | External HTTP service | `max_sites`, `num_results` |
 | `deterministic` | Pure function | `threshold`, `scorer` |
-| `evaluation` | Backend call + comparison (`l1_evaluate`) | `improvement_threshold` |
+| `evaluation` | Backend call + comparison (`l1_evaluate`) | `improvement_threshold`, `stale_data_load_protocol`, `rerun_trigger_count`, `samplescan_candidates`, `samplescan_threshold`, `sampleswitch_min_degradation_rate` |
 
 ---
 
 ## Composability
 
-Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx, writes to ctx. Self-contained — handles its own prompt assembly, LLM call, and parsing. A pipeline is a list of nodes; the runner loops through them.
+Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx, writes to ctx. Self-contained — handles its own prompt assembly, LLM call, and parsing. A pipeline is a list of nodes; the runner loops through them. Node execution is traced via `observed_node()` — see [observability.md](observability.md).
 
 **Key insight:** `llm/meta` inherits from `llm/structured` which inherits from `llm`. Subtypes add prompt assembly and response parsing around the same core LLM call. A new node = configure which subtype + prompt_family + parser.
 

@@ -2,6 +2,12 @@
 
 PromptPotter decomposes monolithic prompts into independent fields for perturbation, measurement, and optimization.
 
+## Key Concept: Two Parameter Namespaces
+
+**Prompt scheme fields** live on `OptSearchPoint` / `PromptTemplate` and render into a single prompt string via `render()`. **Pipeline node params** (`pipeline_params`) are a separate namespace — nested dicts keyed by node name (e.g., `{"token_matching": {"thinking_style": "single_pass"}}`). Some names overlap (e.g., `thinking_style` appears in both).
+
+L1 candidates use `pipeline_params_override` for both namespaces: keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields); all other keys stay as node-level pipeline overrides.
+
 ---
 
 ## Field Registry
@@ -18,8 +24,6 @@ PromptPotter decomposes monolithic prompts into independent fields for perturbat
 | 8 | `plan` | L3 | No | Strategic optimization framework (rendered at end) |
 
 Source of truth: `PROMPT_STRING_FIELDS` in `api/shared/constants.py` (fields 1-6). `few_shot_examples` and `plan` are rendered explicitly after the string fields.
-
-> **Disambiguation:** Prompt scheme fields live on `OptSearchPoint` / `PromptTemplate` and render into a single prompt string. Pipeline node params (`pipeline_params`) are a separate namespace — nested dicts keyed by node name (e.g., `{"token_matching": {"thinking_style": "single_pass"}}`). Some names overlap (e.g., `thinking_style` appears in both). L1 candidates target pipeline node params only via `pipeline_params_override` — they do NOT mutate prompt scheme fields.
 
 Dynamic field mutation (L2-driven add/remove) is a future optimization direction — see [optimization.md § Dynamic Field Set](optimization.md#dynamic-field-set-design-vision).
 
@@ -41,6 +45,16 @@ Dynamic field mutation (L2-driven add/remove) is a future optimization direction
          │ render()
          ▼
    skip empties → join("\n\n") → prompt string
+```
+
+**Example:** Given `persona = "You are a domain expert."`, `instruction = "Match the query to the best candidate."`, `thinking_style = "Think step by step."`, and all other fields empty, `render()` produces:
+
+```
+You are a domain expert.
+
+Match the query to the best candidate.
+
+Think step by step.
 ```
 
 `compile_prompt()` adds a second pass: substitutes `{{variable}}` placeholders with runtime values (Langfuse-compatible).
