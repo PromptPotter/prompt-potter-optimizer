@@ -313,8 +313,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
 
     line = f"{indent}{time_col} {tag} {step:>{sw}s}  {q:<45s}  -> {pred}"
 
-    # Shared indent for multi-line annotations below the main result line
-    _ann_indent = " " * len(indent) + " " * (sw + 2)
+    _ann_indent = ""
 
     # Append pipeline degradation warnings from diagnostics
     diag = pd.get("diagnostics", {})
@@ -330,7 +329,13 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
 
     # Stale data protocol actions
     if r.get("retry_of_degraded"):
-        line += f"\n{_ann_indent}{YELLOW}\U0001f504 rerun of degraded cache{RESET}"
+        comp = r.get("rerun_comparison")
+        rerun_detail = ""
+        if comp:
+            rerun_detail = f" | {comp['hit_change']}"
+            if comp.get("rank_change"):
+                rerun_detail += f" rank {comp['rank_change']}"
+        line += f"\n{_ann_indent}{YELLOW}\U0001f504 rerun of degraded cache{rerun_detail}{RESET}"
     elif r.get("samplescan_probe"):
         line += f"\n{_ann_indent}{YELLOW}\U0001f52c samplescan probe{RESET}"
     elif r.get("switched_out"):
@@ -340,7 +345,13 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     elif r.get("degraded_observed"):
         obs = r.get("degraded_obs_count", "?")
         threshold = r.get("degraded_obs_threshold", "?")
-        line += f"\n{_ann_indent}{DIM}\u21a9 degraded observed ({obs}/{threshold} toward rerun){RESET}"
+        prior = r.get("rerun_prior_outcome")
+        prior_str = ""
+        if prior:
+            prior_str = f" | prior rerun: {prior['hit_change']}"
+            if prior.get("rank_change"):
+                prior_str += f" rank {prior['rank_change']}"
+        line += f"\n{_ann_indent}{DIM}\u21a9 degraded observed ({obs}/{threshold} toward rerun){prior_str}{RESET}"
 
     return line
 

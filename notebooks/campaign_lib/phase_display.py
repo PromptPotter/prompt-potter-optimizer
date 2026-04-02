@@ -155,6 +155,10 @@ def _flatten_sp_summary(
                 elif op == "~" and len(mutation) >= 6:
                     flat[f"{k}.{mutation[2]}"] = mutation[5]
                 # '-' removals: absent = not in dict (handled by diff)
+        # Plain nested dict (e.g. node overrides) — un-nest to flat param keys
+        elif isinstance(v, dict):
+            for sub_k, sub_v in v.items():
+                flat[sub_k] = _pp_val(sub_v)
         else:
             flat[k] = _pp_val(v)
     return flat
@@ -223,6 +227,7 @@ def _group_diff_keys(
 def _print_sp_diff(
     columns: list[tuple[str, dict[str, str]]],
     node_param_keys: dict[str, list[str]] | None = None,
+    round_num: int | None = None,
 ) -> None:
     """Print N-column diff table with lookup codes for long values.
 
@@ -278,9 +283,9 @@ def _print_sp_diff(
     max_key = max(len(k) for k in diff_keys)
 
     # Header
-    n_sp = len(columns)
+    r_label = f"Round {round_num}" if round_num is not None else "SPs"
     print(_node_line(
-        f"{CYAN}Round {n_sp} SPs:{RESET}"))
+        f"{CYAN}{r_label} SPs:{RESET}"))
     hdr = f"{'':>{max_key}}  " + "".join(
         f"{label:<{col_w}}" for label, _ in columns)
     print(_node_line(hdr))
@@ -455,7 +460,11 @@ def _print_l1_generate_exit(d: dict, state: _CycleDisplayState) -> None:
         c_flat = _build_candidate_flat(state.current_sp_flat, c)
         columns.append((f"C{c['idx'] + 1}", c_flat))
     print()
-    _print_sp_diff(columns, node_param_keys=state.node_param_keys)
+    _print_sp_diff(
+        columns,
+        node_param_keys=state.node_param_keys,
+        round_num=state.round_num + 1,
+    )
 
 
 def _print_l1_evaluate_enter(d: dict, state: _CycleDisplayState) -> None:

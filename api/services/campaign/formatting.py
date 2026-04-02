@@ -32,6 +32,7 @@ class ContextData:
     scan_compact: bool = False
     failure_analysis: FailureAnalysis | None = None
     search_memory_context: dict | None = None
+    pipeline_schema_text: str = ""
 
 
 def format_context_sections(ctx: ContextData) -> str:
@@ -43,6 +44,10 @@ def format_context_sections(ctx: ContextData) -> str:
     live here.
     """
     sections: list[str] = []
+
+    # Pipeline schema — valid nodes and parameters
+    if ctx.pipeline_schema_text:
+        sections.append(ctx.pipeline_schema_text)
 
     # Scan analytics — full on first round, sensitivity-only thereafter
     sc = ctx.scan_context

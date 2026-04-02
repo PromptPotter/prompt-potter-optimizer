@@ -96,6 +96,21 @@ async def l1_generate(
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
+    # Build pipeline schema text so the LLM knows valid nodes/params
+    schema_text = ""
+    if pipeline_schema:
+        npk = pipeline_schema.node_param_keys()
+        if npk:
+            lines = [
+                "VALID PIPELINE NODES AND PARAMETERS (only use these — do not invent nodes or params):",
+            ]
+            for node_name, params in npk.items():
+                if params:
+                    lines.append(f"  {node_name}: {', '.join(sorted(params))}")
+                else:
+                    lines.append(f"  {node_name}: (no tunable params)")
+            schema_text = "\n".join(lines)
+
     meta_prompt = load_optimizer_prompt("meta_scan_aware").compile_prompt(
         n_variants=str(n_variants),
         accuracy_pct=f"{current_accuracy:.1%}",
@@ -115,6 +130,7 @@ async def l1_generate(
                 scan_compact=scan_compact,
                 failure_analysis=failure_analysis,
                 search_memory_context=search_memory_context,
+                pipeline_schema_text=schema_text,
             )
         ),
     )
@@ -147,6 +163,13 @@ async def l1_generate(
                 if owner:
                     logger.warning("l1_generate: auto-nesting flat param %r → %s", fk, owner)
                     node_overrides.setdefault(owner, {})[fk] = node_overrides.pop(fk)
+
+            # Filter out hallucinated nodes that don't exist in the pipeline
+            _valid_nodes = {n.name for n in pipeline_schema.nodes}
+            _bad_nodes = [k for k in node_overrides if k not in _valid_nodes]
+            for bk in _bad_nodes:
+                logger.warning("l1_generate: dropping hallucinated node %r", bk)
+                del node_overrides[bk]
 
         child = opt_sp.derive_candidate(
             changes_description=v.get("changes_description", ""),

@@ -175,6 +175,41 @@ def _is_degraded(result: dict) -> bool:
     return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
 
 
+def _find_gt_rank(result: dict) -> int | None:
+    """Find ground truth rank in ranked_candidates. Returns 1-indexed or None."""
+    gt = result.get("ground_truth", "")
+    if not gt:
+        return None
+    pd = result.get("pipeline_data") or {}
+    for i, c in enumerate(pd.get("ranked_candidates", [])):
+        name = c.get("candidate", "") if isinstance(c, dict) else str(c)
+        if name == gt:
+            return i + 1
+    return None
+
+
+def _compare_rerun(cached_result: dict, rerun_result: dict) -> dict:
+    """Compare rerun to cached result. Returns improvement summary."""
+    cached_hit = cached_result.get("hit", False)
+    rerun_hit = rerun_result.get("hit", False)
+    hit_change = f"{'HIT' if cached_hit else 'MISS'}->{'HIT' if rerun_hit else 'MISS'}"
+
+    cached_rank = _find_gt_rank(cached_result)
+    rerun_rank = _find_gt_rank(rerun_result)
+    rank_change = (
+        f"{cached_rank}->{rerun_rank}"
+        if cached_rank is not None and rerun_rank is not None
+        else None
+    )
+
+    improved = (
+        (not cached_hit and rerun_hit)
+        or (cached_rank is not None and rerun_rank is not None and rerun_rank < cached_rank)
+    )
+
+    return {"hit_change": hit_change, "rank_change": rank_change, "improved": improved}
+
+
 def _error_result(query: str, ground_truth: str, error_msg: str) -> dict:
     """Build a standard error result dict."""
     return {
@@ -319,7 +354,7 @@ async def _execute_stale_data_protocol(
     upstream_hash: str = "",
     upstream_nodes: set[str] | None = None,
     search_memory: SearchMemory | None = None,
-    stale_data_observations: dict[str, int] | None = None,
+    stale_data_observations: dict[str, int | dict] | None = None,
 ) -> tuple[dict, str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
@@ -340,16 +375,30 @@ async def _execute_stale_data_protocol(
     for step in protocol_steps:
         if step == "rerun":
             trigger_count = cfg.get("rerun_trigger_count", 3)
-            obs_count = (stale_data_observations or {}).get(query, 0)
+            obs_entry = (stale_data_observations or {}).get(query, 0)
+            obs_count = (
+                obs_entry.get("obs_count", 0)
+                if isinstance(obs_entry, dict)
+                else obs_entry
+            )
+            last_rerun = (
+                obs_entry.get("last_rerun")
+                if isinstance(obs_entry, dict)
+                else None
+            )
             if obs_count < trigger_count:
                 if stale_data_observations is not None:
-                    stale_data_observations[query] = obs_count + 1
+                    stale_data_observations[query] = {
+                        "obs_count": obs_count + 1,
+                        "last_rerun": last_rerun,
+                    }
                 return {
                     **cached_result,
                     "cached": cached_result.get("cached", False),
                     "degraded_observed": True,
                     "degraded_obs_count": obs_count + 1,
                     "degraded_obs_threshold": trigger_count,
+                    "rerun_prior_outcome": last_rerun,
                 }, "below_threshold"
 
             result = await eval_query_via_backend(
@@ -362,7 +411,14 @@ async def _execute_stale_data_protocol(
                 upstream_hash=upstream_hash,
                 upstream_nodes=upstream_nodes,
             )
+            comparison = _compare_rerun(cached_result, result)
             result["retry_of_degraded"] = True
+            result["rerun_comparison"] = comparison
+            if stale_data_observations is not None:
+                stale_data_observations[query] = {
+                    "obs_count": obs_count,
+                    "last_rerun": comparison,
+                }
             if not _is_degraded(result):
                 if stale_data_observations is not None:
                     stale_data_observations.pop(query, None)

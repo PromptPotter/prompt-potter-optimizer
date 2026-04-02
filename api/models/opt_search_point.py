@@ -209,9 +209,9 @@ class OptSearchPoint(PromptTemplate):
         False,
         description="One-shot flag — True after backend warning has been emitted.",
     )
-    stale_data_observations: dict[str, int] = Field(
+    stale_data_observations: dict[str, int | dict] = Field(
         default_factory=dict,
-        description="Per-query degradation observation counts {query: count}.",
+        description="Per-query degradation state {query: {obs_count, last_rerun} | int}.",
     )
 
     # Canonical list of optimization memory fields.
