@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from api.models.evaluator import EvalResult, ExactMatchEvaluator
-from api.services.metrics import compute_composite_score
+from api.services.metrics import compute_composite_score, count_degraded_queries
 from api.shared.constants import NO_RESULT
 from api.shared.errors import ErrorCategory
 from api.shared.hashing import HASH_TRUNCATE
@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from api.services.backend_client import BackendClient
     from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
+    from api.services.search.search_memory import SearchMemory
+    from api.services.stores.intermediate_cache import IntermediateCache
 
 _evaluator = ExactMatchEvaluator({"strip": True})
 
@@ -49,6 +51,9 @@ class EvalBatchResult:
     results: list
     completed: bool = True
     stop_reason: str | None = None  # "graceful" | "force" | None
+    retried_degraded: int = 0
+    probed_degraded: int = 0
+    switched_samples: int = 0
 
 
 def _error_category(error: str | None) -> ErrorCategory | None:
@@ -163,6 +168,11 @@ def _parse_backend_response(
         pd["terminated_at"] = terminated_at
 
     return pd
+
+
+def _is_degraded(result: dict) -> bool:
+    """Check if a result has pipeline degradation warnings."""
+    return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
 
 
 def _error_result(query: str, ground_truth: str, error_msg: str) -> dict:
@@ -296,6 +306,101 @@ def _run_escalation_checks(
     return None
 
 
+async def _execute_stale_data_protocol(
+    protocol_steps: list[str],
+    query_data: dict,
+    cached_result: dict,
+    backend_client: BackendClient,
+    *,
+    pipeline_params: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
+    intermediate_cache: IntermediateCache | None = None,
+    backend_id: str = "",
+    upstream_hash: str = "",
+    upstream_nodes: set[str] | None = None,
+    search_memory: SearchMemory | None = None,
+    stale_data_observations: dict[str, int] | None = None,
+) -> tuple[dict, str]:
+    """Walk the stale data load protocol ladder for a degraded cached query.
+
+    Hyperparameters are read from the ``l1_evaluate`` node config in
+    ``optimizer_pipeline.json``.  The protocol step list and all thresholds
+    live on that single node — tunable via ``param_keys`` when PromptPotter
+    self-optimizes.
+
+    Returns ``(result_dict, step_taken)`` where *step_taken* is the step
+    that resolved the query, or ``"exhausted"``.
+    """
+    from api.config.optimizer_pipeline import get_optimizer_schema
+
+    cfg = get_optimizer_schema().get_node("l1_evaluate").current_config
+    query = query_data["query"]
+    result = cached_result
+
+    for step in protocol_steps:
+        if step == "rerun":
+            trigger_count = cfg.get("rerun_trigger_count", 3)
+            obs_count = (stale_data_observations or {}).get(query, 0)
+            if obs_count < trigger_count:
+                if stale_data_observations is not None:
+                    stale_data_observations[query] = obs_count + 1
+                return {
+                    **cached_result,
+                    "cached": cached_result.get("cached", False),
+                    "degraded_observed": True,
+                    "degraded_obs_count": obs_count + 1,
+                    "degraded_obs_threshold": trigger_count,
+                }, "below_threshold"
+
+            result = await eval_query_via_backend(
+                query_data,
+                backend_client,
+                pipeline_params=pipeline_params,
+                pipeline_schema=pipeline_schema,
+                intermediate_cache=intermediate_cache,
+                backend_id=backend_id,
+                upstream_hash=upstream_hash,
+                upstream_nodes=upstream_nodes,
+            )
+            result["retry_of_degraded"] = True
+            if not _is_degraded(result):
+                if stale_data_observations is not None:
+                    stale_data_observations.pop(query, None)
+                return result, "rerun"
+
+        elif step == "samplescan":
+            n_candidates = cfg.get("samplescan_candidates", 3)
+            resolved_threshold = cfg.get("samplescan_threshold", 0.5)
+
+            result = await eval_query_via_backend(
+                query_data,
+                backend_client,
+                pipeline_params=None,
+                pipeline_schema=pipeline_schema,
+                intermediate_cache=None,
+                backend_id=backend_id,
+                upstream_hash="",
+                upstream_nodes=None,
+            )
+            result["samplescan_probe"] = True
+            result["samplescan_config"] = {
+                "n_candidates": n_candidates,
+                "resolved_threshold": resolved_threshold,
+            }
+            if not _is_degraded(result):
+                return result, "samplescan"
+
+        elif step == "sampleswitch":
+            min_deg_rate = cfg.get("sampleswitch_min_degradation_rate", 0.5)
+            if search_memory:
+                deg_rate = search_memory.query_degradation_rate(query)
+                if deg_rate >= min_deg_rate:
+                    result = {**cached_result, "cached": True, "switched_out": True}
+                    return result, "sampleswitch"
+
+    return {**result, "persistently_degraded": True}, "exhausted"
+
+
 async def _run_eval_batch(
     search_point: JobSearchPoint,
     eval_data: list,
@@ -335,9 +440,16 @@ async def _run_eval_batch(
     n_total_candidates = ctx.n_total_candidates if ctx else 1
     max_consecutive_errors = ctx.max_consecutive_errors if ctx else 3
 
+    _stale_protocol = ctx.stale_data_load_protocol if ctx else None
+    _search_memory = ctx.search_memory if ctx else None
+    _stale_observations = ctx.stale_data_observations if ctx else None
+
     results: list = []
     consecutive_errors = 0
     n_reused = 0
+    n_retried = 0
+    n_probed = 0
+    n_switched = 0
 
     # Wave 4: compute upstream hash and cache reference for batch
     # Split at the first prompt-bearing node — everything before it is
@@ -385,8 +497,31 @@ async def _run_eval_batch(
             # Per-query cache check (inlined from former _evaluate_single_query)
             cached = cached_queries.get(qd["query"]) if cached_queries else None
             if cached is not None and not cached.get("error"):
-                result = {**cached, "cached": True}
-                was_cached = True
+                if _is_degraded(cached) and _stale_protocol:
+                    result, step_taken = await _execute_stale_data_protocol(
+                        _stale_protocol,
+                        qd,
+                        cached,
+                        backend_client,
+                        pipeline_params=search_point.pipeline_params,
+                        pipeline_schema=pipeline_schema,
+                        intermediate_cache=_intermediate_cache,
+                        backend_id=_backend_id,
+                        upstream_hash=_upstream_hash,
+                        upstream_nodes=_upstream_nodes or None,
+                        search_memory=_search_memory,
+                        stale_data_observations=_stale_observations,
+                    )
+                    was_cached = step_taken == "below_threshold"
+                    if step_taken == "rerun":
+                        n_retried += 1
+                    elif step_taken == "samplescan":
+                        n_probed += 1
+                    elif step_taken == "sampleswitch":
+                        n_switched += 1
+                else:
+                    result = {**cached, "cached": True}
+                    was_cached = True
             else:
                 result = await eval_query_via_backend(
                     qd,
@@ -399,6 +534,28 @@ async def _run_eval_batch(
                     upstream_nodes=_upstream_nodes or None,
                 )
                 was_cached = False
+                # Fire stale data protocol on fresh degraded results too
+                if _is_degraded(result) and _stale_protocol:
+                    result, step_taken = await _execute_stale_data_protocol(
+                        _stale_protocol,
+                        qd,
+                        result,
+                        backend_client,
+                        pipeline_params=search_point.pipeline_params,
+                        pipeline_schema=pipeline_schema,
+                        intermediate_cache=_intermediate_cache,
+                        backend_id=_backend_id,
+                        upstream_hash=_upstream_hash,
+                        upstream_nodes=_upstream_nodes or None,
+                        search_memory=_search_memory,
+                        stale_data_observations=_stale_observations,
+                    )
+                    if step_taken == "rerun":
+                        n_retried += 1
+                    elif step_taken == "samplescan":
+                        n_probed += 1
+                    elif step_taken == "sampleswitch":
+                        n_switched += 1
 
             if was_cached:
                 n_reused += 1
@@ -447,7 +604,10 @@ async def _run_eval_batch(
             len(results),
             len(eval_data),
         )
-        return EvalBatchResult(results, completed=False, stop_reason="force")
+        return EvalBatchResult(
+            results, completed=False, stop_reason="force",
+            retried_degraded=n_retried, probed_degraded=n_probed, switched_samples=n_switched,
+        )
     finally:
         signal.signal(signal.SIGINT, old_handler)
 
@@ -457,11 +617,22 @@ async def _run_eval_batch(
             n_reused,
             len(eval_data),
         )
+    if n_retried or n_probed or n_switched:
+        logger.info(
+            "Stale data protocol: %d rerun, %d samplescan, %d sampleswitch",
+            n_retried, n_probed, n_switched,
+        )
+
+    _stale_counters = {
+        "retried_degraded": n_retried,
+        "probed_degraded": n_probed,
+        "switched_samples": n_switched,
+    }
 
     if _stop_requested:
-        return EvalBatchResult(results, completed=False, stop_reason="graceful")
+        return EvalBatchResult(results, completed=False, stop_reason="graceful", **_stale_counters)
 
-    return EvalBatchResult(results, completed=True)
+    return EvalBatchResult(results, completed=True, **_stale_counters)
 
 
 def _log_eval_to_obs(
@@ -545,16 +716,24 @@ async def eval_search_point(
         if _cached_run:
             results = _cached_run["dataset_run_items"]
             if not (results and all(r.get("error") for r in results)):
-                scores = compute_composite_score(results, pipeline_schema)
-                if on_result is not None:
-                    for i, r in enumerate(results):
-                        on_result({**r, "cached": True}, i, len(results))
-                esc_signal = _run_escalation_checks(
-                    ctx.escalation_checks, results, ctx.candidate_idx, ctx.n_total_candidates,
-                )
-                if esc_signal:
-                    scores["escalation_signal"] = esc_signal.to_dict()
-                return results, scores, True
+                degraded_count = count_degraded_queries(results)
+                if degraded_count > 0:
+                    logger.info(
+                        "Full-run cache has %d/%d degraded queries — falling through to per-query eval",
+                        degraded_count, len(results),
+                    )
+                    _cached_run = None
+                else:
+                    scores = compute_composite_score(results, pipeline_schema)
+                    if on_result is not None:
+                        for i, r in enumerate(results):
+                            on_result({**r, "cached": True}, i, len(results))
+                    esc_signal = _run_escalation_checks(
+                        ctx.escalation_checks, results, ctx.candidate_idx, ctx.n_total_candidates,
+                    )
+                    if esc_signal:
+                        scores["escalation_signal"] = esc_signal.to_dict()
+                    return results, scores, True
 
     # --- evaluate via backend ---
     safe_label = label.lower().replace(" ", "_")

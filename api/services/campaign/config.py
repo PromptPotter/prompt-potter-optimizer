@@ -78,6 +78,12 @@ class CycleConfig(BaseModel):
         description="Safety cap on total rounds (incl. probe rounds)",
     )
 
+    # Stale data handling
+    stale_data_load_protocol: list[str] = Field(
+        default=["rerun", "samplescan", "sampleswitch"],
+        description="Ordered fallback ladder for degraded cached samples (l1_evaluate config)",
+    )
+
     # Critique thresholds
     critique_degradation_threshold: float = Field(
         0.4,
@@ -138,4 +144,5 @@ class CycleConfig(BaseModel):
             degradation_threshold=opt["degradation_threshold"],
             backend_warning_threshold=opt["backend_warning_threshold"],
             max_failures=opt["max_failures"],
+            stale_data_load_protocol=opt.get("stale_data_load_protocol", ["rerun", "samplescan", "sampleswitch"]),
         )

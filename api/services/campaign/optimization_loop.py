@@ -280,9 +280,9 @@ def _restore_from_checkpoint(
             known = {k: v for k, v in _osp.items() if k in OptSearchPoint.model_fields}
             missing = set(OptSearchPoint.model_fields) - set(_osp)
             if missing:
-                logger.warning(
+                logger.debug(
                     "Checkpoint missing %d OptSearchPoint field(s): %s "
-                    "(will use defaults — checkpoint may predate schema changes)",
+                    "(using defaults — checkpoint predates schema change)",
                     len(missing), ", ".join(sorted(missing)),
                 )
             state.opt_sp = OptSearchPoint(**known)
@@ -332,6 +332,8 @@ def _setup_eval_context(
         source="optimization_loop",
         experiment_id=experiment_id or (cycle_id.replace("cycle_", "")[:12] if cycle_id else ""),
         max_consecutive_errors=config.max_consecutive_errors,
+        stale_data_load_protocol=config.stale_data_load_protocol,
+        stale_data_observations=state.opt_sp.stale_data_observations,
     )
 
     # Alias: raw instruction ↔ restructured baseline
@@ -621,6 +623,8 @@ async def run_optimization(
     resumed_from_round = init.resumed_from_round
     search_memory = init.search_memory
     state.search_memory = search_memory
+    if state.eval_ctx and search_memory:
+        state.eval_ctx.search_memory = search_memory
 
     # -- Round loop --
     stop_reason: StopReason | None = None

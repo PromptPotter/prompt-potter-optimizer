@@ -64,9 +64,9 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **PipelineSchema** / **PipelineNode** — describes a pipeline (target or optimizer). Both TermNorm and the optimizer pipeline parse into PipelineSchema.
 
-**EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, etc.).
+**EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, etc.). Also carries stale data protocol config (`stale_data_load_protocol`, `search_memory`, `stale_data_observations`).
 
-**SearchMemory** *(M8 Wave 3)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark. See [SearchMemory section](#searchmemory-m8-wave-3) below.
+**SearchMemory** *(M8 Wave 3 — partial)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Also tracks per-query degradation counts (`query_degradation_rate()`), consumed by the stale data protocol's sampleswitch step. Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark. See [SearchMemory section](#searchmemory-m8-wave-3) below.
 
 Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 
@@ -88,7 +88,8 @@ All paths converge on `eval_search_point()` — single gateway for eval persiste
 - **Content-hash dedup** — same JobSearchPoint + eval data returns cached results instantly
 - **Shared store** — sensitivity scan and feedback cycle both write to `dataset_runs/`; coverage advisor discovers all cached results regardless of source
 - **Write by experiment_id, read by step-sequence matching** — provenance tagged, but reads use step-sequence matching (which nodes ran) + prompt hash + parameter value extraction. Robust to `pipeline_params` format changes across code versions. Data shared across experiments.
-- **SearchMemory** *(M8 — planned)* — materialized statistical index over `dataset_runs/`. See [SearchMemory section](#searchmemory-m8-wave-3)
+- **Stale data protocol** — fires on **all** degraded results (cached and fresh). Full-run cache hits with degraded queries are invalidated and fall through to per-query eval. Each degraded query walks a 3-step ladder configured on `l1_evaluate`: **rerun** (re-run after N observations) → **samplescan** (probe with no pipeline_params override) → **sampleswitch** (consult SearchMemory, exclude historically unreliable queries). Observations are counted from the first occurrence regardless of cache state, so the rerun threshold accumulates across fresh and cached evaluations. Counters tracked on `OptSearchPoint.stale_data_observations` and persisted across rounds. See [`optimization.md` § Configuration](optimization.md#configuration).
+- **SearchMemory** *(M8 — partial)* — materialized statistical index over `dataset_runs/`. Degradation tracking (`query_degradation_rate()`) implemented; full cross-campaign intelligence planned. See [SearchMemory section](#searchmemory-m8-wave-3)
 - **Intermediate Cache** *(M8 — planned)* — per-node output cache. See [Intermediate Cache section](#intermediate-cache-m8-wave-4)
 - **Graceful interrupt** — first Ctrl+C finishes in-flight call and saves (`"partial": True`); content-hash cache bridges partial results on re-run
 
@@ -107,10 +108,12 @@ Five nodes, declared in `api/config/optimizer_pipeline.json`:
 | Node | Purpose | Trigger |
 |------|---------|---------|
 | `l1_generate` | Candidate generation (sole `pipeline_params` decider) | Every round |
-| `l1_evaluate` | Eval + winner selection | Every round |
+| `l1_evaluate` | Eval + winner selection + stale data protocol | Every round |
 | `critique` | Sole intelligence bridge — structured analysis of eval results (summary, priority_fix, axes, highlights) | After L1 evaluate |
 | `l2_refine_context` | Refine `task_context` + meta-settings (creativity, n_variants, sample_size) | L1 patience exhausted or degradation |
 | `l3_modify_plan` | Strategic replanning | L2 patience exhausted |
+
+`l1_evaluate` also carries the **stale data load protocol** config: `stale_data_load_protocol` (step sequence), `rerun_trigger_count`, `samplescan_candidates`, `samplescan_threshold`, `sampleswitch_min_degradation_rate` — all tunable via `optimizer.param_keys`.
 
 ```
   ┌──────────────────────────────────────────────────────────┐
@@ -156,17 +159,20 @@ L1 Generate is the sole `pipeline_params` decider. L2 refines context and meta-s
 
 ### SearchMemory (M8 Wave 3)
 
-> **Planned (M8 Wave 3)** — not yet implemented.
+> **Partially implemented (M8 Wave 3)** — degradation tracking live; full cross-campaign intelligence planned.
 
 A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Persisted at `{backend_id}/search_memory.json` and updated incrementally via watermark (only new dataset runs since last refresh are processed).
 
-**Three analysis pillars:**
+**Three analysis pillars + degradation tracking:**
 
 | Pillar | What it tracks | Key accessors |
 |--------|---------------|---------------|
 | Parameter Impact | Effect size + consistency per axis, top-5 historically-best values | `axis_rankings()`, `top_k_values(axis)`, `axis_impact(axis)` |
 | Query Patterns | Hit rate, variance (discriminative power), dominant failure mode per query | `query_tractability()`, `discriminating_queries()`, `dead_queries()` |
 | Failure Modes | Bottleneck distribution by terminated_at step, failure clusters | `bottleneck_distribution()`, `failure_clusters()` |
+| Degradation | Per-query degradation count (warnings in `pipeline_data.diagnostics`) | `query_degradation_rate(query)` |
+
+Degradation tracking feeds the stale data protocol's `sampleswitch` step: queries with historically high degradation rates are candidates for exclusion from the eval set.
 
 **Design:** Atomic data accessors only -- no LLM text formatting. Each consumer (scan_advisor, L1, L2, critique) queries the subset it needs and composes its own prompt section. This avoids coupling SearchMemory to any particular prompt format.
 

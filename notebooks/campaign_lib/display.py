@@ -313,13 +313,29 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
 
     line = f"{indent}{time_col} {tag} {step:>{sw}s}  {q:<45s}  -> {pred}"
 
+    # Shared indent for multi-line annotations below the main result line
+    _ann_indent = " " * len(indent) + " " * (sw + 2)
+
     # Append pipeline degradation warnings from diagnostics
     diag = pd.get("diagnostics", {})
     warnings = diag.get("warnings", [])
     if warnings:
-        warn_indent = " " * len(indent) + " " * (sw + 2)
         for w in warnings:
-            line += f"\n{warn_indent}{YELLOW}\u26a0 {w['step']}: {w['message']}{RESET}"
+            line += f"\n{_ann_indent}{YELLOW}\u26a0 {w['step']}: {w['message']}{RESET}"
+
+    # Stale data protocol actions
+    if r.get("retry_of_degraded"):
+        line += f"\n{_ann_indent}{YELLOW}\U0001f504 rerun of degraded cache{RESET}"
+    elif r.get("samplescan_probe"):
+        line += f"\n{_ann_indent}{YELLOW}\U0001f52c samplescan probe{RESET}"
+    elif r.get("switched_out"):
+        line += f"\n{_ann_indent}{YELLOW}\U0001f500 switched out (unreliable){RESET}"
+    elif r.get("persistently_degraded"):
+        line += f"\n{_ann_indent}{RED}\u26a0 persistently degraded{RESET}"
+    elif r.get("degraded_observed"):
+        obs = r.get("degraded_obs_count", "?")
+        threshold = r.get("degraded_obs_threshold", "?")
+        line += f"\n{_ann_indent}{DIM}\u21a9 degraded observed ({obs}/{threshold} toward rerun){RESET}"
 
     return line
 

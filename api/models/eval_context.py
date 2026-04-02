@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from api.services.campaign.escalation import DegradationCheck
     from api.services.obs.observability_logger import ObsLogger
     from api.services.project_store import ProjectStore
+    from api.services.search.search_memory import SearchMemory
 
 logger = logging.getLogger(__name__)
 
@@ -37,3 +38,8 @@ class EvalContext:
     candidate_idx: int = 0
     n_total_candidates: int = 1
     max_consecutive_errors: int = 3
+    # Stale data load protocol — optimizer pipeline node sequence
+    stale_data_load_protocol: list[str] | None = None
+    search_memory: SearchMemory | None = None
+    # Mutable dict extracted from opt_sp.stale_data_observations — updated during eval
+    stale_data_observations: dict[str, int] | None = None

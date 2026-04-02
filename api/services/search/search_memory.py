@@ -102,6 +102,10 @@ class SearchMemory:
         # {query: [terminated_at_values]}
         self._query_failure_modes: dict[str, list[str]] = defaultdict(list)
 
+        # Degradation tracking
+        # {query: degradation_count}
+        self._query_degradation_counts: dict[str, int] = defaultdict(int)
+
         # Failure Modes internals
         # {terminated_at: count}
         self._bottleneck_counts: dict[str, int] = defaultdict(int)
@@ -170,6 +174,15 @@ class SearchMemory:
         if not hasattr(self, "_query_axis_sensitivity"):
             return []
         return self._query_axis_sensitivity.get(query, [])
+
+    # --- Degradation ---
+
+    def query_degradation_rate(self, query: str) -> float:
+        """Return fraction of evaluations where *query* was degraded."""
+        n_evals = len(self._query_hits.get(query, []))
+        if n_evals == 0:
+            return 0.0
+        return self._query_degradation_counts.get(query, 0) / n_evals
 
     # --- Failure Modes ---
 
@@ -276,6 +289,7 @@ class SearchMemory:
             "query_failure_modes": dict(self._query_failure_modes),
             "bottleneck_counts": dict(self._bottleneck_counts),
             "total_failures": self._total_failures,
+            "query_degradation_counts": dict(self._query_degradation_counts),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -302,6 +316,7 @@ class SearchMemory:
             mem._query_failure_modes[q] = modes
         mem._bottleneck_counts = defaultdict(int, data.get("bottleneck_counts", {}))
         mem._total_failures = data.get("total_failures", 0)
+        mem._query_degradation_counts = defaultdict(int, data.get("query_degradation_counts", {}))
         return mem
 
     # --- Internals ---
@@ -335,8 +350,13 @@ class SearchMemory:
             hit = bool(item.get("hit"))
             self._query_hits[query].append(hit)
 
+            pd = item.get("pipeline_data") or {}
+
+            # Degradation tracking
+            if (pd.get("diagnostics") or {}).get("warnings"):
+                self._query_degradation_counts[query] += 1
+
             if not hit and not item.get("error"):
-                pd = item.get("pipeline_data") or {}
                 terminated = pd.get("terminated_at", "unknown")
                 self._query_failure_modes[query].append(terminated)
                 self._bottleneck_counts[terminated] += 1

@@ -349,10 +349,14 @@ def load_pipeline_from_dict(data: dict) -> PipelineSchema:
     """
     nodes = []
     for name, node_data in data.get("nodes", {}).items():
+        opt = node_data.get("optimizer", {})
+        pk = set(opt.get("param_keys", []))
         nodes.append(
             PipelineNode(
                 name=name,
                 current_config=node_data.get("config", {}),
+                param_keys=pk,
+                override_map=opt.get("override_map", {}),
             )
         )
     return PipelineSchema(
