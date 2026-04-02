@@ -34,9 +34,21 @@ scan_variants = {
 
 ### Scan Baseline & Coverage
 
-Before evaluation, `prepare_scan_baseline()` reports per-axis coverage from historical data — which values are cached vs new. Uses the `dataset_runs` index for instant lookups.
+Before evaluation, `prepare_scan_baseline()` reports per-axis coverage from historical data — which values are cached vs new. Uses the `dataset_runs` index for instant lookups. Coverage diagnostics (`diagnose_scan_variants`) use the same `_entry_matches()` logic as the eval cache, so pre-run ✓ ticks accurately predict actual cache hits.
 
 **Prompt alias groups** link restructured prompts to their originals so historical pipeline-parameter results are discoverable. Resolution is transitive.
+
+### Cache Matching (`strict_params`)
+
+Scan cache matching is configurable via `strict_params` in the notebook:
+
+| Value | Behavior |
+|-------|----------|
+| `{}` (default) | Maximally loose — match by rendered prompt + steps + auto-strict scanned axis only |
+| `{"node": {"param"}}` | Listed params must also match exactly |
+| `None` | Exact mode — full `pipeline_params` dict equality (same as optimizer) |
+
+During scan, the perturbed axis is **auto-added** to `strict_params`. For example, when scanning `max_sites=[3,7,12]`, a variant with `max_sites=7` will cache-hit against any historical eval with that same prompt, same steps, and `max_sites=7` — regardless of what `temperature` or `content_char_limit` were. This eliminates the previous mismatch where coverage reported ✓ but the eval cache missed due to strict full-dict hashing.
 
 ### Circuit Breaker
 

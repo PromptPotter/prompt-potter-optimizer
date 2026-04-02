@@ -74,14 +74,15 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
 
 All paths converge on `eval_search_point()` — single gateway for eval persistence. Content-addressed dedup via `eval_content_hash()`. Prompt alias groups link semantically equivalent prompts so historical data is discoverable across forms (transitive resolution).
 
-**Two matching strategies:**
+**Unified per-query cache:** `find_cached_queries()` (`dataset_run_store.py`) uses the in-memory `_rp_index` (keyed by `rendered_prompt_hash`) then filters by `_entry_matches()` — step-set equality + configurable param strictness:
 
-| Strategy | Used by | How it works |
-|----------|---------|-------------|
-| `sp_hash` (exact) | Eval cache (`find_cached_queries`) | Hash of `rendered_prompt_hash` + full `pipeline_params` — within-session dedup |
-| Step-sequence matching | Coverage (`diagnose_scan_variants`) | Filter by step set + prompt hash for prompt variants, step set + `_extract_param()` for pipeline-param variants — robust to `pipeline_params` format changes |
+| Mode | `strict_params` | Used by | Behavior |
+|------|----------------|---------|----------|
+| Exact | `None` | Optimizer (L1/L2/L3) | Full `pipeline_params` dict equality |
+| Selective | `{"node": {"param"}}` | Sensitivity scan | Steps + listed params must match; others relaxed |
+| Maximally loose | `{}` | Scan (default) | Steps + `rendered_prompt_hash` only |
 
-`_extract_param()` (`coverage.py`) resolves parameter values across all historical formats: flat top-level (`pp["max_sites"]`), nested under node (`pp["web_search"]["max_sites"]`), and brute-force scan of node dicts.
+During sensitivity scan, the perturbed axis is auto-added to `strict_params` so cache reuse never crosses the axis under test. Coverage diagnostics (`diagnose_scan_variants`) use the same `_entry_matches()` logic, so pre-run ✓ ticks accurately predict actual cache hits.
 
 ## Caching & Crash Recovery
 
@@ -89,7 +90,7 @@ All paths converge on `eval_search_point()` — single gateway for eval persiste
 |----------|-----------|--------|
 | **Content-hash dedup** | Same JobSearchPoint + eval data → cached | Instant lookup |
 | **Shared store** | Scan + cycle both write to `dataset_runs/` | Coverage discovers all cached results regardless of source |
-| **Write by experiment, read by step-sequence** | Provenance tagged; reads use step-sequence + prompt hash + param extraction | Robust to `pipeline_params` format changes. Data shared across experiments |
+| **Per-query cache** | `_rp_index` + `_entry_matches()` with configurable `strict_params` | Exact (optimizer) or NN (scan) — see [Evaluation Flow](#evaluation-flow) |
 | **Stale data protocol** | 3-step ladder for degraded queries: rerun → samplescan → sampleswitch | See [optimization.md § Stale Data Load Protocol](optimization.md#stale-data-load-protocol) |
 | **SearchMemory** *(M8 — live)* | Materialized statistical index over `dataset_runs/` | See [SearchMemory section](#searchmemory-m8-wave-3) |
 | **Intermediate Cache** *(M8 — planned)* | Per-node output cache | See [Intermediate Cache section](#intermediate-cache-m8-wave-4) |

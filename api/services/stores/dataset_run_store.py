@@ -26,6 +26,46 @@ from api.shared.constants import (
 logger = logging.getLogger(__name__)
 
 
+def _entry_matches(
+    entry_pp: dict | None,
+    target_pp: dict | None,
+    strict_params: dict[str, set[str]] | None = None,
+) -> bool:
+    """Check whether a historical entry's pipeline_params match a target.
+
+    Args:
+        entry_pp: pipeline_params from a stored index entry.
+        target_pp: pipeline_params we want to match against.
+        strict_params: Controls strictness:
+            ``None`` — exact full-dict equality.
+            ``{}`` — steps must match, all other params relaxed.
+            ``{"node": {"param"}}`` — steps + listed params must match.
+    """
+    entry_pp = entry_pp or {}
+    target_pp = target_pp or {}
+
+    # Steps must always match
+    if frozenset(entry_pp.get("steps", [])) != frozenset(target_pp.get("steps", [])):
+        return False
+
+    if strict_params is None:
+        # Exact mode: full dict equality
+        return entry_pp == target_pp
+
+    # NN mode: only listed params must match
+    for node, params in strict_params.items():
+        entry_node = entry_pp.get(node, {})
+        target_node = target_pp.get(node, {})
+        if not isinstance(entry_node, dict) or not isinstance(target_node, dict):
+            if entry_node != target_node:
+                return False
+            continue
+        for p in params:
+            if entry_node.get(p) != target_node.get(p):
+                return False
+    return True
+
+
 class DatasetRunStore:
     """File I/O for dataset evaluation runs and incremental eval writes."""
 
@@ -233,60 +273,38 @@ class DatasetRunStore:
         write_json(path, data)
         self._alias_cache.pop(backend_id, None)
 
-    def _ensure_sp_hashes(self, backend_id: str) -> None:
-        """Compute sp_hash for index entries missing it.
-
-        Uses ``rendered_prompt_hash``, ``model``, ``temperature``, and
-        ``pipeline_params`` from the index — no detail file loading needed.
-        """
-        from api.shared.hashing import sp_identity_hash
-
-        index = self._load_index(backend_id)
-        entries = index.get("dataset_runs", [])
-        updated = 0
-        for entry in entries:
-            if entry.get("sp_hash"):
-                continue
-            rp_hash = entry.get("rendered_prompt_hash", "")
-            if not rp_hash:
-                continue
-            entry["sp_hash"] = sp_identity_hash(
-                rp_hash,
-                entry.get("pipeline_params"),
-            )
-            updated += 1
-
-        if updated:
-            index_path = self._index_path(backend_id)
-            write_json(index_path, index)
-            logger.info("Backfilled sp_hash for %d/%d index entries", updated, len(entries))
-
     def find_cached_queries(
         self,
         backend_id: str,
-        sp_hash: str,
+        rendered_prompt_hash: str,
+        pipeline_params: dict | None,
+        strict_params: dict[str, set[str]] | None = None,
     ) -> dict[str, dict]:
         """Find cached query results for a SearchPoint.
 
-        Returns ``{query_string: result_dict}`` from all prior runs whose
-        ``sp_hash`` matches.  Different sample sizes are bridged
-        automatically — any query evaluated under the same SearchPoint
-        is reusable.
+        Returns ``{query_string: result_dict}`` from all prior runs that
+        match on rendered prompt, step sequence, and param constraints.
+        Different sample sizes are bridged automatically.
+
+        Args:
+            rendered_prompt_hash: Hash of the rendered prompt string.
+            pipeline_params: Target pipeline_params to match against.
+            strict_params: Controls matching strictness:
+                ``None`` — exact: full ``pipeline_params`` dict equality.
+                ``{}`` — maximally loose: prompt + steps only.
+                ``{"node": {"param"}}`` — listed params must match,
+                others may differ.
 
         Later runs overwrite earlier (last-write-wins per query).
         """
-        # Backfill sp_hash for old entries on first access
-        index = self._load_index(backend_id)
-        if any(not e.get("sp_hash") for e in index.get("dataset_runs", [])):
-            self._ensure_sp_hashes(backend_id)
-
-        matching_entries = [
-            entry for entry in self._load_index(backend_id).get("dataset_runs", [])
-            if entry.get("sp_hash") == sp_hash
+        candidates = self._get_rp_index(backend_id).get(rendered_prompt_hash, [])
+        matching = [
+            e for e in candidates
+            if _entry_matches(e.get("pipeline_params"), pipeline_params, strict_params)
         ]
 
         results: dict[str, dict] = {}
-        for entry in matching_entries:
+        for entry in matching:
             detail = read_json_optional(
                 self._runs_dir(backend_id) / f"{entry['run_id']}.json",
             )

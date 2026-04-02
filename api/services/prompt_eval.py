@@ -701,6 +701,7 @@ async def eval_search_point(
     source = source or ctx.source
 
     rendered = search_point.render()
+    rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
     content_hash = search_point.content_hash(eval_data)
 
     # --- dedup lookup (content hash + alias group fallback) ---
@@ -709,7 +710,6 @@ async def eval_search_point(
         if _cached_run and _cached_run.get("partial"):
             _cached_run = None
         if not _cached_run:
-            rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
             _cached_run = store.dataset_runs.load_by_alias(
                 backend_id, rp_hash, search_point.pipeline_params, len(eval_data),
             )
@@ -743,16 +743,18 @@ async def eval_search_point(
 
     from api.services.campaign.escalation import EscalationError as _EscalationError
 
-    # SP-hash query cache: find individual query results from prior runs
-    # with the same SearchPoint (prompt + pipeline_params).
+    # Per-query cache: find individual query results from prior runs
+    # matching on rendered prompt + pipeline_params (strict or NN).
     # Bridges different sample sizes automatically.
     sp_cache: dict[str, dict] | None = None
     if store and backend_id:
-        sp_h = search_point.sp_hash(prompt_nodes)
-        sp_cache = store.dataset_runs.find_cached_queries(backend_id, sp_h)
+        sp_cache = store.dataset_runs.find_cached_queries(
+            backend_id, rp_hash, search_point.pipeline_params,
+            strict_params=ctx.strict_params,
+        )
         if sp_cache:
             logger.debug(
-                "SP cache: %d cached queries for %d eval queries",
+                "Per-query cache: %d cached queries for %d eval queries",
                 len(sp_cache),
                 len(eval_data),
             )

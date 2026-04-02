@@ -30,6 +30,8 @@ Two entry points (FastAPI API + Jupyter notebook), one service core in `api/serv
 
 **Pipeline composability:** `pipeline_params` (nested dicts keyed by node name) throughout PromptPotter. `node_config` only at the TermNorm wire boundary.
 
+**Per-query cache matching:** `find_cached_queries()` uses `_rp_index` (by `rendered_prompt_hash`) then `_entry_matches()` with configurable `strict_params`: `None` = exact dict equality (optimizer), `{}` = steps + prompt only (scan default). Sensitivity scan auto-adds the perturbed axis to `strict_params`. Coverage diagnostics use the same `_entry_matches()` logic so pre-run ✓ ticks predict actual cache hits. See [`docs/architecture.md` § Evaluation Flow](docs/architecture.md#evaluation-flow).
+
 **Two parameter namespaces:** Prompt scheme fields (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format` — rendered into a prompt string by `render()`) vs pipeline node params (nested dicts like `{"token_matching": {"thinking_style": "..."}}` — sent to backend nodes). These are orthogonal and may share names. L1 candidates use `pipeline_params_override` for both: keys matching `PROMPT_STRING_FIELDS` auto-route to `derive_candidate()` (updating prompt scheme fields); all other keys are nested under their node name (`{"web_search": {"max_sites": 5}}`). **No flat param format** — all pipeline params use nested format from LLM output through to backend. See [`docs/prompt-scheme.md`](docs/prompt-scheme.md).
 
 See [`docs/architecture.md`](docs/architecture.md) for diagrams, caching, pipeline discovery, and disk layout.
