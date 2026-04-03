@@ -14,4 +14,16 @@ class ErrorCategory(enum.StrEnum):
     CLIENT = "CLIENT"
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
+    PIPELINE = "PIPELINE"
     UNKNOWN = "UNKNOWN"
+
+
+def is_error_result(result: dict) -> bool:
+    """Return True if *result* represents a failed evaluation.
+
+    Catches all error forms:
+    - Truthy ``error`` field (tagged error message from exception handling)
+    - ``predicted == "ERROR"`` (backend returned ERROR as candidate name,
+      or legacy cached data with ``error=""`` / ``error=None``)
+    """
+    return bool(result.get("error")) or result.get("predicted") == "ERROR"

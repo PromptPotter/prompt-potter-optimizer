@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from api.config.optimizer_pipeline import llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.config.settings import load_variant_library
+from api.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -109,7 +110,7 @@ def extract_warning_types(result: dict) -> list[str]:
         elif isinstance(w, str):
             types.append(w)
     # Fallback: synthesize warning from error field when diagnostics empty
-    if not types and result.get("error"):
+    if not types and is_error_result(result):
         terminated = pd.get("terminated_at", "unknown")
         types.append(f"{terminated}:error")
     return types
@@ -244,7 +245,7 @@ def _pipeline_health_section(
         if diag.get("warnings"):
             web_warning_count += 1
         termination[pd.get("terminated_at", "unknown")] += 1
-        if r.get("error"):
+        if is_error_result(r):
             error_count += 1
 
     deg_rate = web_warning_count / total
@@ -278,13 +279,13 @@ def _rank_analysis_section(
     """
     rank_map: dict[int, int | None] = {}
     for i, r in enumerate(results):
-        if not r.get("error"):
+        if not is_error_result(r):
             rank_map[i] = find_rank(get_candidates(r, candidate_keys), r.get("ground_truth", ""))
 
     rank_buckets = {"1": 0, "2-5": 0, "6-10": 0, "11-20": 0, "not_found": 0}
     near_misses: list[dict] = []
     for i, r in enumerate(results):
-        if r.get("error"):
+        if is_error_result(r):
             continue
         rank = rank_map.get(i)
         if rank == 1:
@@ -316,7 +317,7 @@ def _rank_analysis_section(
 
     nm_queries = {nm["query"] for nm in near_misses}
 
-    n_valid = sum(1 for r in results if not r.get("error"))
+    n_valid = sum(1 for r in results if not is_error_result(r))
     if n_valid == 0:
         return "", nm_queries
 
@@ -338,7 +339,7 @@ def _rank_analysis_section(
             )
 
     # >30% of misses are near-misses → ranking problem, not retrieval
-    misses = [r for r in results if not r.get("hit") and not r.get("error")]
+    misses = [r for r in results if not r.get("hit") and not is_error_result(r)]
     if misses and len(near_misses) / max(len(misses), 1) > near_miss_ratio:
         anomalies.append(
             f"[MEDIUM] near_miss_pattern: GT in candidates for "
@@ -397,7 +398,7 @@ def _query_category_section(results: list[dict]) -> str:
     """Failures grouped by termination step (counts only)."""
     step_counts: Counter[str] = Counter()
     for r in results:
-        if r.get("hit") or r.get("error"):
+        if r.get("hit") or is_error_result(r):
             continue
         pd = r.get("pipeline_data") or {}
         step_counts[pd.get("terminated_at", "unknown")] += 1
@@ -427,7 +428,7 @@ def _failure_details_section(
     Skips queries already shown in rank_analysis near-miss section to
     avoid duplication.
     """
-    failures = [r for r in results if not r.get("hit") and not r.get("error")]
+    failures = [r for r in results if not r.get("hit") and not is_error_result(r)]
     if near_miss_queries:
         failures = [r for r in failures if r.get("query", "") not in near_miss_queries]
     if not failures:

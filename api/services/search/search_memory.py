@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from api.shared.errors import is_error_result
+
 if TYPE_CHECKING:
     from api.services.project_store import ProjectStore
 
@@ -356,7 +358,7 @@ class SearchMemory:
             if (pd.get("diagnostics") or {}).get("warnings"):
                 self._query_degradation_counts[query] += 1
 
-            if not hit and not item.get("error"):
+            if not hit and not is_error_result(item):
                 terminated = pd.get("terminated_at", "unknown")
                 self._query_failure_modes[query].append(terminated)
                 self._bottleneck_counts[terminated] += 1

@@ -21,7 +21,7 @@ import httpx
 from api.models.evaluator import EvalResult, ExactMatchEvaluator
 from api.services.metrics import compute_composite_score, count_degraded_queries
 from api.shared.constants import NO_RESULT
-from api.shared.errors import ErrorCategory
+from api.shared.errors import ErrorCategory, is_error_result
 from api.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
@@ -73,7 +73,7 @@ def _most_common_error_category(results: list) -> ErrorCategory | None:
     """Return the most common error category across errored results."""
     from collections import Counter
 
-    cats = [_error_category(r.get("error")) for r in results if r.get("error")]
+    cats = [_error_category(r.get("error")) for r in results if is_error_result(r)]
     cats = [c for c in cats if c]
     if not cats:
         return None
@@ -218,7 +218,7 @@ def _error_result(query: str, ground_truth: str, error_msg: str) -> dict:
         "ground_truth": ground_truth,
         "hit": False,
         "score": 0.0,
-        "error": error_msg,
+        "error": error_msg or "unknown error",
         "pipeline_data": None,
     }
 
@@ -295,6 +295,12 @@ async def eval_query_via_backend(
 
         ranked = data.get("ranked_candidates", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
+        if predicted == "ERROR":
+            return _error_result(
+                query, ground_truth,
+                f"[{ErrorCategory.PIPELINE}] Backend returned ERROR as candidate"
+                " — pipeline internal failure for this query.",
+            )
         eval_output = _evaluator.evaluate(ground_truth, predicted)
         result = {
             "query": query,
@@ -552,7 +558,7 @@ async def _run_eval_batch(
 
             # Per-query cache check (inlined from former _evaluate_single_query)
             cached = cached_queries.get(qd["query"]) if cached_queries else None
-            if cached is not None and not cached.get("error"):
+            if cached is not None and not is_error_result(cached):
                 if _is_degraded(cached) and _stale_protocol:
                     result, step_taken = await _execute_stale_data_protocol(
                         _stale_protocol,
@@ -618,18 +624,16 @@ async def _run_eval_batch(
             results.append(result)
 
             # Cached results don't count toward consecutive error tracking
-            if not was_cached and result.get("error"):
-                cat = _error_category(result["error"])
-                if cat is ErrorCategory.CLIENT:
-                    # Client errors are deterministic — same config will
-                    # fail for every query.  Abort immediately.
+            if not was_cached and is_error_result(result):
+                cat = _error_category(result.get("error"))
+                if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
+                    # Deterministic failures — abort immediately.
                     logger.warning(
-                        "Aborting eval: client error (4xx) on query %d. "
+                        "Aborting eval: deterministic error (%s) on query %d. "
                         "Marking remaining %d queries as errors.",
-                        i + 1,
-                        len(eval_data) - i - 1,
+                        cat or "PIPELINE", i + 1, len(eval_data) - i - 1,
                     )
-                    _fill_remaining_errors(results, eval_data, i + 1, "skipped_after_client_error")
+                    _fill_remaining_errors(results, eval_data, i + 1, f"skipped_after_{cat or 'pipeline'}_error")
                     break
                 consecutive_errors += 1
                 if consecutive_errors >= max_consecutive_errors:
@@ -771,9 +775,16 @@ async def eval_search_point(
             )
         if _cached_run:
             results = _cached_run["dataset_run_items"]
-            if not (results and all(r.get("error") for r in results)):
+            if not (results and all(is_error_result(r) for r in results)):
+                error_count = sum(1 for r in results if is_error_result(r))
                 degraded_count = count_degraded_queries(results)
-                if degraded_count > 0:
+                if error_count > 0:
+                    logger.info(
+                        "Full-run cache has %d/%d error queries — falling through to per-query eval",
+                        error_count, len(results),
+                    )
+                    _cached_run = None
+                elif degraded_count > 0:
                     logger.info(
                         "Full-run cache has %d/%d degraded queries — falling through to per-query eval",
                         degraded_count, len(results),

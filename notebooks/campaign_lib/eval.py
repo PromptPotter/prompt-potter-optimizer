@@ -13,6 +13,7 @@ from api.services.campaign.campaign_init import (
 from api.services.campaign.campaign_init import (
     run_baseline_eval as _run_baseline_eval,
 )
+from api.shared.errors import is_error_result
 
 from .display import _fmt_query_result, _print_interrupt_banner, show_progress
 
@@ -71,7 +72,7 @@ async def run_baseline_eval(
 
     show_progress(campaign_rounds)
 
-    failures = [r for r in baseline_results if not r["hit"] and not r.get("error")]
+    failures = [r for r in baseline_results if not r["hit"] and not is_error_result(r)]
     for r in failures[:5]:
         print(
             f"  MISS: {r['query'][:55]}  |  "

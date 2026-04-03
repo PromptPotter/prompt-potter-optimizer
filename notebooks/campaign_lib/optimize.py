@@ -12,6 +12,7 @@ from api.services.campaign.campaign_init import (
 from api.services.campaign.campaign_persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
+from api.shared.errors import is_error_result
 
 from .display import (
     BOLD,
@@ -582,7 +583,7 @@ async def run_optimization_notebook(
                     print(_node_line(f"Degradation: {_deg / _total:.0%}"))
 
                 _valid = [
-                    _r for _r in _results if not _r.get("error")
+                    _r for _r in _results if not is_error_result(_r)
                 ]
                 if _valid:
                     def _recall_at_k(k):

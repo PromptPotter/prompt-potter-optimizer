@@ -20,6 +20,7 @@ from api.shared.constants import (
     MIN_DIAGNOSTIC_QUERIES,
     SCAN_TARGET_MDE,
 )
+from api.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -307,7 +308,7 @@ def _stratify_misses(
     # Map miss queries to their baseline results for diagnostic extraction
     result_by_query: dict[str, dict] = {}
     for r in baseline_results:
-        if not r.get("hit") and not r.get("error"):
+        if not r.get("hit") and not is_error_result(r):
             result_by_query[r.get("query", "")] = r
 
     # Group miss pool items by failure pattern key

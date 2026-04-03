@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from api.shared.errors import is_error_result
+
 from .stats import fmt_ci, wilson_ci
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
@@ -271,7 +273,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     """
     q = (r.get("query") or "")[:45]
     pred = (r.get("predicted") or "")[:35]
-    err = r.get("error")
+    err = r.get("error") or ("pipeline error" if is_error_result(r) else None)
     pd = r.get("pipeline_data") or {}
     step_name = pd.get("terminated_at")
     if step_name is None:
@@ -537,7 +539,7 @@ def show_scan_query_difficulty(
             qs["n_evals"] += 1
             if item.get("hit"):
                 qs["n_hits"] += 1
-            if item.get("error"):
+            if is_error_result(item):
                 qs["n_errors"] += 1
 
     if not query_stats:

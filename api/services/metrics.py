@@ -8,6 +8,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+from api.shared.errors import is_error_result
+
 if TYPE_CHECKING:
     from api.models.analysis import (
         DifficultyClass,
@@ -34,7 +36,7 @@ def compute_accuracy(results: list) -> dict:
     """
     total = len(results)
     hits = sum(1 for r in results if r.get("hit"))
-    errors = sum(1 for r in results if r.get("error"))
+    errors = sum(1 for r in results if is_error_result(r))
     accuracy = hits / total if total else 0.0
     return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
 
@@ -68,7 +70,7 @@ def _compute_recall(
     candidate_key: str = "token_matched_candidates",
 ) -> float:
     """Fraction of queries where GT appears in the candidate list for *step*."""
-    scoped = [r for r in results if _step_executed(step.name, r) and not r.get("error")]
+    scoped = [r for r in results if _step_executed(step.name, r) and not is_error_result(r)]
     if not scoped:
         return 0.0
     found = 0
@@ -87,13 +89,13 @@ def _compute_cache_hit_rate(step: PipelineNode, results: list[dict]) -> float:
         return 0.0
     cache_hits = 0
     for r in results:
-        if r.get("error"):
+        if is_error_result(r):
             continue
         pd = r.get("pipeline_data") or {}
         timings = pd.get("step_timings") or {}
         if timings.get(step.name) is not None:
             cache_hits += 1
-    non_error = sum(1 for r in results if not r.get("error"))
+    non_error = sum(1 for r in results if not is_error_result(r))
     return cache_hits / non_error if non_error else 0.0
 
 
@@ -134,7 +136,7 @@ def extract_sample_diagnostics(
     diag["terminated_at"] = pd.get("terminated_at")
     diag["total_time_ms"] = pd.get("total_time")
     diag["degraded"] = bool((pd.get("diagnostics") or {}).get("warnings"))
-    diag["error"] = bool(result.get("error"))
+    diag["error"] = is_error_result(result)
 
     if not pd:
         return diag
@@ -381,7 +383,7 @@ def compile_failure_analysis(
     """
     from api.models.analysis import FailureAnalysis, FailurePattern
 
-    failures = [r for r in results if not r.get("hit") and not r.get("error")]
+    failures = [r for r in results if not r.get("hit") and not is_error_result(r)]
     if not failures:
         return FailureAnalysis(total_failures=0, total_results=len(results))
 
@@ -508,7 +510,7 @@ def attribute_bottleneck(
     # Count terminated_at values from failures
     termination_counts: Counter[str] = Counter()
     for r in results:
-        if not r.get("hit") and not r.get("error"):
+        if not r.get("hit") and not is_error_result(r):
             pd = r.get("pipeline_data") or {}
             terminated = pd.get("terminated_at", "")
             if terminated:
