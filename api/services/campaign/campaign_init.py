@@ -454,8 +454,10 @@ async def run_baseline_eval(
         with graceful("Dataset registration in run_baseline_eval failed"):
             obs.register_dataset(DATASET_NAME, eval_data)
 
+    _steps = (pipeline_params or {}).get("steps", [])
     sp = baseline.to_job_search_point(
         base_pipeline_params=pipeline_params,
+        active_steps=_steps or None,
         prompt_node=prompt_node,
     )
     ctx = EvalContext(

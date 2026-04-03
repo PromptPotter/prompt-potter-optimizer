@@ -243,6 +243,7 @@ def _build_baseline_state(
     )
     baseline_sp = opt_sp.to_job_search_point(
         base_pipeline_params=config.pipeline_params,
+        active_steps=config.active_steps,
         prompt_node=config.prompt_node,
     )
     state = LoopState(
@@ -671,7 +672,7 @@ async def run_optimization(
                 escalation_checks=_round_checks,
                 search_memory=search_memory,
             )
-            update_round_state(state, round_result, round_num, prompt_node=config.prompt_node)
+            update_round_state(state, round_result, round_num, active_steps=config.active_steps, prompt_node=config.prompt_node)
 
             # --- After probe round: reset flag + force L2 ---
             if is_probe:

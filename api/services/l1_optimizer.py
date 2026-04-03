@@ -152,6 +152,7 @@ async def l1_generate(
         # derive_candidate (rendered into the prompt string), the rest
         # stays as node-level pipeline overrides (already nested).
         pp_override = v.get("pipeline_params_override") or {}
+        pp_override.pop("steps", None)  # LLM must not override pipeline composition
         prompt_changes = {k: pp_override[k] for k in pp_override if k in PROMPT_STRING_FIELDS}
         node_overrides = {k: pv for k, pv in pp_override.items() if k not in PROMPT_STRING_FIELDS}
 
@@ -247,6 +248,7 @@ async def l1_evaluate(
     ctx: EvalContext,
     *,
     pipeline_params: dict | None = None,
+    active_steps: tuple[str, ...] = (),
     improvement_threshold: float = 0.01,
     callbacks: CycleCallbacks | None = None,
     escalation_checks: list | None = None,
@@ -294,11 +296,19 @@ async def l1_evaluate(
                     pp[k] = {**pp[k], **v}
                 else:
                     pp[k] = v
+            # Safety net: drop overrides for nodes not in active steps
+            if active_steps:
+                _active = set(active_steps)
+                for k in list(pp):
+                    if k != "steps" and isinstance(pp[k], dict) and k not in _active:
+                        logger.warning("Dropping LLM override for excluded node %r", k)
+                        del pp[k]
         else:
             pp = _sp_pipeline_params
         _pn = ctx.pipeline_schema.prompt_node_names()[0] if ctx.pipeline_schema and ctx.pipeline_schema.prompt_node_names() else ""
         sp = osp_c.to_job_search_point(
             base_pipeline_params=pp,
+            active_steps=active_steps,
             prompt_node=_pn,
         )
         ctx.candidate_idx = idx

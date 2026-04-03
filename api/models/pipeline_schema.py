@@ -202,6 +202,14 @@ class PipelineSchema(BaseModel):
                 return step
         return None
 
+    def filter_to_steps(self, steps: list[str]) -> "PipelineSchema":
+        """Return a copy with only nodes present in *steps*."""
+        active = set(steps)
+        return PipelineSchema(
+            name=self.name, version=self.version, description=self.description,
+            nodes=[n for n in self.nodes if n.name in active],
+        )
+
     def node_for_param(self, param_name: str) -> str | None:
         """Return the node name that owns *param_name*, or None."""
         for step in self.nodes:

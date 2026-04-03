@@ -94,8 +94,10 @@ async def prepare_scan_baseline(
         restructured_fields[f] = getattr(search_baseline, f, "") or ""
 
     # Build JobSearchPoint for evaluation
+    _steps = (pipeline_params or {}).get("steps", [])
     baseline_jsp = search_baseline.to_job_search_point(
         base_pipeline_params=pipeline_params,
+        active_steps=_steps or None,
         prompt_node=prompt_node,
     )
 

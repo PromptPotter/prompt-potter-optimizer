@@ -296,8 +296,10 @@ def select_scan_winner(
             **prompt_changes,
             changes_description="scan_winner",
         )
+        _steps = (baseline.pipeline_params or {}).get("steps", [])
         best = best_opt.to_job_search_point(
             base_pipeline_params=baseline.pipeline_params,
+            active_steps=_steps or None,
             prompt_node=prompt_node,
         )
     if param_changes:

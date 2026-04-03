@@ -25,6 +25,10 @@ class CycleConfig(BaseModel):
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
     pipeline_params: dict | None = Field(None, description="Pipeline parameter overrides")
+    active_steps: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Immutable active node sequence — authoritative source of pipeline composition",
+    )
     session_terms: list[str] | None = Field(None, description="Backend session terms")
     sample_size: int = Field(0, description="Subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
@@ -94,6 +98,11 @@ class CycleConfig(BaseModel):
         description="Near-miss/miss ratio above which critique flags ranking issues",
     )
 
+    def node_config(self) -> dict:
+        """Node-level configs only (no steps). Safe for user modification."""
+        pp = self.pipeline_params or {}
+        return {k: v for k, v in pp.items() if k != "steps" and isinstance(v, dict)}
+
     @classmethod
     def from_campaign_config(
         cls,
@@ -127,6 +136,7 @@ class CycleConfig(BaseModel):
             backend_id=backend_id,
             project_root=project_root,
             pipeline_params=pipeline_params,
+            active_steps=tuple(pipeline_params.get("steps", [])) if pipeline_params else (),
             session_terms=session_terms,
             sample_size=campaign_config["sample_size"],
             seed=opt["seed"],

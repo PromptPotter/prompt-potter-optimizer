@@ -243,6 +243,7 @@ class OptSearchPoint(PromptTemplate):
         self,
         base_pipeline_params: dict | None = None,
         *,
+        active_steps: tuple[str, ...] | list[str] | None = None,
         prompt_node: str = "",
     ) -> JobSearchPoint:
         """Project into a JobSearchPoint for target-layer evaluation.
@@ -250,10 +251,16 @@ class OptSearchPoint(PromptTemplate):
         Renders prompt fields → injects into pipeline_params → creates
         a frozen JobSearchPoint with ``prompt_fields`` populated for
         variant derivation.
+
+        When *active_steps* is provided, unconditionally sets
+        ``pp["steps"]`` — pipeline composition is immutable per campaign
+        and must not depend on what ``base_pipeline_params`` carries.
         """
         from api.models.search_point import JobSearchPoint
 
         pp = copy.deepcopy(base_pipeline_params or {})
+        if active_steps is not None:
+            pp["steps"] = list(active_steps)
         rendered = self.render()
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered

@@ -161,8 +161,11 @@ def _make_eval_fn(
                 break
 
     async def _eval_opt(opt: OptSearchPoint, pp: dict | None = None) -> dict:
+        _base_pp = pp or get_params()
+        _steps = (_base_pp or {}).get("steps", [])
         sp = opt.to_job_search_point(
-            base_pipeline_params=pp or get_params(),
+            base_pipeline_params=_base_pp,
+            active_steps=_steps or None,
             prompt_node=_pn,
         )
         results, scores, cached = await eval_search_point(

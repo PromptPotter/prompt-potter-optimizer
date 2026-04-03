@@ -224,6 +224,7 @@ def _rebuild_current_sp(
     state: LoopState,
     tr: Any,
     *,
+    active_steps: tuple[str, ...] = (),
     prompt_node: str = "",
 ) -> None:
     """Update opt_sp from a transition result and rebuild current_sp."""
@@ -233,7 +234,9 @@ def _rebuild_current_sp(
     cur = state.current_sp
     assert cur is not None
     pp = getattr(tr, "pipeline_params", None) or cur.pipeline_params
-    state.current_sp = state.opt_sp.to_job_search_point(base_pipeline_params=pp, prompt_node=prompt_node)
+    state.current_sp = state.opt_sp.to_job_search_point(
+        base_pipeline_params=pp, active_steps=active_steps, prompt_node=prompt_node,
+    )
 
 
 def _degradation_reset(
@@ -298,7 +301,7 @@ async def _do_l2_transition(
         )
     # Rebuild first — inherit_memory preserves accumulated state,
     # then apply L2's new values to the rebuilt opt_sp.
-    _rebuild_current_sp(state, tr, prompt_node=config.prompt_node)
+    _rebuild_current_sp(state, tr, active_steps=config.active_steps, prompt_node=config.prompt_node)
     if tr.task_context:
         state.opt_sp.task_context = tr.task_context
     state.opt_sp.l2_directive = tr.l2_directive
@@ -386,7 +389,7 @@ async def _do_l3_transition(
             pipeline_params=current_pp,
             pipeline_schema=config.pipeline_schema,
         )
-    _rebuild_current_sp(state, tr, prompt_node=config.prompt_node)
+    _rebuild_current_sp(state, tr, active_steps=config.active_steps, prompt_node=config.prompt_node)
     state.escalation.l3_round += 1
     state.escalation.best_accuracy_at_l3_entry = state.best_accuracy
     state.escalation.best_composite_at_l3_entry = state.best_composite
