@@ -62,6 +62,22 @@
         "context_sources": ["critique", "task_context", "plan", "escalation_journal"],
         "response_parser": "transition_result"
       }
+    },
+    "scan_advisor": {
+      "type": "llm/meta",
+      "config": {
+        "temperature": 0.3,
+        "max_tokens": 2000,
+        "output_format": "json"
+      }
+    },
+    "restructure": {
+      "type": "llm/meta",
+      "config": {
+        "temperature": 0.3,
+        "max_tokens": 2000,
+        "output_format": "json"
+      }
     }
   },
   "pipelines": {

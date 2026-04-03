@@ -53,7 +53,7 @@ async def resume_or_build_diagnostic(
     """
     # Prepare variant library: base + scan_variants merge
     pipeline_params = campaign_config.get("pipeline_params")
-    variant_library = _load_filtered_variants(pipeline_params, svc.get("pipeline_schema"))
+    variant_library = _load_filtered_variants(pipeline_params, svc.pipeline_schema)
     if scan_variants:
         variant_library["pipeline_params"] = scan_variants
 
@@ -66,8 +66,8 @@ async def resume_or_build_diagnostic(
         baseline_results,
         llm_client,
         llm_model,
-        svc["store"],
-        svc["backend_id"],
+        svc.store,
+        svc.backend_id,
         eval_data,
         variant_library=variant_library,
     )
@@ -199,4 +199,4 @@ def show_scan_analytics(scan_df, axis_profiles, svc: dict):
     if scan_df is None or scan_df.empty:
         return None
     show_scan_leaderboard(scan_df, axis_profiles)
-    return show_scan_query_difficulty(svc["store"], svc["backend_id"])
+    return show_scan_query_difficulty(svc.store, svc.backend_id)

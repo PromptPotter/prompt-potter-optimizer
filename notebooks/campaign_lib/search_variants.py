@@ -115,14 +115,14 @@ def resolve_scan_variants(
     Accepts nested format: ``{"thinking_style": [...], "web_search": {"max_sites": [...]}}``
 
     If *pipeline_schema* is ``None`` and *svc* is provided, falls back to
-    ``svc["pipeline_schema"]``.
+    ``svc.pipeline_schema``.
 
     Returns ``(resolved_variants, schema_labels)``.
     """
     from api.shared.constants import PROMPT_STRING_FIELDS
 
     if pipeline_schema is None and svc is not None:
-        pipeline_schema = svc.get("pipeline_schema")
+        pipeline_schema = svc.pipeline_schema
 
     # Flatten nested node groups for schema resolution (only applies to _schema axes)
     flat_for_resolve: dict[str, list] = {}

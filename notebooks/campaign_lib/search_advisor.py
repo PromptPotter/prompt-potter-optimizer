@@ -47,7 +47,7 @@ def preview_advisor_prompt(
     from IPython.display import display as ipy_display
 
     if svc is not None:
-        pipeline_schema = svc.get("pipeline_schema")
+        pipeline_schema = svc.pipeline_schema
         pipeline_params = campaign_config.get("pipeline_params") if campaign_config else None
         exclude_nodes = campaign_config.get("exclude_nodes") if campaign_config else None
 
@@ -150,7 +150,7 @@ async def scan_advisor(
         axes_to_skip, budget_breakdown, and reasoning.
     """
     # --- Internalized prep (matches resume_or_build_diagnostic pattern) ---
-    pipeline_schema = svc.get("pipeline_schema")
+    pipeline_schema = svc.pipeline_schema
     pipeline_params = campaign_config.get("pipeline_params")
     user_excluded = campaign_config.get("exclude_nodes", [])
 
@@ -189,7 +189,7 @@ async def scan_advisor(
         pipeline_params=pipeline_params,
         task_description=task_description,
         exclude_nodes=user_excluded or None,
-        search_memory=svc.get("search_memory"),
+        search_memory=None,
     )
 
     _display_scan_advisory(advisory)
@@ -218,7 +218,7 @@ async def run_scan_advisor(
         return {}, {}, {}
 
     proposed, schema_labels = advisory_to_scan_variants(
-        advisory, pipeline_schema=svc.get("pipeline_schema"),
+        advisory, pipeline_schema=svc.pipeline_schema,
     )
 
     # Print copy-pasteable Python dict (nested format)

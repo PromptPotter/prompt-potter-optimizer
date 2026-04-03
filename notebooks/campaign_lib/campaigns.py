@@ -175,7 +175,7 @@ def load_and_apply_experiment(
     Returns updated *pipeline_params* (or the original if nothing changed).
     """
     stored_cfg = load_experiment_config(
-        svc["store"], svc["backend_id"], experiment_id,
+        svc.store, svc.backend_id, experiment_id,
     )
     if stored_cfg:
         pp_override = apply_experiment_overrides(campaign_config, stored_cfg)
@@ -203,8 +203,8 @@ def show_experiment_dashboard(
     """
     # svc shorthand
     if svc is not None:
-        store = store or svc.get("store")
-        backend_id = backend_id or svc.get("backend_id", "")
+        store = store or svc.store
+        backend_id = backend_id or svc.backend_id
 
     # Apply experiment overrides when resuming
     if experiment_id and svc is not None:

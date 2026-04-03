@@ -52,11 +52,11 @@ async def sensitivity_scan(
     """
     # svc shorthand: extract infrastructure params if provided
     if svc is not None:
-        backend_client = backend_client or svc.get("backend_client")
-        store = store or svc.get("store")
-        backend_id = backend_id or svc.get("backend_id", "")
-        pipeline_schema = pipeline_schema or svc.get("pipeline_schema")
-        session_terms = svc.get("session_terms")
+        backend_client = backend_client or svc.backend_client
+        store = store or svc.store
+        backend_id = backend_id or svc.backend_id
+        pipeline_schema = pipeline_schema or svc.pipeline_schema
+        session_terms = svc.session_terms
         if session_terms and backend_client:
             await backend_client.init_session(session_terms)
 
@@ -234,10 +234,10 @@ async def adaptive_search(
     """
     # svc shorthand
     if svc is not None:
-        backend_client = backend_client or svc.get("backend_client")
-        store = store or svc.get("store")
-        backend_id = backend_id or svc.get("backend_id", "")
-        session_terms = session_terms or svc.get("session_terms")
+        backend_client = backend_client or svc.backend_client
+        store = store or svc.store
+        backend_id = backend_id or svc.backend_id
+        session_terms = session_terms or svc.session_terms
 
     active = [p for p in (axis_profiles or []) if p["exploration_budget"] != "skip"]
     print(f"Adaptive search: {len(active)} active axes, max {max_rounds} rounds")

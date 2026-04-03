@@ -46,16 +46,16 @@ async def run_baseline_eval(
         pbar.update(1)
 
     from api.services.obs.observability_logger import ObsLogger
-    _obs = ObsLogger(svc["store"].base_dir, svc.get("backend_id", ""), langfuse=None)
+    _obs = ObsLogger(svc.store.base_dir, svc.backend_id, langfuse=None)
 
     try:
         campaign_rounds, baseline_results = await _run_baseline_eval(
-            baseline, eval_data, svc.get("backend_client"),
+            baseline, eval_data, svc.backend_client,
             pipeline_params=campaign_config.get("pipeline_params"),
-            store=svc.get("store"), backend_id=svc.get("backend_id", ""),
-            experiment_id=svc.get("experiment_id", ""),
+            store=svc.store, backend_id=svc.backend_id,
+            experiment_id=svc.experiment_id,
             on_result=_on_result,
-            session_terms=svc.get("session_terms"),
+            session_terms=svc.session_terms,
             obs=_obs,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):

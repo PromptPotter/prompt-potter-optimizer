@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.services.project_store import ProjectStore
 from api.services.stores.base import read_json_optional, write_json
-from api.shared.constants import DATASET_NAME
+from api.shared.constants import DATASET_NAME as _DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -176,6 +176,7 @@ def _register_dataset_items(
     gt_map: dict[str, str],
     state: dict[str, Any],
     on_progress: Callable[[str], None] | None = None,
+    dataset_name: str = _DEFAULT_DATASET_NAME,
 ) -> dict[str, str]:
     """Register/update dataset items in Langfuse. Returns {query: item_id}.
 
@@ -186,19 +187,19 @@ def _register_dataset_items(
 
     # Create dataset (idempotent) — fail fast on auth errors
     ok = lf.create_dataset(
-        name=DATASET_NAME,
+        name=dataset_name,
         description="TermNorm production ground truth queries for prompt evaluation",
         metadata={"n_queries": len(gt_map)},
     )
     if not ok:
         raise RuntimeError(
-            f"Langfuse: failed to create/access dataset '{DATASET_NAME}'. "
+            f"Langfuse: failed to create/access dataset '{dataset_name}'. "
             "Check LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY in .env."
         )
 
     # Fetch existing items to find those needing updates
     existing_items: dict[str, Any] = {}  # query_str -> SDK item
-    ds = lf.get_dataset(DATASET_NAME)
+    ds = lf.get_dataset(dataset_name)
     if ds and hasattr(ds, "items"):
         for it in ds.items:
             input_data = getattr(it, "input", None) or {}
@@ -232,7 +233,7 @@ def _register_dataset_items(
                 updated += 1
         else:
             item_id = lf.create_dataset_item(
-                dataset_name=DATASET_NAME,
+                dataset_name=dataset_name,
                 input={"query": query},
                 expected_output=ground_truth,
                 metadata={"source": "eval_data"},
@@ -244,7 +245,7 @@ def _register_dataset_items(
 
     if on_progress:
         on_progress(
-            f"  Dataset '{DATASET_NAME}': {len(query_to_item_id)} items "
+            f"  Dataset '{dataset_name}': {len(query_to_item_id)} items "
             f"({created} created, {updated} updated)",
         )
 
@@ -404,9 +405,6 @@ def sync_langfuse_runs(
     Returns:
         Push stats dict, or None if backfill was skipped.
     """
-    global DATASET_NAME
-    DATASET_NAME = dataset_name
-
     if not backfill:
         logger.info("Langfuse dataset: %s (backfill disabled)", dataset_name)
         return None
@@ -420,13 +418,14 @@ def sync_langfuse_runs(
         logger.info("No completed dataset runs — skipping Langfuse backfill.")
         return None
 
-    return push_all_runs(store, backend_id)
+    return push_all_runs(store, backend_id, dataset_name=dataset_name)
 
 
 def push_all_runs(
     store: ProjectStore,
     backend_id: str,
     *,
+    dataset_name: str = _DEFAULT_DATASET_NAME,
     flush_every: int = 20,
     on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
@@ -473,7 +472,7 @@ def push_all_runs(
     _emit("Collecting ground truth from dataset runs...")
     gt_map = _collect_ground_truth(store, backend_id, summaries)
     try:
-        query_to_item_id = _register_dataset_items(lf, gt_map, state, on_progress)
+        query_to_item_id = _register_dataset_items(lf, gt_map, state, on_progress, dataset_name=dataset_name)
     except RuntimeError as exc:
         _emit(f"  SKIP: {exc}")
         return {"skipped": True, "reason": str(exc)}
@@ -567,7 +566,7 @@ def push_all_runs(
         "already_done": total_on_disk - new_runs,
         "origins": origin_stats,
         "session_id": session_id,
-        "dataset_name": DATASET_NAME,
+        "dataset_name": dataset_name,
         "dataset_items": len(query_to_item_id),
         "rate_limit_hit": rate_limit_warned,
     }

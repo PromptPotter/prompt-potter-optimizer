@@ -251,7 +251,7 @@ class BackendClient:
 
         experiments = data.get("experiments", [])
         for exp in experiments:
-            exp_id = exp.get("experiment_id", exp.get("id", ""))
+            exp_id = exp["experiment_id"]
             if exp_id:
                 detail = await self.fetch_experiment(
                     exp_id, include_traces=include_traces,

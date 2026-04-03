@@ -15,6 +15,7 @@ import json
 import logging
 from typing import Any
 
+from api.config.optimizer_pipeline import llm_call
 from api.models.pipeline_schema import NodeOutputSchema, PipelineNode, PipelineSchema
 
 logger = logging.getLogger(__name__)
@@ -328,11 +329,11 @@ def preview_advisor_prompt(
 
     # Fallback: placeholder mode
     return _build_advisor_prompt(
-        pipeline_overview=[{"<build_pipeline_overview(schema=svc['pipeline_schema'])>": "..."}],
-        tunable_params=[{"<build_tunable_params(schema=svc['pipeline_schema'])>": "..."}],
-        llm_context=[{"<build_llm_context(schema=svc['pipeline_schema'])>": "..."}],
+        pipeline_overview=[{"<build_pipeline_overview(schema=svc.pipeline_schema)>": "..."}],
+        tunable_params=[{"<build_tunable_params(schema=svc.pipeline_schema)>": "..."}],
+        llm_context=[{"<build_llm_context(schema=svc.pipeline_schema)>": "..."}],
         prompt_field_axes=["<load_variant_library()['prompt_fields'].keys()>"],
-        pipeline_description="<svc['pipeline_schema'].description>",
+        pipeline_description="<svc.pipeline_schema.description>",
         task_description="<TASK_DESCRIPTION>",
     )
 
@@ -632,12 +633,12 @@ async def advise_scan_config(
         search_memory_section=sm_section,
     )
 
-    response = await llm_client.chat(
+    response = await llm_call(
+        llm_client,
         messages=[{"role": "user", "content": prompt}],
+        node="scan_advisor",
         model=model,
-        temperature=0.3,
         max_tokens=max_tokens,
-        output_format="json",
     )
 
     truncated = response.finish_reason in ("max_tokens", "length")

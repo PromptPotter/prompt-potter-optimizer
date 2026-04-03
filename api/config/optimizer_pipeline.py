@@ -9,10 +9,16 @@ that reads defaults from a node's config dict and allows runtime overrides.
 Every optimizer pipeline node uses this instead of calling ``chat()`` directly.
 """
 
+from __future__ import annotations
+
 import functools
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from api.models.pipeline_schema import PipelineSchema
 
 from api.services.llm_client import LLMClientBase, LLMResponse
 
@@ -22,7 +28,7 @@ _PIPELINE_PATH = Path(__file__).parent / "optimizer_pipeline.json"
 
 
 @functools.lru_cache(maxsize=1)
-def get_optimizer_schema():
+def get_optimizer_schema() -> PipelineSchema:
     """Load optimizer_pipeline.json as PipelineSchema (cached)."""
     from api.models.pipeline_schema import load_pipeline_from_dict
 

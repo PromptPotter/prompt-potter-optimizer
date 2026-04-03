@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from api.config.optimizer_pipeline import llm_call
 from api.config.optimizer_prompt_loader import load_optimizer_prompt
 from api.services.llm_client import LLMClientBase
 from api.services.stores.base import read_json_optional, validate_path_component, write_json
@@ -76,15 +77,14 @@ async def decompose_prompt_fields(
         consultation_instruction=consultation_instruction,
     )
 
-    response = await llm_client.chat(
+    response = await llm_call(
+        llm_client,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
+        node="restructure",
         model=model,
-        temperature=0.3,
-        max_tokens=2000,
-        output_format="json",
     )
     result = extract_parsed_json(response)
 

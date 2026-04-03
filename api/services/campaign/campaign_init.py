@@ -20,7 +20,6 @@ from api.models.opt_search_point import OptSearchPoint
 from api.services.backend_client import BackendClient
 from api.services.project_store import ProjectStore
 from api.shared.constants import DATASET_NAME
-from api.shared.dict_mixin import MutableDictAccessMixin
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
@@ -29,13 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class InitResult(MutableDictAccessMixin):
-    """Return value from ``init_services()``.
-
-    Supports dict-style access (``result["key"]``, ``result.get("key")``)
-    for backward compatibility with notebook code that treats the result
-    as a dict.  Prefer attribute access (``result.store``) in new code.
-    """
+class InitResult:
+    """Return value from ``init_services()``."""
 
     store: ProjectStore
     backend_id: str
@@ -83,18 +77,12 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
             break
 
     tip_ps = tip["prompt_fields"]
-    if isinstance(tip_ps, dict):
-        baseline_ps = tip_ps
-        instruction = tip_ps.get("instruction", "")
-    else:
-        baseline_ps = tip_ps.model_dump()
-        instruction = tip_ps.instruction or ""
 
     return CampaignBaseline(
-        baseline_ps=baseline_ps,
+        baseline_ps=tip_ps,
         baseline_acc=baseline_acc,
         baseline_results=baseline_results,
-        instruction=instruction,
+        instruction=tip_ps.instruction,
     )
 
 

@@ -364,11 +364,11 @@ async def run_optimization_notebook(
 
     # svc shorthand
     if svc is not None:
-        store = store or svc.get("store")
-        backend_id = backend_id or svc.get("backend_id", "")
-        backend_url = backend_url or svc["backend_client"].base_url
-        session_terms = session_terms or svc.get("session_terms")
-        pipeline_schema = pipeline_schema or svc.get("pipeline_schema")
+        store = store or svc.store
+        backend_id = backend_id or svc.backend_id
+        backend_url = backend_url or svc.backend_client.base_url
+        session_terms = session_terms or svc.session_terms
+        pipeline_schema = pipeline_schema or svc.pipeline_schema
 
     config = CycleConfig.from_campaign_config(
         campaign_config,
@@ -653,7 +653,7 @@ async def run_optimization_notebook(
         langfuse_session_id=langfuse_session_id,
         cycle_id=resolved_cycle_id,
         experiment_id=experiment_id or "",
-        backend_client=svc["backend_client"] if svc else None,
+        backend_client=svc.backend_client if svc else None,
     )
 
     # --- Final summary ---

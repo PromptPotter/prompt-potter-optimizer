@@ -42,8 +42,8 @@ async def prepare_scan_baseline(
 
     # svc shorthand: extract store/backend_id if provided
     if svc is not None:
-        store = store or svc.get("store")
-        backend_id = backend_id or svc.get("backend_id", "")
+        store = store or svc.store
+        backend_id = backend_id or svc.backend_id
 
     # Fresh pipeline defaults when not explicitly provided
     if pipeline_params is None and svc is not None:
@@ -54,7 +54,7 @@ async def prepare_scan_baseline(
     # Resolve prompt node from pipeline schema — only if the node is active
     prompt_node = ""
     if svc is not None:
-        ps = svc.get("pipeline_schema")
+        ps = svc.pipeline_schema
         active_steps = set((pipeline_params or {}).get("steps", []))
         if ps:
             for name in ps.prompt_node_names():
