@@ -38,7 +38,7 @@ init ──→ [task-context] ──→ [scan] ──→ [scan-results] ──�
 
 **Session directory** (`{backend_id}/sessions/{session_id}/`):
 - `session.json` — config, phase, pipeline_params, cycle_id, best_accuracy
-- `campaign_state.json` — **bidirectional dashboard**: live optimization state (monitoring) + `control` section (user commands: pause/resume/stop). Overwritten per update. See `api/cli/file_emitter.py` for full schema.
+- `campaign_state.json` — live optimization state (overwritten per update, carries counters across cycles via `resume_from`)
 - `campaign_output.log` — append-only eval log (ANSI-stripped)
 - `campaign_log.md` — structured campaign report
 
@@ -48,7 +48,12 @@ See [`docs/cli-workflow.md`](docs/cli-workflow.md) for the full subcommand refer
 
 ## Mental Model
 
-Three entry points (FastAPI API, Jupyter notebook, CLI runner), one service core in `api/services/`. The notebook is `notebooks/optimization_campaign.ipynb`; `campaign_lib` wraps services with display. The CLI (`api/cli/campaign_runner.py`) is a parallel orchestration layer with HITL support — generates candidates, pauses for human/AI review, then evaluates. Both notebook and CLI persist through `SessionStore` so artifacts (scan results, campaign log) are shared.
+Three entry points (Jupyter notebook, CLI runner, web app), one service core in `api/services/`. The notebook is `notebooks/optimization_campaign.ipynb`; `campaign_lib` wraps services with display. The CLI (`api/cli/campaign_runner.py`) is a parallel orchestration layer with HITL support — generates candidates, pauses for human/AI review, then evaluates. All entry points produce identical persistent artifacts via the three-layer architecture:
+
+**Three-layer I/O architecture (INVARIANT):**
+- **Persistence** (shared, mandatory) — `run_optimization()` auto-creates `CampaignPersistenceEmitter` (`api/services/campaign/persistence_emitter.py`). Entry points MUST NOT write campaign artifacts directly — all persistence flows through the emitter. New artifacts must be added to `CAMPAIGN_SESSION_ARTIFACTS` (`api/services/campaign/artifacts.py`); `tests/test_artifact_parity.py` enforces this.
+- **Display** (per-entry-point) — caller passes `display_callbacks: CycleCallbacks`. MUST NOT write to disk.
+- **Control** (per-entry-point, optional) — `FileControlSurface` (CLI/web) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
 **Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup. SearchMemory *(M8 — live)* aggregates all historical evaluation data into a materialized view (parameter impact, query patterns, failure modes) that feeds both loops.
 
@@ -149,7 +154,7 @@ global query counter across all candidates
 - **`api/shared/constants.py`**: Canonical source for `PROMPT_STRING_FIELDS`, `LAYER_FIELDS`, and `LAYER1_STRING_FIELDS`. All modules must import field lists from here — never define them locally.
 - **`api/config/optimizer_pipeline.py`**: Optimizer pipeline schema loader + `llm_call()` primitive. All optimizer nodes use this instead of calling `chat()` directly.
 - **HITL mode**: `CycleConfig.pause_before_eval` raises `PauseForReviewError` between L1 generate and L1 evaluate. Candidates are already persisted to `round_NNNN_candidates.json` before the pause. On resume (`run_optimization()` with same `cycle_id`), `load_round_candidates()` loads them and evaluation proceeds. Campaign finalized as `"paused"` with `StopReason.PAUSED_FOR_REVIEW`.
-- **SessionStore**: `store.sessions` manages cross-phase state (`session.json`, `scan_results.json`, `campaign_log.md`) under `{backend_id}/sessions/{session_id}/`. Both notebook (`campaign_lib`) and CLI use the same store — pass `session_id` to `sensitivity_scan()` / `run_optimization_notebook()` to activate persistence.
+- **SessionStore**: `store.sessions` manages cross-phase state (`session.json`, `scan_results.json`, `campaign_log.md`) under `{backend_id}/sessions/{session_id}/`. All entry points use the same store — pass `session_id` to `sensitivity_scan()` / `run_optimization_notebook()` to activate persistence.
 - **Nested-only pipeline params**: All pipeline params use nested format (`{"node_name": {"param": value}}`) from LLM output through to backend. No flat-to-nested resolution. LLM prompt instructs nested output; `PROMPT_STRING_FIELDS` split separates prompt fields (inherently flat) from node params. `l1_generate()` has a safety net that auto-nests any flat params the LLM still emits.
 
 ## Design Principles

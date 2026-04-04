@@ -1,26 +1,21 @@
-"""Campaign state emitter — bidirectional campaign_state.json + campaign_output.log.
+"""Campaign persistence emitter — writes campaign_state.json + campaign_output.log.
 
-Produces two files in the session directory during optimization:
+Auto-created by ``run_optimization()`` so every entry point (notebook, CLI,
+web app) produces identical persistent artifacts.  Display and control are
+separate layers — see CLAUDE.md § Three-layer I/O architecture.
+
+Produces two files in the session directory:
 
 1. ``campaign_state.json`` — single JSON, overwritten on every update.
    Contains execution state + accumulator arrays (queries within current
-   candidate, candidates within current round). Resets accumulators on
-   candidate/round transitions. Supports ``resume_from`` to carry over
+   candidate, candidates within current round).  Resets accumulators on
+   candidate/round transitions.  Supports ``resume_from`` to carry over
    historical counters across cycles.
 
-   **Bidirectional control:** The ``control`` section is read back from the
-   file at checkpoints. Users/webapp can edit it to pause, resume, or stop
-   the loop mid-run. The emitter preserves user-written control fields
-   across flushes (read-merge-write).
+   The ``control`` section is written with defaults.  A separate
+   ``FileControlSurface`` reads it back for bidirectional control.
 
-   ``control`` schema::
-
-       {
-           "requested_state": "running" | "pause" | "resume" | "stop",
-           "pause_before_l2_eval": false
-       }
-
-2. ``campaign_output.log`` — append-only plain-text log (ANSI-stripped stdout).
+2. ``campaign_output.log`` — append-only plain-text log.
 """
 
 from __future__ import annotations
@@ -35,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from api.models.phase_event import PhaseEvent
     from api.services.campaign.results import CycleRoundResult
+    from api.services.stores.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +41,20 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
-class CampaignFileEmitter:
+class CampaignPersistenceEmitter:
     """Writes campaign_state.json + campaign_output.log during optimization.
 
-    Also reads back the ``control`` section from campaign_state.json at
-    checkpoints, enabling bidirectional control (pause/resume/stop).
+    Instantiated by the optimization loop — entry points never create this
+    directly.  All persistent campaign artifacts flow through here.
     """
 
     def __init__(
         self,
         session_dir: Path,
         *,
+        session_store: SessionStore | None = None,
+        backend_id: str = "",
+        session_id: str = "",
         max_rounds: int = 10,
         active_nodes: list[str] | None = None,
         excluded_nodes: list[str] | None = None,
@@ -64,6 +63,11 @@ class CampaignFileEmitter:
     ) -> None:
         self.state_path = session_dir / "campaign_state.json"
         self.log_path = session_dir / "campaign_output.log"
+
+        # Session store for campaign_log.md writes
+        self._session_store = session_store
+        self._backend_id = backend_id
+        self._session_id = session_id
 
         cfg = config or {}
         opt = cfg.get("optimization", {})
@@ -114,7 +118,7 @@ class CampaignFileEmitter:
             "current_queries": [],
             "round_candidates": [],
             "last_round": None,
-            # Bidirectional control surface
+            # Bidirectional control surface (defaults — FileControlSurface reads back)
             "control": {
                 "requested_state": "running",
                 "pause_before_l2_eval": opt.get("pause_before_l2_eval", False),
@@ -139,43 +143,7 @@ class CampaignFileEmitter:
             self._log(f"  RESUMED — prior: {r.get('rounds_completed', 0)} rounds, best={r.get('best', 0):.1%}")
             self._log(f"{'=' * 70}\n")
 
-    # -- Bidirectional control ------------------------------------------------
-
-    def check_control(self, checkpoint_name: str) -> str | None:
-        """Read control section from campaign_state.json. Returns action or None.
-
-        Called at natural checkpoints (after_round, before_l2, before_l3).
-        Returns ``"pause"`` or ``"stop"`` if the user requested it, else None.
-        """
-        try:
-            data = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError):
-            return None
-
-        control = data.get("control", {})
-        requested = control.get("requested_state", "running")
-
-        if requested == "resume":
-            # Acknowledge resume: clear to running
-            self._state["control"]["requested_state"] = "running"
-            self._flush()
-            logger.info("Control: resume acknowledged at %s", checkpoint_name)
-            return None
-
-        if requested == "pause":
-            logger.info("Control: pause requested at %s", checkpoint_name)
-            return "pause"
-
-        if requested == "stop":
-            logger.info("Control: stop requested at %s", checkpoint_name)
-            return "stop"
-
-        # Check L2-specific pause
-        if checkpoint_name == "before_l2_eval" and control.get("pause_before_l2_eval"):
-            logger.info("Control: pause_before_l2_eval active at %s", checkpoint_name)
-            return "pause"
-
-        return None
+    # -- Resume ----------------------------------------------------------------
 
     @classmethod
     def load_resume_state(
@@ -240,8 +208,6 @@ class CampaignFileEmitter:
     def on_query_eval(
         self, ci: int, ct: int, qi: int, qt: int, result: dict,
     ) -> None:
-        from notebooks.campaign_lib.display import _fmt_query_result
-
         s = self._state
 
         # Candidate switch — compact queries, reset
@@ -308,10 +274,13 @@ class CampaignFileEmitter:
             q_entry["error"] = True
         s["current_queries"].append(q_entry)
 
-        # Log tail + file
+        # Structured log line (no display dependency — audit trail only)
         counter = s["total_queries_evaluated"]
-        prefix = f"  [{counter:>3d}] "
-        line = _strip_ansi(_fmt_query_result(result, cached=is_cached, prefix=prefix))
+        q_text = (result.get("query") or "")[:45]
+        pred = (result.get("prediction") or "")[:35]
+        mark = "HIT" if hit else "MISS"
+        cache_mark = " CACHED" if is_cached else ""
+        line = f"  [{counter:>3d}] {query_time:5.1f}s {mark}{cache_mark} {q_text} -> {pred}"
         s["log_tail"] = line.strip()[:120]
         self._log(line.rstrip())
         self._flush()
@@ -384,6 +353,17 @@ class CampaignFileEmitter:
         )
         self._flush()
 
+        # Persist round to campaign_log.md via SessionStore
+        if self._session_store and self._backend_id and self._session_id:
+            _rr_hits = round_result.hits
+            _rr_total = round_result.total
+            self._session_store.append_log(
+                self._backend_id, self._session_id,
+                f"## Round {round_result.round} — Evaluated\n"
+                f"- {round_result.label}: {acc:.1%} — {mark}\n"
+                f"- Hits: {_rr_hits}/{_rr_total}, stall: {stall_count}",
+            )
+
     # -- Lifecycle -------------------------------------------------------------
 
     def set_stop_reason(self, reason: str | None, pause_point: str | None = None) -> None:
@@ -391,6 +371,20 @@ class CampaignFileEmitter:
         self._state["pause_point"] = pause_point
         self._state["workflow"] = "idle"
         self._flush()
+
+    def finalize(self, n_rounds: int, best_accuracy: float, best_round: int,
+                 stop_reason: str, cycle_id: str | None = None) -> None:
+        """Write final summary to campaign_log.md and set stop reason."""
+        self.set_stop_reason(stop_reason)
+
+        if self._session_store and self._backend_id and self._session_id:
+            self._session_store.append_log(
+                self._backend_id, self._session_id,
+                f"## Optimization Complete\n"
+                f"- Rounds: {n_rounds}, best: {best_accuracy:.1%} (round {best_round})\n"
+                f"- Stop reason: {stop_reason}\n"
+                f"- Cycle ID: {cycle_id or 'N/A'}",
+            )
 
     # -- Internal --------------------------------------------------------------
 

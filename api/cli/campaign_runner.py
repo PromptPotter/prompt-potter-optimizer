@@ -323,34 +323,13 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     state["phase"] = "optimizing"
     svc.store.sessions.save(bid, sid, state)
 
-    # File emitter — bidirectional dashboard
-    from api.cli.file_emitter import CampaignFileEmitter
+    # Bidirectional control — CLI provides FileControlSurface as on_checkpoint
     from api.services.campaign.callbacks import CycleCallbacks
+    from api.services.campaign.control_surface import FileControlSurface
 
     session_dir = svc.store.sessions._session_dir(bid, sid)
-    opt_cfg = campaign_config.get("optimization", {})
-    active = state.get("active_steps", [])
-    excluded = campaign_config.get("exclude_nodes", [])
-
-    resume_from = CampaignFileEmitter.load_resume_state(
-        session_dir, baseline=state.get("baseline_accuracy", 0.0),
-    )
-
-    emitter = CampaignFileEmitter(
-        session_dir,
-        max_rounds=opt_cfg.get("max_rounds", 10),
-        active_nodes=active,
-        excluded_nodes=excluded,
-        config=campaign_config,
-        resume_from=resume_from,
-    )
-    emitter_cb = CycleCallbacks(
-        on_phase=emitter.on_phase,
-        on_query_eval=emitter.on_query_eval,
-        on_candidate_eval=emitter.on_candidate_eval,
-        on_round_complete=emitter.on_round_complete,
-        on_checkpoint=emitter.check_control,
-    )
+    control = FileControlSurface(session_dir / "campaign_state.json")
+    control_cb = CycleCallbacks(on_checkpoint=control.check)
 
     campaign_rounds = await run_optimization_notebook(
         campaign_rounds, eval_data, campaign_config,
@@ -359,16 +338,25 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         experiment_id=state.get("experiment_id"),
         task_context=state.get("task_context"),
         session_id=sid,
-        extra_callbacks=emitter_cb,
+        display_callbacks=control_cb,
     )
 
-    emitter.set_stop_reason("completed")
+    # Read back cycle_id and best from persisted campaign_state.json
+    import contextlib
+    import json
+
+    _state_path = session_dir / "campaign_state.json"
+    _emitter_state = {}
+    if _state_path.exists():
+        with contextlib.suppress(json.JSONDecodeError, OSError):
+            _emitter_state = json.loads(_state_path.read_text(encoding="utf-8"))
+
     state["phase"] = "optimize"
-    state["cycle_id"] = emitter._state.get("cycle_id")
-    state["best_accuracy"] = emitter._state.get("best", state.get("baseline_accuracy", 0.0))
+    state["cycle_id"] = _emitter_state.get("cycle_id")
+    state["best_accuracy"] = _emitter_state.get("best", state.get("baseline_accuracy", 0.0))
     svc.store.sessions.save(bid, sid, state)
 
-    print(f"Dashboard: {emitter.state_path}")
+    print(f"Dashboard: {_state_path}")
 
 
 async def cmd_control(args: argparse.Namespace) -> None:

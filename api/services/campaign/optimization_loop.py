@@ -489,6 +489,33 @@ async def _init_cycle_state(
         restored_state=_restored,
     )
 
+    # 5. Persistence emitter — auto-created for all entry points
+    persistence_emitter = None
+    if config.project_root and config.backend_id and config.session_id:
+        from pathlib import Path
+
+        from api.services.campaign.persistence_emitter import CampaignPersistenceEmitter
+
+        _session_dir = Path(config.project_root) / config.backend_id / "sessions" / config.session_id
+        _session_store = None
+        if _store:
+            from api.services.stores.session_store import SessionStore
+            _session_store = SessionStore(Path(config.project_root))
+
+        resume_from = CampaignPersistenceEmitter.load_resume_state(
+            _session_dir, baseline=baseline_accuracy,
+        )
+        persistence_emitter = CampaignPersistenceEmitter(
+            _session_dir,
+            session_store=_session_store,
+            backend_id=config.backend_id,
+            session_id=config.session_id,
+            max_rounds=config.max_rounds or 999,
+            active_nodes=list(config.active_steps),
+            config={},  # raw campaign config not available here; emitter uses defaults
+            resume_from=resume_from,
+        )
+
     return CycleInitResult(
         state=state,
         campaign_store=campaign_store,
@@ -498,6 +525,7 @@ async def _init_cycle_state(
         escalation_checks=escalation_checks,
         resumed_from_round=resumed_from_round,
         search_memory=search_memory,
+        persistence_emitter=persistence_emitter,
     )
 
 
@@ -630,9 +658,22 @@ async def run_optimization(
     escalation_checks = init.escalation_checks
     resumed_from_round = init.resumed_from_round
     search_memory = init.search_memory
+    _emitter = init.persistence_emitter
     state.search_memory = search_memory
     if state.eval_ctx and search_memory:
         state.eval_ctx.search_memory = search_memory
+
+    # Chain persistence callbacks (fires first) with caller display callbacks
+    if _emitter:
+        from api.services.campaign.callbacks import chain_callbacks
+
+        persistence_cb = CycleCallbacks(
+            on_phase=_emitter.on_phase,
+            on_query_eval=_emitter.on_query_eval,
+            on_candidate_eval=_emitter.on_candidate_eval,
+            on_round_complete=_emitter.on_round_complete,
+        )
+        cb = chain_callbacks(persistence_cb, cb)
 
     # -- Round loop --
     stop_reason: StopReason | None = None
@@ -828,6 +869,17 @@ async def run_optimization(
         obs_campaign_id,
         status=campaign_status,
     )
+
+    # Persistence emitter: finalize artifacts
+    if _emitter:
+        _emitter.finalize(
+            n_rounds=len(state.rounds),
+            best_accuracy=state.best_accuracy,
+            best_round=state.best_round,
+            stop_reason=stop_reason,
+            cycle_id=cycle_id,
+        )
+
     cloud_trace_id = (
         None
         if stop_reason in (StopReason.INTERRUPTED, StopReason.PAUSED_FOR_REVIEW)

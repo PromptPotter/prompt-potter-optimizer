@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from api.models.analysis import FailureAnalysis
     from api.models.eval_context import EvalContext
     from api.services.campaign.escalation import DegradationCheck
+    from api.services.campaign.persistence_emitter import CampaignPersistenceEmitter
 
 __all__ = ["CycleInitResult", "EscalationCounters", "LoopState"]
 
@@ -93,3 +94,4 @@ class CycleInitResult:
     escalation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
     search_memory: Any = None
+    persistence_emitter: CampaignPersistenceEmitter | None = None

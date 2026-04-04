@@ -61,40 +61,6 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
-# Callback chaining
-# ---------------------------------------------------------------------------
-
-
-def _chain_callbacks(a: CycleCallbacks, b: CycleCallbacks) -> CycleCallbacks:
-    """Compose two CycleCallbacks so both fire on every event."""
-    from api.services.campaign.callbacks import CycleCallbacks as ChainedCB
-
-    def _chain(fn_a, fn_b):
-        if fn_a and fn_b:
-            return lambda *args, **kw: (fn_a(*args, **kw), fn_b(*args, **kw))
-        return fn_a or fn_b
-
-    def _chain_checkpoint(fn_a, fn_b):
-        """For on_checkpoint: return the first non-None result."""
-        if fn_a and fn_b:
-            def _both(*args, **kw):
-                r = fn_a(*args, **kw)
-                if r is not None:
-                    return r
-                return fn_b(*args, **kw)
-            return _both
-        return fn_a or fn_b
-
-    return ChainedCB(
-        on_round_complete=_chain(a.on_round_complete, b.on_round_complete),
-        on_candidate_eval=_chain(a.on_candidate_eval, b.on_candidate_eval),
-        on_query_eval=_chain(a.on_query_eval, b.on_query_eval),
-        on_phase=_chain(a.on_phase, b.on_phase),
-        on_checkpoint=_chain_checkpoint(a.on_checkpoint, b.on_checkpoint),
-    )
-
-
-# ---------------------------------------------------------------------------
 # Feedback cycle (preflight + run)
 # ---------------------------------------------------------------------------
 
@@ -384,7 +350,7 @@ async def run_optimization_notebook(
     svc: dict | None = None,
     task_context: dict | None = None,
     session_id: str = "",
-    extra_callbacks: CycleCallbacks | None = None,
+    display_callbacks: CycleCallbacks | None = None,
 ) -> list:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
@@ -393,6 +359,9 @@ async def run_optimization_notebook(
 
     When ``scan_context`` is provided (from ``show_feedback_preflight()``),
     runs in scan-aware mode with per-candidate pipeline_params overrides.
+
+    ``display_callbacks`` are entry-point-specific (display, control).
+    Persistence callbacks are auto-created by the optimization loop.
 
     Returns:
         Updated campaign_rounds list.
@@ -415,6 +384,7 @@ async def run_optimization_notebook(
         project_root=str(store.base_dir) if store else "",
         pipeline_params=pipeline_params,
         session_terms=session_terms,
+        session_id=session_id,
         scan_context=scan_context,
         pipeline_schema=pipeline_schema,
         task_context=task_context,
@@ -653,16 +623,6 @@ async def run_optimization_notebook(
 
         print(_node_bottom())
 
-        # Persist round to session log
-        if session_id and store and backend_id:
-            _mark = "improved" if round_result.improved else "no improvement"
-            store.sessions.append_log(
-                backend_id, session_id,
-                f"## Round {rn} — Evaluated\n"
-                f"- {round_result.label}: {round_result.accuracy:.1%} — {_mark}\n"
-                f"- Hits: {_rr_hits}/{_rr_total}, stall: {stall_count}",
-            )
-
     # Resolve explicit experiment_id to full cycle_id
     resolved_cycle_id = None
     if experiment_id and store:
@@ -683,15 +643,15 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from api.services.campaign.callbacks import CycleCallbacks
+    from api.services.campaign.callbacks import CycleCallbacks, chain_callbacks
 
-    display_cb = CycleCallbacks(
+    notebook_display_cb = CycleCallbacks(
         on_round_complete=_on_round,
         on_candidate_eval=_on_candidate,
         on_query_eval=_on_query,
         on_phase=_on_phase,
     )
-    callbacks = _chain_callbacks(display_cb, extra_callbacks) if extra_callbacks else display_cb
+    callbacks = chain_callbacks(notebook_display_cb, display_callbacks) if display_callbacks else notebook_display_cb
 
     result = await run_optimization(
         instruction=instruction,
@@ -737,15 +697,5 @@ async def run_optimization_notebook(
     print(_dbox_bottom())
 
     format_pipeline_overrides(result.winner_pipeline_params, pipeline_schema)
-
-    # Persist final summary to session log
-    if session_id and store and backend_id and campaign_rounds:
-        store.sessions.append_log(
-            backend_id, session_id,
-            f"## Optimization Complete\n"
-            f"- Rounds: {result.n_rounds}, best: {best['accuracy']:.1%} (round {best['round']})\n"
-            f"- Stop reason: {result.stop_reason}\n"
-            f"- Cycle ID: {result.cycle_id or 'N/A'}",
-        )
 
     return campaign_rounds

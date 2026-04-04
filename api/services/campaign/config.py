@@ -30,6 +30,7 @@ class CycleConfig(BaseModel):
         description="Immutable active node sequence — authoritative source of pipeline composition",
     )
     session_terms: list[str] | None = Field(None, description="Backend session terms")
+    session_id: str = Field("", description="Session ID for persistence emitter")
     sample_size: int = Field(0, description="Subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
 
@@ -114,6 +115,7 @@ class CycleConfig(BaseModel):
         project_root: str = "",
         pipeline_params: dict | None = None,
         session_terms: list[str] | None = None,
+        session_id: str = "",
         pipeline_schema: PipelineSchema | None = None,
         scan_context: ScanContext | None = None,
         task_context: dict | None = None,
@@ -138,6 +140,7 @@ class CycleConfig(BaseModel):
             pipeline_params=pipeline_params,
             active_steps=tuple(pipeline_params.get("steps", [])) if pipeline_params else (),
             session_terms=session_terms,
+            session_id=session_id,
             sample_size=campaign_config.get("sample_size", 0),
             seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
