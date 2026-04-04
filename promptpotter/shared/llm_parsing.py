@@ -1,7 +1,7 @@
 """LLM response parsing utilities.
 
 Leaf module shared by llm_client and service-layer callers.
-Lives in ``api/shared/`` — no domain model or service dependencies.
+Lives in ``promptpotter/shared/`` — no domain model or service dependencies.
 """
 from __future__ import annotations
 

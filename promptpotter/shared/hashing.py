@@ -1,6 +1,6 @@
 """Content-addressed hashing for evaluation deduplication.
 
-Leaf module shared by both models and services. Lives in ``api/shared/``
+Leaf module shared by both models and services. Lives in ``promptpotter/shared/``
 to avoid circular imports between search_point.py and opt_search_point.py.
 """
 

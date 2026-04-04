@@ -1,7 +1,7 @@
 """Error classification for backend evaluation responses.
 
 Leaf module shared by prompt_eval and any future error-handling code.
-Lives in ``api/shared/`` — no domain model or service dependencies.
+Lives in ``promptpotter/shared/`` — no domain model or service dependencies.
 """
 from __future__ import annotations
 

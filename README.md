@@ -32,7 +32,7 @@ Future: non-parametric significance tests and confidence intervals on accuracy d
 
 **The AI Loop (Potter)** — From that starting point, a **critique-guided** feedback cycle iterates: each evaluation produces a structured **critique** of failures (or successes), which feeds forward into the next round's candidate generation alongside sampled **thinking styles** as mutation guidance. This separates failure analysis from candidate generation (inspired by [PromptWizard](https://arxiv.org/abs/2405.18369)'s critique-and-refine pattern). Candidates are evaluated against the backend and winners selected by composite score. 3-layer escalation: Layer 1 (prompt fields) changes every round, Layer 2 (context) adjusts when Layer 1 stalls, Layer 3 (strategy) rarely changes. The critique and thinking styles operate at the **optimizer agent** level (guiding the eval LLM that generates candidates) — they are not injected into the pipeline prompt being optimized.
 
-**Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [variant library](api/config/prompt_variants.json) that includes variants from published research (e.g. PromptWizard's 40 thinking styles). Each variant carries provenance metadata (source, year) for traceability. This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
+**Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [variant library](promptpotter/config/prompt_variants.json) that includes variants from published research (e.g. PromptWizard's 40 thinking styles). Each variant carries provenance metadata (source, year) for traceability. This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
 
 Every evaluation point is a **SearchPoint** — content-hashable, so every evaluation is stored once and discoverable by any workflow.
 
@@ -83,12 +83,25 @@ SearchPoint (abstract — render())
 
 ## Getting Started
 
+### Local install
+
 ```bash
-pip install -e ".[dev,jupyter,stats]"  # then configure .env (see .env.example)
+pip install -e ".[dev,jupyter,stats]"
+cp .env.example .env   # add your LLM API keys (Groq, OpenAI, or Anthropic)
 ```
 
-- Open `notebooks/optimization_campaign.ipynb` for the full HITL optimization workflow
-- Or start the API: `uvicorn api.main:app --port 8001 --reload`
+### Docker (one command)
+
+```bash
+cd docker && docker-compose up --build
+# JupyterLab: http://localhost:8888  |  API: http://localhost:8001
+```
+
+### Three entry points
+
+- **Notebook** (recommended): open `notebooks/optimization_campaign.ipynb`
+- **CLI**: `python -m promptpotter.cli.campaign_runner init --backend-url http://127.0.0.1:8000`
+- **API**: `uvicorn promptpotter.main:app --port 8001 --reload`
 
 See the [Setup Guide](docs/setup-guide.md) for prerequisites, configuration, and first run.
 

@@ -522,9 +522,11 @@ async def prepare_eval_context(
         campaign_rounds, baseline_results = await run_baseline_eval(
             baseline,
             eval_data,
-            campaign_config,
-            svc=svc,
+            svc.backend_client,
             pipeline_params=pipeline_params,
+            store=svc.store,
+            backend_id=svc.backend_id,
+            pipeline_schema=pipeline_schema,
         )
 
     return baseline, eval_data, campaign_rounds, baseline_results

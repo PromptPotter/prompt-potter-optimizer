@@ -1,7 +1,7 @@
 """
 Logging configuration for PromptPotter Optimizer.
 
-Call ``setup_logging()`` explicitly from entry points (``api.main``,
+Call ``setup_logging()`` explicitly from entry points (``promptpotter.main``,
 notebook ``init_services()``) to configure the root logger.
 All modules should use ``logger = logging.getLogger(__name__)``.
 """

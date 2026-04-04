@@ -8,14 +8,14 @@ during optimization and accepts control signals (pause/resume/stop)
 written by the user or a webapp.
 
 Usage:
-    python -m api.cli.campaign_runner init [options]
-    python -m api.cli.campaign_runner task-context --task-file PATH
-    python -m api.cli.campaign_runner scan --variants-file PATH
-    python -m api.cli.campaign_runner scan-results
-    python -m api.cli.campaign_runner optimize [--round | --auto]
-    python -m api.cli.campaign_runner control --pause | --resume | --stop
-    python -m api.cli.campaign_runner results [--save]
-    python -m api.cli.campaign_runner status
+    python -m promptpotter.cli.campaign_runner init [options]
+    python -m promptpotter.cli.campaign_runner task-context --task-file PATH
+    python -m promptpotter.cli.campaign_runner scan --variants-file PATH
+    python -m promptpotter.cli.campaign_runner scan-results
+    python -m promptpotter.cli.campaign_runner optimize [--round | --auto]
+    python -m promptpotter.cli.campaign_runner control --pause | --resume | --stop
+    python -m promptpotter.cli.campaign_runner results [--save]
+    python -m promptpotter.cli.campaign_runner status
 """
 
 from __future__ import annotations

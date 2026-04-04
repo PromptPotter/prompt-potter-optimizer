@@ -82,7 +82,7 @@ class LLMClientBase(ABC):
 
 
 
-# JSON repair and parsing moved to api.shared.llm_parsing.
+# JSON repair and parsing moved to promptpotter.shared.llm_parsing.
 _try_parse_json = try_parse_json
 
 

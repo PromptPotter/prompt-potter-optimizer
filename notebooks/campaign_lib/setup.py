@@ -70,7 +70,7 @@ async def decompose_task_context(
 ) -> dict:
     """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
 
-    Delegates to ``api.services.search.context.decompose_task_context()``
+    Delegates to ``promptpotter.services.search.context.decompose_task_context()``
     and prints the decomposed fields for visibility.
     """
     from promptpotter.services.search.context import (
@@ -138,7 +138,7 @@ def dev_reload() -> None:
         "promptpotter.services.search.smart_search",
         "promptpotter.services.search.sensitivity_scanner",
         "promptpotter.services.search.scan_baseline",
-        # NOTE: Do NOT reload api.models.* or dataclass modules —
+        # NOTE: Do NOT reload promptpotter.models.* or dataclass modules —
         # Pydantic/dataclass classes break when reloaded (existing
         # instances fail type checks).  scan_results.py has ScanContext
         # dataclass, so it must not be reloaded.
@@ -188,7 +188,7 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
 def configure_pipeline(svc: dict, campaign_config: CampaignConfig) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
-    Delegates to ``api.services.campaign.campaign_init.configure_pipeline()``
+    Delegates to ``promptpotter.services.campaign.campaign_init.configure_pipeline()``
     and prints a summary of active/excluded nodes.
     """
     result = _configure_pipeline(
@@ -323,7 +323,7 @@ async def prepare_eval_context(
     """Load baseline prompt, set eval_data, optionally run baseline.
 
     Thin display wrapper around
-    ``api.services.campaign.campaign_init.prepare_eval_context()``.
+    ``promptpotter.services.campaign.campaign_init.prepare_eval_context()``.
     """
     from promptpotter.services.campaign.campaign_init import (
         prepare_eval_context as _prepare_eval_context,
@@ -353,7 +353,7 @@ def prepare_datasets(
     """Load/create datasets, build session terms, and display summary.
 
     Thin display wrapper around
-    ``api.services.campaign.campaign_init.prepare_datasets()``.
+    ``promptpotter.services.campaign.campaign_init.prepare_datasets()``.
     """
     from promptpotter.services.campaign.campaign_init import (
         prepare_datasets as _prepare_datasets,

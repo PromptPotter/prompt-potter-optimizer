@@ -89,7 +89,7 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
 
     Resolution order:
     1. Langfuse prompt registry (by ``production`` label, SDK-cached)
-    2. Local JSON default in ``api/config/optimizer_prompts/{name}.json``
+    2. Local JSON default in ``promptpotter/config/optimizer_prompts/{name}.json``
     """
     lf_prompt = _try_langfuse(name)
     return lf_prompt or _load_local(name)
