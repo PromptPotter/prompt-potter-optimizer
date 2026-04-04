@@ -1,4 +1,4 @@
-"""Mutable state types — LoopState, EscalationCounters, CycleInitResult."""
+"""Mutable state types — LoopState, EscalationCounters, RunBackendSession."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.search_point import JobSearchPoint
-from promptpotter.services.campaign.results import CycleRoundResult
+from promptpotter.services.campaign.results import RoundResult
 
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from promptpotter.services.campaign.escalation import DegradationCheck
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
 
-__all__ = ["CycleInitResult", "EscalationCounters", "LoopState"]
+__all__ = ["EscalationCounters", "LoopState", "RunBackendSession"]
 
 
 @dataclass
@@ -50,7 +50,7 @@ class LoopState:
     The optimization loop is single-threaded — no concurrent access.
     """
 
-    rounds: list[CycleRoundResult] = field(default_factory=list)
+    rounds: list[RoundResult] = field(default_factory=list)
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
     current_composite: float = 0.0
@@ -83,7 +83,7 @@ class LoopState:
 
 
 @dataclass
-class CycleInitResult:
+class RunBackendSession:
     """Return type for ``_init_cycle_state()`` — replaces a 7-tuple."""
 
     state: LoopState

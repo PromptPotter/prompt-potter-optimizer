@@ -138,9 +138,9 @@ def diff_campaign_config(
     Returns dict of ``{param_name: {"stored": value, "current": value}}``.
     Includes nested pipeline_params diffs as ``pp.<key>`` entries.
     """
-    from promptpotter.services.campaign.config import CycleConfig
+    from promptpotter.services.campaign.config import RunConfig
 
-    current = CycleConfig.from_campaign_config(
+    current = RunConfig.from_campaign_config(
         campaign_config, pipeline_params=pipeline_params,
     ).model_dump()
 

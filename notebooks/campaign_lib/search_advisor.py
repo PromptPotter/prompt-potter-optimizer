@@ -23,6 +23,7 @@ from .setup import setup_llm
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.init import BackendSession
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +37,12 @@ __all__ = [
 
 def preview_advisor_prompt(
     campaign_config: CampaignConfig | None = None,
-    svc: dict | None = None,
+    session: BackendSession | None = None,
     *,
     task_description: str | dict = "",
     raw: bool = False,
 ) -> None:
-    """Display the scan advisor prompt — with real data when svc is provided.
+    """Display the scan advisor prompt — with real data when session is provided.
 
     Args:
         raw: When True, print the exact prompt string instead of
@@ -50,8 +51,8 @@ def preview_advisor_prompt(
     from IPython.display import Markdown
     from IPython.display import display as ipy_display
 
-    if svc is not None:
-        pipeline_schema = svc.pipeline_schema
+    if session is not None:
+        pipeline_schema = session.pipeline_schema
         pipeline_params = campaign_config.get("pipeline_params") if campaign_config else None
         exclude_nodes = campaign_config.get("exclude_nodes") if campaign_config else None
 
@@ -138,14 +139,14 @@ def _display_scan_advisory(advisory: dict) -> None:
 
 async def scan_advisor(
     campaign_config: CampaignConfig,
-    svc: dict,
+    session: BackendSession,
     *,
     task_description: str | dict = "",
     model: str = "",
 ) -> dict:
     """LLM-powered scan configuration advice.
 
-    Accepts high-level ``campaign_config`` + ``svc`` (same shape as
+    Accepts high-level ``campaign_config`` + ``session`` (same shape as
     ``resume_or_build_diagnostic``) and internalizes pipeline_schema
     resolution, variant library loading/filtering, and LLM setup.
 
@@ -154,7 +155,7 @@ async def scan_advisor(
         axes_to_skip, budget_breakdown, and reasoning.
     """
     # --- Internalized prep (matches resume_or_build_diagnostic pattern) ---
-    pipeline_schema = svc.pipeline_schema
+    pipeline_schema = session.pipeline_schema
     pipeline_params = campaign_config.get("pipeline_params")
     user_excluded = campaign_config.get("exclude_nodes", [])
 
@@ -203,7 +204,7 @@ async def scan_advisor(
 
 async def run_scan_advisor(
     campaign_config: CampaignConfig,
-    svc: dict,
+    session: BackendSession,
     *,
     task_description: str | dict = "",
     model: str = "",
@@ -214,7 +215,7 @@ async def run_scan_advisor(
     Returns (advisory, scan_variants, schema_labels).
     """
     advisory = await scan_advisor(
-        campaign_config, svc,
+        campaign_config, session,
         task_description=task_description,
         model=model,
     )
@@ -222,7 +223,7 @@ async def run_scan_advisor(
         return {}, {}, {}
 
     proposed, schema_labels = advisory_to_scan_variants(
-        advisory, pipeline_schema=svc.pipeline_schema,
+        advisory, pipeline_schema=session.pipeline_schema,
     )
 
     # Print copy-pasteable Python dict (nested format)

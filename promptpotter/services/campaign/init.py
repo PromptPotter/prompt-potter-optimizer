@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class InitResult:
+class BackendSession:
     """Return value from ``init_services()``."""
 
     store: ProjectStore
@@ -145,7 +145,7 @@ async def init_services(
     project_root: Path | None = None,
     dataset_name: str | None = None,
     on_status: Callable[[str], None] | None = None,
-) -> InitResult:
+) -> BackendSession:
     """Initialize store, client, and load experiment data.
 
     If experiment data is not in the project store, attempts an automatic
@@ -168,7 +168,7 @@ async def init_services(
             traces.
 
     Returns:
-        InitResult with all service handles and loaded data.
+        BackendSession with all service handles and loaded data.
     """
 
     def _status(msg: str) -> None:
@@ -208,7 +208,7 @@ async def init_services(
         logger.info("Could not fetch pipeline schema: %s", exc)
         _status("Pipeline: unavailable")
 
-    base = InitResult(
+    base = BackendSession(
         store=store,
         backend_id=backend_id,
         experiment_id=experiment_id,

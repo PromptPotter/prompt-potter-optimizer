@@ -2,7 +2,7 @@
 
 Handles individual round mechanics for the feedback cycle. Escalation
 logic (L2/L3) lives in ``escalation.py``; campaign lifecycle
-(create/resume/finalize) lives in ``campaign_lifecycle.py``.
+(create/resume/finalize) lives in ``lifecycle.py``.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from promptpotter.services.campaign._campaign_utils import (
     emit_phase,
     graceful,
 )
-from promptpotter.services.campaign.callbacks import CycleCallbacks
-from promptpotter.services.campaign.config import CycleConfig
+from promptpotter.services.campaign.callbacks import RunCallbacks
+from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import (
     CritiqueAgent,
     CritiqueContext,
@@ -28,7 +28,7 @@ from promptpotter.services.campaign.critique import (
     sample_thinking_styles,
     update_query_tracker,
 )
-from promptpotter.services.campaign.results import CycleRoundResult
+from promptpotter.services.campaign.results import RoundResult
 from promptpotter.services.campaign.state import LoopState
 from promptpotter.services.obs.node_tracer import observed_node
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
@@ -77,7 +77,7 @@ def _candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
 async def _generate_or_load_candidates(
     round_num: int,
     state: LoopState,
-    config: CycleConfig,
+    config: RunConfig,
     campaign_store: CampaignStore | None,
     cycle_id: str | None,
     on_phase=None,
@@ -187,8 +187,8 @@ async def _evaluate_candidates(
     round_num: int,
     state: LoopState,
     round_eval_data: list[dict],
-    config: CycleConfig,
-    callbacks: CycleCallbacks,
+    config: RunConfig,
+    callbacks: RunCallbacks,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
     escalation_checks: list[DegradationCheck] | None = None,
@@ -314,14 +314,14 @@ async def execute_round(
     round_num: int,
     state: LoopState,
     round_eval_data: list[dict],
-    config: CycleConfig,
+    config: RunConfig,
     obs_campaign_id: str,
     campaign_store: CampaignStore | None,
     cycle_id: str | None,
-    callbacks: CycleCallbacks,
+    callbacks: RunCallbacks,
     escalation_checks: list[DegradationCheck] | None = None,
     search_memory: Any = None,
-) -> CycleRoundResult:
+) -> RoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     obs = state.eval_ctx.obs if state.eval_ctx else None
     trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
@@ -371,7 +371,7 @@ async def execute_round(
     else:
         state.failure_analysis = None
 
-    round_result = CycleRoundResult(
+    round_result = RoundResult(
         round=round_num,
         label=eval_out.label,
         accuracy=eval_out.winner_accuracy,
@@ -429,7 +429,7 @@ async def execute_round(
 
 def update_round_state(
     state: LoopState,
-    rr: CycleRoundResult,
+    rr: RoundResult,
     round_num: int,
     *,
     active_steps: tuple[str, ...] = (),

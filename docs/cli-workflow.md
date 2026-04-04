@@ -21,7 +21,7 @@ Steps 2-4 are optional. Minimum viable: `init` then `optimize --auto`.
 
 This `pipeline_params` dict must flow to every eval:
 - `init --run-baseline`: `prepare_eval_context(pipeline_params=...)` → `run_baseline_eval(pipeline_params=...)`
-- `optimize`: `run_optimization_notebook(pipeline_params=...)` → `CycleConfig` → `eval_search_point()`
+- `optimize`: `run_optimization_notebook(pipeline_params=...)` → `RunConfig` → `eval_search_point()`
 - `scan`: `sensitivity_scan()` builds its own pipeline_params per variant
 
 If `pipeline_params` is `None`, the backend runs the full pipeline including excluded nodes.

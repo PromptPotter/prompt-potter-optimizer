@@ -1,6 +1,6 @@
 """Helper library for optimization_campaign.ipynb.
 
-Thin notebook-facing layer that delegates to ``api.services`` for core logic
+Thin notebook-facing layer that delegates to ``promptpotter.services`` for core logic
 and adds tqdm progress bars, print statements, and IPython display for
 interactive notebook use.
 """

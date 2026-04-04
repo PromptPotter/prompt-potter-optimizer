@@ -29,7 +29,7 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.eval_context import EvalContext
-    from promptpotter.services.campaign.callbacks import CycleCallbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.search.scan_results import ScanContext
 
 logger = logging.getLogger(__name__)
@@ -268,7 +268,7 @@ async def l1_evaluate(
     pipeline_params: dict | None = None,
     active_steps: tuple[str, ...] = (),
     improvement_threshold: float = 0.01,
-    callbacks: CycleCallbacks | None = None,
+    callbacks: RunCallbacks | None = None,
     escalation_checks: list | None = None,
 ) -> L1EvalResult:
     """Evaluate candidates and select the round winner."""
@@ -400,7 +400,7 @@ async def l1_evaluate(
         winner_pp = _sp_pipeline_params
 
     winner_osp = winner_entry["prompt_fields"]
-    # Serialize winner as prompt field dict (compatible with CycleRoundResult.prompt_fields)
+    # Serialize winner as prompt field dict (compatible with RoundResult.prompt_fields)
     if isinstance(winner_osp, OptSearchPoint):
         winner_dict = winner_osp.prompt_field_dict()
         winner_dict["id"] = winner_osp.id

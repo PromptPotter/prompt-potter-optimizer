@@ -22,6 +22,7 @@ from .display import (
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.init import BackendSession
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ async def sensitivity_scan(
     backend_id: str = "",
     pipeline_schema=None,
     experiment_id: str = "",
-    svc: dict | None = None,
+    session: BackendSession | None = None,
     session_id: str = "",
 ) -> tuple:
     """Run a sensitivity scan with progress output.
@@ -54,13 +55,13 @@ async def sensitivity_scan(
 
     Returns (per_variant_df, axis_profiles).
     """
-    # svc shorthand: extract infrastructure params if provided
-    if svc is not None:
-        backend_client = backend_client or svc.backend_client
-        store = store or svc.store
-        backend_id = backend_id or svc.backend_id
-        pipeline_schema = pipeline_schema or svc.pipeline_schema
-        session_terms = svc.session_terms
+    # session shorthand: extract infrastructure params if provided
+    if session is not None:
+        backend_client = backend_client or session.backend_client
+        store = store or session.store
+        backend_id = backend_id or session.backend_id
+        pipeline_schema = pipeline_schema or session.pipeline_schema
+        session_terms = session.session_terms
         if session_terms and backend_client:
             await backend_client.init_session(session_terms)
 
@@ -238,18 +239,18 @@ async def adaptive_search(
     session_terms: list | None = None,
     plan_id: str = "",
     experiment_id: str = "",
-    svc: dict | None = None,
+    session: BackendSession | None = None,
 ) -> tuple:
     """Run adaptive coordinate descent search with progress output.
 
     Returns (best_ps, best_pipeline_params, search_log_df).
     """
-    # svc shorthand
-    if svc is not None:
-        backend_client = backend_client or svc.backend_client
-        store = store or svc.store
-        backend_id = backend_id or svc.backend_id
-        session_terms = session_terms or svc.session_terms
+    # session shorthand
+    if session is not None:
+        backend_client = backend_client or session.backend_client
+        store = store or session.store
+        backend_id = backend_id or session.backend_id
+        session_terms = session_terms or session.session_terms
 
     active = [p for p in (axis_profiles or []) if p["exploration_budget"] != "skip"]
     print(f"Adaptive search: {len(active)} active axes, max {max_rounds} rounds")
@@ -385,7 +386,7 @@ async def run_sensitivity_scan(
     eval_data: list,
     *,
     scan_sample_size: int = 0,
-    svc: dict | None = None,
+    session: BackendSession | None = None,
     experiment_id: str = "",
     session_id: str = "",
 ):
@@ -401,13 +402,13 @@ async def run_sensitivity_scan(
 
     scan_baseline_sp, search_baseline, _scan_diag = await prepare_scan_baseline(
         baseline, campaign_config,
-        svc=svc, scan_variants=scan_variants,
+        session=session, scan_variants=scan_variants,
     )
     scan_df, axis_profiles = await sensitivity_scan(
         scan_baseline_sp, scan_variants, eval_data,
         baseline_opt=search_baseline,
         sample_size=scan_sample_size,
-        svc=svc, experiment_id=experiment_id,
+        session=session, experiment_id=experiment_id,
         session_id=session_id,
     )
     return scan_baseline_sp, scan_df, axis_profiles

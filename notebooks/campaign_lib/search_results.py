@@ -28,6 +28,7 @@ from .setup import setup_llm
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.init import BackendSession
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ async def resume_or_build_diagnostic(
     campaign_config: CampaignConfig,
     baseline,
     baseline_results: list,
-    svc: dict,
+    session: BackendSession,
     eval_data: list,
     scan_variants: dict | None = None,
 ) -> tuple[str, object, list, list, dict]:
@@ -57,7 +58,7 @@ async def resume_or_build_diagnostic(
     """
     # Prepare variant library: base + scan_variants merge
     pipeline_params = campaign_config.get("pipeline_params")
-    variant_library = _load_filtered_variants(pipeline_params, svc.pipeline_schema)
+    variant_library = _load_filtered_variants(pipeline_params, session.pipeline_schema)
     if scan_variants:
         variant_library["pipeline_params"] = scan_variants
 
@@ -70,8 +71,8 @@ async def resume_or_build_diagnostic(
         baseline_results,
         llm_client,
         llm_model,
-        svc.store,
-        svc.backend_id,
+        session.store,
+        session.backend_id,
         eval_data,
         variant_library=variant_library,
     )
@@ -148,7 +149,7 @@ def seed_campaign_from_scan(
 ):
     """Select scan winner, update pipeline_params, seed campaign_rounds.
 
-    Delegates to ``api.services.search.scan_results.seed_campaign_from_scan()``
+    Delegates to ``promptpotter.services.search.scan_results.seed_campaign_from_scan()``
     and prints summary + progress.
     """
     if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
@@ -195,7 +196,7 @@ def seed_campaign_from_scan(
     return result.best_sp
 
 
-def show_scan_analytics(scan_df, axis_profiles, svc: dict):
+def show_scan_analytics(scan_df, axis_profiles, session: BackendSession):
     """Display scan leaderboard and query difficulty if results are available.
 
     Returns difficulty_df (or None if scan_df is empty/None).
@@ -203,4 +204,4 @@ def show_scan_analytics(scan_df, axis_profiles, svc: dict):
     if scan_df is None or scan_df.empty:
         return None
     show_scan_leaderboard(scan_df, axis_profiles)
-    return show_scan_query_difficulty(svc.store, svc.backend_id)
+    return show_scan_query_difficulty(session.store, session.backend_id)

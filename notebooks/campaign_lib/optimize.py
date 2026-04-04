@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.phase_event import PhaseEvent
-from promptpotter.services.campaign.campaign_init import (
+from promptpotter.services.campaign.init import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
-from promptpotter.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
-from promptpotter.services.campaign.results import CycleResult
+from promptpotter.services.campaign.results import RunResult
 from promptpotter.shared.errors import is_error_result
 
 from .display import (
@@ -50,8 +50,9 @@ from .stats import (
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.callbacks import CycleCallbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.init import BackendSession
     from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.scan_results import ScanContext
 
@@ -102,7 +103,7 @@ def show_feedback_preflight(
     Returns:
         ScanContext (or None) for passing to the run cell.
     """
-    from promptpotter.services.campaign.config import CycleConfig
+    from promptpotter.services.campaign.config import RunConfig
 
     # Build scan context from scan data when available
     scan_context = None
@@ -123,7 +124,7 @@ def show_feedback_preflight(
             difficulty_summary=difficulty_summary,
         )
 
-    config = CycleConfig.from_campaign_config(
+    config = RunConfig.from_campaign_config(
         campaign_config, pipeline_params=pipeline_params,
         scan_context=scan_context,
         pipeline_schema=pipeline_schema,
@@ -349,11 +350,11 @@ async def run_optimization_notebook(
     langfuse_session_id: str | None = None,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
-    svc: dict | None = None,
+    session: BackendSession | None = None,
     task_context: dict | None = None,
     session_id: str = "",
-    display_callbacks: CycleCallbacks | None = None,
-) -> tuple[list, CycleResult | None]:
+    display_callbacks: RunCallbacks | None = None,
+) -> tuple[list, RunResult | None]:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
     Accepts and returns the ``campaign_rounds`` list format for downstream
@@ -366,20 +367,20 @@ async def run_optimization_notebook(
     Persistence callbacks are auto-created by the optimization loop.
 
     Returns:
-        Tuple of (campaign_rounds, CycleResult or None if interrupted).
+        Tuple of (campaign_rounds, RunResult or None if interrupted).
     """
-    from promptpotter.services.campaign.config import CycleConfig
+    from promptpotter.services.campaign.config import RunConfig
     from promptpotter.services.campaign.optimization_loop import run_optimization
 
-    # svc shorthand
-    if svc is not None:
-        store = store or svc.store
-        backend_id = backend_id or svc.backend_id
-        backend_url = backend_url or svc.backend_client.base_url
-        session_terms = session_terms or svc.session_terms
-        pipeline_schema = pipeline_schema or svc.pipeline_schema
+    # session shorthand
+    if session is not None:
+        store = store or session.store
+        backend_id = backend_id or session.backend_id
+        backend_url = backend_url or session.backend_client.base_url
+        session_terms = session_terms or session.session_terms
+        pipeline_schema = pipeline_schema or session.pipeline_schema
 
-    config = CycleConfig.from_campaign_config(
+    config = RunConfig.from_campaign_config(
         campaign_config,
         backend_url=backend_url,
         backend_id=backend_id,
@@ -647,9 +648,9 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from promptpotter.services.campaign.callbacks import CycleCallbacks, chain_callbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks, chain_callbacks
 
-    notebook_display_cb = CycleCallbacks(
+    notebook_display_cb = RunCallbacks(
         on_round_complete=_on_round,
         on_candidate_eval=_on_candidate,
         on_query_eval=_on_query,
@@ -668,7 +669,7 @@ async def run_optimization_notebook(
         langfuse_session_id=langfuse_session_id,
         cycle_id=resolved_cycle_id,
         experiment_id=experiment_id or "",
-        backend_client=svc.backend_client if svc else None,
+        backend_client=session.backend_client if session else None,
     )
 
     # --- Final summary ---

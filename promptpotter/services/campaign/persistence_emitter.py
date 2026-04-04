@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from promptpotter.models.phase_event import PhaseEvent
-    from promptpotter.services.campaign.results import CycleRoundResult
+    from promptpotter.services.campaign.results import RoundResult
     from promptpotter.services.stores.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
@@ -315,7 +315,7 @@ class CampaignPersistenceEmitter:
         self._log(f"  === C{idx + 1}/{total}: {acc:.1%} ({hits}/{n}){comp_str} ===")
         self._flush()
 
-    def on_round_complete(self, round_result: CycleRoundResult, stall_count: int) -> None:
+    def on_round_complete(self, round_result: RoundResult, stall_count: int) -> None:
         s = self._state
         acc = round_result.accuracy
         improved = round_result.improved

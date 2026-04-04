@@ -18,7 +18,7 @@ optimization_loop.py ──auto-creates──> CampaignPersistenceEmitter
 
 **Three layers:**
 - **Persistence** — shared, mandatory. Auto-created by `run_optimization()`. Entry points MUST NOT write campaign artifacts directly.
-- **Display** — per-entry-point. Caller passes `display_callbacks: CycleCallbacks`.
+- **Display** — per-entry-point. Caller passes `display_callbacks: RunCallbacks`.
 - **Control** — per-entry-point, optional. `FileControlSurface` (CLI/web) or kernel interrupt (notebook).
 
 **Key files:**

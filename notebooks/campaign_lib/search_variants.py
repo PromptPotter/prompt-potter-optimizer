@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from promptpotter.services.campaign.init import BackendSession
 
 from promptpotter.config.settings import load_variant_library_rich
 from promptpotter.models.pipeline_schema import PipelineSchema
@@ -26,7 +30,7 @@ __all__ = [
 
 
 def show_variant_library(
-    svc: dict | None = None,
+    session: BackendSession | None = None,
     *,
     axes: list[str] | None = None,
     source: str | None = None,
@@ -34,7 +38,7 @@ def show_variant_library(
     """Display the variant library with provenance metadata.
 
     Args:
-        svc: Service dict (optional). When provided with ``store`` and
+        session: Service dict (optional). When provided with ``store`` and
             ``backend_id``, shows historical coverage per axis.
         axes: Filter to specific axes (e.g. ``["thinking_style", "persona"]``).
         source: Filter to a specific source (e.g. ``"PromptWizard"``).
@@ -105,7 +109,7 @@ def resolve_scan_variants(
     scan_variants: dict,
     pipeline_schema: PipelineSchema | None = None,
     *,
-    svc: dict | None = None,
+    session: BackendSession | None = None,
 ) -> tuple[dict, dict[str, list[str]]]:
     """Resolve schema mutation tuples and display the resolved variants.
 
@@ -114,15 +118,15 @@ def resolve_scan_variants(
 
     Accepts nested format: ``{"thinking_style": [...], "web_search": {"max_sites": [...]}}``
 
-    If *pipeline_schema* is ``None`` and *svc* is provided, falls back to
-    ``svc.pipeline_schema``.
+    If *pipeline_schema* is ``None`` and *session* is provided, falls back to
+    ``session.pipeline_schema``.
 
     Returns ``(resolved_variants, schema_labels)``.
     """
     from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
-    if pipeline_schema is None and svc is not None:
-        pipeline_schema = svc.pipeline_schema
+    if pipeline_schema is None and session is not None:
+        pipeline_schema = session.pipeline_schema
 
     # Flatten nested node groups for schema resolution (only applies to _schema axes)
     flat_for_resolve: dict[str, list] = {}

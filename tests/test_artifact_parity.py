@@ -49,7 +49,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     must produce all CAMPAIGN_SESSION_ARTIFACTS."""
     from promptpotter.models.phase_event import PhaseEvent
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
-    from promptpotter.services.campaign.results import CycleRoundResult
+    from promptpotter.services.campaign.results import RoundResult
 
     store = _make_mock_session_store(tmp_path)
 
@@ -101,7 +101,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     emitter.on_candidate_eval(0, 1, {"accuracy": 0.6, "hits": 1, "total": 2})
 
     # Simulate round complete
-    round_result = CycleRoundResult(
+    round_result = RoundResult(
         round=0,
         label="C1",
         accuracy=0.6,

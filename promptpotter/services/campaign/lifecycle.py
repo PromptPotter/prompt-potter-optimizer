@@ -2,7 +2,7 @@
 
 Configuration identity hashing, observability initialization,
 campaign resume/create logic, and campaign finalization.
-Shared helpers (graceful, emit_phase, etc.) live in ``_helpers.py``.
+Shared helpers (graceful, emit_phase, etc.) live in ``_campaign_utils.py``.
 """
 
 import asyncio
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.services.campaign._campaign_utils import graceful
-from promptpotter.services.campaign.config import CycleConfig
+from promptpotter.services.campaign.config import RunConfig
 from promptpotter.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
@@ -22,9 +22,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["cycle_config_identity", "finalize_campaign", "init_campaign"]
+
 
 def cycle_config_identity(
-    config: CycleConfig,
+    config: RunConfig,
     baseline_rendered: str,
     eval_data: list[dict],
 ) -> str:
@@ -58,7 +60,7 @@ def cycle_config_identity(
 
 
 def init_campaign(
-    config: CycleConfig,
+    config: RunConfig,
     eval_data: list[dict],
     current_ps: dict,
     baseline_prompt_fields: dict | None,
@@ -169,7 +171,7 @@ def init_campaign(
 
 
 def _validate_config_match(
-    config: CycleConfig,
+    config: RunConfig,
     stored_cfg: dict,
     cycle_id: str,
 ) -> None:
@@ -204,7 +206,7 @@ def _validate_config_match(
 def finalize_campaign(
     campaign_store,
     cycle_id: str | None,
-    config: CycleConfig,
+    config: RunConfig,
     state: "LoopState",
     stop_reason: str,
     finished_at: str,

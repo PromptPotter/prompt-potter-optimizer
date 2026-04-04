@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 from tqdm.auto import tqdm
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.campaign_init import (
+from promptpotter.services.campaign.init import (
     load_baseline_prompt,
 )
-from promptpotter.services.campaign.campaign_init import (
+from promptpotter.services.campaign.init import (
     run_baseline_eval as _run_baseline_eval,
 )
 from promptpotter.shared.errors import is_error_result
@@ -20,6 +20,7 @@ from .display import _fmt_query_result, _print_interrupt_banner, show_progress
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.init import BackendSession
 
 __all__ = [
     "load_baseline_prompt", "run_baseline_eval",
@@ -35,7 +36,7 @@ async def run_baseline_eval(
     baseline: OptSearchPoint,
     eval_data: list,
     campaign_config: CampaignConfig,
-    svc: dict,
+    session: BackendSession,
     pipeline_params: dict | None = None,
 ) -> tuple:
     """Evaluate baseline prompt and initialize campaign_rounds.
@@ -52,17 +53,17 @@ async def run_baseline_eval(
         pbar.update(1)
 
     from promptpotter.services.obs.observability_logger import ObsLogger
-    _obs = ObsLogger(svc.store.base_dir, svc.backend_id, langfuse=None)
+    _obs = ObsLogger(session.store.base_dir, session.backend_id, langfuse=None)
 
     try:
         campaign_rounds, baseline_results = await _run_baseline_eval(
-            baseline, eval_data, svc.backend_client,
+            baseline, eval_data, session.backend_client,
             pipeline_params=pipeline_params,
-            pipeline_schema=svc.pipeline_schema,
-            store=svc.store, backend_id=svc.backend_id,
-            experiment_id=svc.experiment_id,
+            pipeline_schema=session.pipeline_schema,
+            store=session.store, backend_id=session.backend_id,
+            experiment_id=session.experiment_id,
             on_result=_on_result,
-            session_terms=svc.session_terms,
+            session_terms=session.session_terms,
             obs=_obs,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):

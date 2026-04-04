@@ -1,4 +1,4 @@
-"""Callback type aliases and CycleCallbacks dataclass for the optimization loop."""
+"""Callback type aliases and RunCallbacks dataclass for the optimization loop."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -8,22 +8,22 @@ from typing import TYPE_CHECKING, TypeAlias
 from promptpotter.models.phase_event import PhaseEvent
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.results import CycleRoundResult
+    from promptpotter.services.campaign.results import RoundResult
 
 __all__ = [
-    "CycleCallbacks",
     "OnCandidateEval",
     "OnCheckpoint",
     "OnPhase",
     "OnQueryEval",
     "OnRoundComplete",
+    "RunCallbacks",
     "chain_callbacks",
 ]
 
 # -- Callback type aliases (documented parameter semantics) ----------------
 
 # (round_result, round_number)
-OnRoundComplete: TypeAlias = Callable[["CycleRoundResult", int], None]
+OnRoundComplete: TypeAlias = Callable[["RoundResult", int], None]
 # (candidate_index, total_candidates, scores_dict)
 OnCandidateEval: TypeAlias = Callable[[int, int, dict], None]
 # (candidate_index, total_candidates, query_index, total_queries, result_dict)
@@ -35,7 +35,7 @@ OnCheckpoint: TypeAlias = Callable[[str], str | None]
 
 
 @dataclass
-class CycleCallbacks:
+class RunCallbacks:
     """Optional progress callbacks for the feedback cycle."""
 
     on_round_complete: OnRoundComplete | None = None
@@ -45,8 +45,8 @@ class CycleCallbacks:
     on_checkpoint: OnCheckpoint | None = None
 
 
-def chain_callbacks(a: CycleCallbacks, b: CycleCallbacks) -> CycleCallbacks:
-    """Compose two CycleCallbacks so both fire on every event.
+def chain_callbacks(a: RunCallbacks, b: RunCallbacks) -> RunCallbacks:
+    """Compose two RunCallbacks so both fire on every event.
 
     ``a`` fires first (typically persistence), ``b`` second (typically display).
     For ``on_checkpoint``, returns the first non-None result.
@@ -70,7 +70,7 @@ def chain_callbacks(a: CycleCallbacks, b: CycleCallbacks) -> CycleCallbacks:
             return _both
         return fn_a or fn_b
 
-    return CycleCallbacks(
+    return RunCallbacks(
         on_round_complete=_chain(a.on_round_complete, b.on_round_complete),
         on_candidate_eval=_chain(a.on_candidate_eval, b.on_candidate_eval),
         on_query_eval=_chain(a.on_query_eval, b.on_query_eval),

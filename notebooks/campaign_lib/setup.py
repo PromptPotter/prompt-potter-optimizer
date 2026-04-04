@@ -7,20 +7,20 @@ from typing import TYPE_CHECKING
 
 from promptpotter.config.settings import load_variant_library
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.campaign_configuration import (
+from promptpotter.services.campaign.configuration import (
     configure_pipeline as _configure_pipeline,
 )
-from promptpotter.services.campaign.campaign_configuration import (
+from promptpotter.services.campaign.configuration import (
     create_llm_client as setup_llm,
 )
-from promptpotter.services.campaign.campaign_init import (
-    InitResult,
+from promptpotter.services.campaign.init import (
+    BackendSession,
     build_all_session_terms,
 )
-from promptpotter.services.campaign.campaign_init import (
+from promptpotter.services.campaign.init import (
     init_services as _init_services,
 )
-from promptpotter.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.persistence import (
     save_campaign_winner,
 )
 from promptpotter.services.project_store import ProjectStore
@@ -63,7 +63,7 @@ __all__ = [
 async def decompose_task_context(
     task_description: str,
     campaign_config: CampaignConfig,
-    svc: dict,
+    session: BackendSession,
     *,
     llm_client: LLMClientBase | None = None,
     model: str | None = None,
@@ -93,8 +93,8 @@ async def decompose_task_context(
         task_description,
         llm_client,
         model,
-        store_base_dir=svc.store.base_dir if svc.store else None,
-        backend_id=svc.backend_id,
+        store_base_dir=session.store.base_dir if session.store else None,
+        backend_id=session.backend_id,
     )
 
     cache_tag = " (cached)" if result.was_cached else ""
@@ -124,8 +124,8 @@ def dev_reload() -> None:
         # Service layer — safe to reload (no Pydantic model classes)
         "promptpotter.shared.hashing",
         "promptpotter.services.campaign.config",
-        "promptpotter.services.campaign.campaign_lifecycle",
-        "promptpotter.services.campaign.campaign_configuration",
+        "promptpotter.services.campaign.lifecycle",
+        "promptpotter.services.campaign.configuration",
         "promptpotter.services.campaign.escalation",
         "promptpotter.services.campaign.layer_transitions",
         "promptpotter.services.campaign.critique",
@@ -148,7 +148,7 @@ def dev_reload() -> None:
             importlib.reload(sys.modules[mod])
 
 
-async def show_pipeline_snapshot(svc: dict) -> dict:
+async def show_pipeline_snapshot(session: BackendSession) -> dict:
     """Fetch and display full pipeline config from backend.
 
     Prints: pipeline name/version, node list, resolved schemas/prompts,
@@ -159,9 +159,9 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     import httpx
 
     try:
-        pipeline_raw = await svc.backend_client.fetch_pipeline()
+        pipeline_raw = await session.backend_client.fetch_pipeline()
     except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
-        base = svc.backend_client.base_url
+        base = session.backend_client.base_url
         print("WARNING: Backend unreachable — is TermNorm running?")
         print(f"  Could not connect to {base}/pipeline")
         print(f"  Error: {exc}")
@@ -185,24 +185,24 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     return config
 
 
-def configure_pipeline(svc: dict, campaign_config: CampaignConfig) -> dict:
+def configure_pipeline(session: BackendSession, campaign_config: CampaignConfig) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
-    Delegates to ``promptpotter.services.campaign.campaign_init.configure_pipeline()``
+    Delegates to ``promptpotter.services.campaign.init.configure_pipeline()``
     and prints a summary of active/excluded nodes.
     """
     result = _configure_pipeline(
-        svc.pipeline_schema, campaign_config,
-        exp_data=getattr(svc, "exp_data", None),
+        session.pipeline_schema, campaign_config,
+        exp_data=getattr(session, "exp_data", None),
     )
 
     # Replace schema with filtered version — excluded nodes cease to exist
-    if svc.pipeline_schema and result.excluded_nodes:
-        svc.pipeline_schema = svc.pipeline_schema.filter_to_steps(result.active_nodes)
+    if session.pipeline_schema and result.excluded_nodes:
+        session.pipeline_schema = session.pipeline_schema.filter_to_steps(result.active_nodes)
 
     # Set display tags from finalized schema (drives eval output formatting)
     from .display import set_display_tags
-    set_display_tags(svc.pipeline_schema)
+    set_display_tags(session.pipeline_schema)
 
     nodes_str = ", ".join(result.active_nodes)
     excl_str = f"  Excluded: {', '.join(result.excluded_nodes)}" if result.excluded_nodes else ""
@@ -212,7 +212,7 @@ def configure_pipeline(svc: dict, campaign_config: CampaignConfig) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Setup (thin wrapper over campaign_init.init_services)
+# Setup (thin wrapper over init.init_services)
 # ---------------------------------------------------------------------------
 
 
@@ -221,7 +221,7 @@ async def init_services(
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
     dataset_name: str | None = None,
-) -> InitResult:
+) -> BackendSession:
     """Initialize store, client, and load experiment data.
 
     When *dataset_name* is provided, loads ground-truth data from the
@@ -233,7 +233,7 @@ async def init_services(
 
     project_root = Path(__file__).resolve().parent.parent.parent
 
-    svc = await _init_services(
+    session = await _init_services(
         backend_url=backend_url,
         backend_id=backend_id,
         experiment_id=experiment_id,
@@ -242,26 +242,26 @@ async def init_services(
         on_status=print,
     )
 
-    if dataset_name and svc.queries:
-        print(f"Dataset    : {dataset_name} ({len(svc.queries)} queries)")
-        print(f"Session terms: {len(svc.session_terms)}")
-        return svc
+    if dataset_name and session.queries:
+        print(f"Dataset    : {dataset_name} ({len(session.queries)} queries)")
+        print(f"Session terms: {len(session.session_terms)}")
+        return session
 
-    if not svc.exp_data:
+    if not session.exp_data:
         print(
             "WARNING: No experiment data available. "
             "Use prepare_datasets() to load from Excel, "
             "or sync from backend."
         )
-        return svc
+        return session
 
-    mappings = svc.exp_data.get("mappings", [])
+    mappings = session.exp_data.get("mappings", [])
     verified = sum(1 for m in mappings if m.get("dataset_entry", "").strip() not in ("", "--"))
-    print(f"Experiment : {svc.exp_data.get('experiment', {}).get('name', experiment_id)}")
+    print(f"Experiment : {session.exp_data.get('experiment', {}).get('name', experiment_id)}")
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
-    print(f"Queries    : {len(svc.queries)}  |  Session terms: {len(svc.session_terms)}")
+    print(f"Queries    : {len(session.queries)}  |  Session terms: {len(session.session_terms)}")
 
-    return svc
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +314,7 @@ async def show_backend_status(client) -> dict:
 
 
 async def prepare_eval_context(
-    svc: dict,
+    session: BackendSession,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = False,
@@ -323,20 +323,20 @@ async def prepare_eval_context(
     """Load baseline prompt, set eval_data, optionally run baseline.
 
     Thin display wrapper around
-    ``promptpotter.services.campaign.campaign_init.prepare_eval_context()``.
+    ``promptpotter.services.campaign.init.prepare_eval_context()``.
     """
-    from promptpotter.services.campaign.campaign_init import (
+    from promptpotter.services.campaign.init import (
         prepare_eval_context as _prepare_eval_context,
     )
 
     baseline, eval_data, campaign_rounds, baseline_results = await _prepare_eval_context(
-        svc.exp_data,
+        session.exp_data,
         train_data,
         campaign_config,
         run_baseline=run_baseline,
         pipeline_params=pipeline_params,
-        pipeline_schema=svc.pipeline_schema,
-        svc=svc,
+        pipeline_schema=session.pipeline_schema,
+        session=session,
     )
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
@@ -353,9 +353,9 @@ def prepare_datasets(
     """Load/create datasets, build session terms, and display summary.
 
     Thin display wrapper around
-    ``promptpotter.services.campaign.campaign_init.prepare_datasets()``.
+    ``promptpotter.services.campaign.init.prepare_datasets()``.
     """
-    from promptpotter.services.campaign.campaign_init import (
+    from promptpotter.services.campaign.init import (
         prepare_datasets as _prepare_datasets,
     )
 

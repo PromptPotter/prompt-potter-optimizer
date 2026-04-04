@@ -48,7 +48,7 @@ def _die(msg: str) -> None:
 
 
 async def _reconstruct_svc(init_params: dict):
-    """Reconstruct InitResult from stored init params (~1s)."""
+    """Reconstruct BackendSession from stored init params (~1s)."""
     from notebooks.campaign_lib.setup import init_services
 
     return await init_services(
@@ -74,7 +74,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
         show_pipeline_snapshot,
     )
 
-    svc = await init_services(
+    session = await init_services(
         backend_url=args.backend_url,
         backend_id=args.backend_id,
         experiment_id=args.experiment_id,
@@ -82,7 +82,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
     )
 
     # Priority: --config file > connector profile > empty dict
-    profile = svc.store.backends.load_connector_profile(args.backend_id) or {}
+    profile = session.store.backends.load_connector_profile(args.backend_id) or {}
     config_data: dict = {}
     if args.config:
         with open(args.config) as f:
@@ -90,8 +90,8 @@ async def cmd_init(args: argparse.Namespace) -> None:
     file_config = config_data.get("campaign_config", config_data) or {}
     campaign_config = {**profile, **file_config}
 
-    await show_pipeline_snapshot(svc)
-    pipeline_params = configure_pipeline(svc, campaign_config)
+    await show_pipeline_snapshot(session)
+    pipeline_params = configure_pipeline(session, campaign_config)
 
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     excluded = campaign_config.get("exclude_nodes", [])
@@ -117,19 +117,19 @@ async def cmd_init(args: argparse.Namespace) -> None:
         "experiment_id": None,
     }
 
-    bid = svc.backend_id
-    sid = svc.store.sessions.create(bid, state)
-    svc.store.sessions.save_active_pointer(bid, sid)
+    bid = session.backend_id
+    sid = session.store.sessions.create(bid, state)
+    session.store.sessions.save_active_pointer(bid, sid)
 
     # Load data and run baseline (may be long-running)
     train_data = None
     if args.excel_path:
-        train_data, _st = prepare_datasets(svc.store, svc.backend_id, excel_path=args.excel_path)
-    elif svc.queries:
-        train_data = svc.queries
+        train_data, _st = prepare_datasets(session.store, session.backend_id, excel_path=args.excel_path)
+    elif session.queries:
+        train_data = session.queries
 
     baseline, eval_data, campaign_rounds, _br = await prepare_eval_context(
-        svc, train_data, campaign_config,
+        session, train_data, campaign_config,
         run_baseline=args.run_baseline, pipeline_params=pipeline_params,
     )
 
@@ -138,10 +138,10 @@ async def cmd_init(args: argparse.Namespace) -> None:
     state["baseline_prompt_fields"] = baseline.prompt_field_dict()
     state["eval_data_count"] = len(eval_data)
     state["baseline_accuracy"] = baseline_acc
-    svc.store.sessions.save(bid, sid, state)
+    session.store.sessions.save(bid, sid, state)
 
     excl_str = f"{', '.join(excluded)} excluded" if excluded else "none excluded"
-    svc.store.sessions.append_log(bid, sid, f"""# Campaign Report — {sid}
+    session.store.sessions.append_log(bid, sid, f"""# Campaign Report — {sid}
 
 ## Setup
 - Backend: {args.backend_id} @ {args.backend_url}
@@ -179,15 +179,15 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
     if not task_description:
         _die("Provide --task-file or --task-text")
 
-    svc = await _reconstruct_svc(state["init_params"])
+    session = await _reconstruct_svc(state["init_params"])
     task_context = await decompose_task_context(
-        task_description, state["campaign_config"], svc,
+        task_description, state["campaign_config"], session,
     )
 
     state["task_context"] = task_context
     state["phase"] = "task-context"
-    svc.store.sessions.save(bid, sid, state)
-    svc.store.sessions.append_log(bid, sid, f"## Task Context\n{json.dumps(task_context, indent=2)}")
+    session.store.sessions.save(bid, sid, state)
+    session.store.sessions.append_log(bid, sid, f"## Task Context\n{json.dumps(task_context, indent=2)}")
 
 
 async def cmd_scan(args: argparse.Namespace) -> None:
@@ -206,15 +206,15 @@ async def cmd_scan(args: argparse.Namespace) -> None:
     with open(args.variants_file) as f:
         scan_variants = json.load(f)
 
-    svc = await _reconstruct_svc(state["init_params"])
-    resolve_scan_variants(scan_variants, svc=svc)
-    configure_pipeline(svc, state["campaign_config"])
+    session = await _reconstruct_svc(state["init_params"])
+    resolve_scan_variants(scan_variants, session=session)
+    configure_pipeline(session, state["campaign_config"])
 
-    from promptpotter.services.campaign.campaign_init import load_baseline_prompt
+    from promptpotter.services.campaign.init import load_baseline_prompt
 
-    _pn = svc.pipeline_schema.prompt_node_names() if svc.pipeline_schema else []
-    baseline = load_baseline_prompt(svc.exp_data, prompt_node_names=_pn)
-    train_data = svc.queries or []
+    _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
+    baseline = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
+    train_data = session.queries or []
 
     sample_size = (
         args.sample_size
@@ -223,18 +223,18 @@ async def cmd_scan(args: argparse.Namespace) -> None:
     )
     _scan_bl, scan_df, _axis_profiles = await run_sensitivity_scan(
         baseline, state["campaign_config"], scan_variants, train_data,
-        scan_sample_size=sample_size, svc=svc,
+        scan_sample_size=sample_size, session=session,
         experiment_id=state["init_params"]["experiment_id"],
         session_id=sid,
     )
 
     state["scan_variants"] = scan_variants
     state["phase"] = "scan"
-    svc.store.sessions.save(bid, sid, state)
+    session.store.sessions.save(bid, sid, state)
 
     records = scan_df.to_dict(orient="records") if scan_df is not None else []
     best = max(records, key=lambda r: r.get("accuracy", 0)) if records else {}
-    svc.store.sessions.append_log(bid, sid, f"""## Scan
+    session.store.sessions.append_log(bid, sid, f"""## Scan
 - Axes: {len(scan_variants)}, variants: {len(records)}
 - Best: {best.get('axis', '?')}={best.get('value_preview', '?')} → {best.get('accuracy', 0):.1%} (delta: {best.get('delta', 0):+.1%})""")
 
@@ -245,9 +245,9 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
 
     store = ProjectStore()
     state, bid, sid = store.sessions.load_active(args.session)
-    svc = await _reconstruct_svc(state["init_params"])
+    session = await _reconstruct_svc(state["init_params"])
 
-    scan_data = svc.store.sessions.load_scan_results(bid, sid)
+    scan_data = session.store.sessions.load_scan_results(bid, sid)
     if not scan_data:
         _die("No scan results. Run 'scan' first.")
 
@@ -256,18 +256,18 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
     scan_df = pd.DataFrame(scan_data["scan_df"])
     axis_profiles = scan_data["axis_profiles"]
 
-    show_scan_analytics(scan_df, axis_profiles, svc)
+    show_scan_analytics(scan_df, axis_profiles, session)
 
-    from promptpotter.services.campaign.campaign_init import load_baseline_prompt
+    from promptpotter.services.campaign.init import load_baseline_prompt
 
-    _pn = svc.pipeline_schema.prompt_node_names() if svc.pipeline_schema else []
-    scan_baseline_sp = load_baseline_prompt(svc.exp_data, prompt_node_names=_pn)
+    _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
+    scan_baseline_sp = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
 
     campaign_rounds: list = []
     seed_campaign_from_scan(
         scan_df, axis_profiles, scan_baseline_sp,
         state.get("scan_variants", {}), campaign_rounds,
-        state["campaign_config"], pipeline_schema=svc.pipeline_schema,
+        state["campaign_config"], pipeline_schema=session.pipeline_schema,
     )
 
     if campaign_rounds:
@@ -275,7 +275,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
         state["baseline_prompt_fields"] = campaign_rounds[-1].get("prompt_fields", {})
 
     state["phase"] = "scan-results"
-    svc.store.sessions.save(bid, sid, state)
+    session.store.sessions.save(bid, sid, state)
 
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
@@ -291,12 +291,12 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     state, bid, sid = store.sessions.load_active(args.session)
     campaign_config = state["campaign_config"]
 
-    svc = await _reconstruct_svc(state["init_params"])
-    pipeline_params = configure_pipeline(svc, campaign_config)
-    train_data = svc.queries or []
+    session = await _reconstruct_svc(state["init_params"])
+    pipeline_params = configure_pipeline(session, campaign_config)
+    train_data = session.queries or []
 
     _baseline, eval_data, campaign_rounds, _ = await prepare_eval_context(
-        svc, train_data, campaign_config, pipeline_params=pipeline_params,
+        session, train_data, campaign_config, pipeline_params=pipeline_params,
     )
 
     # Seed campaign_rounds with stored baseline when no eval has been run yet
@@ -313,7 +313,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     # Load scan context if available
     scan_df, axis_profiles = None, None
-    scan_data = svc.store.sessions.load_scan_results(bid, sid)
+    scan_data = session.store.sessions.load_scan_results(bid, sid)
     if scan_data:
         import pandas as pd
 
@@ -322,7 +322,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     scan_context = show_feedback_preflight(
         campaign_rounds, eval_data, campaign_config,
-        pipeline_params=pipeline_params, pipeline_schema=svc.pipeline_schema,
+        pipeline_params=pipeline_params, pipeline_schema=session.pipeline_schema,
         scan_df=scan_df, axis_profiles=axis_profiles,
         scan_variants=state.get("scan_variants"),
     )
@@ -334,15 +334,15 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         campaign_config.setdefault("optimization", {}).pop("pause_before_eval", None)
 
     state["phase"] = "optimizing"
-    svc.store.sessions.save(bid, sid, state)
+    session.store.sessions.save(bid, sid, state)
 
     # Bidirectional control — CLI provides FileControlSurface as on_checkpoint
-    from promptpotter.services.campaign.callbacks import CycleCallbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.campaign.control_surface import FileControlSurface
 
-    session_dir = svc.store.sessions._session_dir(bid, sid)
+    session_dir = session.store.sessions._session_dir(bid, sid)
     control = FileControlSurface(session_dir / "campaign_state.json")
-    control_cb = CycleCallbacks(on_checkpoint=control.check)
+    control_cb = RunCallbacks(on_checkpoint=control.check)
 
     # Round recorder — write rounds/round_NNN.json with full action traces
     from promptpotter.config.optimizer_pipeline import set_round_recorder
@@ -354,7 +354,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     try:
         campaign_rounds, cycle_result = await run_optimization_notebook(
             campaign_rounds, eval_data, campaign_config,
-            svc=svc, pipeline_params=pipeline_params,
+            session=session, pipeline_params=pipeline_params,
             scan_context=scan_context,
             experiment_id=state.get("experiment_id"),
             task_context=state.get("task_context"),
@@ -376,7 +376,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     state["phase"] = "optimize"
     state["cycle_id"] = _emitter_state.get("cycle_id")
     state["best_accuracy"] = _emitter_state.get("best", state.get("baseline_accuracy", 0.0))
-    svc.store.sessions.save(bid, sid, state)
+    session.store.sessions.save(bid, sid, state)
 
     # Write structured result for AI/machine consumption
     result_path = session_dir / "optimize_result.json"
@@ -478,9 +478,9 @@ async def cmd_results(args: argparse.Namespace) -> None:
 
     store = ProjectStore()
     state, bid, sid = store.sessions.load_active(args.session)
-    svc = await _reconstruct_svc(state["init_params"])
+    session = await _reconstruct_svc(state["init_params"])
 
-    campaigns = svc.store.campaigns.list_campaigns(bid)
+    campaigns = session.store.campaigns.list_campaigns(bid)
     if not campaigns:
         if getattr(args, "json_output", False):
             print(json.dumps({"error": "no_campaigns"}, indent=2))
@@ -492,7 +492,7 @@ async def cmd_results(args: argparse.Namespace) -> None:
     cycle_id = latest.get("campaign_id", "")
     campaign_rounds = []
     for i in range(latest.get("n_trials", 0)):
-        trial = svc.store.campaigns.load_trial(bid, cycle_id, i)
+        trial = session.store.campaigns.load_trial(bid, cycle_id, i)
         if trial:
             campaign_rounds.append(trial)
 
@@ -521,13 +521,13 @@ async def cmd_results(args: argparse.Namespace) -> None:
     if args.save:
         save_campaign_winner(
             campaign_rounds, state["campaign_config"],
-            svc.store, bid, experiment_id=state.get("experiment_id", ""),
+            session.store, bid, experiment_id=state.get("experiment_id", ""),
         )
         if not getattr(args, "json_output", False):
             print("Winner saved.")
 
     best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
-    svc.store.sessions.append_log(bid, sid, f"""## Results
+    session.store.sessions.append_log(bid, sid, f"""## Results
 - Rounds: {len(campaign_rounds)}
 - Best: {best.get('accuracy', 0):.1%} (round {best.get('round', '?')})
 - Saved: {args.save}""")

@@ -1,4 +1,4 @@
-"""CycleConfig — configuration for the optimization loop.
+"""RunConfig — configuration for the optimization loop.
 
 Also defines ``CampaignConfig`` TypedDict — the typed schema for the
 ``campaign_config`` dict that flows from notebooks / CLI through to
@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from promptpotter.models.pipeline_schema import PipelineSchema
 from promptpotter.services.search.scan_results import ScanContext
 
-__all__ = ["CampaignConfig", "CycleConfig"]
+__all__ = ["CampaignConfig", "RunConfig"]
 
 
 # ---------------------------------------------------------------------------
@@ -84,11 +84,11 @@ class CampaignConfig(TypedDict, total=False):
 
 
 # ---------------------------------------------------------------------------
-# CycleConfig — Pydantic model for the optimization loop
+# RunConfig — Pydantic model for the optimization loop
 # ---------------------------------------------------------------------------
 
 
-class CycleConfig(BaseModel):
+class RunConfig(BaseModel):
     """Configuration for feedback cycling."""
 
     model_config = {"arbitrary_types_allowed": True}
@@ -197,10 +197,10 @@ class CycleConfig(BaseModel):
         pipeline_schema: PipelineSchema | None = None,
         scan_context: ScanContext | None = None,
         task_context: dict | None = None,
-    ) -> CycleConfig:
+    ) -> RunConfig:
         """Build from the notebook's ``campaign_config`` dict.
 
-        Uses CycleConfig field defaults for any missing keys — a minimal
+        Uses RunConfig field defaults for any missing keys — a minimal
         connector profile (e.g. just ``exclude_nodes``) is valid input.
         """
         opt = campaign_config.get("optimization", {})

@@ -1,11 +1,11 @@
-"""Outcome types — CycleRoundResult, CycleResult, and StopReason."""
+"""Outcome types — RoundResult, RunResult, and StopReason."""
 from __future__ import annotations
 
 import enum
 
 from pydantic import BaseModel, Field
 
-__all__ = ["CycleResult", "CycleRoundResult", "StopReason"]
+__all__ = ["RoundResult", "RunResult", "StopReason"]
 
 
 class StopReason(enum.StrEnum):
@@ -24,7 +24,7 @@ class StopReason(enum.StrEnum):
     USER_STOPPED = "user_stopped"
 
 
-class CycleRoundResult(BaseModel):
+class RoundResult(BaseModel):
     """Result of a single feedback cycle round."""
 
     round: int
@@ -43,10 +43,10 @@ class CycleRoundResult(BaseModel):
     escalation_signal: dict | None = None
 
 
-class CycleResult(BaseModel):
+class RunResult(BaseModel):
     """Final result of the feedback cycling process."""
 
-    rounds: list[CycleRoundResult]
+    rounds: list[RoundResult]
     n_rounds: int
     best_accuracy: float
     best_round: int

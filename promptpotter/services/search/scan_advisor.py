@@ -329,11 +329,11 @@ def preview_advisor_prompt(
 
     # Fallback: placeholder mode
     return _build_advisor_prompt(
-        pipeline_overview=[{"<build_pipeline_overview(schema=svc.pipeline_schema)>": "..."}],
-        tunable_params=[{"<build_tunable_params(schema=svc.pipeline_schema)>": "..."}],
-        llm_context=[{"<build_llm_context(schema=svc.pipeline_schema)>": "..."}],
+        pipeline_overview=[{"<build_pipeline_overview(schema=session.pipeline_schema)>": "..."}],
+        tunable_params=[{"<build_tunable_params(schema=session.pipeline_schema)>": "..."}],
+        llm_context=[{"<build_llm_context(schema=session.pipeline_schema)>": "..."}],
         prompt_field_axes=["<load_variant_library()['prompt_fields'].keys()>"],
-        pipeline_description="<svc.pipeline_schema.description>",
+        pipeline_description="<session.pipeline_schema.description>",
         task_description="<TASK_DESCRIPTION>",
     )
 

@@ -52,7 +52,7 @@ Three entry points (Jupyter notebook, CLI runner, web app), one service core in 
 
 **Three-layer I/O architecture (INVARIANT):**
 - **Persistence** (shared, mandatory) — `run_optimization()` auto-creates `CampaignPersistenceEmitter` (`promptpotter/services/campaign/persistence_emitter.py`). Entry points MUST NOT write campaign artifacts directly — all persistence flows through the emitter. New artifacts must be added to `CAMPAIGN_SESSION_ARTIFACTS` (`promptpotter/services/campaign/artifacts.py`); `tests/test_artifact_parity.py` enforces this.
-- **Display** (per-entry-point) — caller passes `display_callbacks: CycleCallbacks`. MUST NOT write to disk.
+- **Display** (per-entry-point) — caller passes `display_callbacks: RunCallbacks`. MUST NOT write to disk.
 - **Control** (per-entry-point, optional) — `FileControlSurface` (CLI/web) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
 **Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup. SearchMemory *(M8 — live)* aggregates all historical evaluation data into a materialized view (parameter impact, query patterns, failure modes) that feeds both loops.
@@ -149,11 +149,11 @@ global query counter across all candidates
 - **EXPERIMENT_ID**: Single source of truth. Config must match stored experiment when set.
 - **Display parity**: Cached and fresh results use the same output format. A provenance indicator distinguishes data source for transparency.
 - **Graceful interrupt**: Signal-flag pattern — first Ctrl+C finishes in-flight call and saves; second force-quits. No completed work is ever discarded. See [architecture.md § Caching & Crash Recovery](docs/architecture.md#caching--crash-recovery).
-- **Error handling**: `graceful()` context manager in `campaign/helpers.py` is the standard suppress-and-log pattern. `EscalationError` carries structured `partial_results` for campaign flow control.
+- **Error handling**: `graceful()` context manager in `campaign/_campaign_utils.py` is the standard suppress-and-log pattern. `EscalationError` carries structured `partial_results` for campaign flow control.
 - **`promptpotter/shared/`**: Leaf-level utilities shared by models and services (hashing, schema mutations). No domain model or service dependencies allowed.
 - **`promptpotter/shared/constants.py`**: Canonical source for `PROMPT_STRING_FIELDS`, `LAYER_FIELDS`, and `LAYER1_STRING_FIELDS`. All modules must import field lists from here — never define them locally.
 - **`promptpotter/config/optimizer_pipeline.py`**: Optimizer pipeline schema loader + `llm_call()` primitive. All optimizer nodes use this instead of calling `chat()` directly.
-- **HITL mode**: `CycleConfig.pause_before_eval` raises `PauseForReviewError` between L1 generate and L1 evaluate. Candidates are already persisted to `round_NNNN_candidates.json` before the pause. On resume (`run_optimization()` with same `cycle_id`), `load_round_candidates()` loads them and evaluation proceeds. Campaign finalized as `"paused"` with `StopReason.PAUSED_FOR_REVIEW`.
+- **HITL mode**: `RunConfig.pause_before_eval` (from `OptimizationConfig`) raises `PauseForReviewError` between L1 generate and L1 evaluate. Candidates are already persisted to `round_NNNN_candidates.json` before the pause. On resume (`run_optimization()` with same `cycle_id`), `load_round_candidates()` loads them and evaluation proceeds. Campaign finalized as `"paused"` with `StopReason.PAUSED_FOR_REVIEW`.
 - **SessionStore**: `store.sessions` manages cross-phase state (`session.json`, `scan_results.json`, `campaign_log.md`) under `{backend_id}/sessions/{session_id}/`. All entry points use the same store — pass `session_id` to `sensitivity_scan()` / `run_optimization_notebook()` to activate persistence.
 - **Nested-only pipeline params**: All pipeline params use nested format (`{"node_name": {"param": value}}`) from LLM output through to backend. No flat-to-nested resolution. LLM prompt instructs nested output; `PROMPT_STRING_FIELDS` split separates prompt fields (inherently flat) from node params. `l1_generate()` has a safety net that auto-nests any flat params the LLM still emits.
 

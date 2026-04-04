@@ -24,21 +24,21 @@ from promptpotter.models.phase_event import PhaseEvent
 from promptpotter.services.backend_client import BackendClient
 from promptpotter.services.campaign._campaign_utils import emit_phase, get_obs_trace, graceful
 from promptpotter.services.campaign.adaptive_eval import adapt_eval_set
-from promptpotter.services.campaign.callbacks import CycleCallbacks
-from promptpotter.services.campaign.campaign_lifecycle import (
+from promptpotter.services.campaign.callbacks import RunCallbacks
+from promptpotter.services.campaign.config import RunConfig
+from promptpotter.services.campaign.critique import sample_thinking_styles
+from promptpotter.services.campaign.escalation import escalate_l2
+from promptpotter.services.campaign.lifecycle import (
     finalize_campaign,
     init_campaign,
 )
-from promptpotter.services.campaign.config import CycleConfig
-from promptpotter.services.campaign.critique import sample_thinking_styles
-from promptpotter.services.campaign.escalation import escalate_l2
-from promptpotter.services.campaign.results import CycleResult, CycleRoundResult, StopReason
+from promptpotter.services.campaign.results import RoundResult, RunResult, StopReason
 from promptpotter.services.campaign.round_execution import (
     PauseForReviewError,
     execute_round,
     update_round_state,
 )
-from promptpotter.services.campaign.state import CycleInitResult, LoopState
+from promptpotter.services.campaign.state import LoopState, RunBackendSession
 from promptpotter.services.metrics import compile_query_difficulty, compute_composite_score
 from promptpotter.services.prompt_eval import subsample_eval_data
 from promptpotter.services.search.scan_results import ScanContext
@@ -75,7 +75,7 @@ def _prepare_probe_data(
 
 async def _handle_post_probe(
     state: LoopState,
-    config: CycleConfig,
+    config: RunConfig,
     round_num: int,
     round_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None,
@@ -100,8 +100,8 @@ async def _handle_post_probe(
 
 async def _handle_escalation_signal(
     state: LoopState,
-    config: CycleConfig,
-    round_result: CycleRoundResult,
+    config: RunConfig,
+    round_result: RoundResult,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     obs_campaign_id: str,
@@ -203,7 +203,7 @@ async def _handle_escalation_signal(
 
 
 def _build_baseline_state(
-    config: CycleConfig,
+    config: RunConfig,
     baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
     baseline_results: list | None,
@@ -266,7 +266,7 @@ def _build_baseline_state(
 
 def _restore_from_checkpoint(
     state: LoopState,
-    config: CycleConfig,
+    config: RunConfig,
     campaign_store: "CampaignStore",
     cycle_id: str,
     resumed_from_round: int,
@@ -311,7 +311,7 @@ def _restore_from_checkpoint(
 
 def _setup_eval_context(
     state: LoopState,
-    config: CycleConfig,
+    config: RunConfig,
     instruction: str,
     baseline_osp: OptSearchPoint,
     backend_client: BackendClient,
@@ -373,7 +373,7 @@ def _setup_eval_context(
 async def _init_cycle_state(
     instruction: str,
     eval_data: list[dict[str, Any]],
-    config: CycleConfig,
+    config: RunConfig,
     baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
     baseline_results: list | None,
@@ -383,7 +383,7 @@ async def _init_cycle_state(
     experiment_id: str,
     backend_client: "BackendClient | None",
     started_at: str,
-) -> CycleInitResult:
+) -> RunBackendSession:
     """Initialize all cycle state: baseline, resume, obs, eval context."""
     emit_phase(
         on_phase,
@@ -517,7 +517,7 @@ async def _init_cycle_state(
             resume_from=resume_from,
         )
 
-    return CycleInitResult(
+    return RunBackendSession(
         state=state,
         campaign_store=campaign_store,
         cycle_id=cycle_id,
@@ -538,9 +538,9 @@ async def _init_cycle_state(
 def _checkpoint_round(
     campaign_store: "CampaignStore",
     cycle_id: str,
-    config: CycleConfig,
+    config: RunConfig,
     state: LoopState,
-    round_result: CycleRoundResult,
+    round_result: RoundResult,
     round_num: int,
 ) -> None:
     """Persist round results to the campaign store."""
@@ -573,7 +573,7 @@ def _checkpoint_round(
 
 async def _check_stopping_conditions(
     state: LoopState,
-    config: CycleConfig,
+    config: RunConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     obs_campaign_id: str,
@@ -613,18 +613,18 @@ async def _check_stopping_conditions(
 async def run_optimization(
     instruction: str,
     eval_data: list[dict[str, Any]],
-    config: CycleConfig,
+    config: RunConfig,
     *,
     baseline_prompt_fields: dict | None = None,
     baseline_accuracy: float = 0.0,
     baseline_results: list | None = None,
-    callbacks: CycleCallbacks | None = None,
+    callbacks: RunCallbacks | None = None,
     langfuse_session_id: str | None = None,
     scan_context: ScanContext | None = None,
     cycle_id: str | None = None,
     experiment_id: str = "",
     backend_client: "BackendClient | None" = None,
-) -> CycleResult:
+) -> RunResult:
     """Run iterative optimization with feedback cycling.
 
     Executes: init → round loop (l1_generate → l1_evaluate) → finalize.
@@ -634,7 +634,7 @@ async def run_optimization(
         config = config.model_copy(update={"scan_context": scan_context})
     started_at = datetime.now(UTC).isoformat()
 
-    cb = callbacks or CycleCallbacks()
+    cb = callbacks or RunCallbacks()
 
     # -- Init --
     init = await _init_cycle_state(
@@ -668,7 +668,7 @@ async def run_optimization(
     if _emitter:
         from promptpotter.services.campaign.callbacks import chain_callbacks
 
-        persistence_cb = CycleCallbacks(
+        persistence_cb = RunCallbacks(
             on_phase=_emitter.on_phase,
             on_query_eval=_emitter.on_query_eval,
             on_candidate_eval=_emitter.on_candidate_eval,
@@ -903,7 +903,7 @@ async def run_optimization(
         else (obs.get_cloud_trace_id(obs_campaign_id) if obs else None)
     )
 
-    return CycleResult(
+    return RunResult(
         rounds=state.rounds,
         n_rounds=len(state.rounds),
         best_accuracy=state.best_accuracy,

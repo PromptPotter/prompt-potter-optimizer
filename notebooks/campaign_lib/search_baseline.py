@@ -15,6 +15,7 @@ from .setup import setup_llm
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.init import BackendSession
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +33,11 @@ async def prepare_scan_baseline(
     backend_id: str = "",
     scan_variants: dict | None = None,
     force_restructure: bool = False,
-    svc: dict | None = None,
+    session: BackendSession | None = None,
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
-    Delegates to ``api.services.search.scan_baseline.prepare_scan_baseline()``
+    Delegates to ``promptpotter.services.search.scan_baseline.prepare_scan_baseline()``
     and prints restructured fields + historical diagnostic.
 
     Returns:
@@ -44,21 +45,21 @@ async def prepare_scan_baseline(
     """
     from .setup import configure_pipeline
 
-    # svc shorthand: extract store/backend_id if provided
-    if svc is not None:
-        store = store or svc.store
-        backend_id = backend_id or svc.backend_id
+    # session shorthand: extract store/backend_id if provided
+    if session is not None:
+        store = store or session.store
+        backend_id = backend_id or session.backend_id
 
     # Fresh pipeline defaults when not explicitly provided
-    if pipeline_params is None and svc is not None:
-        pipeline_params = configure_pipeline(svc, campaign_config)
+    if pipeline_params is None and session is not None:
+        pipeline_params = configure_pipeline(session, campaign_config)
 
     llm_client, llm_model = setup_llm(campaign_config)
 
     # Resolve prompt node from pipeline schema — only if the node is active
     prompt_node = ""
-    if svc is not None:
-        ps = svc.pipeline_schema
+    if session is not None:
+        ps = session.pipeline_schema
         active_steps = set((pipeline_params or {}).get("steps", []))
         if ps:
             for name in ps.prompt_node_names():
