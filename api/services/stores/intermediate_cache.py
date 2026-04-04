@@ -25,9 +25,19 @@ from api.services.stores.base import read_json_optional, validate_path_component
 logger = logging.getLogger(__name__)
 
 
-def _steps_hash(steps: list[str]) -> str:
-    """Deterministic short hash for an ordered step list."""
-    blob = json.dumps(steps, sort_keys=False).encode()
+def _steps_hash(steps: list[str], pipeline_params: dict[str, Any] | None = None) -> str:
+    """Deterministic short hash for step list + pipeline params.
+
+    Incorporates pipeline_params so different configurations (model,
+    temperature, schema, etc.) produce distinct cache keys.
+    """
+    key_parts: list[Any] = [steps]
+    if pipeline_params:
+        # Exclude 'steps' from params hash (already in the step list)
+        pp = {k: v for k, v in sorted(pipeline_params.items()) if k != "steps"}
+        if pp:
+            key_parts.append(pp)
+    blob = json.dumps(key_parts, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
@@ -64,11 +74,12 @@ class IntermediateCache:
         steps: list[str],
         query: str,
         node_outputs: dict[str, Any],
+        pipeline_params: dict[str, Any] | None = None,
     ) -> None:
-        """Store node outputs keyed by step sequence + query."""
+        """Store node outputs keyed by step sequence + pipeline params + query."""
         if not steps or not node_outputs:
             return
-        sh = _steps_hash(steps)
+        sh = _steps_hash(steps, pipeline_params)
         path = self._cache_path(backend_id, f"steps_{sh}")
         data = read_json_optional(path) or {}
         data[query] = node_outputs
@@ -86,16 +97,29 @@ class IntermediateCache:
         backend_id: str,
         query: str,
         target_steps: list[str],
+        pipeline_params: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], list[str]] | None:
         """Find the longest cached prefix for a query.
 
-        Scans the step index for entries whose steps are an ordered prefix
-        of *target_steps*.  Returns ``(node_outputs, cached_steps)`` for
-        the longest match, or ``None`` on miss.
+        When *pipeline_params* is provided, only returns exact-match entries
+        (same steps + same params). Without pipeline_params, falls back to
+        step-only matching for backward compatibility.
+
+        Returns ``(node_outputs, cached_steps)`` for the longest match,
+        or ``None`` on miss.
         """
         if not target_steps:
             return None
 
+        # Fast path: exact match with pipeline_params
+        if pipeline_params is not None:
+            sh = _steps_hash(target_steps, pipeline_params)
+            data = read_json_optional(self._cache_path(backend_id, f"steps_{sh}"))
+            if data and query in data:
+                return data[query], target_steps
+            return None
+
+        # Legacy path: scan index for step-prefix matches
         index = self._load_step_index(backend_id)
         best: tuple[dict[str, Any], list[str]] | None = None
         best_len = 0
@@ -106,7 +130,6 @@ class IntermediateCache:
                 continue
             if target_steps[:n] != cached_steps:
                 continue
-            # Prefix match — check if query exists
             data = read_json_optional(self._cache_path(backend_id, f"steps_{sh}"))
             if data and query in data:
                 best = (data[query], cached_steps)

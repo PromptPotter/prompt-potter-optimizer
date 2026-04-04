@@ -330,7 +330,7 @@ async def eval_query_via_backend(
         precomputed = None
         cached_steps: list[str] = []
         if intermediate_cache and _target_steps:
-            prefix_hit = intermediate_cache.get_prefix(backend_id, query, _target_steps)
+            prefix_hit = intermediate_cache.get_prefix(backend_id, query, _target_steps, pipeline_params=pipeline_params)
             if prefix_hit:
                 node_outputs_hit, cached_steps = prefix_hit
                 precomputed = {k: v for k, v in node_outputs_hit.items() if k in set(cached_steps)}
@@ -351,7 +351,7 @@ async def eval_query_via_backend(
         # Cache populate: store node outputs keyed by step sequence
         node_outputs = data.get("node_outputs")
         if intermediate_cache and _target_steps and node_outputs and not precomputed:
-            intermediate_cache.put_steps(backend_id, _target_steps, query, node_outputs)
+            intermediate_cache.put_steps(backend_id, _target_steps, query, node_outputs, pipeline_params=pipeline_params)
 
         ranked = data.get("final_ranking", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
