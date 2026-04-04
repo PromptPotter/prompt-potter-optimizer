@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from api.config.settings import load_variant_library_rich
-from api.models.pipeline_schema import PipelineSchema
-from api.services.search.scan_advisor import (
+from promptpotter.config.settings import load_variant_library_rich
+from promptpotter.models.pipeline_schema import PipelineSchema
+from promptpotter.services.search.scan_advisor import (
     _resolve_schema_axes,
     advisory_to_scan_variants,
 )
@@ -119,7 +119,7 @@ def resolve_scan_variants(
 
     Returns ``(resolved_variants, schema_labels)``.
     """
-    from api.shared.constants import PROMPT_STRING_FIELDS
+    from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
     if pipeline_schema is None and svc is not None:
         pipeline_schema = svc.pipeline_schema

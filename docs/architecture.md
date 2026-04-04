@@ -5,9 +5,9 @@
 Two entry points, shared service core:
 
 1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `notebooks/campaign_lib/` (display layer wrapping services). No business logic in the notebook layer.
-2. **FastAPI API** (`api/main.py`) — REST at `/api/v1/`. Routers: `backends`, `campaigns`, `health`.
+2. **FastAPI API** (`promptpotter/main.py`) — REST at `/promptpotter/v1/`. Routers: `backends`, `campaigns`, `health`.
 
-All core logic lives in `api/services/`.
+All core logic lives in `promptpotter/services/`.
 
 ## Two-Loop Architecture
 
@@ -106,7 +106,7 @@ During sensitivity scan, the perturbed axis is auto-added to `strict_params` so 
 
 ## Optimizer Pipeline
 
-Five nodes, declared in `api/config/optimizer_pipeline.json`:
+Five nodes, declared in `promptpotter/config/optimizer_pipeline.json`:
 
 | Node | Purpose | Trigger |
 |------|---------|---------|
@@ -190,13 +190,13 @@ Degradation tracking feeds the stale data protocol's `sampleswitch` step: querie
 
 Cohort analysis (`cohort_analysis.py`) extends the model: per-query hit/miss results from scans are sliced by failure mode cohort to determine which axes matter most for which failure types. Results are ingested via `ingest_cohort_analysis()`.
 
-Implementation: `api/services/search/search_memory.py`, `api/services/search/cohort_analysis.py`.
+Implementation: `promptpotter/services/search/search_memory.py`, `promptpotter/services/search/cohort_analysis.py`.
 
 ### Intermediate Cache (M8 Wave 4)
 
 > **Planned (M8 Wave 4)** — not yet implemented.
 
-Partial pipeline caching that avoids re-running upstream nodes when only the ranker config changes. The `IntermediateCache` (`api/services/stores/intermediate_cache.py`) stores per-node outputs keyed by `(upstream_config_hash, query)`.
+Partial pipeline caching that avoids re-running upstream nodes when only the ranker config changes. The `IntermediateCache` (`promptpotter/services/stores/intermediate_cache.py`) stores per-node outputs keyed by `(upstream_config_hash, query)`.
 
 When a pipeline has stable upstream nodes (e.g., `fuzzy_matching`, `web_search`) and only the ranker (`llm_ranking`) parameters vary across candidates, cached upstream outputs can be injected as `precomputed` inputs, skipping redundant computation. `PipelineSchema.upstream_config_hash()` computes the cache key from upstream node configs.
 

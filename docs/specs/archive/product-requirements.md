@@ -49,13 +49,13 @@
 
 ## P0 -- Must Have (Core Optimizer)
 
-P0.1–P0.6: All implemented (M1–M2). Backend evaluation with content-addressed dedup and crash recovery, failure analysis, LLM candidate generation, optimization loop with patience-based stopping, immutable 3-layer PromptState, sensitivity scan with sampling and plan persistence. See `api/services/` for implementations.
+P0.1–P0.6: All implemented (M1–M2). Backend evaluation with content-addressed dedup and crash recovery, failure analysis, LLM candidate generation, optimization loop with patience-based stopping, immutable 3-layer PromptState, sensitivity scan with sampling and plan persistence. See `promptpotter/services/` for implementations.
 
 ---
 
 ## P1 -- Should Have (M3 Optimization Infrastructure)
 
-P1.1–P1.9: All implemented (M1–M3). Optimizer pipeline, feedback cycling with 3-path routing, campaign registry, Langfuse per-trial tracing, discovery protocol, ablation comparison, parameter passthrough, sensitivity scan, shared data loop. See `api/services/` for implementations.
+P1.1–P1.9: All implemented (M1–M3). Optimizer pipeline, feedback cycling with 3-path routing, campaign registry, Langfuse per-trial tracing, discovery protocol, ablation comparison, parameter passthrough, sensitivity scan, shared data loop. See `promptpotter/services/` for implementations.
 
 ---
 
@@ -63,8 +63,8 @@ P1.1–P1.9: All implemented (M1–M3). Optimizer pipeline, feedback cycling wit
 
 | ID | What | Implementation | Milestone |
 |----|------|---------------|-----------|
-| P1.10 | File-based observability: Langfuse-compatible traces + MLflow-compatible experiments on disk. Prompt versioning. | See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) | M5 (Complete) |
-| P1.11 | LLM retry logic: exponential backoff for transient 503/429 errors | See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) | M5 (Complete) |
+| P1.10 | File-based observability: Langfuse-compatible traces + MLflow-compatible experiments on disk. Prompt versioning. | See [`promptpotter/services/CLAUDE.md`](../../promptpotter/services/CLAUDE.md) | M5 (Complete) |
+| P1.11 | LLM retry logic: exponential backoff for transient 503/429 errors | See [`promptpotter/services/CLAUDE.md`](../../promptpotter/services/CLAUDE.md) | M5 (Complete) |
 | P1.12 | Workflow-driven optimization: `WorkflowRunner` with `runtime_config`, `FeedbackCycleNode`, `DatasetLoadNode`, YAML campaigns | [M6 spec](m6-pipeline-composability.md) | M6 |
 | P1.13 | Multi-connector support: `ConnectorProtocol`, `MockConnector`, `ConnectorRegistry`, backend-agnostic evaluation | [M9 spec](m9-multi-connector.md) | M9 |
 | P1.14 | PipelineSchema: backend-agnostic pipeline description as single source of truth. Eliminates 13 backend-specific assumptions. Derived from backend discovery, consumed by all services. | [M6 spec](m6-pipeline-composability.md) — WP 6.1–6.2 | M6 |

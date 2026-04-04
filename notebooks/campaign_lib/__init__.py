@@ -7,14 +7,14 @@ interactive notebook use.
 
 # -- Setup (init, pipeline, LLM, langfuse, datasets) -------------------------
 
-# -- Re-exports from api.services.search (used directly in notebook) ----------
-from api.services.search import (
+# -- Re-exports from promptpotter.services.search (used directly in notebook) ----------
+from promptpotter.services.search import (
     build_diagnostic_set,
     build_llm_context,
     build_pipeline_overview,
     build_tunable_params,
 )
-from api.services.search import (
+from promptpotter.services.search import (
     build_prompt_result_index as build_historical_index,
 )
 
@@ -173,7 +173,7 @@ __all__ = [
     "show_progress",
     "show_scan_leaderboard",
     "show_scan_query_difficulty",
-    # Re-exports from api.services.search
+    # Re-exports from promptpotter.services.search
     "build_diagnostic_set",
     "build_historical_index",
     "build_llm_context",

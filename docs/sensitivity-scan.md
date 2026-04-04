@@ -90,5 +90,5 @@ Standard sensitivity scan measures per-axis accuracy deltas over the full query 
 - `query_sensitive_axes(query)` returns the axes most relevant to a specific query based on its cohort membership.
 - `parameter_failure_correlation(axis)` returns per-failure-mode deltas for an axis.
 
-Implementation: `api/services/search/cohort_analysis.py`. Data models: `CohortSensitivity`, `CohortAnalysisResult`.
+Implementation: `promptpotter/services/search/cohort_analysis.py`. Data models: `CohortSensitivity`, `CohortAnalysisResult`.
 

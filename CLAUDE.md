@@ -8,27 +8,27 @@ PromptPotter Optimizer is a backend-first prompt optimization service. It connec
 
 ```bash
 # Run API server
-uvicorn api.main:app --port 8001 --reload
+uvicorn promptpotter.main:app --port 8001 --reload
 
 # Run tests
 pytest -v --tb=short
 
 # Lint
-ruff check api/ tests/
+ruff check promptpotter/ tests/
 
 # Docker (JupyterLab + API)
 cd docker && docker-compose up --build
 
 # CLI campaign runner (HITL optimization from terminal)
-python -m api.cli.campaign_runner init --backend-url http://127.0.0.1:8000
-python -m api.cli.campaign_runner optimize --round   # generate → pause for review
-python -m api.cli.campaign_runner optimize --evaluate # resume evaluation
-python -m api.cli.campaign_runner optimize --auto     # full loop, no pause
+python -m promptpotter.cli.campaign_runner init --backend-url http://127.0.0.1:8000
+python -m promptpotter.cli.campaign_runner optimize --round   # generate → pause for review
+python -m promptpotter.cli.campaign_runner optimize --evaluate # resume evaluation
+python -m promptpotter.cli.campaign_runner optimize --auto     # full loop, no pause
 ```
 
 ## CLI Workflow
 
-The CLI campaign runner (`api/cli/campaign_runner.py`) follows a strict subcommand sequence. Each step persists to `SessionStore` so progress survives interrupts. Config via `--config` JSON file.
+The CLI campaign runner (`promptpotter/cli/campaign_runner.py`) follows a strict subcommand sequence. Each step persists to `SessionStore` so progress survives interrupts. Config via `--config` JSON file.
 
 ```
 init ──→ [task-context] ──→ [scan] ──→ [scan-results] ──→ optimize ──→ results
@@ -42,16 +42,16 @@ init ──→ [task-context] ──→ [scan] ──→ [scan-results] ──�
 - `campaign_output.log` — append-only eval log (ANSI-stripped)
 - `campaign_log.md` — structured campaign report
 
-**Bidirectional control:** Edit `campaign_state.json`'s `control.requested_state` to `"pause"`, `"resume"`, or `"stop"`. Set `control.pause_before_l2_eval: true` to pause after L2 generates new context. Or use `python -m api.cli.campaign_runner control --pause`.
+**Bidirectional control:** Edit `campaign_state.json`'s `control.requested_state` to `"pause"`, `"resume"`, or `"stop"`. Set `control.pause_before_l2_eval: true` to pause after L2 generates new context. Or use `python -m promptpotter.cli.campaign_runner control --pause`.
 
 See [`docs/cli-workflow.md`](docs/cli-workflow.md) for the full subcommand reference.
 
 ## Mental Model
 
-Three entry points (Jupyter notebook, CLI runner, web app), one service core in `api/services/`. The notebook is `notebooks/optimization_campaign.ipynb`; `campaign_lib` wraps services with display. The CLI (`api/cli/campaign_runner.py`) is a parallel orchestration layer with HITL support — generates candidates, pauses for human/AI review, then evaluates. All entry points produce identical persistent artifacts via the three-layer architecture:
+Three entry points (Jupyter notebook, CLI runner, web app), one service core in `promptpotter/services/`. The notebook is `notebooks/optimization_campaign.ipynb`; `campaign_lib` wraps services with display. The CLI (`promptpotter/cli/campaign_runner.py`) is a parallel orchestration layer with HITL support — generates candidates, pauses for human/AI review, then evaluates. All entry points produce identical persistent artifacts via the three-layer architecture:
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `run_optimization()` auto-creates `CampaignPersistenceEmitter` (`api/services/campaign/persistence_emitter.py`). Entry points MUST NOT write campaign artifacts directly — all persistence flows through the emitter. New artifacts must be added to `CAMPAIGN_SESSION_ARTIFACTS` (`api/services/campaign/artifacts.py`); `tests/test_artifact_parity.py` enforces this.
+- **Persistence** (shared, mandatory) — `run_optimization()` auto-creates `CampaignPersistenceEmitter` (`promptpotter/services/campaign/persistence_emitter.py`). Entry points MUST NOT write campaign artifacts directly — all persistence flows through the emitter. New artifacts must be added to `CAMPAIGN_SESSION_ARTIFACTS` (`promptpotter/services/campaign/artifacts.py`); `tests/test_artifact_parity.py` enforces this.
 - **Display** (per-entry-point) — caller passes `display_callbacks: CycleCallbacks`. MUST NOT write to disk.
 - **Control** (per-entry-point, optional) — `FileControlSurface` (CLI/web) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
@@ -138,7 +138,7 @@ global query counter across all candidates
 - **CLI command timeouts**: Backend responds fast — use 30s timeout for CLI commands, not minutes. 30s covers 5+ backend requests easily. For long-running CLI commands (init with baseline, optimize), use **120s (2 minutes) maximum** — never 10 minutes. If a command hasn't finished in 2 minutes, something is wrong.
 - **No background CLI commands**: Never run CLI campaign commands (`campaign_runner`) in the background or with `run_in_background`. Always foreground so stale processes don't leak and spam the backend. After any interrupted CLI run, verify with `ps aux | grep python` and kill orphans with `taskkill //PID <pid> //F`.
 - **Type hints**: PEP 604 (`X | None`), lowercase generics (`list[str]`)
-- **Logging**: `logging` module (no `print()` in services). Setup in `api/config/logging.py`.
+- **Logging**: `logging` module (no `print()` in services). Setup in `promptpotter/config/logging.py`.
 - **`sample_size`**: Universal eval sampling parameter (0 = all). No synonyms.
 - **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields. Surfaces schema violations immediately rather than hiding them behind silent defaults.
 
@@ -150,9 +150,9 @@ global query counter across all candidates
 - **Display parity**: Cached and fresh results use the same output format. A provenance indicator distinguishes data source for transparency.
 - **Graceful interrupt**: Signal-flag pattern — first Ctrl+C finishes in-flight call and saves; second force-quits. No completed work is ever discarded. See [architecture.md § Caching & Crash Recovery](docs/architecture.md#caching--crash-recovery).
 - **Error handling**: `graceful()` context manager in `campaign/helpers.py` is the standard suppress-and-log pattern. `EscalationError` carries structured `partial_results` for campaign flow control.
-- **`api/shared/`**: Leaf-level utilities shared by models and services (hashing, schema mutations). No domain model or service dependencies allowed.
-- **`api/shared/constants.py`**: Canonical source for `PROMPT_STRING_FIELDS`, `LAYER_FIELDS`, and `LAYER1_STRING_FIELDS`. All modules must import field lists from here — never define them locally.
-- **`api/config/optimizer_pipeline.py`**: Optimizer pipeline schema loader + `llm_call()` primitive. All optimizer nodes use this instead of calling `chat()` directly.
+- **`promptpotter/shared/`**: Leaf-level utilities shared by models and services (hashing, schema mutations). No domain model or service dependencies allowed.
+- **`promptpotter/shared/constants.py`**: Canonical source for `PROMPT_STRING_FIELDS`, `LAYER_FIELDS`, and `LAYER1_STRING_FIELDS`. All modules must import field lists from here — never define them locally.
+- **`promptpotter/config/optimizer_pipeline.py`**: Optimizer pipeline schema loader + `llm_call()` primitive. All optimizer nodes use this instead of calling `chat()` directly.
 - **HITL mode**: `CycleConfig.pause_before_eval` raises `PauseForReviewError` between L1 generate and L1 evaluate. Candidates are already persisted to `round_NNNN_candidates.json` before the pause. On resume (`run_optimization()` with same `cycle_id`), `load_round_candidates()` loads them and evaluation proceeds. Campaign finalized as `"paused"` with `StopReason.PAUSED_FOR_REVIEW`.
 - **SessionStore**: `store.sessions` manages cross-phase state (`session.json`, `scan_results.json`, `campaign_log.md`) under `{backend_id}/sessions/{session_id}/`. All entry points use the same store — pass `session_id` to `sensitivity_scan()` / `run_optimization_notebook()` to activate persistence.
 - **Nested-only pipeline params**: All pipeline params use nested format (`{"node_name": {"param": value}}`) from LLM output through to backend. No flat-to-nested resolution. LLM prompt instructs nested output; `PROMPT_STRING_FIELDS` split separates prompt fields (inherently flat) from node params. `l1_generate()` has a safety net that auto-nests any flat params the LLM still emits.
@@ -185,12 +185,12 @@ What's genuinely distinctive about how PromptPotter works.
 1. **This file** — overview, commands, data models, conventions, service catalog
 2. [`docs/architecture.md`](docs/architecture.md) — system design, two-loop diagram, two-layer tracing, caching, pipeline discovery, disk layout
 3. [`docs/optimization.md`](docs/optimization.md) — L1/L2/L3 optimization loop, critique agent, escalation, configuration
-4. [`docs/node-standard.md`](docs/node-standard.md) — node type hierarchy, `llm_call()` primitive (`api/config/optimizer_pipeline.py`), pipeline declaration format
+4. [`docs/node-standard.md`](docs/node-standard.md) — node type hierarchy, `llm_call()` primitive (`promptpotter/config/optimizer_pipeline.py`), pipeline declaration format
 5. [`docs/sensitivity-scan.md`](docs/sensitivity-scan.md) — OAT scan workflow, coverage, circuit breaker
 6. [`docs/observability.md`](docs/observability.md) — Langfuse, MLflow, events.jsonl
 7. [`docs/setup-guide.md`](docs/setup-guide.md) — installation, quick start, REST API
 8. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M8, M9) + roadmap; archived specs in `docs/specs/archive/`
 9. [`docs/prompt-scheme.md`](docs/prompt-scheme.md) — prompt decomposition (8 fields), rendering, variant library, projection to target pipeline
 10. [`docs/information-flow.md`](docs/information-flow.md) — data origins, consumer matrix, information compression chain
-11. `api/cli/campaign_runner.py` — CLI campaign runner (HITL subcommands: init, scan, optimize --round/--evaluate/--auto, results, status)
+11. `promptpotter/cli/campaign_runner.py` — CLI campaign runner (HITL subcommands: init, scan, optimize --round/--evaluate/--auto, results, status)
 

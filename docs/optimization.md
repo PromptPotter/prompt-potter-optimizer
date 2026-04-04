@@ -254,7 +254,7 @@ That's it. `DegradationCheck` counts it, critique shows `ANOMALY FLAGS`, escalat
 
 ## Thinking Styles
 
-Each round samples 2-3 styles from the variant library (`api/config/prompt_variants.json`, 35+ from published research) into the meta-prompt as mutation guidance. Structured diversity beyond temperature randomness.
+Each round samples 2-3 styles from the variant library (`promptpotter/config/prompt_variants.json`, 35+ from published research) into the meta-prompt as mutation guidance. Structured diversity beyond temperature randomness.
 
 ## Scan-Aware Generation
 

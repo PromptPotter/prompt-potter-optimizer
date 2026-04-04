@@ -102,12 +102,12 @@ PromptPotter has no backward compatibility constraint. Once TermNorm fixes the w
 
 | File | What it does with warnings |
 |------|---------------------------|
-| `api/services/prompt_eval.py` | `_is_degraded()`, `_execute_stale_data_protocol()`, cache invalidation |
-| `api/services/metrics.py` | `count_degraded_queries()` |
-| `api/services/campaign/escalation.py` | `DegradationCheck`, `DEFAULT_STRATEGIES` routing |
-| `api/services/campaign/critique.py` | `extract_warning_types()`, warning inventory |
-| `api/services/search/search_memory.py` | `query_degradation_rate()`, degradation counting in `_ingest_run()` |
-| `api/config/optimizer_pipeline.json` | Stale data protocol thresholds on `l1_evaluate` node |
+| `promptpotter/services/prompt_eval.py` | `_is_degraded()`, `_execute_stale_data_protocol()`, cache invalidation |
+| `promptpotter/services/metrics.py` | `count_degraded_queries()` |
+| `promptpotter/services/campaign/escalation.py` | `DegradationCheck`, `DEFAULT_STRATEGIES` routing |
+| `promptpotter/services/campaign/critique.py` | `extract_warning_types()`, warning inventory |
+| `promptpotter/services/search/search_memory.py` | `query_degradation_rate()`, degradation counting in `_ingest_run()` |
+| `promptpotter/config/optimizer_pipeline.json` | Stale data protocol thresholds on `l1_evaluate` node |
 | `notebooks/campaign_lib/display.py` | `_fmt_query_result()` — per-query warning + protocol action display |
 
 ---

@@ -11,10 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from api.models.phase_event import PhaseEvent
+from promptpotter.models.phase_event import PhaseEvent
 
 if TYPE_CHECKING:
-    from api.services.search.scan_results import ScanContext
+    from promptpotter.services.search.scan_results import ScanContext
 
 from .display import (
     BOLD,

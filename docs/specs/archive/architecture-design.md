@@ -17,7 +17,7 @@
             | Notebook (Python)         | HTTP (REST)
             v                           v
 +-----------+-----------+  +------------+-------------------+
-| _campaign_lib.py      |  |  FastAPI (api/main.py)         |
+| _campaign_lib.py      |  |  FastAPI (promptpotter/main.py)         |
 | (tqdm, IPython,       |  |  backends (+pipeline discovery)|
 |  progress display)    |  |  workflows / health / campaigns|
 +-----------+-----------+  +--------------------------------+
@@ -41,7 +41,7 @@
           v      v        v        v       v       v
       Connector LLM    Langfuse  File   Evaluator  obs/
       Protocol Providers  SDK    System  Framework  (Langfuse
-      (M9)     (Groq,           (.pp/)  (api/       traces,
+      (M9)     (Groq,           (.pp/)  (promptpotter/       traces,
        |       OpenAI)                   evaluators/ MLflow
        v                                )           experiments,
    TermNorm                                         prompts)
@@ -71,7 +71,7 @@ The AI Loop is itself a 4-step pipeline, implemented by `optimization_loop.py`:
 | **l2_refine_context** | Context/parameter tuning on L1 stall | `refine_context()` in `layer_transitions.py` |
 | **l3_modify_plan** | Strategic replanning on L2 stall | `modify_plan()` in `layer_transitions.py` |
 
-These 4 steps are modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend, enabling step-level tracing, full reproducibility, and self-optimization. Each step is a direct service call wrapped with `observed_step()` (in `api/services/obs/step_tracer.py`), configured via `api/config/optimizer_pipeline.json` using the node standard. `OptSearchPoint` (`api/models/opt_search_point.py`) captures the optimizer's configuration at each round — critique, thinking styles, task context, escalation journal, and per-query warning inventory — checkpointed in trial JSON for traceability and resume. See the [M7 spec](m7-optimizer-pipeline.md) for the full design including the warning inventory (§13) and L2 diagnostic probe rounds.
+These 4 steps are modeled using the same `PipelineSchema`/`PipelineStep` architecture as the target backend, enabling step-level tracing, full reproducibility, and self-optimization. Each step is a direct service call wrapped with `observed_step()` (in `promptpotter/services/obs/step_tracer.py`), configured via `promptpotter/config/optimizer_pipeline.json` using the node standard. `OptSearchPoint` (`promptpotter/models/opt_search_point.py`) captures the optimizer's configuration at each round — critique, thinking styles, task context, escalation journal, and per-query warning inventory — checkpointed in trial JSON for traceability and resume. See the [M7 spec](m7-optimizer-pipeline.md) for the full design including the warning inventory (§13) and L2 diagnostic probe rounds.
 
 Each round runs l1_generate then l1_evaluate. Stopping: `max_rounds`, `patience`, `next_action == "stop"`, or perfect accuracy. On L1 stall, escalates to l2_refine_context; on L2 stall, to l3_modify_plan. Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (bypassing patience).
 
@@ -79,15 +79,15 @@ Each round runs l1_generate then l1_evaluate. Stopping: `max_rounds`, `patience`
 
 ## Service Architecture
 
-See [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) for the full service catalog, evaluation gateway, and conventions.
+See [`promptpotter/services/CLAUDE.md`](../../promptpotter/services/CLAUDE.md) for the full service catalog, evaluation gateway, and conventions.
 
 ---
 
 ## Data Model
 
-**SearchPoint** bundles `PromptState` + `model` + `temperature` + `pipeline_params` — the four search-space dimensions for one evaluation. **PipelineSchema** (what pipeline) provides the structural context: `f(SearchPoint, PipelineSchema, eval_data) → scores`. See `api/models/search_point.py` and `api/models/pipeline_schema.py` for field details, derivation methods, and factory patterns.
+**SearchPoint** bundles `PromptState` + `model` + `temperature` + `pipeline_params` — the four search-space dimensions for one evaluation. **PipelineSchema** (what pipeline) provides the structural context: `f(SearchPoint, PipelineSchema, eval_data) → scores`. See `promptpotter/models/search_point.py` and `promptpotter/models/pipeline_schema.py` for field details, derivation methods, and factory patterns.
 
-**ProjectStore** file layout and store module breakdown: see [`api/services/CLAUDE.md`](../../api/services/CLAUDE.md) § "Store layout".
+**ProjectStore** file layout and store module breakdown: see [`promptpotter/services/CLAUDE.md`](../../promptpotter/services/CLAUDE.md) § "Store layout".
 
 ---
 

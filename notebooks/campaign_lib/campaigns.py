@@ -5,22 +5,22 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.campaign_persistence import (
+from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.services.campaign.campaign_persistence import (
     apply_experiment_overrides,
 )
-from api.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.campaign_persistence import (
     diff_campaign_config as _diff_campaign_config,
 )
-from api.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.campaign_persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from api.services.campaign.config import CampaignConfig
-    from api.services.project_store import ProjectStore
+    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.project_store import ProjectStore
 
 
 __all__ = [
@@ -224,8 +224,8 @@ def show_experiment_dashboard(
     active_id = None
     if campaign_config is not None and eval_data is not None:
         try:
-            from api.services.campaign.campaign_lifecycle import cycle_config_identity
-            from api.services.campaign.config import CycleConfig
+            from promptpotter.services.campaign.campaign_lifecycle import cycle_config_identity
+            from promptpotter.services.campaign.config import CycleConfig
 
             config = CycleConfig.from_campaign_config(
                 campaign_config, pipeline_params=pipeline_params,

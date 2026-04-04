@@ -6,10 +6,10 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import OptSearchPoint
-from api.services.search.adaptive_searcher import adaptive_search as _adaptive_search
-from api.services.search.sensitivity_scanner import sensitivity_scan as _sensitivity_scan
-from api.shared.constants import LAYER1_STRING_FIELDS
+from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.services.search.adaptive_searcher import adaptive_search as _adaptive_search
+from promptpotter.services.search.sensitivity_scanner import sensitivity_scan as _sensitivity_scan
+from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
 from .display import (
     CYAN,
@@ -21,7 +21,7 @@ from .display import (
 )
 
 if TYPE_CHECKING:
-    from api.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 

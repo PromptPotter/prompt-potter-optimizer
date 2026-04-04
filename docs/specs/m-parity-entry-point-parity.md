@@ -22,8 +22,8 @@ optimization_loop.py ──auto-creates──> CampaignPersistenceEmitter
 - **Control** — per-entry-point, optional. `FileControlSurface` (CLI/web) or kernel interrupt (notebook).
 
 **Key files:**
-- `api/services/campaign/persistence_emitter.py` — `CampaignPersistenceEmitter`
-- `api/services/campaign/control_surface.py` — `FileControlSurface`
-- `api/services/campaign/callbacks.py` — `chain_callbacks()`
-- `api/services/campaign/artifacts.py` — `CAMPAIGN_SESSION_ARTIFACTS` manifest
+- `promptpotter/services/campaign/persistence_emitter.py` — `CampaignPersistenceEmitter`
+- `promptpotter/services/campaign/control_surface.py` — `FileControlSurface`
+- `promptpotter/services/campaign/callbacks.py` — `chain_callbacks()`
+- `promptpotter/services/campaign/artifacts.py` — `CAMPAIGN_SESSION_ARTIFACTS` manifest
 - `tests/test_artifact_parity.py` — 4 parity guard tests

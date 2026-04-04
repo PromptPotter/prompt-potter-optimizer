@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import OptSearchPoint
-from api.models.phase_event import PhaseEvent
-from api.services.campaign.campaign_init import (
+from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.phase_event import PhaseEvent
+from promptpotter.services.campaign.campaign_init import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
-from api.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.campaign_persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
-from api.services.campaign.results import CycleResult
-from api.shared.errors import is_error_result
+from promptpotter.services.campaign.results import CycleResult
+from promptpotter.shared.errors import is_error_result
 
 from .display import (
     BOLD,
@@ -49,11 +49,11 @@ from .stats import (
 )
 
 if TYPE_CHECKING:
-    from api.models.pipeline_schema import PipelineSchema
-    from api.services.campaign.callbacks import CycleCallbacks
-    from api.services.campaign.config import CampaignConfig
-    from api.services.project_store import ProjectStore
-    from api.services.search.scan_results import ScanContext
+    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.services.campaign.callbacks import CycleCallbacks
+    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.services.search.scan_results import ScanContext
 
 __all__ = [
     "run_optimization_notebook",
@@ -102,12 +102,12 @@ def show_feedback_preflight(
     Returns:
         ScanContext (or None) for passing to the run cell.
     """
-    from api.services.campaign.config import CycleConfig
+    from promptpotter.services.campaign.config import CycleConfig
 
     # Build scan context from scan data when available
     scan_context = None
     if scan_df is not None and axis_profiles is not None and scan_variants is not None:
-        from api.services.search import prepare_scan_context
+        from promptpotter.services.search import prepare_scan_context
 
         baseline_acc = 0.0
         if campaign_rounds:
@@ -368,8 +368,8 @@ async def run_optimization_notebook(
     Returns:
         Tuple of (campaign_rounds, CycleResult or None if interrupted).
     """
-    from api.services.campaign.config import CycleConfig
-    from api.services.campaign.optimization_loop import run_optimization
+    from promptpotter.services.campaign.config import CycleConfig
+    from promptpotter.services.campaign.optimization_loop import run_optimization
 
     # svc shorthand
     if svc is not None:
@@ -571,8 +571,10 @@ async def run_optimization_notebook(
             try:
                 from collections import Counter
 
-                from api.services.campaign.critique import find_rank, get_candidates
-                from api.services.campaign.round_execution import _candidate_keys_from_schema
+                from promptpotter.services.campaign.critique import find_rank, get_candidates
+                from promptpotter.services.campaign.round_execution import (
+                    _candidate_keys_from_schema,
+                )
                 _ck = _candidate_keys_from_schema(config.pipeline_schema)
 
                 _results = round_result.results
@@ -645,7 +647,7 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from api.services.campaign.callbacks import CycleCallbacks, chain_callbacks
+    from promptpotter.services.campaign.callbacks import CycleCallbacks, chain_callbacks
 
     notebook_display_cb = CycleCallbacks(
         on_round_complete=_on_round,

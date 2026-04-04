@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from api.shared.errors import is_error_result
+from promptpotter.shared.errors import is_error_result
 
 from .stats import fmt_ci, wilson_ci
 
@@ -247,7 +247,7 @@ def _infer_terminated_step(step_timings: dict) -> str | None:
 
 def _find_gt_rank(r: dict) -> int | None:
     """Find ground truth rank in candidates. Returns 1-indexed rank or None."""
-    from api.services.campaign.critique import find_rank
+    from promptpotter.services.campaign.critique import find_rank
 
     gt = r.get("ground_truth", "")
     if not gt:
@@ -627,7 +627,7 @@ def format_pipeline_overrides(
     for node_name, params in node_entries:
         print(f'      "{node_name}": {{')
         for param, val in params.items():
-            print(f'          "{param}": {repr(val)},')
+            print(f'          "{param}": {val!r},')
         print("      },")
     print("  }")
     print(f"  {DIM}{'─' * 60}{RESET}")

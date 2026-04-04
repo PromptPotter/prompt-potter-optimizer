@@ -23,7 +23,7 @@ L1 candidates use `pipeline_params_override` for both namespaces: keys matching 
 | 7 | `few_shot_examples` | L1 | No | Input/Output demonstration pairs (rendered separately) |
 | 8 | `plan` | L3 | No | Strategic optimization framework (rendered at end) |
 
-Source of truth: `PROMPT_STRING_FIELDS` in `api/shared/constants.py` (fields 1-6). `few_shot_examples` and `plan` are rendered explicitly after the string fields.
+Source of truth: `PROMPT_STRING_FIELDS` in `promptpotter/shared/constants.py` (fields 1-6). `few_shot_examples` and `plan` are rendered explicitly after the string fields.
 
 Dynamic field mutation (L2-driven add/remove) is a future optimization direction — see [optimization.md § Dynamic Field Set](optimization.md#dynamic-field-set-design-vision).
 
@@ -80,7 +80,7 @@ In optimizer prompts, `problem_description` carries analytical evidence (eval st
 └────────────────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
 ```
 
-All optimizer prompts follow: JSON template (`api/config/optimizer_prompts/`) → `load_optimizer_prompt()` → `compile_prompt()` → `llm_call()`.
+All optimizer prompts follow: JSON template (`promptpotter/config/optimizer_prompts/`) → `load_optimizer_prompt()` → `compile_prompt()` → `llm_call()`.
 
 ---
 
@@ -100,7 +100,7 @@ Three transformations bridge optimizer state to the wire:
 
 ## Variant Library
 
-`api/config/prompt_variants.json` provides pre-built alternatives per field for the sensitivity scan (OAT).
+`promptpotter/config/prompt_variants.json` provides pre-built alternatives per field for the sensitivity scan (OAT).
 
 | Field | Variant count | Source |
 |-------|--------------|--------|
@@ -120,7 +120,7 @@ Three transformations bridge optimizer state to the wire:
 
 | Concern | File |
 |---------|------|
-| Field constants | `api/shared/constants.py` |
-| OptSearchPoint (render, derive, project) | `api/models/opt_search_point.py` |
-| Variant library | `api/config/prompt_variants.json` |
-| Variant filtering | `api/services/search/smart_search.py` |
+| Field constants | `promptpotter/shared/constants.py` |
+| OptSearchPoint (render, derive, project) | `promptpotter/models/opt_search_point.py` |
+| Variant library | `promptpotter/config/prompt_variants.json` |
+| Variant filtering | `promptpotter/services/search/smart_search.py` |

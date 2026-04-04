@@ -5,29 +5,29 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from api.config.settings import load_variant_library
-from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.campaign_configuration import (
+from promptpotter.config.settings import load_variant_library
+from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.services.campaign.campaign_configuration import (
     configure_pipeline as _configure_pipeline,
 )
-from api.services.campaign.campaign_configuration import (
+from promptpotter.services.campaign.campaign_configuration import (
     create_llm_client as setup_llm,
 )
-from api.services.campaign.campaign_init import (
+from promptpotter.services.campaign.campaign_init import (
     InitResult,
     build_all_session_terms,
 )
-from api.services.campaign.campaign_init import (
+from promptpotter.services.campaign.campaign_init import (
     init_services as _init_services,
 )
-from api.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.campaign_persistence import (
     save_campaign_winner,
 )
-from api.services.project_store import ProjectStore
+from promptpotter.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
-    from api.services.campaign.config import CampaignConfig
-    from api.services.llm_client import LLMClientBase
+    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.llm_client import LLMClientBase
 
 __all__ = [
     "build_all_session_terms",
@@ -73,10 +73,10 @@ async def decompose_task_context(
     Delegates to ``api.services.search.context.decompose_task_context()``
     and prints the decomposed fields for visibility.
     """
-    from api.services.search.context import (
+    from promptpotter.services.search.context import (
         TASK_CONTEXT_FIELDS,
     )
-    from api.services.search.context import (
+    from promptpotter.services.search.context import (
         decompose_task_context as _decompose_task_context,
     )
 
@@ -122,22 +122,22 @@ def dev_reload() -> None:
 
     for mod in [
         # Service layer — safe to reload (no Pydantic model classes)
-        "api.shared.hashing",
-        "api.services.campaign.config",
-        "api.services.campaign.campaign_lifecycle",
-        "api.services.campaign.campaign_configuration",
-        "api.services.campaign.escalation",
-        "api.services.campaign.layer_transitions",
-        "api.services.campaign.critique",
-        "api.services.campaign.round_execution",
-        "api.services.campaign.optimization_loop",
-        "api.services.stores.dataset_run_store",
-        "api.services.stale_data",
-        "api.services.prompt_eval",
-        "api.services.campaign.l1_optimizer",
-        "api.services.search.smart_search",
-        "api.services.search.sensitivity_scanner",
-        "api.services.search.scan_baseline",
+        "promptpotter.shared.hashing",
+        "promptpotter.services.campaign.config",
+        "promptpotter.services.campaign.campaign_lifecycle",
+        "promptpotter.services.campaign.campaign_configuration",
+        "promptpotter.services.campaign.escalation",
+        "promptpotter.services.campaign.layer_transitions",
+        "promptpotter.services.campaign.critique",
+        "promptpotter.services.campaign.round_execution",
+        "promptpotter.services.campaign.optimization_loop",
+        "promptpotter.services.stores.dataset_run_store",
+        "promptpotter.services.stale_data",
+        "promptpotter.services.prompt_eval",
+        "promptpotter.services.campaign.l1_optimizer",
+        "promptpotter.services.search.smart_search",
+        "promptpotter.services.search.sensitivity_scanner",
+        "promptpotter.services.search.scan_baseline",
         # NOTE: Do NOT reload api.models.* or dataclass modules —
         # Pydantic/dataclass classes break when reloaded (existing
         # instances fail type checks).  scan_results.py has ScanContext
@@ -227,7 +227,7 @@ async def init_services(
     When *dataset_name* is provided, loads ground-truth data from the
     DatasetStore instead of requiring experiment traces.
     """
-    from api.config.logging import setup_logging
+    from promptpotter.config.logging import setup_logging
 
     setup_logging()
 
@@ -325,7 +325,7 @@ async def prepare_eval_context(
     Thin display wrapper around
     ``api.services.campaign.campaign_init.prepare_eval_context()``.
     """
-    from api.services.campaign.campaign_init import (
+    from promptpotter.services.campaign.campaign_init import (
         prepare_eval_context as _prepare_eval_context,
     )
 
@@ -355,7 +355,7 @@ def prepare_datasets(
     Thin display wrapper around
     ``api.services.campaign.campaign_init.prepare_datasets()``.
     """
-    from api.services.campaign.campaign_init import (
+    from promptpotter.services.campaign.campaign_init import (
         prepare_datasets as _prepare_datasets,
     )
 
@@ -389,8 +389,8 @@ def configure_langfuse(
     secret_key: str | None = None,
 ) -> None:
     """Configure Langfuse settings at runtime from a notebook cell."""
-    from api.config.settings import settings
-    from api.services.obs.langfuse_client import LangfuseLogger
+    from promptpotter.config.settings import settings
+    from promptpotter.services.obs.langfuse_client import LangfuseLogger
 
     changed = False
     if enabled is not None:
@@ -422,7 +422,7 @@ def sync_langfuse(
     reset: bool = False,
 ) -> dict | None:
     """Configure Langfuse dataset name and optionally push all runs."""
-    from api.services.obs.langfuse_push import sync_langfuse_runs
+    from promptpotter.services.obs.langfuse_push import sync_langfuse_runs
 
     result = sync_langfuse_runs(
         store,
@@ -442,7 +442,7 @@ def sync_langfuse(
 
 def push_langfuse(store, backend_id: str) -> dict:
     """Push all historical dataset_runs to cloud Langfuse (dataset-first)."""
-    from api.services.obs.langfuse_push import push_all_runs
+    from promptpotter.services.obs.langfuse_push import push_all_runs
 
     summaries = store.dataset_runs.list_all(backend_id)
 

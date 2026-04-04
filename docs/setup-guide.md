@@ -31,7 +31,7 @@ Open `notebooks/optimization_campaign.ipynb` for the full HITL optimization work
 ### API server
 
 ```bash
-uvicorn api.main:app --port 8001 --reload
+uvicorn promptpotter.main:app --port 8001 --reload
 ```
 
 Swagger docs at `http://localhost:8001/docs`.
@@ -46,13 +46,13 @@ cd docker && docker-compose up --build
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /api/v1/backends` | Register a new backend connection |
-| `GET /api/v1/backends` | List registered backends |
-| `POST /api/v1/backends/{id}/sync` | Sync experiments from backend |
-| `GET /api/v1/backends/{id}/pipeline` | Dynamic pipeline view (30s cache) |
-| `GET /api/v1/campaigns` | List optimization campaigns |
-| `GET /api/v1/campaigns/{id}` | Campaign detail with trial summaries |
-| `GET /api/v1/health` | Service health check |
+| `POST /promptpotter/v1/backends` | Register a new backend connection |
+| `GET /promptpotter/v1/backends` | List registered backends |
+| `POST /promptpotter/v1/backends/{id}/sync` | Sync experiments from backend |
+| `GET /promptpotter/v1/backends/{id}/pipeline` | Dynamic pipeline view (30s cache) |
+| `GET /promptpotter/v1/campaigns` | List optimization campaigns |
+| `GET /promptpotter/v1/campaigns/{id}` | Campaign detail with trial summaries |
+| `GET /promptpotter/v1/health` | Service health check |
 
 ## Troubleshooting
 

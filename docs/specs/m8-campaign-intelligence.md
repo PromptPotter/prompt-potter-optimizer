@@ -54,7 +54,7 @@ New function `extract_sample_diagnostics(result, pipeline_schema) -> dict[str, f
 - `_parse_backend_response()` (`prompt_eval.py:130`) already collects everything the schema describes
 - Same registry, same keys, per-result instead of aggregate
 
-**Location:** `api/services/metrics.py` (alongside existing `compute_pipeline_metrics()`)
+**Location:** `promptpotter/services/metrics.py` (alongside existing `compute_pipeline_metrics()`)
 
 ### 1b. Evaluation profiles (Level B) — failure analysis compilation
 
@@ -66,7 +66,7 @@ Deterministic analysis functions that compile sample diagnostics into structured
 
 Each function is pure computation (no I/O, no LLM calls).
 
-**Return types** (defined at implementation time in `api/services/metrics.py` or a new `api/models/analysis.py`):
+**Return types** (defined at implementation time in `promptpotter/services/metrics.py` or a new `promptpotter/models/analysis.py`):
 - `FailureAnalysis`: `patterns: list[FailurePattern]` (each with `name`, `description`, `query_count`, `fraction`, `example_queries`, `diagnostic_signals`), `total_failures: int`
 - `QueryDifficulty`: `queries: list[QueryProfile]` (each with `query`, `hit_rate`, `n_evals`, `classification: "easy"|"discriminating"|"hard"|"dead"`)
 - `TrendAnalysis`: `rounds: list[RoundSnapshot]` (each with `round_idx`, `improved_queries`, `regressed_queries`, `diagnostic_shifts`)
@@ -78,7 +78,7 @@ Each function is pure computation (no I/O, no LLM calls).
 - Add failure analysis summary as a structured section: "Dominant failure pattern: GT not retrieved by candidate_source (60% of failures) — focus on web_search/entity_profiling params"
 - **Multi-direction injection:** surface 2-3 distinct improvement directions ranked by failure count, not just the dominant one. L1 should see all directions and generate candidates across them.
 - Inject via `{{context_sections}}` in meta-prompts (assembled by `format_context_sections()`)
-- Location: `api/services/campaign/formatting.py` (modify `format_context_sections()`)
+- Location: `promptpotter/services/campaign/formatting.py` (modify `format_context_sections()`)
 
 ### 1d. Adaptive sampling in optimizer feedback cycle
 
@@ -109,7 +109,7 @@ The feedback cycle should pick queries that maximise information about which pro
 
 ### 2a. Statistically grounded sample sizing
 
-- `build_diagnostic_set()` uses `min_detectable_effect(n)` (in `api/services/search/_stats.py`) to compute minimum n for a target MDE
+- `build_diagnostic_set()` uses `min_detectable_effect(n)` (in `promptpotter/services/search/_stats.py`) to compute minimum n for a target MDE
 - If user-specified `scan_sample_size` is below minimum for detecting a 15% effect, auto-adjust upward with a warning
 - This alone would have prevented the "3 queries = no signal" problem
 
@@ -134,7 +134,7 @@ The feedback cycle should pick queries that maximise information about which pro
 
 **What it is:** A **materialized view** — a persistent, incrementally-updated statistical index over ALL historical search points and their results. Persisted to disk, updated lazily (when an LLM needs it and the watermark is stale), queryable by any optimizer node via atomic data accessors.
 
-**Location:** `api/services/search/search_memory.py`
+**Location:** `promptpotter/services/search/search_memory.py`
 **Disk:** `.promptpotter/projects/{backend_id}/search_memory.json`
 
 ### Three analysis pillars
@@ -283,19 +283,19 @@ All four wave groups are independent at their roots.
 
 | Code | Role | Location |
 |------|------|----------|
-| `NODE_TYPE_METRICS` | Maps node_type → metrics → pipeline_data_key | `api/models/pipeline_schema.py:141` |
-| `IntermediateMetric` | Per-type metric definition | `api/models/pipeline_schema.py` |
-| `compute_pipeline_metrics()` | Aggregate metrics from node types | `api/services/metrics.py:99` |
-| `_parse_backend_response()` | Assembles per-query pipeline_data from schema | `api/services/prompt_eval.py:130` |
-| `obs_extraction_map()` | Schema -> observation mapping | `api/models/pipeline_schema.py` |
-| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `api/services/search/_stats.py` (re-exported by `notebooks/campaign_lib/stats.py`) |
-| `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `api/services/search/smart_search.py:169` |
-| `LoopState` | Feedback cycle state (has `current_results` per round) | `api/services/campaign/state.py:38` |
-| `format_context_sections()` | Context injection point for LLM prompts | `api/services/campaign/formatting.py` |
-| `DatasetRunStore` | All historical evaluations (per-query results with pipeline_data) | `api/services/stores/dataset_run_store.py` |
-| `CampaignStore` | Campaign trials, lineage, configs | `api/services/stores/campaign_store.py` |
-| `PlanStore` | Smart search plans with axis_profiles | `api/services/stores/plan_store.py` |
-| `build_pipeline_overview()` | Advisor context layer (pipeline structure) | `api/services/search/scan_advisor.py` |
+| `NODE_TYPE_METRICS` | Maps node_type → metrics → pipeline_data_key | `promptpotter/models/pipeline_schema.py:141` |
+| `IntermediateMetric` | Per-type metric definition | `promptpotter/models/pipeline_schema.py` |
+| `compute_pipeline_metrics()` | Aggregate metrics from node types | `promptpotter/services/metrics.py:99` |
+| `_parse_backend_response()` | Assembles per-query pipeline_data from schema | `promptpotter/services/prompt_eval.py:130` |
+| `obs_extraction_map()` | Schema -> observation mapping | `promptpotter/models/pipeline_schema.py` |
+| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `promptpotter/services/search/_stats.py` (re-exported by `notebooks/campaign_lib/stats.py`) |
+| `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `promptpotter/services/search/smart_search.py:169` |
+| `LoopState` | Feedback cycle state (has `current_results` per round) | `promptpotter/services/campaign/state.py:38` |
+| `format_context_sections()` | Context injection point for LLM prompts | `promptpotter/services/campaign/formatting.py` |
+| `DatasetRunStore` | All historical evaluations (per-query results with pipeline_data) | `promptpotter/services/stores/dataset_run_store.py` |
+| `CampaignStore` | Campaign trials, lineage, configs | `promptpotter/services/stores/campaign_store.py` |
+| `PlanStore` | Smart search plans with axis_profiles | `promptpotter/services/stores/plan_store.py` |
+| `build_pipeline_overview()` | Advisor context layer (pipeline structure) | `promptpotter/services/search/scan_advisor.py` |
 
 ---
 

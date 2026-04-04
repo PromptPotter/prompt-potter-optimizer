@@ -63,12 +63,12 @@ The protocol defines 6 methods. Two tiers: **core** (required for eval) and **sy
 
 | # | File | Action | What |
 |---|------|--------|------|
-| 1 | `api/services/connector_protocol.py` | CREATE | `ConnectorProtocol` as `typing.Protocol` with 6 methods |
-| 2 | `api/services/mock_connector.py` | CREATE | `MockConnector` implementing protocol — configurable responses, call recording |
-| 3 | `api/services/connector_registry.py` | CREATE | `ConnectorRegistry` — register/get connectors by ID, default to BackendClient |
-| 4 | `api/services/prompt_eval.py` | MODIFY | Change `backend_client: BackendClient` → `backend_client: ConnectorProtocol` in function signatures |
-| 5 | `api/services/optimization_loop.py` | MODIFY | Change `BackendClient` import → `ConnectorProtocol` type annotation |
-| 6 | `api/services/campaign/optimization_loop.py` | MODIFY | Change `BackendClient` instantiation to use `ConnectorRegistry` or accept connector |
+| 1 | `promptpotter/services/connector_protocol.py` | CREATE | `ConnectorProtocol` as `typing.Protocol` with 6 methods |
+| 2 | `promptpotter/services/mock_connector.py` | CREATE | `MockConnector` implementing protocol — configurable responses, call recording |
+| 3 | `promptpotter/services/connector_registry.py` | CREATE | `ConnectorRegistry` — register/get connectors by ID, default to BackendClient |
+| 4 | `promptpotter/services/prompt_eval.py` | MODIFY | Change `backend_client: BackendClient` → `backend_client: ConnectorProtocol` in function signatures |
+| 5 | `promptpotter/services/optimization_loop.py` | MODIFY | Change `BackendClient` import → `ConnectorProtocol` type annotation |
+| 6 | `promptpotter/services/campaign/optimization_loop.py` | MODIFY | Change `BackendClient` instantiation to use `ConnectorRegistry` or accept connector |
 | 7 | `docs/connectors/connector-protocol.md` | CREATE | Developer guide: how to implement a new connector |
 | 8 | `tests/test_connector_protocol.py` | CREATE | Protocol conformance tests, MockConnector tests, registry tests |
 
@@ -197,7 +197,7 @@ The type annotation change is mechanical and non-breaking:
 
 ```python
 # Before (M6)
-from api.services.backend_client import BackendClient
+from promptpotter.services.backend_client import BackendClient
 
 async def eval_query_via_backend(
     query_data: dict,
@@ -206,7 +206,7 @@ async def eval_query_via_backend(
 ) -> dict:
 
 # After (M9)
-from api.services.connector_protocol import ConnectorProtocol
+from promptpotter.services.connector_protocol import ConnectorProtocol
 
 async def eval_query_via_backend(
     query_data: dict,
@@ -234,9 +234,9 @@ async def eval_query_via_backend(
 
 | WP | Read first |
 |----|-----------|
-| 9.1 | `api/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
-| 9.2 | `api/services/llm_client.py` (singleton pattern reference: `get_llm_client()`) |
-| 9.3 | `api/services/prompt_eval.py` (eval_query_via_backend, eval_search_point), `api/services/campaign/optimization_loop.py` (BackendClient usage) |
+| 9.1 | `promptpotter/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
+| 9.2 | `promptpotter/services/llm_client.py` (singleton pattern reference: `get_llm_client()`) |
+| 9.3 | `promptpotter/services/prompt_eval.py` (eval_query_via_backend, eval_search_point), `promptpotter/services/campaign/optimization_loop.py` (BackendClient usage) |
 | 9.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_campaign_registry.py` (E2E test pattern) |
 
 ---

@@ -42,11 +42,11 @@ Enables in-place updates during feedback cycle, single `model_dump()` at checkpo
 
 ## Key Design Artifacts
 
-**Pipeline declaration:** `api/config/optimizer_pipeline.json` — 5 nodes (l1_generate, l1_evaluate, critique, l2_refine_context, l3_modify_plan), 4 sequences (l1_round, l1_round_with_critique, l2_escalation, l3_escalation).
+**Pipeline declaration:** `promptpotter/config/optimizer_pipeline.json` — 5 nodes (l1_generate, l1_evaluate, critique, l2_refine_context, l3_modify_plan), 4 sequences (l1_round, l1_round_with_critique, l2_escalation, l3_escalation).
 
 **Node type hierarchy:** `llm` → `llm/structured` → `llm/meta`, plus `agent`, `evaluation`, `deterministic`, `web_search`.
 
-**Shared primitives:** `llm_call()` in `api/config/optimizer_pipeline.py` (config-driven LLM wrapper), `observed_step()` in `api/services/obs/node_tracer.py` (async tracing context manager).
+**Shared primitives:** `llm_call()` in `promptpotter/config/optimizer_pipeline.py` (config-driven LLM wrapper), `observed_step()` in `promptpotter/services/obs/node_tracer.py` (async tracing context manager).
 
 **Responsibility matrix:** l1_generate decides pipeline_params; critique decides focus areas; l2_refine_context decides context + meta-settings; l3_modify_plan decides strategic plan.
 

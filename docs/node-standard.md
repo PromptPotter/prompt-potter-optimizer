@@ -114,7 +114,7 @@ Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx,
 
 ## Pipeline Declaration Format
 
-Both TermNorm and PromptPotter declare their pipelines using the same JSON format. TermNorm's `GET /pipeline` returns a pipeline config; the optimizer declares its pipeline in `api/config/optimizer_pipeline.json`.
+Both TermNorm and PromptPotter declare their pipelines using the same JSON format. TermNorm's `GET /pipeline` returns a pipeline config; the optimizer declares its pipeline in `promptpotter/config/optimizer_pipeline.json`.
 
 ```json
 {
@@ -173,10 +173,10 @@ Excluding `llm_ranking` makes `token_matching` the last exit point. Cached full-
 
 ### Now (M7)
 
-- **`llm_call()`** (`api/config/optimizer_pipeline.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline nodes use it.
+- **`llm_call()`** (`promptpotter/config/optimizer_pipeline.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline nodes use it.
 - **`get_node_config()`** — loads node configs from `optimizer_pipeline.json` (cached)
 - **`optimizer_pipeline.json`** declares optimizer nodes with the same config shape as TermNorm's pipeline
-- **`observed_node()`** (`api/services/obs/node_tracer.py`) — traces node execution with timing + Langfuse observations. Callers use node type names as `node_type` (e.g., `"llm/meta"`, `"evaluation"`).
+- **`observed_node()`** (`promptpotter/services/obs/node_tracer.py`) — traces node execution with timing + Langfuse observations. Callers use node type names as `node_type` (e.g., `"llm/meta"`, `"evaluation"`).
 - Optimizer nodes — `l1_generate` (`llm/meta`), `l1_evaluate` (`evaluation`), `critique` (`agent`), `l2_refine_context` (`llm/meta`), `l3_modify_plan` (`llm/meta`) — use `llm_call()` with their declared config from `optimizer_pipeline.json`
 
 ### Future (milestone TBD, post-ConnectorProtocol)
@@ -189,6 +189,6 @@ Excluding `llm_ranking` makes `token_matching` the last exit point. Cached full-
 ## Reference
 
 - **TermNorm pipeline config:** `GET /pipeline` endpoint (see TermNorm repo)
-- **Optimizer pipeline config:** [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json)
+- **Optimizer pipeline config:** [`promptpotter/config/optimizer_pipeline.json`](../promptpotter/config/optimizer_pipeline.json)
 - **M7 spec:** [`docs/specs/archive/m7-optimizer-pipeline.md`](specs/archive/m7-optimizer-pipeline.md)
 - **Observability:** [`docs/observability.md`](observability.md) — node tracing via `observed_node`

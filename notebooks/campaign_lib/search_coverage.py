@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 
-from api.services.search import (
+from promptpotter.services.search import (
     assess_scan_coverage as _assess_scan_coverage,
 )
-from api.services.search import (
+from promptpotter.services.search import (
     build_data_inventory as _build_data_inventory,
 )
-from api.services.search import (
+from promptpotter.services.search import (
     build_prompt_result_index as build_historical_index,
 )
 

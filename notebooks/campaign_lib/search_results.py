@@ -5,16 +5,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from api.services.search import (
+from promptpotter.services.search import (
     load_filtered_variant_library as _load_filtered_variants,
 )
-from api.services.search import (
+from promptpotter.services.search import (
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
 )
-from api.services.search import (
+from promptpotter.services.search import (
     select_scan_winner as _select_scan_winner,
 )
-from api.services.search.scan_results import (
+from promptpotter.services.search.scan_results import (
     seed_campaign_from_scan as _seed_campaign_from_scan,
 )
 
@@ -27,7 +27,7 @@ from .display import (
 from .setup import setup_llm
 
 if TYPE_CHECKING:
-    from api.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 

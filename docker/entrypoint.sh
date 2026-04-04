@@ -8,7 +8,7 @@ echo "Starting PromptPotter Optimizer..."
 
 # Start FastAPI server in background
 echo "Starting FastAPI server on port ${API_PORT:-8001}..."
-uvicorn api.main:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8001} &
+uvicorn promptpotter.main:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8001} &
 FASTAPI_PID=$!
 
 # Wait for FastAPI to be ready

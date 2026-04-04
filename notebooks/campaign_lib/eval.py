@@ -7,19 +7,19 @@ from typing import TYPE_CHECKING
 
 from tqdm.auto import tqdm
 
-from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.campaign_init import (
+from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.services.campaign.campaign_init import (
     load_baseline_prompt,
 )
-from api.services.campaign.campaign_init import (
+from promptpotter.services.campaign.campaign_init import (
     run_baseline_eval as _run_baseline_eval,
 )
-from api.shared.errors import is_error_result
+from promptpotter.shared.errors import is_error_result
 
 from .display import _fmt_query_result, _print_interrupt_banner, show_progress
 
 if TYPE_CHECKING:
-    from api.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.config import CampaignConfig
 
 __all__ = [
     "load_baseline_prompt", "run_baseline_eval",
@@ -51,7 +51,7 @@ async def run_baseline_eval(
         tqdm.write(_fmt_query_result(result, cached=is_cached))
         pbar.update(1)
 
-    from api.services.obs.observability_logger import ObsLogger
+    from promptpotter.services.obs.observability_logger import ObsLogger
     _obs = ObsLogger(svc.store.base_dir, svc.backend_id, langfuse=None)
 
     try:

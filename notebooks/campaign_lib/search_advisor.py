@@ -8,13 +8,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from api.services.search import (
+from promptpotter.services.search import (
     advise_scan_config as _advise_scan_config,
 )
-from api.services.search import (
+from promptpotter.services.search import (
     load_filtered_variant_library as _load_filtered_variants,
 )
-from api.services.search import (
+from promptpotter.services.search import (
     preview_advisor_prompt as _preview_advisor_prompt,
 )
 
@@ -22,7 +22,7 @@ from .search_variants import advisory_to_scan_variants
 from .setup import setup_llm
 
 if TYPE_CHECKING:
-    from api.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 

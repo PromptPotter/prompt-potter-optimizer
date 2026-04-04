@@ -5,16 +5,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from api.services.search.scan_baseline import (
+from promptpotter.services.search.scan_baseline import (
     prepare_scan_baseline as _prepare_scan_baseline,
 )
-from api.shared.constants import LAYER1_STRING_FIELDS
+from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
 from .display import CYAN, DIM, RESET
 from .setup import setup_llm
 
 if TYPE_CHECKING:
-    from api.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 

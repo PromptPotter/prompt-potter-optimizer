@@ -246,8 +246,8 @@ n8n JSON file
           │ stdout (JSON)
           ▼
 ┌─────────────────────┐
-│  Python mapper      │  api/services/n8n_mapper.py
-│  Pydantic models    │  api/models/n8n_workflow.py (bridge output models)
+│  Python mapper      │  promptpotter/services/n8n_mapper.py
+│  Pydantic models    │  promptpotter/models/n8n_workflow.py (bridge output models)
 │  for bridge output  │  NOT per-node-type models
 └─────────┬───────────┘
           │
@@ -586,7 +586,7 @@ const output = {
 console.log(JSON.stringify(output));
 ```
 
-### Pydantic models for bridge output (`api/models/n8n_workflow.py`)
+### Pydantic models for bridge output (`promptpotter/models/n8n_workflow.py`)
 
 These model the bridge script's **output format**, NOT n8n node parameter types. Parameters stay `dict[str, Any]`.
 
@@ -642,16 +642,16 @@ class N8nWorkflow(BaseModel):
 |------|---------|
 | `external/n8n-bridge/package.json` | Node.js bridge package (minimal, `@n8n/workflow-sdk` dependency) |
 | `external/n8n-bridge/bridge.mjs` | Bridge script: SDK → structured JSON via `buildSemanticGraph()` |
-| `api/models/n8n_workflow.py` | Pydantic models for bridge output (NOT per-node-type models) |
-| `api/services/n8n_mapper.py` | Python mapper + MappingReport + gap detection (Phases A-E) |
+| `promptpotter/models/n8n_workflow.py` | Pydantic models for bridge output (NOT per-node-type models) |
+| `promptpotter/services/n8n_mapper.py` | Python mapper + MappingReport + gap detection (Phases A-E) |
 | `tests/test_n8n_mapper.py` | Tests against real fixture (`websearch-entity-profiling.n8n.json`) |
 
 ### Files to modify
 
 | File | Change |
 |------|--------|
-| `api/services/pipeline_discovery.py` | Add `parse_n8n_workflow()` alongside existing `parse_pipeline_response()` |
-| `api/models/__init__.py` | Re-export n8n workflow models |
+| `promptpotter/services/pipeline_discovery.py` | Add `parse_n8n_workflow()` alongside existing `parse_pipeline_response()` |
+| `promptpotter/models/__init__.py` | Re-export n8n workflow models |
 
 ### Test plan
 
@@ -665,7 +665,7 @@ class N8nWorkflow(BaseModel):
 
 ### Verification steps
 
-1. Spec document internally consistent with `PipelineSchema` model (`api/models/pipeline_schema.py`)
+1. Spec document internally consistent with `PipelineSchema` model (`promptpotter/models/pipeline_schema.py`)
 2. All 8 gap categories have real examples from the test workflow
 3. Bridge output models match SDK's `SemanticGraph` output format
 4. MappingReport captures sufficient information for human review
