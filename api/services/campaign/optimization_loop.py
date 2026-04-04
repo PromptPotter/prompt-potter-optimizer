@@ -794,7 +794,7 @@ async def run_optimization(
                     "type": "l1_evaluate",
                     "n_candidates": round_result.candidates_evaluated,
                     "n_queries": round_result.total,
-                    "candidates": list(round_result.candidate_scores),
+                    "candidates": round_result.candidate_scores,
                 })
                 _rr.add_action({
                     "type": "decision",
@@ -803,6 +803,8 @@ async def run_optimization(
                     "composite": round_result.composite,
                     "improved": round_result.improved,
                     "stall_count": state.stall_count,
+                    "winner_prompt_fields": round_result.prompt_fields,
+                    "winner_pipeline_params": round_result.pipeline_params,
                 })
                 _rr.flush(state_snapshot={
                     "opt_search_point_id": state.opt_sp.id,
@@ -883,6 +885,10 @@ async def run_optimization(
             "Optimization interrupted at round %d. Completed rounds are checkpointed.",
             len(state.rounds),
         )
+
+    # -- Cleanup round recorder --
+    from api.config.optimizer_pipeline import set_round_recorder
+    set_round_recorder(None)
 
     # -- Finalize --
     finished_at = datetime.now(UTC).isoformat()

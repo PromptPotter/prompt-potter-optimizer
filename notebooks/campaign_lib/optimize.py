@@ -47,6 +47,8 @@ from .stats import (
     wilson_ci,
 )
 
+from api.services.campaign.results import CycleResult
+
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
     from api.services.campaign.callbacks import CycleCallbacks
@@ -351,7 +353,7 @@ async def run_optimization_notebook(
     task_context: dict | None = None,
     session_id: str = "",
     display_callbacks: CycleCallbacks | None = None,
-) -> list:
+) -> tuple[list, CycleResult | None]:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
     Accepts and returns the ``campaign_rounds`` list format for downstream
@@ -364,7 +366,7 @@ async def run_optimization_notebook(
     Persistence callbacks are auto-created by the optimization loop.
 
     Returns:
-        Updated campaign_rounds list.
+        Tuple of (campaign_rounds, CycleResult or None if interrupted).
     """
     from api.services.campaign.config import CycleConfig
     from api.services.campaign.optimization_loop import run_optimization
@@ -672,7 +674,7 @@ async def run_optimization_notebook(
         print(f"\n{YELLOW}{BOLD}[INTERRUPTED]{RESET} Feedback cycle "
               f"stopped before any rounds completed.")
         print("  Resume: re-run this cell to restart.")
-        return campaign_rounds
+        return campaign_rounds, result
 
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
     interrupted = result.stop_reason == "interrupted"
@@ -698,4 +700,4 @@ async def run_optimization_notebook(
 
     format_pipeline_overrides(result.winner_pipeline_params, pipeline_schema)
 
-    return campaign_rounds
+    return campaign_rounds, result

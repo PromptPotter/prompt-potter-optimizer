@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
+    from api.services.campaign.round_recorder import RoundRecorder
 
 from api.services.llm_client import LLMClientBase, LLMResponse
 
@@ -63,10 +64,6 @@ def set_round_recorder(recorder: RoundRecorder | None) -> None:
 def get_round_recorder() -> RoundRecorder | None:
     """Return the active round recorder (for non-LLM actions)."""
     return _recorder
-
-
-if TYPE_CHECKING:
-    from api.services.campaign.round_recorder import RoundRecorder
 
 
 async def llm_call(

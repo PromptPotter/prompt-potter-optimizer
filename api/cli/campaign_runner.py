@@ -120,7 +120,6 @@ async def cmd_init(args: argparse.Namespace) -> None:
     bid = svc.backend_id
     sid = svc.store.sessions.create(bid, state)
     svc.store.sessions.save_active_pointer(bid, sid)
-    print(f"\nSession created: {sid}")
 
     # Load data and run baseline (may be long-running)
     train_data = None
@@ -149,6 +148,20 @@ async def cmd_init(args: argparse.Namespace) -> None:
 - Active steps: {', '.join(active)} ({excl_str})
 - Eval data: {len(eval_data)} queries
 - Baseline: {baseline_acc:.1%}""")
+
+    if getattr(args, "json_output", False):
+        print(json.dumps({
+            "session_id": sid,
+            "backend_id": bid,
+            "phase": state["phase"],
+            "baseline_accuracy": baseline_acc,
+            "eval_data_count": len(eval_data),
+            "active_steps": active,
+            "excluded_nodes": excluded,
+        }, indent=2, default=str))
+    else:
+        print(f"\nSession created: {sid}")
+        print(f"Baseline: {baseline_acc:.1%} ({len(eval_data)} queries)")
 
 
 async def cmd_task_context(args: argparse.Namespace) -> None:
@@ -338,19 +351,21 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     recorder = RoundRecorder(session_dir / "rounds")
     set_round_recorder(recorder)
 
-    campaign_rounds = await run_optimization_notebook(
-        campaign_rounds, eval_data, campaign_config,
-        svc=svc, pipeline_params=pipeline_params,
-        scan_context=scan_context,
-        experiment_id=state.get("experiment_id"),
-        task_context=state.get("task_context"),
-        session_id=sid,
-        display_callbacks=control_cb,
-    )
+    try:
+        campaign_rounds, cycle_result = await run_optimization_notebook(
+            campaign_rounds, eval_data, campaign_config,
+            svc=svc, pipeline_params=pipeline_params,
+            scan_context=scan_context,
+            experiment_id=state.get("experiment_id"),
+            task_context=state.get("task_context"),
+            session_id=sid,
+            display_callbacks=control_cb,
+        )
+    finally:
+        set_round_recorder(None)
 
     # Read back cycle_id and best from persisted campaign_state.json
     import contextlib
-    import json
 
     _state_path = session_dir / "campaign_state.json"
     _emitter_state = {}
@@ -363,7 +378,21 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     state["best_accuracy"] = _emitter_state.get("best", state.get("baseline_accuracy", 0.0))
     svc.store.sessions.save(bid, sid, state)
 
-    print(f"Dashboard: {_state_path}")
+    # Write structured result for AI/machine consumption
+    result_path = session_dir / "optimize_result.json"
+    if cycle_result:
+        result_path.write_text(
+            json.dumps(cycle_result.model_dump(), indent=2, default=str),
+            encoding="utf-8",
+        )
+
+    if getattr(args, "json_output", False):
+        _summary = cycle_result.model_dump() if cycle_result else {"status": "interrupted"}
+        print(json.dumps(_summary, indent=2, default=str))
+    else:
+        print(f"Dashboard: {_state_path}")
+        if cycle_result:
+            print(f"Result: {result_path}")
 
 
 async def cmd_control(args: argparse.Namespace) -> None:
@@ -379,24 +408,30 @@ async def cmd_control(args: argparse.Namespace) -> None:
     data = json.loads(state_path.read_text(encoding="utf-8"))
     control = data.get("control", {})
 
+    action = ""
     if args.pause:
         control["requested_state"] = "pause"
-        print("Control: pause requested. Loop will pause at next checkpoint.")
+        action = "pause"
     elif args.resume:
         control["requested_state"] = "resume"
-        print("Control: resume requested.")
+        action = "resume"
     elif args.stop:
         control["requested_state"] = "stop"
-        print("Control: stop requested. Loop will stop at next checkpoint.")
+        action = "stop"
     elif args.pause_before_l2:
         control["pause_before_l2_eval"] = True
-        print("Control: pause_before_l2_eval enabled.")
+        action = "pause_before_l2_enabled"
     elif args.no_pause_l2:
         control["pause_before_l2_eval"] = False
-        print("Control: pause_before_l2_eval disabled.")
+        action = "pause_before_l2_disabled"
 
     data["control"] = control
     state_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+
+    if getattr(args, "json_output", False):
+        print(json.dumps({"action": action, "control": control}, indent=2))
+    else:
+        print(f"Control: {action} requested.")
 
 
 async def cmd_profile(args: argparse.Namespace) -> None:
@@ -447,7 +482,10 @@ async def cmd_results(args: argparse.Namespace) -> None:
 
     campaigns = svc.store.campaigns.list_campaigns(bid)
     if not campaigns:
-        print("No campaigns found.")
+        if getattr(args, "json_output", False):
+            print(json.dumps({"error": "no_campaigns"}, indent=2))
+        else:
+            print("No campaigns found.")
         return
 
     latest = campaigns[-1]
@@ -458,16 +496,35 @@ async def cmd_results(args: argparse.Namespace) -> None:
         if trial:
             campaign_rounds.append(trial)
 
-    show_campaign_summary(campaign_rounds)
-    show_flip_tracking(campaign_rounds)
-    show_lineage_chain(campaign_rounds)
+    if getattr(args, "json_output", False):
+        best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
+        print(json.dumps({
+            "cycle_id": cycle_id,
+            "n_rounds": len(campaign_rounds),
+            "best_accuracy": best.get("accuracy", 0),
+            "best_round": best.get("round"),
+            "baseline_accuracy": state.get("baseline_accuracy", 0),
+            "rounds": [
+                {
+                    "round": r.get("round"),
+                    "accuracy": r.get("accuracy", 0),
+                    "label": r.get("label", ""),
+                }
+                for r in campaign_rounds
+            ],
+        }, indent=2, default=str))
+    else:
+        show_campaign_summary(campaign_rounds)
+        show_flip_tracking(campaign_rounds)
+        show_lineage_chain(campaign_rounds)
 
     if args.save:
         save_campaign_winner(
             campaign_rounds, state["campaign_config"],
             svc.store, bid, experiment_id=state.get("experiment_id", ""),
         )
-        print("Winner saved.")
+        if not getattr(args, "json_output", False):
+            print("Winner saved.")
 
     best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
     svc.store.sessions.append_log(bid, sid, f"""## Results
@@ -483,6 +540,32 @@ async def cmd_status(args: argparse.Namespace) -> None:
     session_dir = store.sessions._session_dir(bid, sid)
     state_path = session_dir / "campaign_state.json"
 
+    # Machine-readable JSON mode
+    if getattr(args, "json_output", False):
+        output: dict[str, Any] = {
+            "session_id": sid,
+            "phase": state["phase"],
+            "backend_id": bid,
+            "backend_url": state["init_params"]["backend_url"],
+            "baseline_accuracy": state.get("baseline_accuracy", 0),
+            "eval_data_count": state.get("eval_data_count"),
+        }
+        import contextlib
+
+        if state_path.exists():
+            with contextlib.suppress(json.JSONDecodeError, OSError):
+                output["live_dashboard"] = json.loads(state_path.read_text(encoding="utf-8"))
+        result_path = session_dir / "optimize_result.json"
+        if result_path.exists():
+            with contextlib.suppress(json.JSONDecodeError, OSError):
+                output["optimize_result"] = json.loads(result_path.read_text(encoding="utf-8"))
+        rounds_dir = session_dir / "rounds"
+        if rounds_dir.exists():
+            output["round_count"] = len(list(rounds_dir.glob("round_*.json")))
+        print(json.dumps(output, indent=2, default=str))
+        return
+
+    # Human-readable mode
     print(f"Session: {sid}")
     print(f"Phase: {state['phase']}")
     print(f"Backend: {bid} @ {state['init_params']['backend_url']}")
@@ -536,6 +619,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="CLI campaign runner for PromptPotter optimization",
     )
     parser.add_argument("--session", default=None, help="Session ID (default: active)")
+    parser.add_argument("--json", action="store_true", dest="json_output",
+                        help="Emit machine-readable JSON instead of human-formatted text")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="Initialize services and create session")

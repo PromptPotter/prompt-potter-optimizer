@@ -334,6 +334,8 @@ async def l1_evaluate(
         candidate_scores.append(
             {
                 "candidate_id": osp_c.id,
+                "changes_description": osp_c.changes_description or "",
+                "pipeline_params_override": _cpp,
                 "accuracy": scores["accuracy"],
                 "composite": scores.get("composite", scores["accuracy"]),
                 "hits": scores["hits"],
