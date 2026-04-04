@@ -1,4 +1,4 @@
-"""Campaign state emitter — writes campaign_state.json + campaign_output.log.
+"""Campaign state emitter — bidirectional campaign_state.json + campaign_output.log.
 
 Produces two files in the session directory during optimization:
 
@@ -7,12 +7,26 @@ Produces two files in the session directory during optimization:
    candidate, candidates within current round). Resets accumulators on
    candidate/round transitions. Supports ``resume_from`` to carry over
    historical counters across cycles.
+
+   **Bidirectional control:** The ``control`` section is read back from the
+   file at checkpoints. Users/webapp can edit it to pause, resume, or stop
+   the loop mid-run. The emitter preserves user-written control fields
+   across flushes (read-merge-write).
+
+   ``control`` schema::
+
+       {
+           "requested_state": "running" | "pause" | "resume" | "stop",
+           "pause_before_l2_eval": false
+       }
+
 2. ``campaign_output.log`` — append-only plain-text log (ANSI-stripped stdout).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from pathlib import Path
@@ -22,6 +36,8 @@ if TYPE_CHECKING:
     from api.models.phase_event import PhaseEvent
     from api.services.campaign.results import CycleRoundResult
 
+logger = logging.getLogger(__name__)
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -30,7 +46,11 @@ def _strip_ansi(text: str) -> str:
 
 
 class CampaignFileEmitter:
-    """Writes campaign_state.json + campaign_output.log during optimization."""
+    """Writes campaign_state.json + campaign_output.log during optimization.
+
+    Also reads back the ``control`` section from campaign_state.json at
+    checkpoints, enabling bidirectional control (pause/resume/stop).
+    """
 
     def __init__(
         self,
@@ -64,6 +84,7 @@ class CampaignFileEmitter:
             "current_acc": 0.0,
             "cycle_id": None,
             "stop_reason": None,
+            "pause_point": None,
             "log_tail": "",
             # Timing
             "elapsed_s": 0.0,
@@ -93,6 +114,11 @@ class CampaignFileEmitter:
             "current_queries": [],
             "round_candidates": [],
             "last_round": None,
+            # Bidirectional control surface
+            "control": {
+                "requested_state": "running",
+                "pause_before_l2_eval": opt.get("pause_before_l2_eval", False),
+            },
         }
 
         self._workflow_start = time.monotonic()
@@ -112,6 +138,65 @@ class CampaignFileEmitter:
             self._log(f"\n{'=' * 70}")
             self._log(f"  RESUMED — prior: {r.get('rounds_completed', 0)} rounds, best={r.get('best', 0):.1%}")
             self._log(f"{'=' * 70}\n")
+
+    # -- Bidirectional control ------------------------------------------------
+
+    def check_control(self, checkpoint_name: str) -> str | None:
+        """Read control section from campaign_state.json. Returns action or None.
+
+        Called at natural checkpoints (after_round, before_l2, before_l3).
+        Returns ``"pause"`` or ``"stop"`` if the user requested it, else None.
+        """
+        try:
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+        control = data.get("control", {})
+        requested = control.get("requested_state", "running")
+
+        if requested == "resume":
+            # Acknowledge resume: clear to running
+            self._state["control"]["requested_state"] = "running"
+            self._flush()
+            logger.info("Control: resume acknowledged at %s", checkpoint_name)
+            return None
+
+        if requested == "pause":
+            logger.info("Control: pause requested at %s", checkpoint_name)
+            return "pause"
+
+        if requested == "stop":
+            logger.info("Control: stop requested at %s", checkpoint_name)
+            return "stop"
+
+        # Check L2-specific pause
+        if checkpoint_name == "before_l2_eval" and control.get("pause_before_l2_eval"):
+            logger.info("Control: pause_before_l2_eval active at %s", checkpoint_name)
+            return "pause"
+
+        return None
+
+    @classmethod
+    def load_resume_state(
+        cls, session_dir: Path, baseline: float = 0.0,
+    ) -> dict[str, Any] | None:
+        """Load prior campaign_state.json to build resume_from dict."""
+        state_path = session_dir / "campaign_state.json"
+        if not state_path.exists():
+            return None
+        try:
+            prior = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        return {
+            "best": prior.get("best", 0.0),
+            "best_round": prior.get("best_round", 0),
+            "baseline": baseline,
+            "rounds_completed": prior.get("rounds_completed", 0),
+            "total_queries_evaluated": prior.get("total_queries_evaluated", 0),
+            "total_backend_calls": prior.get("total_backend_calls", 0),
+        }
 
     # -- Callbacks -------------------------------------------------------------
 
@@ -240,7 +325,7 @@ class CampaignFileEmitter:
 
         s["current_acc"] = round(acc, 4)
 
-        # Compact current_queries → candidate summary
+        # Compact current_queries -> candidate summary
         summary: dict[str, Any] = {
             "id": f"C{idx + 1}", "acc": round(acc, 4),
             "hits": hits, "total": n,
@@ -282,7 +367,7 @@ class CampaignFileEmitter:
         s["rounds_completed"] = round_result.round
         s["elapsed_s"] = self._elapsed()
 
-        # Compact round_candidates → last_round
+        # Compact round_candidates -> last_round
         s["last_round"] = {
             "r": round_result.round, "best": round_result.label,
             "acc": round(acc, 4), "improved": improved,
@@ -301,8 +386,9 @@ class CampaignFileEmitter:
 
     # -- Lifecycle -------------------------------------------------------------
 
-    def set_stop_reason(self, reason: str | None) -> None:
+    def set_stop_reason(self, reason: str | None, pause_point: str | None = None) -> None:
         self._state["stop_reason"] = reason
+        self._state["pause_point"] = pause_point
         self._state["workflow"] = "idle"
         self._flush()
 
@@ -317,6 +403,18 @@ class CampaignFileEmitter:
         return {}
 
     def _flush(self) -> None:
+        """Write state to disk, preserving user-written control fields."""
+        # Read-merge-write: preserve control edits the user may have written
+        if self.state_path.exists():
+            try:
+                on_disk = json.loads(self.state_path.read_text(encoding="utf-8"))
+                disk_control = on_disk.get("control", {})
+                # User may have changed requested_state or pause_before_l2_eval
+                # Merge: disk wins for control fields (user intent), we win for everything else
+                merged_control = {**self._state["control"], **disk_control}
+                self._state["control"] = merged_control
+            except (json.JSONDecodeError, OSError):
+                pass
         self.state_path.write_text(
             json.dumps(self._state, indent=2, default=str),
             encoding="utf-8",

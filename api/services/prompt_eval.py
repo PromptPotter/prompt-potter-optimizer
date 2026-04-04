@@ -201,14 +201,10 @@ def _build_local_result(
     predicted = ranked[0]["candidate"] if ranked else NO_RESULT
     eval_output = _evaluator.evaluate(ground_truth, predicted)
 
-    # Synthetic pipeline_data — mirrors _parse_backend_response format
-    step_timings = dict.fromkeys(target_steps, 0.0)
     pd: dict = {
         "final_ranking": ranked,
         "total_time": 0.0,
-        "step_timings": step_timings,
         "terminated_at": last_node,
-        "diagnostics": {"warnings": []},
     }
     # Include node-specific outputs that obs mappings expect
     for step in target_steps:
@@ -216,6 +212,7 @@ def _build_local_result(
         if node_data is not None and step != last_node:
             pd[step] = node_data
 
+    gt_rank = next((i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth), None)
     n_candidates = len(ranked)
     return {
         "query": query,
@@ -225,19 +222,11 @@ def _build_local_result(
         "score": eval_output.score,
         "error": None,
         "n_candidates": n_candidates,
-        "ground_truth_rank": _find_gt_rank_in_ranked(ranked, ground_truth),
+        "ground_truth_rank": gt_rank,
         "pipeline_data": pd,
         "precomputed_through": list(target_steps),
         "cached": True,
     }
-
-
-def _find_gt_rank_in_ranked(ranked: list[dict], ground_truth: str) -> int | None:
-    """Find ground truth position in a ranked list. Returns 1-indexed or None."""
-    for i, c in enumerate(ranked):
-        if c.get("candidate", "") == ground_truth:
-            return i + 1
-    return None
 
 
 def _is_degraded(result: dict) -> bool:
@@ -313,7 +302,6 @@ def rescore_cached_result(
         "hit": eval_output.result == EvalResult.PASS,
         "score": eval_output.score,
         "cached": True,
-        "_rescored_from": output_key,
     }
 
 

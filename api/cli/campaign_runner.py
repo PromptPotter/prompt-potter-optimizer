@@ -2,14 +2,18 @@
 
 Parallel orchestration layer to the Jupyter notebook. Each subcommand
 reconstructs services, runs its step, persists to SessionStore, and
-appends to the campaign log. Designed for both Claude Code and humans.
+appends to the campaign log. The ``campaign_state.json`` file in the
+session directory is the bidirectional dashboard: it shows live state
+during optimization and accepts control signals (pause/resume/stop)
+written by the user or a webapp.
 
 Usage:
     python -m api.cli.campaign_runner init [options]
     python -m api.cli.campaign_runner task-context --task-file PATH
     python -m api.cli.campaign_runner scan --variants-file PATH
     python -m api.cli.campaign_runner scan-results
-    python -m api.cli.campaign_runner optimize --round | --evaluate | --auto
+    python -m api.cli.campaign_runner optimize [--round | --auto]
+    python -m api.cli.campaign_runner control --pause | --resume | --stop
     python -m api.cli.campaign_runner results [--save]
     python -m api.cli.campaign_runner status
 """
@@ -24,8 +28,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Windows consoles default to cp1252 which can't print Unicode symbols (→, ✓, ⚠).
-# Reconfigure stdout/stderr to UTF-8 so display code works unchanged.
+# Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -34,59 +37,14 @@ from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 
-# Thin pointer to the active session (bootstrap before svc is available)
-_ACTIVE_SESSION_PATH = Path(".promptpotter") / "active_session.json"
-SUMMARY_START = "--- CLI_SUMMARY ---"
-SUMMARY_END = "--- END_SUMMARY ---"
-
 
 # ---------------------------------------------------------------------------
-# Session bootstrap
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-def _save_active_pointer(backend_id: str, session_id: str) -> None:
-    _ACTIVE_SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_ACTIVE_SESSION_PATH, "w") as f:
-        json.dump({"backend_id": backend_id, "session_id": session_id}, f)
-
-
-def _load_active_pointer(session_override: str | None = None) -> dict:
-    if not _ACTIVE_SESSION_PATH.exists():
-        print("ERROR: No active session. Run 'init' first.")
-        sys.exit(1)
-    with open(_ACTIVE_SESSION_PATH) as f:
-        ptr = json.load(f)
-    if session_override:
-        ptr["session_id"] = session_override
-    return ptr
-
-
-def _load_state(session_override: str | None = None) -> tuple[dict, str, str]:
-    """Load session state + backend_id + session_id from active pointer.
-
-    Returns (state, backend_id, session_id).
-    """
-    ptr = _load_active_pointer(session_override)
-    bid, sid = ptr["backend_id"], ptr["session_id"]
-    store = ProjectStore()
-    state = store.sessions.load(bid, sid)
-    if not state:
-        print(f"ERROR: Session '{sid}' not found for backend '{bid}'.")
-        sys.exit(1)
-    return state, bid, sid
-
-
-def _print_summary(data: dict) -> None:
-    """Print JSON summary block for programmatic consumption (Claude Code)."""
-    print(f"\n{SUMMARY_START}")
-    print(json.dumps(data, default=str))
-    print(SUMMARY_END)
-
-
-# ---------------------------------------------------------------------------
-# Service reconstruction
-# ---------------------------------------------------------------------------
+def _die(msg: str) -> None:
+    sys.exit(f"ERROR: {msg}")
 
 
 async def _reconstruct_svc(init_params: dict):
@@ -116,18 +74,21 @@ async def cmd_init(args: argparse.Namespace) -> None:
         show_pipeline_snapshot,
     )
 
-    config_data: dict = {}
-    if args.config:
-        with open(args.config) as f:
-            config_data = json.load(f)
-    campaign_config = config_data.get("campaign_config", config_data) or _default_campaign_config()
-
     svc = await init_services(
         backend_url=args.backend_url,
         backend_id=args.backend_id,
         experiment_id=args.experiment_id,
         dataset_name=args.dataset_name,
     )
+
+    # Priority: --config file > connector profile > empty dict
+    profile = svc.store.backends.load_connector_profile(args.backend_id) or {}
+    config_data: dict = {}
+    if args.config:
+        with open(args.config) as f:
+            config_data = json.load(f)
+    file_config = config_data.get("campaign_config", config_data) or {}
+    campaign_config = {**profile, **file_config}
 
     await show_pipeline_snapshot(svc)
     pipeline_params = configure_pipeline(svc, campaign_config)
@@ -158,7 +119,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
 
     bid = svc.backend_id
     sid = svc.store.sessions.create(bid, state)
-    _save_active_pointer(bid, sid)
+    svc.store.sessions.save_active_pointer(bid, sid)
     print(f"\nSession created: {sid}")
 
     # Load data and run baseline (may be long-running)
@@ -189,18 +150,13 @@ async def cmd_init(args: argparse.Namespace) -> None:
 - Eval data: {len(eval_data)} queries
 - Baseline: {baseline_acc:.1%}""")
 
-    _print_summary({
-        "step": "init", "session_id": sid,
-        "eval_data_count": len(eval_data),
-        "baseline_accuracy": baseline_acc, "active_steps": active,
-    })
-
 
 async def cmd_task_context(args: argparse.Namespace) -> None:
     """Decompose task description into structured domain context."""
     from notebooks.campaign_lib import decompose_task_context
 
-    state, bid, sid = _load_state(args.session)
+    store = ProjectStore()
+    state, bid, sid = store.sessions.load_active(args.session)
 
     task_description = ""
     if args.task_file:
@@ -208,8 +164,7 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
     elif args.task_text:
         task_description = args.task_text
     if not task_description:
-        print("ERROR: Provide --task-file or --task-text")
-        sys.exit(1)
+        _die("Provide --task-file or --task-text")
 
     svc = await _reconstruct_svc(state["init_params"])
     task_context = await decompose_task_context(
@@ -221,8 +176,6 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
     svc.store.sessions.save(bid, sid, state)
     svc.store.sessions.append_log(bid, sid, f"## Task Context\n{json.dumps(task_context, indent=2)}")
 
-    _print_summary({"step": "task-context", "fields": list(task_context.keys())})
-
 
 async def cmd_scan(args: argparse.Namespace) -> None:
     """Run sensitivity scan with provided variants."""
@@ -232,11 +185,11 @@ async def cmd_scan(args: argparse.Namespace) -> None:
         run_sensitivity_scan,
     )
 
-    state, bid, sid = _load_state(args.session)
+    store = ProjectStore()
+    state, bid, sid = store.sessions.load_active(args.session)
 
     if not args.variants_file:
-        print("ERROR: --variants-file required")
-        sys.exit(1)
+        _die("--variants-file required")
     with open(args.variants_file) as f:
         scan_variants = json.load(f)
 
@@ -272,23 +225,18 @@ async def cmd_scan(args: argparse.Namespace) -> None:
 - Axes: {len(scan_variants)}, variants: {len(records)}
 - Best: {best.get('axis', '?')}={best.get('value_preview', '?')} → {best.get('accuracy', 0):.1%} (delta: {best.get('delta', 0):+.1%})""")
 
-    _print_summary({
-        "step": "scan", "n_variants": len(records),
-        "best_axis": best.get("axis"), "best_accuracy": best.get("accuracy"),
-    })
-
 
 async def cmd_scan_results(args: argparse.Namespace) -> None:
     """Show scan analytics and seed campaign from scan winner."""
     from notebooks.campaign_lib import seed_campaign_from_scan, show_scan_analytics
 
-    state, bid, sid = _load_state(args.session)
+    store = ProjectStore()
+    state, bid, sid = store.sessions.load_active(args.session)
     svc = await _reconstruct_svc(state["init_params"])
 
     scan_data = svc.store.sessions.load_scan_results(bid, sid)
     if not scan_data:
-        print("ERROR: No scan results. Run 'scan' first.")
-        sys.exit(1)
+        _die("No scan results. Run 'scan' first.")
 
     import pandas as pd
 
@@ -316,14 +264,9 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
     state["phase"] = "scan-results"
     svc.store.sessions.save(bid, sid, state)
 
-    _print_summary({
-        "step": "scan-results", "seeded": bool(campaign_rounds),
-        "baseline_accuracy": state["baseline_accuracy"],
-    })
-
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
-    """Run optimization loop (--round, --evaluate, or --auto)."""
+    """Run optimization loop. Dashboard is campaign_state.json in session dir."""
     from notebooks.campaign_lib import (
         configure_pipeline,
         prepare_eval_context,
@@ -331,7 +274,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         show_feedback_preflight,
     )
 
-    state, bid, sid = _load_state(args.session)
+    store = ProjectStore()
+    state, bid, sid = store.sessions.load_active(args.session)
     campaign_config = state["campaign_config"]
 
     svc = await _reconstruct_svc(state["init_params"])
@@ -370,17 +314,16 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         scan_variants=state.get("scan_variants"),
     )
 
-    # HITL: set pause_before_eval for --round mode
+    # HITL: --round sets pause_before_eval via the control surface
     if args.round:
         campaign_config.setdefault("optimization", {})["pause_before_eval"] = True
     else:
         campaign_config.setdefault("optimization", {}).pop("pause_before_eval", None)
 
-    # Save phase before loop starts so in-progress state is visible
     state["phase"] = "optimizing"
     svc.store.sessions.save(bid, sid, state)
 
-    # File emitter: writes campaign_state.json + campaign_output.log
+    # File emitter — bidirectional dashboard
     from api.cli.file_emitter import CampaignFileEmitter
     from api.services.campaign.callbacks import CycleCallbacks
 
@@ -389,19 +332,9 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     active = state.get("active_steps", [])
     excluded = campaign_config.get("exclude_nodes", [])
 
-    # Load prior state for continuity across cycles
-    resume_from = None
-    state_path = session_dir / "campaign_state.json"
-    if state_path.exists():
-        prior = json.loads(state_path.read_text(encoding="utf-8"))
-        resume_from = {
-            "best": prior.get("best", 0.0),
-            "best_round": prior.get("best_round", 0),
-            "baseline": state.get("baseline_accuracy", 0.0),
-            "rounds_completed": prior.get("rounds_completed", 0),
-            "total_queries_evaluated": prior.get("total_queries_evaluated", 0),
-            "total_backend_calls": prior.get("total_backend_calls", 0),
-        }
+    resume_from = CampaignFileEmitter.load_resume_state(
+        session_dir, baseline=state.get("baseline_accuracy", 0.0),
+    )
 
     emitter = CampaignFileEmitter(
         session_dir,
@@ -416,6 +349,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         on_query_eval=emitter.on_query_eval,
         on_candidate_eval=emitter.on_candidate_eval,
         on_round_complete=emitter.on_round_complete,
+        on_checkpoint=emitter.check_control,
     )
 
     campaign_rounds = await run_optimization_notebook(
@@ -434,13 +368,73 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     state["best_accuracy"] = emitter._state.get("best", state.get("baseline_accuracy", 0.0))
     svc.store.sessions.save(bid, sid, state)
 
-    best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
-    _print_summary({
-        "step": "optimize",
-        "mode": "round" if args.round else "evaluate" if args.evaluate else "auto",
-        "n_rounds": len(campaign_rounds),
-        "best_accuracy": best.get("accuracy", 0),
-    })
+    print(f"Dashboard: {emitter.state_path}")
+
+
+async def cmd_control(args: argparse.Namespace) -> None:
+    """Write control signals to campaign_state.json (bidirectional dashboard)."""
+    store = ProjectStore()
+    _state, bid, sid = store.sessions.load_active(args.session)
+    session_dir = store.sessions._session_dir(bid, sid)
+    state_path = session_dir / "campaign_state.json"
+
+    if not state_path.exists():
+        _die("No campaign_state.json — run 'optimize' first.")
+
+    data = json.loads(state_path.read_text(encoding="utf-8"))
+    control = data.get("control", {})
+
+    if args.pause:
+        control["requested_state"] = "pause"
+        print("Control: pause requested. Loop will pause at next checkpoint.")
+    elif args.resume:
+        control["requested_state"] = "resume"
+        print("Control: resume requested.")
+    elif args.stop:
+        control["requested_state"] = "stop"
+        print("Control: stop requested. Loop will stop at next checkpoint.")
+    elif args.pause_before_l2:
+        control["pause_before_l2_eval"] = True
+        print("Control: pause_before_l2_eval enabled.")
+    elif args.no_pause_l2:
+        control["pause_before_l2_eval"] = False
+        print("Control: pause_before_l2_eval disabled.")
+
+    data["control"] = control
+    state_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+
+
+async def cmd_profile(args: argparse.Namespace) -> None:
+    """Manage connector profile — persistent per-backend defaults."""
+    store = ProjectStore()
+    bid = args.backend_id
+
+    if args.save:
+        # Save active session's campaign_config as the backend profile
+        state, bid, _sid = store.sessions.load_active(args.session)
+        profile = state.get("campaign_config", {})
+        store.backends.save_connector_profile(bid, profile)
+        print(f"Profile saved for '{bid}'.")
+        return
+
+    if args.set:
+        key, raw_value = args.set
+        try:
+            value = json.loads(raw_value)
+        except json.JSONDecodeError:
+            value = raw_value
+        profile = store.backends.load_connector_profile(bid) or {}
+        profile[key] = value
+        store.backends.save_connector_profile(bid, profile)
+        print(f"Profile '{bid}': {key} = {json.dumps(value)}")
+        return
+
+    # Default: --show
+    profile = store.backends.load_connector_profile(bid)
+    if not profile:
+        print(f"No connector profile for '{bid}'. Use --save or --set to create one.")
+        return
+    print(json.dumps(profile, indent=2, default=str))
 
 
 async def cmd_results(args: argparse.Namespace) -> None:
@@ -452,7 +446,8 @@ async def cmd_results(args: argparse.Namespace) -> None:
         show_lineage_chain,
     )
 
-    state, bid, sid = _load_state(args.session)
+    store = ProjectStore()
+    state, bid, sid = store.sessions.load_active(args.session)
     svc = await _reconstruct_svc(state["init_params"])
 
     campaigns = svc.store.campaigns.list_campaigns(bid)
@@ -485,76 +480,54 @@ async def cmd_results(args: argparse.Namespace) -> None:
 - Best: {best.get('accuracy', 0):.1%} (round {best.get('round', '?')})
 - Saved: {args.save}""")
 
-    _print_summary({
-        "step": "results", "n_rounds": len(campaign_rounds),
-        "best_accuracy": best.get("accuracy", 0), "saved": args.save,
-    })
-
 
 async def cmd_status(args: argparse.Namespace) -> None:
-    """Print current session state and campaign log tail."""
-    state, bid, sid = _load_state(args.session)
+    """Print live dashboard from campaign_state.json (or session state if idle)."""
+    store = ProjectStore()
+    state, bid, sid = store.sessions.load_active(args.session)
+    session_dir = store.sessions._session_dir(bid, sid)
+    state_path = session_dir / "campaign_state.json"
 
     print(f"Session: {sid}")
     print(f"Phase: {state['phase']}")
-    print(f"Created: {state.get('created_at', '?')}")
     print(f"Backend: {bid} @ {state['init_params']['backend_url']}")
     print(f"Eval data: {state.get('eval_data_count', '?')} queries")
     print(f"Baseline: {state.get('baseline_accuracy', 0):.1%}")
-    print(f"Active steps: {state.get('active_steps', [])}")
 
-    if state.get("task_context"):
-        print(f"Task context: {len(state['task_context'])} fields")
-    if state.get("scan_variants"):
-        print(f"Scan variants: {len(state['scan_variants'])} axes")
+    # Live dashboard from campaign_state.json
+    if state_path.exists():
+        try:
+            live = json.loads(state_path.read_text(encoding="utf-8"))
+            print("\n--- Live Dashboard ---")
+            print(f"Workflow: {live.get('workflow', '?')}")
+            print(f"Phase: {live.get('phase', '?')}")
+            print(f"Round: {live.get('round', 0)}/{live.get('max_rounds', '?')}")
+            print(f"Layer: {live.get('layer', 'L1')}")
+            print(f"Patience: {live.get('patience', '?')}")
+            print(f"Best: {live.get('best', 0):.1%} (round {live.get('best_round', '?')})")
+            print(f"Current: {live.get('candidate', '')} {live.get('query', '')}")
+            print(f"Hit rate: {live.get('hit_rate', 0):.1%}")
+            print(f"Cache: {live.get('cache_hit_rate', 0):.1%}")
+            print(f"ETA: {live.get('eta_s', 0):.0f}s")
+            print(f"Elapsed: {live.get('elapsed_s', 0):.0f}s")
+            control = live.get("control", {})
+            print(f"Control: {control.get('requested_state', 'running')}")
+            if control.get("pause_before_l2_eval"):
+                print("  pause_before_l2_eval: enabled")
+            if live.get("stop_reason"):
+                print(f"Stop reason: {live['stop_reason']}")
+            if live.get("pause_point"):
+                print(f"Pause point: {live['pause_point']}")
+        except (json.JSONDecodeError, OSError):
+            pass
 
-    store = ProjectStore()
     log = store.sessions.load_log(bid, sid)
     if log:
         lines = log.splitlines()
-        tail = lines[-30:] if len(lines) > 30 else lines
+        tail = lines[-20:] if len(lines) > 20 else lines
         print(f"\n--- campaign_log.md (last {len(tail)} lines) ---")
         for line in tail:
             print(line)
-
-
-# ---------------------------------------------------------------------------
-# Defaults
-# ---------------------------------------------------------------------------
-
-
-def _default_campaign_config() -> dict:
-    """Sensible defaults — override via --config JSON file."""
-    return {
-        "sample_size": 0,
-        "exploration_sample_size": 0,
-        "exclude_nodes": [],
-        "pipeline_overrides": {},
-        "optimization": {
-            "patience": 3,
-            "max_rounds": 10,
-            "n_variants": 5,
-            "creativity": 0.7,
-            "improvement_threshold": 0.01,
-            "seed": 42,
-            "enable_l2": True,
-            "enable_l3": True,
-            "l2_patience": 2,
-            "l3_patience": 1,
-            "l2_temperature": 0.3,
-            "l3_temperature": 0.5,
-            "enable_critique": True,
-            "degradation_threshold": 0.4,
-            "backend_warning_threshold": 2,
-            "max_failures": 15,
-        },
-        "eval_llm": {
-            "model": "openai/gpt-oss-120b",
-            "provider": "groq",
-            "temperature": 0.4,
-            "max_tokens": 2000,
-        },
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -590,15 +563,28 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("scan-results", help="Show scan analytics and seed campaign")
 
     p_opt = sub.add_parser("optimize", help="Run optimization loop")
-    mode = p_opt.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--round", action="store_true", help="Generate then stop for review")
-    mode.add_argument("--evaluate", action="store_true", help="Evaluate existing candidates")
-    mode.add_argument("--auto", action="store_true", help="Full loop without pausing")
+    p_opt.add_argument("--round", action="store_true", help="Pause after L1 generate for review")
+    p_opt.add_argument("--auto", action="store_true", help="Full loop (default — use dashboard to control)")
+
+    p_ctl = sub.add_parser("control", help="Write control signals to dashboard")
+    ctl_mode = p_ctl.add_mutually_exclusive_group(required=True)
+    ctl_mode.add_argument("--pause", action="store_true", help="Pause at next checkpoint")
+    ctl_mode.add_argument("--resume", action="store_true", help="Resume from pause")
+    ctl_mode.add_argument("--stop", action="store_true", help="Stop at next checkpoint")
+    ctl_mode.add_argument("--pause-before-l2", action="store_true", help="Enable L2 pause")
+    ctl_mode.add_argument("--no-pause-l2", action="store_true", help="Disable L2 pause")
+
+    p_prof = sub.add_parser("profile", help="Manage connector profile (per-backend defaults)")
+    p_prof.add_argument("--backend-id", default="termnorm-local")
+    prof_mode = p_prof.add_mutually_exclusive_group()
+    prof_mode.add_argument("--show", action="store_true", default=True, help="Show profile (default)")
+    prof_mode.add_argument("--save", action="store_true", help="Save active session config as profile")
+    prof_mode.add_argument("--set", nargs=2, metavar=("KEY", "VALUE"), help="Set a profile field")
 
     p_res = sub.add_parser("results", help="Show results and optionally save")
     p_res.add_argument("--save", action="store_true")
 
-    sub.add_parser("status", help="Print session state and campaign log")
+    sub.add_parser("status", help="Print live dashboard + session state")
 
     return parser
 
@@ -609,6 +595,8 @@ COMMANDS = {
     "scan": cmd_scan,
     "scan-results": cmd_scan_results,
     "optimize": cmd_optimize,
+    "control": cmd_control,
+    "profile": cmd_profile,
     "results": cmd_results,
     "status": cmd_status,
 }

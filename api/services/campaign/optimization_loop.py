@@ -80,6 +80,7 @@ async def _handle_post_probe(
     round_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None,
     obs_campaign_id: str,
+    on_checkpoint: Callable[[str], str | None] | None = None,
 ) -> StopReason | None:
     """After a probe round: reset flag and force L2 if enabled."""
     state.probe_next_round = False
@@ -90,6 +91,7 @@ async def _handle_post_probe(
             config,
             round_num,
             on_phase,
+            on_checkpoint=on_checkpoint,
             obs=_obs,
             trace_id=_tid,
         )
@@ -105,6 +107,7 @@ async def _handle_escalation_signal(
     obs_campaign_id: str,
     campaign_store: "CampaignStore | None",
     cycle_id: str | None,
+    on_checkpoint: Callable[[str], str | None] | None = None,
 ) -> StopReason | None:
     """Handle a degradation escalation signal from a round result.
 
@@ -167,6 +170,7 @@ async def _handle_escalation_signal(
                 config,
                 round_num,
                 on_phase,
+                on_checkpoint=on_checkpoint,
                 obs=_obs,
                 trace_id=_tid,
                 from_degradation=True,
@@ -544,6 +548,7 @@ async def _check_stopping_conditions(
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     obs_campaign_id: str,
+    on_checkpoint: Callable[[str], str | None] | None = None,
 ) -> StopReason | None:
     """Check patience, max_rounds, and perfect score.
 
@@ -559,6 +564,7 @@ async def _check_stopping_conditions(
                 config,
                 round_num,
                 on_phase,
+                on_checkpoint=on_checkpoint,
                 obs=_obs,
                 trace_id=_tid,
             )
@@ -684,6 +690,7 @@ async def run_optimization(
                     _round_data,
                     cb.on_phase,
                     obs_campaign_id,
+                    on_checkpoint=cb.on_checkpoint,
                 )
                 if probe_stop:
                     stop_reason = probe_stop
@@ -703,6 +710,7 @@ async def run_optimization(
                     obs_campaign_id,
                     campaign_store,
                     cycle_id,
+                    on_checkpoint=cb.on_checkpoint,
                 )
                 if esc_stop:
                     stop_reason = esc_stop
@@ -730,6 +738,15 @@ async def run_optimization(
                     round_result,
                     round_num,
                 )
+
+            # Bidirectional control checkpoint — user may pause/stop via dashboard
+            if cb.on_checkpoint:
+                _ctrl = cb.on_checkpoint("after_round")
+                if _ctrl == "pause":
+                    raise PauseForReviewError([], round_num, pause_point="user_pause")
+                if _ctrl == "stop":
+                    stop_reason = StopReason.USER_STOPPED
+                    break
 
             # SearchMemory refresh — pick up results from this round
             if search_memory and state.eval_ctx and state.eval_ctx.store:
@@ -759,6 +776,7 @@ async def run_optimization(
                 round_num,
                 cb.on_phase,
                 obs_campaign_id,
+                on_checkpoint=cb.on_checkpoint,
             )
             if _stop:
                 stop_reason = _stop
@@ -772,11 +790,16 @@ async def run_optimization(
             stop_reason = StopReason.HARD_CAP if round_num >= hard_cap else StopReason.MAX_ROUNDS
 
     except PauseForReviewError as pause:
-        stop_reason = StopReason.PAUSED_FOR_REVIEW
+        stop_reason = (
+            StopReason.USER_PAUSED
+            if pause.pause_point == "user_pause"
+            else StopReason.PAUSED_FOR_REVIEW
+        )
         logger.info(
-            "HITL: %d candidates ready for review at round %d.",
-            len(pause.candidates),
+            "HITL: paused at %s (round %d, %d candidates).",
+            pause.pause_point,
             pause.round_num,
+            len(pause.candidates),
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         stop_reason = StopReason.INTERRUPTED
@@ -789,7 +812,8 @@ async def run_optimization(
     finished_at = datetime.now(UTC).isoformat()
     obs = state.eval_ctx.obs if state.eval_ctx else None
     campaign_status = (
-        "paused" if stop_reason == StopReason.PAUSED_FOR_REVIEW
+        "paused" if stop_reason in (StopReason.PAUSED_FOR_REVIEW, StopReason.USER_PAUSED)
+        else "stopped" if stop_reason == StopReason.USER_STOPPED
         else "interrupted" if stop_reason == StopReason.INTERRUPTED
         else "completed"
     )

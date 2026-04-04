@@ -44,12 +44,18 @@ logger = logging.getLogger(__name__)
 
 
 class PauseForReviewError(Exception):
-    """Raised when HITL mode pauses the loop after candidate generation."""
+    """Raised when HITL mode pauses the loop for human/AI review."""
 
-    def __init__(self, candidates: list[dict], round_num: int) -> None:
+    def __init__(
+        self,
+        candidates: list[dict],
+        round_num: int,
+        pause_point: str = "l1_generate",
+    ) -> None:
         self.candidates = candidates
         self.round_num = round_num
-        super().__init__(f"Paused: {len(candidates)} candidates ready (round {round_num})")
+        self.pause_point = pause_point  # "l1_generate", "before_l2_eval", "user_pause"
+        super().__init__(f"Paused at {pause_point}: {len(candidates)} candidates (round {round_num})")
 
 
 def _candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:

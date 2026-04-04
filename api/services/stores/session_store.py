@@ -14,6 +14,8 @@ Disk layout::
 
 from __future__ import annotations
 
+import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +26,11 @@ from api.services.stores.base import (
     validate_path_component,
     write_json,
 )
+
+logger = logging.getLogger(__name__)
+
+# Thin pointer to the active session — survives across CLI invocations
+_ACTIVE_SESSION_PATH = Path(".promptpotter") / "active_session.json"
 
 
 def generate_session_id() -> str:
@@ -125,3 +132,33 @@ class SessionStore:
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8")
+
+    # -- Active session pointer ------------------------------------------------
+
+    def save_active_pointer(self, backend_id: str, session_id: str) -> None:
+        """Persist pointer to the active session across CLI invocations."""
+        _ACTIVE_SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _ACTIVE_SESSION_PATH.write_text(
+            json.dumps({"backend_id": backend_id, "session_id": session_id}),
+            encoding="utf-8",
+        )
+
+    def load_active(
+        self, session_override: str | None = None,
+    ) -> tuple[dict[str, Any], str, str]:
+        """Load active session state + backend_id + session_id.
+
+        Reads ``.promptpotter/active_session.json`` to find the active
+        session, then loads the full session state.
+
+        Raises ``SystemExit`` if no active session or session not found.
+        """
+        if not _ACTIVE_SESSION_PATH.exists():
+            raise SystemExit("ERROR: No active session. Run 'init' first.")
+        ptr = json.loads(_ACTIVE_SESSION_PATH.read_text(encoding="utf-8"))
+        bid = ptr["backend_id"]
+        sid = session_override or ptr["session_id"]
+        state = self.load(bid, sid)
+        if not state:
+            raise SystemExit(f"ERROR: Session '{sid}' not found for backend '{bid}'.")
+        return state, bid, sid

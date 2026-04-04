@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CycleCallbacks",
     "OnCandidateEval",
+    "OnCheckpoint",
     "OnPhase",
     "OnQueryEval",
     "OnRoundComplete",
@@ -28,6 +29,8 @@ OnCandidateEval: TypeAlias = Callable[[int, int, dict], None]
 OnQueryEval: TypeAlias = Callable[[int, int, int, int, dict], None]
 # (phase_event)
 OnPhase: TypeAlias = Callable[[PhaseEvent], None]
+# (checkpoint_name) -> "pause" | "stop" | None
+OnCheckpoint: TypeAlias = Callable[[str], str | None]
 
 
 @dataclass
@@ -38,3 +41,4 @@ class CycleCallbacks:
     on_candidate_eval: OnCandidateEval | None = None
     on_query_eval: OnQueryEval | None = None
     on_phase: OnPhase | None = None
+    on_checkpoint: OnCheckpoint | None = None

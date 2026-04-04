@@ -147,3 +147,16 @@ class BackendStore:
         return read_json_optional(
             self._datasets_dir(backend_id) / f"{name}.json",
         )
+
+    # -- connector profile (persistent per-backend defaults) -------------------
+
+    def save_connector_profile(self, backend_id: str, profile: dict[str, Any]) -> None:
+        """Write connector profile — persistent campaign defaults for this backend."""
+        path = self._backend_dir(backend_id) / "connector_profile.json"
+        write_json(path, profile)
+
+    def load_connector_profile(self, backend_id: str) -> dict[str, Any] | None:
+        """Load connector profile. Returns None if no profile saved."""
+        return read_json_optional(
+            self._backend_dir(backend_id) / "connector_profile.json",
+        )

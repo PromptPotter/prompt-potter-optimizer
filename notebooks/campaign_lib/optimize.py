@@ -74,11 +74,23 @@ def _chain_callbacks(a: CycleCallbacks, b: CycleCallbacks) -> CycleCallbacks:
             return lambda *args, **kw: (fn_a(*args, **kw), fn_b(*args, **kw))
         return fn_a or fn_b
 
+    def _chain_checkpoint(fn_a, fn_b):
+        """For on_checkpoint: return the first non-None result."""
+        if fn_a and fn_b:
+            def _both(*args, **kw):
+                r = fn_a(*args, **kw)
+                if r is not None:
+                    return r
+                return fn_b(*args, **kw)
+            return _both
+        return fn_a or fn_b
+
     return ChainedCB(
         on_round_complete=_chain(a.on_round_complete, b.on_round_complete),
         on_candidate_eval=_chain(a.on_candidate_eval, b.on_candidate_eval),
         on_query_eval=_chain(a.on_query_eval, b.on_query_eval),
         on_phase=_chain(a.on_phase, b.on_phase),
+        on_checkpoint=_chain_checkpoint(a.on_checkpoint, b.on_checkpoint),
     )
 
 

@@ -104,11 +104,6 @@ class CycleConfig(BaseModel):
         description="Stop after L1 generate (before eval) for human/AI review",
     )
 
-    def node_config(self) -> dict:
-        """Node-level configs only (no steps). Safe for user modification."""
-        pp = self.pipeline_params or {}
-        return {k: v for k, v in pp.items() if k != "steps" and isinstance(v, dict)}
-
     @classmethod
     def from_campaign_config(
         cls,
@@ -125,41 +120,40 @@ class CycleConfig(BaseModel):
     ) -> CycleConfig:
         """Build from the notebook's ``campaign_config`` dict.
 
-        All experiment knobs must be explicitly set in the notebook — no
-        hidden defaults.  Missing keys raise ``KeyError`` immediately so
-        the researcher sees what's missing.
+        Uses CycleConfig field defaults for any missing keys — a minimal
+        connector profile (e.g. just ``exclude_nodes``) is valid input.
         """
-        opt = campaign_config["optimization"]
-        eval_llm = campaign_config["eval_llm"]
+        opt = campaign_config.get("optimization", {})
+        eval_llm = campaign_config.get("eval_llm", {})
         return cls(
-            max_rounds=opt["max_rounds"],
-            l1_patience=opt["patience"],
-            n_variants=opt["n_variants"],
-            creativity=opt["creativity"],
-            improvement_threshold=opt["improvement_threshold"],
-            model=eval_llm["model"],
+            max_rounds=opt.get("max_rounds", 10),
+            l1_patience=opt.get("patience", 3),
+            n_variants=opt.get("n_variants", 5),
+            creativity=opt.get("creativity", 0.7),
+            improvement_threshold=opt.get("improvement_threshold", 0.01),
+            model=eval_llm.get("model"),
             backend_url=backend_url,
             backend_id=backend_id,
             project_root=project_root,
             pipeline_params=pipeline_params,
             active_steps=tuple(pipeline_params.get("steps", [])) if pipeline_params else (),
             session_terms=session_terms,
-            sample_size=campaign_config["sample_size"],
-            seed=opt["seed"],
+            sample_size=campaign_config.get("sample_size", 0),
+            seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
             prompt_node=pipeline_schema.prompt_node_names()[0] if pipeline_schema and pipeline_schema.prompt_node_names() else "",
             scan_context=scan_context,
             task_context=task_context,
-            enable_l2=opt["enable_l2"],
-            enable_l3=opt["enable_l3"],
-            l2_patience=opt["l2_patience"],
-            l3_patience=opt["l3_patience"],
-            l2_temperature=opt["l2_temperature"],
-            l3_temperature=opt["l3_temperature"],
-            enable_critique=opt["enable_critique"],
-            degradation_threshold=opt["degradation_threshold"],
-            backend_warning_threshold=opt["backend_warning_threshold"],
-            max_failures=opt["max_failures"],
+            enable_l2=opt.get("enable_l2", True),
+            enable_l3=opt.get("enable_l3", True),
+            l2_patience=opt.get("l2_patience", 2),
+            l3_patience=opt.get("l3_patience", 1),
+            l2_temperature=opt.get("l2_temperature", 0.3),
+            l3_temperature=opt.get("l3_temperature", 0.5),
+            enable_critique=opt.get("enable_critique", True),
+            degradation_threshold=opt.get("degradation_threshold", 0.4),
+            backend_warning_threshold=opt.get("backend_warning_threshold", 2),
+            max_failures=opt.get("max_failures", 15),
             stale_data_load_protocol=opt.get("stale_data_load_protocol", ["rerun", "samplescan", "sampleswitch"]),
             pause_before_eval=opt.get("pause_before_eval", False),
         )

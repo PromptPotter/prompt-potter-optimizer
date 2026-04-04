@@ -420,6 +420,7 @@ async def escalate_l2(
     config: CycleConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
+    on_checkpoint: Callable[[str], str | None] | None = None,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
     from_degradation: bool = False,
@@ -432,6 +433,7 @@ async def escalate_l2(
     instead of stopping — the degradation investigation loop continues.
     """
     from api.services.campaign.results import StopReason
+    from api.services.campaign.round_execution import PauseForReviewError
 
     esc = state.escalation
 
@@ -451,6 +453,13 @@ async def escalate_l2(
             trace_id=trace_id,
             escalation_context=escalation_context,
         )
+        # HITL checkpoint: pause after L2 generates new context, before L1 resumes
+        if on_checkpoint:
+            _ctrl = on_checkpoint("before_l2_eval")
+            if _ctrl == "pause":
+                raise PauseForReviewError([], round_num, pause_point="before_l2_eval")
+            if _ctrl == "stop":
+                return StopReason.USER_STOPPED
         return None
 
     async def _reset_and_do_l2(*, reset_l3: bool = False) -> None:
