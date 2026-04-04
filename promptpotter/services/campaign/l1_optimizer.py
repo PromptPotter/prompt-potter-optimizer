@@ -110,6 +110,9 @@ async def l1_generate(
                 else:
                     lines.append(f"  {node_name}: (no tunable params)")
             schema_text = "\n".join(lines)
+        if pipeline_schema.available_models:
+            schema_text += "\n\nAVAILABLE MODELS (only use these for model overrides):\n"
+            schema_text += "\n".join(f"  {m}" for m in pipeline_schema.available_models)
 
     _compile_vars = {
         "n_variants": str(n_variants),
@@ -178,6 +181,14 @@ async def l1_generate(
             for bk in _bad_nodes:
                 logger.warning("l1_generate: dropping hallucinated node %r", bk)
                 del node_overrides[bk]
+
+            # Filter out invalid model overrides
+            if pipeline_schema.available_models:
+                _valid_models = set(pipeline_schema.available_models)
+                for _nn, _np in node_overrides.items():
+                    if isinstance(_np, dict) and "model" in _np and _np["model"] not in _valid_models:
+                        logger.warning("l1_generate: dropping invalid model %r for %s", _np["model"], _nn)
+                        del _np["model"]
 
         child = opt_sp.derive_candidate(
             changes_description=v.get("changes_description", ""),

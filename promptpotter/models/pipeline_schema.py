@@ -204,6 +204,7 @@ class PipelineSchema(BaseModel):
     version: str = ""
     description: str = ""
     nodes: list[PipelineNode] = Field(default_factory=list)
+    available_models: list[str] = Field(default_factory=list)
 
     # -------------------------------------------------------------------
     # Lookup helpers

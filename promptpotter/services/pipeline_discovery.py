@@ -179,6 +179,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         version=config.get("version", ""),
         description=config.get("description", ""),
         nodes=steps,
+        available_models=config.get("available_models", []),
     )
 
 
