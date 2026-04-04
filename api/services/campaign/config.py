@@ -98,6 +98,12 @@ class CycleConfig(BaseModel):
         description="Near-miss/miss ratio above which critique flags ranking issues",
     )
 
+    # HITL mode
+    pause_before_eval: bool = Field(
+        False,
+        description="Stop after L1 generate (before eval) for human/AI review",
+    )
+
     def node_config(self) -> dict:
         """Node-level configs only (no steps). Safe for user modification."""
         pp = self.pipeline_params or {}
@@ -155,4 +161,5 @@ class CycleConfig(BaseModel):
             backend_warning_threshold=opt["backend_warning_threshold"],
             max_failures=opt["max_failures"],
             stale_data_load_protocol=opt.get("stale_data_load_protocol", ["rerun", "samplescan", "sampleswitch"]),
+            pause_before_eval=opt.get("pause_before_eval", False),
         )

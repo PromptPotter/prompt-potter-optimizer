@@ -42,6 +42,7 @@ async def sensitivity_scan(
     experiment_id: str = "",
     svc: dict | None = None,
     strict_params: dict[str, set[str]] | None = None,
+    session_id: str = "",
 ) -> tuple:
     """Run a sensitivity scan with progress output.
 
@@ -123,6 +124,15 @@ async def sensitivity_scan(
 
     print(f"\nSensitivity scan complete: {len(df)} variants evaluated")
     show_axis_profiles(profiles)
+
+    # Persist scan results via SessionStore if session is active
+    if session_id and store and backend_id:
+        store.sessions.save_scan_results(
+            backend_id, session_id,
+            df.to_dict(orient="records"),
+            profiles,
+        )
+        logger.info("Scan results persisted to session %s", session_id)
 
     return df, profiles
 
@@ -376,6 +386,7 @@ async def run_sensitivity_scan(
     svc: dict | None = None,
     experiment_id: str = "",
     strict_params: dict[str, set[str]] | None = None,
+    session_id: str = "",
 ):
     """Prepare scan baseline and run sensitivity scan in one call.
 
@@ -397,5 +408,6 @@ async def run_sensitivity_scan(
         sample_size=scan_sample_size,
         svc=svc, experiment_id=experiment_id,
         strict_params=strict_params,
+        session_id=session_id,
     )
     return scan_baseline_sp, scan_df, axis_profiles

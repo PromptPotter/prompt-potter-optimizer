@@ -43,6 +43,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class PauseForReviewError(Exception):
+    """Raised when HITL mode pauses the loop after candidate generation."""
+
+    def __init__(self, candidates: list[dict], round_num: int) -> None:
+        self.candidates = candidates
+        self.round_num = round_num
+        super().__init__(f"Paused: {len(candidates)} candidates ready (round {round_num})")
+
+
 def _candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
     """Derive pipeline_data candidate keys from schema's ranker/candidate_source nodes."""
     if not schema:
@@ -325,6 +334,9 @@ async def execute_round(
         trace_id=trace_id,
         search_memory=search_memory,
     )
+
+    if config.pause_before_eval:
+        raise PauseForReviewError(candidates, round_num)
 
     eval_out = await _evaluate_candidates(
         candidates,

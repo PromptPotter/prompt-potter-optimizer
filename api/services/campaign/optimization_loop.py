@@ -34,6 +34,7 @@ from api.services.campaign.escalation import escalate_l2
 from api.services.campaign.helpers import emit_phase, get_obs_trace, graceful
 from api.services.campaign.results import CycleResult, CycleRoundResult, StopReason
 from api.services.campaign.round_execution import (
+    PauseForReviewError,
     execute_round,
     update_round_state,
 )
@@ -770,6 +771,13 @@ async def run_optimization(
         if stop_reason is None:
             stop_reason = StopReason.HARD_CAP if round_num >= hard_cap else StopReason.MAX_ROUNDS
 
+    except PauseForReviewError as pause:
+        stop_reason = StopReason.PAUSED_FOR_REVIEW
+        logger.info(
+            "HITL: %d candidates ready for review at round %d.",
+            len(pause.candidates),
+            pause.round_num,
+        )
     except (KeyboardInterrupt, asyncio.CancelledError):
         stop_reason = StopReason.INTERRUPTED
         logger.warning(
@@ -780,7 +788,11 @@ async def run_optimization(
     # -- Finalize --
     finished_at = datetime.now(UTC).isoformat()
     obs = state.eval_ctx.obs if state.eval_ctx else None
-    campaign_status = "interrupted" if stop_reason == StopReason.INTERRUPTED else "completed"
+    campaign_status = (
+        "paused" if stop_reason == StopReason.PAUSED_FOR_REVIEW
+        else "interrupted" if stop_reason == StopReason.INTERRUPTED
+        else "completed"
+    )
     finalize_campaign(
         campaign_store,
         cycle_id,
@@ -794,7 +806,7 @@ async def run_optimization(
     )
     cloud_trace_id = (
         None
-        if stop_reason == StopReason.INTERRUPTED
+        if stop_reason in (StopReason.INTERRUPTED, StopReason.PAUSED_FOR_REVIEW)
         else (obs.get_cloud_trace_id(obs_campaign_id) if obs else None)
     )
 

@@ -18,11 +18,17 @@ ruff check api/ tests/
 
 # Docker (JupyterLab + API)
 cd docker && docker-compose up --build
+
+# CLI campaign runner (HITL optimization from terminal)
+python -m api.cli.campaign_runner init --backend-url http://127.0.0.1:8000
+python -m api.cli.campaign_runner optimize --round   # generate → pause for review
+python -m api.cli.campaign_runner optimize --evaluate # resume evaluation
+python -m api.cli.campaign_runner optimize --auto     # full loop, no pause
 ```
 
 ## Mental Model
 
-Two entry points (FastAPI API + Jupyter notebook), one service core in `api/services/`. The sole notebook is `notebooks/optimization_campaign.ipynb` (handles both optimization and evaluation); `campaign_lib` wraps services with display only. (`evaluation.ipynb` was removed — it was never production-used.)
+Three entry points (FastAPI API, Jupyter notebook, CLI runner), one service core in `api/services/`. The notebook is `notebooks/optimization_campaign.ipynb`; `campaign_lib` wraps services with display. The CLI (`api/cli/campaign_runner.py`) is a parallel orchestration layer with HITL support — generates candidates, pauses for human/AI review, then evaluates. Both notebook and CLI persist through `SessionStore` so artifacts (scan results, campaign log) are shared.
 
 **Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data shares one `dataset_runs/` store via content-addressed dedup. SearchMemory *(M8 — live)* aggregates all historical evaluation data into a materialized view (parameter impact, query patterns, failure modes) that feeds both loops.
 
@@ -87,7 +93,7 @@ global query counter across all candidates
 | `l1_optimizer.py` | L1 candidate generation (`l1_generate`) and winner selection (`l1_evaluate`) |
 | `backend_client.py` | HTTP client for backend APIs (sync, replay, `fetch_pipeline()`) |
 | `pipeline_discovery.py` | Parses `GET /pipeline` response into `PipelineSchema` |
-| `project_store.py` | Facade over focused store modules in `stores/` |
+| `project_store.py` | Facade over focused store modules in `stores/` (incl. `SessionStore`) |
 | `campaign/optimization_loop.py` | L1→L2→L3 optimization loop with patience-based stopping |
 | `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
 | `campaign/campaign_init.py` | Campaign init, `resolve_experiment_id()`, experiment overrides |
@@ -96,6 +102,8 @@ global query counter across all candidates
 | `search/coverage.py` | Historical index, step-sequence coverage matching |
 | `search/search_memory.py` | Cross-campaign intelligence materialized view *(M8 — live)* |
 | `obs/observability_logger.py` | Langfuse-compatible traces, MLflow |
+| `stores/session_store.py` | Session lifecycle — config, scan results, campaign log (shared by notebook + CLI) |
+| `cli/campaign_runner.py` | CLI campaign runner — HITL optimization with `pause_before_eval` |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
 
 ## Project Conventions
@@ -118,6 +126,8 @@ global query counter across all candidates
 - **`api/shared/`**: Leaf-level utilities shared by models and services (hashing, schema mutations). No domain model or service dependencies allowed.
 - **`api/shared/constants.py`**: Canonical source for `PROMPT_STRING_FIELDS`, `LAYER_FIELDS`, and `LAYER1_STRING_FIELDS`. All modules must import field lists from here — never define them locally.
 - **`api/config/optimizer_pipeline.py`**: Optimizer pipeline schema loader + `llm_call()` primitive. All optimizer nodes use this instead of calling `chat()` directly.
+- **HITL mode**: `CycleConfig.pause_before_eval` raises `PauseForReviewError` between L1 generate and L1 evaluate. Candidates are already persisted to `round_NNNN_candidates.json` before the pause. On resume (`run_optimization()` with same `cycle_id`), `load_round_candidates()` loads them and evaluation proceeds. Campaign finalized as `"paused"` with `StopReason.PAUSED_FOR_REVIEW`.
+- **SessionStore**: `store.sessions` manages cross-phase state (`session.json`, `scan_results.json`, `campaign_log.md`) under `{backend_id}/sessions/{session_id}/`. Both notebook (`campaign_lib`) and CLI use the same store — pass `session_id` to `sensitivity_scan()` / `run_optimization_notebook()` to activate persistence.
 - **Nested-only pipeline params**: All pipeline params use nested format (`{"node_name": {"param": value}}`) from LLM output through to backend. No flat-to-nested resolution. LLM prompt instructs nested output; `PROMPT_STRING_FIELDS` split separates prompt fields (inherently flat) from node params. `l1_generate()` has a safety net that auto-nests any flat params the LLM still emits.
 
 ## Design Principles
@@ -149,4 +159,5 @@ What's genuinely distinctive about how PromptPotter works.
 8. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M8, M9) + roadmap; archived specs in `docs/specs/archive/`
 9. [`docs/prompt-scheme.md`](docs/prompt-scheme.md) — prompt decomposition (8 fields), rendering, variant library, projection to target pipeline
 10. [`docs/information-flow.md`](docs/information-flow.md) — data origins, consumer matrix, information compression chain
+11. `api/cli/campaign_runner.py` — CLI campaign runner (HITL subcommands: init, scan, optimize --round/--evaluate/--auto, results, status)
 

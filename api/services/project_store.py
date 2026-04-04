@@ -21,6 +21,9 @@ Layout on disk::
         smart_search_plans/{plan_id}.json
         campaigns/{campaign_id}.json
         campaigns/{campaign_id}/trial_NNNN.json
+        sessions/{session_id}/session.json
+        sessions/{session_id}/scan_results.json
+        sessions/{session_id}/campaign_log.md
 """
 
 from pathlib import Path
@@ -30,6 +33,7 @@ from api.services.stores.campaign_store import CampaignStore
 from api.services.stores.dataset_run_store import DatasetRunStore
 from api.services.stores.intermediate_cache import IntermediateCache
 from api.services.stores.plan_store import PlanStore
+from api.services.stores.session_store import SessionStore
 
 BASE_DIR = Path(".promptpotter") / "projects"
 
@@ -44,3 +48,4 @@ class ProjectStore:
         self.dataset_runs = DatasetRunStore(self.base_dir)
         self.smart_search = PlanStore(self.base_dir)
         self.intermediate_cache = IntermediateCache(self.base_dir)
+        self.sessions = SessionStore(self.base_dir)

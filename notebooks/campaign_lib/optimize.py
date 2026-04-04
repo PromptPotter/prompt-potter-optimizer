@@ -348,6 +348,7 @@ async def run_optimization_notebook(
     experiment_id: str | None = None,
     svc: dict | None = None,
     task_context: dict | None = None,
+    session_id: str = "",
 ) -> list:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
@@ -616,6 +617,16 @@ async def run_optimization_notebook(
 
         print(_node_bottom())
 
+        # Persist round to session log
+        if session_id and store and backend_id:
+            _mark = "improved" if round_result.improved else "no improvement"
+            store.sessions.append_log(
+                backend_id, session_id,
+                f"## Round {rn} — Evaluated\n"
+                f"- {round_result.label}: {round_result.accuracy:.1%} — {_mark}\n"
+                f"- Hits: {_rr_hits}/{_rr_total}, stall: {stall_count}",
+            )
+
     # Resolve explicit experiment_id to full cycle_id
     resolved_cycle_id = None
     if experiment_id and store:
@@ -687,5 +698,15 @@ async def run_optimization_notebook(
     print(_dbox_bottom())
 
     format_pipeline_overrides(result.winner_pipeline_params, pipeline_schema)
+
+    # Persist final summary to session log
+    if session_id and store and backend_id and campaign_rounds:
+        store.sessions.append_log(
+            backend_id, session_id,
+            f"## Optimization Complete\n"
+            f"- Rounds: {result.n_rounds}, best: {best['accuracy']:.1%} (round {best['round']})\n"
+            f"- Stop reason: {result.stop_reason}\n"
+            f"- Cycle ID: {result.cycle_id or 'N/A'}",
+        )
 
     return campaign_rounds
