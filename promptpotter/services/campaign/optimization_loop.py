@@ -50,6 +50,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["run_optimization"]
+
 
 # ---------------------------------------------------------------------------
 # Extracted loop helpers (probe + escalation)

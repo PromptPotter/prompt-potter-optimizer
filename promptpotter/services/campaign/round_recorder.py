@@ -16,6 +16,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["RoundRecorder"]
+
 
 class RoundRecorder:
     """Accumulates actions within a round, writes ``round_NNN.json`` on flush."""

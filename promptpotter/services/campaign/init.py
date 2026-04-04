@@ -27,6 +27,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "BackendSession",
+    "CampaignBaseline",
+    "DatasetSummary",
+    "build_all_session_terms",
+    "extract_campaign_baseline",
+    "load_baseline_prompt",
+    "prepare_datasets",
+]
+
 
 @dataclass
 class BackendSession:

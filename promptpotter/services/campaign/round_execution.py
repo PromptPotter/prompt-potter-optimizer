@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["PauseForReviewError", "execute_round", "update_round_state"]
+
 
 class PauseForReviewError(Exception):
     """Raised when HITL mode pauses the loop for human/AI review."""

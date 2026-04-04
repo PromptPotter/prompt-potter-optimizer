@@ -13,6 +13,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["FileControlSurface"]
+
 
 class FileControlSurface:
     """Reads control signals from ``campaign_state.json`` at checkpoints.

@@ -25,6 +25,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "CritiqueAgent",
+    "CritiqueContext",
+    "assemble_critique_sections",
+    "extract_warning_types",
+    "find_rank",
+    "format_critique_for_prompt",
+    "get_candidates",
+    "sample_thinking_styles",
+    "summarize_warning_inventory",
+    "update_query_tracker",
+    "warning_summary",
+]
+
 
 # ---------------------------------------------------------------------------
 # CritiqueContext — all data available for critique analysis

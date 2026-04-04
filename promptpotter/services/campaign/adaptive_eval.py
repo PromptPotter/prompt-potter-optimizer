@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["adapt_eval_set"]
+
 # Never drop more than this fraction of the eval set per adaptation
 MAX_DROP_FRACTION = 0.25
 

@@ -34,6 +34,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["CampaignPersistenceEmitter"]
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 

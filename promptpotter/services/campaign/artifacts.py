@@ -5,6 +5,8 @@ Every entry point must produce all files listed here. The parity test
 1-round optimization run.
 """
 
+__all__ = ["CAMPAIGN_SESSION_ARTIFACTS"]
+
 CAMPAIGN_SESSION_ARTIFACTS = {
     "campaign_state.json",
     "campaign_output.log",

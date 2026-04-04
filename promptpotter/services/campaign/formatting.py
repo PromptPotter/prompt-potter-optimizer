@@ -15,6 +15,15 @@ if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.services.search.scan_results import ScanContext
 
+__all__ = [
+    "ContextData",
+    "L2IntelligenceData",
+    "build_l1_search_memory_context",
+    "build_l2_search_memory_context",
+    "format_context_sections",
+    "format_l2_intelligence",
+]
+
 
 @dataclass
 class ContextData:

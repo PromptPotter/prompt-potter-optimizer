@@ -13,7 +13,7 @@ import enum
 import logging
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.phase_event import PhaseEvent
@@ -28,6 +28,16 @@ if TYPE_CHECKING:
     from promptpotter.services.obs.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "DegradationCheck",
+    "EscalationError",
+    "EscalationSignal",
+    "EscalationStrategy",
+    "EscalationTarget",
+    "build_escalation_checks",
+    "collect_warning_types",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -56,8 +66,6 @@ class EscalationSignal:
     candidates_skipped: int
 
     def to_dict(self) -> dict[str, Any]:
-        from dataclasses import asdict
-
         return asdict(self)
 
 

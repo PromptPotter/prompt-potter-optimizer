@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["TransitionAction", "TransitionResult", "modify_plan", "refine_context"]
+
 
 class TransitionAction(enum.StrEnum):
     """What the feedback cycle should do after an L2/L3 transition."""
