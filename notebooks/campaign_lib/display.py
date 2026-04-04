@@ -220,20 +220,20 @@ def _print_interrupt_banner(
     print(f"{'=' * 70}")
 
 
-_STEP_SHORT_TAGS: dict[str, str] = {
-    "cache_lookup": "cache",
-    "fuzzy_matching": "fuzzy",
-    "web_search": "web",
-    "entity_profiling": "prof",
-    "token_matching": "token",
-    "llm_ranking": "llm",
-}
+# Display tags — populated from PipelineSchema.build_display_tags() at init.
+_DISPLAY_TAGS: dict[str, str] = {}
+
+
+def set_display_tags(schema) -> None:
+    """Set display tags from a PipelineSchema. Call once at pipeline init."""
+    global _DISPLAY_TAGS
+    _DISPLAY_TAGS = schema.build_display_tags() if schema else {}
 
 
 def _step_tag(step_name: str | None) -> str:
     if step_name is None:
         return ""
-    return f"[{_STEP_SHORT_TAGS.get(step_name, step_name[:5])}]"
+    return f"[{_DISPLAY_TAGS.get(step_name, step_name[:4])}]"
 
 
 def _infer_terminated_step(step_timings: dict) -> str | None:
@@ -301,7 +301,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     cache_marker = " \U0001f4d6" if cached else ""
     precomp = r.get("precomputed_through")
     if precomp and not cached:
-        last_cached = _STEP_SHORT_TAGS.get(precomp[-1], precomp[-1][:5])
+        last_cached = _DISPLAY_TAGS.get(precomp[-1], precomp[-1][:4])
         step = f"{DIM}[{last_cached}\U0001f4d6]{RESET}->{step}{cache_marker}"
     else:
         step = f"{step}{cache_marker}"

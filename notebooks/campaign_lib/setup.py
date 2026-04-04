@@ -208,6 +208,10 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
     if svc.pipeline_schema and result.excluded_nodes:
         svc.pipeline_schema = svc.pipeline_schema.filter_to_steps(result.active_nodes)
 
+    # Set display tags from finalized schema (drives eval output formatting)
+    from .display import set_display_tags
+    set_display_tags(svc.pipeline_schema)
+
     nodes_str = ", ".join(result.active_nodes)
     excl_str = f"  Excluded: {', '.join(result.excluded_nodes)}" if result.excluded_nodes else ""
     print(f"Active nodes: {nodes_str}{excl_str}")

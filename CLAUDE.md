@@ -28,7 +28,7 @@ python -m api.cli.campaign_runner optimize --auto     # full loop, no pause
 
 ## CLI Workflow
 
-The CLI campaign runner (`api/cli/campaign_runner.py`) follows a strict subcommand sequence. Each step persists to `SessionStore` so progress survives interrupts. Config lives in `campaign_config.json`.
+The CLI campaign runner (`api/cli/campaign_runner.py`) follows a strict subcommand sequence. Each step persists to `SessionStore` so progress survives interrupts. Config via `--config` JSON file.
 
 ```
 init ──→ [task-context] ──→ [scan] ──→ [scan-results] ──→ optimize ──→ results
@@ -38,9 +38,11 @@ init ──→ [task-context] ──→ [scan] ──→ [scan-results] ──�
 
 **Session directory** (`{backend_id}/sessions/{session_id}/`):
 - `session.json` — config, phase, pipeline_params, cycle_id, best_accuracy
-- `campaign_state.json` — live optimization state (overwritten per update, carries counters across cycles via `resume_from`)
+- `campaign_state.json` — **bidirectional dashboard**: live optimization state (monitoring) + `control` section (user commands: pause/resume/stop). Overwritten per update. See `api/cli/file_emitter.py` for full schema.
 - `campaign_output.log` — append-only eval log (ANSI-stripped)
 - `campaign_log.md` — structured campaign report
+
+**Bidirectional control:** Edit `campaign_state.json`'s `control.requested_state` to `"pause"`, `"resume"`, or `"stop"`. Set `control.pause_before_l2_eval: true` to pause after L2 generates new context. Or use `python -m api.cli.campaign_runner control --pause`.
 
 See [`docs/cli-workflow.md`](docs/cli-workflow.md) for the full subcommand reference.
 
@@ -90,7 +92,7 @@ Per-query result lines printed during evaluation, scan, and optimization. Genera
 global query counter across all candidates
 ```
 
-**Node trace tags:** `cache` · `fuzzy` · `web` · `prof` · `token` · `llm`. `📖` = cached (precomputed_through). `[web📖]->[llm]` means cached through web_search, pipeline resumed at the next node after web, and terminated at llm_ranking.
+**Node trace tags:** `cach` · `fuzz` · `webS` · `ai_1` · `rank` · `ai_2`. Derived from `PipelineSchema.build_display_tags()`: per-node `display_tag` override → `WIRE_TYPE_TAGS[wire_type]` default → name[:4]. Auto-enumerated when multiple nodes share the same base tag. `📖` = cached (precomputed_through). `[webS📖]->[ai_2]` means cached through web_search, pipeline resumed at the next node after web, and terminated at llm_ranking.
 
 **Annotation lines** (indented below the result):
 

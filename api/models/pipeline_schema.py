@@ -94,6 +94,18 @@ class NodePromptMeta(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Display tag defaults (wire_type → short base tag, max 4 chars)
+# ---------------------------------------------------------------------------
+
+WIRE_TYPE_TAGS: dict[str, str] = {
+    "generation": "ai",
+    "retriever": "retr",
+    "tool": "tool",
+    "cache": "cach",
+}
+
+
+# ---------------------------------------------------------------------------
 # Pipeline node
 # ---------------------------------------------------------------------------
 
@@ -104,6 +116,8 @@ class PipelineNode(BaseModel):
     model_config = {"frozen": True}
 
     name: str
+    wire_type: str = ""  # Raw type from connector (e.g., "generation", "retriever")
+    display_tag: str = ""  # Optional short display tag override from connector config
     runtime: NodeRuntime = NodeRuntime.BACKEND
     short_circuit: bool = False
     node_type: NodeType = NodeType.NONE
@@ -148,7 +162,7 @@ NODE_TYPE_METRICS: dict[str, list[IntermediateMetric]] = {
         IntermediateMetric(
             name="source_recall",
             node_type="candidate_source",
-            pipeline_data_key="token_matched_candidates",
+            pipeline_data_key="candidate_ranking",
             description="Fraction of queries where ground truth appears in candidate list",
         ),
     ],
@@ -156,7 +170,7 @@ NODE_TYPE_METRICS: dict[str, list[IntermediateMetric]] = {
         IntermediateMetric(
             name="candidate_recall",
             node_type="ranker",
-            pipeline_data_key="ranked_candidates",
+            pipeline_data_key="final_ranking",
             description="Fraction of LLM-ranked queries where ground truth was available",
         ),
     ],
@@ -216,6 +230,34 @@ class PipelineSchema(BaseModel):
             if param_name in step.param_keys:
                 return step.name
         return None
+
+    def build_display_tags(self) -> dict[str, str]:
+        """Compute display tag map ``{node_name: tag}`` with auto-enumeration.
+
+        Resolution: node.display_tag → WIRE_TYPE_TAGS[wire_type] → name[:4].
+        When multiple nodes resolve to the same base tag, append ``_1``, ``_2``, ...
+        """
+        from collections import Counter
+
+        # Resolve base tag per node
+        base_tags: list[tuple[str, str]] = []  # [(name, base_tag), ...]
+        for node in self.nodes:
+            tag = node.display_tag or WIRE_TYPE_TAGS.get(node.wire_type, "") or node.name[:4]
+            base_tags.append((node.name, tag))
+
+        # Count occurrences
+        tag_counts = Counter(tag for _, tag in base_tags)
+
+        # Enumerate duplicates
+        tag_seq: dict[str, int] = {}
+        result: dict[str, str] = {}
+        for name, tag in base_tags:
+            if tag_counts[tag] > 1:
+                tag_seq[tag] = tag_seq.get(tag, 0) + 1
+                result[name] = f"{tag}_{tag_seq[tag]}"
+            else:
+                result[name] = tag
+        return result
 
     def infer_terminating_node(self, step_timings: dict[str, float | None]) -> str | None:
         """Infer which pipeline step produced the final result.

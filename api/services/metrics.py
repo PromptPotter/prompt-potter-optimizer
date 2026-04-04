@@ -67,7 +67,7 @@ def _extract_candidate_label(c) -> str:
 def _compute_recall(
     step: PipelineNode,
     results: list[dict],
-    candidate_key: str = "token_matched_candidates",
+    candidate_key: str = "candidate_ranking",
 ) -> float:
     """Fraction of queries where GT appears in the candidate list for *step*."""
     scoped = [r for r in results if _step_executed(step.name, r) and not is_error_result(r)]
@@ -191,7 +191,7 @@ def _diag_candidate_source(
     from api.models.pipeline_schema import NODE_TYPE_METRICS
 
     metrics = NODE_TYPE_METRICS.get("candidate_source", [])
-    key = metrics[0].pipeline_data_key if metrics else "token_matched_candidates"
+    key = metrics[0].pipeline_data_key if metrics else "candidate_ranking"
     candidates = pd.get(key, [])
     pos = _gt_position(candidates, gt)
     return {
@@ -207,7 +207,7 @@ def _diag_ranker(
     from api.models.pipeline_schema import NODE_TYPE_METRICS
 
     metrics = NODE_TYPE_METRICS.get("ranker", [])
-    key = metrics[0].pipeline_data_key if metrics else "ranked_candidates"
+    key = metrics[0].pipeline_data_key if metrics else "final_ranking"
     candidates = pd.get(key, [])
     pos = _gt_position(candidates, gt)
 
@@ -225,7 +225,7 @@ def _diag_ranker(
 
     return {
         "gt_in_ranked": pos is not None,
-        "n_ranked_candidates": len(candidates),
+        "n_final_ranking": len(candidates),
         "gt_rank": pos,
         "top_score_gap": top_score_gap,
     }

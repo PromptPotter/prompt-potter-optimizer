@@ -139,14 +139,14 @@ def build_dataset_run_data(
 
 def _parse_backend_response(
     backend_data: dict,
-    ranked_candidates: list,
+    final_ranking: list,
     pipeline_schema: PipelineSchema,
 ) -> dict:
     """Extract pipeline data fields from a backend /matches response.
 
     Derives the key set from the ``PipelineSchema``'s observation mappings.
     """
-    pd: dict = {"ranked_candidates": ranked_candidates}
+    pd: dict = {"final_ranking": final_ranking}
     keys: set[str] = set()
     for mappings in pipeline_schema.obs_extraction_map().values():
         for m in mappings:
@@ -204,7 +204,7 @@ def _build_local_result(
     # Synthetic pipeline_data — mirrors _parse_backend_response format
     step_timings = dict.fromkeys(target_steps, 0.0)
     pd: dict = {
-        "ranked_candidates": ranked,
+        "final_ranking": ranked,
         "total_time": 0.0,
         "step_timings": step_timings,
         "terminated_at": last_node,
@@ -246,12 +246,12 @@ def _is_degraded(result: dict) -> bool:
 
 
 def _find_gt_rank(result: dict) -> int | None:
-    """Find ground truth rank in ranked_candidates. Returns 1-indexed or None."""
+    """Find ground truth rank in final_ranking. Returns 1-indexed or None."""
     gt = result.get("ground_truth", "")
     if not gt:
         return None
     pd = result.get("pipeline_data") or {}
-    for i, c in enumerate(pd.get("ranked_candidates", [])):
+    for i, c in enumerate(pd.get("final_ranking", [])):
         name = c.get("candidate", "") if isinstance(c, dict) else str(c)
         if name == gt:
             return i + 1
@@ -402,7 +402,7 @@ async def eval_query_via_backend(
         if intermediate_cache and _target_steps and node_outputs and not precomputed:
             intermediate_cache.put_steps(backend_id, _target_steps, query, node_outputs)
 
-        ranked = data.get("ranked_candidates", [])
+        ranked = data.get("final_ranking", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
         if predicted == "ERROR":
             return _error_result(
