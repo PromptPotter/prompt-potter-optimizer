@@ -1,5 +1,5 @@
 """Tests for OptSearchPoint model."""
-from api.models.opt_search_point import FewShotExample, OptSearchPoint
+from promptpotter.models.opt_search_point import FewShotExample, OptSearchPoint
 
 
 def test_create_and_derive():

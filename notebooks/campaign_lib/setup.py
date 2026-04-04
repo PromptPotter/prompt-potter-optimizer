@@ -5,37 +5,29 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from api.config.settings import load_variant_library
-from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.campaign_factories import (
+from promptpotter.config.settings import load_variant_library
+from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.services.campaign.configuration import (
     configure_pipeline as _configure_pipeline,
 )
-from api.services.campaign.campaign_factories import (
+from promptpotter.services.campaign.configuration import (
     create_llm_client as setup_llm,
 )
-from api.services.campaign.campaign_init import (
-    InitResult,
+from promptpotter.services.campaign.init import (
+    BackendSession,
     build_all_session_terms,
 )
-from api.services.campaign.campaign_init import (
+from promptpotter.services.campaign.init import (
     init_services as _init_services,
 )
-from api.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.persistence import (
     save_campaign_winner,
 )
-from api.services.dataset_builder import (
-    SHEET_COLUMN_MAP,
-)
-from api.services.dataset_builder import (
-    load_excel_ground_truth as _load_excel_gt,
-)
-from api.services.dataset_builder import (
-    train_test_split as _train_test_split,
-)
-from api.services.project_store import ProjectStore
+from promptpotter.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
-    from api.services.llm_client import LLMClientBase
+    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.llm_client import LLMClientBase
 
 __all__ = [
     "build_all_session_terms",
@@ -70,21 +62,21 @@ __all__ = [
 
 async def decompose_task_context(
     task_description: str,
-    campaign_config: dict,
-    svc: dict,
+    campaign_config: CampaignConfig,
+    session: BackendSession,
     *,
     llm_client: LLMClientBase | None = None,
     model: str | None = None,
 ) -> dict:
     """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
 
-    Delegates to ``api.services.search.context.decompose_task_context()``
+    Delegates to ``promptpotter.services.search.context.decompose_task_context()``
     and prints the decomposed fields for visibility.
     """
-    from api.services.search.context import (
+    from promptpotter.services.search.context import (
         TASK_CONTEXT_FIELDS,
     )
-    from api.services.search.context import (
+    from promptpotter.services.search.context import (
         decompose_task_context as _decompose_task_context,
     )
 
@@ -101,8 +93,8 @@ async def decompose_task_context(
         task_description,
         llm_client,
         model,
-        store_base_dir=svc.store.base_dir if svc.store else None,
-        backend_id=svc.backend_id,
+        store_base_dir=session.store.base_dir if session.store else None,
+        backend_id=session.backend_id,
     )
 
     cache_tag = " (cached)" if result.was_cached else ""
@@ -129,17 +121,34 @@ def dev_reload() -> None:
     import sys
 
     for mod in [
-        "api.services.campaign.escalation",
-        "api.services.campaign.layer_transitions",
-        "api.services.campaign.critique",
-        "api.services.campaign.models",
-        "api.services.campaign.optimization_loop",
+        # Service layer — safe to reload (no Pydantic model classes)
+        "promptpotter.shared.hashing",
+        "promptpotter.services.campaign.config",
+        "promptpotter.services.campaign.lifecycle",
+        "promptpotter.services.campaign.configuration",
+        "promptpotter.services.campaign.escalation",
+        "promptpotter.services.campaign.layer_transitions",
+        "promptpotter.services.campaign.critique",
+        "promptpotter.services.campaign.round_execution",
+        "promptpotter.services.campaign.optimization_loop",
+        "promptpotter.services.stores.dataset_run_store",
+        "promptpotter.services.stale_data",
+        "promptpotter.services.prompt_eval",
+        "promptpotter.services.campaign.l1_optimizer",
+        "promptpotter.services.search.smart_search",
+        "promptpotter.services.search.sensitivity_scanner",
+        "promptpotter.services.search.scan_baseline",
+        # NOTE: Do NOT reload promptpotter.models.* or dataclass modules —
+        # Pydantic/dataclass classes break when reloaded (existing
+        # instances fail type checks).  scan_results.py has ScanContext
+        # dataclass, so it must not be reloaded.
+        # For model/dataclass changes, restart the kernel.
     ]:
         if mod in sys.modules:
             importlib.reload(sys.modules[mod])
 
 
-async def show_pipeline_snapshot(svc: dict) -> dict:
+async def show_pipeline_snapshot(session: BackendSession) -> dict:
     """Fetch and display full pipeline config from backend.
 
     Prints: pipeline name/version, node list, resolved schemas/prompts,
@@ -150,9 +159,9 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     import httpx
 
     try:
-        pipeline_raw = await svc.backend_client.fetch_pipeline()
+        pipeline_raw = await session.backend_client.fetch_pipeline()
     except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
-        base = svc.backend_client.base_url
+        base = session.backend_client.base_url
         print("WARNING: Backend unreachable — is TermNorm running?")
         print(f"  Could not connect to {base}/pipeline")
         print(f"  Error: {exc}")
@@ -176,16 +185,24 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     return config
 
 
-def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
+def configure_pipeline(session: BackendSession, campaign_config: CampaignConfig) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
-    Delegates to ``api.services.campaign.campaign_init.configure_pipeline()``
+    Delegates to ``promptpotter.services.campaign.init.configure_pipeline()``
     and prints a summary of active/excluded nodes.
     """
     result = _configure_pipeline(
-        svc.pipeline_schema, campaign_config,
-        exp_data=getattr(svc, "exp_data", None),
+        session.pipeline_schema, campaign_config,
+        exp_data=getattr(session, "exp_data", None),
     )
+
+    # Replace schema with filtered version — excluded nodes cease to exist
+    if session.pipeline_schema and result.excluded_nodes:
+        session.pipeline_schema = session.pipeline_schema.filter_to_steps(result.active_nodes)
+
+    # Set display tags from finalized schema (drives eval output formatting)
+    from .display import set_display_tags
+    set_display_tags(session.pipeline_schema)
 
     nodes_str = ", ".join(result.active_nodes)
     excl_str = f"  Excluded: {', '.join(result.excluded_nodes)}" if result.excluded_nodes else ""
@@ -195,7 +212,7 @@ def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Setup (thin wrapper over campaign_init.init_services)
+# Setup (thin wrapper over init.init_services)
 # ---------------------------------------------------------------------------
 
 
@@ -204,19 +221,19 @@ async def init_services(
     backend_id: str = "termnorm-local",
     experiment_id: str = "1_production_historical",
     dataset_name: str | None = None,
-) -> InitResult:
+) -> BackendSession:
     """Initialize store, client, and load experiment data.
 
     When *dataset_name* is provided, loads ground-truth data from the
     DatasetStore instead of requiring experiment traces.
     """
-    from api.config.logging import setup_logging
+    from promptpotter.config.logging import setup_logging
 
     setup_logging()
 
     project_root = Path(__file__).resolve().parent.parent.parent
 
-    svc = await _init_services(
+    session = await _init_services(
         backend_url=backend_url,
         backend_id=backend_id,
         experiment_id=experiment_id,
@@ -225,26 +242,26 @@ async def init_services(
         on_status=print,
     )
 
-    if dataset_name and svc.queries:
-        print(f"Dataset    : {dataset_name} ({len(svc.queries)} queries)")
-        print(f"Session terms: {len(svc.session_terms)}")
-        return svc
+    if dataset_name and session.queries:
+        print(f"Dataset    : {dataset_name} ({len(session.queries)} queries)")
+        print(f"Session terms: {len(session.session_terms)}")
+        return session
 
-    if not svc.exp_data:
+    if not session.exp_data:
         print(
             "WARNING: No experiment data available. "
             "Use prepare_datasets() to load from Excel, "
             "or sync from backend."
         )
-        return svc
+        return session
 
-    mappings = svc.exp_data.get("mappings", [])
+    mappings = session.exp_data.get("mappings", [])
     verified = sum(1 for m in mappings if m.get("dataset_entry", "").strip() not in ("", "--"))
-    print(f"Experiment : {svc.exp_data.get('experiment', {}).get('name', experiment_id)}")
+    print(f"Experiment : {session.exp_data.get('experiment', {}).get('name', experiment_id)}")
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
-    print(f"Queries    : {len(svc.queries)}  |  Session terms: {len(svc.session_terms)}")
+    print(f"Queries    : {len(session.queries)}  |  Session terms: {len(session.session_terms)}")
 
-    return svc
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -297,41 +314,33 @@ async def show_backend_status(client) -> dict:
 
 
 async def prepare_eval_context(
-    svc: dict,
+    session: BackendSession,
     train_data: list[dict] | None,
-    campaign_config: dict | None = None,
+    campaign_config: CampaignConfig | None = None,
     run_baseline: bool = False,
+    pipeline_params: dict | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
-    """Load baseline prompt, set eval_data, check backend, optionally run baseline.
+    """Load baseline prompt, set eval_data, optionally run baseline.
 
-    Returns:
-        (baseline, eval_data, campaign_rounds, baseline_results)
+    Thin display wrapper around
+    ``promptpotter.services.campaign.init.prepare_eval_context()``.
     """
-    from api.services.campaign.campaign_init import load_baseline_prompt
+    from promptpotter.services.campaign.init import (
+        prepare_eval_context as _prepare_eval_context,
+    )
 
-    _pn = svc.pipeline_schema.prompt_node_names() if svc.pipeline_schema else []
-    baseline = load_baseline_prompt(svc.exp_data, prompt_node_names=_pn)
-    eval_data = train_data or []
+    baseline, eval_data, campaign_rounds, baseline_results = await _prepare_eval_context(
+        session.exp_data,
+        train_data,
+        campaign_config,
+        run_baseline=run_baseline,
+        pipeline_params=pipeline_params,
+        pipeline_schema=session.pipeline_schema,
+        session=session,
+    )
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
-
-    campaign_rounds: list = []
-    baseline_results: list = []
-    if run_baseline and campaign_config is not None:
-        from .eval import run_baseline_eval
-
-        campaign_rounds, baseline_results = await run_baseline_eval(
-            baseline,
-            eval_data,
-            campaign_config,
-            svc,
-        )
-
     return baseline, eval_data, campaign_rounds, baseline_results
-
-
-# build_all_session_terms is now imported from
-# api.services.campaign.campaign_init (see imports above)
 
 
 def prepare_datasets(
@@ -343,53 +352,28 @@ def prepare_datasets(
 ) -> tuple[list[dict] | None, list[str]]:
     """Load/create datasets, build session terms, and display summary.
 
-    Single entry point that replaces the separate show_dataset_summary +
-    load_or_create_datasets + build_all_session_terms calls.
-
-    Returns:
-        (train_data, session_terms)
+    Thin display wrapper around
+    ``promptpotter.services.campaign.init.prepare_datasets()``.
     """
+    from promptpotter.services.campaign.init import (
+        prepare_datasets as _prepare_datasets,
+    )
+
     if excel_path:
-        excel_path = Path(excel_path)
-        col_map = SHEET_COLUMN_MAP
-        existing = store.backends.load_dataset(backend_id, "train")
-        needs_create = force or not (existing and existing.get("items"))
+        print(f"Loading ground truth from {Path(excel_path).name} ...")
 
-        if needs_create:
-            print(f"Loading ground truth from {excel_path.name} ...")
-            all_rows = _load_excel_gt(excel_path, col_map)
-            train, test_sets = _train_test_split(all_rows)
-            store.backends.save_dataset(backend_id, "train", train, source_file=excel_path.name)
-            for name, items in test_sets.items():
-                store.backends.save_dataset(backend_id, name, items, source_file=excel_path.name)
-
-    # Load all splits from store (whether just created or pre-existing)
-    splits: dict[str, list[dict]] = {}
-    for name in ("train", "test_processes", "test_material"):
-        ds = store.backends.load_dataset(backend_id, name)
-        splits[name] = ds["items"] if ds and ds.get("items") else []
-
-    train_data = splits["train"] or None
-    session_terms = build_all_session_terms(store, backend_id)
-
-    # Combined summary
-    all_queries: set[str] = set()
-    for items in splits.values():
-        for item in items:
-            q = item.get("query", "").strip()
-            if q:
-                all_queries.add(q)
+    result = _prepare_datasets(store, backend_id, excel_path, force=force)
 
     print(f"\n{'=' * 50}")
-    print(f"  Train              : {len(splits['train'])} queries")
-    print(f"  Test (processes)   : {len(splits['test_processes'])} queries")
-    print(f"  Test (material)    : {len(splits['test_material'])} queries")
+    print(f"  Train              : {len(result.splits.get('train', []))} queries")
+    print(f"  Test (processes)   : {len(result.splits.get('test_processes', []))} queries")
+    print(f"  Test (material)    : {len(result.splits.get('test_material', []))} queries")
     print(f"  {'-' * 48}")
-    print(f"  Combined queries   : {len(all_queries)} (deduplicated)")
-    print(f"  Session identifiers: {len(session_terms)} unique targets")
+    print(f"  Combined queries   : {result.n_unique_queries} (deduplicated)")
+    print(f"  Session identifiers: {len(result.session_terms)} unique targets")
     print(f"{'=' * 50}")
 
-    return train_data, session_terms
+    return result.train_data, result.session_terms
 
 
 # ---------------------------------------------------------------------------
@@ -405,8 +389,8 @@ def configure_langfuse(
     secret_key: str | None = None,
 ) -> None:
     """Configure Langfuse settings at runtime from a notebook cell."""
-    from api.config.settings import settings
-    from api.services.obs.langfuse_client import LangfuseLogger
+    from promptpotter.config.settings import settings
+    from promptpotter.services.obs.langfuse_client import LangfuseLogger
 
     changed = False
     if enabled is not None:
@@ -438,7 +422,7 @@ def sync_langfuse(
     reset: bool = False,
 ) -> dict | None:
     """Configure Langfuse dataset name and optionally push all runs."""
-    from api.services.obs.langfuse_push import sync_langfuse_runs
+    from promptpotter.services.obs.langfuse_push import sync_langfuse_runs
 
     result = sync_langfuse_runs(
         store,
@@ -458,7 +442,7 @@ def sync_langfuse(
 
 def push_langfuse(store, backend_id: str) -> dict:
     """Push all historical dataset_runs to cloud Langfuse (dataset-first)."""
-    from api.services.obs.langfuse_push import push_all_runs
+    from promptpotter.services.obs.langfuse_push import push_all_runs
 
     summaries = store.dataset_runs.list_all(backend_id)
 

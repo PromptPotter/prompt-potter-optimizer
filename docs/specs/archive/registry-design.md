@@ -1,6 +1,6 @@
 > **SUPERSEDED** — This document describes pre-M3 design research. The actual
-> implementation is in `api/services/campaign_registry.py` and
-> `api/services/stores/campaign_store.py`. Retained as research history only.
+> implementation is in `promptpotter/services/campaign_registry.py` and
+> `promptpotter/services/stores/campaign_store.py`. Retained as research history only.
 
 > **Status: WIP — planned for M3 (WP 3.3).** Design research, not yet implemented.
 

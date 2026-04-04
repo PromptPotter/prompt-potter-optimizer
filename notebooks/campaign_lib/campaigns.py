@@ -5,21 +5,23 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.campaign_persistence import (
+from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.services.campaign.persistence import (
     apply_experiment_overrides,
 )
-from api.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.persistence import (
     diff_campaign_config as _diff_campaign_config,
 )
-from api.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from api.services.project_store import ProjectStore
+    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.init import BackendSession
+    from promptpotter.services.project_store import ProjectStore
 
 
 __all__ = [
@@ -120,7 +122,7 @@ def diff_campaign_config(
     store: ProjectStore,
     backend_id: str,
     campaign_id: str,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     pipeline_params: dict | None = None,
 ) -> dict:
     """Show parameter differences between current config and a stored campaign."""
@@ -164,8 +166,8 @@ def load_experiment_config(
 
 
 def load_and_apply_experiment(
-    svc: dict,
-    campaign_config: dict,
+    session: BackendSession,
+    campaign_config: CampaignConfig,
     experiment_id: str,
     pipeline_params: dict | None = None,
 ) -> dict | None:
@@ -175,7 +177,7 @@ def load_and_apply_experiment(
     Returns updated *pipeline_params* (or the original if nothing changed).
     """
     stored_cfg = load_experiment_config(
-        svc["store"], svc["backend_id"], experiment_id,
+        session.store, session.backend_id, experiment_id,
     )
     if stored_cfg:
         pp_override = apply_experiment_overrides(campaign_config, stored_cfg)
@@ -190,26 +192,26 @@ def show_experiment_dashboard(
     backend_id: str = "",
     *,
     experiment_id: str | None = None,
-    campaign_config: dict | None = None,
+    campaign_config: CampaignConfig | None = None,
     eval_data: list | None = None,
     pipeline_params: dict | None = None,
     baseline_prompt_fields: dict | None = None,
-    svc: dict | None = None,
+    session: BackendSession | None = None,
 ) -> dict:
     """Unified experiment dashboard — overview or detail by experiment ID.
 
     When *experiment_id* is truthy, loads and applies experiment overrides
     before displaying. Always returns ``pipeline_params`` (possibly updated).
     """
-    # svc shorthand
-    if svc is not None:
-        store = store or svc.get("store")
-        backend_id = backend_id or svc.get("backend_id", "")
+    # session shorthand
+    if session is not None:
+        store = store or session.store
+        backend_id = backend_id or session.backend_id
 
     # Apply experiment overrides when resuming
-    if experiment_id and svc is not None:
+    if experiment_id and session is not None:
         pipeline_params = load_and_apply_experiment(
-            svc, campaign_config, experiment_id, pipeline_params,
+            session, campaign_config, experiment_id, pipeline_params,
         )
 
     # --- Resolve short ID ---
@@ -223,10 +225,10 @@ def show_experiment_dashboard(
     active_id = None
     if campaign_config is not None and eval_data is not None:
         try:
-            from api.services.campaign.campaign_lifecycle import cycle_config_identity
-            from api.services.campaign.config import CycleConfig
+            from promptpotter.services.campaign.config import RunConfig
+            from promptpotter.services.campaign.lifecycle import cycle_config_identity
 
-            config = CycleConfig.from_campaign_config(
+            config = RunConfig.from_campaign_config(
                 campaign_config, pipeline_params=pipeline_params,
             )
             bl_rendered = ""

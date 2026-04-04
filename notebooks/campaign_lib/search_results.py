@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from api.services.search import (
+from promptpotter.services.search import (
     load_filtered_variant_library as _load_filtered_variants,
 )
-from api.services.search import (
+from promptpotter.services.search import (
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
 )
-from api.services.search import (
+from promptpotter.services.search import (
     select_scan_winner as _select_scan_winner,
 )
-from api.services.search.scan_results import (
+from promptpotter.services.search.scan_results import (
     seed_campaign_from_scan as _seed_campaign_from_scan,
 )
 
@@ -24,6 +25,10 @@ from .display import (
     show_scan_query_difficulty,
 )
 from .setup import setup_llm
+
+if TYPE_CHECKING:
+    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.init import BackendSession
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +41,10 @@ __all__ = [
 
 
 async def resume_or_build_diagnostic(
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     baseline,
     baseline_results: list,
-    svc: dict,
+    session: BackendSession,
     eval_data: list,
     scan_variants: dict | None = None,
 ) -> tuple[str, object, list, list, dict]:
@@ -53,7 +58,7 @@ async def resume_or_build_diagnostic(
     """
     # Prepare variant library: base + scan_variants merge
     pipeline_params = campaign_config.get("pipeline_params")
-    variant_library = _load_filtered_variants(pipeline_params, svc.get("pipeline_schema"))
+    variant_library = _load_filtered_variants(pipeline_params, session.pipeline_schema)
     if scan_variants:
         variant_library["pipeline_params"] = scan_variants
 
@@ -66,8 +71,8 @@ async def resume_or_build_diagnostic(
         baseline_results,
         llm_client,
         llm_model,
-        svc["store"],
-        svc["backend_id"],
+        session.store,
+        session.backend_id,
         eval_data,
         variant_library=variant_library,
     )
@@ -139,12 +144,12 @@ def seed_campaign_from_scan(
     baseline,
     scan_variants: dict[str, list],
     campaign_rounds: list,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     pipeline_schema=None,
 ):
     """Select scan winner, update pipeline_params, seed campaign_rounds.
 
-    Delegates to ``api.services.search.scan_results.seed_campaign_from_scan()``
+    Delegates to ``promptpotter.services.search.scan_results.seed_campaign_from_scan()``
     and prints summary + progress.
     """
     if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
@@ -191,7 +196,7 @@ def seed_campaign_from_scan(
     return result.best_sp
 
 
-def show_scan_analytics(scan_df, axis_profiles, svc: dict):
+def show_scan_analytics(scan_df, axis_profiles, session: BackendSession):
     """Display scan leaderboard and query difficulty if results are available.
 
     Returns difficulty_df (or None if scan_df is empty/None).
@@ -199,4 +204,4 @@ def show_scan_analytics(scan_df, axis_profiles, svc: dict):
     if scan_df is None or scan_df.empty:
         return None
     show_scan_leaderboard(scan_df, axis_profiles)
-    return show_scan_query_difficulty(svc["store"], svc["backend_id"])
+    return show_scan_query_difficulty(session.store, session.backend_id)

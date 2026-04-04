@@ -12,4 +12,4 @@ repos:
         additional_dependencies: [pydantic>=2.5.3]
         args: [--config-file=pyproject.toml]
         pass_filenames: false
-        files: ^api/
+        files: ^promptpotter/

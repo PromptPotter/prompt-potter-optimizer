@@ -1,24 +1,24 @@
 """Statistical helpers for feedback cycle display annotations.
 
-Core functions re-exported from ``api.services.search._stats``.
+Core functions re-exported from ``promptpotter.services.search._stats``.
 Display-only formatters (fmt_ci, fmt_pvalue) remain here.
 """
 
 from __future__ import annotations
 
 # Re-export core functions from service layer (canonical location)
-from api.services.search._stats import (
+from promptpotter.services.search._stats import (
     min_detectable_effect,
     proportion_test,
     wilson_ci,
 )
 
 __all__ = [
-    "wilson_ci",
-    "proportion_test",
-    "min_detectable_effect",
     "fmt_ci",
     "fmt_pvalue",
+    "min_detectable_effect",
+    "proportion_test",
+    "wilson_ci",
 ]
 
 

@@ -1,0 +1,36 @@
+{
+  "token_matching": {
+    "max_token_candidates": [10, 30, 50]
+  },
+  "web_search": {
+    "query_prefix": [
+      "ecoinvent",
+      "ecoinvent LCA database material name",
+      "material composition LCA",
+      "what is",
+      "technical data sheet",
+      "manufactured from"
+    ],
+    "max_sites": [3, 7, 12],
+    "num_results": [5, 20, 40],
+    "content_char_limit": [400, 800, 1500]
+  },
+  "entity_profiling": {
+    "temperature": [0.0, 0.3, 0.7],
+    "raw_content_limit": [1000, 2500, 8000],
+    "profiling_schema": [
+      [["+", "lca_database_names", "array", true, "Likely ecoinvent or GaBi database entry names that would match this entity, using standard LCA database naming conventions like 'market for X | X | cut-off, U'"]],
+      [["-", "manufacturing_processes"], ["-", "applications"],
+       ["+", "lca_database_names", "array", true, "Likely ecoinvent or GaBi database entry names for this entity using standard LCA naming conventions"]],
+      [["-", "applications"], ["+", "ecoinvent_candidate_names", "array", true, "Exact ecoinvent activity names this entity most likely maps to"]],
+      [["-", "manufacturing_processes"], ["+", "database_search_tokens", "array", true, "Optimized search tokens for LCA database lookup including spelling variants"]],
+      [["-", "applications"], ["-", "manufacturing_processes"], ["-", "notes"], ["-", "technical_specifications"]],
+      [["+", "material_hierarchy", "array", false, "Classification chain from specific to generic, e.g. [Makrolon 2805, polycarbonate, thermoplastic, polymer]"]],
+      [["+", "material_code_decoded", "string", false, "Decoded meaning of any material code, Werkstoff number, or alloy designation present in the input"],
+       ["+", "base_material", "string", false, "The fundamental base material, e.g. brass, steel, polycarbonate"]]
+    ]
+  },
+  "fuzzy_matching": {
+    "threshold": [50, 70, 85]
+  }
+}

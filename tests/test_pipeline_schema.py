@@ -4,12 +4,12 @@ Verifies derivation methods, parse_pipeline_response factory,
 and registry metadata flow.
 """
 
-from api.models.pipeline_schema import (
+from promptpotter.models.pipeline_schema import (
     ObservationMapping,
     PipelineNode,
     PipelineSchema,
 )
-from api.services.pipeline_discovery import parse_pipeline_response
+from promptpotter.services.pipeline_discovery import parse_pipeline_response
 
 
 def test_derivation_methods():

@@ -29,7 +29,6 @@ dependencies = [
     "python-multipart>=0.0.6",
     "aiofiles>=23.2.1",
     "pandas>=2.2.0",
-    "numpy>=1.26.3",
     "openpyxl>=3.1.0",
     "httpx>=0.26.0",
     "langfuse>=2.0.0",
@@ -58,16 +57,16 @@ dev = [
 Repository = "https://github.com/runfish5/prompt-potter-optimizer"
 
 [tool.setuptools.packages.find]
-include = ["api*"]
+include = ["promptpotter*"]
 
 [tool.setuptools.package-data]
-api = ["py.typed"]
+promptpotter = ["py.typed"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["tests"]
-addopts = "-q --tb=short --cov=api --cov-report=term-missing"
+addopts = "-q --tb=short --cov=promptpotter --cov-report=term-missing"
 markers = ["slow: orchestrator integration tests (>1s each)"]
 
 [tool.mypy]
@@ -128,7 +127,7 @@ max-complexity = 15
 
 [tool.coverage.run]
 branch = true
-source = ["api"]
+source = ["promptpotter"]
 
 [tool.coverage.report]
 exclude_lines = [

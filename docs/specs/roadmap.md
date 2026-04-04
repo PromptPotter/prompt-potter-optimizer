@@ -13,6 +13,7 @@
 | M0-M5 | Specifications, Foundation, Core Optimizer, Infrastructure, Observability | Complete |
 | M6 | PipelineSchema + Pipeline Composability | Complete (Wave 4 → M9) |
 | M7 | Optimizer-as-Pipeline | Complete |
+| Parity | Entry-Point Parity (Unified Persistence) | Complete |
 | M8 | Campaign Intelligence | **Next** |
 | M9 | Multi-Connector Architecture | Future |
 
@@ -32,11 +33,17 @@ PipelineSchema model, `GET /pipeline` self-describing config, schema derivation 
 
 ---
 
+## Parity: Entry-Point Parity -- Complete
+
+Three-layer I/O architecture (persistence / display / control). `CampaignPersistenceEmitter` auto-created by `run_optimization()` — all entry points produce identical `campaign_state.json`, `campaign_output.log`, `campaign_log.md`. `FileControlSurface` extracted for bidirectional control. Parity test enforces artifact manifest. Spec: [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md)
+
+---
+
 ## M8: Campaign Intelligence -- Next
 
 Make campaigns smarter and faster by using accumulated data better. Three pillars: (1) cache intermediate node outputs so prompt variants skip redundant upstream computation, (2) adaptive sensitivity scan that prunes dead axes early, (3) inject accumulated analysis (query difficulty, failure clusters, axis sensitivity) into L1/L2/scan advisor prompts.
 
-**Entry criteria:** M7 exit gate passed.
+**Entry criteria:** Parity exit gate passed.
 
 **Exit gate:** Upstream caching active, scan prunes dead axes, L1 receives accumulated analysis context.
 

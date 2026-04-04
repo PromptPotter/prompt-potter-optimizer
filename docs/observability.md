@@ -49,7 +49,7 @@ mlflow ui --backend-store-uri file:./.promptpotter/projects/{backend_id}/obs/exp
 # Opens at http://localhost:5000
 ```
 
-This pattern is proven in production by TermNorm-excel (reference: `backend-api/docs/FILE_ORGANIZATION_STRATEGY.md` line 128).
+This pattern is proven in production by TermNorm-excel (reference: `backend-promptpotter/docs/FILE_ORGANIZATION_STRATEGY.md` line 128).
 
 **What you'll see in mlflow ui:**
 - One experiment per optimization campaign

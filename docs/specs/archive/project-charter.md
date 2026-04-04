@@ -110,7 +110,7 @@ Public service deployment, non-prompt optimization targets, evolutionary operato
 | Document | Description |
 |----------|-------------|
 | [Literature Review](literature-review.md) | Survey of 11+ prompt optimization frameworks |
-| [Registry Design](registry-design.md) | Campaign/trial tracking pattern (superseded — see `api/services/stores/campaign_store.py`) |
+| [Registry Design](registry-design.md) | Campaign/trial tracking pattern (superseded — see `promptpotter/services/stores/campaign_store.py`) |
 | [PRD](product-requirements.md) | Requirements (P0/P1/P2) |
 | [ADD](architecture-design.md) | Architecture and decisions |
 | [WBS](work-breakdown.md) | Work breakdown structure |

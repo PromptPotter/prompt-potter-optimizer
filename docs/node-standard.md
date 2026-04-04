@@ -114,7 +114,7 @@ Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx,
 
 ## Pipeline Declaration Format
 
-Both TermNorm and PromptPotter declare their pipelines using the same JSON format. TermNorm's `GET /pipeline` returns a pipeline config; the optimizer declares its pipeline in `api/config/optimizer_pipeline.json`.
+Both TermNorm and PromptPotter declare their pipelines using the same JSON format. TermNorm's `GET /pipeline` returns a pipeline config; the optimizer declares its pipeline in `promptpotter/config/optimizer_pipeline.json`.
 
 ```json
 {
@@ -123,7 +123,13 @@ Both TermNorm and PromptPotter declare their pipelines using the same JSON forma
   "nodes": {
     "node_name": {
       "type": "llm|llm/structured|llm/meta|agent|deterministic|evaluation|web_search",
-      "config": { ... }
+      "node_role": "cache|candidate_source|enricher|ranker",
+      "config": { ... },
+      "optimizer": {
+        "observation_mappings": [
+          {"pipeline_key": "output_key_name", "output_field": "field_in_response"}
+        ]
+      }
     }
   },
   "pipelines": {
@@ -134,16 +140,43 @@ Both TermNorm and PromptPotter declare their pipelines using the same JSON forma
 
 The `pipelines` dict composes named sequences from the node pool. The same node can appear in multiple pipeline sequences.
 
+### Node Roles & Exit Points
+
+Every node declares a `node_role` that describes its function in the pipeline:
+
+| Role | Purpose | Produces candidates? |
+|------|---------|---------------------|
+| `cache` | Short-circuit lookup (e.g., exact match cache) | No |
+| `candidate_source` | Generates or retrieves candidate matches | **Yes** |
+| `enricher` | Adds context without producing candidates (e.g., web search, profiling) | No |
+| `ranker` | Re-ranks/scores candidates from upstream sources | **Yes** |
+
+**Exit point convention:** Nodes with role `candidate_source` or `ranker` are valid pipeline exit points. They MUST declare an `observation_mappings` entry whose `pipeline_key` points to their candidate list output. The candidate list is an ordered array of `{"candidate": string, ...}` objects, best-first.
+
+PromptPotter auto-detects exit points from this metadata. When a pipeline terminates early (e.g., `llm_ranking` excluded), the system reads candidates from the last active exit point's declared output key. This enables:
+
+- **Step-sequence cache reuse**: A cached run with more nodes serves a request for fewer nodes by re-scoring from the appropriate exit point.
+- **Partial pipeline execution**: Cached node outputs from a shorter run feed into a longer run via `precomputed`, skipping already-computed nodes.
+
+**Example** — TermNorm's two exit points:
+
+```
+token_matching  (candidate_source) → "token_matched_candidates"
+llm_ranking     (ranker)           → "ranked_candidates"
+```
+
+Excluding `llm_ranking` makes `token_matching` the last exit point. Cached full-pipeline results are re-scored by reading `token_matched_candidates` instead of `ranked_candidates`.
+
 ---
 
 ## Current State vs Future
 
 ### Now (M7)
 
-- **`llm_call()`** (`api/config/optimizer_pipeline.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline nodes use it.
+- **`llm_call()`** (`promptpotter/config/optimizer_pipeline.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline nodes use it.
 - **`get_node_config()`** — loads node configs from `optimizer_pipeline.json` (cached)
 - **`optimizer_pipeline.json`** declares optimizer nodes with the same config shape as TermNorm's pipeline
-- **`observed_node()`** (`api/services/obs/node_tracer.py`) — traces node execution with timing + Langfuse observations. Callers use node type names as `node_type` (e.g., `"llm/meta"`, `"evaluation"`).
+- **`observed_node()`** (`promptpotter/services/obs/node_tracer.py`) — traces node execution with timing + Langfuse observations. Callers use node type names as `node_type` (e.g., `"llm/meta"`, `"evaluation"`).
 - Optimizer nodes — `l1_generate` (`llm/meta`), `l1_evaluate` (`evaluation`), `critique` (`agent`), `l2_refine_context` (`llm/meta`), `l3_modify_plan` (`llm/meta`) — use `llm_call()` with their declared config from `optimizer_pipeline.json`
 
 ### Future (milestone TBD, post-ConnectorProtocol)
@@ -156,6 +189,6 @@ The `pipelines` dict composes named sequences from the node pool. The same node 
 ## Reference
 
 - **TermNorm pipeline config:** `GET /pipeline` endpoint (see TermNorm repo)
-- **Optimizer pipeline config:** [`api/config/optimizer_pipeline.json`](../api/config/optimizer_pipeline.json)
+- **Optimizer pipeline config:** [`promptpotter/config/optimizer_pipeline.json`](../promptpotter/config/optimizer_pipeline.json)
 - **M7 spec:** [`docs/specs/archive/m7-optimizer-pipeline.md`](specs/archive/m7-optimizer-pipeline.md)
 - **Observability:** [`docs/observability.md`](observability.md) — node tracing via `observed_node`

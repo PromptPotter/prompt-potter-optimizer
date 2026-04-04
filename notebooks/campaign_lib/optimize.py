@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from api.models.opt_search_point import OptSearchPoint
-from api.models.phase_event import PhaseEvent
-from api.services.campaign.campaign_init import (
+from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.phase_event import PhaseEvent
+from promptpotter.services.campaign.init import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
-from api.services.campaign.campaign_persistence import (
+from promptpotter.services.campaign.persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
+from promptpotter.services.campaign.results import RunResult
+from promptpotter.shared.errors import is_error_result
 
 from .display import (
     BOLD,
@@ -47,9 +49,12 @@ from .stats import (
 )
 
 if TYPE_CHECKING:
-    from api.models.pipeline_schema import PipelineSchema
-    from api.services.project_store import ProjectStore
-    from api.services.search.scan_results import ScanContext
+    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.services.campaign.callbacks import RunCallbacks
+    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.init import BackendSession
+    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.services.search.scan_results import ScanContext
 
 __all__ = [
     "run_optimization_notebook",
@@ -77,7 +82,7 @@ def _campaign_baseline_as_dict(campaign_rounds: list) -> dict:
 def show_feedback_preflight(
     campaign_rounds: list,
     eval_data: list,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     *,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
@@ -98,12 +103,12 @@ def show_feedback_preflight(
     Returns:
         ScanContext (or None) for passing to the run cell.
     """
-    from api.services.campaign.config import CycleConfig
+    from promptpotter.services.campaign.config import RunConfig
 
     # Build scan context from scan data when available
     scan_context = None
     if scan_df is not None and axis_profiles is not None and scan_variants is not None:
-        from api.services.search import prepare_scan_context
+        from promptpotter.services.search import prepare_scan_context
 
         baseline_acc = 0.0
         if campaign_rounds:
@@ -119,7 +124,7 @@ def show_feedback_preflight(
             difficulty_summary=difficulty_summary,
         )
 
-    config = CycleConfig.from_campaign_config(
+    config = RunConfig.from_campaign_config(
         campaign_config, pipeline_params=pipeline_params,
         scan_context=scan_context,
         pipeline_schema=pipeline_schema,
@@ -334,7 +339,7 @@ def _print_preflight_sections(config, bl, eval_data,
 async def run_optimization_notebook(
     campaign_rounds: list,
     eval_data: list,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     *,
     store: ProjectStore | None = None,
     backend_id: str = "",
@@ -345,9 +350,11 @@ async def run_optimization_notebook(
     langfuse_session_id: str | None = None,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
-    svc: dict | None = None,
+    session: BackendSession | None = None,
     task_context: dict | None = None,
-) -> list:
+    session_id: str = "",
+    display_callbacks: RunCallbacks | None = None,
+) -> tuple[list, RunResult | None]:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
     Accepts and returns the ``campaign_rounds`` list format for downstream
@@ -356,27 +363,31 @@ async def run_optimization_notebook(
     When ``scan_context`` is provided (from ``show_feedback_preflight()``),
     runs in scan-aware mode with per-candidate pipeline_params overrides.
 
+    ``display_callbacks`` are entry-point-specific (display, control).
+    Persistence callbacks are auto-created by the optimization loop.
+
     Returns:
-        Updated campaign_rounds list.
+        Tuple of (campaign_rounds, RunResult or None if interrupted).
     """
-    from api.services.campaign.config import CycleConfig
-    from api.services.campaign.optimization_loop import run_optimization
+    from promptpotter.services.campaign.config import RunConfig
+    from promptpotter.services.campaign.optimization_loop import run_optimization
 
-    # svc shorthand
-    if svc is not None:
-        store = store or svc.get("store")
-        backend_id = backend_id or svc.get("backend_id", "")
-        backend_url = backend_url or svc["backend_client"].base_url
-        session_terms = session_terms or svc.get("session_terms")
-        pipeline_schema = pipeline_schema or svc.get("pipeline_schema")
+    # session shorthand
+    if session is not None:
+        store = store or session.store
+        backend_id = backend_id or session.backend_id
+        backend_url = backend_url or session.backend_client.base_url
+        session_terms = session_terms or session.session_terms
+        pipeline_schema = pipeline_schema or session.pipeline_schema
 
-    config = CycleConfig.from_campaign_config(
+    config = RunConfig.from_campaign_config(
         campaign_config,
         backend_url=backend_url,
         backend_id=backend_id,
         project_root=str(store.base_dir) if store else "",
         pipeline_params=pipeline_params,
         session_terms=session_terms,
+        session_id=session_id,
         scan_context=scan_context,
         pipeline_schema=pipeline_schema,
         task_context=task_context,
@@ -561,8 +572,10 @@ async def run_optimization_notebook(
             try:
                 from collections import Counter
 
-                from api.services.campaign.critique import find_rank, get_candidates
-                from api.services.campaign.round_execution import _candidate_keys_from_schema
+                from promptpotter.services.campaign.critique import find_rank, get_candidates
+                from promptpotter.services.campaign.round_execution import (
+                    _candidate_keys_from_schema,
+                )
                 _ck = _candidate_keys_from_schema(config.pipeline_schema)
 
                 _results = round_result.results
@@ -582,7 +595,7 @@ async def run_optimization_notebook(
                     print(_node_line(f"Degradation: {_deg / _total:.0%}"))
 
                 _valid = [
-                    _r for _r in _results if not _r.get("error")
+                    _r for _r in _results if not is_error_result(_r)
                 ]
                 if _valid:
                     def _recall_at_k(k):
@@ -635,7 +648,15 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from api.services.campaign.callbacks import CycleCallbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks, chain_callbacks
+
+    notebook_display_cb = RunCallbacks(
+        on_round_complete=_on_round,
+        on_candidate_eval=_on_candidate,
+        on_query_eval=_on_query,
+        on_phase=_on_phase,
+    )
+    callbacks = chain_callbacks(notebook_display_cb, display_callbacks) if display_callbacks else notebook_display_cb
 
     result = await run_optimization(
         instruction=instruction,
@@ -644,16 +665,11 @@ async def run_optimization_notebook(
         baseline_prompt_fields=baseline_ps,
         baseline_accuracy=baseline_acc,
         baseline_results=baseline_results,
-        callbacks=CycleCallbacks(
-            on_round_complete=_on_round,
-            on_candidate_eval=_on_candidate,
-            on_query_eval=_on_query,
-            on_phase=_on_phase,
-        ),
+        callbacks=callbacks,
         langfuse_session_id=langfuse_session_id,
         cycle_id=resolved_cycle_id,
         experiment_id=experiment_id or "",
-        backend_client=svc["backend_client"] if svc else None,
+        backend_client=session.backend_client if session else None,
     )
 
     # --- Final summary ---
@@ -661,7 +677,7 @@ async def run_optimization_notebook(
         print(f"\n{YELLOW}{BOLD}[INTERRUPTED]{RESET} Feedback cycle "
               f"stopped before any rounds completed.")
         print("  Resume: re-run this cell to restart.")
-        return campaign_rounds
+        return campaign_rounds, result
 
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
     interrupted = result.stop_reason == "interrupted"
@@ -687,4 +703,4 @@ async def run_optimization_notebook(
 
     format_pipeline_overrides(result.winner_pipeline_params, pipeline_schema)
 
-    return campaign_rounds
+    return campaign_rounds, result

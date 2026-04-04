@@ -182,7 +182,7 @@ Formatted by `format_critique_for_prompt()` (emits only actionable fields: summa
 | **Anomaly flags** | Computed inline from health/rank/evolution |
 | **Pipeline health** | `winner_results.pipeline_data` |
 | **Rank analysis** | `winner_results` + `candidate_keys` from schema |
-| **Round evolution** | `state.rounds` (`CycleRoundResult` history) |
+| **Round evolution** | `state.rounds` (`RoundResult` history) |
 | **Query categories** | `winner_results.terminated_at` |
 | **Failure details** | `winner_results` (8 max, deduped) |
 | **Successes** | `winner_results` (2 examples) |
@@ -254,7 +254,7 @@ That's it. `DegradationCheck` counts it, critique shows `ANOMALY FLAGS`, escalat
 
 ## Thinking Styles
 
-Each round samples 2-3 styles from the variant library (`api/config/prompt_variants.json`, 35+ from published research) into the meta-prompt as mutation guidance. Structured diversity beyond temperature randomness.
+Each round samples 2-3 styles from the variant library (`promptpotter/config/prompt_variants.json`, 35+ from published research) into the meta-prompt as mutation guidance. Structured diversity beyond temperature randomness.
 
 ## Scan-Aware Generation
 
@@ -293,7 +293,7 @@ The feedback cycle emits `PhaseEvent` objects at phase boundaries via `on_phase`
 | `modify_plan` | L3 escalation |
 | `escalation` | `EscalationCheck` fires mid-eval |
 
-Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestamp` (ISO 8601). See `CycleCallbacks` for the callback interface.
+Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestamp` (ISO 8601). See `RunCallbacks` for the callback interface.
 
 ---
 

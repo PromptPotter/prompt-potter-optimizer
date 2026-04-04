@@ -1,7 +1,7 @@
 """Shared test fixtures."""
 import pytest
 
-from api.services.obs.langfuse_client import LangfuseLogger
+from promptpotter.services.obs.langfuse_client import LangfuseLogger
 
 
 @pytest.fixture(autouse=True)

@@ -19,7 +19,7 @@ services:
       - ../.env
     volumes:
       # Mount source code for development (hot reload)
-      - ../api:/app/api
+      - ../promptpotter:/app/promptpotter
       - ./apps:/app/apps
       - ./launcher:/app/launcher
     restart: unless-stopped

@@ -3,9 +3,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from api.dependencies import get_store
-from api.main import app
-from api.services.project_store import ProjectStore
+from promptpotter.dependencies import get_store
+from promptpotter.main import app
+from promptpotter.services.project_store import ProjectStore
 
 
 @pytest.fixture

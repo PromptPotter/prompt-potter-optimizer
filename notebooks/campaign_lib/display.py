@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from promptpotter.shared.errors import is_error_result
+
 from .stats import fmt_ci, wilson_ci
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
@@ -218,20 +220,20 @@ def _print_interrupt_banner(
     print(f"{'=' * 70}")
 
 
-_STEP_SHORT_TAGS: dict[str, str] = {
-    "cache_lookup": "cache",
-    "fuzzy_matching": "fuzzy",
-    "web_search": "web",
-    "entity_profiling": "prof",
-    "token_matching": "token",
-    "llm_ranking": "llm",
-}
+# Display tags — populated from PipelineSchema.build_display_tags() at init.
+_DISPLAY_TAGS: dict[str, str] = {}
+
+
+def set_display_tags(schema) -> None:
+    """Set display tags from a PipelineSchema. Call once at pipeline init."""
+    global _DISPLAY_TAGS
+    _DISPLAY_TAGS = schema.build_display_tags() if schema else {}
 
 
 def _step_tag(step_name: str | None) -> str:
     if step_name is None:
         return ""
-    return f"[{_STEP_SHORT_TAGS.get(step_name, step_name[:5])}]"
+    return f"[{_DISPLAY_TAGS.get(step_name, step_name[:4])}]"
 
 
 def _infer_terminated_step(step_timings: dict) -> str | None:
@@ -245,21 +247,17 @@ def _infer_terminated_step(step_timings: dict) -> str | None:
 
 def _find_gt_rank(r: dict) -> int | None:
     """Find ground truth rank in candidates. Returns 1-indexed rank or None."""
+    from promptpotter.services.campaign.critique import find_rank
+
     gt = r.get("ground_truth", "")
     if not gt:
         return None
     pd = r.get("pipeline_data") or {}
-    ranked = pd.get("ranked_candidates", [])
-    for i, c in enumerate(ranked):
-        name = c.get("candidate", "") if isinstance(c, dict) else str(c)
-        if name == gt:
-            return i + 1
-    # Fallback: token_matched_candidates (tuple/list format)
-    token = pd.get("token_matched_candidates", [])
-    for i, c in enumerate(token):
-        name = c[0] if isinstance(c, (list, tuple)) else str(c)
-        if name == gt:
-            return i + 1
+    # Try ranked_candidates first, then token_matched_candidates fallback
+    for key in ("ranked_candidates", "token_matched_candidates"):
+        rank = find_rank(pd.get(key, []), gt)
+        if rank is not None:
+            return rank
     return None
 
 
@@ -271,7 +269,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     """
     q = (r.get("query") or "")[:45]
     pred = (r.get("predicted") or "")[:35]
-    err = r.get("error")
+    err = r.get("error") or ("pipeline error" if is_error_result(r) else None)
     pd = r.get("pipeline_data") or {}
     step_name = pd.get("terminated_at")
     if step_name is None:
@@ -299,7 +297,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     cache_marker = " \U0001f4d6" if cached else ""
     precomp = r.get("precomputed_through")
     if precomp and not cached:
-        last_cached = _STEP_SHORT_TAGS.get(precomp[-1], precomp[-1][:5])
+        last_cached = _DISPLAY_TAGS.get(precomp[-1], precomp[-1][:4])
         step = f"{DIM}[{last_cached}\U0001f4d6]{RESET}->{step}{cache_marker}"
     else:
         step = f"{step}{cache_marker}"
@@ -537,7 +535,7 @@ def show_scan_query_difficulty(
             qs["n_evals"] += 1
             if item.get("hit"):
                 qs["n_hits"] += 1
-            if item.get("error"):
+            if is_error_result(item):
                 qs["n_errors"] += 1
 
     if not query_stats:
@@ -629,7 +627,7 @@ def format_pipeline_overrides(
     for node_name, params in node_entries:
         print(f'      "{node_name}": {{')
         for param, val in params.items():
-            print(f'          "{param}": {repr(val)},')
+            print(f'          "{param}": {val!r},')
         print("      },")
     print("  }")
     print(f"  {DIM}{'─' * 60}{RESET}")

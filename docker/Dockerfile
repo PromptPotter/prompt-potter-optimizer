@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /root/.local /root/.local
 
 # Copy application code
-COPY api/ /app/api/
+COPY promptpotter/ /app/promptpotter/
 COPY docker/apps/ /app/apps/
 COPY docker/launcher/ /app/launcher/
 COPY requirements.txt /app/
