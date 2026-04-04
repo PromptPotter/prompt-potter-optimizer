@@ -169,6 +169,12 @@ What's genuinely distinctive about how PromptPotter works.
 
 - **Cross-campaign learning via SearchMemory** *(M8 — live)* — Evaluation data compounds across campaigns via a materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic data accessors only — each consumer composes what it needs. See [`docs/architecture.md` § SearchMemory](docs/architecture.md#searchmemory-m8-wave-3).
 
+## Known Backend Issues (TermNorm)
+
+- **`llm_ranking` node is broken — always exclude it.** The TermNorm `llm_ranking` node (LLM-driven re-ranking) is a leftover that produces `json_validate_failed` errors on ~50% of queries, triggers `max_tokens` retries, adds 7–16s latency per query, and falls back to token_matching scores anyway. Always set `"exclude_nodes": ["llm_ranking"]` in campaign configs. The `configs/campaign_default.json` already has this set. Do NOT attempt to enable it — the bug is in the backend, not in PromptPotter. The effective pipeline is: `cache_lookup → fuzzy_matching → web_search → entity_profiling → token_matching`.
+- **`direct_prompt` node** — Backend-only diagnostic node, not part of the optimization pipeline. Ignore it.
+- **Without `llm_ranking`, prompt string fields have no effect.** The only LLM node in the active pipeline is `entity_profiling`, which has its own fixed prompt template. PromptPotter's prompt scheme fields (`thinking_style`, `instruction`, etc.) only affect nodes with a prompt template that references them. With `llm_ranking` excluded, optimization must focus on pipeline params: `entity_profiling` (model, temperature, schema, raw_content_limit), `web_search` (max_sites, num_results, content_char_limit, query_prefix), `token_matching` (max_token_candidates), `fuzzy_matching` (threshold, scorer).
+
 ## Evaluated & Rejected Refactorings
 
 - **PromptDecomposition sub-model on OptSearchPoint**: Evaluated 2026-03-26 and rejected. 15+ `getattr(opt_sp, field)` iteration sites across 7 files depend on flat fields via `PROMPT_STRING_FIELDS`. Extracting to `opt_sp.prompt.field` would add indirection at every site without clarity gain.
