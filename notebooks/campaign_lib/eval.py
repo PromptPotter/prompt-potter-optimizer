@@ -32,6 +32,7 @@ async def run_baseline_eval(
     eval_data: list,
     campaign_config: dict,
     svc: dict,
+    pipeline_params: dict | None = None,
 ) -> tuple:
     """Evaluate baseline prompt and initialize campaign_rounds.
 
@@ -52,7 +53,8 @@ async def run_baseline_eval(
     try:
         campaign_rounds, baseline_results = await _run_baseline_eval(
             baseline, eval_data, svc.backend_client,
-            pipeline_params=campaign_config.get("pipeline_params"),
+            pipeline_params=pipeline_params,
+            pipeline_schema=svc.pipeline_schema,
             store=svc.store, backend_id=svc.backend_id,
             experiment_id=svc.experiment_id,
             on_result=_on_result,

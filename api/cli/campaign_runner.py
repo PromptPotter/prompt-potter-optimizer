@@ -169,7 +169,8 @@ async def cmd_init(args: argparse.Namespace) -> None:
         train_data = svc.queries
 
     baseline, eval_data, campaign_rounds, _br = await prepare_eval_context(
-        svc, train_data, campaign_config, run_baseline=args.run_baseline,
+        svc, train_data, campaign_config,
+        run_baseline=args.run_baseline, pipeline_params=pipeline_params,
     )
 
     # Update session with baseline results
@@ -338,7 +339,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     train_data = svc.queries or []
 
     _baseline, eval_data, campaign_rounds, _ = await prepare_eval_context(
-        svc, train_data, campaign_config,
+        svc, train_data, campaign_config, pipeline_params=pipeline_params,
     )
 
     # Seed campaign_rounds with stored baseline when no eval has been run yet

@@ -26,6 +26,24 @@ python -m api.cli.campaign_runner optimize --evaluate # resume evaluation
 python -m api.cli.campaign_runner optimize --auto     # full loop, no pause
 ```
 
+## CLI Workflow
+
+The CLI campaign runner (`api/cli/campaign_runner.py`) follows a strict subcommand sequence. Each step persists to `SessionStore` so progress survives interrupts. Config lives in `campaign_config.json`.
+
+```
+init ──→ [task-context] ──→ [scan] ──→ [scan-results] ──→ optimize ──→ results
+```
+
+**Critical data flow:** `configure_pipeline(svc, campaign_config)` produces `pipeline_params` (with `exclude_nodes` applied). This must be threaded to every eval call — baseline, scan, and optimization. The configured `pipeline_params` is stored in `state["pipeline_params"]` and in the session directory.
+
+**Session directory** (`{backend_id}/sessions/{session_id}/`):
+- `session.json` — config, phase, pipeline_params, cycle_id, best_accuracy
+- `campaign_state.json` — live optimization state (overwritten per update, carries counters across cycles via `resume_from`)
+- `campaign_output.log` — append-only eval log (ANSI-stripped)
+- `campaign_log.md` — structured campaign report
+
+See [`docs/cli-workflow.md`](docs/cli-workflow.md) for the full subcommand reference.
+
 ## Mental Model
 
 Three entry points (FastAPI API, Jupyter notebook, CLI runner), one service core in `api/services/`. The notebook is `notebooks/optimization_campaign.ipynb`; `campaign_lib` wraps services with display. The CLI (`api/cli/campaign_runner.py`) is a parallel orchestration layer with HITL support — generates candidates, pauses for human/AI review, then evaluates. Both notebook and CLI persist through `SessionStore` so artifacts (scan results, campaign log) are shared.
@@ -36,7 +54,7 @@ Three entry points (FastAPI API, Jupyter notebook, CLI runner), one service core
 
 **Pipeline composability:** `pipeline_params` (nested dicts keyed by node name) throughout PromptPotter. `node_config` only at the TermNorm wire boundary.
 
-**Per-query cache matching:** `find_cached_queries()` uses `_rp_index` (by `rendered_prompt_hash`) then `_entry_matches()` with configurable `strict_params`: `None` = exact dict equality (optimizer), `{}` = steps + prompt only (scan default). Sensitivity scan auto-adds the perturbed axis to `strict_params`. Coverage diagnostics use the same `_entry_matches()` logic so pre-run ✓ ticks predict actual cache hits. See [`docs/architecture.md` § Evaluation Flow](docs/architecture.md#evaluation-flow).
+**Per-query cache matching:** Two cache layers. (1) `dataset_runs` cache: `find_cached_queries()` uses `config_hash(pipeline_params, rp_hash)` — a canonical hash of normalized pipeline config (prompt/output_schema stripped) + prompt identity. Exact match only. (2) `IntermediateCache`: step-sequence prefix matching. When the intermediate cache covers ALL target steps, `eval_query_via_backend()` short-circuits — constructs the result locally without any backend call. See [`docs/architecture.md` § Evaluation Flow](docs/architecture.md#evaluation-flow).
 
 **Two parameter namespaces:** Prompt scheme fields (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format` — rendered into a prompt string by `render()`) vs pipeline node params (nested dicts like `{"token_matching": {"thinking_style": "..."}}` — sent to backend nodes). These are orthogonal and may share names. L1 candidates use `pipeline_params_override` for both: keys matching `PROMPT_STRING_FIELDS` auto-route to `derive_candidate()` (updating prompt scheme fields); all other keys are nested under their node name (`{"web_search": {"max_sites": 5}}`). **No flat param format** — all pipeline params use nested format from LLM output through to backend. See [`docs/prompt-scheme.md`](docs/prompt-scheme.md).
 

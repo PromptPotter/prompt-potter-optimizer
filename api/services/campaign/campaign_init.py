@@ -401,6 +401,7 @@ async def run_baseline_eval(
     obs: Any | None = None,
     session_terms: list[str] | None = None,
     prompt_node: str = "",
+    pipeline_schema: Any | None = None,
 ) -> tuple[list, list]:
     """Evaluate baseline prompt and build initial campaign_rounds list.
 
@@ -415,6 +416,7 @@ async def run_baseline_eval(
         experiment_id: Experiment to load eval data from if eval_data is empty.
         on_result: Optional callback for progress reporting.
         obs: Optional ObsLogger for dataset registration.
+        pipeline_schema: Optional PipelineSchema for composite scoring.
 
     Returns:
         Tuple of (campaign_rounds, baseline_results).
@@ -464,6 +466,7 @@ async def run_baseline_eval(
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,
+        pipeline_schema=pipeline_schema,
         obs=obs,
         source="baseline",
     )

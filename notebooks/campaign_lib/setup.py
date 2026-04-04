@@ -322,6 +322,7 @@ async def prepare_eval_context(
     train_data: list[dict] | None,
     campaign_config: dict | None = None,
     run_baseline: bool = False,
+    pipeline_params: dict | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set eval_data, check backend, optionally run baseline.
 
@@ -346,6 +347,7 @@ async def prepare_eval_context(
             eval_data,
             campaign_config,
             svc,
+            pipeline_params=pipeline_params,
         )
 
     return baseline, eval_data, campaign_rounds, baseline_results
