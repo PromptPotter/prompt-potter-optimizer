@@ -19,6 +19,7 @@ from api.services.campaign.campaign_persistence import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from api.services.campaign.config import CampaignConfig
     from api.services.project_store import ProjectStore
 
 
@@ -120,7 +121,7 @@ def diff_campaign_config(
     store: ProjectStore,
     backend_id: str,
     campaign_id: str,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     pipeline_params: dict | None = None,
 ) -> dict:
     """Show parameter differences between current config and a stored campaign."""
@@ -165,7 +166,7 @@ def load_experiment_config(
 
 def load_and_apply_experiment(
     svc: dict,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     experiment_id: str,
     pipeline_params: dict | None = None,
 ) -> dict | None:
@@ -190,7 +191,7 @@ def show_experiment_dashboard(
     backend_id: str = "",
     *,
     experiment_id: str | None = None,
-    campaign_config: dict | None = None,
+    campaign_config: CampaignConfig | None = None,
     eval_data: list | None = None,
     pipeline_params: dict | None = None,
     baseline_prompt_fields: dict | None = None,

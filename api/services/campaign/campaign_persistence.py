@@ -8,6 +8,7 @@ from datetime import UTC
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from api.services.campaign.config import CampaignConfig
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ def resolve_experiment_id(
 
 
 def apply_experiment_overrides(
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     stored_cfg: dict,
 ) -> dict | None:
     """Merge stored experiment config into campaign_config (in-place).
@@ -68,7 +69,7 @@ def apply_experiment_overrides(
 
 def save_campaign_winner(
     campaign_rounds: list,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     store: ProjectStore,
     backend_id: str,
     *,
@@ -129,7 +130,7 @@ def save_campaign_winner(
 
 def diff_campaign_config(
     stored_config: dict,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     pipeline_params: dict | None = None,
 ) -> dict[str, dict]:
     """Compute parameter differences between stored and current campaign config.

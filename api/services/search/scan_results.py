@@ -16,6 +16,7 @@ from api.shared.constants import PROMPT_STRING_FIELDS
 if TYPE_CHECKING:
     import pandas as pd
 
+    from api.services.campaign.config import CampaignConfig
     from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class DiagnosticResult:
 
 
 async def resume_or_build_diagnostic(
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     baseline: OptSearchPoint,
     baseline_results: list,
     llm_client: Any,
@@ -425,7 +426,7 @@ def seed_campaign_from_scan(
     baseline: JobSearchPoint,
     scan_variants: dict[str, list],
     campaign_rounds: list[dict],
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
 ) -> SeedResult:
     """Select scan winner, update pipeline_params, seed campaign_rounds.
 

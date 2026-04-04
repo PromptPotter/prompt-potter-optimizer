@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from tqdm.auto import tqdm
 
@@ -17,6 +18,9 @@ from api.shared.errors import is_error_result
 
 from .display import _fmt_query_result, _print_interrupt_banner, show_progress
 
+if TYPE_CHECKING:
+    from api.services.campaign.config import CampaignConfig
+
 __all__ = [
     "load_baseline_prompt", "run_baseline_eval",
 ]
@@ -30,7 +34,7 @@ __all__ = [
 async def run_baseline_eval(
     baseline: OptSearchPoint,
     eval_data: list,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     svc: dict,
     pipeline_params: dict | None = None,
 ) -> tuple:

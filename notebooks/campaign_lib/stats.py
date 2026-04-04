@@ -14,11 +14,11 @@ from api.services.search._stats import (
 )
 
 __all__ = [
-    "wilson_ci",
-    "proportion_test",
-    "min_detectable_effect",
     "fmt_ci",
     "fmt_pvalue",
+    "min_detectable_effect",
+    "proportion_test",
+    "wilson_ci",
 ]
 
 

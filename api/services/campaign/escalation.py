@@ -17,8 +17,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from api.models.phase_event import PhaseEvent
+from api.services.campaign._campaign_utils import emit_phase
 from api.services.campaign.critique import extract_warning_types
-from api.services.campaign.helpers import emit_phase
 from api.services.metrics import count_degraded_queries
 
 if TYPE_CHECKING:

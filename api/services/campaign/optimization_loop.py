@@ -22,6 +22,7 @@ from api.models.eval_context import EvalContext
 from api.models.opt_search_point import OptSearchPoint
 from api.models.phase_event import PhaseEvent
 from api.services.backend_client import BackendClient
+from api.services.campaign._campaign_utils import emit_phase, get_obs_trace, graceful
 from api.services.campaign.adaptive_eval import adapt_eval_set
 from api.services.campaign.callbacks import CycleCallbacks
 from api.services.campaign.campaign_lifecycle import (
@@ -31,7 +32,6 @@ from api.services.campaign.campaign_lifecycle import (
 from api.services.campaign.config import CycleConfig
 from api.services.campaign.critique import sample_thinking_styles
 from api.services.campaign.escalation import escalate_l2
-from api.services.campaign.helpers import emit_phase, get_obs_trace, graceful
 from api.services.campaign.results import CycleResult, CycleRoundResult, StopReason
 from api.services.campaign.round_execution import (
     PauseForReviewError,

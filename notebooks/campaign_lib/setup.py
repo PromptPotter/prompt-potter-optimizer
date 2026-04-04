@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 from api.config.settings import load_variant_library
 from api.models.opt_search_point import OptSearchPoint
-from api.services.campaign.campaign_factories import (
+from api.services.campaign.campaign_configuration import (
     configure_pipeline as _configure_pipeline,
 )
-from api.services.campaign.campaign_factories import (
+from api.services.campaign.campaign_configuration import (
     create_llm_client as setup_llm,
 )
 from api.services.campaign.campaign_init import (
@@ -23,18 +23,10 @@ from api.services.campaign.campaign_init import (
 from api.services.campaign.campaign_persistence import (
     save_campaign_winner,
 )
-from api.services.dataset_builder import (
-    SHEET_COLUMN_MAP,
-)
-from api.services.dataset_builder import (
-    load_excel_ground_truth as _load_excel_gt,
-)
-from api.services.dataset_builder import (
-    train_test_split as _train_test_split,
-)
 from api.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
+    from api.services.campaign.config import CampaignConfig
     from api.services.llm_client import LLMClientBase
 
 __all__ = [
@@ -70,7 +62,7 @@ __all__ = [
 
 async def decompose_task_context(
     task_description: str,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     svc: dict,
     *,
     llm_client: LLMClientBase | None = None,
@@ -133,11 +125,10 @@ def dev_reload() -> None:
         "api.shared.hashing",
         "api.services.campaign.config",
         "api.services.campaign.campaign_lifecycle",
-        "api.services.campaign.campaign_factories",
+        "api.services.campaign.campaign_configuration",
         "api.services.campaign.escalation",
         "api.services.campaign.layer_transitions",
         "api.services.campaign.critique",
-        "api.services.campaign.models",
         "api.services.campaign.round_execution",
         "api.services.campaign.optimization_loop",
         "api.services.stores.dataset_run_store",
@@ -194,7 +185,7 @@ async def show_pipeline_snapshot(svc: dict) -> dict:
     return config
 
 
-def configure_pipeline(svc: dict, campaign_config: dict) -> dict:
+def configure_pipeline(svc: dict, campaign_config: CampaignConfig) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
     Delegates to ``api.services.campaign.campaign_init.configure_pipeline()``
@@ -325,41 +316,31 @@ async def show_backend_status(client) -> dict:
 async def prepare_eval_context(
     svc: dict,
     train_data: list[dict] | None,
-    campaign_config: dict | None = None,
+    campaign_config: CampaignConfig | None = None,
     run_baseline: bool = False,
     pipeline_params: dict | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
-    """Load baseline prompt, set eval_data, check backend, optionally run baseline.
+    """Load baseline prompt, set eval_data, optionally run baseline.
 
-    Returns:
-        (baseline, eval_data, campaign_rounds, baseline_results)
+    Thin display wrapper around
+    ``api.services.campaign.campaign_init.prepare_eval_context()``.
     """
-    from api.services.campaign.campaign_init import load_baseline_prompt
+    from api.services.campaign.campaign_init import (
+        prepare_eval_context as _prepare_eval_context,
+    )
 
-    _pn = svc.pipeline_schema.prompt_node_names() if svc.pipeline_schema else []
-    baseline = load_baseline_prompt(svc.exp_data, prompt_node_names=_pn)
-    eval_data = train_data or []
+    baseline, eval_data, campaign_rounds, baseline_results = await _prepare_eval_context(
+        svc.exp_data,
+        train_data,
+        campaign_config,
+        run_baseline=run_baseline,
+        pipeline_params=pipeline_params,
+        pipeline_schema=svc.pipeline_schema,
+        svc=svc,
+    )
 
     print(f"\nEvaluation data: {len(eval_data)} queries")
-
-    campaign_rounds: list = []
-    baseline_results: list = []
-    if run_baseline and campaign_config is not None:
-        from .eval import run_baseline_eval
-
-        campaign_rounds, baseline_results = await run_baseline_eval(
-            baseline,
-            eval_data,
-            campaign_config,
-            svc,
-            pipeline_params=pipeline_params,
-        )
-
     return baseline, eval_data, campaign_rounds, baseline_results
-
-
-# build_all_session_terms is now imported from
-# api.services.campaign.campaign_init (see imports above)
 
 
 def prepare_datasets(
@@ -371,53 +352,28 @@ def prepare_datasets(
 ) -> tuple[list[dict] | None, list[str]]:
     """Load/create datasets, build session terms, and display summary.
 
-    Single entry point that replaces the separate show_dataset_summary +
-    load_or_create_datasets + build_all_session_terms calls.
-
-    Returns:
-        (train_data, session_terms)
+    Thin display wrapper around
+    ``api.services.campaign.campaign_init.prepare_datasets()``.
     """
+    from api.services.campaign.campaign_init import (
+        prepare_datasets as _prepare_datasets,
+    )
+
     if excel_path:
-        excel_path = Path(excel_path)
-        col_map = SHEET_COLUMN_MAP
-        existing = store.backends.load_dataset(backend_id, "train")
-        needs_create = force or not (existing and existing.get("items"))
+        print(f"Loading ground truth from {Path(excel_path).name} ...")
 
-        if needs_create:
-            print(f"Loading ground truth from {excel_path.name} ...")
-            all_rows = _load_excel_gt(excel_path, col_map)
-            train, test_sets = _train_test_split(all_rows)
-            store.backends.save_dataset(backend_id, "train", train, source_file=excel_path.name)
-            for name, items in test_sets.items():
-                store.backends.save_dataset(backend_id, name, items, source_file=excel_path.name)
-
-    # Load all splits from store (whether just created or pre-existing)
-    splits: dict[str, list[dict]] = {}
-    for name in ("train", "test_processes", "test_material"):
-        ds = store.backends.load_dataset(backend_id, name)
-        splits[name] = ds["items"] if ds and ds.get("items") else []
-
-    train_data = splits["train"] or None
-    session_terms = build_all_session_terms(store, backend_id)
-
-    # Combined summary
-    all_queries: set[str] = set()
-    for items in splits.values():
-        for item in items:
-            q = item.get("query", "").strip()
-            if q:
-                all_queries.add(q)
+    result = _prepare_datasets(store, backend_id, excel_path, force=force)
 
     print(f"\n{'=' * 50}")
-    print(f"  Train              : {len(splits['train'])} queries")
-    print(f"  Test (processes)   : {len(splits['test_processes'])} queries")
-    print(f"  Test (material)    : {len(splits['test_material'])} queries")
+    print(f"  Train              : {len(result.splits.get('train', []))} queries")
+    print(f"  Test (processes)   : {len(result.splits.get('test_processes', []))} queries")
+    print(f"  Test (material)    : {len(result.splits.get('test_material', []))} queries")
     print(f"  {'-' * 48}")
-    print(f"  Combined queries   : {len(all_queries)} (deduplicated)")
-    print(f"  Session identifiers: {len(session_terms)} unique targets")
+    print(f"  Combined queries   : {result.n_unique_queries} (deduplicated)")
+    print(f"  Session identifiers: {len(result.session_terms)} unique targets")
     print(f"{'=' * 50}")
 
-    return train_data, session_terms
+    return result.train_data, result.session_terms
 
 
 # ---------------------------------------------------------------------------

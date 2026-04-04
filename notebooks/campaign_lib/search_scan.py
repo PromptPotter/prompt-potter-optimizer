@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from api.models.opt_search_point import OptSearchPoint
 from api.services.search.adaptive_searcher import adaptive_search as _adaptive_search
@@ -18,6 +19,9 @@ from .display import (
     _print_interrupt_banner,
     show_axis_profiles,
 )
+
+if TYPE_CHECKING:
+    from api.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +380,7 @@ def _make_search_progress_cb():
 
 async def run_sensitivity_scan(
     baseline,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     scan_variants: dict[str, list],
     eval_data: list,
     *,

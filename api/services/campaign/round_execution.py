@@ -14,6 +14,11 @@ from api.models.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from api.services import llm_client as _llm_client
+from api.services.campaign._campaign_utils import (
+    candidate_summaries,
+    emit_phase,
+    graceful,
+)
 from api.services.campaign.callbacks import CycleCallbacks
 from api.services.campaign.config import CycleConfig
 from api.services.campaign.critique import (
@@ -22,11 +27,6 @@ from api.services.campaign.critique import (
     format_critique_for_prompt,
     sample_thinking_styles,
     update_query_tracker,
-)
-from api.services.campaign.helpers import (
-    candidate_summaries,
-    emit_phase,
-    graceful,
 )
 from api.services.campaign.results import CycleRoundResult
 from api.services.campaign.state import LoopState

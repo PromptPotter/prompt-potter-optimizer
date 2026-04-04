@@ -12,6 +12,7 @@ from api.services.campaign.campaign_init import (
 from api.services.campaign.campaign_persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
+from api.services.campaign.results import CycleResult
 from api.shared.errors import is_error_result
 
 from .display import (
@@ -47,11 +48,10 @@ from .stats import (
     wilson_ci,
 )
 
-from api.services.campaign.results import CycleResult
-
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
     from api.services.campaign.callbacks import CycleCallbacks
+    from api.services.campaign.config import CampaignConfig
     from api.services.project_store import ProjectStore
     from api.services.search.scan_results import ScanContext
 
@@ -81,7 +81,7 @@ def _campaign_baseline_as_dict(campaign_rounds: list) -> dict:
 def show_feedback_preflight(
     campaign_rounds: list,
     eval_data: list,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     *,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
@@ -338,7 +338,7 @@ def _print_preflight_sections(config, bl, eval_data,
 async def run_optimization_notebook(
     campaign_rounds: list,
     eval_data: list,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     *,
     store: ProjectStore | None = None,
     backend_id: str = "",

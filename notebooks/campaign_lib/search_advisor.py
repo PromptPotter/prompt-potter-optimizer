@@ -6,6 +6,7 @@ import contextlib
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from api.services.search import (
     advise_scan_config as _advise_scan_config,
@@ -20,6 +21,9 @@ from api.services.search import (
 from .search_variants import advisory_to_scan_variants
 from .setup import setup_llm
 
+if TYPE_CHECKING:
+    from api.services.campaign.config import CampaignConfig
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -31,7 +35,7 @@ __all__ = [
 
 
 def preview_advisor_prompt(
-    campaign_config: dict | None = None,
+    campaign_config: CampaignConfig | None = None,
     svc: dict | None = None,
     *,
     task_description: str | dict = "",
@@ -133,7 +137,7 @@ def _display_scan_advisory(advisory: dict) -> None:
 
 
 async def scan_advisor(
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     svc: dict,
     *,
     task_description: str | dict = "",
@@ -198,7 +202,7 @@ async def scan_advisor(
 
 
 async def run_scan_advisor(
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     svc: dict,
     *,
     task_description: str | dict = "",

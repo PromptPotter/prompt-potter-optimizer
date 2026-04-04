@@ -1,13 +1,91 @@
-"""CycleConfig — configuration for the optimization loop."""
+"""CycleConfig — configuration for the optimization loop.
+
+Also defines ``CampaignConfig`` TypedDict — the typed schema for the
+``campaign_config`` dict that flows from notebooks / CLI through to
+services.
+"""
 
 from __future__ import annotations
+
+from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
 from api.models.pipeline_schema import PipelineSchema
 from api.services.search.scan_results import ScanContext
 
-__all__ = ["CycleConfig"]
+__all__ = ["CampaignConfig", "CycleConfig"]
+
+
+# ---------------------------------------------------------------------------
+# CampaignConfig TypedDict — typed schema for the campaign_config dict
+# ---------------------------------------------------------------------------
+
+
+class OptimizationConfig(TypedDict, total=False):
+    """Optimization loop parameters (``campaign_config["optimization"]``)."""
+
+    patience: int
+    max_rounds: int | None
+    n_variants: int
+    creativity: float
+    improvement_threshold: float
+    seed: int
+    max_failures: int
+    degradation_threshold: float
+    backend_warning_threshold: int
+    enable_l2: bool
+    enable_l3: bool
+    l2_patience: int | None
+    l3_patience: int | None
+    l2_temperature: float
+    l3_temperature: float
+    enable_critique: bool
+    pause_before_eval: bool
+    stale_data_load_protocol: list[str]
+
+
+class EvalLLMConfig(TypedDict, total=False):
+    """LLM provider settings (``campaign_config["eval_llm"]``)."""
+
+    model: str
+    provider: str
+    temperature: float
+    max_tokens: int
+
+
+class SmartSearchConfig(TypedDict, total=False):
+    """Sensitivity scan parameters (``campaign_config["smart_search"]``)."""
+
+    n_diagnostic: int
+    max_rounds: int
+    stop_threshold: float
+    seed: int
+
+
+class CampaignConfig(TypedDict, total=False):
+    """Top-level campaign configuration.
+
+    All keys are optional — a minimal connector profile (e.g. just
+    ``exclude_nodes``) is valid input.  The dict is mutated in place by
+    ``configure_pipeline()`` (sets ``pipeline_params``) and the CLI
+    (sets ``optimization.pause_before_eval``).
+    """
+
+    sample_size: int
+    exploration_sample_size: int
+    exploration_rate: float
+    exclude_nodes: list[str]
+    pipeline_overrides: dict
+    pipeline_params: dict | None
+    optimization: OptimizationConfig
+    eval_llm: EvalLLMConfig
+    smart_search: SmartSearchConfig
+
+
+# ---------------------------------------------------------------------------
+# CycleConfig — Pydantic model for the optimization loop
+# ---------------------------------------------------------------------------
 
 
 class CycleConfig(BaseModel):
@@ -108,7 +186,7 @@ class CycleConfig(BaseModel):
     @classmethod
     def from_campaign_config(
         cls,
-        campaign_config: dict,
+        campaign_config: CampaignConfig,
         *,
         backend_url: str = "",
         backend_id: str = "",

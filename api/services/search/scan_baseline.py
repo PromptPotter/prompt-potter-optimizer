@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from api.models.opt_search_point import OptSearchPoint
     from api.models.pipeline_schema import PipelineSchema
     from api.models.search_point import JobSearchPoint
+    from api.services.campaign.config import CampaignConfig
     from api.services.llm_client import LLMClientBase
     from api.services.project_store import ProjectStore
 
@@ -37,7 +38,7 @@ class ScanBaselineResult:
 
 async def prepare_scan_baseline(
     baseline: OptSearchPoint,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     llm_client: LLMClientBase,
     llm_model: str,
     *,

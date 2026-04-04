@@ -23,6 +23,7 @@ from api.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
+    from api.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 
@@ -451,7 +452,7 @@ async def run_baseline_eval(
 
     # Register dataset items in obs if available
     if obs and eval_data:
-        from api.services.campaign.helpers import graceful
+        from api.services.campaign._campaign_utils import graceful
 
         with graceful("Dataset registration in run_baseline_eval failed"):
             obs.register_dataset(DATASET_NAME, eval_data)
@@ -491,6 +492,108 @@ async def run_baseline_eval(
     ]
 
     return campaign_rounds, baseline_results
+
+
+async def prepare_eval_context(
+    exp_data: dict | None,
+    train_data: list[dict] | None,
+    campaign_config: CampaignConfig | None = None,
+    *,
+    run_baseline: bool = False,
+    pipeline_params: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
+    svc: Any = None,
+) -> tuple[OptSearchPoint, list[dict], list, list]:
+    """Load baseline prompt, set eval_data, optionally run baseline.
+
+    Pure orchestration — no display.  The notebook wrapper adds print
+    statements on top.
+
+    Returns:
+        (baseline, eval_data, campaign_rounds, baseline_results)
+    """
+    prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
+    baseline = load_baseline_prompt(exp_data, prompt_node_names=prompt_nodes)
+    eval_data = train_data or []
+
+    campaign_rounds: list = []
+    baseline_results: list = []
+    if run_baseline and campaign_config is not None and svc is not None:
+        campaign_rounds, baseline_results = await run_baseline_eval(
+            baseline,
+            eval_data,
+            campaign_config,
+            svc=svc,
+            pipeline_params=pipeline_params,
+        )
+
+    return baseline, eval_data, campaign_rounds, baseline_results
+
+
+@dataclass
+class DatasetSummary:
+    """Return from ``prepare_datasets()``."""
+
+    train_data: list[dict] | None
+    session_terms: list[str]
+    splits: dict[str, list[dict]]
+    n_unique_queries: int
+
+
+def prepare_datasets(
+    store: ProjectStore,
+    backend_id: str,
+    excel_path: str | Path | None = None,
+    *,
+    force: bool = False,
+) -> DatasetSummary:
+    """Load/create datasets and build session terms.
+
+    Pure orchestration — no display.  The notebook wrapper prints the
+    summary table.
+
+    Returns:
+        DatasetSummary with train_data, session_terms, splits dict, and unique query count.
+    """
+    from api.services.dataset_builder import (
+        SHEET_COLUMN_MAP,
+        load_excel_ground_truth,
+        train_test_split,
+    )
+
+    if excel_path:
+        excel_path = Path(excel_path)
+        existing = store.backends.load_dataset(backend_id, "train")
+        needs_create = force or not (existing and existing.get("items"))
+
+        if needs_create:
+            all_rows = load_excel_ground_truth(excel_path, SHEET_COLUMN_MAP)
+            train, test_sets = train_test_split(all_rows)
+            store.backends.save_dataset(backend_id, "train", train, source_file=excel_path.name)
+            for name, items in test_sets.items():
+                store.backends.save_dataset(backend_id, name, items, source_file=excel_path.name)
+
+    splits: dict[str, list[dict]] = {}
+    for name in ("train", "test_processes", "test_material"):
+        ds = store.backends.load_dataset(backend_id, name)
+        splits[name] = ds["items"] if ds and ds.get("items") else []
+
+    train_data = splits["train"] or None
+    session_terms = build_all_session_terms(store, backend_id)
+
+    all_queries: set[str] = set()
+    for items in splits.values():
+        for item in items:
+            q = item.get("query", "").strip()
+            if q:
+                all_queries.add(q)
+
+    return DatasetSummary(
+        train_data=train_data,
+        session_terms=session_terms,
+        splits=splits,
+        n_unique_queries=len(all_queries),
+    )
 
 
 def build_all_session_terms(

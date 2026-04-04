@@ -648,7 +648,7 @@ def _log_eval_to_obs(
     Langfuse push is handled separately via push_all_runs() to ensure
     dataset-item linking is always present.
     """
-    from api.services.campaign.helpers import graceful
+    from api.services.campaign._campaign_utils import graceful
 
     with graceful("ObsLogger.log_dataset_run failed"):
         _obs = obs

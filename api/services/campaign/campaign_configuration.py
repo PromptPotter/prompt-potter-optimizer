@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
+    from api.services.campaign.config import CampaignConfig
     from api.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ class PipelineConfigResult:
 
 def configure_pipeline(
     pipeline_schema: PipelineSchema | None,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     exp_data: dict | None = None,
 ) -> PipelineConfigResult:
     """Build pipeline_params from live pipeline schema and campaign_config.
@@ -80,7 +81,7 @@ def configure_pipeline(
 
 
 def create_llm_client(
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
 ) -> tuple[LLMClientBase, str]:
     """Create LLM client + model from campaign_config['eval_llm'].
 

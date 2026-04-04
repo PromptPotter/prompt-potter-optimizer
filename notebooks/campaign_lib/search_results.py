@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from api.services.search import (
     load_filtered_variant_library as _load_filtered_variants,
@@ -25,6 +26,9 @@ from .display import (
 )
 from .setup import setup_llm
 
+if TYPE_CHECKING:
+    from api.services.campaign.config import CampaignConfig
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -36,7 +40,7 @@ __all__ = [
 
 
 async def resume_or_build_diagnostic(
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     baseline,
     baseline_results: list,
     svc: dict,
@@ -139,7 +143,7 @@ def seed_campaign_from_scan(
     baseline,
     scan_variants: dict[str, list],
     campaign_rounds: list,
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     pipeline_schema=None,
 ):
     """Select scan winner, update pipeline_params, seed campaign_rounds.

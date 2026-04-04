@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from api.models.opt_search_point import OptSearchPoint
+from api.services.campaign._campaign_utils import graceful
 from api.services.campaign.config import CycleConfig
-from api.services.campaign.helpers import graceful
 from api.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
