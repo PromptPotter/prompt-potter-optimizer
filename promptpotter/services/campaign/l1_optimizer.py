@@ -107,10 +107,40 @@ async def l1_generate(
                 "VALID PIPELINE NODES AND PARAMETERS (only use these — do not invent nodes or params):",
             ]
             for node_name, params in npk.items():
+                node = pipeline_schema.get_node(node_name)
+                descs = node.param_descriptions if node else {}
                 if params:
-                    lines.append(f"  {node_name}: {', '.join(sorted(params))}")
+                    param_parts = []
+                    for p in sorted(params):
+                        desc = descs.get(p)
+                        param_parts.append(f"{p} ({desc})" if desc else p)
+                    lines.append(f"  {node_name}: {', '.join(param_parts)}")
                 else:
                     lines.append(f"  {node_name}: (no tunable params)")
+
+            # Output schema context — teaches LLM the mutation language
+            for node in pipeline_schema.nodes:
+                if node.output_schema and node.output_schema.fields:
+                    os = node.output_schema
+                    lines.append(f"\n  CURRENT OUTPUT SCHEMA for {node.name}:")
+                    lines.append(f"    Fields: {', '.join(os.fields)}")
+                    for fname, fdesc in os.field_descriptions.items():
+                        lines.append(f"      {fname}: {fdesc}")
+                    lines.append("    MUTATION SYNTAX (use as output_schema param):")
+                    lines.append('      Add:     ["+", "field_name", "array", true, "description"]')
+                    lines.append('      Remove:  ["-", "field_name"]')
+                    lines.append('      Replace: ["~", "old_name", "new_name", "array", true, "description"]')
+                    lines.append(f'    Example: {{"{node.name}": {{"output_schema": [["+", "domain_terms", "array", true, "Domain-specific database entry names"]]}}}}')
+
+            # Token matching mechanics — so LLM understands the causal chain
+            if pipeline_schema.get_node("token_matching"):
+                lines.append("\n  HOW TOKEN MATCHING USES ENTITY PROFILES:")
+                lines.append("    ALL entity profile field values are tokenized ([a-zA-Z0-9]+)")
+                lines.append("    and matched against database entry tokens.")
+                lines.append("    Score = shared_tokens / term_tokens.")
+                lines.append("    Adding fields that produce tokens matching database entries")
+                lines.append("    DIRECTLY improves retrieval. Removing noisy fields reduces false matches.")
+
             schema_text = "\n".join(lines)
         if pipeline_schema.available_models:
             schema_text += "\n\nAVAILABLE MODELS (only use these for model overrides):\n"
@@ -161,12 +191,16 @@ async def l1_generate(
     candidates: list[dict] = []
     for v in variants_list[:n_variants]:
         # Split pipeline_params_override: prompt scheme fields go to
-        # derive_candidate (rendered into the prompt string), the rest
-        # stays as node-level pipeline overrides (already nested).
+        # derive_candidate (rendered into the prompt string), task_context
+        # sub-fields update task_context, the rest stays as node-level
+        # pipeline overrides (already nested).
+        _TASK_CONTEXT_OVERRIDES = {"upstream_context", "downstream_context"}
         pp_override = v.get("pipeline_params_override") or {}
         pp_override.pop("steps", None)  # LLM must not override pipeline composition
         prompt_changes = {k: pp_override[k] for k in pp_override if k in PROMPT_STRING_FIELDS}
-        node_overrides = {k: pv for k, pv in pp_override.items() if k not in PROMPT_STRING_FIELDS}
+        tc_changes = {k: pp_override[k] for k in pp_override if k in _TASK_CONTEXT_OVERRIDES}
+        node_overrides = {k: pv for k, pv in pp_override.items()
+                          if k not in PROMPT_STRING_FIELDS and k not in _TASK_CONTEXT_OVERRIDES}
 
         # Safety net: auto-nest flat params the LLM may still emit
         if pipeline_schema:
@@ -196,6 +230,8 @@ async def l1_generate(
             changes_description=v.get("changes_description", ""),
             **prompt_changes,
         )
+        if tc_changes:
+            child.task_context = {**child.task_context, **tc_changes}
         c_dict = child.prompt_field_dict()
         c_dict["id"] = child.id
         c_dict["parent_id"] = child.parent_id

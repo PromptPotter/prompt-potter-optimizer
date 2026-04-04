@@ -122,6 +122,7 @@ class PipelineNode(BaseModel):
     short_circuit: bool = False
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
+    param_descriptions: dict[str, str] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"

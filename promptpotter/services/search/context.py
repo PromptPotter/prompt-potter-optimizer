@@ -29,6 +29,8 @@ TASK_CONTEXT_FIELDS = (
     "data_characteristics",
     "optimization_goals",
     "key_challenges",
+    "upstream_context",
+    "downstream_context",
 )
 
 

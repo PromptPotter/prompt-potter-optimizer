@@ -143,6 +143,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "short_circuit": node.get("short_circuit", False),
             "node_type": node.get("node_role", ""),
             "param_keys": pk,
+            "param_descriptions": opt.get("param_descriptions", {}),
             "langfuse_type": opt.get("langfuse_type", "span"),
             "current_config": {
                 k: v for k, v in nc.items()

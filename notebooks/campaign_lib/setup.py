@@ -336,7 +336,7 @@ async def prepare_eval_context(
         run_baseline=run_baseline,
         pipeline_params=pipeline_params,
         pipeline_schema=session.pipeline_schema,
-        session=session,
+        svc=session,
     )
 
     print(f"\nEvaluation data: {len(eval_data)} queries")

@@ -237,6 +237,24 @@ class OptSearchPoint(PromptTemplate):
         for field in self.MEMORY_FIELDS:
             setattr(self, field, getattr(source, field))
 
+    # -- Render with pipeline context --------------------------------------
+
+    def render(self) -> str:
+        """Render with upstream/downstream context injected around problem_description."""
+        tc = self.task_context or {}
+        upstream = tc.get("upstream_context", "")
+        downstream = tc.get("downstream_context", "")
+        if not upstream and not downstream:
+            return super().render()
+
+        # Compose problem_description from parts, render, restore
+        original_pd = self.problem_description
+        pd_parts = [p for p in (upstream, original_pd, downstream) if p]
+        self.problem_description = "\n\n".join(pd_parts)
+        result = super().render()
+        self.problem_description = original_pd
+        return result
+
     # -- Projection to target layer ----------------------------------------
 
     def to_job_search_point(
