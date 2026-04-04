@@ -1,0 +1,44 @@
+{
+  "sample_size": 0,
+  "exploration_sample_size": 10,
+  "exploration_rate": 0.5,
+  "exclude_nodes": ["llm_ranking"],
+  "pipeline_overrides": {
+    "web_search": {
+      "max_sites": 20,
+      "num_results": 20,
+      "content_char_limit": 800
+    },
+    "entity_profiling": {
+      "model": "openai/gpt-oss-120b",
+      "max_tokens": 4000
+    },
+    "llm_ranking": {
+      "model": "openai/gpt-oss-120b"
+    }
+  },
+  "optimization": {
+    "patience": 2,
+    "max_rounds": 10,
+    "n_variants": 5,
+    "creativity": 0.7,
+    "improvement_threshold": 0.01,
+    "seed": 42,
+    "max_failures": 15,
+    "degradation_threshold": 0.4,
+    "backend_warning_threshold": 2,
+    "enable_l2": true,
+    "enable_l3": true,
+    "l2_patience": 2,
+    "l3_patience": 1,
+    "l2_temperature": 0.3,
+    "l3_temperature": 0.5,
+    "enable_critique": true
+  },
+  "eval_llm": {
+    "model": "openai/gpt-oss-120b",
+    "provider": "groq",
+    "temperature": 0.4,
+    "max_tokens": 2000
+  }
+}

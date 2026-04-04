@@ -24,6 +24,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Windows consoles default to cp1252 which can't print Unicode symbols (→, ✓, ⚠).
+# Reconfigure stdout/stderr to UTF-8 so display code works unchanged.
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from api.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -126,20 +132,10 @@ async def cmd_init(args: argparse.Namespace) -> None:
     await show_pipeline_snapshot(svc)
     pipeline_params = configure_pipeline(svc, campaign_config)
 
-    train_data = None
-    if args.excel_path:
-        train_data, _st = prepare_datasets(svc.store, svc.backend_id, excel_path=args.excel_path)
-    elif svc.queries:
-        train_data = svc.queries
-
-    baseline, eval_data, campaign_rounds, _br = await prepare_eval_context(
-        svc, train_data, campaign_config, run_baseline=args.run_baseline,
-    )
-
-    baseline_acc = campaign_rounds[-1]["accuracy"] if campaign_rounds else 0.0
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     excluded = campaign_config.get("exclude_nodes", [])
 
+    # Create session early so partial progress survives interrupts
     state: dict[str, Any] = {
         "phase": "init",
         "init_params": {
@@ -151,9 +147,9 @@ async def cmd_init(args: argparse.Namespace) -> None:
         "campaign_config": campaign_config,
         "pipeline_params": pipeline_params,
         "active_steps": active,
-        "baseline_prompt_fields": baseline.prompt_field_dict(),
-        "eval_data_count": len(eval_data),
-        "baseline_accuracy": baseline_acc,
+        "baseline_prompt_fields": {},
+        "eval_data_count": 0,
+        "baseline_accuracy": 0.0,
         "task_context": None,
         "scan_variants": None,
         "cycle_id": None,
@@ -163,6 +159,25 @@ async def cmd_init(args: argparse.Namespace) -> None:
     bid = svc.backend_id
     sid = svc.store.sessions.create(bid, state)
     _save_active_pointer(bid, sid)
+    print(f"\nSession created: {sid}")
+
+    # Load data and run baseline (may be long-running)
+    train_data = None
+    if args.excel_path:
+        train_data, _st = prepare_datasets(svc.store, svc.backend_id, excel_path=args.excel_path)
+    elif svc.queries:
+        train_data = svc.queries
+
+    baseline, eval_data, campaign_rounds, _br = await prepare_eval_context(
+        svc, train_data, campaign_config, run_baseline=args.run_baseline,
+    )
+
+    # Update session with baseline results
+    baseline_acc = campaign_rounds[-1]["accuracy"] if campaign_rounds else 0.0
+    state["baseline_prompt_fields"] = baseline.prompt_field_dict()
+    state["eval_data_count"] = len(eval_data)
+    state["baseline_accuracy"] = baseline_acc
+    svc.store.sessions.save(bid, sid, state)
 
     excl_str = f"{', '.join(excluded)} excluded" if excluded else "none excluded"
     svc.store.sessions.append_log(bid, sid, f"""# Campaign Report — {sid}
@@ -173,7 +188,6 @@ async def cmd_init(args: argparse.Namespace) -> None:
 - Eval data: {len(eval_data)} queries
 - Baseline: {baseline_acc:.1%}""")
 
-    print(f"\nSession created: {sid}")
     _print_summary({
         "step": "init", "session_id": sid,
         "eval_data_count": len(eval_data),
@@ -330,6 +344,18 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         svc, train_data, campaign_config,
     )
 
+    # Seed campaign_rounds with stored baseline when no eval has been run yet
+    if not campaign_rounds and state.get("baseline_prompt_fields"):
+        from api.models.opt_search_point import OptSearchPoint
+
+        bl_ps = OptSearchPoint.from_prompt_fields(state["baseline_prompt_fields"])
+        campaign_rounds.append({
+            "round": "baseline",
+            "accuracy": state.get("baseline_accuracy", 0.0),
+            "prompt_fields": bl_ps,
+            "results": [],
+        })
+
     # Load scan context if available
     scan_df, axis_profiles = None, None
     scan_data = svc.store.sessions.load_scan_results(bid, sid)
@@ -352,6 +378,33 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     else:
         campaign_config.setdefault("optimization", {}).pop("pause_before_eval", None)
 
+    # Save phase before loop starts so in-progress state is visible
+    state["phase"] = "optimizing"
+    svc.store.sessions.save(bid, sid, state)
+
+    # File emitter: writes campaign_state.jsonl + campaign_output.log
+    from api.cli.file_emitter import CampaignFileEmitter
+    from api.services.campaign.callbacks import CycleCallbacks
+
+    session_dir = svc.store.sessions._session_dir(bid, sid)
+    opt_cfg = campaign_config.get("optimization", {})
+    active = state.get("active_steps", [])
+    excluded = campaign_config.get("exclude_nodes", [])
+
+    emitter = CampaignFileEmitter(
+        session_dir,
+        max_rounds=opt_cfg.get("max_rounds", 10),
+        active_nodes=active,
+        excluded_nodes=excluded,
+        config=campaign_config,
+    )
+    emitter_cb = CycleCallbacks(
+        on_phase=emitter.on_phase,
+        on_query_eval=emitter.on_query_eval,
+        on_candidate_eval=emitter.on_candidate_eval,
+        on_round_complete=emitter.on_round_complete,
+    )
+
     campaign_rounds = await run_optimization_notebook(
         campaign_rounds, eval_data, campaign_config,
         svc=svc, pipeline_params=pipeline_params,
@@ -359,8 +412,10 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         experiment_id=state.get("experiment_id"),
         task_context=state.get("task_context"),
         session_id=sid,
+        extra_callbacks=emitter_cb,
     )
 
+    emitter.set_stop_reason("completed")
     state["phase"] = "optimize"
     svc.store.sessions.save(bid, sid, state)
 

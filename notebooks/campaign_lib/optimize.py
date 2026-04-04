@@ -49,6 +49,7 @@ from .stats import (
 
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
+    from api.services.campaign.callbacks import CycleCallbacks
     from api.services.project_store import ProjectStore
     from api.services.search.scan_results import ScanContext
 
@@ -57,6 +58,28 @@ __all__ = [
     "show_feedback_preflight",
     "show_progress",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Callback chaining
+# ---------------------------------------------------------------------------
+
+
+def _chain_callbacks(a: CycleCallbacks, b: CycleCallbacks) -> CycleCallbacks:
+    """Compose two CycleCallbacks so both fire on every event."""
+    from api.services.campaign.callbacks import CycleCallbacks as ChainedCB
+
+    def _chain(fn_a, fn_b):
+        if fn_a and fn_b:
+            return lambda *args, **kw: (fn_a(*args, **kw), fn_b(*args, **kw))
+        return fn_a or fn_b
+
+    return ChainedCB(
+        on_round_complete=_chain(a.on_round_complete, b.on_round_complete),
+        on_candidate_eval=_chain(a.on_candidate_eval, b.on_candidate_eval),
+        on_query_eval=_chain(a.on_query_eval, b.on_query_eval),
+        on_phase=_chain(a.on_phase, b.on_phase),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +372,7 @@ async def run_optimization_notebook(
     svc: dict | None = None,
     task_context: dict | None = None,
     session_id: str = "",
+    extra_callbacks: CycleCallbacks | None = None,
 ) -> list:
     """Run optimization via feedback cycle with optional L2/L3 escalation.
 
@@ -649,6 +673,14 @@ async def run_optimization_notebook(
 
     from api.services.campaign.callbacks import CycleCallbacks
 
+    display_cb = CycleCallbacks(
+        on_round_complete=_on_round,
+        on_candidate_eval=_on_candidate,
+        on_query_eval=_on_query,
+        on_phase=_on_phase,
+    )
+    callbacks = _chain_callbacks(display_cb, extra_callbacks) if extra_callbacks else display_cb
+
     result = await run_optimization(
         instruction=instruction,
         eval_data=eval_data,
@@ -656,12 +688,7 @@ async def run_optimization_notebook(
         baseline_prompt_fields=baseline_ps,
         baseline_accuracy=baseline_acc,
         baseline_results=baseline_results,
-        callbacks=CycleCallbacks(
-            on_round_complete=_on_round,
-            on_candidate_eval=_on_candidate,
-            on_query_eval=_on_query,
-            on_phase=_on_phase,
-        ),
+        callbacks=callbacks,
         langfuse_session_id=langfuse_session_id,
         cycle_id=resolved_cycle_id,
         experiment_id=experiment_id or "",
