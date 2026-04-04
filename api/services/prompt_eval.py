@@ -468,6 +468,7 @@ async def _execute_stale_data_protocol(
     backend_id: str = "",
     search_memory: SearchMemory | None = None,
     stale_data_observations: dict[str, int | dict] | None = None,
+    stop_check: Callable[[], bool] | None = None,
 ) -> tuple[dict, str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
@@ -486,6 +487,8 @@ async def _execute_stale_data_protocol(
     result = cached_result
 
     for step in protocol_steps:
+        if stop_check and stop_check():
+            return {**result, "cached": result.get("cached", False)}, "interrupted"
         if step == "rerun":
             trigger_count = cfg.get("rerun_trigger_count", 3)
             obs_entry = (stale_data_observations or {}).get(query, 0)
@@ -623,13 +626,20 @@ async def _run_eval_batch(
         _intermediate_cache = ctx.store.intermediate_cache
 
     # -- Graceful interrupt: 1st Ctrl+C sets flag (current query finishes),
-    #    2nd Ctrl+C force-quits immediately. --
+    #    2nd Ctrl+C cancels the task via asyncio (safe on Windows). --
     _stop_requested = False
+    _batch_task: asyncio.Task | None = asyncio.current_task()
 
     def _graceful_handler(_signum: int, _frame: object) -> None:
         nonlocal _stop_requested
         if _stop_requested:
-            raise KeyboardInterrupt  # 2nd Ctrl+C = force quit
+            # 2nd Ctrl+C: cancel task safely instead of raising.
+            # Task.cancel() just sets an internal flag — no IOCP interaction,
+            # no event loop corruption.  CancelledError is delivered at the
+            # next await point.
+            if _batch_task is not None and not _batch_task.done():
+                _batch_task.cancel()
+            return
         _stop_requested = True  # 1st Ctrl+C = finish current query
 
     old_handler = signal.signal(signal.SIGINT, _graceful_handler)
@@ -658,8 +668,9 @@ async def _run_eval_batch(
                         backend_id=_backend_id,
                         search_memory=_search_memory,
                         stale_data_observations=_stale_observations,
+                        stop_check=lambda: _stop_requested,
                     )
-                    was_cached = step_taken == "below_threshold"
+                    was_cached = step_taken in ("below_threshold", "interrupted")
                     if step_taken == "rerun":
                         n_retried += 1
                     elif step_taken == "samplescan":
@@ -698,6 +709,7 @@ async def _run_eval_batch(
                         backend_id=_backend_id,
                         search_memory=_search_memory,
                         stale_data_observations=_stale_observations,
+                        stop_check=lambda: _stop_requested,
                     )
                     if step_taken == "rerun":
                         n_retried += 1
