@@ -33,24 +33,37 @@ def _entry_matches(
 ) -> bool:
     """Check whether a historical entry's pipeline_params match a target.
 
+    Step matching uses **ordered prefix**: target steps must be an ordered
+    prefix of (or equal to) entry steps.  This allows cached runs with more
+    nodes to serve requests for fewer nodes (superset reuse).
+
     Args:
         entry_pp: pipeline_params from a stored index entry.
         target_pp: pipeline_params we want to match against.
         strict_params: Controls strictness:
-            ``None`` — exact full-dict equality.
-            ``{}`` — steps must match, all other params relaxed.
-            ``{"node": {"param"}}`` — steps + listed params must match.
+            ``None`` — exact full-dict equality (steps still use prefix).
+            ``{}`` — steps prefix match, all other params relaxed.
+            ``{"node": {"param"}}`` — steps prefix + listed params must match.
     """
     entry_pp = entry_pp or {}
     target_pp = target_pp or {}
 
-    # Steps must always match
-    if frozenset(entry_pp.get("steps", [])) != frozenset(target_pp.get("steps", [])):
+    # Steps: target must be an ordered prefix of entry (superset OK)
+    entry_steps = entry_pp.get("steps", [])
+    target_steps = target_pp.get("steps", [])
+    if len(target_steps) > len(entry_steps):
+        return False
+    if entry_steps[: len(target_steps)] != target_steps:
         return False
 
     if strict_params is None:
-        # Exact mode: full dict equality
-        return entry_pp == target_pp
+        # Exact mode: params for target nodes must match.
+        # Ignore node configs for superset-only nodes (e.g. llm_ranking
+        # config when target excludes llm_ranking).
+        extra_nodes = set(entry_steps) - set(target_steps)
+        entry_filtered = {k: v for k, v in entry_pp.items() if k != "steps" and k not in extra_nodes}
+        target_filtered = {k: v for k, v in target_pp.items() if k != "steps"}
+        return entry_filtered == target_filtered
 
     # NN mode: only listed params must match
     for node, params in strict_params.items():
@@ -310,9 +323,11 @@ class DatasetRunStore:
             )
             if not detail:
                 continue
+            entry_steps = (entry.get("pipeline_params") or {}).get("steps", [])
             for item in detail.get("dataset_run_items", []):
                 query = item.get("query", "")
                 if query:
+                    item["_cache_steps"] = entry_steps
                     results[query] = item
         return results
 

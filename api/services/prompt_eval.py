@@ -210,6 +210,43 @@ def _compare_rerun(cached_result: dict, rerun_result: dict) -> dict:
     return {"hit_change": hit_change, "rank_change": rank_change, "improved": improved}
 
 
+def rescore_cached_result(
+    result: dict,
+    target_steps: list[str],
+    pipeline_schema: PipelineSchema,
+) -> dict:
+    """Re-score a cached superset result for a shorter target pipeline.
+
+    Reads the candidate list from the target's last candidate-producing node
+    (via ``pipeline_schema.candidate_output_key``), recomputes predicted/hit/score.
+    Returns a new dict — the original is not mutated.
+
+    Falls back to the original result if the target node's output is missing
+    from pipeline_data (e.g., node was short-circuited before reaching it).
+    """
+    output_key = pipeline_schema.candidate_output_key(target_steps)
+    if not output_key:
+        return {**result, "cached": True}
+
+    pd = result.get("pipeline_data") or {}
+    candidates = pd.get(output_key)
+    if not candidates:
+        return {**result, "cached": True}
+
+    predicted = candidates[0].get("candidate", NO_RESULT) if candidates else NO_RESULT
+    gt = result.get("ground_truth", "")
+    eval_output = _evaluator.evaluate(gt, predicted)
+
+    return {
+        **result,
+        "predicted": predicted,
+        "hit": eval_output.result == EvalResult.PASS,
+        "score": eval_output.score,
+        "cached": True,
+        "_rescored_from": output_key,
+    }
+
+
 def _error_result(query: str, ground_truth: str, error_msg: str) -> dict:
     """Build a standard error result dict."""
     return {
@@ -253,10 +290,8 @@ async def eval_query_via_backend(
     backend_client: BackendClient,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
-    intermediate_cache: object | None = None,
+    intermediate_cache: IntermediateCache | None = None,
     backend_id: str = "",
-    upstream_hash: str = "",
-    upstream_nodes: set[str] | None = None,
 ) -> dict:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint."""
     query = query_data["query"]
@@ -267,18 +302,16 @@ async def eval_query_via_backend(
 
         pipeline_schema = PipelineSchema()
 
+    _target_steps = (pipeline_params or {}).get("steps", [])
+
     try:
-        # Wave 4: intermediate cache lookup
-        # Filter cached outputs to upstream nodes only — downstream nodes
-        # may depend on the prompt or other config that changed.
+        # Step-sequence prefix lookup: find longest cached prefix
         precomputed = None
-        if intermediate_cache and upstream_hash:
-            cached_outputs = intermediate_cache.get(backend_id, upstream_hash, query)
-            if cached_outputs:
-                if upstream_nodes:
-                    precomputed = {k: v for k, v in cached_outputs.items() if k in upstream_nodes}
-                else:
-                    precomputed = cached_outputs
+        if intermediate_cache and _target_steps:
+            prefix_hit = intermediate_cache.get_prefix(backend_id, query, _target_steps)
+            if prefix_hit:
+                node_outputs_hit, cached_steps = prefix_hit
+                precomputed = {k: v for k, v in node_outputs_hit.items() if k in set(cached_steps)}
 
         resp = await backend_client.run_match(
             query,
@@ -287,11 +320,10 @@ async def eval_query_via_backend(
         )
         data = resp.get("data", {})
 
-        # Wave 4: cache populate from response node_outputs (store all,
-        # not just upstream — different perturbation targets may need different subsets)
+        # Cache populate: store node outputs keyed by step sequence
         node_outputs = data.get("node_outputs")
-        if intermediate_cache and upstream_hash and node_outputs and not precomputed:
-            intermediate_cache.put(backend_id, upstream_hash, query, node_outputs)
+        if intermediate_cache and _target_steps and node_outputs and not precomputed:
+            intermediate_cache.put_steps(backend_id, _target_steps, query, node_outputs)
 
         ranked = data.get("ranked_candidates", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
@@ -357,8 +389,6 @@ async def _execute_stale_data_protocol(
     pipeline_schema: PipelineSchema | None = None,
     intermediate_cache: IntermediateCache | None = None,
     backend_id: str = "",
-    upstream_hash: str = "",
-    upstream_nodes: set[str] | None = None,
     search_memory: SearchMemory | None = None,
     stale_data_observations: dict[str, int | dict] | None = None,
 ) -> tuple[dict, str]:
@@ -414,8 +444,6 @@ async def _execute_stale_data_protocol(
                 pipeline_schema=pipeline_schema,
                 intermediate_cache=intermediate_cache,
                 backend_id=backend_id,
-                upstream_hash=upstream_hash,
-                upstream_nodes=upstream_nodes,
             )
             comparison = _compare_rerun(cached_result, result)
             result["retry_of_degraded"] = True
@@ -441,8 +469,6 @@ async def _execute_stale_data_protocol(
                 pipeline_schema=pipeline_schema,
                 intermediate_cache=None,
                 backend_id=backend_id,
-                upstream_hash="",
-                upstream_nodes=None,
             )
             result["samplescan_probe"] = True
             result["samplescan_config"] = {
@@ -513,27 +539,11 @@ async def _run_eval_batch(
     n_probed = 0
     n_switched = 0
 
-    # Wave 4: compute upstream hash and cache reference for batch
-    # Split at the first prompt-bearing node — everything before it is
-    # stable when only the prompt changes and can be cached.
+    # Intermediate cache for partial pipeline reuse (step-sequence mode)
     _intermediate_cache = None
-    _upstream_hash = ""
-    _upstream_nodes: set[str] = set()
     _backend_id = ctx.backend_id if ctx else ""
-    if ctx and ctx.store and pipeline_schema:
+    if ctx and ctx.store:
         _intermediate_cache = ctx.store.intermediate_cache
-        prompt_nodes = pipeline_schema.prompt_node_names()
-        if prompt_nodes:
-            _upstream_list = pipeline_schema.upstream_of(prompt_nodes[0])
-        else:
-            _upstream_list, _ = pipeline_schema.split_at_ranker()
-        _upstream_nodes = set(_upstream_list)
-        if _upstream_list:
-            from api.shared.hashing import upstream_config_hash
-
-            _upstream_hash = upstream_config_hash(
-                search_point.pipeline_params, _upstream_list,
-            )
 
     # -- Graceful interrupt: 1st Ctrl+C sets flag (current query finishes),
     #    2nd Ctrl+C force-quits immediately. --
@@ -569,8 +579,6 @@ async def _run_eval_batch(
                         pipeline_schema=pipeline_schema,
                         intermediate_cache=_intermediate_cache,
                         backend_id=_backend_id,
-                        upstream_hash=_upstream_hash,
-                        upstream_nodes=_upstream_nodes or None,
                         search_memory=_search_memory,
                         stale_data_observations=_stale_observations,
                     )
@@ -582,7 +590,13 @@ async def _run_eval_batch(
                     elif step_taken == "sampleswitch":
                         n_switched += 1
                 else:
-                    result = {**cached, "cached": True}
+                    # Superset step reuse: re-score if cache ran more nodes
+                    _target_steps = (search_point.pipeline_params or {}).get("steps", [])
+                    _cached_steps = cached.get("_cache_steps", [])
+                    if _cached_steps and _target_steps and len(_cached_steps) > len(_target_steps) and pipeline_schema:
+                        result = rescore_cached_result(cached, _target_steps, pipeline_schema)
+                    else:
+                        result = {**cached, "cached": True}
                     was_cached = True
             else:
                 result = await eval_query_via_backend(
@@ -592,8 +606,6 @@ async def _run_eval_batch(
                     pipeline_schema=pipeline_schema,
                     intermediate_cache=_intermediate_cache,
                     backend_id=_backend_id,
-                    upstream_hash=_upstream_hash,
-                    upstream_nodes=_upstream_nodes or None,
                 )
                 was_cached = False
                 # Fire stale data protocol on fresh degraded results too
@@ -607,8 +619,6 @@ async def _run_eval_batch(
                         pipeline_schema=pipeline_schema,
                         intermediate_cache=_intermediate_cache,
                         backend_id=_backend_id,
-                        upstream_hash=_upstream_hash,
-                        upstream_nodes=_upstream_nodes or None,
                         search_memory=_search_memory,
                         stale_data_observations=_stale_observations,
                     )

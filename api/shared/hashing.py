@@ -14,7 +14,7 @@ import json
 # negligible up to ~280 billion items.
 HASH_TRUNCATE = 24
 
-__all__ = ["HASH_TRUNCATE", "eval_content_hash", "sp_identity_hash", "upstream_config_hash"]
+__all__ = ["HASH_TRUNCATE", "eval_content_hash", "sp_identity_hash"]
 
 
 def _hash_dict(blob_dict: dict) -> str:
@@ -81,38 +81,3 @@ def eval_content_hash(
     return _hash_dict(blob_dict)
 
 
-def upstream_config_hash(
-    pipeline_params: dict | None = None,
-    upstream_nodes: list[str] | None = None,
-) -> str:
-    """Hash pipeline config for upstream (pre-ranker) nodes only (Wave 4).
-
-    Used for intermediate caching: when only the ranker config changes,
-    upstream node outputs can be reused.
-
-    Args:
-        pipeline_params: Full pipeline_params dict.
-        upstream_nodes: Node names before the ranker (from
-            ``PipelineSchema.split_at_ranker()``).  When None, hashes the
-            full pipeline_params (conservative — no false reuse).
-
-    Returns:
-        24-char hex hash of upstream config, or empty string if no params.
-    """
-    if not pipeline_params:
-        return ""
-
-    pp = dict(pipeline_params)
-
-    if upstream_nodes is not None:
-        upstream_set = set(upstream_nodes)
-        filtered: dict = {}
-        steps = pp.get("steps")
-        if steps:
-            filtered["steps"] = [s for s in steps if s in upstream_set]
-        for node_name in upstream_nodes:
-            if node_name in pp and isinstance(pp[node_name], dict):
-                filtered[node_name] = pp[node_name]
-        pp = filtered
-
-    return _hash_dict({"upstream_config": pp})

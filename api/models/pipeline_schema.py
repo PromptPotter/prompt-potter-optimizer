@@ -296,6 +296,25 @@ class PipelineSchema(BaseModel):
                 upstream.append(node.name)
         return upstream, downstream
 
+    def candidate_output_key(self, steps: list[str] | None = None) -> str | None:
+        """Pipeline_data key for the last candidate-producing node in *steps*.
+
+        Walks nodes in pipeline order, filters to *steps* (all if None),
+        finds the last node with node_type candidate_source or ranker,
+        and returns its first output_keys entry.  Returns None if no
+        candidate-producing node exists.
+        """
+        active = set(steps) if steps else None
+        last_key: str | None = None
+        for node in self.nodes:
+            if active is not None and node.name not in active:
+                continue
+            if node.node_type in (NodeType.CANDIDATE_SOURCE, NodeType.RANKER):
+                keys = node.output_keys
+                if keys:
+                    last_key = keys[0]
+        return last_key
+
     def required_pipeline_key(self) -> str:
         """The pipeline_data key that gates trace validity.
 
