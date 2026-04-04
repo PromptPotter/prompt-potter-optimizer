@@ -708,6 +708,13 @@ async def run_optimization(
                 ", PROBE" if is_probe else "",
             )
 
+            # Round recorder: begin new round
+            from api.config.optimizer_pipeline import get_round_recorder
+
+            _rr = get_round_recorder()
+            if _rr:
+                _rr.begin_round(round_num)
+
             round_result = await execute_round(
                 round_num,
                 state,
@@ -779,6 +786,34 @@ async def run_optimization(
                     round_result,
                     round_num,
                 )
+
+            # Round recorder: add eval + decision actions, then flush
+            _rr = get_round_recorder()
+            if _rr:
+                _rr.add_action({
+                    "type": "l1_evaluate",
+                    "n_candidates": round_result.candidates_evaluated,
+                    "n_queries": round_result.total,
+                    "candidates": list(round_result.candidate_scores),
+                })
+                _rr.add_action({
+                    "type": "decision",
+                    "winner": round_result.label,
+                    "accuracy": round_result.accuracy,
+                    "composite": round_result.composite,
+                    "improved": round_result.improved,
+                    "stall_count": state.stall_count,
+                })
+                _rr.flush(state_snapshot={
+                    "opt_search_point_id": state.opt_sp.id,
+                    "l2_directive": state.opt_sp.l2_directive or "",
+                    "escalation_counters": {
+                        "l2_stall": state.escalation.l2_stall_count,
+                        "l3_stall": state.escalation.l3_stall_count,
+                        "l2_round": state.escalation.l2_round,
+                        "l3_round": state.escalation.l3_round,
+                    },
+                })
 
             # Bidirectional control checkpoint — user may pause/stop via dashboard
             if cb.on_checkpoint:

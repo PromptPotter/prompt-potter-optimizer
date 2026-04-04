@@ -331,6 +331,13 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     control = FileControlSurface(session_dir / "campaign_state.json")
     control_cb = CycleCallbacks(on_checkpoint=control.check)
 
+    # Round recorder — write rounds/round_NNN.json with full action traces
+    from api.config.optimizer_pipeline import set_round_recorder
+    from api.services.campaign.round_recorder import RoundRecorder
+
+    recorder = RoundRecorder(session_dir / "rounds")
+    set_round_recorder(recorder)
+
     campaign_rounds = await run_optimization_notebook(
         campaign_rounds, eval_data, campaign_config,
         svc=svc, pipeline_params=pipeline_params,

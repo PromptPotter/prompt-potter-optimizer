@@ -567,9 +567,9 @@ class CritiqueAgent:
         priority_fix, suggested_axes, failure_highlights, summary.
         """
         sections = assemble_critique_sections(ctx)
-        prompt = load_optimizer_prompt("critique").compile_prompt(
-            stat_sections=sections,
-        )
+        _compile_vars = {"stat_sections": sections}
+        _template = load_optimizer_prompt("critique")
+        prompt = _template.compile_prompt(**_compile_vars)
         logger.info(
             "Rich critique: %d chars prompt, round %d, acc=%.3f",
             len(prompt),
@@ -582,6 +582,11 @@ class CritiqueAgent:
             messages=[{"role": "user", "content": prompt}],
             node="critique",
             model=self.model,
+            trace_meta={
+                "template_name": "critique",
+                "template_fields": _template.prompt_field_dict(),
+                "variables": _compile_vars,
+            },
         )
 
         return _parse_critique(response.content)

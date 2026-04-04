@@ -26,6 +26,7 @@ from api.services.campaign.formatting import (
 from api.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
+    from api.models.opt_search_point import PromptTemplate
     from api.models.pipeline_schema import PipelineSchema
     from api.services.llm_client import LLMClientBase
 
@@ -62,8 +63,11 @@ def _build_l2_prompt(
     pipeline_schema: PipelineSchema | None,
     escalation_context: dict | None,
     search_memory: object | None = None,
-) -> str:
-    """Assemble the L2 refine_context prompt from all context sources."""
+) -> tuple[str, PromptTemplate, dict]:
+    """Assemble the L2 refine_context prompt from all context sources.
+
+    Returns (compiled_prompt, template, compile_variables).
+    """
     escalation_section = _build_escalation_prompt_section(
         escalation_context,
         opt_sp.escalation_journal or None,
@@ -106,12 +110,14 @@ def _build_l2_prompt(
         "based on the data above."
     )
 
-    return load_optimizer_prompt("l2_refine_context").compile_prompt(
-        current_params=json.dumps(opt_sp.optimizer_params),
-        task_context_section=task_context_section,
-        intelligence_sections=("\n\n" + intelligence_sections) if intelligence_sections else "",
-        response_schema_suffix=response_schema_suffix,
-    )
+    _compile_vars = {
+        "current_params": json.dumps(opt_sp.optimizer_params),
+        "task_context_section": task_context_section,
+        "intelligence_sections": ("\n\n" + intelligence_sections) if intelligence_sections else "",
+        "response_schema_suffix": response_schema_suffix,
+    }
+    _template = load_optimizer_prompt("l2_refine_context")
+    return _template.compile_prompt(**_compile_vars), _template, _compile_vars
 
 
 def _parse_l2_response(
@@ -178,7 +184,7 @@ async def refine_context(
     text), and optionally ``pipeline_params`` when a pipeline schema is
     available.
     """
-    prompt = _build_l2_prompt(
+    prompt, _template, _compile_vars = _build_l2_prompt(
         opt_sp, pipeline_params, pipeline_schema, escalation_context,
         search_memory=search_memory,
     )
@@ -189,6 +195,11 @@ async def refine_context(
         node="l2_refine_context",
         model=model,
         temperature=temperature,
+        trace_meta={
+            "template_name": "l2_refine_context",
+            "template_fields": _template.prompt_field_dict(),
+            "variables": _compile_vars,
+        },
     )
 
     return _parse_l2_response(extract_parsed_json(response), opt_sp, prompt)
@@ -229,13 +240,15 @@ async def modify_plan(
         '  "rationale": 1-2 sentence explanation of the strategic shift'
     )
 
-    prompt = load_optimizer_prompt("l3_modify_plan").compile_prompt(
-        current_plan=opt_sp.plan or "(none — default strategy)",
-        l2_summary=l2_summary,
-        rendered_prompt=opt_sp.render(),
-        pipeline_section=pipeline_section,
-        response_schema_suffix=response_schema_suffix,
-    )
+    _compile_vars = {
+        "current_plan": opt_sp.plan or "(none — default strategy)",
+        "l2_summary": l2_summary,
+        "rendered_prompt": opt_sp.render(),
+        "pipeline_section": pipeline_section,
+        "response_schema_suffix": response_schema_suffix,
+    }
+    _template = load_optimizer_prompt("l3_modify_plan")
+    prompt = _template.compile_prompt(**_compile_vars)
 
     response = await llm_call(
         llm_client,
@@ -243,6 +256,11 @@ async def modify_plan(
         node="l3_modify_plan",
         model=model,
         temperature=temperature,
+        trace_meta={
+            "template_name": "l3_modify_plan",
+            "template_fields": _template.prompt_field_dict(),
+            "variables": _compile_vars,
+        },
     )
     result = extract_parsed_json(response)
 

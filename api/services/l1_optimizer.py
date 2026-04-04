@@ -111,12 +111,12 @@ async def l1_generate(
                     lines.append(f"  {node_name}: (no tunable params)")
             schema_text = "\n".join(lines)
 
-    meta_prompt = load_optimizer_prompt("meta_scan_aware").compile_prompt(
-        n_variants=str(n_variants),
-        accuracy_pct=f"{current_accuracy:.1%}",
-        n_queries=str(len(current_results)),
-        rendered_prompt=opt_sp.render(),
-        context_sections=format_context_sections(
+    _compile_vars = {
+        "n_variants": str(n_variants),
+        "accuracy_pct": f"{current_accuracy:.1%}",
+        "n_queries": str(len(current_results)),
+        "rendered_prompt": opt_sp.render(),
+        "context_sections": format_context_sections(
             ContextData(
                 task_context=opt_sp.task_context or None,
                 critique_text=opt_sp.critique_text,
@@ -133,7 +133,9 @@ async def l1_generate(
                 pipeline_schema_text=schema_text,
             )
         ),
-    )
+    }
+    _template = load_optimizer_prompt("meta_scan_aware")
+    meta_prompt = _template.compile_prompt(**_compile_vars)
 
     response = await llm_call(
         llm_client,
@@ -141,6 +143,11 @@ async def l1_generate(
         node="l1_generate",
         model=model,
         temperature=creativity,
+        trace_meta={
+            "template_name": "meta_scan_aware",
+            "template_fields": _template.prompt_field_dict(),
+            "variables": _compile_vars,
+        },
     )
     generated = extract_parsed_json(response)
 

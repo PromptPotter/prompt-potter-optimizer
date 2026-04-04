@@ -49,6 +49,25 @@ def get_node_config(node_name: str) -> dict:
 
 _LLM_DEFAULTS = {"temperature": 0.0, "max_tokens": 1000, "output_format": "text"}
 
+# -- Round recorder (set by CLI/webapp, None = no tracing) ----------------
+
+_recorder: RoundRecorder | None = None
+
+
+def set_round_recorder(recorder: RoundRecorder | None) -> None:
+    """Wire the round recorder for LLM trace capture. None = disable."""
+    global _recorder
+    _recorder = recorder
+
+
+def get_round_recorder() -> RoundRecorder | None:
+    """Return the active round recorder (for non-LLM actions)."""
+    return _recorder
+
+
+if TYPE_CHECKING:
+    from api.services.campaign.round_recorder import RoundRecorder
+
 
 async def llm_call(
     llm_client: LLMClientBase,
@@ -56,6 +75,7 @@ async def llm_call(
     *,
     node: str | None = None,
     config: dict | None = None,
+    trace_meta: dict | None = None,
     **overrides,
 ) -> LLMResponse:
     """Execute an LLM call with config defaults and runtime overrides.
@@ -64,14 +84,55 @@ async def llm_call(
     or ``config`` to pass a config dict directly.  At least one is required.
 
     Precedence: ``_LLM_DEFAULTS < config < overrides``.
+
+    If a :class:`RoundRecorder` is active (via :func:`set_round_recorder`),
+    the call is traced: messages, config, response, and optional
+    ``trace_meta`` (template_name, variables) are recorded as an action.
     """
     if config is None:
         config = get_node_config(node) if node else {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
-    return await llm_client.chat(
+
+    import time as _time
+    _t0 = _time.monotonic()
+
+    response = await llm_client.chat(
         messages=messages,
         model=merged.get("model"),
         temperature=merged["temperature"],
         max_tokens=merged["max_tokens"],
         output_format=merged["output_format"],
     )
+
+    # Trace to round recorder if active
+    if _recorder is not None:
+        duration_s = round(_time.monotonic() - _t0, 2)
+
+        # Parse JSON responses into structured objects (not escaped strings)
+        response_data: dict | str
+        try:
+            response_data = json.loads(response.content)
+        except (json.JSONDecodeError, TypeError):
+            response_data = response.content
+
+        action: dict = {
+            "type": node or "llm_call",
+            "config": {
+                "model": merged.get("model"),
+                "temperature": merged["temperature"],
+                "max_tokens": merged["max_tokens"],
+            },
+            "response": response_data,
+            "usage": response.usage,
+            "model": response.model,
+            "duration_s": duration_s,
+        }
+        if trace_meta:
+            # template_name, template_fields, variables from call site
+            action.update(trace_meta)
+        else:
+            # Fallback: store compiled messages when no decomposition available
+            action["messages"] = messages
+        _recorder.add_action(action)
+
+    return response
