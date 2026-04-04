@@ -787,35 +787,10 @@ async def run_optimization(
                     round_num,
                 )
 
-            # Round recorder: add eval + decision actions, then flush
+            # Round recorder: eval + decision + flush
             _rr = get_round_recorder()
             if _rr:
-                _rr.add_action({
-                    "type": "l1_evaluate",
-                    "n_candidates": round_result.candidates_evaluated,
-                    "n_queries": round_result.total,
-                    "candidates": round_result.candidate_scores,
-                })
-                _rr.add_action({
-                    "type": "decision",
-                    "winner": round_result.label,
-                    "accuracy": round_result.accuracy,
-                    "composite": round_result.composite,
-                    "improved": round_result.improved,
-                    "stall_count": state.stall_count,
-                    "winner_prompt_fields": round_result.prompt_fields,
-                    "winner_pipeline_params": round_result.pipeline_params,
-                })
-                _rr.flush(state_snapshot={
-                    "opt_search_point_id": state.opt_sp.id,
-                    "l2_directive": state.opt_sp.l2_directive or "",
-                    "escalation_counters": {
-                        "l2_stall": state.escalation.l2_stall_count,
-                        "l3_stall": state.escalation.l3_stall_count,
-                        "l2_round": state.escalation.l2_round,
-                        "l3_round": state.escalation.l3_round,
-                    },
-                })
+                _rr.record_round_outcome(round_result, state)
 
             # Bidirectional control checkpoint — user may pause/stop via dashboard
             if cb.on_checkpoint:

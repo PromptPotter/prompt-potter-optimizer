@@ -36,7 +36,7 @@ from api.shared.constants import PROMPT_STRING_FIELDS
 if TYPE_CHECKING:
     from api.models.pipeline_schema import PipelineSchema
     from api.services.campaign.escalation import DegradationCheck
-    from api.services.l1_optimizer import L1EvalResult
+    from api.services.campaign.l1_optimizer import L1EvalResult
     from api.services.obs.observability_logger import ObsLogger
     from api.services.stores.campaign_store import CampaignStore
 
@@ -137,7 +137,7 @@ async def _generate_or_load_candidates(
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
     from api.services.campaign.formatting import build_l1_search_memory_context
-    from api.services.l1_optimizer import l1_generate
+    from api.services.campaign.l1_optimizer import l1_generate
 
     sm_ctx = build_l1_search_memory_context(search_memory)
 
@@ -193,7 +193,7 @@ async def _evaluate_candidates(
     escalation_checks: list[DegradationCheck] | None = None,
 ) -> L1EvalResult:
     """Evaluate candidates and run critique analysis."""
-    from api.services.l1_optimizer import l1_evaluate
+    from api.services.campaign.l1_optimizer import l1_evaluate
 
     emit_phase(
         callbacks.on_phase,

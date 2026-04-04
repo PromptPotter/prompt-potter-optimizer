@@ -31,6 +31,7 @@ from api.shared.constants import (
     DEFAULT_CONNECTOR_TYPE,
     LOCK_TIMEOUT,
 )
+from api.shared.hashing import HASH_TRUNCATE
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def config_hash(pipeline_params: dict | None, rp_hash: str = "") -> str:
     """
     normalized = _normalize_pp(pipeline_params)
     blob = json.dumps({"pp": normalized, "rp": rp_hash}, sort_keys=True, default=str).encode()
-    return hashlib.sha256(blob).hexdigest()[:24]
+    return hashlib.sha256(blob).hexdigest()[:HASH_TRUNCATE]
 
 
 class DatasetRunStore:

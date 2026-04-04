@@ -247,21 +247,17 @@ def _infer_terminated_step(step_timings: dict) -> str | None:
 
 def _find_gt_rank(r: dict) -> int | None:
     """Find ground truth rank in candidates. Returns 1-indexed rank or None."""
+    from api.services.campaign.critique import find_rank
+
     gt = r.get("ground_truth", "")
     if not gt:
         return None
     pd = r.get("pipeline_data") or {}
-    ranked = pd.get("ranked_candidates", [])
-    for i, c in enumerate(ranked):
-        name = c.get("candidate", "") if isinstance(c, dict) else str(c)
-        if name == gt:
-            return i + 1
-    # Fallback: token_matched_candidates (tuple/list format)
-    token = pd.get("token_matched_candidates", [])
-    for i, c in enumerate(token):
-        name = c[0] if isinstance(c, (list, tuple)) else str(c)
-        if name == gt:
-            return i + 1
+    # Try ranked_candidates first, then token_matched_candidates fallback
+    for key in ("ranked_candidates", "token_matched_candidates"):
+        rank = find_rank(pd.get(key, []), gt)
+        if rank is not None:
+            return rank
     return None
 
 
