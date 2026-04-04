@@ -511,6 +511,7 @@ async def _init_cycle_state(
             backend_id=config.backend_id,
             session_id=config.session_id,
             max_rounds=config.max_rounds or 999,
+            l1_patience=config.l1_patience,
             active_nodes=list(config.active_steps),
             config={},  # raw campaign config not available here; emitter uses defaults
             resume_from=resume_from,

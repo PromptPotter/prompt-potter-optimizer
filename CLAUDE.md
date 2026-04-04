@@ -135,7 +135,7 @@ global query counter across all candidates
 
 ### Code Style
 
-- **CLI command timeouts**: Backend responds fast — use 30s timeout for CLI commands, not minutes. 30s covers 5+ backend requests easily. For long-running CLI commands (init with baseline, optimize), use **120s (2 minutes) maximum** — never 10 minutes. If a command hasn't finished in 2 minutes, something is wrong.
+- **CLI command timeouts**: **30 seconds default for ALL CLI commands** — including `init`, `optimize`, `scan`. This is the diagnostic/development phase; we are analyzing algorithm behavior, not collecting data. 30s is enough to observe one round starting, check output, and verify fixes. Only increase timeout when explicitly told "ready for data collection".
 - **No background CLI commands**: Never run CLI campaign commands (`campaign_runner`) in the background or with `run_in_background`. Always foreground so stale processes don't leak and spam the backend. After any interrupted CLI run, verify with `ps aux | grep python` and kill orphans with `taskkill //PID <pid> //F`.
 - **Type hints**: PEP 604 (`X | None`), lowercase generics (`list[str]`)
 - **Logging**: `logging` module (no `print()` in services). Setup in `promptpotter/config/logging.py`.

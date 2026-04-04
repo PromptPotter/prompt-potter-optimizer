@@ -89,8 +89,9 @@ async def _generate_or_load_candidates(
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
     # Resolve L2 meta-param overrides from OptSearchPoint.optimizer_params
+    # Cap n_variants to 3× config to prevent L2 from blowing up eval budget
     opt_params = state.opt_sp.optimizer_params
-    _n_variants = opt_params.get("n_variants", config.n_variants)
+    _n_variants = min(opt_params.get("n_variants", config.n_variants), config.n_variants * 3)
     _creativity = opt_params.get("creativity", config.creativity)
     prompt_preview = state.opt_sp.render()[:120]
 
