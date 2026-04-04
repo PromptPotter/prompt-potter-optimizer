@@ -170,6 +170,76 @@ def _parse_backend_response(
     return pd
 
 
+def _build_local_result(
+    query: str,
+    ground_truth: str,
+    node_outputs: dict,
+    target_steps: list[str],
+    pipeline_schema: PipelineSchema,
+) -> dict:
+    """Construct an eval result locally from intermediate cache (no backend call).
+
+    Used when the intermediate cache covers ALL target steps — the backend
+    would just repackage the same precomputed data, so we skip the HTTP
+    round-trip entirely.
+    """
+    last_node = target_steps[-1] if target_steps else ""
+    raw_ranked = node_outputs.get(last_node, [])
+
+    # Normalize: intermediate cache stores [{term, score}],
+    # backend returns [{candidate, score}]
+    ranked: list[dict] = []
+    for item in raw_ranked:
+        if isinstance(item, dict):
+            ranked.append({
+                "candidate": item.get("candidate") or item.get("term", NO_RESULT),
+                "score": item.get("score", 0),
+            })
+        else:
+            ranked.append({"candidate": str(item), "score": 0})
+
+    predicted = ranked[0]["candidate"] if ranked else NO_RESULT
+    eval_output = _evaluator.evaluate(ground_truth, predicted)
+
+    # Synthetic pipeline_data — mirrors _parse_backend_response format
+    step_timings = dict.fromkeys(target_steps, 0.0)
+    pd: dict = {
+        "ranked_candidates": ranked,
+        "total_time": 0.0,
+        "step_timings": step_timings,
+        "terminated_at": last_node,
+        "diagnostics": {"warnings": []},
+    }
+    # Include node-specific outputs that obs mappings expect
+    for step in target_steps:
+        node_data = node_outputs.get(step)
+        if node_data is not None and step != last_node:
+            pd[step] = node_data
+
+    n_candidates = len(ranked)
+    return {
+        "query": query,
+        "predicted": predicted,
+        "ground_truth": ground_truth,
+        "hit": eval_output.result == EvalResult.PASS,
+        "score": eval_output.score,
+        "error": None,
+        "n_candidates": n_candidates,
+        "ground_truth_rank": _find_gt_rank_in_ranked(ranked, ground_truth),
+        "pipeline_data": pd,
+        "precomputed_through": list(target_steps),
+        "cached": True,
+    }
+
+
+def _find_gt_rank_in_ranked(ranked: list[dict], ground_truth: str) -> int | None:
+    """Find ground truth position in a ranked list. Returns 1-indexed or None."""
+    for i, c in enumerate(ranked):
+        if c.get("candidate", "") == ground_truth:
+            return i + 1
+    return None
+
+
 def _is_degraded(result: dict) -> bool:
     """Check if a result has pipeline degradation warnings."""
     return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
@@ -307,11 +377,18 @@ async def eval_query_via_backend(
     try:
         # Step-sequence prefix lookup: find longest cached prefix
         precomputed = None
+        cached_steps: list[str] = []
         if intermediate_cache and _target_steps:
             prefix_hit = intermediate_cache.get_prefix(backend_id, query, _target_steps)
             if prefix_hit:
                 node_outputs_hit, cached_steps = prefix_hit
                 precomputed = {k: v for k, v in node_outputs_hit.items() if k in set(cached_steps)}
+
+        # Full coverage: all target steps cached — skip backend entirely
+        if precomputed and cached_steps == _target_steps:
+            return _build_local_result(
+                query, ground_truth, precomputed, _target_steps, pipeline_schema,
+            )
 
         resp = await backend_client.run_match(
             query,
@@ -820,14 +897,13 @@ async def eval_search_point(
 
     from api.services.campaign.escalation import EscalationError as _EscalationError
 
-    # Per-query cache: find individual query results from prior runs
-    # matching on rendered prompt + pipeline_params (strict or NN).
+    # Per-query cache: find results from prior runs with identical
+    # pipeline config (same steps, same node params, same prompt).
     # Bridges different sample sizes automatically.
     sp_cache: dict[str, dict] | None = None
     if store and backend_id:
         sp_cache = store.dataset_runs.find_cached_queries(
-            backend_id, rp_hash, search_point.pipeline_params,
-            strict_params=ctx.strict_params,
+            backend_id, search_point.pipeline_params, rp_hash,
         )
         if sp_cache:
             logger.debug(

@@ -19,7 +19,7 @@ from api.models.pipeline_schema import is_result_step_compatible
 from api.services.project_store import ProjectStore
 from api.services.search.plan_persistence import deserialize_smart_search_plan
 from api.services.search.preview import preview
-from api.services.stores.dataset_run_store import _entry_matches
+from api.services.stores.dataset_run_store import config_hash
 from api.shared.constants import DEFAULT_DIAGNOSTIC_QUERIES, PROMPT_STRING_FIELDS
 from api.shared.hashing import HASH_TRUNCATE
 
@@ -140,17 +140,14 @@ def diagnose_scan_variants(
                 ).hexdigest()[:HASH_TRUNCATE]
                 entries = rp_index.get(rp_h, [])
             else:
-                # Pipeline param variant: match using _entry_matches
-                # with auto-strict on the scanned axis
+                # Pipeline param variant: match by config_hash
                 target_pp = copy.deepcopy(baseline_sp.pipeline_params or {})
                 if axis_node:
                     target_pp.setdefault(axis_node, {})[axis_name] = v
-                strict = {axis_node: {axis_name}} if axis_node else {}
+                target_ch = config_hash(target_pp, baseline_rp_hash)
                 entries = [
                     e for e in step_matches
-                    if _entry_matches(
-                        e.get("pipeline_params"), target_pp, strict,
-                    )
+                    if config_hash(e.get("pipeline_params"), e.get("rendered_prompt_hash", "")) == target_ch
                 ]
 
             value_counts[key] = sum(e.get("item_count", 0) for e in entries)

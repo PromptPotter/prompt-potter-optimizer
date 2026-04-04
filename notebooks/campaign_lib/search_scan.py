@@ -41,7 +41,6 @@ async def sensitivity_scan(
     pipeline_schema=None,
     experiment_id: str = "",
     svc: dict | None = None,
-    strict_params: dict[str, set[str]] | None = None,
     session_id: str = "",
 ) -> tuple:
     """Run a sensitivity scan with progress output.
@@ -104,7 +103,6 @@ async def sensitivity_scan(
             progress_cb=cb,
             on_result=on_result_cb,
             experiment_id=experiment_id,
-            strict_params=strict_params,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         _print_interrupt_banner(
@@ -385,7 +383,6 @@ async def run_sensitivity_scan(
     scan_sample_size: int = 0,
     svc: dict | None = None,
     experiment_id: str = "",
-    strict_params: dict[str, set[str]] | None = None,
     session_id: str = "",
 ):
     """Prepare scan baseline and run sensitivity scan in one call.
@@ -407,7 +404,6 @@ async def run_sensitivity_scan(
         baseline_opt=search_baseline,
         sample_size=scan_sample_size,
         svc=svc, experiment_id=experiment_id,
-        strict_params=strict_params,
         session_id=session_id,
     )
     return scan_baseline_sp, scan_df, axis_profiles

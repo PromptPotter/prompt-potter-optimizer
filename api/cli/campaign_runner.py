@@ -254,13 +254,10 @@ async def cmd_scan(args: argparse.Namespace) -> None:
         if args.sample_size is not None
         else state["campaign_config"].get("exploration_sample_size", 0)
     )
-    strict_params = json.loads(args.strict_params) if args.strict_params else {}
-
     _scan_bl, scan_df, _axis_profiles = await run_sensitivity_scan(
         baseline, state["campaign_config"], scan_variants, train_data,
         scan_sample_size=sample_size, svc=svc,
         experiment_id=state["init_params"]["experiment_id"],
-        strict_params=strict_params,
         session_id=sid,
     )
 
@@ -382,7 +379,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     state["phase"] = "optimizing"
     svc.store.sessions.save(bid, sid, state)
 
-    # File emitter: writes campaign_state.jsonl + campaign_output.log
+    # File emitter: writes campaign_state.json + campaign_output.log
     from api.cli.file_emitter import CampaignFileEmitter
     from api.services.campaign.callbacks import CycleCallbacks
 
@@ -391,12 +388,27 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     active = state.get("active_steps", [])
     excluded = campaign_config.get("exclude_nodes", [])
 
+    # Load prior state for continuity across cycles
+    resume_from = None
+    state_path = session_dir / "campaign_state.json"
+    if state_path.exists():
+        prior = json.loads(state_path.read_text(encoding="utf-8"))
+        resume_from = {
+            "best": prior.get("best", 0.0),
+            "best_round": prior.get("best_round", 0),
+            "baseline": state.get("baseline_accuracy", 0.0),
+            "rounds_completed": prior.get("rounds_completed", 0),
+            "total_queries_evaluated": prior.get("total_queries_evaluated", 0),
+            "total_backend_calls": prior.get("total_backend_calls", 0),
+        }
+
     emitter = CampaignFileEmitter(
         session_dir,
         max_rounds=opt_cfg.get("max_rounds", 10),
         active_nodes=active,
         excluded_nodes=excluded,
         config=campaign_config,
+        resume_from=resume_from,
     )
     emitter_cb = CycleCallbacks(
         on_phase=emitter.on_phase,
@@ -417,6 +429,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     emitter.set_stop_reason("completed")
     state["phase"] = "optimize"
+    state["cycle_id"] = emitter._state.get("cycle_id")
+    state["best_accuracy"] = emitter._state.get("best", state.get("baseline_accuracy", 0.0))
     svc.store.sessions.save(bid, sid, state)
 
     best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
@@ -571,7 +585,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan = sub.add_parser("scan", help="Run sensitivity scan")
     p_scan.add_argument("--variants-file", required=True, help="Scan variants JSON")
     p_scan.add_argument("--sample-size", type=int, default=None)
-    p_scan.add_argument("--strict-params", default=None, help="strict_params JSON")
 
     sub.add_parser("scan-results", help="Show scan analytics and seed campaign")
 

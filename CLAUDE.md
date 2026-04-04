@@ -111,6 +111,7 @@ global query counter across all candidates
 ### Code Style
 
 - **CLI command timeouts**: Backend responds fast — use 30s timeout for CLI commands, not minutes. 30s covers 5+ backend requests easily.
+- **No background CLI commands**: Never run CLI campaign commands (`campaign_runner`) in the background or with `run_in_background`. Always foreground so stale processes don't leak and spam the backend. After any interrupted CLI run, verify with `ps aux | grep python` and kill orphans with `taskkill //PID <pid> //F`.
 - **Type hints**: PEP 604 (`X | None`), lowercase generics (`list[str]`)
 - **Logging**: `logging` module (no `print()` in services). Setup in `api/config/logging.py`.
 - **`sample_size`**: Universal eval sampling parameter (0 = all). No synonyms.

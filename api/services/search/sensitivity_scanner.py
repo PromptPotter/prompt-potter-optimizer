@@ -48,7 +48,6 @@ async def sensitivity_scan(
     on_result: Callable | None = None,
     experiment_id: str = "",
     pruning_enabled: bool = True,
-    strict_params: dict[str, set[str]] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -92,7 +91,6 @@ async def sensitivity_scan(
         pipeline_schema=pipeline_schema,
         source="sensitivity_scan",
         experiment_id=experiment_id,
-        strict_params=strict_params,
     )
 
     # Resolve active prompt node — only if the prompt node is in active steps
@@ -222,14 +220,6 @@ async def sensitivity_scan(
         # Per-axis pruning state (Wave 2b)
         _axis_variant_cis: list[tuple[float, float]] = []
         _axis_pruned = False
-
-        # Auto-strict: the perturbed pipeline-param axis must match exactly
-        if strict_params is not None and axis_type == "pipeline_param" and axis_node:
-            auto = {n: set(ps) for n, ps in strict_params.items()}
-            auto.setdefault(axis_node, set()).add(axis_name)
-            scan_ctx.strict_params = auto
-        elif strict_params is not None:
-            scan_ctx.strict_params = strict_params
 
         for vi, value in enumerate(values):
             # Detect baseline value for this axis

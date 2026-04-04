@@ -1,11 +1,12 @@
-"""Campaign dashboard emitter — writes campaign_dashboard.json + campaign_output.log.
+"""Campaign state emitter — writes campaign_state.json + campaign_output.log.
 
 Produces two files in the session directory during optimization:
 
-1. ``campaign_dashboard.json`` — single JSON, overwritten on every update.
+1. ``campaign_state.json`` — single JSON, overwritten on every update.
    Contains execution state + accumulator arrays (queries within current
    candidate, candidates within current round). Resets accumulators on
-   candidate/round transitions.
+   candidate/round transitions. Supports ``resume_from`` to carry over
+   historical counters across cycles.
 2. ``campaign_output.log`` — append-only plain-text log (ANSI-stripped stdout).
 """
 
@@ -29,7 +30,7 @@ def _strip_ansi(text: str) -> str:
 
 
 class CampaignFileEmitter:
-    """Writes campaign_dashboard.json + campaign_output.log during optimization."""
+    """Writes campaign_state.json + campaign_output.log during optimization."""
 
     def __init__(
         self,
@@ -39,12 +40,14 @@ class CampaignFileEmitter:
         active_nodes: list[str] | None = None,
         excluded_nodes: list[str] | None = None,
         config: dict[str, Any] | None = None,
+        resume_from: dict[str, Any] | None = None,
     ) -> None:
-        self.dashboard_path = session_dir / "campaign_dashboard.json"
+        self.state_path = session_dir / "campaign_state.json"
         self.log_path = session_dir / "campaign_output.log"
 
         cfg = config or {}
         opt = cfg.get("optimization", {})
+        r = resume_from or {}
 
         self._state: dict[str, Any] = {
             # Execution
@@ -56,8 +59,8 @@ class CampaignFileEmitter:
             "query": "",
             "patience": "0/0",
             "layer": "L1",
-            "baseline": 0.0,
-            "best": 0.0,
+            "baseline": r.get("baseline", 0.0),
+            "best": r.get("best", 0.0),
             "current_acc": 0.0,
             "cycle_id": None,
             "stop_reason": None,
@@ -76,12 +79,12 @@ class CampaignFileEmitter:
             "hit_rate": 0.0,
             "degraded_count": 0,
             "error_count": 0,
-            "best_round": 0,
+            "best_round": r.get("best_round", 0),
             "improvement_streak": 0,
-            # Historical
-            "rounds_completed": 0,
-            "total_queries_evaluated": 0,
-            "total_backend_calls": 0,
+            # Historical (carried over across cycles)
+            "rounds_completed": r.get("rounds_completed", 0),
+            "total_queries_evaluated": r.get("total_queries_evaluated", 0),
+            "total_backend_calls": r.get("total_backend_calls", 0),
             # Config
             "model": cfg.get("eval_llm", {}).get("model", ""),
             "n_variants": opt.get("n_variants", 5),
@@ -97,11 +100,18 @@ class CampaignFileEmitter:
         self._query_times: list[float] = []
         self._round_cache_hits = 0
         self._round_queries = 0
+        self._round_degraded = 0
         self._improvement_streak = 0
         self._candidates_meta: list[dict] = []
 
         self._flush()
-        self.log_path.write_text("", encoding="utf-8")
+        # Append-only log — don't truncate on resume
+        if not self.log_path.exists():
+            self.log_path.write_text("", encoding="utf-8")
+        if resume_from:
+            self._log(f"\n{'=' * 70}")
+            self._log(f"  RESUMED — prior: {r.get('rounds_completed', 0)} rounds, best={r.get('best', 0):.1%}")
+            self._log(f"{'=' * 70}\n")
 
     # -- Callbacks -------------------------------------------------------------
 
@@ -124,6 +134,8 @@ class CampaignFileEmitter:
             self._round_start = time.monotonic()
             self._round_cache_hits = 0
             self._round_queries = 0
+            self._round_degraded = 0
+            s["degraded_count"] = 0
             s["round_elapsed_s"] = 0.0
             s["current_queries"] = []
             s["round_candidates"] = []
@@ -189,7 +201,8 @@ class CampaignFileEmitter:
         if has_error:
             s["error_count"] += 1
         if pd.get("diagnostics"):
-            s["degraded_count"] += 1
+            self._round_degraded += 1
+            s["degraded_count"] = self._round_degraded
 
         # Historical
         s["total_queries_evaluated"] += 1
@@ -304,7 +317,7 @@ class CampaignFileEmitter:
         return {}
 
     def _flush(self) -> None:
-        self.dashboard_path.write_text(
+        self.state_path.write_text(
             json.dumps(self._state, indent=2, default=str),
             encoding="utf-8",
         )

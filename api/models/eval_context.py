@@ -43,5 +43,3 @@ class EvalContext:
     search_memory: SearchMemory | None = None
     # Mutable dict extracted from opt_sp.stale_data_observations — updated during eval
     stale_data_observations: dict[str, int | dict] | None = None
-    # NN cache: None = exact match (optimizer), dict = selective match (scan)
-    strict_params: dict[str, set[str]] | None = None

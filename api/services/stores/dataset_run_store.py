@@ -2,9 +2,18 @@
 Dataset run (eval result caching) storage.
 
 Performance: in-memory caches for the index, alias groups, and
-rendered-prompt-hash secondary index avoid repeated disk reads during
+config-hash secondary index avoid repeated disk reads during
 scan/grid/feedback-cycle hot loops.  All caches are invalidated on write.
+
+Cache lookup uses a single **config_hash** — a canonical hash of the
+full pipeline config (steps + all node params including prompt).  Two
+configs with the same hash are identical; different hash = different
+searchpoint.  No dict comparison, no partial matching.  Prefix reuse
+is handled by the separate IntermediateCache layer.
 """
+
+import hashlib
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -26,57 +35,37 @@ from api.shared.constants import (
 logger = logging.getLogger(__name__)
 
 
-def _entry_matches(
-    entry_pp: dict | None,
-    target_pp: dict | None,
-    strict_params: dict[str, set[str]] | None = None,
-) -> bool:
-    """Check whether a historical entry's pipeline_params match a target.
+# Keys in node config dicts that are tracked by rp_hash, not by
+# pipeline config.  Stripped before hashing to avoid asymmetry
+# (stored entries may include them, lookup may not).
+_PROMPT_KEYS = frozenset({"prompt", "output_schema"})
 
-    Step matching uses **ordered prefix**: target steps must be an ordered
-    prefix of (or equal to) entry steps.  This allows cached runs with more
-    nodes to serve requests for fewer nodes (superset reuse).
 
-    Args:
-        entry_pp: pipeline_params from a stored index entry.
-        target_pp: pipeline_params we want to match against.
-        strict_params: Controls strictness:
-            ``None`` — exact full-dict equality (steps still use prefix).
-            ``{}`` — steps prefix match, all other params relaxed.
-            ``{"node": {"param"}}`` — steps prefix + listed params must match.
+def _normalize_pp(pipeline_params: dict | None) -> dict:
+    """Normalize pipeline_params for hashing: strip prompt/output_schema."""
+    pp = pipeline_params or {}
+    out: dict = {}
+    for k, v in pp.items():
+        if isinstance(v, dict):
+            out[k] = {pk: pv for pk, pv in v.items() if pk not in _PROMPT_KEYS}
+        else:
+            out[k] = v
+    return out
+
+
+def config_hash(pipeline_params: dict | None, rp_hash: str = "") -> str:
+    """Canonical hash of pipeline config identity.
+
+    Combines ``rp_hash`` (prompt identity) with normalized
+    ``pipeline_params`` (steps + all node configs, excluding prompt
+    and output_schema which are already captured by rp_hash).
+
+    Two configs with the same hash ran the same steps, same prompt,
+    and same node params — guaranteed identical results.
     """
-    entry_pp = entry_pp or {}
-    target_pp = target_pp or {}
-
-    # Steps: target must be an ordered prefix of entry (superset OK)
-    entry_steps = entry_pp.get("steps", [])
-    target_steps = target_pp.get("steps", [])
-    if len(target_steps) > len(entry_steps):
-        return False
-    if entry_steps[: len(target_steps)] != target_steps:
-        return False
-
-    if strict_params is None:
-        # Exact mode: params for target nodes must match.
-        # Ignore node configs for superset-only nodes (e.g. llm_ranking
-        # config when target excludes llm_ranking).
-        extra_nodes = set(entry_steps) - set(target_steps)
-        entry_filtered = {k: v for k, v in entry_pp.items() if k != "steps" and k not in extra_nodes}
-        target_filtered = {k: v for k, v in target_pp.items() if k != "steps"}
-        return entry_filtered == target_filtered
-
-    # NN mode: only listed params must match
-    for node, params in strict_params.items():
-        entry_node = entry_pp.get(node, {})
-        target_node = target_pp.get(node, {})
-        if not isinstance(entry_node, dict) or not isinstance(target_node, dict):
-            if entry_node != target_node:
-                return False
-            continue
-        for p in params:
-            if entry_node.get(p) != target_node.get(p):
-                return False
-    return True
+    normalized = _normalize_pp(pipeline_params)
+    blob = json.dumps({"pp": normalized, "rp": rp_hash}, sort_keys=True, default=str).encode()
+    return hashlib.sha256(blob).hexdigest()[:24]
 
 
 class DatasetRunStore:
@@ -87,7 +76,8 @@ class DatasetRunStore:
         # In-memory caches — invalidated on save()/register_alias()
         self._index_cache: dict[str, dict] = {}
         self._alias_cache: dict[str, dict] = {}
-        self._rp_index: dict[str, dict[str, list[dict]]] = {}
+        # {backend_id: {config_hash: [entries]}}
+        self._config_index: dict[str, dict[str, list[dict]]] = {}
 
     # -- internal cache helpers -----------------------------------------------
 
@@ -109,31 +99,28 @@ class DatasetRunStore:
             )
         return self._alias_cache[backend_id]
 
-    def _get_rp_index(self, backend_id: str) -> dict[str, list[dict]]:
-        """Return {rendered_prompt_hash: [index_entries]} secondary index."""
-        if backend_id not in self._rp_index:
+    def _get_config_index(self, backend_id: str) -> dict[str, list[dict]]:
+        """Return ``{config_hash: [index_entries]}`` secondary index."""
+        if backend_id not in self._config_index:
             idx: dict[str, list[dict]] = {}
             for entry in self._load_index(backend_id).get("dataset_runs", []):
                 rp = entry.get("rendered_prompt_hash", "")
-                if rp:
-                    idx.setdefault(rp, []).append(entry)
-            self._rp_index[backend_id] = idx
-        return self._rp_index[backend_id]
+                ch = config_hash(entry.get("pipeline_params"), rp)
+                idx.setdefault(ch, []).append(entry)
+            self._config_index[backend_id] = idx
+        return self._config_index[backend_id]
 
     def _invalidate_cache(self, backend_id: str) -> None:
         """Drop all in-memory caches for a backend (after write)."""
         self._index_cache.pop(backend_id, None)
         self._alias_cache.pop(backend_id, None)
-        self._rp_index.pop(backend_id, None)
+        self._config_index.pop(backend_id, None)
 
     def clear_caches(self) -> None:
-        """Drop all in-memory caches across all backends.
-
-        Call between campaign cycles or when memory pressure is a concern.
-        """
+        """Drop all in-memory caches across all backends."""
         self._index_cache.clear()
         self._alias_cache.clear()
-        self._rp_index.clear()
+        self._config_index.clear()
 
     # -- path helpers ---------------------------------------------------------
 
@@ -187,11 +174,11 @@ class DatasetRunStore:
             else:
                 index = {"dataset_runs": [], "total": 0}
 
-            content_hash = data.get("content_hash", "")
+            content_hash_val = data.get("content_hash", "")
             entries = index["dataset_runs"]
             replaced = False
             for i, entry in enumerate(entries):
-                if entry.get("content_hash") == content_hash:
+                if entry.get("content_hash") == content_hash_val:
                     entries[i] = summary
                     replaced = True
                     break
@@ -234,22 +221,56 @@ class DatasetRunStore:
     ) -> dict[str, Any] | None:
         """Find a cached run via prompt alias groups.
 
-        Uses the secondary rp_hash index for O(alias_set × entries_per_hash)
-        lookups instead of O(total_entries) linear scan.
+        Uses config_hash for matching instead of dict equality.
         """
         alias_set = self.resolve_aliases(backend_id, rp_hash)
-        rp_idx = self._get_rp_index(backend_id)
+        target_ch = config_hash(pipeline_params)
+        cfg_idx = self._get_config_index(backend_id)
 
-        for h in alias_set:
-            for entry in rp_idx.get(h, []):
-                if entry.get("pipeline_params") != pipeline_params:
-                    continue
-                if entry.get("item_count") != item_count:
-                    continue
+        for entry in cfg_idx.get(target_ch, []):
+            if entry.get("item_count") != item_count:
+                continue
+            # Verify rp_hash matches via alias
+            entry_rp = entry.get("rendered_prompt_hash", "")
+            if entry_rp in alias_set:
                 return read_json_optional(
                     self._runs_dir(backend_id) / f"{entry['run_id']}.json",
                 )
         return None
+
+    # -- per-query cache ------------------------------------------------------
+
+    def find_cached_queries(
+        self,
+        backend_id: str,
+        pipeline_params: dict | None,
+        rp_hash: str = "",
+    ) -> dict[str, dict]:
+        """Find cached query results for a pipeline config.
+
+        Returns ``{query_string: result_dict}`` from all prior runs whose
+        ``config_hash(pipeline_params, rp_hash)`` matches.  Different
+        sample sizes are bridged automatically (last-write-wins per query).
+
+        No dict comparison — just hash equality on (steps + prompt).
+        """
+        ch = config_hash(pipeline_params, rp_hash)
+        entries = self._get_config_index(backend_id).get(ch, [])
+
+        results: dict[str, dict] = {}
+        for entry in entries:
+            detail = read_json_optional(
+                self._runs_dir(backend_id) / f"{entry['run_id']}.json",
+            )
+            if not detail:
+                continue
+            entry_steps = (entry.get("pipeline_params") or {}).get("steps", [])
+            for item in detail.get("dataset_run_items", []):
+                query = item.get("query", "")
+                if query:
+                    item["_cache_steps"] = entry_steps
+                    results[query] = item
+        return results
 
     # -- prompt alias groups ---------------------------------------------------
 
@@ -285,51 +306,6 @@ class DatasetRunStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         write_json(path, data)
         self._alias_cache.pop(backend_id, None)
-
-    def find_cached_queries(
-        self,
-        backend_id: str,
-        rendered_prompt_hash: str,
-        pipeline_params: dict | None,
-        strict_params: dict[str, set[str]] | None = None,
-    ) -> dict[str, dict]:
-        """Find cached query results for a SearchPoint.
-
-        Returns ``{query_string: result_dict}`` from all prior runs that
-        match on rendered prompt, step sequence, and param constraints.
-        Different sample sizes are bridged automatically.
-
-        Args:
-            rendered_prompt_hash: Hash of the rendered prompt string.
-            pipeline_params: Target pipeline_params to match against.
-            strict_params: Controls matching strictness:
-                ``None`` — exact: full ``pipeline_params`` dict equality.
-                ``{}`` — maximally loose: prompt + steps only.
-                ``{"node": {"param"}}`` — listed params must match,
-                others may differ.
-
-        Later runs overwrite earlier (last-write-wins per query).
-        """
-        candidates = self._get_rp_index(backend_id).get(rendered_prompt_hash, [])
-        matching = [
-            e for e in candidates
-            if _entry_matches(e.get("pipeline_params"), pipeline_params, strict_params)
-        ]
-
-        results: dict[str, dict] = {}
-        for entry in matching:
-            detail = read_json_optional(
-                self._runs_dir(backend_id) / f"{entry['run_id']}.json",
-            )
-            if not detail:
-                continue
-            entry_steps = (entry.get("pipeline_params") or {}).get("steps", [])
-            for item in detail.get("dataset_run_items", []):
-                query = item.get("query", "")
-                if query:
-                    item["_cache_steps"] = entry_steps
-                    results[query] = item
-        return results
 
     def resolve_aliases(self, backend_id: str, rp_hash: str) -> set[str]:
         """Return all hashes equivalent to *rp_hash* (including itself)."""
