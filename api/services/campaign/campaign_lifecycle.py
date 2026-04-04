@@ -44,6 +44,7 @@ def cycle_config_identity(
             "model": config.model,
             "sample_size": config.sample_size,
             "seed": config.seed,
+            "active_steps": list(config.active_steps),
             "baseline_rendered": baseline_rendered,
             "eval_data_pairs": sorted(
                 (d.get("query", ""), d.get("ground_truth", ""))

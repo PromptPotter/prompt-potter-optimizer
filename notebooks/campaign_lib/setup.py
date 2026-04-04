@@ -129,11 +129,28 @@ def dev_reload() -> None:
     import sys
 
     for mod in [
+        # Service layer — safe to reload (no Pydantic model classes)
+        "api.shared.hashing",
+        "api.services.campaign.config",
+        "api.services.campaign.campaign_lifecycle",
+        "api.services.campaign.campaign_factories",
         "api.services.campaign.escalation",
         "api.services.campaign.layer_transitions",
         "api.services.campaign.critique",
         "api.services.campaign.models",
+        "api.services.campaign.round_execution",
         "api.services.campaign.optimization_loop",
+        "api.services.stores.dataset_run_store",
+        "api.services.prompt_eval",
+        "api.services.l1_optimizer",
+        "api.services.search.smart_search",
+        "api.services.search.sensitivity_scanner",
+        "api.services.search.scan_baseline",
+        # NOTE: Do NOT reload api.models.* or dataclass modules —
+        # Pydantic/dataclass classes break when reloaded (existing
+        # instances fail type checks).  scan_results.py has ScanContext
+        # dataclass, so it must not be reloaded.
+        # For model/dataclass changes, restart the kernel.
     ]:
         if mod in sys.modules:
             importlib.reload(sys.modules[mod])
