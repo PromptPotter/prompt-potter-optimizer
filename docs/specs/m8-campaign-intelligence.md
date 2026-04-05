@@ -2,7 +2,7 @@
 
 **Version:** 0.3.0
 **Date:** 2026-03-30
-**Status:** Planned
+**Status:** Complete
 **Depends on:** [M7 Optimizer-as-Pipeline](archive/m7-optimizer-pipeline.md)
 
 ---
@@ -316,50 +316,32 @@ AFTER: eval_search_point()
 
 | Wave | Scope | Depends on | Side |
 |------|-------|------------|------|
-| 1a | Sample diagnostics: `extract_sample_diagnostics()` in `metrics.py` | — | PP |
-| 1b | Failure analysis compilation: `compile_failure_analysis()`, `compile_query_difficulty()`, `compile_temporal_trends()` | 1a | PP |
-| 1c | Enriched failure context + multi-direction injection in L1/L2/advisor prompts | 1b | PP |
-| 1d | Adaptive sampling: drop dead queries, replace with discriminating ones | 1a | PP |
-| 2a | Statistical sample sizing in `build_diagnostic_set()` | — | PP |
-| 2b | Per-axis early pruning via Wilson CI overlap | 2a | PP |
-| 2c | Diagnostic-aware sample stratification | 1a, 2a | PP |
-| 3a | SearchMemory core: data model, incremental update, watermark, persistence | — | PP |
-| 3b | Three analysis pillars: parameter_impact (with top-5), query_patterns, failure_modes | 3a | PP |
-| 3c | Context injection: scan_advisor, L1, L2, critique consume SearchMemory atomically | 3b | PP |
-| 3d | Bottleneck attribution + causal scan ordering | 1a | PP |
-| 3e | Query cohort sensitivity (per-query scan result persistence + cohort slicing) | 1a | PP |
-| 3f | Docs: SearchMemory in architecture.md, sensitivity-scan.md, optimization.md | 3c | PP |
-| 4a | Fix `output_schema` stripping in `config_hash()` (unblock schema mutations) | — | PP |
-| 4b | Per-node cache keying: `node_cache_key()`, `compute_prefix_keys()` in IntermediateCache | — | PP |
-| 4c | Eval gateway: per-node prefix walk in `eval_query_via_backend()` | 4b | PP |
-| 4d | Cache consolidation: remove `config_hash`, `find_cached_queries`, content-hash lookup | 4c | PP |
-| 4e | TermNorm: `node_outputs` response + `precomputed` request | 4b | TN |
-| 4f | Docs: update architecture.md caching section, CLAUDE.md conventions | 4d | PP |
+| 1a | ~~Sample diagnostics: `extract_sample_diagnostics()` in `metrics.py`~~ | — | PP ✅ |
+| 1b | ~~Failure analysis compilation: `compile_failure_analysis()`, `compile_query_difficulty()`, `compile_temporal_trends()`~~ | 1a | PP ✅ |
+| 1c | ~~Enriched failure context + multi-direction injection in L1/L2/advisor prompts~~ | 1b | PP ✅ |
+| 1d | ~~Adaptive sampling: drop dead queries, replace with discriminating ones~~ | 1a | PP ✅ |
+| 2a | ~~Statistical sample sizing in `build_diagnostic_set()`~~ | — | PP ✅ |
+| 2b | ~~Per-axis early pruning via Wilson CI overlap~~ | 2a | PP ✅ |
+| 2c | ~~Diagnostic-aware sample stratification~~ | 1a, 2a | PP ✅ |
+| 3a | ~~SearchMemory core: data model, incremental update, watermark, persistence~~ | — | PP ✅ |
+| 3b | ~~Three analysis pillars: parameter_impact (with top-5), query_patterns, failure_modes~~ | 3a | PP ✅ |
+| 3c | ~~Context injection: scan_advisor, L1, L2, critique consume SearchMemory atomically~~ | 3b | PP ✅ |
+| 3d | ~~Bottleneck attribution + causal scan ordering~~ | 1a | PP ✅ |
+| 3e | ~~Query cohort sensitivity (per-query scan result persistence + cohort slicing)~~ | 1a | PP ✅ |
+| 3f | ~~Docs: SearchMemory in architecture.md, sensitivity-scan.md, optimization.md~~ | 3c | PP ✅ |
+| 4a | ~~Fix `output_schema` stripping in `config_hash()`~~ | — | PP ✅ |
+| 4b | ~~Per-node cache keying: `node_cache_key()`, `compute_prefix_keys()` in IntermediateCache~~ | — | PP ✅ |
+| 4c | ~~Eval gateway: per-node prefix walk in `eval_query_via_backend()`~~ | 4b | PP ✅ |
+| 4d | ~~Cache consolidation: remove `find_cached_queries`, `load_by_hash`, `load_by_alias`, content-hash lookup~~ | 4c | PP ✅ |
+| 4e | ~~TermNorm: `node_outputs` response + `precomputed` request~~ | 4b | TN ✅ |
+| 4f | ~~Docs: update architecture.md caching section, CLAUDE.md conventions~~ | 4d | PP ✅ |
 
 ### Dependency graph
 
 ```
-Wave 1 (Data-Informed Intelligence):
-  1a ──┬── 1b ── 1c
-       └── 1d
+All waves complete.
 
-Wave 2 (Smarter Scan):
-  2a ──── 2b
-  1a + 2a ── 2c
-
-Wave 3 (SearchMemory):
-  3a ── 3b ── 3c ── 3f
-  1a ──┬── 3d
-       └── 3e
-
-Wave 4 (Node-Level Cache):
-  4a (fix output_schema — immediate)
-  4b ── 4c ── 4d ── 4f
-  4b ── 4e (TermNorm, parallel)
-
-All four wave groups are independent at their roots.
-1a is the shared foundation for Waves 1, 2c, 3d, and 3e.
-4a is independent and can ship immediately.
+Wave 1 ✅  Wave 2 ✅  Wave 3 ✅  Wave 4 ✅
 ```
 
 ---

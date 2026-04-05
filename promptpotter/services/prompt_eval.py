@@ -1,8 +1,9 @@
 """
 Prompt evaluation service.
 
-Evaluates prompts via the backend's /matches endpoint,
-with content-hash deduplication and alias-aware caching.
+Evaluates prompts via the backend's /matches endpoint.
+Per-node intermediate cache handles all reuse (partial pipeline skip).
+Dataset run store is archive-only (history, SearchMemory, observability).
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from promptpotter.models.evaluator import EvalResult, ExactMatchEvaluator
-from promptpotter.services.metrics import compute_composite_score, count_degraded_queries
+from promptpotter.services.metrics import compute_composite_score
 from promptpotter.services.stale_data import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
@@ -234,42 +235,6 @@ def _build_local_result(
 
 
 
-def rescore_cached_result(
-    result: dict,
-    target_steps: list[str],
-    pipeline_schema: PipelineSchema,
-) -> dict:
-    """Re-score a cached superset result for a shorter target pipeline.
-
-    Reads the candidate list from the target's last candidate-producing node
-    (via ``pipeline_schema.candidate_output_key``), recomputes predicted/hit/score.
-    Returns a new dict — the original is not mutated.
-
-    Falls back to the original result if the target node's output is missing
-    from pipeline_data (e.g., node was short-circuited before reaching it).
-    """
-    output_key = pipeline_schema.candidate_output_key(target_steps)
-    if not output_key:
-        return {**result, "cached": True}
-
-    pd = result.get("pipeline_data") or {}
-    candidates = pd.get(output_key)
-    if not candidates:
-        return {**result, "cached": True}
-
-    predicted = candidates[0].get("candidate", NO_RESULT) if candidates else NO_RESULT
-    gt = result.get("ground_truth", "")
-    eval_output = _evaluator.evaluate(gt, predicted)
-
-    return {
-        **result,
-        "predicted": predicted,
-        "hit": eval_output.result == EvalResult.PASS,
-        "score": eval_output.score,
-        "cached": True,
-    }
-
-
 def _error_result(query: str, ground_truth: str, error_msg: str) -> dict:
     """Build a standard error result dict."""
     return {
@@ -328,14 +293,19 @@ async def eval_query_via_backend(
     _target_steps = (pipeline_params or {}).get("steps", [])
 
     try:
-        # Step-sequence prefix lookup: find longest cached prefix
+        # Per-node prefix walk: find longest cached prefix from pipeline start
         precomputed = None
         cached_steps: list[str] = []
+        prefix_keys: list[tuple[str, str]] = []
         if intermediate_cache and _target_steps:
-            prefix_hit = intermediate_cache.get_prefix(backend_id, query, _target_steps, pipeline_params=pipeline_params)
-            if prefix_hit:
-                node_outputs_hit, cached_steps = prefix_hit
-                precomputed = {k: v for k, v in node_outputs_hit.items() if k in set(cached_steps)}
+            from promptpotter.services.stores.intermediate_cache import compute_prefix_keys
+
+            prefix_keys = compute_prefix_keys(pipeline_params or {}, pipeline_schema)
+            node_outputs_hit, cached_steps = intermediate_cache.walk_prefix(
+                backend_id, query, prefix_keys,
+            )
+            if node_outputs_hit:
+                precomputed = node_outputs_hit
 
         # Full coverage: all target steps cached — skip backend entirely
         if precomputed and cached_steps == _target_steps:
@@ -350,10 +320,15 @@ async def eval_query_via_backend(
         )
         data = resp.get("data", {})
 
-        # Cache populate: store node outputs keyed by step sequence
+        # Cache populate: store per-node outputs
         node_outputs = data.get("node_outputs")
-        if intermediate_cache and _target_steps and node_outputs and not precomputed:
-            intermediate_cache.put_steps(backend_id, _target_steps, query, node_outputs, pipeline_params=pipeline_params)
+        if intermediate_cache and _target_steps and node_outputs and prefix_keys:
+            precomputed_set = set(precomputed or {})
+            for node_name, cache_key in prefix_keys:
+                if node_name in node_outputs and node_name not in precomputed_set:
+                    intermediate_cache.put_node(
+                        backend_id, node_name, cache_key, query, node_outputs[node_name],
+                    )
 
         ranked = data.get("final_ranking", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
@@ -418,22 +393,12 @@ async def _run_eval_batch(
     *,
     on_result: Callable[[dict, int, int], None] | None = None,
     ctx: EvalContext | None = None,
-    cached_queries: dict[str, dict] | None = None,
 ) -> EvalBatchResult:
     """Evaluate a prompt on all eval_data queries via the backend.
 
-    Args:
-        search_point: SearchPoint whose render() produces the ranking prompt.
-        eval_data: List of query dicts with ``query`` and ``ground_truth``.
-        backend_client: BackendClient with ``run_match()`` method.
-        on_result: Optional callback ``(result, index, total)`` called after
-            each query evaluation.
-        ctx: Optional EvalContext carrying pipeline_schema, escalation_checks,
-            and other infrastructure.  When None (e.g. in tests), defaults
-            are used (no escalation, max 3 consecutive errors).
-        cached_queries: Optional ``{query_string: result_dict}`` from prior
-            runs with the same SearchPoint.  Matching queries skip the
-            backend call.
+    Per-node caching is handled inside ``eval_query_via_backend()`` via
+    the intermediate cache.  This function drives the query loop, stale
+    data protocol, error tracking, and escalation checks.
 
     Returns:
         EvalBatchResult with results, completion status, and stop reason.
@@ -495,70 +460,37 @@ async def _run_eval_batch(
                 )
                 break
 
-            # Per-query cache check (inlined from former _evaluate_single_query)
-            cached = cached_queries.get(qd["query"]) if cached_queries else None
-            if cached is not None and not is_error_result(cached):
-                if _is_degraded(cached) and _stale_protocol:
-                    result, step_taken = await _execute_stale_data_protocol(
-                        _stale_protocol,
-                        qd,
-                        cached,
-                        backend_client,
-                        pipeline_params=search_point.pipeline_params,
-                        pipeline_schema=pipeline_schema,
-                        intermediate_cache=_intermediate_cache,
-                        backend_id=_backend_id,
-                        search_memory=_search_memory,
-                        stale_data_observations=_stale_observations,
-                        stop_check=lambda: _stop_requested,
-                    )
-                    was_cached = step_taken in ("below_threshold", "interrupted")
-                    if step_taken == "rerun":
-                        n_retried += 1
-                    elif step_taken == "samplescan":
-                        n_probed += 1
-                    elif step_taken == "sampleswitch":
-                        n_switched += 1
-                else:
-                    # Superset step reuse: re-score if cache ran more nodes
-                    _target_steps = (search_point.pipeline_params or {}).get("steps", [])
-                    _cached_steps = cached.get("_cache_steps", [])
-                    if _cached_steps and _target_steps and len(_cached_steps) > len(_target_steps) and pipeline_schema:
-                        result = rescore_cached_result(cached, _target_steps, pipeline_schema)
-                    else:
-                        result = {**cached, "cached": True}
-                    was_cached = True
-            else:
-                result = await eval_query_via_backend(
+            result = await eval_query_via_backend(
+                qd,
+                backend_client,
+                pipeline_params=search_point.pipeline_params,
+                pipeline_schema=pipeline_schema,
+                intermediate_cache=_intermediate_cache,
+                backend_id=_backend_id,
+            )
+            was_cached = bool(result.get("precomputed_through"))
+
+            # Stale data protocol on degraded results (cached or fresh)
+            if _is_degraded(result) and _stale_protocol:
+                result, step_taken = await _execute_stale_data_protocol(
+                    _stale_protocol,
                     qd,
+                    result,
                     backend_client,
                     pipeline_params=search_point.pipeline_params,
                     pipeline_schema=pipeline_schema,
                     intermediate_cache=_intermediate_cache,
                     backend_id=_backend_id,
+                    search_memory=_search_memory,
+                    stale_data_observations=_stale_observations,
+                    stop_check=lambda: _stop_requested,
                 )
-                was_cached = False
-                # Fire stale data protocol on fresh degraded results too
-                if _is_degraded(result) and _stale_protocol:
-                    result, step_taken = await _execute_stale_data_protocol(
-                        _stale_protocol,
-                        qd,
-                        result,
-                        backend_client,
-                        pipeline_params=search_point.pipeline_params,
-                        pipeline_schema=pipeline_schema,
-                        intermediate_cache=_intermediate_cache,
-                        backend_id=_backend_id,
-                        search_memory=_search_memory,
-                        stale_data_observations=_stale_observations,
-                        stop_check=lambda: _stop_requested,
-                    )
-                    if step_taken == "rerun":
-                        n_retried += 1
-                    elif step_taken == "samplescan":
-                        n_probed += 1
-                    elif step_taken == "sampleswitch":
-                        n_switched += 1
+                if step_taken == "rerun":
+                    n_retried += 1
+                elif step_taken == "samplescan":
+                    n_probed += 1
+                elif step_taken == "sampleswitch":
+                    n_switched += 1
 
             if was_cached:
                 n_reused += 1
@@ -614,7 +546,7 @@ async def _run_eval_batch(
 
     if n_reused:
         logger.info(
-            "Per-query reuse: %d/%d queries from prior runs",
+            "Per-node cache reuse: %d/%d queries had partial/full upstream cache",
             n_reused,
             len(eval_data),
         )
@@ -673,17 +605,15 @@ async def eval_search_point(
     eval_data: list,
     ctx: EvalContext,
     *,
-    force: bool = False,
     label: str = "Eval",
     on_result: Callable[[dict, int, int], None] | None = None,
     source: str = "",
 ) -> tuple[list, dict, bool]:
-    """Evaluate a prompt with deduplication and finalization.
+    """Evaluate a prompt via backend with per-node caching and finalization.
 
-    Core evaluation logic without UI output. Handles:
-    - Content-hash deduplication via ProjectStore
-    - Alias-aware fallback via prompt alias groups
-    - Final run storage
+    All cache reuse is handled by the per-node intermediate cache inside
+    ``eval_query_via_backend()``.  This function handles run archival
+    (dataset_run_store) and observability logging.
 
     The ``search_point`` bundles the search-space dimensions
     (pipeline_params).  Infrastructure params (backend_client,
@@ -701,70 +631,15 @@ async def eval_search_point(
     obs = ctx.obs
     source = source or ctx.source
 
-    rendered = search_point.render()
-    rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
     content_hash = search_point.content_hash(eval_data)
 
-    # --- dedup lookup (content hash + alias group fallback) ---
-    if store and backend_id and not force:
-        _cached_run = store.dataset_runs.load_by_hash(backend_id, content_hash)
-        if _cached_run and _cached_run.get("partial"):
-            _cached_run = None
-        if not _cached_run:
-            _cached_run = store.dataset_runs.load_by_alias(
-                backend_id, rp_hash, search_point.pipeline_params, len(eval_data),
-            )
-        if _cached_run:
-            results = _cached_run["dataset_run_items"]
-            if not (results and all(is_error_result(r) for r in results)):
-                error_count = sum(1 for r in results if is_error_result(r))
-                degraded_count = count_degraded_queries(results)
-                if error_count > 0:
-                    logger.info(
-                        "Full-run cache has %d/%d error queries — falling through to per-query eval",
-                        error_count, len(results),
-                    )
-                    _cached_run = None
-                elif degraded_count > 0:
-                    logger.info(
-                        "Full-run cache has %d/%d degraded queries — falling through to per-query eval",
-                        degraded_count, len(results),
-                    )
-                    _cached_run = None
-                else:
-                    scores = compute_composite_score(results, pipeline_schema)
-                    if on_result is not None:
-                        for i, r in enumerate(results):
-                            on_result({**r, "cached": True}, i, len(results))
-                    esc_signal = _run_escalation_checks(
-                        ctx.escalation_checks, results, ctx.candidate_idx, ctx.n_total_candidates,
-                    )
-                    if esc_signal:
-                        scores["escalation_signal"] = esc_signal.to_dict()
-                    return results, scores, True
-
-    # --- evaluate via backend ---
+    # --- evaluate via backend (per-node cache handles all reuse) ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
     # Prefix display name with experiment_id for discoverability
     display_name = f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id else safe_label
 
     from promptpotter.shared.errors import EscalationError as _EscalationError
-
-    # Per-query cache: find results from prior runs with identical
-    # pipeline config (same steps, same node params, same prompt).
-    # Bridges different sample sizes automatically.
-    sp_cache: dict[str, dict] | None = None
-    if store and backend_id:
-        sp_cache = store.dataset_runs.find_cached_queries(
-            backend_id, search_point.pipeline_params, rp_hash,
-        )
-        if sp_cache:
-            logger.debug(
-                "Per-query cache: %d cached queries for %d eval queries",
-                len(sp_cache),
-                len(eval_data),
-            )
 
     def _save_run(results: list, scores: dict, *, partial: bool = False) -> None:
         """Persist a dataset run (complete or partial) to the store."""
@@ -793,7 +668,6 @@ async def eval_search_point(
             backend_client,
             on_result=on_result,
             ctx=ctx,
-            cached_queries=sp_cache,
         )
         results = batch.results
         if not batch.completed:
