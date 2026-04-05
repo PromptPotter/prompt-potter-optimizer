@@ -33,7 +33,7 @@ Steps in brackets are optional. Minimum viable workflow: `init` then `optimize -
 ```bash
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
-    --config configs/campaign_default.json \
+    --config configs/datasets/lca-termnorm/campaign.json \
     --run-baseline
 ```
 
@@ -140,7 +140,7 @@ A complete workflow from initialization to export:
 # 1. Initialize session against a running backend
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
-    --config configs/campaign_default.json \
+    --config configs/datasets/lca-termnorm/campaign.json \
     --run-baseline
 
 # 2. (Optional) Add domain context

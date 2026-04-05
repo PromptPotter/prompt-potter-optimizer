@@ -5,7 +5,6 @@ from __future__ import annotations
 import random
 from typing import TYPE_CHECKING
 
-from promptpotter.services.backend_client import BackendClient
 from promptpotter.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
@@ -23,20 +22,17 @@ def _extract_eval_from_traces(
     """Build eval data from Langfuse-style traces in synced experiment data.
 
     Each trace in ``runs[0].traces[]`` carries named observations with
-    pipeline step outputs.  Ground truth is joined from ``mappings[]``
-    via the ``bom_material`` extracted from the query string.
+    pipeline step outputs.  Ground truth is joined from experiment
+    mappings via the connector config's query parsing.
 
     Observation extraction is driven by the schema's ``obs_extraction_map()``.
 
     Returns:
         List of eval-data dicts (may be empty).
     """
-    bom_to_gt: dict = {}
-    for m in exp_data.get("mappings", []):
-        bom = m.get("bom_material", "")
-        entry = m.get("dataset_entry", "").strip()
-        if bom and entry and entry != "--":
-            bom_to_gt[bom] = entry
+    from promptpotter.config.connectors.termnorm import extract_ground_truth_map
+
+    bom_to_gt = extract_ground_truth_map(exp_data)
 
     runs = exp_data.get("runs", [])
     if not runs:
@@ -52,7 +48,9 @@ def _extract_eval_from_traces(
         if not query:
             continue
 
-        bom_material, _ = BackendClient.split_query_parts(query)
+        from promptpotter.config.connectors.termnorm import split_query
+
+        bom_material, _ = split_query(query)
         ground_truth = bom_to_gt.get(bom_material)
         if not ground_truth:
             continue

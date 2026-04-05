@@ -34,7 +34,7 @@
       "l3_temperature": 0.5,
       "enable_critique": true
     },
-    "eval_llm": {
+    "optimizer_llm": {
       "model": "openai/gpt-oss-120b",
       "provider": "groq",
       "temperature": 0.4,

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from promptpotter.services.campaign.config import RunConfig
     from promptpotter.services.campaign.results import StopReason
     from promptpotter.services.campaign.state import LoopState
-    from promptpotter.services.obs.observability_logger import ObsLogger
+    from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +265,7 @@ async def _do_l2_transition(
     from promptpotter.services import llm_client as _llm_client
     from promptpotter.services.campaign import layer_transitions
     from promptpotter.services.campaign.critique import warning_summary
-    from promptpotter.services.obs.node_tracer import observed_node
+    from promptpotter.services.tracing.node_tracer import observed_node
 
     assert state.current_sp is not None
     current_pp = state.current_sp.pipeline_params
@@ -349,7 +349,7 @@ async def _do_l3_transition(
     """Perform L3 modify_plan transition. Updates state in-place."""
     from promptpotter.services import llm_client as _llm_client
     from promptpotter.services.campaign import layer_transitions
-    from promptpotter.services.obs.node_tracer import observed_node
+    from promptpotter.services.tracing.node_tracer import observed_node
 
     assert state.current_sp is not None
     current_pp = state.current_sp.pipeline_params

@@ -42,7 +42,7 @@ from promptpotter.services.stores.base import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.services.obs.langfuse_client import LangfuseLogger
+    from promptpotter.services.tracing.langfuse_client import LangfuseLogger
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ class ObsLogger:
 
         if langfuse is _UNSET:
             try:
-                from promptpotter.services.obs.langfuse_client import LangfuseLogger
+                from promptpotter.services.tracing.langfuse_client import LangfuseLogger
                 lf = LangfuseLogger.get_instance()
                 if lf.enabled:
                     self._cloud_lf = lf

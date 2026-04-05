@@ -18,12 +18,24 @@ import httpx
 from promptpotter.models.backend import BackendConnection
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.services.backend_client import BackendClient
+from promptpotter.services.campaign.config import CampaignConfig
 from promptpotter.services.project_store import ProjectStore
 from promptpotter.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.config import CampaignConfig
+
+
+def _default_backend_name() -> str:
+    from promptpotter.config.connectors.termnorm import BACKEND_NAME
+
+    return BACKEND_NAME
+
+
+def _default_backend_type() -> str:
+    from promptpotter.config.connectors.termnorm import BACKEND_TYPE
+
+    return BACKEND_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +209,8 @@ async def init_services(
         store.backends.register(
             BackendConnection(
                 id=backend_id,
-                name="TermNorm Local",
-                backend_type="termnorm",
+                name=_default_backend_name(),
+                backend_type=_default_backend_type(),
                 base_url=backend_url,
             )
         )
@@ -301,15 +313,9 @@ def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
         gt = item.get("ground_truth", "")
         if not query or not gt:
             continue
-        queries.append(
-            {
-                "query": query,
-                "bom_material": query,
-                "process": "",
-                "query_fields": {"bom_material": query, "process": ""},
-                "ground_truth": gt,
-            }
-        )
+        from promptpotter.config.connectors.termnorm import build_query_item
+
+        queries.append(build_query_item(query, ground_truth=gt))
     return queries
 
 

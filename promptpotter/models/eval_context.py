@@ -10,9 +10,9 @@ if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.backend_client import BackendClient
     from promptpotter.services.campaign.escalation import DegradationCheck
-    from promptpotter.services.obs.observability_logger import ObsLogger
     from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.search_memory import SearchMemory
+    from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 

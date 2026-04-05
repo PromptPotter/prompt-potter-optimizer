@@ -34,8 +34,8 @@ if TYPE_CHECKING:
     from promptpotter.models.eval_context import EvalContext
     from promptpotter.models.search_point import JobSearchPoint
     from promptpotter.services.backend_client import BackendClient
-    from promptpotter.services.obs.observability_logger import ObsLogger
     from promptpotter.services.project_store import ProjectStore
+    from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +378,7 @@ def _log_eval_to_obs(
     with graceful("ObsLogger.log_dataset_run failed"):
         _obs = obs
         if _obs is None:
-            from promptpotter.services.obs.observability_logger import ObsLogger
+            from promptpotter.services.tracing.observability_logger import ObsLogger
 
             _obs = ObsLogger(store.base_dir, backend_id)
         _obs.log_dataset_run(

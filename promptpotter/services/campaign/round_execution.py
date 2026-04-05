@@ -29,7 +29,7 @@ from promptpotter.services.campaign.critique import (
 )
 from promptpotter.services.campaign.results import RoundResult
 from promptpotter.services.campaign.state import LoopState
-from promptpotter.services.obs.node_tracer import observed_node
+from promptpotter.services.tracing.node_tracer import observed_node
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
@@ -37,8 +37,8 @@ if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.escalation import DegradationCheck
     from promptpotter.services.campaign.l1_optimizer import L1EvalResult
-    from promptpotter.services.obs.observability_logger import ObsLogger
     from promptpotter.services.stores.campaign_store import CampaignStore
+    from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 

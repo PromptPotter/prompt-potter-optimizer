@@ -58,7 +58,7 @@ def _try_langfuse(name: str) -> PromptTemplate | None:
         if not settings.LANGFUSE_PROMPTS_ENABLED:
             return None
 
-        from promptpotter.services.obs.langfuse_client import LangfuseLogger
+        from promptpotter.services.tracing.langfuse_client import LangfuseLogger
 
         lf = LangfuseLogger.get_instance()
         if not lf.enabled or not lf.client:
@@ -106,7 +106,7 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
 
     Returns ``{name: success_bool}`` mapping.
     """
-    from promptpotter.services.obs.langfuse_client import LangfuseLogger
+    from promptpotter.services.tracing.langfuse_client import LangfuseLogger
 
     lf = LangfuseLogger.get_instance()
     if not lf.enabled or not lf.client:

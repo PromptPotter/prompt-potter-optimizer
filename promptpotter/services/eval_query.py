@@ -1,6 +1,6 @@
 """Single-query backend evaluation engine.
 
-Evaluates one query at a time via the backend ``/matches`` endpoint.
+Evaluates one query at a time via the backend query endpoint.
 Handles per-node intermediate cache walk, cache populate, and error
 classification.  No batch logic — that lives in ``eval_gateway``.
 """

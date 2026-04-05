@@ -16,7 +16,7 @@ re-running only pushes new runs.
 
 Usage::
 
-    from promptpotter.services.obs.langfuse_push import push_all_runs
+    from promptpotter.services.tracing.langfuse_push import push_all_runs
     stats = push_all_runs(store, backend_id)
 """
 
@@ -188,7 +188,7 @@ def _register_dataset_items(
     # Create dataset (idempotent) — fail fast on auth errors
     ok = lf.create_dataset(
         name=dataset_name,
-        description="TermNorm production ground truth queries for prompt evaluation",
+        description="Production ground truth queries for prompt evaluation",
         metadata={"n_queries": len(gt_map)},
     )
     if not ok:
@@ -273,7 +273,7 @@ def push_run(
 
     Creates one rooted trace per query item (via ``create_trace()``), then
     adds pipeline steps as child spans (via ``create_span()``). This produces
-    a proper Langfuse graph: ``__start__ → termnorm_pipeline → {steps} → __end__``.
+    a proper Langfuse graph: ``__start__ → target_pipeline → {steps} → __end__``.
 
     Args:
         lf: LangfuseLogger instance.
@@ -450,7 +450,7 @@ def push_all_runs(
         Stats dict with keys: total_on_disk, new_runs, already_done,
         origins (per-origin breakdown), error (if Langfuse disabled).
     """
-    from promptpotter.services.obs.langfuse_client import LangfuseLogger
+    from promptpotter.services.tracing.langfuse_client import LangfuseLogger
 
     lf = LangfuseLogger.get_instance()
     if not lf.enabled:

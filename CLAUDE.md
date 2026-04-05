@@ -7,20 +7,6 @@ PromptPotter Optimizer finds better prompts automatically. Give it a dataset (qu
 ## Commands
 
 ```bash
-# Run API server
-uvicorn promptpotter.main:app --port 8001 --reload
-
-# Run tests
-pytest
-
-# Run tests with coverage (CI only — skip for dev iteration)
-pytest --cov
-
-# Lint
-ruff check promptpotter/ tests/
-
-# Docker (JupyterLab + API)
-cd docker && docker-compose up --build
 
 # CLI campaign runner (HITL optimization from terminal)
 python -m promptpotter.cli.campaign_runner init --backend-url http://127.0.0.1:8000
@@ -180,9 +166,19 @@ What's genuinely distinctive about how PromptPotter works.
 
 - **Cross-campaign learning via SearchMemory** *(M8 — live)* — Evaluation data compounds across campaigns via a materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic data accessors only — each consumer composes what it needs. See [`docs/architecture.md` § SearchMemory](docs/architecture.md#searchmemory-m8-wave-3).
 
+## Known Issue: Notebook ↔ CLI Session Parity
+
+**History:** The notebook (`optimization_campaign.ipynb`) was the original entry point through M7. M8 introduced the CLI runner with full `SessionStore` lifecycle (`session_id`, scan persistence, campaign state). The notebook was never retrofitted — it has no `session_id` and doesn't participate in the session lifecycle.
+
+**Symptoms:** Scan results, campaign state, and other session artifacts are not persisted when running from the notebook. Previous run data is not picked up on re-run. The CLI works correctly because it creates and threads `session_id` through all calls.
+
+**Root cause:** `campaign_lib` wrappers (`search_scan.py`, `optimize.py`) accept `session_id` but the notebook never passes one. Persistence is gated by `if session_id and store and backend_id:` — always falsy from the notebook.
+
+**Goal:** Both entry points must produce identical persistent artifacts and be able to resume from each other's state. Any service-layer change must be validated against both notebook and CLI paths. This is a prerequisite for whitelabel distribution.
+
 ## Known Backend Issues (TermNorm)
 
-- **`llm_ranking` node is broken — always exclude it.** The TermNorm `llm_ranking` node (LLM-driven re-ranking) is a leftover that produces `json_validate_failed` errors on ~50% of queries, triggers `max_tokens` retries, adds 7–16s latency per query, and falls back to token_matching scores anyway. Always set `"exclude_nodes": ["llm_ranking"]` in campaign configs. The `configs/campaign_default.json` already has this set. Do NOT attempt to enable it — the bug is in the backend, not in PromptPotter. The effective pipeline is: `cache_lookup → fuzzy_matching → web_search → entity_profiling → token_matching`.
+- **`llm_ranking` node is broken — always exclude it.** The TermNorm `llm_ranking` node (LLM-driven re-ranking) is a leftover that produces `json_validate_failed` errors on ~50% of queries, triggers `max_tokens` retries, adds 7–16s latency per query, and falls back to token_matching scores anyway. Always set `"exclude_nodes": ["llm_ranking"]` in campaign configs. The `configs/datasets/lca-termnorm/campaign.json` already has this set. Do NOT attempt to enable it — the bug is in the backend, not in PromptPotter. The effective pipeline is: `cache_lookup → fuzzy_matching → web_search → entity_profiling → token_matching`.
 - **`direct_prompt` node** — Backend-only diagnostic node, not part of the optimization pipeline. Ignore it.
 - **Without `llm_ranking`, prompt string fields have no effect.** The only LLM node in the active pipeline is `entity_profiling`, which has its own fixed prompt template. PromptPotter's prompt scheme fields (`thinking_style`, `instruction`, etc.) only affect nodes with a prompt template that references them. With `llm_ranking` excluded, optimization must focus on pipeline params: `entity_profiling` (model, temperature, schema, raw_content_limit), `web_search` (max_sites, num_results, content_char_limit, query_prefix), `token_matching` (max_token_candidates), `fuzzy_matching` (threshold, scorer).
 

@@ -72,7 +72,7 @@ The CLI campaign runner supports both interactive (round-by-round) and autonomou
 # Initialize against your backend
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
-    --config configs/campaign_default.json \
+    --config configs/datasets/lca-termnorm/campaign.json \
     --run-baseline
 
 # Run optimization (autonomous — L1/L2/L3 until convergence)

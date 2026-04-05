@@ -3,7 +3,7 @@ PipelineSchema — backend-agnostic description of an LLM pipeline.
 
 Describes the nodes, parameters, observation mappings, and metadata of
 a backend pipeline so that PromptPotter services can work generically
-instead of hardcoding TermNorm-specific constants.
+instead of hardcoding backend-specific constants.
 
 Derivation methods:
   node_param_keys()       → node name → param keys
@@ -400,7 +400,7 @@ def load_pipeline_from_dict(data: dict) -> PipelineSchema:
     """Load a PipelineSchema from a raw dict (e.g., optimizer_pipeline.json).
 
     Accepts the standard ``{nodes: {...}, pipelines: {...}}`` format used
-    by both TermNorm and the optimizer pipeline declarations.
+    by both the target backend and the optimizer pipeline declarations.
     """
     nodes = []
     for name, node_data in data.get("nodes", {}).items():

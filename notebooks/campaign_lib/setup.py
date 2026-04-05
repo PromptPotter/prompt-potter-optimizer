@@ -163,7 +163,7 @@ async def show_pipeline_snapshot(session: BackendSession) -> dict:
         pipeline_raw = await session.backend_client.fetch_pipeline()
     except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
         base = session.backend_client.base_url
-        print("WARNING: Backend unreachable — is TermNorm running?")
+        print("WARNING: Backend unreachable — is the backend running?")
         print(f"  Could not connect to {base}/pipeline")
         print(f"  Error: {exc}")
         return {}
@@ -284,14 +284,14 @@ async def show_backend_status(client) -> dict:
         return status
     if st == "not_implemented":
         print("BACKEND STATUS: connected (GET /status not available)")
-        print("  Upgrade TermNorm backend to get detailed status info.")
+        print("  Upgrade your backend to get detailed status info.")
         return status
     if "error" in status and st == "error":
         print("BACKEND STATUS: error")
         print(f"  {status['error']}")
         return status
 
-    # Success -- TermNorm wraps data under "data" key
+    # Success -- Backend wraps data under "data" key
     data = status.get("data", status)
 
     print("BACKEND STATUS")
@@ -391,7 +391,7 @@ def configure_langfuse(
 ) -> None:
     """Configure Langfuse settings at runtime from a notebook cell."""
     from promptpotter.config.settings import settings
-    from promptpotter.services.obs.langfuse_client import LangfuseLogger
+    from promptpotter.services.tracing.langfuse_client import LangfuseLogger
 
     changed = False
     if enabled is not None:
@@ -423,7 +423,7 @@ def sync_langfuse(
     reset: bool = False,
 ) -> dict | None:
     """Configure Langfuse dataset name and optionally push all runs."""
-    from promptpotter.services.obs.langfuse_push import sync_langfuse_runs
+    from promptpotter.services.tracing.langfuse_push import sync_langfuse_runs
 
     result = sync_langfuse_runs(
         store,
@@ -443,7 +443,7 @@ def sync_langfuse(
 
 def push_langfuse(store, backend_id: str) -> dict:
     """Push all historical dataset_runs to cloud Langfuse (dataset-first)."""
-    from promptpotter.services.obs.langfuse_push import push_all_runs
+    from promptpotter.services.tracing.langfuse_push import push_all_runs
 
     summaries = store.dataset_runs.list_all(backend_id)
 

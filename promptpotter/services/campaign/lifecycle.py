@@ -75,7 +75,7 @@ def init_campaign(
     Returns:
         (campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id)
     """
-    from promptpotter.services.obs.observability_logger import ObsLogger  # lazy: heavy dep
+    from promptpotter.services.tracing.observability_logger import ObsLogger  # lazy: heavy dep
 
     # --- Resume detection ---
     campaign_store = None

@@ -52,7 +52,7 @@ async def run_baseline_eval(
         tqdm.write(_fmt_query_result(result, cached=is_cached))
         pbar.update(1)
 
-    from promptpotter.services.obs.observability_logger import ObsLogger
+    from promptpotter.services.tracing.observability_logger import ObsLogger
     _obs = ObsLogger(session.store.base_dir, session.backend_id, langfuse=None)
 
     try:

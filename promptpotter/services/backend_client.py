@@ -1,5 +1,5 @@
 """
-HTTP client for backend APIs (e.g. TermNorm).
+HTTP client for backend APIs.
 
 Fetches experiments, syncs data into the project store, and replays
 pipeline queries. All API responses stored verbatim.
@@ -56,22 +56,15 @@ class BackendClient:
 
     @staticmethod
     def split_query_parts(query: str) -> tuple[str, str]:
-        """Split a TermNorm query string into (bom_material, process).
+        """Split a query string into (primary, secondary) parts.
 
-        TermNorm queries use the format ``bom_material / process``.
-        If no slash is present, process is an empty string.
-
-        Connector-specific: other backends implement their own query
-        parsing inside their ``extract_replay_queries()`` method.
+        Delegates to the connector config. Currently uses the TermNorm
+        format (``bom_material / process``). Will become connector-specific
+        in M9 (ConnectorProtocol).
         """
-        if "/" in query:
-            last_slash = query.rfind("/")
-            bom_material = query[:last_slash].strip()
-            process = query[last_slash + 1:].strip()
-        else:
-            bom_material = query.strip()
-            process = ""
-        return bom_material, process
+        from promptpotter.config.connectors.termnorm import split_query
+
+        return split_query(query)
 
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         """GET ``{base_url}{path}`` and return parsed JSON."""
@@ -170,7 +163,7 @@ class BackendClient:
         pipeline_params: dict[str, Any] | None = None,
         precomputed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """POST /matches — translate pipeline_params to TermNorm wire format.
+        """POST /matches — translate pipeline_params to wire format.
 
         ``pipeline_params`` carries ``steps`` (which nodes to run) plus
         per-node override dicts (e.g. ``{"entity_profiling": {"prompt": "..."}}``)
@@ -278,13 +271,13 @@ class BackendClient:
 
     @staticmethod
     def extract_index_terms(experiment_data: dict) -> list[str]:
-        """Extract unique non-empty dataset_entry values from mappings."""
-        entries = set()
-        for m in experiment_data.get("mappings", []):
-            entry = m.get("dataset_entry", "").strip()
-            if entry and entry != "--":
-                entries.add(entry)
-        return sorted(entries)
+        """Extract index terms from experiment data.
+
+        Delegates to the connector config.
+        """
+        from promptpotter.config.connectors.termnorm import extract_index_terms
+
+        return extract_index_terms(experiment_data)
 
     @staticmethod
     def extract_replay_queries(
@@ -292,42 +285,9 @@ class BackendClient:
     ) -> list[dict[str, Any]]:
         """Extract queries with valid ground truth from experiment data.
 
-        Matches evaluation_result queries back to mappings via bom_material.
+        Delegates to the connector config.
         """
-        bom_to_gt: dict[str, str] = {}
-        for m in experiment_data.get("mappings", []):
-            bom = m["bom_material"]
-            entry = m.get("dataset_entry", "").strip()
-            if entry and entry != "--":
-                bom_to_gt[bom] = entry
+        from promptpotter.config.connectors.termnorm import extract_queries
 
-        runs = experiment_data.get("runs", [])
-        if not runs:
-            return []
-
-        queries = []
-        eval_results = runs[0].get("evaluation_results", [])
-
-        for er in eval_results:
-            query = er["query"]
-            bom_material, process = BackendClient.split_query_parts(query)
-
-            if bom_material not in bom_to_gt:
-                continue
-
-            queries.append({
-                "query": query,
-                "bom_material": bom_material,
-                "process": process,
-                "query_fields": {
-                    "bom_material": bom_material,
-                    "process": process,
-                },
-                "ground_truth": bom_to_gt[bom_material],
-                "original_predicted": er.get("predicted", ""),
-                "original_latency_ms": er.get("latency_ms", 0),
-                "original_confidence": er.get("confidence", 0),
-            })
-
-        return queries
+        return extract_queries(experiment_data)
 

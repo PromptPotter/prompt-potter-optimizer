@@ -31,7 +31,7 @@ router = APIRouter(prefix="/backends", tags=["Backends"])
 
 class RegisterBackendRequest(BaseModel):
     name: str = Field(..., description="Human-readable name")
-    backend_type: str = Field(..., description="Backend type, e.g. 'termnorm'")
+    backend_type: str = Field(..., description="Backend type, e.g. 'default'")
     base_url: str = Field(..., description="Backend API base URL")
     id: str | None = Field(
         None, description="Custom ID (auto-generated from name if omitted)",
@@ -41,7 +41,7 @@ class RegisterBackendRequest(BaseModel):
 class RegisterBackendResponse(BaseModel):
     id: str = Field(description="Backend identifier")
     name: str = Field(description="Human-readable backend name")
-    backend_type: str = Field(description="Backend type (e.g. 'termnorm')")
+    backend_type: str = Field(description="Backend type (e.g. 'default')")
     base_url: str = Field(description="Backend API base URL")
     created_at: str = Field(description="ISO 8601 creation timestamp")
 

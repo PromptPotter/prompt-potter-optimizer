@@ -1,7 +1,7 @@
 """
 Pydantic models for project-based backend storage.
 
-BackendConnection represents a connected backend (e.g. TermNorm instance).
+BackendConnection represents a connected backend (e.g. a local backend).
 Execution captures results from pipeline replays triggered by PromptPotter.
 """
 
@@ -12,11 +12,11 @@ from pydantic import BaseModel, Field
 
 
 class BackendConnection(BaseModel):
-    """A registered backend connection (e.g. TermNorm instance)."""
+    """A registered backend connection (e.g. a local backend)."""
 
     id: str = Field(..., description="Unique backend ID, e.g. 'local'")
     name: str = Field(..., description="Human-readable name")
-    backend_type: str = Field(..., description="Backend type, e.g. 'termnorm'")
+    backend_type: str = Field(..., description="Backend type, e.g. 'default'")
     base_url: str = Field(..., description="Backend API base URL")
     created_at: str = Field(
         default_factory=lambda: datetime.now(UTC).isoformat()
@@ -32,8 +32,8 @@ class ExecutionResultItem(BaseModel):
     process: str | None = None
     query_fields: dict[str, Any] = Field(
         default_factory=dict,
-        description="Generic query metadata. Mirrors bom_material/process for "
-        "TermNorm; other connectors populate with their own keys.",
+        description="Generic query metadata. Connector-specific fields ( "
+        "populated per connector).",
     )
     ground_truth: str
     predicted: str

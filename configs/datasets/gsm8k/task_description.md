@@ -1,0 +1,21 @@
+# GSM8K — Grade School Math
+
+Solve grade school math word problems requiring multi-step arithmetic reasoning.
+
+## Domain
+
+- Input: a natural language math word problem
+- Output: a single numeric answer
+- Challenge: multi-step arithmetic, unit tracking, reading comprehension of word problems
+
+## Success criteria
+
+- Exact Match: predicted number equals gold number (after stripping formatting)
+- GSM8K answers use the `#### N` format — the number after `####` is the ground truth
+
+## Key failure modes
+
+- Arithmetic errors in intermediate steps
+- Misreading the problem (wrong quantities, wrong operation)
+- Off-by-one errors in counting/grouping problems
+- Not reducing to a single final number

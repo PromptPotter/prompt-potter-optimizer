@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from promptpotter.services.obs.observability_logger import ObsLogger
+    from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 
