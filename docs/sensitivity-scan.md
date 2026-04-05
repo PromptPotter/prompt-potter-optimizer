@@ -66,11 +66,9 @@ If the backend restarts mid-scan, `BackendClient` auto-reinitializes the session
 
 ---
 
-## Planned Features (M8)
+## SearchMemory Integration (M8)
 
-### SearchMemory Integration
-
-When historical data exists, SearchMemory enriches the scan workflow: the scan advisor receives axis rankings, historically-best values, and bottleneck distribution to prioritize impactful axes and skip dead ones. Diagnostic sets can be stratified using query tractability data. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3) for the full data model and accessor methods.
+SearchMemory enriches the scan workflow when historical data exists: the scan advisor receives axis rankings, historically-best values, and bottleneck distribution to prioritize impactful axes and skip dead ones. Diagnostic sets can be stratified using query tractability data. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3) for the full data model and accessor methods.
 
 **Bottleneck attribution** (`attribute_bottleneck()` in `metrics.py`) maps each `terminated_at` step to the `param_keys` of that node plus all upstream nodes. The scan advisor uses this to order axes by causal pipeline depth — parameters that feed into the dominant bottleneck are scanned first.
 

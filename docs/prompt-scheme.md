@@ -112,7 +112,7 @@ Three transformations bridge optimizer state to the wire:
 | `instruction` | — | Always LLM-generated |
 | `few_shot_examples` | — | Not in variant library |
 
-`filter_variant_library()` (`smart_search.py`) drops prompt field axes when the pipeline has no LLM node with `prompt_meta`.
+`filter_variant_library()` (`smart_search.py`) drops prompt field axes when the pipeline has no LLM node with `prompt_meta`. In practice, this means prompt fields are inactive when the only LLM node (e.g. `llm_ranking`) is excluded from the pipeline.
 
 ---
 

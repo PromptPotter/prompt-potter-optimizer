@@ -2,7 +2,7 @@
 
 ## What This Is
 
-PromptPotter Optimizer is a backend-first prompt optimization service. It connects to LLM application backends (currently TermNorm), syncs experiment data, replays pipelines with different configurations, and runs L1/L2/L3 optimization campaigns to improve prompt accuracy.
+PromptPotter Optimizer finds better prompts automatically. Give it a dataset (question + expected answer pairs) and point it at your LLM pipeline's evaluation endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer optimization loop. The backend can be anything from a single LLM call to a multi-step pipeline with retrieval, enrichment, and ranking. Currently tested with TermNorm (AI terminology normalization).
 
 ## Commands
 
@@ -27,6 +27,10 @@ python -m promptpotter.cli.campaign_runner init --backend-url http://127.0.0.1:8
 python -m promptpotter.cli.campaign_runner optimize --round   # generate → pause for review
 python -m promptpotter.cli.campaign_runner optimize --evaluate # resume evaluation
 python -m promptpotter.cli.campaign_runner optimize --auto     # full loop, no pause
+
+# Export results (paper supplemental materials)
+python -m promptpotter.cli.export_results supplemental --backend-id termnorm -o supplemental.md
+python -m promptpotter.cli.export_results json --backend-id termnorm -o paper_results.json
 ```
 
 ## CLI Workflow
@@ -132,6 +136,9 @@ global query counter across all candidates
 | `obs/observability_logger.py` | Langfuse-compatible traces, MLflow |
 | `stores/session_store.py` | Session lifecycle — config, scan results, campaign log (shared by notebook + CLI) |
 | `cli/campaign_runner.py` | CLI campaign runner — HITL optimization with `pause_before_eval` |
+| `cli/export_results.py` | CLI for exporting campaign results as markdown supplemental or JSON |
+| `campaign/export.py` | Pure data transforms: flatten trials, compare campaigns, reproducibility manifest |
+| `campaign_lib/reporting.py` | Markdown table rendering + supplemental document assembly |
 | `llm_client.py` | Unified LLM abstraction (Groq, OpenAI) with exponential backoff |
 
 ## Project Conventions
@@ -195,5 +202,6 @@ What's genuinely distinctive about how PromptPotter works.
 8. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M8, M9) + roadmap; archived specs in `docs/specs/archive/`
 9. [`docs/prompt-scheme.md`](docs/prompt-scheme.md) — prompt decomposition (8 fields), rendering, variant library, projection to target pipeline
 10. [`docs/information-flow.md`](docs/information-flow.md) — data origins, consumer matrix, information compression chain
-11. `promptpotter/cli/campaign_runner.py` — CLI campaign runner (HITL subcommands: init, scan, optimize --round/--evaluate/--auto, results, status)
+11. [`docs/benchmarks.md`](docs/benchmarks.md) — benchmark methodology, datasets (HotPotQA, GSM8K), head-to-head protocol, result placeholders
+12. [`docs/cli-workflow.md`](docs/cli-workflow.md) — full CLI subcommand reference with examples, export commands, worked example
 

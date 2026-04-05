@@ -76,7 +76,7 @@ Tunable parameters discovered from the target pipeline's active nodes. Changed e
 | Output schema | LLM nodes with structured output | `output_schema` field overrides |
 | Pipeline params | Non-LLM nodes (`fuzzy_matching`, `token_matching`) | thresholds, weights, `sample_size` |
 
-Which parameters are Layer 1 depends on the target pipeline config -- not a fixed list. The scan advisor reads the full pipeline snapshot to recommend which axes to optimize.
+Which parameters are Layer 1 depends on the target pipeline config — not a fixed list. Prompt fields only affect nodes with a prompt template referencing them (see CLAUDE.md Known Backend Issues for TermNorm-specific constraints). The scan advisor reads the full pipeline snapshot to recommend which axes to optimize.
 
 ### Layer 2: Refine Context
 
@@ -311,9 +311,9 @@ campaign_config = {
         "max_rounds": 10,
         "enable_critique": True,               # critique-guided generation
         "degradation_threshold": 0.4,          # 0 = disabled
-        "enable_l2": False,            # opt-in: refine task_context on L1 stall
+        "enable_l2": True,             # refine task_context on L1 stall
         "l2_patience": 2,             # None = unlimited during degradation
-        "enable_l3": False,            # opt-in: modify plan on L2 stall
+        "enable_l3": True,             # modify plan on L2 stall
         "l3_patience": 1,             # None = unlimited during degradation
         "escalation_checks": [         # pluggable mid-eval checks
             {"name": "degradation", "threshold": 0.3, "target": "l3"},

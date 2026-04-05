@@ -101,7 +101,7 @@ eval_search_point()
 
 ## Pipeline Discovery
 
-`GET /pipeline` returns the target pipeline config with resolved registry metadata. `parse_pipeline_response()` builds `PipelineSchema` entirely from the live response. Each node carries an `optimizer` sub-object (`param_keys`, `observation_mappings`). Zero backend-specific constants in PromptPotter code.
+`GET /pipeline` returns the target pipeline config with resolved registry metadata. `parse_pipeline_response()` builds `PipelineSchema` entirely from the live response. Each node carries an `optimizer` sub-object (`param_keys`, `observation_mappings`). No backend-specific constants in PromptPotter service code — all backend knowledge comes from the live `GET /pipeline` response.
 
 ## Optimizer Pipeline
 
@@ -208,3 +208,26 @@ intermediate_cache/
 **Implementation:** `compute_prefix_keys()` and `node_cache_key()` in `intermediate_cache.py`. Wired through `eval_query_via_backend()` in `prompt_eval.py`.
 
 Gracefully no-ops until the target backend supports `node_outputs` in responses and `precomputed` in requests.
+
+### Export & Reporting
+
+Paper-ready data export follows a three-layer architecture mirroring the persistence/display split:
+
+```
+CampaignStore.load()          ← disk (campaign + trial JSON)
+        │
+        ▼
+campaign/export.py            ← pure transforms (flatten, compare, manifest)
+        │                        No I/O, no display. Returns dicts/lists.
+        ▼
+campaign_lib/reporting.py     ← markdown rendering (tables, supplemental doc)
+        │                        Formatting only, no persistence.
+        ▼
+cli/export_results.py         ← CLI file I/O (write .md or .json)
+```
+
+**`export.py`** functions: `flatten_campaign_trials()`, `compare_campaigns()`, `export_search_memory_summary()`, `export_failure_analysis()`, `export_query_difficulty()`, `build_reproducibility_manifest()`.
+
+**`reporting.py`** functions: `render_comparison_table()`, `render_convergence_table()`, `render_significance_table()`, `render_parameter_impact_table()`, `generate_supplemental()`, `generate_export_json()`.
+
+The supplemental document includes: campaign comparison, convergence, pairwise significance, parameter impact, failure analysis, query difficulty, and a reproducibility manifest. See [`docs/benchmarks.md`](benchmarks.md) for the benchmark methodology and result table format.

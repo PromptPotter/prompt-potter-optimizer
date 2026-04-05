@@ -54,6 +54,9 @@ from .optimize import (
     show_feedback_preflight,
 )
 
+# -- Reporting (supplemental materials) ---------------------------------------
+from .reporting import generate_export_json, generate_supplemental
+
 # -- Search: Advisor ----------------------------------------------------------
 from .search_advisor import (
     load_task_description,
@@ -173,6 +176,9 @@ __all__ = [
     "show_progress",
     "show_scan_leaderboard",
     "show_scan_query_difficulty",
+    # Reporting
+    "generate_export_json",
+    "generate_supplemental",
     # Re-exports from promptpotter.services.search
     "build_diagnostic_set",
     "build_historical_index",
