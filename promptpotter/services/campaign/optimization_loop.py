@@ -39,8 +39,8 @@ from promptpotter.services.campaign.round_execution import (
     update_round_state,
 )
 from promptpotter.services.campaign.state import LoopState, RunBackendSession
+from promptpotter.services.eval_gateway import subsample_eval_data
 from promptpotter.services.metrics import compile_query_difficulty, compute_composite_score
-from promptpotter.services.prompt_eval import subsample_eval_data
 from promptpotter.services.search.scan_results import ScanContext
 from promptpotter.services.search.search_memory import SearchMemory
 from promptpotter.shared.errors import graceful

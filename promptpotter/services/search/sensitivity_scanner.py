@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.search_point import JobSearchPoint
-from promptpotter.services.prompt_eval import _most_common_error_category, eval_search_point
+from promptpotter.services.eval_gateway import _most_common_error_category, eval_search_point
 from promptpotter.services.search.preview import preview as _preview
 from promptpotter.services.search.smart_search import (
     ScanEvent,

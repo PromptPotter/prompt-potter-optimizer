@@ -436,7 +436,7 @@ async def run_baseline_eval(
         RuntimeError: If no evaluation data is available.
     """
     from promptpotter.models.eval_context import EvalContext
-    from promptpotter.services.prompt_eval import eval_search_point
+    from promptpotter.services.eval_gateway import eval_search_point
 
     if not eval_data and store and experiment_id:
         from promptpotter.services.search.eval_dataset import load_eval_dataset

@@ -121,7 +121,8 @@ global query counter across all candidates
 
 | Service | Purpose |
 |---------|---------|
-| `prompt_eval.py` | Evaluate prompts via backend `/matches` — single eval gateway + stale data load protocol |
+| `eval_query.py` | Evaluate single query via backend `/matches` — cache walk, cache populate, error classification |
+| `eval_gateway.py` | Batch eval orchestration — query loop, stale data protocol, error tracking, dataset archival |
 | `l1_optimizer.py` | L1 candidate generation (`l1_generate`) and winner selection (`l1_evaluate`) |
 | `backend_client.py` | HTTP client for backend APIs (sync, replay, `fetch_pipeline()`) |
 | `pipeline_discovery.py` | Parses `GET /pipeline` response into `PipelineSchema` |

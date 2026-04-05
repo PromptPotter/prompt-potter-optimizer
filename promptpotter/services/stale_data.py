@@ -11,6 +11,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from promptpotter.services.eval_query import eval_query_via_backend
 from promptpotter.shared.errors import find_rank
 
 if TYPE_CHECKING:
@@ -93,7 +94,6 @@ async def execute_stale_data_protocol(
     that resolved the query, or ``"exhausted"``.
     """
     from promptpotter.config.optimizer_pipeline import get_optimizer_schema
-    from promptpotter.services.prompt_eval import eval_query_via_backend
 
     cfg = get_optimizer_schema().get_node("l1_evaluate").current_config
     query = query_data["query"]

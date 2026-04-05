@@ -310,7 +310,7 @@ async def l1_evaluate(
     escalation_checks: list | None = None,
 ) -> L1EvalResult:
     """Evaluate candidates and select the round winner."""
-    from promptpotter.services.prompt_eval import eval_search_point
+    from promptpotter.services.eval_gateway import eval_search_point
 
     _sp_pipeline_params = pipeline_params
 

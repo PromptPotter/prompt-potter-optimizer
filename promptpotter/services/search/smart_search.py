@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.prompt_eval import eval_search_point
+from promptpotter.services.eval_gateway import eval_search_point
 from promptpotter.shared.constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,
     DIAGNOSTIC_HIT_RATIO,
