@@ -295,8 +295,12 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     pipeline_params = configure_pipeline(session, campaign_config)
     train_data = session.queries or []
 
-    _baseline, eval_data, campaign_rounds, _ = await prepare_eval_context(
-        session, train_data, campaign_config, pipeline_params=pipeline_params,
+    # Re-run baseline (fast — cached) to populate baseline_results for critique
+    _has_baseline = state.get("baseline_accuracy", 0) > 0
+    _baseline, eval_data, campaign_rounds, baseline_results = await prepare_eval_context(
+        session, train_data, campaign_config,
+        pipeline_params=pipeline_params,
+        run_baseline=_has_baseline,
     )
 
     # Seed campaign_rounds with stored baseline when no eval has been run yet
@@ -308,7 +312,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             "round": "baseline",
             "accuracy": state.get("baseline_accuracy", 0.0),
             "prompt_fields": bl_ps,
-            "results": [],
+            "results": baseline_results or [],
         })
 
     # Load scan context if available

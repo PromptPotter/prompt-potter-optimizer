@@ -173,8 +173,8 @@ def format_context_sections(ctx: ContextData) -> str:
     if ctx.l2_directive:
         sections.append(f"DIRECTIVE:\n{ctx.l2_directive}")
 
-    # Critique — skip when L2 directive is present (L2 already absorbed critique)
-    if ctx.critique_text and not ctx.l2_directive:
+    # Critique — always show (L2 directive is strategic, critique has failure data)
+    if ctx.critique_text:
         sections.append(f"CRITIQUE:\n{ctx.critique_text}")
 
     # Thinking styles

@@ -535,6 +535,22 @@ def assemble_critique_sections(ctx: CritiqueContext) -> str:
             sm_lines.append(f"  Failure clusters: {smc['failure_clusters']}")
         sections.append("\n".join(sm_lines))
 
+    # Pipeline mutation capabilities — teach critique about schema mutations
+    if ctx.pipeline_schema:
+        cap_lines: list[str] = []
+        for node in ctx.pipeline_schema.nodes:
+            if node.output_schema and node.output_schema.fields and "output_schema" in node.param_keys:
+                cap_lines.append(
+                    f"  {node.name} has mutable output_schema"
+                    f" (current fields: {', '.join(node.output_schema.fields)})"
+                )
+        if cap_lines:
+            sections.append(
+                "## AVAILABLE SCHEMA MUTATIONS\n" + "\n".join(cap_lines)
+                + "\n  Use output_schema param with +/-/~ mutation tuples"
+                " to add/remove/replace fields."
+            )
+
     return "\n\n".join(s for s in sections if s)
 
 
