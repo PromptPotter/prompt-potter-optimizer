@@ -81,7 +81,7 @@ def _campaign_baseline_as_dict(campaign_rounds: list) -> dict:
 
 def show_feedback_preflight(
     campaign_rounds: list,
-    eval_data: list,
+    dataset: list,
     campaign_config: CampaignConfig,
     *,
     pipeline_params: dict | None = None,
@@ -133,7 +133,7 @@ def show_feedback_preflight(
     bl = _campaign_baseline_as_dict(campaign_rounds)
 
     _print_preflight_sections(
-        config, bl, eval_data,
+        config, bl, dataset,
         campaign_config=campaign_config,
         scan_context=scan_context,
     )
@@ -141,7 +141,7 @@ def show_feedback_preflight(
     return scan_context
 
 
-def _print_preflight_sections(config, bl, eval_data,
+def _print_preflight_sections(config, bl, dataset,
                               *, campaign_config=None, scan_context=None):
     """Print three-section preflight walkthrough."""
     baseline_acc = bl["baseline_acc"]
@@ -150,11 +150,11 @@ def _print_preflight_sections(config, bl, eval_data,
 
     _instr_preview = (instruction[:80] + "...") if len(instruction) > 80 else instruction
     _instr_preview = _instr_preview or "(empty)"
-    _eff_queries = config.sample_size if config.sample_size else len(eval_data)
+    _eff_queries = config.sample_size if config.sample_size else len(dataset)
     if config.sample_size:
-        _queries_label = f"{config.sample_size} of {len(eval_data)}"
+        _queries_label = f"{config.sample_size} of {len(dataset)}"
     else:
-        _queries_label = f"all {len(eval_data)}"
+        _queries_label = f"all {len(dataset)}"
     # Pipeline node display
     pp = config.pipeline_params or {}
     active_nodes = pp.get("steps", [])
@@ -338,7 +338,7 @@ def _print_preflight_sections(config, bl, eval_data,
 
 async def run_optimization_notebook(
     campaign_rounds: list,
-    eval_data: list,
+    dataset: list,
     campaign_config: CampaignConfig,
     *,
     store: ProjectStore | None = None,
@@ -346,7 +346,7 @@ async def run_optimization_notebook(
     backend_url: str = "http://127.0.0.1:8000",
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
-    session_terms: list[str] | None = None,
+    index_terms: list[str] | None = None,
     langfuse_session_id: str | None = None,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
@@ -377,7 +377,7 @@ async def run_optimization_notebook(
         store = store or session.store
         backend_id = backend_id or session.backend_id
         backend_url = backend_url or session.backend_client.base_url
-        session_terms = session_terms or session.session_terms
+        index_terms = index_terms or session.index_terms
         pipeline_schema = pipeline_schema or session.pipeline_schema
 
     config = RunConfig.from_campaign_config(
@@ -386,7 +386,7 @@ async def run_optimization_notebook(
         backend_id=backend_id,
         project_root=str(store.base_dir) if store else "",
         pipeline_params=pipeline_params,
-        session_terms=session_terms,
+        index_terms=index_terms,
         session_id=session_id,
         scan_context=scan_context,
         pipeline_schema=pipeline_schema,
@@ -660,7 +660,7 @@ async def run_optimization_notebook(
 
     result = await run_optimization(
         instruction=instruction,
-        eval_data=eval_data,
+        dataset=dataset,
         config=config,
         baseline_prompt_fields=baseline_ps,
         baseline_accuracy=baseline_acc,

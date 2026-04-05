@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.shared.constants import MATCH_TIMEOUT
+from promptpotter.shared.constants import QUERY_TIMEOUT
 
 if TYPE_CHECKING:
     from promptpotter.services.project_store import ProjectStore
@@ -45,7 +45,7 @@ class BackendClient:
     def __init__(self, base_url: str, timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._session_terms: list[str] | None = None
+        self._index_terms: list[str] | None = None
         self._http: httpx.AsyncClient | None = None
 
     def _get_http(self) -> httpx.AsyncClient:
@@ -146,7 +146,7 @@ class BackendClient:
         """POST /sessions with terms array.
 
         Idempotent: skips the HTTP call if already initialized with the
-        same terms.  Stores ``terms`` internally so that ``run_match()``
+        same terms.  Stores ``terms`` internally so that ``run_query()``
         can auto-reinitialize the session if the backend restarts.
         """
         if not terms:
@@ -154,17 +154,17 @@ class BackendClient:
                 "init_session called with empty terms — session won't support /matches",
             )
             return {"status": "skipped", "terms_count": 0}
-        if self._session_terms == terms:
+        if self._index_terms == terms:
             return {"status": "already_initialized", "terms_count": len(terms)}
         resp = await self._get_http().post(
             f"{self.base_url}/sessions",
             json={"terms": terms},
         )
         resp.raise_for_status()
-        self._session_terms = terms
+        self._index_terms = terms
         return resp.json()
 
-    async def run_match(
+    async def run_query(
         self,
         query: str,
         pipeline_params: dict[str, Any] | None = None,
@@ -193,7 +193,7 @@ class BackendClient:
                 wire_overrides[k] = v
             else:
                 logger.debug(
-                    "run_match: dropping non-dict pipeline_param %r=%r", k, v,
+                    "run_query: dropping non-dict pipeline_param %r=%r", k, v,
                 )
 
         if wire_overrides:
@@ -207,7 +207,7 @@ class BackendClient:
         resp = await client.post(
             f"{self.base_url}/matches",
             json=payload,
-            timeout=MATCH_TIMEOUT,
+            timeout=QUERY_TIMEOUT,
         )
 
         # Auto-reinitialize session on 400 "no session" errors
@@ -220,15 +220,15 @@ class BackendClient:
                 detail = ""
             is_session_error = "session" in detail.lower()
 
-            if is_session_error and self._session_terms:
+            if is_session_error and self._index_terms:
                 logger.warning("Got 400 (no session) — re-initializing")
-                terms = self._session_terms
-                self._session_terms = None  # clear so idempotency guard re-sends
+                terms = self._index_terms
+                self._index_terms = None  # clear so idempotency guard re-sends
                 await self.init_session(terms)
                 resp = await client.post(
                     f"{self.base_url}/matches",
                     json=payload,
-                    timeout=MATCH_TIMEOUT,
+                    timeout=QUERY_TIMEOUT,
                 )
             elif is_session_error:
                 logger.error(
@@ -277,7 +277,7 @@ class BackendClient:
     # -- replay helpers ---------------------------------------------------
 
     @staticmethod
-    def extract_session_terms(experiment_data: dict) -> list[str]:
+    def extract_index_terms(experiment_data: dict) -> list[str]:
         """Extract unique non-empty dataset_entry values from mappings."""
         entries = set()
         for m in experiment_data.get("mappings", []):

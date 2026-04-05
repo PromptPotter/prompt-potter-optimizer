@@ -17,16 +17,16 @@
 
 ## Current BackendClient Interface
 
-Methods derived from actual usage across `prompt_eval.py` and `optimization_loop.py`:
+Methods derived from actual usage across `eval_query.py`, `eval_gateway.py`, and `optimization_loop.py`:
 
 | Method | Signature | Used by |
 |--------|-----------|---------|
-| `init_session` | `async (terms: list[str]) -> dict[str, Any]` | `optimization_loop.py`, `prompt_eval.py` |
-| `run_match` | `async (query: str, pipeline_params: dict \| None, ranking_prompt: str \| None) -> dict[str, Any]` | `prompt_eval.py` (via `eval_query_via_backend`) |
+| `init_session` | `async (terms: list[str]) -> dict[str, Any]` | `optimization_loop.py`, `eval_gateway.py` |
+| `run_query` | `async (query: str, pipeline_params: dict \| None, prompt_override: str \| None) -> dict[str, Any]` | `eval_query.py` (via `eval_query_via_backend`) |
 | `fetch_experiments` | `async () -> dict[str, Any]` | `backend_client.py` (sync operations) |
 | `fetch_experiment` | `async (experiment_id: str, include_traces: bool) -> dict[str, Any]` | `backend_client.py` (sync operations) |
-| `extract_session_terms` | `@staticmethod (experiment_data: dict) -> list[str]` | `optimization_loop.py`, `_campaign_lib.py` |
-| `extract_replay_queries` | `@staticmethod (experiment_data: dict) -> list[dict[str, Any]]` | `_campaign_lib.py`, `DatasetLoadNode` (M6) |
+| `extract_index_terms` | `@staticmethod (experiment_data: dict) -> list[str]` | `optimization_loop.py`, `campaign_lib/` |
+| `extract_replay_queries` | `@staticmethod (experiment_data: dict) -> list[dict[str, Any]]` | `campaign_lib/`, `DatasetLoadNode` (M6) |
 
 ---
 
@@ -37,10 +37,10 @@ The protocol defines 6 methods. Two tiers: **core** (required for eval) and **sy
 | # | Method | Tier | Purpose |
 |---|--------|------|---------|
 | 1 | `init_session` | Core | Initialize backend state (load terms, warm caches) |
-| 2 | `run_match` | Core | Execute single query with optional prompt/param overrides |
+| 2 | `run_query` | Core | Execute single query with optional prompt/param overrides |
 | 3 | `fetch_experiments` | Sync | List available experiments for dataset selection |
 | 4 | `fetch_experiment` | Sync | Get experiment data with ground-truth mappings |
-| 5 | `extract_session_terms` | Sync | Parse terms from experiment data (static) |
+| 5 | `extract_index_terms` | Sync | Parse terms from experiment data (static) |
 | 6 | `extract_replay_queries` | Sync | Parse query/expected pairs from experiment data (static) |
 
 ---
@@ -52,7 +52,7 @@ The protocol defines 6 methods. Two tiers: **core** (required for eval) and **sy
 | Abstraction mechanism | `typing.Protocol` (structural subtyping) | `BackendClient` satisfies it without inheriting — zero migration cost |
 | Static methods | Keep as `@staticmethod` on protocol | They parse experiment-specific data formats; each connector implements its own parsing |
 | Sync operations | Include in protocol (not separate) | `DatasetLoadNode` (M6) needs them; splitting would add complexity without benefit |
-| `replay_queries` | Exclude from protocol | High-level convenience method built on `init_session` + `run_match`. Each connector can implement its own. |
+| `replay_queries` | Exclude from protocol | High-level convenience method built on `init_session` + `run_query`. Each connector can implement its own. |
 | `sync_experiments` / `sync_experiment` | Exclude from protocol | ProjectStore-coupled convenience methods. Stay on `BackendClient` as TermNorm-specific. |
 | `MockConnector` | Both test double and reference impl | Shows exactly how to satisfy the protocol. Returns configurable canned responses. |
 | Registry | Simple dict-based `ConnectorRegistry` | Discover connectors by ID at runtime. No plugin system needed yet. |
@@ -66,8 +66,9 @@ The protocol defines 6 methods. Two tiers: **core** (required for eval) and **sy
 | 1 | `promptpotter/services/connector_protocol.py` | CREATE | `ConnectorProtocol` as `typing.Protocol` with 6 methods |
 | 2 | `promptpotter/services/mock_connector.py` | CREATE | `MockConnector` implementing protocol — configurable responses, call recording |
 | 3 | `promptpotter/services/connector_registry.py` | CREATE | `ConnectorRegistry` — register/get connectors by ID, default to BackendClient |
-| 4 | `promptpotter/services/prompt_eval.py` | MODIFY | Change `backend_client: BackendClient` → `backend_client: ConnectorProtocol` in function signatures |
-| 5 | `promptpotter/services/optimization_loop.py` | MODIFY | Change `BackendClient` import → `ConnectorProtocol` type annotation |
+| 4 | `promptpotter/services/eval_query.py` | MODIFY | Change `backend_client: BackendClient` → `backend_client: ConnectorProtocol` in function signatures |
+| 4b | `promptpotter/services/eval_gateway.py` | MODIFY | Change `backend_client: BackendClient` → `backend_client: ConnectorProtocol` |
+| 5 | `promptpotter/services/campaign/optimization_loop.py` | MODIFY | Change `BackendClient` import → `ConnectorProtocol` type annotation |
 | 6 | `promptpotter/services/campaign/optimization_loop.py` | MODIFY | Change `BackendClient` instantiation to use `ConnectorRegistry` or accept connector |
 | 7 | `docs/connectors/connector-protocol.md` | CREATE | Developer guide: how to implement a new connector |
 | 8 | `tests/test_connector_protocol.py` | CREATE | Protocol conformance tests, MockConnector tests, registry tests |
@@ -90,11 +91,11 @@ class ConnectorProtocol(Protocol):
         """Initialize backend state with terms (e.g., load search index)."""
         ...
 
-    async def run_match(
+    async def run_query(
         self,
         query: str,
         pipeline_params: dict[str, Any] | None = None,
-        ranking_prompt: str | None = None,
+        prompt_override: str | None = None,
     ) -> dict[str, Any]:
         """Execute single query through backend pipeline.
 
@@ -114,7 +115,7 @@ class ConnectorProtocol(Protocol):
         ...
 
     @staticmethod
-    def extract_session_terms(experiment_data: dict) -> list[str]:
+    def extract_index_terms(experiment_data: dict) -> list[str]:
         """Extract initialization terms from experiment data."""
         ...
 
@@ -149,12 +150,12 @@ class MockConnector:
         self.calls: list[dict] = []  # call recording for assertions
 
     async def init_session(self, terms: list[str]) -> dict[str, Any]: ...
-    async def run_match(self, query: str, **kwargs) -> dict[str, Any]: ...
+    async def run_query(self, query: str, **kwargs) -> dict[str, Any]: ...
     async def fetch_experiments(self) -> dict[str, Any]: ...
     async def fetch_experiment(self, experiment_id: str, ...) -> dict[str, Any]: ...
 
     @staticmethod
-    def extract_session_terms(experiment_data: dict) -> list[str]: ...
+    def extract_index_terms(experiment_data: dict) -> list[str]: ...
     @staticmethod
     def extract_replay_queries(experiment_data: dict) -> list[dict[str, Any]]: ...
 
@@ -165,7 +166,7 @@ class MockConnector:
     def reset(self) -> None: ...
 ```
 
-The `accuracy_rate` parameter controls what fraction of `run_match` calls return the expected value as `top_candidate` (for testing optimization convergence without a real backend).
+The `accuracy_rate` parameter controls what fraction of `run_query` calls return the expected value as `top_candidate` (for testing optimization convergence without a real backend).
 
 ---
 
@@ -226,7 +227,7 @@ async def eval_query_via_backend(
 | 9.0 | Write M9 spec | 1 | — | This document |
 | 9.1 | ConnectorProtocol + MockConnector | 1 | 9.0 | Create `connector_protocol.py` and `mock_connector.py`. Protocol conformance tests verifying BackendClient satisfies protocol. MockConnector unit tests. |
 | 9.2 | ConnectorRegistry | 1 | 9.1 | Create `connector_registry.py`. Register/get/list connectors. Integration with `runtime_config` from M6. |
-| 9.3 | Service migration | 1 | 9.1 | Change type annotations in `prompt_eval.py`, `optimization_loop.py`. Update connector instantiation to use registry. |
+| 9.3 | Service migration | 1 | 9.1 | Change type annotations in `eval_query.py`, `eval_gateway.py`, `optimization_loop.py`. Update connector instantiation to use registry. |
 | 9.4 | Docs + integration test | 1 | 9.2, 9.3 | Write `docs/connectors/connector-protocol.md`. Integration test: run feedback cycle with MockConnector. |
 | 9.5 | OPTIMIZER_PIPELINE_SCHEMA | 1 | 9.1 | Describe the optimizer's own 4-step pipeline as a `PipelineSchema` instance (moved from M7 Wave E2). Enables `GET /optimizer/pipeline` for L4 self-optimization. |
 
@@ -236,7 +237,7 @@ async def eval_query_via_backend(
 |----|-----------|
 | 9.1 | `promptpotter/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
 | 9.2 | `promptpotter/services/llm_client.py` (singleton pattern reference: `get_llm_client()`) |
-| 9.3 | `promptpotter/services/prompt_eval.py` (eval_query_via_backend, eval_search_point), `promptpotter/services/campaign/optimization_loop.py` (BackendClient usage) |
+| 9.3 | `promptpotter/services/eval_query.py` (eval_query_via_backend), `promptpotter/services/eval_gateway.py` (eval_search_point), `promptpotter/services/campaign/optimization_loop.py` (BackendClient usage) |
 | 9.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_campaign_registry.py` (E2E test pattern) |
 
 ---
@@ -251,7 +252,7 @@ async def eval_query_via_backend(
 - `ConnectorProtocol` defined with 6 methods
 - `BackendClient` satisfies `ConnectorProtocol` (verified by test)
 - `MockConnector` satisfies `ConnectorProtocol` (verified by test)
-- `prompt_eval.py` and `optimization_loop.py` use `ConnectorProtocol` type annotations
+- `eval_query.py`, `eval_gateway.py`, and `optimization_loop.py` use `ConnectorProtocol` type annotations
 - `ConnectorRegistry` can register and retrieve connectors
 - Feedback cycle runs successfully with `MockConnector` (no live backend needed)
 - `docs/connectors/connector-protocol.md` documents how to implement a new connector

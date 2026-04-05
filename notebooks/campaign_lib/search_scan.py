@@ -36,7 +36,7 @@ __all__ = [
 async def sensitivity_scan(
     baseline,
     scan_variants: dict[str, list],
-    eval_data: list,
+    dataset: list,
     backend_client=None,
     *,
     baseline_opt: OptSearchPoint | None = None,
@@ -61,9 +61,9 @@ async def sensitivity_scan(
         store = store or session.store
         backend_id = backend_id or session.backend_id
         pipeline_schema = pipeline_schema or session.pipeline_schema
-        session_terms = session.session_terms
-        if session_terms and backend_client:
-            await backend_client.init_session(session_terms)
+        index_terms = session.index_terms
+        if index_terms and backend_client:
+            await backend_client.init_session(index_terms)
 
     # Print scan overview
     print("Running sensitivity scan...")
@@ -79,7 +79,7 @@ async def sensitivity_scan(
 
     n_axes = sum(1 for v in scan_variants.values() if len(v) > 1)
     n_configs = sum(len(v) for v in scan_variants.values() if len(v) > 1)
-    n_eval = sample_size if sample_size > 0 else len(eval_data)
+    n_eval = sample_size if sample_size > 0 else len(dataset)
     n_cached = sum(
         e.get("item_count", 0)
         for e in store.dataset_runs.list_all(backend_id)
@@ -100,7 +100,7 @@ async def sensitivity_scan(
     try:
         print("  Evaluating baseline...")
         df, profiles = await _sensitivity_scan(
-            baseline, scan_variants, eval_data, backend_client,
+            baseline, scan_variants, dataset, backend_client,
             baseline_opt=baseline_opt,
             sample_size=sample_size,
             store=store, backend_id=backend_id,
@@ -228,7 +228,7 @@ def _make_scan_progress_cb():
 async def adaptive_search(
     baseline_ps,
     variant_library: dict,
-    eval_data: list,
+    dataset: list,
     backend_client=None,
     axis_profiles: list[dict] | None = None,
     max_rounds: int = 3,
@@ -236,7 +236,7 @@ async def adaptive_search(
     store=None,
     backend_id: str = "",
     pipeline_params: dict | None = None,
-    session_terms: list | None = None,
+    index_terms: list | None = None,
     plan_id: str = "",
     experiment_id: str = "",
     session: BackendSession | None = None,
@@ -250,7 +250,7 @@ async def adaptive_search(
         backend_client = backend_client or session.backend_client
         store = store or session.store
         backend_id = backend_id or session.backend_id
-        session_terms = session_terms or session.session_terms
+        index_terms = index_terms or session.index_terms
 
     active = [p for p in (axis_profiles or []) if p["exploration_budget"] != "skip"]
     print(f"Adaptive search: {len(active)} active axes, max {max_rounds} rounds")
@@ -270,13 +270,13 @@ async def adaptive_search(
     _httpcore_log.setLevel(logging.WARNING)
     try:
         best_ps, best_params, log_df = await _adaptive_search(
-            baseline_ps, variant_library, eval_data, backend_client,
+            baseline_ps, variant_library, dataset, backend_client,
             axis_profiles,
             max_rounds=max_rounds,
             stop_threshold=stop_threshold,
             store=store, backend_id=backend_id,
             pipeline_params=pipeline_params,
-            session_terms=session_terms,
+            index_terms=index_terms,
             progress_cb=cb,
             plan_id=plan_id,
             experiment_id=experiment_id,
@@ -383,7 +383,7 @@ async def run_sensitivity_scan(
     baseline,
     campaign_config: CampaignConfig,
     scan_variants: dict[str, list],
-    eval_data: list,
+    dataset: list,
     *,
     scan_sample_size: int = 0,
     session: BackendSession | None = None,
@@ -405,7 +405,7 @@ async def run_sensitivity_scan(
         session=session, scan_variants=scan_variants,
     )
     scan_df, axis_profiles = await sensitivity_scan(
-        scan_baseline_sp, scan_variants, eval_data,
+        scan_baseline_sp, scan_variants, dataset,
         baseline_opt=search_baseline,
         sample_size=scan_sample_size,
         session=session, experiment_id=experiment_id,

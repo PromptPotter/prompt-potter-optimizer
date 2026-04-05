@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 async def sensitivity_scan(
     baseline: JobSearchPoint,
     scan_variants: dict[str, list | dict],
-    eval_data: list,
+    dataset: list,
     backend_client: BackendClient,
     *,
     baseline_opt: OptSearchPoint | None = None,
@@ -60,11 +60,11 @@ async def sensitivity_scan(
         scan_variants: Dict mapping axes to value lists.  Two formats:
             - Prompt fields: ``{"thinking_style": ["a", "b"]}`` (list → prompt)
             - Pipeline params: ``{"web_search": {"max_sites": [3, 5]}}`` (dict → node)
-        eval_data: Full evaluation dataset.
+        dataset: Full evaluation dataset.
         backend_client: Backend client for evaluation.
         baseline_opt: OptSearchPoint for prompt-field perturbation. Required
             when scan_variants contains prompt_field axes.
-        sample_size: If >0, subsample eval_data to this many queries
+        sample_size: If >0, subsample dataset to this many queries
             (deterministic seed=42). 0 means use all.
         store: Optional ProjectStore for caching.
         backend_id: Backend identifier.
@@ -79,9 +79,9 @@ async def sensitivity_scan(
 
     _cb = progress_cb or (lambda _e: None)
 
-    # Subsample eval_data if requested
-    if sample_size > 0 and sample_size < len(eval_data):
-        eval_data = random.Random(42).sample(eval_data, sample_size)
+    # Subsample dataset if requested
+    if sample_size > 0 and sample_size < len(dataset):
+        dataset = random.Random(42).sample(dataset, sample_size)
 
     # Build EvalContext once for all scan evaluations
     scan_ctx = EvalContext(
@@ -155,7 +155,7 @@ async def sensitivity_scan(
 
     # Evaluate baseline
     baseline_results, baseline_scores, baseline_cached = await eval_search_point(
-        baseline, eval_data, scan_ctx,
+        baseline, dataset, scan_ctx,
         label="scan",
         on_result=on_result,
     )
@@ -278,7 +278,7 @@ async def sensitivity_scan(
                 perturbed = baseline.derive(pipeline_params=pp)
 
             results, scores, cached = await eval_search_point(
-                perturbed, eval_data, scan_ctx,
+                perturbed, dataset, scan_ctx,
                 label="scan",
                 on_result=on_result,
             )
@@ -361,7 +361,7 @@ async def sensitivity_scan(
                         f"variant evals returned all errors. {detail}"
                     )
                     logger.error(reason)
-                    profiles = _profiles_from_rows(rows, axes, len(eval_data))
+                    profiles = _profiles_from_rows(rows, axes, len(dataset))
                     for profile in profiles:
                         _cb({"type": "axis_done", **profile})
                     _cb({"type": "scan_aborted", "reason": reason})
@@ -370,7 +370,7 @@ async def sensitivity_scan(
                 _consecutive_all_error = 0
 
     # Build axis profiles and annotate pruned axes (Wave 2b)
-    profiles = _profiles_from_rows(rows, axes, len(eval_data))
+    profiles = _profiles_from_rows(rows, axes, len(dataset))
     for profile in profiles:
         profile["pruned"] = profile["axis"] in _pruned_axes
         _cb({"type": "axis_done", **profile})

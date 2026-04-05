@@ -45,7 +45,7 @@ async def resume_or_build_diagnostic(
     baseline,
     baseline_results: list,
     session: BackendSession,
-    eval_data: list,
+    dataset: list,
     scan_variants: dict | None = None,
 ) -> tuple[str, object, list, list, dict]:
     """Resume or build smart search diagnostic set.
@@ -73,7 +73,7 @@ async def resume_or_build_diagnostic(
         llm_model,
         session.store,
         session.backend_id,
-        eval_data,
+        dataset,
         variant_library=variant_library,
     )
     plan_id = result.plan_id

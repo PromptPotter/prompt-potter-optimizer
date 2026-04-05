@@ -9,13 +9,13 @@ import from here.
 # Shared application constants
 # ---------------------------------------------------------------------------
 
-DATASET_NAME: str = "termnorm_ground_truth"
+DATASET_NAME: str = "ground_truth"
 NO_RESULT: str = "NO_RESULT"
 DISPLAY_TRUNCATE: int = 60
 DEFAULT_DIAGNOSTIC_QUERIES: int = 6
 
 # backend_client — HTTP timeout for /matches endpoint
-MATCH_TIMEOUT: float = 120.0
+QUERY_TIMEOUT: float = 120.0
 
 # llm_client — provider defaults
 OPENAI_MAX_RETRIES: int = 5
@@ -74,4 +74,4 @@ LAYER1_STRING_FIELDS = [f for f in LAYER_FIELDS["generate"] if f != "few_shot_ex
 
 # Persistence versioning
 DATASET_RUNS_SCHEMA_VERSION = 1
-DEFAULT_CONNECTOR_TYPE = "termnorm"
+DEFAULT_CONNECTOR_TYPE = "default"

@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 async def adaptive_search(
     baseline_opt: OptSearchPoint,
     variant_library: dict,
-    eval_data: list,
+    dataset: list,
     backend_client: BackendClient,
     axis_profiles: list[dict],
     max_rounds: int = 3,
@@ -39,7 +39,7 @@ async def adaptive_search(
     store: ProjectStore | None = None,
     backend_id: str = "",
     pipeline_params: dict | None = None,
-    session_terms: list | None = None,
+    index_terms: list | None = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
     plan_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
@@ -55,7 +55,7 @@ async def adaptive_search(
     Args:
         baseline_opt: Starting OptSearchPoint.
         variant_library: Full variant library dict.
-        eval_data: Diagnostic query set.
+        dataset: Diagnostic query set.
         backend_client: Backend client for evaluation.
         axis_profiles: From ``sensitivity_scan()``.
         max_rounds: Maximum coordinate descent rounds.
@@ -63,7 +63,7 @@ async def adaptive_search(
         store: Optional ProjectStore for caching.
         backend_id: Backend identifier.
         pipeline_params: Base pipeline parameters.
-        session_terms: Optional session terms.
+        index_terms: Optional session terms.
         progress_cb: Optional callback ``(event: dict) -> None`` for
             progress reporting. Event types: ``round_start``,
             ``axis_start``, ``variant_done``, ``axis_resolved``.
@@ -75,8 +75,8 @@ async def adaptive_search(
 
     _cb = progress_cb or (lambda _e: None)
 
-    if session_terms:
-        await backend_client.init_session(session_terms)
+    if index_terms:
+        await backend_client.init_session(index_terms)
 
     # Filter variant library to active pipeline steps
     variant_library = filter_variant_library(
@@ -103,7 +103,7 @@ async def adaptive_search(
         experiment_id=experiment_id,
     )
     _eval_opt = _make_eval_fn(
-        eval_data, _scan_ctx,
+        dataset, _scan_ctx,
         get_params=lambda: current_params,
     )
 

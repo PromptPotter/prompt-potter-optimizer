@@ -59,7 +59,7 @@ def sp_identity_hash(
 
 def eval_content_hash(
     rendered_prompt: str,
-    eval_data: list,
+    dataset: list,
     pipeline_params: dict | None = None,
 ) -> str:
     """Content-addressed hash for evaluation deduplication.
@@ -67,11 +67,11 @@ def eval_content_hash(
     ``sha256(rendered_prompt + sorted_query_gt_pairs
     + pipeline_params)[:16]``
 
-    Order of eval_data queries does not affect the hash.
+    Order of dataset queries does not affect the hash.
     ``pipeline_params`` is included when non-empty so that different
     pipeline configurations produce distinct hashes.
     """
-    pairs = sorted((d.get("query", ""), d.get("ground_truth", "")) for d in eval_data)
+    pairs = sorted((d.get("query", ""), d.get("ground_truth", "")) for d in dataset)
     blob_dict: dict = {
         "prompt": rendered_prompt,
         "pairs": pairs,

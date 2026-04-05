@@ -31,28 +31,28 @@ class TestMinSampleSize:
 
 class TestBuildDiagnosticSetAutoAdjust:
     def _make_data(self, n: int) -> tuple[list, list]:
-        eval_data = [{"query": f"q{i}", "ground_truth": f"gt{i}"} for i in range(n)]
+        dataset = [{"query": f"q{i}", "ground_truth": f"gt{i}"} for i in range(n)]
         baseline = [
             {"query": f"q{i}", "hit": i % 2 == 0}
             for i in range(n)
         ]
-        return eval_data, baseline
+        return dataset, baseline
 
     def test_small_n_adjusted_upward(self):
         """When n_queries=3 and pool is large enough, auto-adjust kicks in."""
-        eval_data, baseline = self._make_data(100)
-        _diagnostic, summary = build_diagnostic_set(eval_data, baseline, n_queries=3)
+        dataset, baseline = self._make_data(100)
+        _diagnostic, summary = build_diagnostic_set(dataset, baseline, n_queries=3)
         # Should have been adjusted upward from 3
         assert summary["n_queries"] > 3
 
     def test_adjustment_clamped_to_pool(self):
         """When pool is smaller than min_n, clamp to pool size."""
-        eval_data, baseline = self._make_data(10)
-        _diagnostic, summary = build_diagnostic_set(eval_data, baseline, n_queries=3)
+        dataset, baseline = self._make_data(10)
+        _diagnostic, summary = build_diagnostic_set(dataset, baseline, n_queries=3)
         assert summary["n_queries"] <= 10
 
     def test_large_n_not_adjusted(self):
         """When n_queries already exceeds min_n, no adjustment."""
-        eval_data, baseline = self._make_data(200)
-        _diagnostic, summary = build_diagnostic_set(eval_data, baseline, n_queries=100)
+        dataset, baseline = self._make_data(200)
+        _diagnostic, summary = build_diagnostic_set(dataset, baseline, n_queries=100)
         assert summary["n_queries"] == 100

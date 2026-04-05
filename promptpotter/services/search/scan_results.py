@@ -64,7 +64,7 @@ async def resume_or_build_diagnostic(
     model: str,
     store: ProjectStore,
     backend_id: str,
-    eval_data: list,
+    dataset: list,
     variant_library: dict | None = None,
 ) -> DiagnosticResult:
     """Resume or build smart search diagnostic set.
@@ -201,7 +201,7 @@ async def resume_or_build_diagnostic(
     )
 
     diagnostic, diag_summary = build_diagnostic_set(
-        eval_data,
+        dataset,
         baseline_results,
         n_queries=ss.get("n_diagnostic", 6),
     )

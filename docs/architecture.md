@@ -68,7 +68,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **SearchMemory** *(M8 — live)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Also tracks per-query degradation counts (`query_degradation_rate()`), consumed by the stale data protocol's sampleswitch step. Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark. See [SearchMemory section](#searchmemory-m8-wave-3) below.
 
-Universal contract: `f(JobSearchPoint, PipelineSchema, eval_data) → scores`.
+Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`.
 
 ## Evaluation Flow
 
@@ -205,7 +205,7 @@ intermediate_cache/
   {node_name}_{cache_key}.json    ← {query: node_output}
 ```
 
-**Implementation:** `compute_prefix_keys()` and `node_cache_key()` in `intermediate_cache.py`. Wired through `eval_query_via_backend()` in `prompt_eval.py`.
+**Implementation:** `compute_prefix_keys()` and `node_cache_key()` in `intermediate_cache.py`. Wired through `eval_query_via_backend()` in `eval_query.py`.
 
 Gracefully no-ops until the target backend supports `node_outputs` in responses and `precomputed` in requests.
 

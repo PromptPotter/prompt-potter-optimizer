@@ -39,7 +39,7 @@ from promptpotter.services.campaign.round_execution import (
     update_round_state,
 )
 from promptpotter.services.campaign.state import LoopState, RunBackendSession
-from promptpotter.services.eval_gateway import subsample_eval_data
+from promptpotter.services.eval_gateway import subsample_dataset
 from promptpotter.services.metrics import compile_query_difficulty, compute_composite_score
 from promptpotter.services.search.scan_results import ScanContext
 from promptpotter.services.search.search_memory import SearchMemory
@@ -61,12 +61,12 @@ __all__ = ["run_optimization"]
 
 def _prepare_probe_data(
     state: LoopState,
-    eval_data: list[dict],
+    dataset: list[dict],
     round_num: int,
 ) -> tuple[list[dict], list | None]:
     """Build eval data for a probe round (warned queries only, no escalation)."""
     warned_queries = {q for q, e in state.opt_sp.warning_inventory.items() if e.get("warnings")}
-    round_data = [d for d in eval_data if d.get("query") in warned_queries]
+    round_data = [d for d in dataset if d.get("query") in warned_queries]
     logger.debug(
         "PROBE round %d: %d warned queries (from %d tracked)",
         round_num,
@@ -375,7 +375,7 @@ def _setup_eval_context(
 
 async def _init_cycle_state(
     instruction: str,
-    eval_data: list[dict[str, Any]],
+    dataset: list[dict[str, Any]],
     config: RunConfig,
     baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
@@ -399,7 +399,7 @@ async def _init_cycle_state(
         sample_size=config.sample_size,
         enable_l2=config.enable_l2,
         enable_l3=config.enable_l3,
-        eval_data_count=len(eval_data),
+        dataset_count=len(dataset),
         baseline_accuracy=baseline_accuracy,
         has_scan_context=config.scan_context is not None,
         enable_critique=config.enable_critique,
@@ -412,10 +412,10 @@ async def _init_cycle_state(
     )
 
     _bc = backend_client or BackendClient(config.backend_url)
-    if config.session_terms:
-        await _bc.init_session(config.session_terms)
+    if config.index_terms:
+        await _bc.init_session(config.index_terms)
 
-    round_eval_data = subsample_eval_data(eval_data, config.sample_size, config.seed)
+    round_dataset = subsample_dataset(dataset, config.sample_size, config.seed)
 
     # 1. Build baseline state
     state, baseline_osp = _build_baseline_state(
@@ -428,7 +428,7 @@ async def _init_cycle_state(
     # 2. Resume detection + obs init
     campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id = init_campaign(
         config,
-        eval_data,
+        dataset,
         baseline_osp.prompt_field_dict(),
         baseline_prompt_fields,
         baseline_accuracy,
@@ -487,7 +487,7 @@ async def _init_cycle_state(
         resumed_from_round=resumed_from_round,
         baseline_accuracy=baseline_accuracy,
         obs_enabled=obs is not None,
-        sample_count=len(round_eval_data),
+        sample_count=len(round_dataset),
         enable_critique=config.enable_critique,
         restored_state=_restored,
     )
@@ -525,7 +525,7 @@ async def _init_cycle_state(
         campaign_store=campaign_store,
         cycle_id=cycle_id,
         obs_campaign_id=obs_campaign_id,
-        round_eval_data=round_eval_data,
+        round_dataset=round_dataset,
         escalation_checks=escalation_checks,
         resumed_from_round=resumed_from_round,
         search_memory=search_memory,
@@ -615,7 +615,7 @@ async def _check_stopping_conditions(
 
 async def run_optimization(
     instruction: str,
-    eval_data: list[dict[str, Any]],
+    dataset: list[dict[str, Any]],
     config: RunConfig,
     *,
     baseline_prompt_fields: dict | None = None,
@@ -642,7 +642,7 @@ async def run_optimization(
     # -- Init --
     init = await _init_cycle_state(
         instruction,
-        eval_data,
+        dataset,
         config,
         baseline_prompt_fields,
         baseline_accuracy,
@@ -658,7 +658,7 @@ async def run_optimization(
     campaign_store = init.campaign_store
     cycle_id = init.cycle_id
     obs_campaign_id = init.obs_campaign_id
-    round_eval_data = init.round_eval_data
+    round_dataset = init.round_dataset
     escalation_checks = init.escalation_checks
     resumed_from_round = init.resumed_from_round
     search_memory = init.search_memory
@@ -694,11 +694,11 @@ async def run_optimization(
             if is_probe:
                 _round_data, _round_checks = _prepare_probe_data(
                     state,
-                    eval_data,
+                    dataset,
                     round_num,
                 )
             else:
-                _round_data = round_eval_data
+                _round_data = round_dataset
                 _round_checks = escalation_checks
 
             logger.debug(
@@ -819,8 +819,8 @@ async def run_optimization(
                 _hist = [r.results for r in state.rounds if r.results]
                 if len(_hist) >= 3:
                     _qd = compile_query_difficulty(_hist)
-                    round_eval_data, _adapt = adapt_eval_set(
-                        round_eval_data, _qd, eval_data,
+                    round_dataset, _adapt = adapt_eval_set(
+                        round_dataset, _qd, dataset,
                         seed=config.seed + round_num,
                     )
                     if not _adapt.get("unchanged"):

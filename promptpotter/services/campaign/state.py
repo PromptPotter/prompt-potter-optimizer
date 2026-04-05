@@ -90,7 +90,7 @@ class RunBackendSession:
     campaign_store: Any = None
     cycle_id: str | None = None
     obs_campaign_id: str = ""
-    round_eval_data: list[dict[str, Any]] = field(default_factory=list)
+    round_dataset: list[dict[str, Any]] = field(default_factory=list)
     escalation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
     search_memory: Any = None

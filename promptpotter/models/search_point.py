@@ -8,7 +8,7 @@ Three-level hierarchy (see ``opt_search_point.py`` for full tree)::
         └── PromptTemplate      — 8-field prompt scheme (render/compile)
                 └── OptSearchPoint  — optimizer working state (+ lineage, L2/L3, memory)
 
-Formula: ``f(JobSearchPoint, PipelineSchema, eval_data) → scores``
+Formula: ``f(JobSearchPoint, PipelineSchema, dataset) → scores``
 """
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ class JobSearchPoint(SearchPoint):
         return ""
 
     def sp_hash(self, prompt_node_names: list[str] | None = None) -> str:
-        """SearchPoint identity hash — eval_data independent."""
+        """SearchPoint identity hash — dataset independent."""
         rendered = self.render()
         rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
         return sp_identity_hash(
@@ -86,11 +86,11 @@ class JobSearchPoint(SearchPoint):
             prompt_node_names,
         )
 
-    def content_hash(self, eval_data: list) -> str:
+    def content_hash(self, dataset: list) -> str:
         """Content-addressed hash for evaluation deduplication."""
         return eval_content_hash(
             self.render(),
-            eval_data,
+            dataset,
             self.pipeline_params,
         )
 

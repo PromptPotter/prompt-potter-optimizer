@@ -236,7 +236,7 @@ def _register_dataset_items(
                 dataset_name=dataset_name,
                 input={"query": query},
                 expected_output=ground_truth,
-                metadata={"source": "eval_data"},
+                metadata={"source": "dataset"},
             )
             created += 1
 
@@ -396,7 +396,7 @@ def sync_langfuse_runs(
     store: ProjectStore,
     backend_id: str,
     *,
-    dataset_name: str = "termnorm_ground_truth",
+    dataset_name: str = "ground_truth",
     backfill: bool = True,
     reset: bool = False,
 ) -> dict | None:

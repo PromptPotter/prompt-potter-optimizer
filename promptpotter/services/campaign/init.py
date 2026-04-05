@@ -31,7 +31,7 @@ __all__ = [
     "BackendSession",
     "CampaignBaseline",
     "DatasetSummary",
-    "build_all_session_terms",
+    "build_all_index_terms",
     "extract_campaign_baseline",
     "load_baseline_prompt",
     "prepare_datasets",
@@ -50,7 +50,7 @@ class BackendSession:
     synced: bool
     queries: list[dict] = field(default_factory=list)
     exp_data: dict = field(default_factory=dict)
-    session_terms: list[str] = field(default_factory=list)
+    index_terms: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -150,7 +150,7 @@ def load_baseline_prompt(
 
 async def init_services(
     backend_url: str = "http://127.0.0.1:8000",
-    backend_id: str = "termnorm-local",
+    backend_id: str = "local",
     experiment_id: str = "1_production_historical",
     project_root: Path | None = None,
     dataset_name: str | None = None,
@@ -232,16 +232,16 @@ async def init_services(
         ds = store.backends.load_dataset(backend_id, dataset_name)
         if ds and ds.get("items"):
             items = ds["items"]
-            session_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
+            index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
             logger.info(
                 "Loaded dataset %r from store: %d items, %d session terms",
                 dataset_name,
                 len(items),
-                len(session_terms),
+                len(index_terms),
             )
             _status(f"Dataset: {dataset_name} ({len(items)} queries)")
             base.queries = _dataset_items_to_queries(items)
-            base.session_terms = session_terms
+            base.index_terms = index_terms
             return base
         logger.info("Dataset %r not found in store, falling back to experiment sync", dataset_name)
         _status(f"Dataset '{dataset_name}' not found, falling back to experiment sync")
@@ -283,13 +283,13 @@ async def init_services(
         return base
 
     queries = client.extract_replay_queries(exp_data)
-    session_terms = client.extract_session_terms(exp_data)
+    index_terms = client.extract_index_terms(exp_data)
     exp_name = exp_data.get("experiment", {}).get("name", experiment_id)
-    _status(f"Experiment: {exp_name} ({len(queries)} queries, {len(session_terms)} session terms)")
+    _status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
 
     base.queries = queries
     base.exp_data = exp_data
-    base.session_terms = session_terms
+    base.index_terms = index_terms
     return base
 
 
@@ -364,7 +364,7 @@ async def _verify_matches_liveness(
     """
     for attempt in range(1, max_attempts + 1):
         try:
-            await backend_client.run_match(probe_query)
+            await backend_client.run_query(probe_query)
             logger.info(
                 "Matches liveness probe succeeded (attempt %d/%d)",
                 attempt,
@@ -402,7 +402,7 @@ async def _verify_matches_liveness(
 
 async def run_baseline_eval(
     baseline: OptSearchPoint,
-    eval_data: list,
+    dataset: list,
     backend_client: BackendClient,
     pipeline_params: dict | None = None,
     store: ProjectStore | None = None,
@@ -410,7 +410,7 @@ async def run_baseline_eval(
     experiment_id: str = "",
     on_result: Callable | None = None,
     obs: Any | None = None,
-    session_terms: list[str] | None = None,
+    index_terms: list[str] | None = None,
     prompt_node: str = "",
     pipeline_schema: Any | None = None,
 ) -> tuple[list, list]:
@@ -418,13 +418,13 @@ async def run_baseline_eval(
 
     Args:
         baseline: Baseline OptSearchPoint.
-        eval_data: Evaluation data. If empty and store+experiment_id are
+        dataset: Evaluation data. If empty and store+experiment_id are
             provided, attempts to load from store.
         backend_client: BackendClient for evaluation.
         pipeline_params: Optional pipeline parameter overrides.
         store: Optional ProjectStore.
         backend_id: Backend identifier.
-        experiment_id: Experiment to load eval data from if eval_data is empty.
+        experiment_id: Experiment to load eval data from if dataset is empty.
         on_result: Optional callback for progress reporting.
         obs: Optional ObsLogger for dataset registration.
         pipeline_schema: Optional PipelineSchema for composite scoring.
@@ -438,22 +438,22 @@ async def run_baseline_eval(
     from promptpotter.models.eval_context import EvalContext
     from promptpotter.services.eval_gateway import eval_search_point
 
-    if not eval_data and store and experiment_id:
+    if not dataset and store and experiment_id:
         from promptpotter.services.search.eval_dataset import load_eval_dataset
 
-        eval_data = load_eval_dataset(store, backend_id, experiment_id)
+        dataset = load_eval_dataset(store, backend_id, experiment_id)
 
-    if not eval_data:
+    if not dataset:
         raise RuntimeError(
             "No evaluation data available. "
             "Generate data first (e.g. load from DatasetStore or sync from backend)."
         )
 
     # Initialize backend session so /matches doesn't 400
-    if session_terms:
-        await backend_client.init_session(session_terms)
+    if index_terms:
+        await backend_client.init_session(index_terms)
         await _wait_session_ready(backend_client)
-        await _verify_matches_liveness(backend_client, probe_query=session_terms[0])
+        await _verify_matches_liveness(backend_client, probe_query=index_terms[0])
     else:
         logger.warning(
             "No session terms available — /matches calls will fail. "
@@ -461,11 +461,11 @@ async def run_baseline_eval(
         )
 
     # Register dataset items in obs if available
-    if obs and eval_data:
+    if obs and dataset:
         from promptpotter.shared.errors import graceful
 
         with graceful("Dataset registration in run_baseline_eval failed"):
-            obs.register_dataset(DATASET_NAME, eval_data)
+            obs.register_dataset(DATASET_NAME, dataset)
 
     _steps = (pipeline_params or {}).get("steps", [])
     sp = baseline.to_job_search_point(
@@ -483,7 +483,7 @@ async def run_baseline_eval(
     )
     baseline_results, scores, _cached = await eval_search_point(
         sp,
-        eval_data,
+        dataset,
         ctx,
         label="Baseline",
         on_result=on_result,
@@ -514,24 +514,24 @@ async def prepare_eval_context(
     pipeline_schema: PipelineSchema | None = None,
     svc: Any = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
-    """Load baseline prompt, set eval_data, optionally run baseline.
+    """Load baseline prompt, set dataset, optionally run baseline.
 
     Pure orchestration — no display.  The notebook wrapper adds print
     statements on top.
 
     Returns:
-        (baseline, eval_data, campaign_rounds, baseline_results)
+        (baseline, dataset, campaign_rounds, baseline_results)
     """
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
     baseline = load_baseline_prompt(exp_data, prompt_node_names=prompt_nodes)
-    eval_data = train_data or []
+    dataset = train_data or []
 
     campaign_rounds: list = []
     baseline_results: list = []
     if run_baseline and campaign_config is not None and svc is not None:
         campaign_rounds, baseline_results = await run_baseline_eval(
             baseline,
-            eval_data,
+            dataset,
             svc.backend_client,
             pipeline_params=pipeline_params,
             store=svc.store,
@@ -539,7 +539,7 @@ async def prepare_eval_context(
             pipeline_schema=pipeline_schema,
         )
 
-    return baseline, eval_data, campaign_rounds, baseline_results
+    return baseline, dataset, campaign_rounds, baseline_results
 
 
 @dataclass
@@ -547,7 +547,7 @@ class DatasetSummary:
     """Return from ``prepare_datasets()``."""
 
     train_data: list[dict] | None
-    session_terms: list[str]
+    index_terms: list[str]
     splits: dict[str, list[dict]]
     n_unique_queries: int
 
@@ -565,7 +565,7 @@ def prepare_datasets(
     summary table.
 
     Returns:
-        DatasetSummary with train_data, session_terms, splits dict, and unique query count.
+        DatasetSummary with train_data, index_terms, splits dict, and unique query count.
     """
     from promptpotter.services.dataset_builder import (
         SHEET_COLUMN_MAP,
@@ -591,7 +591,7 @@ def prepare_datasets(
         splits[name] = ds["items"] if ds and ds.get("items") else []
 
     train_data = splits["train"] or None
-    session_terms = build_all_session_terms(store, backend_id)
+    index_terms = build_all_index_terms(store, backend_id)
 
     all_queries: set[str] = set()
     for items in splits.values():
@@ -602,13 +602,13 @@ def prepare_datasets(
 
     return DatasetSummary(
         train_data=train_data,
-        session_terms=session_terms,
+        index_terms=index_terms,
         splits=splits,
         n_unique_queries=len(all_queries),
     )
 
 
-def build_all_session_terms(
+def build_all_index_terms(
     store: ProjectStore,
     backend_id: str,
 ) -> list[str]:

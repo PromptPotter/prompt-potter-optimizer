@@ -46,7 +46,7 @@ class OptimizationConfig(TypedDict, total=False):
 
 
 class EvalLLMConfig(TypedDict, total=False):
-    """LLM provider settings (``campaign_config["eval_llm"]``)."""
+    """LLM provider settings (``campaign_config["optimizer_llm"]``)."""
 
     model: str
     provider: str
@@ -79,7 +79,7 @@ class CampaignConfig(TypedDict, total=False):
     pipeline_overrides: dict
     pipeline_params: dict | None
     optimization: OptimizationConfig
-    eval_llm: EvalLLMConfig
+    optimizer_llm: EvalLLMConfig
     smart_search: SmartSearchConfig
 
 
@@ -107,7 +107,7 @@ class RunConfig(BaseModel):
         default_factory=tuple,
         description="Immutable active node sequence — authoritative source of pipeline composition",
     )
-    session_terms: list[str] | None = Field(None, description="Backend session terms")
+    index_terms: list[str] | None = Field(None, description="Backend session terms")
     session_id: str = Field("", description="Session ID for persistence emitter")
     sample_size: int = Field(0, description="Subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
@@ -192,7 +192,7 @@ class RunConfig(BaseModel):
         backend_id: str = "",
         project_root: str = "",
         pipeline_params: dict | None = None,
-        session_terms: list[str] | None = None,
+        index_terms: list[str] | None = None,
         session_id: str = "",
         pipeline_schema: PipelineSchema | None = None,
         scan_context: ScanContext | None = None,
@@ -204,20 +204,20 @@ class RunConfig(BaseModel):
         connector profile (e.g. just ``exclude_nodes``) is valid input.
         """
         opt = campaign_config.get("optimization", {})
-        eval_llm = campaign_config.get("eval_llm", {})
+        optimizer_llm = campaign_config.get("optimizer_llm", {})
         return cls(
             max_rounds=opt.get("max_rounds", 10),
             l1_patience=opt.get("patience", 3),
             n_variants=opt.get("n_variants", 5),
             creativity=opt.get("creativity", 0.7),
             improvement_threshold=opt.get("improvement_threshold", 0.01),
-            model=eval_llm.get("model"),
+            model=optimizer_llm.get("model"),
             backend_url=backend_url,
             backend_id=backend_id,
             project_root=project_root,
             pipeline_params=pipeline_params,
             active_steps=tuple(pipeline_params.get("steps", [])) if pipeline_params else (),
-            session_terms=session_terms,
+            index_terms=index_terms,
             session_id=session_id,
             sample_size=campaign_config.get("sample_size", 0),
             seed=opt.get("seed", 42),

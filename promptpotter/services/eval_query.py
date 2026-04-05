@@ -180,7 +180,7 @@ async def eval_query_via_backend(
                 query, ground_truth, precomputed, _target_steps, pipeline_schema,
             )
 
-        resp = await backend_client.run_match(
+        resp = await backend_client.run_query(
             query,
             pipeline_params=pipeline_params,
             precomputed=precomputed,

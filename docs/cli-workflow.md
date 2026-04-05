@@ -115,15 +115,15 @@ Generate paper-ready supplemental materials from completed campaigns:
 ```bash
 # Supplemental materials as markdown (tables, CI, significance, reproducibility)
 python -m promptpotter.cli.export_results supplemental \
-    --backend-id termnorm --output supplemental.md
+    --backend-id local --output supplemental.md
 
 # Structured JSON for paper repositories
 python -m promptpotter.cli.export_results json \
-    --backend-id termnorm --output paper_results.json
+    --backend-id local --output paper_results.json
 
 # Export specific campaigns only
 python -m promptpotter.cli.export_results supplemental \
-    --backend-id termnorm \
+    --backend-id local \
     --campaigns campaign_001,campaign_002 \
     --output supplemental.md
 ```
@@ -162,7 +162,7 @@ python -m promptpotter.cli.campaign_runner results
 
 # 7. Export for paper
 python -m promptpotter.cli.export_results supplemental \
-    --backend-id termnorm --output supplemental.md
+    --backend-id local --output supplemental.md
 ```
 
 ---

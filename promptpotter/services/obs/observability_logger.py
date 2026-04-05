@@ -257,24 +257,24 @@ class ObsLogger:
     # --- Cloud Langfuse helpers (each handles its own try/except) ---
 
     def _cloud_register_dataset(
-        self, dataset_name: str, eval_data: list[dict], query_to_item_id: dict[str, str],
+        self, dataset_name: str, dataset: list[dict], query_to_item_id: dict[str, str],
     ) -> None:
         if not self._cloud_lf:
             return
         try:
-            if len(eval_data) > 100:
+            if len(dataset) > 100:
                 logger.warning(
                     "Skipping Langfuse cloud dataset registration for %d items "
                     "(rate-limit risk). Use the dedicated Langfuse sync cell instead.",
-                    len(eval_data),
+                    len(dataset),
                 )
                 return
             self._cloud_lf.create_dataset(
                 name=dataset_name,
                 description="Ground truth queries for prompt evaluation",
-                metadata={"n_items": len(eval_data)},
+                metadata={"n_items": len(dataset)},
             )
-            for entry in eval_data:
+            for entry in dataset:
                 query = entry.get("query", "")
                 ground_truth = entry.get("ground_truth", "")
                 if not query:
@@ -283,7 +283,7 @@ class ObsLogger:
                     dataset_name=dataset_name,
                     input={"query": query},
                     expected_output=ground_truth,
-                    metadata={"source": "eval_data"},
+                    metadata={"source": "dataset"},
                 )
                 if cloud_id:
                     query_to_item_id[query] = cloud_id
@@ -449,7 +449,7 @@ class ObsLogger:
                     "parent_id": parent_id,
                 },
                 output={
-                    "family": "ranking_prompt",
+                    "family": "optimizer_prompt",
                     "version": prompt_fields_id[:8] if prompt_fields_id else "unknown",
                 },
                 metadata={"layer1_fields": layer1_fields},
@@ -498,7 +498,7 @@ class ObsLogger:
     def register_dataset(
         self,
         dataset_name: str,
-        eval_data: list[dict],
+        dataset: list[dict],
     ) -> dict[str, str]:
         """Register dataset items in file store and cloud Langfuse."""
         if not self._enabled:
@@ -510,7 +510,7 @@ class ObsLogger:
             ds_dir = self.obs_root / "langfuse" / "datasets" / dataset_name
             ds_dir.mkdir(parents=True, exist_ok=True)
 
-            for entry in eval_data:
+            for entry in dataset:
                 query = entry.get("query", "")
                 ground_truth = entry.get("ground_truth", "")
                 if not query:
@@ -529,23 +529,23 @@ class ObsLogger:
                 write_json(ds_dir / f"{item_id}.json", item_data)
                 query_to_item_id[query] = item_id
 
-            n_skipped = len(eval_data) - len(query_to_item_id)
+            n_skipped = len(dataset) - len(query_to_item_id)
             if n_skipped > 0:
                 logger.debug(
                     "Dataset '%s': %d items registered, %d duplicates/empty "
                     "skipped (from %d input)",
-                    dataset_name, len(query_to_item_id), n_skipped, len(eval_data),
+                    dataset_name, len(query_to_item_id), n_skipped, len(dataset),
                 )
 
             self._log_event({
                 "event": "dataset_registered",
                 "dataset_name": dataset_name,
                 "n_items": len(query_to_item_id),
-                "n_input": len(eval_data),
+                "n_input": len(dataset),
                 "n_skipped": n_skipped,
             })
 
-            self._cloud_register_dataset(dataset_name, eval_data, query_to_item_id)
+            self._cloud_register_dataset(dataset_name, dataset, query_to_item_id)
 
         except Exception:
             logger.warning("ObsLogger.register_dataset failed", exc_info=True)
@@ -842,7 +842,7 @@ class ObsLogger:
         if not self._enabled:
             return None
         try:
-            family = "ranking_prompt"
+            family = "optimizer_prompt"
             version = prompt_fields_id[:8] if prompt_fields_id else "unknown"
             prompt_dir = self.obs_root / "prompts" / family / version
 

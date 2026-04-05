@@ -645,7 +645,7 @@ async def advise_scan_config(
     if truncated:
         logger.warning(
             "Scan advisor response truncated (finish_reason=%s, max_tokens=%d). "
-            "Increase max_tokens in eval_llm config.",
+            "Increase max_tokens in optimizer_llm config.",
             response.finish_reason,
             max_tokens,
         )
@@ -653,7 +653,7 @@ async def advise_scan_config(
     advisory = response.parsed
     if advisory is None:
         reason = (
-            f"Response truncated at {max_tokens} tokens — increase max_tokens in eval_llm config."
+            f"Response truncated at {max_tokens} tokens — increase max_tokens in optimizer_llm config."
             if truncated
             else "LLM response was not valid JSON"
         )

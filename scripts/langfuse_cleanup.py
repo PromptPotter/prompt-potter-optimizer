@@ -33,7 +33,7 @@ LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
 SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
 
-DATASET_NAME = "termnorm_ground_truth"
+DATASET_NAME = "ground_truth"
 
 # Trace names to DELETE (exact match or prefix match for round_*)
 JUNK_TRACE_NAMES = {"a", "b", "evaluate", "grow", "candidate_ranker",

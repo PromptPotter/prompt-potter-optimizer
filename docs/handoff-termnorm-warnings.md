@@ -30,7 +30,7 @@ Each item in `diagnostics.warnings[]` must be:
 
 | Consumer | What it reads | Effect |
 |----------|--------------|--------|
-| **`_is_degraded()`** (`prompt_eval.py`) | `bool(diagnostics.warnings)` — any non-empty list | Triggers stale data protocol on all degraded queries (cached and fresh) |
+| **`is_degraded()`** (`stale_data.py`) | `bool(diagnostics.warnings)` — any non-empty list | Triggers stale data protocol on all degraded queries (cached and fresh) |
 | **`count_degraded_queries()`** (`metrics.py`) | Count of results with non-empty warnings | Invalidates full-run cache when >0; feeds composite score |
 | **`DegradationCheck`** (`escalation.py`) | `degraded_rate = count / total` | Aborts evaluation mid-round if rate >= threshold (default 0.4) → escalates to L2/L3 |
 | **`extract_warning_types()`** (`critique.py`) | `"{step}:{code}"` strings | Classifies warning type for escalation routing (e.g., `web_search:partial_scrape` → L2) |
@@ -102,7 +102,9 @@ PromptPotter has no backward compatibility constraint. Once TermNorm fixes the w
 
 | File | What it does with warnings |
 |------|---------------------------|
-| `promptpotter/services/prompt_eval.py` | `_is_degraded()`, `_execute_stale_data_protocol()`, cache invalidation |
+| `promptpotter/services/stale_data.py` | `is_degraded()`, `execute_stale_data_protocol()` |
+| `promptpotter/services/eval_query.py` | Single-query evaluation, cache walk, error classification |
+| `promptpotter/services/eval_gateway.py` | Batch orchestration, stale data integration, dataset archival |
 | `promptpotter/services/metrics.py` | `count_degraded_queries()` |
 | `promptpotter/services/campaign/escalation.py` | `DegradationCheck`, `DEFAULT_STRATEGIES` routing |
 | `promptpotter/services/campaign/critique.py` | `extract_warning_types()`, warning inventory |

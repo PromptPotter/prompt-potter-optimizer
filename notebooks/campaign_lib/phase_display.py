@@ -345,7 +345,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_dbox_line(
         f"Candidates     {d.get('n_variants', 0)}"))
     sample = d.get("sample_size", 0)
-    total = d.get("eval_data_count", 0)
+    total = d.get("dataset_count", 0)
     eff_n = sample if sample else total
     state.baseline_total = eff_n
     sample_label = f"{sample} of {total}" if sample else f"all {total}"

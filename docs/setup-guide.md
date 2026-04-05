@@ -108,11 +108,11 @@ After optimization campaigns complete, generate paper-ready supplemental materia
 ```bash
 # Markdown: comparison tables, convergence, significance tests, reproducibility manifest
 python -m promptpotter.cli.export_results supplemental \
-    --backend-id termnorm --output supplemental.md
+    --backend-id local --output supplemental.md
 
 # JSON: structured data for paper repositories or further analysis
 python -m promptpotter.cli.export_results json \
-    --backend-id termnorm --output paper_results.json
+    --backend-id local --output paper_results.json
 ```
 
 Or from the notebook:

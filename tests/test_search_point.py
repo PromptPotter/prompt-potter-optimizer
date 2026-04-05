@@ -29,11 +29,11 @@ def test_construct_and_frozen():
 def test_content_hash_matches_eval_content_hash():
     # Without extra pipeline params
     sp = _make_jsp("Rank by relevance.")
-    eval_data = [
+    dataset = [
         {"query": "aspirin", "ground_truth": "Aspirin"},
         {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
     ]
-    assert sp.content_hash(eval_data) == eval_content_hash(sp.render(), eval_data, sp.pipeline_params)
+    assert sp.content_hash(dataset) == eval_content_hash(sp.render(), dataset, sp.pipeline_params)
 
     # With extra pipeline params
     osp = OptSearchPoint(instruction="Rank by relevance.")
@@ -44,16 +44,16 @@ def test_content_hash_matches_eval_content_hash():
 
 
 def test_content_hash_differs_with_pipeline_params():
-    eval_data = [{"query": "q", "ground_truth": "a"}]
+    dataset = [{"query": "q", "ground_truth": "a"}]
     sp_a = JobSearchPoint(pipeline_params={"steps": ["llm_ranking"]})
     sp_b = JobSearchPoint(pipeline_params={"steps": ["fuzzy_matching"]})
     sp_none = JobSearchPoint()
-    assert sp_a.content_hash(eval_data) != sp_b.content_hash(eval_data)
-    assert sp_a.content_hash(eval_data) != sp_none.content_hash(eval_data)
+    assert sp_a.content_hash(dataset) != sp_b.content_hash(dataset)
+    assert sp_a.content_hash(dataset) != sp_none.content_hash(dataset)
     # Non-steps params also differ
     sp_t1 = JobSearchPoint(pipeline_params={"ranking_temperature": 0.5})
     sp_t2 = JobSearchPoint(pipeline_params={"ranking_temperature": 0.9})
-    assert sp_t1.content_hash(eval_data) != sp_t2.content_hash(eval_data)
+    assert sp_t1.content_hash(dataset) != sp_t2.content_hash(dataset)
 
 
 def test_derive_pipeline_params():

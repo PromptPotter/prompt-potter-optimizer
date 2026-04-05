@@ -85,12 +85,12 @@ def configure_pipeline(
 def create_llm_client(
     campaign_config: CampaignConfig,
 ) -> tuple[LLMClientBase, str]:
-    """Create LLM client + model from campaign_config['eval_llm'].
+    """Create LLM client + model from campaign_config['optimizer_llm'].
 
     Returns:
         Tuple of (llm_client, model_name).
     """
     from promptpotter.services.llm_client import get_llm_client
 
-    eval_llm = campaign_config["eval_llm"]
-    return get_llm_client(eval_llm["provider"]), eval_llm["model"]
+    optimizer_llm = campaign_config["optimizer_llm"]
+    return get_llm_client(optimizer_llm["provider"]), optimizer_llm["model"]

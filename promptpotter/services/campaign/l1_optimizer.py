@@ -299,7 +299,7 @@ def _select_round_winner(
 
 async def l1_evaluate(
     candidates: list[dict],
-    eval_data: list,
+    dataset: list,
     current_best: dict[str, Any],
     ctx: EvalContext,
     *,
@@ -370,7 +370,7 @@ async def l1_evaluate(
         ctx.candidate_idx = idx
         results, scores, cached = await eval_search_point(
             sp,
-            eval_data,
+            dataset,
             ctx,
             label=f"candidate_{idx}",
             on_result=_on_result,
@@ -378,7 +378,7 @@ async def l1_evaluate(
 
         escalation_signal = scores.pop("escalation_signal", None)
 
-        aborted = bool(escalation_signal) and len(results) < len(eval_data)
+        aborted = bool(escalation_signal) and len(results) < len(dataset)
         all_candidate_results[osp_c.id] = results
         candidate_scores.append(
             {
@@ -392,13 +392,13 @@ async def l1_evaluate(
                 "cached": cached,
                 "escalation_aborted": aborted,
                 "eval_queries": len(results),
-                "expected_queries": len(eval_data),
+                "expected_queries": len(dataset),
             }
         )
         if callbacks and callbacks.on_candidate_eval:
             scores["escalation_aborted"] = aborted
             scores["eval_queries"] = len(results)
-            scores["expected_queries"] = len(eval_data)
+            scores["expected_queries"] = len(dataset)
             callbacks.on_candidate_eval(idx, len(osp_candidates), scores)
 
         if escalation_signal:

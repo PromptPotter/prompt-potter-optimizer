@@ -89,8 +89,8 @@ def _most_common_error_category(results: list) -> ErrorCategory | None:
     return Counter(cats).most_common(1)[0][0]
 
 
-def subsample_eval_data(
-    eval_data: list[dict],
+def subsample_dataset(
+    dataset: list[dict],
     sample_size: int,
     seed: int = 42,
 ) -> list[dict]:
@@ -99,11 +99,11 @@ def subsample_eval_data(
     Returns the full list unchanged if ``sample_size <= 0`` or the dataset
     is already small enough.
     """
-    if sample_size > 0 and len(eval_data) > sample_size:
+    if sample_size > 0 and len(dataset) > sample_size:
         import random
 
-        return random.Random(seed).sample(eval_data, sample_size)
-    return eval_data
+        return random.Random(seed).sample(dataset, sample_size)
+    return dataset
 
 
 def build_dataset_run_data(
@@ -148,12 +148,12 @@ def build_dataset_run_data(
 
 def _fill_remaining_errors(
     results: list[dict],
-    eval_data: list[dict],
+    dataset: list[dict],
     start_idx: int,
     reason: str,
 ) -> None:
     """Append error results for all eval queries from start_idx onward."""
-    for remaining_qd in eval_data[start_idx:]:
+    for remaining_qd in dataset[start_idx:]:
         results.append(
             _error_result(
                 remaining_qd["query"],
@@ -239,13 +239,13 @@ def _run_escalation_checks(
 
 async def _run_eval_batch(
     search_point: JobSearchPoint,
-    eval_data: list,
+    dataset: list,
     backend_client: BackendClient,
     *,
     on_result: Callable[[dict, int, int], None] | None = None,
     ctx: EvalContext | None = None,
 ) -> EvalBatchResult:
-    """Evaluate a prompt on all eval_data queries via the backend.
+    """Evaluate a prompt on all dataset queries via the backend.
 
     Per-node caching is handled inside ``eval_query_via_backend()`` via
     the intermediate cache.  This function drives the query loop, stale
@@ -281,9 +281,9 @@ async def _run_eval_batch(
 
     with graceful_interrupt() as interrupt:
         try:
-            for i, qd in enumerate(eval_data):
+            for i, qd in enumerate(dataset):
                 if interrupt.stop_requested:
-                    logger.debug("Graceful stop after query %d/%d.", len(results), len(eval_data))
+                    logger.debug("Graceful stop after query %d/%d.", len(results), len(dataset))
                     break
 
                 result = await eval_query_via_backend(
@@ -325,13 +325,13 @@ async def _run_eval_batch(
                 if abort_reason:
                     logger.warning(
                         "Aborting eval: %s on query %d. Marking remaining %d queries as errors.",
-                        abort_reason, i + 1, len(eval_data) - i - 1,
+                        abort_reason, i + 1, len(dataset) - i - 1,
                     )
-                    _fill_remaining_errors(results, eval_data, i + 1, abort_reason)
+                    _fill_remaining_errors(results, dataset, i + 1, abort_reason)
                     break
 
                 if on_result is not None:
-                    on_result(result, i, len(eval_data))
+                    on_result(result, i, len(dataset))
 
                 # Escalation checks — run after display
                 esc_signal = _run_escalation_checks(
@@ -340,13 +340,13 @@ async def _run_eval_batch(
                 if esc_signal:
                     raise EscalationError(esc_signal, results)
         except (KeyboardInterrupt, asyncio.CancelledError):
-            logger.warning("Eval batch force-interrupted at query %d/%d.", len(results), len(eval_data))
+            logger.warning("Eval batch force-interrupted at query %d/%d.", len(results), len(dataset))
             return EvalBatchResult(
                 results, completed=False, stop_reason="force",
                 retried_degraded=n_retried, probed_degraded=n_probed, switched_samples=n_switched,
             )
 
-    _log_batch_summary(n_reused, len(eval_data), n_retried, n_probed, n_switched)
+    _log_batch_summary(n_reused, len(dataset), n_retried, n_probed, n_switched)
     stale = {"retried_degraded": n_retried, "probed_degraded": n_probed, "switched_samples": n_switched}
 
     if interrupt.stop_requested:
@@ -398,7 +398,7 @@ def _log_eval_to_obs(
 
 async def eval_search_point(
     search_point: JobSearchPoint,
-    eval_data: list,
+    dataset: list,
     ctx: EvalContext,
     *,
     label: str = "Eval",
@@ -427,7 +427,7 @@ async def eval_search_point(
     obs = ctx.obs
     source = source or ctx.source
 
-    content_hash = search_point.content_hash(eval_data)
+    content_hash = search_point.content_hash(dataset)
 
     # --- evaluate via backend (per-node cache handles all reuse) ---
     safe_label = label.lower().replace(" ", "_")
@@ -460,7 +460,7 @@ async def eval_search_point(
     try:
         batch = await _run_eval_batch(
             search_point,
-            eval_data,
+            dataset,
             backend_client,
             on_result=on_result,
             ctx=ctx,
@@ -473,7 +473,7 @@ async def eval_search_point(
                 logger.info(
                     "Saved partial run (%d/%d queries) for SP %s",
                     len(results),
-                    len(eval_data),
+                    len(dataset),
                     content_hash[:8],
                 )
             raise KeyboardInterrupt()

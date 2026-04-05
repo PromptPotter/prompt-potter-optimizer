@@ -182,8 +182,8 @@ async def scan_advisor(
             print(f"  Task: {task_description[:80].strip()}")
     print(f"  Calling {model or '?'} ...")
 
-    eval_llm = campaign_config.get("eval_llm", {})
-    max_tokens = eval_llm.get("max_tokens", 2000)
+    optimizer_llm = campaign_config.get("optimizer_llm", {})
+    max_tokens = optimizer_llm.get("max_tokens", 2000)
 
     advisory = await _advise_scan_config(
         pipeline_schema=pipeline_schema,

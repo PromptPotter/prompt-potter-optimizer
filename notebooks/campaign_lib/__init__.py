@@ -93,7 +93,7 @@ from .search_variants import (
     show_variant_library,
 )
 from .setup import (
-    build_all_session_terms,
+    build_all_index_terms,
     configure_langfuse,
     configure_pipeline,
     decompose_task_context,
@@ -112,7 +112,7 @@ from .setup import (
 
 __all__ = [
     # Setup
-    "build_all_session_terms",
+    "build_all_index_terms",
     "configure_langfuse",
     "configure_pipeline",
     "decompose_task_context",

@@ -109,7 +109,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
         "pipeline_params": pipeline_params,
         "active_steps": active,
         "baseline_prompt_fields": {},
-        "eval_data_count": 0,
+        "dataset_count": 0,
         "baseline_accuracy": 0.0,
         "task_context": None,
         "scan_variants": None,
@@ -128,7 +128,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
     elif session.queries:
         train_data = session.queries
 
-    baseline, eval_data, campaign_rounds, _br = await prepare_eval_context(
+    baseline, dataset, campaign_rounds, _br = await prepare_eval_context(
         session, train_data, campaign_config,
         run_baseline=args.run_baseline, pipeline_params=pipeline_params,
     )
@@ -136,7 +136,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
     # Update session with baseline results
     baseline_acc = campaign_rounds[-1]["accuracy"] if campaign_rounds else 0.0
     state["baseline_prompt_fields"] = baseline.prompt_field_dict()
-    state["eval_data_count"] = len(eval_data)
+    state["dataset_count"] = len(dataset)
     state["baseline_accuracy"] = baseline_acc
     session.store.sessions.save(bid, sid, state)
 
@@ -146,7 +146,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
 ## Setup
 - Backend: {args.backend_id} @ {args.backend_url}
 - Active steps: {', '.join(active)} ({excl_str})
-- Eval data: {len(eval_data)} queries
+- Eval data: {len(dataset)} queries
 - Baseline: {baseline_acc:.1%}""")
 
     if getattr(args, "json_output", False):
@@ -155,13 +155,13 @@ async def cmd_init(args: argparse.Namespace) -> None:
             "backend_id": bid,
             "phase": state["phase"],
             "baseline_accuracy": baseline_acc,
-            "eval_data_count": len(eval_data),
+            "dataset_count": len(dataset),
             "active_steps": active,
             "excluded_nodes": excluded,
         }, indent=2, default=str))
     else:
         print(f"\nSession created: {sid}")
-        print(f"Baseline: {baseline_acc:.1%} ({len(eval_data)} queries)")
+        print(f"Baseline: {baseline_acc:.1%} ({len(dataset)} queries)")
 
 
 async def cmd_task_context(args: argparse.Namespace) -> None:
@@ -297,7 +297,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     # Re-run baseline (fast — cached) to populate baseline_results for critique
     _has_baseline = state.get("baseline_accuracy", 0) > 0
-    _baseline, eval_data, campaign_rounds, baseline_results = await prepare_eval_context(
+    _baseline, dataset, campaign_rounds, baseline_results = await prepare_eval_context(
         session, train_data, campaign_config,
         pipeline_params=pipeline_params,
         run_baseline=_has_baseline,
@@ -325,7 +325,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         axis_profiles = scan_data["axis_profiles"]
 
     scan_context = show_feedback_preflight(
-        campaign_rounds, eval_data, campaign_config,
+        campaign_rounds, dataset, campaign_config,
         pipeline_params=pipeline_params, pipeline_schema=session.pipeline_schema,
         scan_df=scan_df, axis_profiles=axis_profiles,
         scan_variants=state.get("scan_variants"),
@@ -357,7 +357,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     try:
         campaign_rounds, cycle_result = await run_optimization_notebook(
-            campaign_rounds, eval_data, campaign_config,
+            campaign_rounds, dataset, campaign_config,
             session=session, pipeline_params=pipeline_params,
             scan_context=scan_context,
             experiment_id=state.get("experiment_id"),
@@ -552,7 +552,7 @@ async def cmd_status(args: argparse.Namespace) -> None:
             "backend_id": bid,
             "backend_url": state["init_params"]["backend_url"],
             "baseline_accuracy": state.get("baseline_accuracy", 0),
-            "eval_data_count": state.get("eval_data_count"),
+            "dataset_count": state.get("dataset_count"),
         }
         import contextlib
 
@@ -573,7 +573,7 @@ async def cmd_status(args: argparse.Namespace) -> None:
     print(f"Session: {sid}")
     print(f"Phase: {state['phase']}")
     print(f"Backend: {bid} @ {state['init_params']['backend_url']}")
-    print(f"Eval data: {state.get('eval_data_count', '?')} queries")
+    print(f"Eval data: {state.get('dataset_count', '?')} queries")
     print(f"Baseline: {state.get('baseline_accuracy', 0):.1%}")
 
     # Live dashboard from campaign_state.json
@@ -629,7 +629,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_init = sub.add_parser("init", help="Initialize services and create session")
     p_init.add_argument("--backend-url", default="http://127.0.0.1:8000")
-    p_init.add_argument("--backend-id", default="termnorm-local")
+    p_init.add_argument("--backend-id", default="local")
     p_init.add_argument("--experiment-id", default="1_production_historical")
     p_init.add_argument("--dataset-name", default=None)
     p_init.add_argument("--excel-path", default=None)
@@ -659,7 +659,7 @@ def build_parser() -> argparse.ArgumentParser:
     ctl_mode.add_argument("--no-pause-l2", action="store_true", help="Disable L2 pause")
 
     p_prof = sub.add_parser("profile", help="Manage connector profile (per-backend defaults)")
-    p_prof.add_argument("--backend-id", default="termnorm-local")
+    p_prof.add_argument("--backend-id", default="local")
     prof_mode = p_prof.add_mutually_exclusive_group()
     prof_mode.add_argument("--show", action="store_true", default=True, help="Show profile (default)")
     prof_mode.add_argument("--save", action="store_true", help="Save active session config as profile")

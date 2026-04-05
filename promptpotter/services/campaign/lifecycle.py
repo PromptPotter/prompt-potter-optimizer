@@ -28,7 +28,7 @@ __all__ = ["cycle_config_identity", "finalize_campaign", "init_campaign"]
 def cycle_config_identity(
     config: RunConfig,
     baseline_rendered: str,
-    eval_data: list[dict],
+    dataset: list[dict],
 ) -> str:
     """Compute a stable identity hash for a feedback cycle configuration.
 
@@ -48,9 +48,9 @@ def cycle_config_identity(
             "seed": config.seed,
             "active_steps": list(config.active_steps),
             "baseline_rendered": baseline_rendered,
-            "eval_data_pairs": sorted(
+            "dataset_pairs": sorted(
                 (d.get("query", ""), d.get("ground_truth", ""))
-                for d in eval_data
+                for d in dataset
             ),
         },
         sort_keys=True,
@@ -61,7 +61,7 @@ def cycle_config_identity(
 
 def init_campaign(
     config: RunConfig,
-    eval_data: list[dict],
+    dataset: list[dict],
     current_ps: dict,
     baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
@@ -94,7 +94,7 @@ def init_campaign(
             else:
                 bl_ps = baseline_prompt_fields if baseline_prompt_fields is not None else current_ps
                 bl_osp = OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
-                cycle_id = cycle_config_identity(config, bl_osp.render(), eval_data)
+                cycle_id = cycle_config_identity(config, bl_osp.render(), dataset)
             logger.debug("Cycle identity: %s", cycle_id)
 
             existing = campaign_store.load(config.backend_id, cycle_id)
@@ -156,7 +156,7 @@ def init_campaign(
                 session_id=langfuse_session_id,
             )
         try:
-            dataset_item_map = obs.register_dataset(DATASET_NAME, eval_data)
+            dataset_item_map = obs.register_dataset(DATASET_NAME, dataset)
             if dataset_item_map:
                 logger.debug(
                     "Registered %d dataset items for '%s'",

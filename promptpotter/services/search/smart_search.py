@@ -144,7 +144,7 @@ def _profiles_from_rows(
 
 
 def _make_eval_fn(
-    eval_data: list,
+    dataset: list,
     ctx: EvalContext,
     get_params: Callable[[], dict],
     on_result: Callable | None = None,
@@ -169,7 +169,7 @@ def _make_eval_fn(
             prompt_node=_pn,
         )
         results, scores, cached = await eval_search_point(
-            sp, eval_data, ctx,
+            sp, dataset, ctx,
             label="scan",
             on_result=on_result,
         )
@@ -183,7 +183,7 @@ def _make_eval_fn(
 
 
 def build_diagnostic_set(
-    eval_data: list,
+    dataset: list,
     baseline_results: list,
     n_queries: int = DEFAULT_DIAGNOSTIC_QUERIES,
     seed: int = 42,
@@ -192,7 +192,7 @@ def build_diagnostic_set(
     """Stratified query set: ~75% baseline hits (regression guard) + ~25% misses.
 
     Args:
-        eval_data: Full evaluation dataset (list of query dicts).
+        dataset: Full evaluation dataset (list of query dicts).
         baseline_results: Results from baseline evaluation (list of result dicts
             with ``hit`` and ``query`` keys).
         n_queries: Number of queries in the diagnostic set.
@@ -204,10 +204,10 @@ def build_diagnostic_set(
     Raises:
         ValueError: If fewer than ``MIN_DIAGNOSTIC_QUERIES`` queries available.
     """
-    if len(eval_data) < MIN_DIAGNOSTIC_QUERIES:
+    if len(dataset) < MIN_DIAGNOSTIC_QUERIES:
         raise ValueError(
             f"Need at least {MIN_DIAGNOSTIC_QUERIES} eval queries, "
-            f"got {len(eval_data)}."
+            f"got {len(dataset)}."
         )
 
     # Auto-adjust sample size for statistical power (Wave 2a)
@@ -216,7 +216,7 @@ def build_diagnostic_set(
 
         min_n = min_sample_size(SCAN_TARGET_MDE)
         if n_queries < min_n:
-            adjusted = min(min_n, len(eval_data))
+            adjusted = min(min_n, len(dataset))
             if adjusted > n_queries:
                 logger.warning(
                     "Scan sample size %d too small to detect %.0f%% effect "
@@ -227,8 +227,8 @@ def build_diagnostic_set(
     except ImportError:
         pass  # scipy not installed — skip auto-adjustment
 
-    # Map queries to eval_data items
-    query_to_eval = {d["query"]: d for d in eval_data}
+    # Map queries to dataset items
+    query_to_eval = {d["query"]: d for d in dataset}
 
     hits = []
     misses = []
@@ -243,10 +243,10 @@ def build_diagnostic_set(
 
     rng = random.Random(seed)
 
-    # Fallback: no baseline results — sample randomly from eval_data
+    # Fallback: no baseline results — sample randomly from dataset
     if not hits and not misses:
-        n = min(n_queries, len(eval_data))
-        diagnostic = rng.sample(eval_data, n)
+        n = min(n_queries, len(dataset))
+        diagnostic = rng.sample(dataset, n)
         summary = {
             "n_queries": len(diagnostic),
             "n_hits": 0,

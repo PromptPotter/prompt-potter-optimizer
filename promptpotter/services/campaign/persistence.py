@@ -56,7 +56,7 @@ def apply_experiment_overrides(
         "max_rounds": ("optimization",),
         "n_variants": ("optimization",),
         "creativity": ("optimization",),
-        "model": ("eval_llm",),
+        "model": ("optimizer_llm",),
         "sample_size": (),
     }
     for key, path in _OVERRIDE_KEYS.items():

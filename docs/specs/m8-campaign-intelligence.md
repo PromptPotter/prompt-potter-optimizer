@@ -51,7 +51,7 @@ New function `extract_sample_diagnostics(result, pipeline_schema) -> dict[str, f
 
 **Extends existing pattern:**
 - `NODE_TYPE_METRICS` (`pipeline_schema.py:141`) already maps node type → metrics → `pipeline_data_key`
-- `_parse_backend_response()` (`prompt_eval.py:130`) already collects everything the schema describes
+- `_parse_backend_response()` (`eval_query.py`) already collects everything the schema describes
 - Same registry, same keys, per-result instead of aggregate
 
 **Location:** `promptpotter/services/metrics.py` (alongside existing `compute_pipeline_metrics()`)
@@ -253,7 +253,7 @@ Per-node caching replaces the current multi-layer cache stack:
 
 | Layer | Current | After refactor |
 |-------|---------|----------------|
-| Full-run content-hash dedup | `content_hash(prompt + eval_data + pp)` in dataset_run_store | **Removed** — per-node cache inherently deduplicates |
+| Full-run content-hash dedup | `content_hash(prompt + dataset + pp)` in dataset_run_store | **Removed** — per-node cache inherently deduplicates |
 | Per-query config cache | `config_hash(normalized_pp + rp_hash)` + `find_cached_queries()` | **Removed** — replaced by per-node prefix walk |
 | Intermediate cache | `_steps_hash(steps + pp)` whole-sequence keying | **Replaced** — per-node keying with chained dependency |
 | Dataset run store | Cache lookup + archive | **Archive only** — write history for SearchMemory/campaigns, no lookup during eval |
@@ -353,7 +353,7 @@ Wave 1 ✅  Wave 2 ✅  Wave 3 ✅  Wave 4 ✅
 | `NODE_TYPE_METRICS` | Maps node_type → metrics → pipeline_data_key | `promptpotter/models/pipeline_schema.py:141` |
 | `IntermediateMetric` | Per-type metric definition | `promptpotter/models/pipeline_schema.py` |
 | `compute_pipeline_metrics()` | Aggregate metrics from node types | `promptpotter/services/metrics.py:99` |
-| `_parse_backend_response()` | Assembles per-query pipeline_data from schema | `promptpotter/services/prompt_eval.py:130` |
+| `_parse_backend_response()` | Assembles per-query pipeline_data from schema | `promptpotter/services/eval_query.py` |
 | `obs_extraction_map()` | Schema -> observation mapping | `promptpotter/models/pipeline_schema.py` |
 | `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `promptpotter/services/search/_stats.py` (re-exported by `notebooks/campaign_lib/stats.py`) |
 | `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `promptpotter/services/search/smart_search.py:169` |

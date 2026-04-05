@@ -193,7 +193,7 @@ def show_experiment_dashboard(
     *,
     experiment_id: str | None = None,
     campaign_config: CampaignConfig | None = None,
-    eval_data: list | None = None,
+    dataset: list | None = None,
     pipeline_params: dict | None = None,
     baseline_prompt_fields: dict | None = None,
     session: BackendSession | None = None,
@@ -223,7 +223,7 @@ def show_experiment_dashboard(
 
     # --- Detect active campaign from current config ---
     active_id = None
-    if campaign_config is not None and eval_data is not None:
+    if campaign_config is not None and dataset is not None:
         try:
             from promptpotter.services.campaign.config import RunConfig
             from promptpotter.services.campaign.lifecycle import cycle_config_identity
@@ -234,7 +234,7 @@ def show_experiment_dashboard(
             bl_rendered = ""
             if baseline_prompt_fields:
                 bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
-            active_id = cycle_config_identity(config, bl_rendered, eval_data)
+            active_id = cycle_config_identity(config, bl_rendered, dataset)
         except Exception:
             logger.debug("Could not compute active campaign ID", exc_info=True)
 

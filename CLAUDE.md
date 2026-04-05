@@ -29,8 +29,8 @@ python -m promptpotter.cli.campaign_runner optimize --evaluate # resume evaluati
 python -m promptpotter.cli.campaign_runner optimize --auto     # full loop, no pause
 
 # Export results (paper supplemental materials)
-python -m promptpotter.cli.export_results supplemental --backend-id termnorm -o supplemental.md
-python -m promptpotter.cli.export_results json --backend-id termnorm -o paper_results.json
+python -m promptpotter.cli.export_results supplemental --backend-id local -o supplemental.md
+python -m promptpotter.cli.export_results json --backend-id local -o paper_results.json
 ```
 
 ## CLI Workflow
@@ -76,7 +76,7 @@ See [`docs/architecture.md`](docs/architecture.md) for diagrams, caching, pipeli
 
 ## Data Model Reference
 
-All services follow: `f(SearchPoint, PipelineSchema, eval_data) → scores`.
+All services follow: `f(SearchPoint, PipelineSchema, dataset) → scores`.
 
 ```
 SearchPoint (abstract — render())

@@ -25,7 +25,7 @@ MIN_ROUNDS_FOR_ADAPTATION = 3
 
 
 def adapt_eval_set(
-    current_eval_data: list[dict],
+    current_dataset: list[dict],
     query_difficulty: QueryDifficulty,
     full_pool: list[dict],
     *,
@@ -34,17 +34,17 @@ def adapt_eval_set(
     """Replace dead queries with discriminating ones from the full pool.
 
     Args:
-        current_eval_data: Current evaluation subset.
+        current_dataset: Current evaluation subset.
         query_difficulty: Precomputed difficulty classification.
         full_pool: Full evaluation dataset to draw replacements from.
         seed: Random seed for reproducible sampling.
 
     Returns:
-        Tuple of (new_eval_data, summary_dict).
+        Tuple of (new_dataset, summary_dict).
     """
-    current_queries = {d["query"] for d in current_eval_data}
+    current_queries = {d["query"] for d in current_dataset}
     pool_by_query = {d["query"]: d for d in full_pool}
-    n_original = len(current_eval_data)
+    n_original = len(current_dataset)
     max_drop = max(1, int(n_original * MAX_DROP_FRACTION))
 
     # Find dead queries in current eval set
@@ -60,7 +60,7 @@ def adapt_eval_set(
     ]
 
     if not to_drop or not disc_available:
-        return current_eval_data, {"dropped": 0, "added": 0, "unchanged": True}
+        return current_dataset, {"dropped": 0, "added": 0, "unchanged": True}
 
     rng = random.Random(seed)
     rng.shuffle(disc_available)
@@ -69,7 +69,7 @@ def adapt_eval_set(
 
     # Build new eval set — only drop as many as we can replace
     drop_set = set(to_drop[:n_swap])
-    new_data = [d for d in current_eval_data if d["query"] not in drop_set]
+    new_data = [d for d in current_dataset if d["query"] not in drop_set]
     for q in replacements:
         new_data.append(pool_by_query[q])
 

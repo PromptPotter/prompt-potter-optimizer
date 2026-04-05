@@ -46,7 +46,7 @@ def _extract_eval_from_traces(
     if not traces:
         return []
 
-    eval_data = []
+    dataset = []
     for trace in traces:
         query = (trace.get("input") or {}).get("query", "")
         if not query:
@@ -93,14 +93,14 @@ def _extract_eval_from_traces(
                 pipeline_data["total_time"] = score["value"] / 1000.0
                 break
 
-        eval_data.append({
+        dataset.append({
             "query": query,
             "ground_truth": ground_truth,
             "pipeline_data": pipeline_data,
             "status": "success",
         })
 
-    return eval_data
+    return dataset
 
 
 def load_eval_dataset(
@@ -125,12 +125,12 @@ def load_eval_dataset(
         if schema is None:
             from promptpotter.models.pipeline_schema import PipelineSchema
             schema = PipelineSchema()
-        eval_data = _extract_eval_from_traces(exp_data, schema=schema)
-        if eval_data:
-            if sample_size > 0 and len(eval_data) > sample_size:
+        dataset = _extract_eval_from_traces(exp_data, schema=schema)
+        if dataset:
+            if sample_size > 0 and len(dataset) > sample_size:
                 rng = random.Random(42)
-                eval_data = rng.sample(eval_data, sample_size)
-            return eval_data
+                dataset = rng.sample(dataset, sample_size)
+            return dataset
 
     executions = store.backends.list_executions(backend_id)
     for ex_summary in executions:
@@ -140,16 +140,16 @@ def load_eval_dataset(
             )
             if execution:
                 req_key = schema.required_pipeline_key()
-                eval_data = [
+                dataset = [
                     r.model_dump() for r in execution.results
                     if r.status == "success"
                     and r.pipeline_data
                     and r.pipeline_data.get(req_key)
                 ]
-                if eval_data:
-                    if sample_size > 0 and len(eval_data) > sample_size:
+                if dataset:
+                    if sample_size > 0 and len(dataset) > sample_size:
                         rng = random.Random(42)
-                        eval_data = rng.sample(eval_data, sample_size)
-                    return eval_data
+                        dataset = rng.sample(dataset, sample_size)
+                    return dataset
 
     return []

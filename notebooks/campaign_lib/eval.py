@@ -34,7 +34,7 @@ __all__ = [
 
 async def run_baseline_eval(
     baseline: OptSearchPoint,
-    eval_data: list,
+    dataset: list,
     campaign_config: CampaignConfig,
     session: BackendSession,
     pipeline_params: dict | None = None,
@@ -44,7 +44,7 @@ async def run_baseline_eval(
     Returns:
         (campaign_rounds, baseline_results).
     """
-    pbar = tqdm(total=len(eval_data) or 1, desc="Baseline eval", unit="query")
+    pbar = tqdm(total=len(dataset) or 1, desc="Baseline eval", unit="query")
 
     def _on_result(result, index, total):
         pbar.total = total
@@ -57,13 +57,13 @@ async def run_baseline_eval(
 
     try:
         campaign_rounds, baseline_results = await _run_baseline_eval(
-            baseline, eval_data, session.backend_client,
+            baseline, dataset, session.backend_client,
             pipeline_params=pipeline_params,
             pipeline_schema=session.pipeline_schema,
             store=session.store, backend_id=session.backend_id,
             experiment_id=session.experiment_id,
             on_result=_on_result,
-            session_terms=session.session_terms,
+            index_terms=session.index_terms,
             obs=_obs,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):

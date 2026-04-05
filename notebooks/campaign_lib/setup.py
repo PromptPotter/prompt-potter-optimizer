@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING
 
 from promptpotter.config.settings import load_variant_library
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.configuration import (
+from promptpotter.services.campaign.factory import (
     configure_pipeline as _configure_pipeline,
 )
-from promptpotter.services.campaign.configuration import (
+from promptpotter.services.campaign.factory import (
     create_llm_client as setup_llm,
 )
 from promptpotter.services.campaign.init import (
     BackendSession,
-    build_all_session_terms,
+    build_all_index_terms,
 )
 from promptpotter.services.campaign.init import (
     init_services as _init_services,
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from promptpotter.services.llm_client import LLMClientBase
 
 __all__ = [
-    "build_all_session_terms",
+    "build_all_index_terms",
     # Langfuse
     "configure_langfuse",
     # Pipeline config
@@ -125,7 +125,7 @@ def dev_reload() -> None:
         "promptpotter.shared.hashing",
         "promptpotter.services.campaign.config",
         "promptpotter.services.campaign.lifecycle",
-        "promptpotter.services.campaign.configuration",
+        "promptpotter.services.campaign.factory",
         "promptpotter.services.campaign.escalation",
         "promptpotter.services.campaign.layer_transitions",
         "promptpotter.services.campaign.critique",
@@ -219,7 +219,7 @@ def configure_pipeline(session: BackendSession, campaign_config: CampaignConfig)
 
 async def init_services(
     backend_url: str = "http://127.0.0.1:8000",
-    backend_id: str = "termnorm-local",
+    backend_id: str = "local",
     experiment_id: str = "1_production_historical",
     dataset_name: str | None = None,
 ) -> BackendSession:
@@ -245,7 +245,7 @@ async def init_services(
 
     if dataset_name and session.queries:
         print(f"Dataset    : {dataset_name} ({len(session.queries)} queries)")
-        print(f"Session terms: {len(session.session_terms)}")
+        print(f"Session terms: {len(session.index_terms)}")
         return session
 
     if not session.exp_data:
@@ -260,7 +260,7 @@ async def init_services(
     verified = sum(1 for m in mappings if m.get("dataset_entry", "").strip() not in ("", "--"))
     print(f"Experiment : {session.exp_data.get('experiment', {}).get('name', experiment_id)}")
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
-    print(f"Queries    : {len(session.queries)}  |  Session terms: {len(session.session_terms)}")
+    print(f"Queries    : {len(session.queries)}  |  Session terms: {len(session.index_terms)}")
 
     return session
 
@@ -321,7 +321,7 @@ async def prepare_eval_context(
     run_baseline: bool = False,
     pipeline_params: dict | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
-    """Load baseline prompt, set eval_data, optionally run baseline.
+    """Load baseline prompt, set dataset, optionally run baseline.
 
     Thin display wrapper around
     ``promptpotter.services.campaign.init.prepare_eval_context()``.
@@ -330,7 +330,7 @@ async def prepare_eval_context(
         prepare_eval_context as _prepare_eval_context,
     )
 
-    baseline, eval_data, campaign_rounds, baseline_results = await _prepare_eval_context(
+    baseline, dataset, campaign_rounds, baseline_results = await _prepare_eval_context(
         session.exp_data,
         train_data,
         campaign_config,
@@ -340,8 +340,8 @@ async def prepare_eval_context(
         svc=session,
     )
 
-    print(f"\nEvaluation data: {len(eval_data)} queries")
-    return baseline, eval_data, campaign_rounds, baseline_results
+    print(f"\nEvaluation data: {len(dataset)} queries")
+    return baseline, dataset, campaign_rounds, baseline_results
 
 
 def prepare_datasets(
@@ -371,10 +371,10 @@ def prepare_datasets(
     print(f"  Test (material)    : {len(result.splits.get('test_material', []))} queries")
     print(f"  {'-' * 48}")
     print(f"  Combined queries   : {result.n_unique_queries} (deduplicated)")
-    print(f"  Session identifiers: {len(result.session_terms)} unique targets")
+    print(f"  Session identifiers: {len(result.index_terms)} unique targets")
     print(f"{'=' * 50}")
 
-    return result.train_data, result.session_terms
+    return result.train_data, result.index_terms
 
 
 # ---------------------------------------------------------------------------
@@ -418,7 +418,7 @@ def sync_langfuse(
     store,
     backend_id: str,
     *,
-    dataset_name: str = "termnorm_ground_truth",
+    dataset_name: str = "ground_truth",
     backfill: bool = True,
     reset: bool = False,
 ) -> dict | None:

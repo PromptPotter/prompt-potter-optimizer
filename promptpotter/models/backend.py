@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 class BackendConnection(BaseModel):
     """A registered backend connection (e.g. TermNorm instance)."""
 
-    id: str = Field(..., description="Unique backend ID, e.g. 'termnorm-local'")
+    id: str = Field(..., description="Unique backend ID, e.g. 'local'")
     name: str = Field(..., description="Human-readable name")
     backend_type: str = Field(..., description="Backend type, e.g. 'termnorm'")
     base_url: str = Field(..., description="Backend API base URL")
@@ -56,7 +56,7 @@ class Execution(BaseModel):
     variant_label: str = ""
     pipeline_notation: str = ""
     source_run_id: str | None = None
-    session_terms_count: int | None = None
+    index_terms_count: int | None = None
     limitations: list[str] = Field(default_factory=list)
     created_at: str = Field(
         default_factory=lambda: datetime.now(UTC).isoformat()

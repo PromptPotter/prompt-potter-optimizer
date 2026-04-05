@@ -114,7 +114,7 @@ class CampaignPersistenceEmitter:
             "total_queries_evaluated": r.get("total_queries_evaluated", 0),
             "total_backend_calls": r.get("total_backend_calls", 0),
             # Config
-            "model": cfg.get("eval_llm", {}).get("model", ""),
+            "model": cfg.get("optimizer_llm", {}).get("model", ""),
             "n_variants": opt.get("n_variants", 5),
             "sample_size": cfg.get("sample_size", 0),
             # Accumulators (reset on transitions)

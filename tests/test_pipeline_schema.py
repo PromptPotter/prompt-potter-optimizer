@@ -74,7 +74,7 @@ class TestParsePipelineResponse:
                 "description": "Test pipeline",
                 "required_step": "entity_profile",
                 "template_variables": ["{{core_concept}}", "{{matches}}"],
-                "dataset_name": "termnorm_ground_truth",
+                "dataset_name": "ground_truth",
                 "available_models": ["model-a"],
                 "nodes": {
                     "cache_lookup": {

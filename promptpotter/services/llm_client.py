@@ -166,7 +166,7 @@ class OpenAICompatibleClient(LLMClientBase):
                     model_name = request_params.get("model", "unknown")
                     raise ValueError(
                         f"Model '{model_name}' not found on {self._provider_name}. "
-                        f"Update campaign_config['eval_llm']['model'] or "
+                        f"Update campaign_config['optimizer_llm']['model'] or "
                         f"set EXPERIMENT_ID = None to use current config."
                     ) from exc
                 # Groq JSON mode: invalid generation — try to salvage
