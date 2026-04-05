@@ -11,7 +11,10 @@ PromptPotter Optimizer is a backend-first prompt optimization service. It connec
 uvicorn promptpotter.main:app --port 8001 --reload
 
 # Run tests
-pytest -v --tb=short
+pytest
+
+# Run tests with coverage (CI only — skip for dev iteration)
+pytest --cov
 
 # Lint
 ruff check promptpotter/ tests/
@@ -149,7 +152,7 @@ global query counter across all candidates
 - **EXPERIMENT_ID**: Single source of truth. Config must match stored experiment when set.
 - **Display parity**: Cached and fresh results use the same output format. A provenance indicator distinguishes data source for transparency.
 - **Graceful interrupt**: Signal-flag pattern — first Ctrl+C finishes in-flight call and saves; second force-quits. No completed work is ever discarded. See [architecture.md § Caching & Crash Recovery](docs/architecture.md#caching--crash-recovery).
-- **Error handling**: `graceful()` context manager in `campaign/_campaign_utils.py` is the standard suppress-and-log pattern. `EscalationError` carries structured `partial_results` for campaign flow control.
+- **Error handling**: `graceful()` context manager in `shared/errors.py` is the standard suppress-and-log pattern. `EscalationError` carries structured `partial_results` for campaign flow control.
 - **`promptpotter/shared/`**: Leaf-level utilities shared by models and services (hashing, schema mutations). No domain model or service dependencies allowed.
 - **`promptpotter/shared/constants.py`**: Canonical source for `PROMPT_STRING_FIELDS`, `LAYER_FIELDS`, and `LAYER1_STRING_FIELDS`. All modules must import field lists from here — never define them locally.
 - **`promptpotter/config/optimizer_pipeline.py`**: Optimizer pipeline schema loader + `llm_call()` primitive. All optimizer nodes use this instead of calling `chat()` directly.

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from promptpotter.config.optimizer_pipeline import llm_call
 from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
 from promptpotter.config.settings import load_variant_library
-from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.errors import find_rank, is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
@@ -81,21 +81,6 @@ class CritiqueContext:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def find_rank(candidates: list, ground_truth: str) -> int | None:
-    """Find 1-based rank of ground_truth in candidates list."""
-    if not candidates or not ground_truth:
-        return None
-    for i, c in enumerate(candidates):
-        name = (
-            c.get("candidate", c)
-            if isinstance(c, dict)
-            else (c[0] if isinstance(c, (list, tuple)) else str(c))
-        )
-        if str(name) == ground_truth:
-            return i + 1
-    return None
 
 
 def get_candidates(r: dict, candidate_keys: list[str] | None = None) -> list:

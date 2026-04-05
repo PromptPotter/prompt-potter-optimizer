@@ -1,14 +1,12 @@
 """Small utilities shared across the campaign package.
 
 These are used by optimization_loop, round_execution, escalation, and
-campaign_lifecycle — extracted here to keep each module focused on
+lifecycle — extracted here to keep each module focused on
 its primary responsibility.
 """
 
-import asyncio
 import logging
 from collections.abc import Callable
-from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.phase_event import PhaseEvent
@@ -18,18 +16,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["candidate_summaries", "emit_phase", "get_obs_trace", "graceful"]
-
-
-@contextmanager
-def graceful(msg: str):
-    """Suppress non-interrupt exceptions with a warning log."""
-    try:
-        yield
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception:
-        logger.warning(msg, exc_info=True)
+__all__ = ["candidate_summaries", "emit_phase", "get_obs_trace"]
 
 
 def emit_phase(

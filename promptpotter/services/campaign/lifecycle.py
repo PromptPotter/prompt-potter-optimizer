@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign._campaign_utils import graceful
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.shared.constants import DATASET_NAME
+from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.state import LoopState

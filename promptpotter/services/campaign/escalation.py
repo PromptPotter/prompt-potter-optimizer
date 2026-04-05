@@ -20,6 +20,7 @@ from promptpotter.models.phase_event import PhaseEvent
 from promptpotter.services.campaign._campaign_utils import emit_phase
 from promptpotter.services.campaign.critique import extract_warning_types
 from promptpotter.services.metrics import count_degraded_queries
+from promptpotter.shared.errors import EscalationError
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import RunConfig
@@ -79,20 +80,6 @@ class EscalationStrategy:
 DEFAULT_STRATEGIES: dict[str, EscalationStrategy] = {
     "web_search:low_document_count": EscalationStrategy(target=EscalationTarget.L2),
 }
-
-
-# ---------------------------------------------------------------------------
-# Exception for mid-eval abort
-# ---------------------------------------------------------------------------
-
-
-class EscalationError(Exception):
-    """Raised inside _run_eval_batch when a check fires."""
-
-    def __init__(self, signal: EscalationSignal, partial_results: list[dict]):
-        self.signal = signal
-        self.partial_results = partial_results
-        super().__init__(f"EscalationCheck '{signal.check_name}' triggered")
 
 
 # ---------------------------------------------------------------------------

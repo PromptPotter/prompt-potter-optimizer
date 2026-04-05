@@ -441,7 +441,7 @@ async def _run_eval_batch(
     Raises:
         EscalationError: If an escalation check triggers mid-batch.
     """
-    from promptpotter.services.campaign.escalation import EscalationError
+    from promptpotter.shared.errors import EscalationError
 
     # Unpack ctx with defaults for test compatibility
     pipeline_schema = ctx.pipeline_schema if ctx else None
@@ -650,7 +650,7 @@ def _log_eval_to_obs(
     Langfuse push is handled separately via push_all_runs() to ensure
     dataset-item linking is always present.
     """
-    from promptpotter.services.campaign._campaign_utils import graceful
+    from promptpotter.shared.errors import graceful
 
     with graceful("ObsLogger.log_dataset_run failed"):
         _obs = obs
@@ -749,7 +749,7 @@ async def eval_search_point(
     # Prefix display name with experiment_id for discoverability
     display_name = f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id else safe_label
 
-    from promptpotter.services.campaign.escalation import EscalationError as _EscalationError
+    from promptpotter.shared.errors import EscalationError as _EscalationError
 
     # Per-query cache: find results from prior runs with identical
     # pipeline config (same steps, same node params, same prompt).

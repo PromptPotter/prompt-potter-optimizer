@@ -17,7 +17,6 @@ from promptpotter.services import llm_client as _llm_client
 from promptpotter.services.campaign._campaign_utils import (
     candidate_summaries,
     emit_phase,
-    graceful,
 )
 from promptpotter.services.campaign.callbacks import RunCallbacks
 from promptpotter.services.campaign.config import RunConfig
@@ -32,6 +31,7 @@ from promptpotter.services.campaign.results import RoundResult
 from promptpotter.services.campaign.state import LoopState
 from promptpotter.services.obs.node_tracer import observed_node
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
+from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema

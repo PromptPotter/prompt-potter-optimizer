@@ -462,7 +462,7 @@ async def run_baseline_eval(
 
     # Register dataset items in obs if available
     if obs and eval_data:
-        from promptpotter.services.campaign._campaign_utils import graceful
+        from promptpotter.shared.errors import graceful
 
         with graceful("Dataset registration in run_baseline_eval failed"):
             obs.register_dataset(DATASET_NAME, eval_data)

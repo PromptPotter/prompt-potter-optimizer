@@ -22,7 +22,7 @@ from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.phase_event import PhaseEvent
 from promptpotter.services.backend_client import BackendClient
-from promptpotter.services.campaign._campaign_utils import emit_phase, get_obs_trace, graceful
+from promptpotter.services.campaign._campaign_utils import emit_phase, get_obs_trace
 from promptpotter.services.campaign.adaptive_eval import adapt_eval_set
 from promptpotter.services.campaign.callbacks import RunCallbacks
 from promptpotter.services.campaign.config import RunConfig
@@ -43,6 +43,7 @@ from promptpotter.services.metrics import compile_query_difficulty, compute_comp
 from promptpotter.services.prompt_eval import subsample_eval_data
 from promptpotter.services.search.scan_results import ScanContext
 from promptpotter.services.search.search_memory import SearchMemory
+from promptpotter.shared.errors import graceful
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:

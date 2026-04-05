@@ -11,7 +11,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from promptpotter.services.campaign.critique import find_rank
+from promptpotter.shared.errors import find_rank
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
