@@ -212,24 +212,103 @@ class SearchMemory:
 
 ---
 
-## 4. Partial Pipeline Caching
+## 4. Node-Level Cache Architecture
 
-**Problem:** During optimization, only `llm_ranking` config changes between prompt variants. Steps before the first ranker node produce identical output for the same query.
+**Problem:** The current cache hashes the entire pipeline config together. Changing one param on one node invalidates the cache for ALL queries through ALL nodes. During optimization, most candidates change only 1-2 node params while 3-4 upstream nodes produce identical output. This makes optimization 10-100x slower than necessary.
 
-**Approach:**
-- Compute `upstream_config_hash` from pipeline_params excluding ranker nodes (using `PipelineSchema.split_at_ranker()`)
-- Store per-node intermediate outputs (`node_outputs`) returned by TermNorm in a disk cache keyed by `(upstream_hash, query)`
-- On subsequent evals with matching upstream config, send cached intermediates via new `precomputed` field in `/matches` request; TermNorm skips those nodes
+**Additional bug (pre-refactor):** `config_hash()` strips `output_schema` from the hash key. Schema mutation candidates get the same cache hash as baseline — the optimizer can never observe the effect of schema changes. Fix: remove `output_schema` from `_PROMPT_KEYS` in `dataset_run_store.py`.
 
-**Wire protocol (TermNorm additions, backward-compatible):**
-- Response: `data.node_outputs: {node_name: opaque_output_dict}`
-- Request: `precomputed: {node_name: opaque_output_dict}` — TermNorm injects into pipeline data flow, executes only remaining steps
+### Design: Per-Node Cache Keying
 
-**PromptPotter changes:**
-- `upstream_config_hash()` in `hashing.py`, `split_at_ranker()` on `PipelineSchema`
-- New `IntermediateCache` store in `stores/intermediate_cache.py` (disk-backed, `{backend_id}/intermediate_cache/{upstream_hash}.json`)
-- `eval_query_via_backend()`: check cache -> build `precomputed` -> call `run_match()` -> store `node_outputs`
-- `run_match()`: thread `precomputed` to wire payload
+Each node's output is cached independently with chained dependency:
+
+```
+node_cache_key(node_name, node_config, upstream_hash) → node_output
+
+Where:
+  node_config  = the node's specific params (e.g., {temperature: 0.3})
+  upstream_hash = hash of previous node's cache key (captures dependency chain)
+```
+
+**Prefix matching (longest cached sequence from pipeline start):**
+
+```
+Pipeline: [fuzzy] → [web_search] → [entity_profiling] → [token_matching]
+Candidate changes: entity_profiling.temperature = 0.5
+
+Cache check:
+  fuzzy:             config unchanged + no upstream → CACHED ✓
+  web_search:        config unchanged + upstream same → CACHED ✓
+  entity_profiling:  config CHANGED → MISS ✗
+  token_matching:    upstream changed → MISS ✗
+
+Result: precomputed={fuzzy: ..., web_search: ...} sent to backend
+        Backend runs only [entity_profiling, token_matching]
+        Speedup: ~60% of pipeline skipped
+```
+
+### Cache Consolidation
+
+Per-node caching replaces the current multi-layer cache stack:
+
+| Layer | Current | After refactor |
+|-------|---------|----------------|
+| Full-run content-hash dedup | `content_hash(prompt + eval_data + pp)` in dataset_run_store | **Removed** — per-node cache inherently deduplicates |
+| Per-query config cache | `config_hash(normalized_pp + rp_hash)` + `find_cached_queries()` | **Removed** — replaced by per-node prefix walk |
+| Intermediate cache | `_steps_hash(steps + pp)` whole-sequence keying | **Replaced** — per-node keying with chained dependency |
+| Dataset run store | Cache lookup + archive | **Archive only** — write history for SearchMemory/campaigns, no lookup during eval |
+| Stale data protocol | Recovery ladder | **Kept** — operates on results regardless of cache layer |
+| SearchMemory | Statistical analysis | **Kept** — reads from dataset_run archive |
+
+**Eval flow simplification:**
+
+```
+BEFORE: eval_search_point()
+  → content_hash lookup (full-run dedup)
+  → config_hash + find_cached_queries (per-query)
+  → intermediate_cache.get_prefix (step-sequence)
+  → backend call
+
+AFTER: eval_search_point()
+  → per-node prefix walk (single cache path)
+  → backend call (only for uncached nodes)
+  → dataset_run_store.save() (archive only)
+```
+
+### Wire Protocol (unchanged from original design)
+
+- **Response:** `data.node_outputs: {node_name: opaque_output_dict}` — backend returns per-node outputs
+- **Request:** `precomputed: {node_name: opaque_output_dict}` — PromptPotter sends cached upstream outputs; backend skips those nodes
+
+### Code Changes
+
+**New/modified:**
+- `IntermediateCache` → per-node keying: `node_cache_key()`, `compute_prefix_keys()`, `get_node()`, `put_node()`
+- `eval_query_via_backend()` → per-node prefix walk instead of step-sequence lookup
+- `eval_search_point()` → remove content_hash/config_hash lookup paths
+
+**Removed:**
+- `config_hash()`, `_normalize_pp()`, `_PROMPT_KEYS` — whole-pipeline hash
+- `find_cached_queries()`, `_config_index` — per-query config cache
+- Content-hash lookup path in `eval_search_point()` — dedup handled by per-node cache
+- `_steps_hash()` — replaced by `node_cache_key()`
+
+**Kept unchanged:**
+- `dataset_run_store.save()` — still writes run history for SearchMemory/observability
+- `run_match()` — precomputed format unchanged
+- `SearchMemory` — reads from dataset_run archive
+- Stale data protocol — degradation recovery on results
+
+### Disk Layout
+
+```
+.promptpotter/projects/{backend_id}/
+  intermediate_cache/
+    {node_name}_{cache_key}.json    ← {query: node_output}
+    _node_index.json                ← {cache_key: {node, config_summary}}
+  dataset_runs.json                 ← archive index (no longer used for cache lookup)
+  dataset_runs/{run_id}.json        ← archive detail files
+```
 
 ---
 
@@ -250,9 +329,12 @@ class SearchMemory:
 | 3d | Bottleneck attribution + causal scan ordering | 1a | PP |
 | 3e | Query cohort sensitivity (per-query scan result persistence + cohort slicing) | 1a | PP |
 | 3f | Docs: SearchMemory in architecture.md, sensitivity-scan.md, optimization.md | 3c | PP |
-| 4a | Upstream hash + `split_at_ranker()` + `IntermediateCache` store | — | PP |
-| 4b | TermNorm: `node_outputs` response + `precomputed` request | 4a | TN |
-| 4c | Eval gateway integration (cache lookup/populate in `eval_query_via_backend`) | 4a, 4b | PP |
+| 4a | Fix `output_schema` stripping in `config_hash()` (unblock schema mutations) | — | PP |
+| 4b | Per-node cache keying: `node_cache_key()`, `compute_prefix_keys()` in IntermediateCache | — | PP |
+| 4c | Eval gateway: per-node prefix walk in `eval_query_via_backend()` | 4b | PP |
+| 4d | Cache consolidation: remove `config_hash`, `find_cached_queries`, content-hash lookup | 4c | PP |
+| 4e | TermNorm: `node_outputs` response + `precomputed` request | 4b | TN |
+| 4f | Docs: update architecture.md caching section, CLAUDE.md conventions | 4d | PP |
 
 ### Dependency graph
 
@@ -270,11 +352,14 @@ Wave 3 (SearchMemory):
   1a ──┬── 3d
        └── 3e
 
-Wave 4 (Caching):
-  4a ── 4b ── 4c
+Wave 4 (Node-Level Cache):
+  4a (fix output_schema — immediate)
+  4b ── 4c ── 4d ── 4f
+  4b ── 4e (TermNorm, parallel)
 
 All four wave groups are independent at their roots.
 1a is the shared foundation for Waves 1, 2c, 3d, and 3e.
+4a is independent and can ship immediately.
 ```
 
 ---

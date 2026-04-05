@@ -86,15 +86,39 @@ During sensitivity scan, the perturbed axis is auto-added to `strict_params` so 
 
 ## Caching & Crash Recovery
 
+### Current (pre-M8 Wave 4)
+
 | Strategy | Mechanism | Detail |
 |----------|-----------|--------|
 | **Content-hash dedup** | Same JobSearchPoint + eval data → cached | Instant lookup |
 | **Shared store** | Scan + cycle both write to `dataset_runs/` | Coverage discovers all cached results regardless of source |
-| **Per-query cache** | `_rp_index` + `_entry_matches()` with configurable `strict_params` | Exact (optimizer) or NN (scan) — see [Evaluation Flow](#evaluation-flow) |
+| **Per-query cache** | `config_hash()` + `find_cached_queries()` with configurable `strict_params` | Exact (optimizer) or loose (scan) — see [Evaluation Flow](#evaluation-flow) |
 | **Stale data protocol** | 3-step ladder for degraded queries: rerun → samplescan → sampleswitch | See [optimization.md § Stale Data Load Protocol](optimization.md#stale-data-load-protocol) |
 | **SearchMemory** *(M8 — live)* | Materialized statistical index over `dataset_runs/` | See [SearchMemory section](#searchmemory-m8-wave-3) |
-| **Intermediate Cache** *(M8 — planned)* | Per-node output cache | See [Intermediate Cache section](#intermediate-cache-m8-wave-4) |
 | **Graceful interrupt** | First Ctrl+C finishes in-flight call and saves (`"partial": True`) | Content-hash cache bridges partial results on re-run |
+
+### Target: Node-Level Cache (M8 Wave 4)
+
+The current cache hashes the entire pipeline config together — changing one param on one node invalidates the cache for ALL queries through ALL nodes. The node-level cache replaces this with per-node keying:
+
+```
+node_cache_key(node_name, node_config, upstream_hash) → node_output
+```
+
+Each node's output depends on its own config AND the output of the previous node (chained dependency). This enables **prefix matching**: reuse cached upstream outputs when only downstream nodes change.
+
+**Cache consolidation:** Per-node caching replaces the content-hash dedup, per-query config cache, and step-sequence intermediate cache. `dataset_run_store` becomes an archive for SearchMemory/campaigns — no longer consulted during eval lookup.
+
+**Eval flow after refactor:**
+
+```
+eval_search_point()
+  → per-node prefix walk (single cache path)
+  → backend call with precomputed={cached upstream outputs}
+  → dataset_run_store.save() (archive only)
+```
+
+See [`docs/specs/m8-campaign-intelligence.md` § Node-Level Cache Architecture](specs/m8-campaign-intelligence.md#4-node-level-cache-architecture) for the full design.
 
 ## Pipeline Composability
 
@@ -192,12 +216,21 @@ Cohort analysis (`cohort_analysis.py`) extends the model: per-query hit/miss res
 
 Implementation: `promptpotter/services/search/search_memory.py`, `promptpotter/services/search/cohort_analysis.py`.
 
-### Intermediate Cache (M8 Wave 4)
+### Node-Level Cache (M8 Wave 4)
 
-> **Planned (M8 Wave 4)** — not yet implemented.
+> **Planned (M8 Wave 4b-4f)** — 4a (fix `output_schema` stripping) ships immediately.
 
-Partial pipeline caching that avoids re-running upstream nodes when only the ranker config changes. The `IntermediateCache` (`promptpotter/services/stores/intermediate_cache.py`) stores per-node outputs keyed by `(upstream_config_hash, query)`.
+Per-node output caching with chained dependency keys. Each node's output is keyed by `(node_name, node_config, upstream_key)` where `upstream_key` is the cache key of the previous node. This creates a dependency chain: if fuzzy_matching config is unchanged, its cache key is stable, making web_search's key stable too (since web_search depends on fuzzy_matching output).
 
-When a pipeline has stable upstream nodes (e.g., `fuzzy_matching`, `web_search`) and only the ranker (`llm_ranking`) parameters vary across candidates, cached upstream outputs can be injected as `precomputed` inputs, skipping redundant computation. `PipelineSchema.upstream_config_hash()` computes the cache key from upstream node configs.
+**Prefix walk:** For each query, walk the node chain from pipeline start. At each node, check if `{node}_{key}.json` has the query. Stop at the first miss. Send all cached outputs as `precomputed` to the backend — it only runs the remaining nodes.
+
+**Consolidation:** Replaces the current 3-layer lookup (content-hash → config_hash → step-sequence). `dataset_run_store` becomes archive-only (SearchMemory/campaigns read from it, eval does not).
+
+**Disk layout:**
+```
+intermediate_cache/
+  {node_name}_{cache_key}.json    ← {query: node_output}
+  _node_index.json                ← {cache_key: {node, config_summary}}
+```
 
 Gracefully no-ops until the target backend supports `node_outputs` in responses and `precomputed` in requests.
