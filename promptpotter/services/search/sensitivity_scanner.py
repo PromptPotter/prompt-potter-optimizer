@@ -4,6 +4,7 @@ Evaluates each axis value against the baseline, holding all other axes at
 their baseline values.  Returns per-variant results and axis profiles
 sorted by sensitivity.
 """
+
 from __future__ import annotations
 
 import copy
@@ -19,7 +20,7 @@ from promptpotter.services.eval_gateway import eval_search_point
 from promptpotter.services.search.cohort_analysis import preview as _preview
 from promptpotter.services.search.smart_search import (
     ScanEvent,
-    _profiles_from_rows,
+    profiles_from_rows,
 )
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import most_common_error_category
@@ -133,8 +134,9 @@ async def sensitivity_scan(
             # Bare list but not a prompt field — skip with warning
             logger.warning(
                 "scan_variants: bare list for %r is not a prompt field; "
-                "nest under node name: {\"node\": {\"%s\": [...]}}",
-                key, key,
+                'nest under node name: {"node": {"%s": [...]}}',
+                key,
+                key,
             )
 
     # Sort axes by pipeline node order (prompt fields under their owning node)
@@ -142,7 +144,8 @@ async def sensitivity_scan(
         _node_order = {node.name: i for i, node in enumerate(pipeline_schema.nodes)}
         _prompt_nodes = pipeline_schema.prompt_node_names()
         _prompt_pos = (
-            _node_order[_prompt_nodes[0]] if _prompt_nodes and _prompt_nodes[0] in _node_order
+            _node_order[_prompt_nodes[0]]
+            if _prompt_nodes and _prompt_nodes[0] in _node_order
             else len(_node_order)
         )
 
@@ -156,20 +159,24 @@ async def sensitivity_scan(
 
     # Evaluate baseline
     baseline_results, baseline_scores, baseline_cached = await eval_search_point(
-        baseline, dataset, scan_ctx,
+        baseline,
+        dataset,
+        scan_ctx,
         label="scan",
         on_result=on_result,
     )
     baseline_acc = baseline_scores["accuracy"]
     baseline_composite = baseline_scores.get("composite", baseline_acc)
-    _cb({
-        "type": "baseline_done",
-        "accuracy": baseline_acc,
-        "hits": baseline_scores["hits"],
-        "total": baseline_scores["total"],
-        "results": baseline_results,
-        "cached": baseline_cached,
-    })
+    _cb(
+        {
+            "type": "baseline_done",
+            "accuracy": baseline_acc,
+            "hits": baseline_scores["hits"],
+            "total": baseline_scores["total"],
+            "results": baseline_results,
+            "cached": baseline_cached,
+        }
+    )
 
     # Circuit breaker: abort if baseline eval is all-errors
     baseline_errors = baseline_scores.get("errors", 0)
@@ -211,12 +218,16 @@ async def sensitivity_scan(
     _pruned_axes: set[str] = set()
 
     for ai, (axis_name, axis_type, values, axis_node) in enumerate(axes):
-        _cb({
-            "type": "axis_start",
-            "axis": axis_name, "axis_type": axis_type,
-            "cardinality": len(values),
-            "axis_index": ai, "total_axes": len(axes),
-        })
+        _cb(
+            {
+                "type": "axis_start",
+                "axis": axis_name,
+                "axis_type": axis_type,
+                "cardinality": len(values),
+                "axis_index": ai,
+                "total_axes": len(axes),
+            }
+        )
 
         # Per-axis pruning state (Wave 2b)
         _axis_variant_cis: list[tuple[float, float]] = []
@@ -234,28 +245,38 @@ async def sensitivity_scan(
             if value == current_val:
                 _bl_pq_hits = {
                     r.get("query", ""): bool(r.get("hit"))
-                    for r in baseline_results if r.get("query")
+                    for r in baseline_results
+                    if r.get("query")
                 }
-                rows.append({
-                    "axis": axis_name, "axis_type": axis_type,
-                    "value_idx": vi,
-                    "value_preview": _preview(value),
-                    "hits": baseline_scores["hits"],
-                    "total": baseline_scores["total"],
-                    "accuracy": baseline_acc, "delta": 0.0,
-                    "errors": baseline_errors,
-                    "per_query_hits": _bl_pq_hits,
-                })
-                _cb({
-                    "type": "variant_done",
-                    "axis": axis_name, "value_idx": vi,
-                    "value_preview": _preview(value),
-                    "is_baseline_value": True,
-                    "accuracy": baseline_acc, "delta": 0.0,
-                    "hits": baseline_scores["hits"],
-                    "total": baseline_scores["total"],
-                    "results": [], "cached": False,
-                })
+                rows.append(
+                    {
+                        "axis": axis_name,
+                        "axis_type": axis_type,
+                        "value_idx": vi,
+                        "value_preview": _preview(value),
+                        "hits": baseline_scores["hits"],
+                        "total": baseline_scores["total"],
+                        "accuracy": baseline_acc,
+                        "delta": 0.0,
+                        "errors": baseline_errors,
+                        "per_query_hits": _bl_pq_hits,
+                    }
+                )
+                _cb(
+                    {
+                        "type": "variant_done",
+                        "axis": axis_name,
+                        "value_idx": vi,
+                        "value_preview": _preview(value),
+                        "is_baseline_value": True,
+                        "accuracy": baseline_acc,
+                        "delta": 0.0,
+                        "hits": baseline_scores["hits"],
+                        "total": baseline_scores["total"],
+                        "results": [],
+                        "cached": False,
+                    }
+                )
                 continue
 
             # Derive perturbed JobSearchPoint
@@ -279,7 +300,9 @@ async def sensitivity_scan(
                 perturbed = baseline.derive(pipeline_params=pp)
 
             results, scores, cached = await eval_search_point(
-                perturbed, dataset, scan_ctx,
+                perturbed,
+                dataset,
+                scan_ctx,
                 label="scan",
                 on_result=on_result,
             )
@@ -289,32 +312,38 @@ async def sensitivity_scan(
             delta = composite - baseline_composite
             variant_errors = scores.get("errors", 0)
             # Per-query hit map for cohort sensitivity (Wave 3e)
-            _pq_hits = {
-                r.get("query", ""): bool(r.get("hit"))
-                for r in results if r.get("query")
-            }
-            rows.append({
-                "axis": axis_name, "axis_type": axis_type,
-                "value_idx": vi,
-                "value_preview": _preview(value),
-                "hits": scores["hits"],
-                "total": scores["total"],
-                "accuracy": acc, "delta": delta,
-                "composite": composite,
-                "errors": variant_errors,
-                "per_query_hits": _pq_hits,
-            })
-            _cb({
-                "type": "variant_done",
-                "axis": axis_name, "value_idx": vi,
-                "value_preview": _preview(value),
-                "is_baseline_value": False,
-                "accuracy": acc, "delta": delta,
-                "composite": composite,
-                "hits": scores["hits"], "total": scores["total"],
-                "results": results,
-                "cached": cached,
-            })
+            _pq_hits = {r.get("query", ""): bool(r.get("hit")) for r in results if r.get("query")}
+            rows.append(
+                {
+                    "axis": axis_name,
+                    "axis_type": axis_type,
+                    "value_idx": vi,
+                    "value_preview": _preview(value),
+                    "hits": scores["hits"],
+                    "total": scores["total"],
+                    "accuracy": acc,
+                    "delta": delta,
+                    "composite": composite,
+                    "errors": variant_errors,
+                    "per_query_hits": _pq_hits,
+                }
+            )
+            _cb(
+                {
+                    "type": "variant_done",
+                    "axis": axis_name,
+                    "value_idx": vi,
+                    "value_preview": _preview(value),
+                    "is_baseline_value": False,
+                    "accuracy": acc,
+                    "delta": delta,
+                    "composite": composite,
+                    "hits": scores["hits"],
+                    "total": scores["total"],
+                    "results": results,
+                    "cached": cached,
+                }
+            )
 
             # Per-axis early pruning (Wave 2b)
             if _baseline_ci is not None and not _axis_pruned:
@@ -336,14 +365,18 @@ async def sensitivity_scan(
                             logger.info(
                                 "Pruning axis '%s': all %d variants overlap "
                                 "with baseline CI — skipping %d remaining values",
-                                axis_name, len(_axis_variant_cis), remaining,
+                                axis_name,
+                                len(_axis_variant_cis),
+                                remaining,
                             )
-                            _cb({
-                                "type": "axis_pruned",
-                                "axis": axis_name,
-                                "variants_tested": len(_axis_variant_cis),
-                                "remaining_skipped": remaining,
-                            })
+                            _cb(
+                                {
+                                    "type": "axis_pruned",
+                                    "axis": axis_name,
+                                    "variants_tested": len(_axis_variant_cis),
+                                    "remaining_skipped": remaining,
+                                }
+                            )
                             break
 
             # Circuit breaker: track consecutive non-cached all-error evals
@@ -362,7 +395,7 @@ async def sensitivity_scan(
                         f"variant evals returned all errors. {detail}"
                     )
                     logger.error(reason)
-                    profiles = _profiles_from_rows(rows, axes, len(dataset))
+                    profiles = profiles_from_rows(rows, axes, len(dataset))
                     for profile in profiles:
                         _cb({"type": "axis_done", **profile})
                     _cb({"type": "scan_aborted", "reason": reason})
@@ -371,7 +404,7 @@ async def sensitivity_scan(
                 _consecutive_all_error = 0
 
     # Build axis profiles and annotate pruned axes (Wave 2b)
-    profiles = _profiles_from_rows(rows, axes, len(dataset))
+    profiles = profiles_from_rows(rows, axes, len(dataset))
     for profile in profiles:
         profile["pruned"] = profile["axis"] in _pruned_axes
         _cb({"type": "axis_done", **profile})

@@ -54,7 +54,8 @@ _LLM_DEFAULTS = {"temperature": 0.0, "max_tokens": 1000, "output_format": "text"
 # -- Round recorder (per-task context, not a module global) ----------------
 
 _recorder_var: contextvars.ContextVar[RoundRecorder | None] = contextvars.ContextVar(
-    "round_recorder", default=None,
+    "round_recorder",
+    default=None,
 )
 
 
@@ -92,8 +93,9 @@ async def llm_call(
         config = get_node_config(node) if node else {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
 
-    import time as _time
-    _t0 = _time.monotonic()
+    import time
+
+    _t0 = time.monotonic()
 
     response = await llm_client.chat(
         messages=messages,
@@ -106,7 +108,7 @@ async def llm_call(
     # Trace to round recorder if active
     _recorder = _recorder_var.get()
     if _recorder is not None:
-        duration_s = round(_time.monotonic() - _t0, 2)
+        duration_s = round(time.monotonic() - _t0, 2)
 
         # Parse JSON responses into structured objects (not escaped strings)
         response_data: dict | str

@@ -2,7 +2,6 @@
 
 Configuration identity hashing, observability initialization,
 campaign resume/create logic, and campaign finalization.
-Shared helpers (graceful, emit_phase, etc.) live in ``callbacks.py``.
 """
 
 import hashlib
@@ -48,8 +47,7 @@ def cycle_config_identity(
             "active_steps": list(config.active_steps),
             "baseline_rendered": baseline_rendered,
             "dataset_pairs": sorted(
-                (d.get("query", ""), d.get("ground_truth", ""))
-                for d in dataset
+                (d.get("query", ""), d.get("ground_truth", "")) for d in dataset
             ),
         },
         sort_keys=True,
@@ -92,7 +90,9 @@ def init_campaign(
                 cycle_id = cycle_id_override
             else:
                 bl_ps = baseline_prompt_fields if baseline_prompt_fields is not None else current_ps
-                bl_osp = OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
+                bl_osp = (
+                    OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
+                )
                 cycle_id = cycle_config_identity(config, bl_osp.render(), dataset)
             logger.debug("Cycle identity: %s", cycle_id)
 
@@ -103,8 +103,11 @@ def init_campaign(
                     if stored_cfg:
                         _validate_config_match(config, stored_cfg, cycle_id)
                         _LOOP_CONTROL_KEYS = [
-                            "max_rounds", "l1_patience", "l2_patience",
-                            "l3_patience", "degradation_threshold",
+                            "max_rounds",
+                            "l1_patience",
+                            "l2_patience",
+                            "l3_patience",
+                            "degradation_threshold",
                         ]
                         current_cfg = config.model_dump(mode="json")
                         cfg_updated = False
@@ -114,21 +117,28 @@ def init_campaign(
                                 cfg_updated = True
                         if cfg_updated:
                             campaign_store.update(
-                                config.backend_id, cycle_id, {"config": stored_cfg},
+                                config.backend_id,
+                                cycle_id,
+                                {"config": stored_cfg},
                             )
                             logger.info("Updated loop-control config for %s", cycle_id)
                 resumed_from_round = len(existing.get("trials", []))
                 if resumed_from_round:
                     logger.debug(
                         "Resuming cycle %s — %d prior round(s) on disk",
-                        cycle_id, resumed_from_round,
+                        cycle_id,
+                        resumed_from_round,
                     )
             else:
-                campaign_store.create(config.backend_id, cycle_id, {
-                    "type": "optimization_loop",
-                    "config": config.model_dump(mode="json"),
-                    "baseline_accuracy": baseline_accuracy,
-                })
+                campaign_store.create(
+                    config.backend_id,
+                    cycle_id,
+                    {
+                        "type": "optimization_loop",
+                        "config": config.model_dump(mode="json"),
+                        "baseline_accuracy": baseline_accuracy,
+                    },
+                )
         except ValueError:
             raise
         except (OSError, json.JSONDecodeError, KeyError):
@@ -159,7 +169,8 @@ def init_campaign(
             if dataset_item_map:
                 logger.debug(
                     "Registered %d dataset items for '%s'",
-                    len(dataset_item_map), DATASET_NAME,
+                    len(dataset_item_map),
+                    DATASET_NAME,
                 )
 
     return campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id
@@ -179,8 +190,11 @@ def _validate_config_match(
     # patience, l2_patience, l3_patience, degradation_threshold) can
     # change freely between runs of the same experiment.
     check_keys = [
-        "n_variants", "creativity",
-        "improvement_threshold", "model", "sample_size",
+        "n_variants",
+        "creativity",
+        "improvement_threshold",
+        "model",
+        "sample_size",
     ]
     mismatches = []
     for k in check_keys:
@@ -192,10 +206,8 @@ def _validate_config_match(
         raise ValueError(
             f"Config mismatch for experiment {cycle_id}.\n"
             f"Set EXPERIMENT_ID = None to start a new experiment, "
-            f"or update campaign_config to match.\n"
-            + "\n".join(mismatches)
+            f"or update campaign_config to match.\n" + "\n".join(mismatches)
         )
-
 
 
 def finalize_campaign(
@@ -217,14 +229,18 @@ def finalize_campaign(
     """
     if campaign_store and cycle_id:
         with graceful("Campaign completion update failed"):
-            campaign_store.update(config.backend_id, cycle_id, {
-                "status": status,
-                "stop_reason": stop_reason,
-                "best_accuracy": state.best_accuracy,
-                "best_round": state.best_round,
-                "n_rounds": len(state.rounds),
-                "finished_at": finished_at,
-            })
+            campaign_store.update(
+                config.backend_id,
+                cycle_id,
+                {
+                    "status": status,
+                    "stop_reason": stop_reason,
+                    "best_accuracy": state.best_accuracy,
+                    "best_round": state.best_round,
+                    "n_rounds": len(state.rounds),
+                    "finished_at": finished_at,
+                },
+            )
 
     cloud_trace_id: str | None = None
     if obs:

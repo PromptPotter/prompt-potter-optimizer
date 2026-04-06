@@ -60,12 +60,13 @@ def configure_pipeline(
     campaign_config: CampaignConfig,
 ) -> dict:
     """Configure pipeline and filter schema.  Returns pipeline_params."""
-    from promptpotter.services.campaign.factory import (
+    from promptpotter.services.campaign.config import (
         configure_pipeline as _configure_pipeline,
     )
 
     result = _configure_pipeline(
-        session.pipeline_schema, campaign_config,
+        session.pipeline_schema,
+        campaign_config,
         exp_data=getattr(session, "exp_data", None),
     )
 
@@ -164,7 +165,7 @@ async def decompose_task_context(
     session: BackendSession,
 ) -> dict:
     """Decompose task description into structured context fields."""
-    from promptpotter.services.campaign.factory import create_llm_client
+    from promptpotter.services.campaign.config import create_llm_client
     from promptpotter.services.search.context import (
         decompose_task_context as _decompose_task_context,
     )
@@ -218,7 +219,8 @@ def resolve_scan_variants(
     node_axes = [k for k in scan_variants if k not in PROMPT_STRING_FIELDS]
     logger.info(
         "Scan variants resolved: %d prompt axes, %d node axes",
-        len(prompt_axes), len(node_axes),
+        len(prompt_axes),
+        len(node_axes),
     )
 
 
@@ -237,7 +239,7 @@ async def run_sensitivity_scan(
 
     Returns (scan_baseline_sp, scan_df, axis_profiles).
     """
-    from promptpotter.services.campaign.factory import create_llm_client
+    from promptpotter.services.campaign.config import create_llm_client
     from promptpotter.services.search.scan_baseline import (
         prepare_scan_baseline as _prepare_scan_baseline,
     )
@@ -261,7 +263,10 @@ async def run_sensitivity_scan(
                 break
 
     result = await _prepare_scan_baseline(
-        baseline, campaign_config, llm_client, llm_model,
+        baseline,
+        campaign_config,
+        llm_client,
+        llm_model,
         pipeline_params=pipeline_params,
         store=session.store,
         backend_id=session.backend_id,
@@ -279,7 +284,9 @@ async def run_sensitivity_scan(
     # Run scan
     logger.info("Running sensitivity scan (%d axes) ...", len(scan_variants))
     df, profiles = await _sensitivity_scan(
-        scan_baseline_sp, scan_variants, dataset,
+        scan_baseline_sp,
+        scan_variants,
+        dataset,
         session.backend_client,
         baseline_opt=baseline_opt,
         sample_size=scan_sample_size,
@@ -298,7 +305,8 @@ async def run_sensitivity_scan(
     # Persist scan results
     if session_id and session.store and session.backend_id:
         session.store.sessions.save_scan_results(
-            session.backend_id, session_id,
+            session.backend_id,
+            session_id,
             df.to_dict(orient="records"),
             profiles,
         )
@@ -325,8 +333,12 @@ def seed_campaign_from_scan(
         return baseline
 
     result = _seed_campaign_from_scan(
-        scan_df, axis_profiles, baseline, scan_variants,
-        campaign_rounds, campaign_config,
+        scan_df,
+        axis_profiles,
+        baseline,
+        scan_variants,
+        campaign_rounds,
+        campaign_config,
     )
 
     if result.improving_axes:
@@ -373,7 +385,10 @@ def build_scan_context(
         baseline_acc = campaign_rounds[-1].get("accuracy", 0.0)
 
     return prepare_scan_context(
-        scan_df, axis_profiles, scan_variants, baseline_acc,
+        scan_df,
+        axis_profiles,
+        scan_variants,
+        baseline_acc,
     )
 
 
@@ -395,12 +410,12 @@ async def run_optimization(
     Returns (campaign_rounds, RunResult | None).
     """
     from promptpotter.models.opt_search_point import OptSearchPoint
-    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.campaign.config import RunConfig
     from promptpotter.services.campaign.init import extract_campaign_baseline
     from promptpotter.services.campaign.optimization_loop import (
         run_optimization as _run_optimization,
     )
+    from promptpotter.services.campaign.state import RunCallbacks
 
     config = RunConfig.from_campaign_config(
         campaign_config,

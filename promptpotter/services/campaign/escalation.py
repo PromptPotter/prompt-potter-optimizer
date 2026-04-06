@@ -16,9 +16,8 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.phase_event import PhaseEvent
-from promptpotter.services.campaign.callbacks import emit_phase
 from promptpotter.services.campaign.critique import extract_warning_types
+from promptpotter.services.campaign.state import PhaseEvent, emit_phase
 from promptpotter.services.metrics import count_degraded_queries
 from promptpotter.shared.errors import EscalationError
 
@@ -229,7 +228,9 @@ def _rebuild_current_sp(
     assert cur is not None
     pp = getattr(tr, "pipeline_params", None) or cur.pipeline_params
     state.current_sp = state.opt_sp.to_job_search_point(
-        base_pipeline_params=pp, active_steps=active_steps, prompt_node=prompt_node,
+        base_pipeline_params=pp,
+        active_steps=active_steps,
+        prompt_node=prompt_node,
     )
 
 
@@ -264,7 +265,7 @@ async def _do_l2_transition(
     from promptpotter.services import llm_client as _llm_client
     from promptpotter.services.campaign import layer_transitions
     from promptpotter.services.campaign.critique import warning_summary
-    from promptpotter.services.tracing.node_tracer import observed_node
+    from promptpotter.services.tracing.observability_logger import observed_node
 
     assert state.current_sp is not None
     current_pp = state.current_sp.pipeline_params
@@ -348,7 +349,7 @@ async def _do_l3_transition(
     """Perform L3 modify_plan transition. Updates state in-place."""
     from promptpotter.services import llm_client as _llm_client
     from promptpotter.services.campaign import layer_transitions
-    from promptpotter.services.tracing.node_tracer import observed_node
+    from promptpotter.services.tracing.observability_logger import observed_node
 
     assert state.current_sp is not None
     current_pp = state.current_sp.pipeline_params
@@ -460,12 +461,18 @@ async def escalate_l2(
         layer = "L2/L3" if reset_l3 else "L2"
         logger.debug(
             "%s patience exhausted during degradation — resetting at round %d",
-            layer, round_num,
+            layer,
+            round_num,
         )
         _degradation_reset(state, config, round_num, on_phase, reset_l3=reset_l3)
         await _do_l2_transition(
-            state, config, round_num, on_phase,
-            obs=obs, trace_id=trace_id, escalation_context=escalation_context,
+            state,
+            config,
+            round_num,
+            on_phase,
+            obs=obs,
+            trace_id=trace_id,
+            escalation_context=escalation_context,
         )
 
     # L2 stalled, L3 disabled → exhaust or reset
@@ -475,7 +482,8 @@ async def escalate_l2(
             return None
         logger.debug(
             "L2 patience exhausted (%d stalls) at round %d",
-            esc.l2_stall_count, round_num,
+            esc.l2_stall_count,
+            round_num,
         )
         return StopReason.L2_PATIENCE
 
@@ -486,8 +494,12 @@ async def escalate_l2(
     l3_exhausted = config.l3_patience is not None and esc.l3_stall_count >= config.l3_patience
     if not l3_exhausted:
         await _do_l3_transition(
-            state, config, round_num, on_phase,
-            obs=obs, trace_id=trace_id,
+            state,
+            config,
+            round_num,
+            on_phase,
+            obs=obs,
+            trace_id=trace_id,
         )
         return None
 
@@ -497,6 +509,7 @@ async def escalate_l2(
         return None
     logger.debug(
         "L3 patience exhausted (%d stalls) at round %d",
-        esc.l3_stall_count, round_num,
+        esc.l3_stall_count,
+        round_num,
     )
     return StopReason.L3_PATIENCE

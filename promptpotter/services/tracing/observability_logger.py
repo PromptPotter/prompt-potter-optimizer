@@ -29,9 +29,11 @@ import json
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.services.stores.base import (
     append_jsonl,
@@ -46,6 +48,70 @@ if TYPE_CHECKING:
     from promptpotter.services.tracing.langfuse_client import LangfuseLogger
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Node-level tracing
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class NodeTrace:
+    """Mutable bag for node output and metrics, yielded by ``observed_node``."""
+
+    output: dict[str, Any] = field(default_factory=dict)
+    duration_ms: float = 0.0
+    error: str | None = None
+
+
+@asynccontextmanager
+async def observed_node(
+    node_id: str,
+    node_type: str,
+    obs: ObsLogger | None = None,
+    trace_id: str | None = None,
+    obs_type: str = "generation",
+):
+    """Async context manager for node-level timing + observability.
+
+    Captures wall-clock duration and optionally writes Langfuse-compatible
+    observations via ``obs.log_node_start/end``.  Non-fatal: observability
+    failures are logged as warnings and never crash the caller.
+
+    Yields:
+        NodeTrace with ``.output`` (set by caller), ``.duration_ms``, ``.error``.
+    """
+    trace = NodeTrace()
+    obs_id: str | None = None
+
+    if obs and trace_id:
+        with graceful(f"observed_node start failed for {node_id}"):
+            obs_id = obs.log_node_start(
+                trace_id=trace_id,
+                node_id=node_id,
+                node_type=node_type,
+                obs_type=obs_type,
+                input_data={},
+            )
+
+    t0 = time.perf_counter()
+    try:
+        yield trace
+    except Exception as exc:
+        trace.error = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        trace.duration_ms = (time.perf_counter() - t0) * 1000
+        if obs and trace_id and obs_id:
+            with graceful(f"observed_node end failed for {node_id}"):
+                obs.log_node_end(
+                    obs_id=obs_id,
+                    trace_id=trace_id,
+                    node_id=node_id,
+                    output_data=trace.output,
+                    metrics={"duration_ms": trace.duration_ms},
+                    error=trace.error,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +177,7 @@ class ObsLogger:
         if langfuse is _UNSET:
             with graceful("Cloud backend init failed; file-only mode", level=logging.DEBUG):
                 from promptpotter.services.tracing.langfuse_client import LangfuseLogger
+
                 lf = LangfuseLogger.get_instance()
                 if lf.enabled:
                     self._cloud_lf = lf
@@ -199,14 +266,17 @@ class ObsLogger:
         meta_path = exp_dir / "meta.yaml"
         if not meta_path.exists():
             now_ms = int(time.time() * 1000)
-            write_yaml_kv(meta_path, {
-                "experiment_id": campaign_id,
-                "name": campaign_id,
-                "artifact_location": str(exp_dir),
-                "lifecycle_stage": "active",
-                "creation_time": now_ms,
-                "last_update_time": now_ms,
-            })
+            write_yaml_kv(
+                meta_path,
+                {
+                    "experiment_id": campaign_id,
+                    "name": campaign_id,
+                    "artifact_location": str(exp_dir),
+                    "lifecycle_stage": "active",
+                    "creation_time": now_ms,
+                    "last_update_time": now_ms,
+                },
+            )
         return exp_dir
 
     def _write_mlflow_run(
@@ -222,23 +292,26 @@ class ObsLogger:
         run_dir = experiment_dir / run_id
         now_ms = int(time.time() * 1000)
 
-        write_yaml_kv(run_dir / "meta.yaml", {
-            "run_id": run_id,
-            "run_uuid": run_id,
-            "run_name": run_name,
-            "experiment_id": experiment_dir.name,
-            "status": 3,  # FINISHED (MLflow numeric status)
-            "start_time": now_ms,
-            "end_time": now_ms,
-            "lifecycle_stage": "active",
-            "source_type": 4,  # LOCAL
-            "source_name": "",
-            "source_version": "",
-            "entry_point_name": "",
-            "user_id": "promptpotter",
-            "artifact_uri": f"file:///{(run_dir / 'artifacts').as_posix()}",
-            "tags": [],
-        })
+        write_yaml_kv(
+            run_dir / "meta.yaml",
+            {
+                "run_id": run_id,
+                "run_uuid": run_id,
+                "run_name": run_name,
+                "experiment_id": experiment_dir.name,
+                "status": 3,  # FINISHED (MLflow numeric status)
+                "start_time": now_ms,
+                "end_time": now_ms,
+                "lifecycle_stage": "active",
+                "source_type": 4,  # LOCAL
+                "source_name": "",
+                "source_version": "",
+                "entry_point_name": "",
+                "user_id": "promptpotter",
+                "artifact_uri": f"file:///{(run_dir / 'artifacts').as_posix()}",
+                "tags": [],
+            },
+        )
 
         for key, value in params.items():
             write_text(run_dir / "params" / key, str(value))
@@ -256,7 +329,10 @@ class ObsLogger:
     # --- Cloud Langfuse helpers (each handles its own try/except) ---
 
     def _cloud_register_dataset(
-        self, dataset_name: str, dataset: list[dict], query_to_item_id: dict[str, str],
+        self,
+        dataset_name: str,
+        dataset: list[dict],
+        query_to_item_id: dict[str, str],
     ) -> None:
         if not self._cloud_lf:
             return
@@ -288,8 +364,13 @@ class ObsLogger:
                     query_to_item_id[query] = cloud_id
 
     def _cloud_dataset_run(
-        self, run_id: str, content_hash: str, prompt_fields_id: str,
-        accuracy: float, hits: int, total: int,
+        self,
+        run_id: str,
+        content_hash: str,
+        prompt_fields_id: str,
+        accuracy: float,
+        hits: int,
+        total: int,
     ) -> None:
         if not self._cloud_lf or not self._cloud_active_trace_id:
             return
@@ -308,8 +389,11 @@ class ObsLogger:
             )
 
     def _cloud_campaign_start(
-        self, campaign_id: str, baseline_accuracy: float,
-        config: dict, session_id: str | None,
+        self,
+        campaign_id: str,
+        baseline_accuracy: float,
+        config: dict,
+        session_id: str | None,
     ) -> None:
         if not self._cloud_lf:
             return
@@ -330,8 +414,12 @@ class ObsLogger:
                 self._cloud_active_session_id = session_id
 
     def _cloud_node_start(
-        self, node_id: str, node_type: str, obs_type: str,
-        input_data: dict, metadata: dict | None,
+        self,
+        node_id: str,
+        node_type: str,
+        obs_type: str,
+        input_data: dict,
+        metadata: dict | None,
     ) -> None:
         if not self._cloud_lf or not self._cloud_active_trace_id:
             return
@@ -349,8 +437,11 @@ class ObsLogger:
                 self._cloud_active_step_obs_ids[node_id] = cloud_obs_id
 
     def _cloud_node_end(
-        self, node_id: str, output_data: dict | None,
-        metrics: dict | None, error: str | None,
+        self,
+        node_id: str,
+        output_data: dict | None,
+        metrics: dict | None,
+        error: str | None,
     ) -> None:
         if not self._cloud_lf:
             return
@@ -384,8 +475,13 @@ class ObsLogger:
                 self._cloud_active_round_obs_id = obs_id
 
     def _cloud_round_end(
-        self, campaign_id: str, round_num: int, accuracy: float,
-        improved: bool, next_action: str, candidate_scores: list[dict],
+        self,
+        campaign_id: str,
+        round_num: int,
+        accuracy: float,
+        improved: bool,
+        next_action: str,
+        candidate_scores: list[dict],
         optimizer_templates: list[str] | None,
     ) -> None:
         if not self._cloud_lf:
@@ -421,7 +517,10 @@ class ObsLogger:
             self._cloud_active_round_obs_id = None
 
     def _cloud_prompt_version(
-        self, prompt_fields_id: str, parent_id: str | None, layer1_fields: dict,
+        self,
+        prompt_fields_id: str,
+        parent_id: str | None,
+        layer1_fields: dict,
     ) -> None:
         if not self._cloud_lf or not self._cloud_trace_ids:
             return
@@ -444,8 +543,12 @@ class ObsLogger:
             )
 
     def _cloud_campaign_end(
-        self, campaign_id: str, best_accuracy: float,
-        n_rounds: int, stop_reason: str, best_round: int,
+        self,
+        campaign_id: str,
+        best_accuracy: float,
+        n_rounds: int,
+        stop_reason: str,
+        best_round: int,
     ) -> None:
         if not self._cloud_lf:
             return
@@ -517,16 +620,21 @@ class ObsLogger:
                 logger.debug(
                     "Dataset '%s': %d items registered, %d duplicates/empty "
                     "skipped (from %d input)",
-                    dataset_name, len(query_to_item_id), n_skipped, len(dataset),
+                    dataset_name,
+                    len(query_to_item_id),
+                    n_skipped,
+                    len(dataset),
                 )
 
-            self._log_event({
-                "event": "dataset_registered",
-                "dataset_name": dataset_name,
-                "n_items": len(query_to_item_id),
-                "n_input": len(dataset),
-                "n_skipped": n_skipped,
-            })
+            self._log_event(
+                {
+                    "event": "dataset_registered",
+                    "dataset_name": dataset_name,
+                    "n_items": len(query_to_item_id),
+                    "n_input": len(dataset),
+                    "n_skipped": n_skipped,
+                }
+            )
 
             self._cloud_register_dataset(dataset_name, dataset, query_to_item_id)
 
@@ -557,16 +665,18 @@ class ObsLogger:
             )
             self._write_score(trace_id, "accuracy", accuracy)
 
-            self._log_event({
-                "event": "dataset_run",
-                "trace_id": trace_id,
-                "run_id": run_id,
-                "content_hash": content_hash,
-                "accuracy": accuracy,
-                "hits": hits,
-                "total": total,
-                "prompt_fields_id": prompt_fields_id,
-            })
+            self._log_event(
+                {
+                    "event": "dataset_run",
+                    "trace_id": trace_id,
+                    "run_id": run_id,
+                    "content_hash": content_hash,
+                    "accuracy": accuracy,
+                    "hits": hits,
+                    "total": total,
+                    "prompt_fields_id": prompt_fields_id,
+                }
+            )
 
             self._cloud_dataset_run(run_id, content_hash, prompt_fields_id, accuracy, hits, total)
 
@@ -600,12 +710,14 @@ class ObsLogger:
             self._campaign_traces[campaign_id] = trace_id
             self._write_score(trace_id, "baseline_accuracy", baseline_accuracy)
 
-            self._log_event({
-                "event": "campaign_start",
-                "trace_id": trace_id,
-                "campaign_id": campaign_id,
-                "baseline_accuracy": baseline_accuracy,
-            })
+            self._log_event(
+                {
+                    "event": "campaign_start",
+                    "trace_id": trace_id,
+                    "campaign_id": campaign_id,
+                    "baseline_accuracy": baseline_accuracy,
+                }
+            )
 
             self._cloud_campaign_start(campaign_id, baseline_accuracy, config, session_id)
 
@@ -639,13 +751,15 @@ class ObsLogger:
                 metadata={"node_type": node_type, **(metadata or {})},
             )
 
-            self._log_event({
-                "event": "node_start",
-                "trace_id": trace_id,
-                "obs_id": obs_id,
-                "node_id": node_id,
-                "node_type": node_type,
-            })
+            self._log_event(
+                {
+                    "event": "node_start",
+                    "trace_id": trace_id,
+                    "obs_id": obs_id,
+                    "node_id": node_id,
+                    "node_type": node_type,
+                }
+            )
 
             self._cloud_node_start(node_id, node_type, obs_type, input_data, metadata)
 
@@ -679,13 +793,15 @@ class ObsLogger:
                     obs_data.setdefault("metadata", {})["error"] = error
                 write_json(obs_path, obs_data)
 
-            self._log_event({
-                "event": "node_end",
-                "trace_id": trace_id,
-                "obs_id": obs_id,
-                "node_id": node_id,
-                "error": error,
-            })
+            self._log_event(
+                {
+                    "event": "node_end",
+                    "trace_id": trace_id,
+                    "obs_id": obs_id,
+                    "node_id": node_id,
+                    "error": error,
+                }
+            )
 
             self._cloud_node_end(node_id, output_data, metrics, error)
 
@@ -750,8 +866,11 @@ class ObsLogger:
                     },
                     metadata={
                         "candidate_scores": candidate_scores,
-                        **({"optimizer_templates": optimizer_templates}
-                           if optimizer_templates else {}),
+                        **(
+                            {"optimizer_templates": optimizer_templates}
+                            if optimizer_templates
+                            else {}
+                        ),
                     },
                 )
                 self._write_score(trace_id, "accuracy", accuracy)
@@ -781,24 +900,30 @@ class ObsLogger:
                 },
             )
 
-            self._log_event({
-                "event": "round_complete",
-                "trace_id": trace_id,
-                "campaign_id": campaign_id,
-                "round": round_num,
-                "accuracy": accuracy,
-                "hits": hits,
-                "total": total,
-                "improved": improved,
-                "next_action": next_action,
-                "winner_prompt_fields_id": winner_prompt_fields_id,
-                **({"optimizer_templates": optimizer_templates}
-                   if optimizer_templates else {}),
-            })
+            self._log_event(
+                {
+                    "event": "round_complete",
+                    "trace_id": trace_id,
+                    "campaign_id": campaign_id,
+                    "round": round_num,
+                    "accuracy": accuracy,
+                    "hits": hits,
+                    "total": total,
+                    "improved": improved,
+                    "next_action": next_action,
+                    "winner_prompt_fields_id": winner_prompt_fields_id,
+                    **({"optimizer_templates": optimizer_templates} if optimizer_templates else {}),
+                }
+            )
 
             self._cloud_round_end(
-                campaign_id, round_num, accuracy, improved,
-                next_action, candidate_scores, optimizer_templates,
+                campaign_id,
+                round_num,
+                accuracy,
+                improved,
+                next_action,
+                candidate_scores,
+                optimizer_templates,
             )
 
             obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
@@ -834,13 +959,15 @@ class ObsLogger:
             }
             write_json(prompt_dir / "metadata.json", metadata)
 
-            self._log_event({
-                "event": "prompt_version",
-                "prompt_fields_id": prompt_fields_id,
-                "family": family,
-                "version": version,
-                "parent_id": parent_id,
-            })
+            self._log_event(
+                {
+                    "event": "prompt_version",
+                    "prompt_fields_id": prompt_fields_id,
+                    "family": family,
+                    "version": version,
+                    "parent_id": parent_id,
+                }
+            )
 
             self._cloud_prompt_version(prompt_fields_id, parent_id, layer1_fields)
 
@@ -864,9 +991,7 @@ class ObsLogger:
             trace_id = self._campaign_traces.get(campaign_id, "")
 
             if trace_id:
-                trace_path = (
-                    self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"
-                )
+                trace_path = self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"
                 if trace_path.exists():
                     trace_data = json.loads(
                         trace_path.read_text(encoding="utf-8"),
@@ -880,15 +1005,17 @@ class ObsLogger:
 
                 self._write_score(trace_id, "best_accuracy", best_accuracy)
 
-            self._log_event({
-                "event": "campaign_end",
-                "trace_id": trace_id,
-                "campaign_id": campaign_id,
-                "best_accuracy": best_accuracy,
-                "n_rounds": n_rounds,
-                "stop_reason": stop_reason,
-                "best_round": best_round,
-            })
+            self._log_event(
+                {
+                    "event": "campaign_end",
+                    "trace_id": trace_id,
+                    "campaign_id": campaign_id,
+                    "best_accuracy": best_accuracy,
+                    "n_rounds": n_rounds,
+                    "stop_reason": stop_reason,
+                    "best_round": best_round,
+                }
+            )
 
             self._cloud_campaign_end(campaign_id, best_accuracy, n_rounds, stop_reason, best_round)
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from promptpotter.models.phase_event import PhaseEvent
+from promptpotter.services.campaign.state import PhaseEvent
 
 if TYPE_CHECKING:
     from promptpotter.services.search.scan_results import ScanContext
@@ -49,9 +49,11 @@ def fmt_pvalue(p: float) -> str:
         return f"p={p:.2f} *"
     return f"p={p:.2f} (ns)"
 
+
 # ---------------------------------------------------------------------------
 # Display state — tracks cycle metadata across callbacks (display-only)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _CycleDisplayState:
@@ -59,6 +61,7 @@ class _CycleDisplayState:
 
     Populated exclusively from PhaseEvent data — never touches services.
     """
+
     max_rounds: int = 0
     patience: int = 0
     stall_count: int = 0
@@ -68,7 +71,7 @@ class _CycleDisplayState:
     scan_context: ScanContext | None = None  # cached for scan reasoning display
     candidates_meta: list = field(default_factory=list)  # from l1_generate exit
     n_eval_queries: int = 0  # from generate:exit, used in evaluate:enter banner
-    current_pipeline_params: dict | None = None   # raw pp for candidate eval callback
+    current_pipeline_params: dict | None = None  # raw pp for candidate eval callback
     # 3-column SP diff tracking (flattened dot-notation dicts)
     original_sp_flat: dict[str, str] = field(default_factory=dict)
     previous_sp_flat: dict[str, str] = field(default_factory=dict)
@@ -181,7 +184,8 @@ _VAL_INLINE_MAX = 12  # values longer than this get a lookup code
 
 
 def _build_candidate_flat(
-    parent: dict[str, str], candidate_meta: dict,
+    parent: dict[str, str],
+    candidate_meta: dict,
 ) -> dict[str, str]:
     """Merge candidate overrides onto parent flat dict.
 
@@ -295,10 +299,8 @@ def _print_sp_diff(
 
     # Header
     r_label = f"Round {round_num}" if round_num is not None else "SPs"
-    print(_node_line(
-        f"{CYAN}{r_label} SPs:{RESET}"))
-    hdr = f"{'':>{max_key}}  " + "".join(
-        f"{label:<{col_w}}" for label, _ in columns)
+    print(_node_line(f"{CYAN}{r_label} SPs:{RESET}"))
+    hdr = f"{'':>{max_key}}  " + "".join(f"{label:<{col_w}}" for label, _ in columns)
     print(_node_line(hdr))
 
     # Rows — grouped by pipeline node
@@ -348,13 +350,11 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_dbox_top())
     print(_dbox_line(f"{BOLD}FEEDBACK CYCLE STARTING{RESET}"))
     print(_dbox_sep())
-    print(_dbox_line(
-        f"Baseline       {d.get('baseline_accuracy', 0):.1%}"))
-    print(_dbox_line(
-        f"Max rounds     {state.max_rounds or 999!s:<15s}"
-        f"Patience    {state.patience}"))
-    print(_dbox_line(
-        f"Candidates     {d.get('n_variants', 0)}"))
+    print(_dbox_line(f"Baseline       {d.get('baseline_accuracy', 0):.1%}"))
+    print(
+        _dbox_line(f"Max rounds     {state.max_rounds or 999!s:<15s}Patience    {state.patience}")
+    )
+    print(_dbox_line(f"Candidates     {d.get('n_variants', 0)}"))
     sample = d.get("sample_size", 0)
     total = d.get("dataset_count", 0)
     eff_n = sample if sample else total
@@ -362,8 +362,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     sample_label = f"{sample} of {total}" if sample else f"all {total}"
     mde = min_detectable_effect(eff_n)
     print(_dbox_line(f"Sample size    {sample_label}"))
-    print(_dbox_line(
-        f"Min detectable {YELLOW}\u00b1{mde:.1%}{RESET} (\u03b1=0.05, 80% power)"))
+    print(_dbox_line(f"Min detectable {YELLOW}\u00b1{mde:.1%}{RESET} (\u03b1=0.05, 80% power)"))
     print(_dbox_line(f"Model          {model}"))
     print(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
     print(_dbox_line(f"Scan context   {scan}"))
@@ -376,8 +375,7 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
     cycle_id = d.get("cycle_id", "?")[:12]
     samples = d.get("sample_count", "?")
     obs = "ON" if d.get("obs_enabled") else "OFF"
-    print(f"  {GREEN}✓{RESET} Initialized  cycle={cycle_id}"
-          f"  samples={samples}  obs={obs}")
+    print(f"  {GREEN}✓{RESET} Initialized  cycle={cycle_id}  samples={samples}  obs={obs}")
     crit = d.get("critique_text", "")
     if crit:
         preview = crit.replace("\n", " ").strip()
@@ -408,7 +406,7 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     if not preview:
         preview = "(no baseline -- seed from scan or provide instruction)"
     n = d.get("n_variants", 0)
-    model = (d.get("model") or "(default)")
+    model = d.get("model") or "(default)"
     creativity = d.get("creativity", 0.7)
     scan = "YES" if d.get("has_scan_context") else "NO"
     crit = "YES" if d.get("has_critique") else "NO"
@@ -435,9 +433,11 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_node_top("GENERATE"))
     print(_node_line(f"Current best    {acc:.1%}"))
     print(_node_line(f"Prompt          {preview}"))
-    print(_node_line(
-        f"Candidates      {n}   Creativity: {creativity}   Scan: {scan}"
-        f"   Critique: {crit}"))
+    print(
+        _node_line(
+            f"Candidates      {n}   Creativity: {creativity}   Scan: {scan}   Critique: {crit}"
+        )
+    )
     print(_node_line(f"Model           {model}"))
 
     # Scan reasoning inside node frame
@@ -445,9 +445,11 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
         axes = state.scan_context.improving_axes
         bl_acc = state.scan_context.baseline_accuracy
         if axes:
-            print(_node_line(
-                f"{CYAN}Scan focus:{RESET} {len(axes)} improving axes"
-                f" [{', '.join(axes)}]"))
+            print(
+                _node_line(
+                    f"{CYAN}Scan focus:{RESET} {len(axes)} improving axes [{', '.join(axes)}]"
+                )
+            )
         if bl_acc > 0:
             print(_node_line(f"{CYAN}Scan baseline:{RESET} {bl_acc:.1%}"))
 
@@ -504,9 +506,11 @@ def _print_l1_evaluate_exit(d: dict, state: _CycleDisplayState) -> None:
     for i, s in enumerate(scores):
         s["label"] = f"C{i + 1}"
     non_aborted = [s for s in scores if not s.get("escalation_aborted")]
-    best_s = max(non_aborted, key=lambda s: (
-        s.get("composite", s["accuracy"]), s["accuracy"]
-    )) if non_aborted else {}
+    best_s = (
+        max(non_aborted, key=lambda s: (s.get("composite", s["accuracy"]), s["accuracy"]))
+        if non_aborted
+        else {}
+    )
     winner = best_s.get("label", "?")
 
     # Scoreboard: full table for >3 candidates, compact 1-liner otherwise
@@ -515,8 +519,9 @@ def _print_l1_evaluate_exit(d: dict, state: _CycleDisplayState) -> None:
         if board:
             print(board)
     elif scores:
-        _ranked = sorted(scores, key=lambda s: (
-            s.get("composite", s["accuracy"]), s["accuracy"]), reverse=True)
+        _ranked = sorted(
+            scores, key=lambda s: (s.get("composite", s["accuracy"]), s["accuracy"]), reverse=True
+        )
         parts = []
         for s in _ranked:
             lbl = s.get("label", "?")
@@ -540,14 +545,15 @@ def _print_l1_evaluate_exit(d: dict, state: _CycleDisplayState) -> None:
         bl_hits = round(state.baseline_accuracy * winner_total)
         p = proportion_test(winner_hits, winner_total, bl_hits, winner_total)
         sig_tag = f"  {fmt_pvalue(p)}"
-        print(f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {w_acc:.1%}"
-              f" (was {state.baseline_accuracy:.1%},"
-              f" {_fmt_delta(delta)}){comp_tag}{sig_tag}"
-              f"  ->  next: {action}")
+        print(
+            f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {w_acc:.1%}"
+            f" (was {state.baseline_accuracy:.1%},"
+            f" {_fmt_delta(delta)}){comp_tag}{sig_tag}"
+            f"  ->  next: {action}"
+        )
         state.baseline_accuracy = w_acc
     else:
-        print(f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}"
-              f"  best candidate {w_acc:.1%}{comp_tag}")
+        print(f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}  best candidate {w_acc:.1%}{comp_tag}")
 
     # Critique (fed forward to next l1_generate)
     crit = d.get("critique_text", "")
@@ -587,8 +593,7 @@ def _print_refine_enter(d: dict, state: _CycleDisplayState) -> None:
 
     print()
     print(_node_top("L2 REFINE CONTEXT", f"L2 round {l2r}"))
-    print(_node_line(
-        f"L1 stalled {stalls} rounds  |  acc={acc:.1%}  best={best:.1%}"))
+    print(_node_line(f"L1 stalled {stalls} rounds  |  acc={acc:.1%}  best={best:.1%}"))
     if params:
         parts = []
         for k, v in list(params.items())[:5]:
@@ -623,8 +628,7 @@ def _print_refine_exit(d: dict, state: _CycleDisplayState) -> None:
     warned = d.get("warned_queries", 0)
     top_w = d.get("top_warning", "")
     if warned:
-        print(f"    {YELLOW}⚠ {warned} queries with recurring pipeline warnings"
-              f" ({top_w}){RESET}")
+        print(f"    {YELLOW}⚠ {warned} queries with recurring pipeline warnings ({top_w}){RESET}")
 
     # Debug: show full L2 prompt and response
     l2_prompt = d.get("l2_prompt", "")
@@ -747,5 +751,4 @@ def _dispatch_phase(event: PhaseEvent, state: _CycleDisplayState) -> None:
         handler(event.data, state)
     else:
         # Fallback for unknown phases
-        print(f"  [{event.phase.upper()} {event.event}]"
-              f" {event.data}")
+        print(f"  [{event.phase.upper()} {event.event}] {event.data}")

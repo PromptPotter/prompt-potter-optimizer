@@ -1,8 +1,9 @@
 """Shared types and utilities for sensitivity scan and adaptive search.
 
 Axis classification, variant library filtering, eval function factory,
-diagnostic set builder, and plan persistence (formerly plan_persistence.py).
+diagnostic set builder, and plan persistence.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -103,8 +104,7 @@ class ScanEvent(TypedDict, total=False):
     estimated_eval_cost: int
 
 
-
-def _profiles_from_rows(
+def profiles_from_rows(
     rows: list[dict],
     axes: list[tuple],
     n_eval: int,
@@ -130,22 +130,24 @@ def _profiles_from_rows(
         sens_range = max(deltas) - min(deltas) if deltas else 0.0
         card = len(values)
         budget = classify_axis(card, sens_range, n_eval)
-        profiles.append({
-            "axis": axis_name,
-            "axis_type": axis_type,
-            "cardinality": card,
-            "sensitivity_range": round(sens_range, 4),
-            "best_delta": round(max(deltas), 4) if deltas else 0.0,
-            "worst_delta": round(min(deltas), 4) if deltas else 0.0,
-            "exploration_budget": budget,
-            "estimated_eval_cost": card * n_eval,
-        })
+        profiles.append(
+            {
+                "axis": axis_name,
+                "axis_type": axis_type,
+                "cardinality": card,
+                "sensitivity_range": round(sens_range, 4),
+                "best_delta": round(max(deltas), 4) if deltas else 0.0,
+                "worst_delta": round(min(deltas), 4) if deltas else 0.0,
+                "exploration_budget": budget,
+                "estimated_eval_cost": card * n_eval,
+            }
+        )
 
     profiles.sort(key=lambda p: -p["sensitivity_range"])
     return profiles
 
 
-def _make_eval_fn(
+def make_eval_fn(
     dataset: list,
     ctx: EvalContext,
     get_params: Callable[[], dict],
@@ -171,11 +173,14 @@ def _make_eval_fn(
             prompt_node=_pn,
         )
         results, scores, cached = await eval_search_point(
-            sp, dataset, ctx,
+            sp,
+            dataset,
+            ctx,
             label="scan",
             on_result=on_result,
         )
         return {**scores, "results": results, "cached": cached}
+
     return _eval_opt
 
 
@@ -208,8 +213,7 @@ def build_diagnostic_set(
     """
     if len(dataset) < MIN_DIAGNOSTIC_QUERIES:
         raise ValueError(
-            f"Need at least {MIN_DIAGNOSTIC_QUERIES} eval queries, "
-            f"got {len(dataset)}."
+            f"Need at least {MIN_DIAGNOSTIC_QUERIES} eval queries, got {len(dataset)}."
         )
 
     # Auto-adjust sample size for statistical power (Wave 2a)
@@ -223,7 +227,10 @@ def build_diagnostic_set(
                 logger.warning(
                     "Scan sample size %d too small to detect %.0f%% effect "
                     "(need %d); adjusting to %d",
-                    n_queries, SCAN_TARGET_MDE * 100, min_n, adjusted,
+                    n_queries,
+                    SCAN_TARGET_MDE * 100,
+                    min_n,
+                    adjusted,
                 )
                 n_queries = adjusted
     except ImportError:
@@ -275,7 +282,11 @@ def build_diagnostic_set(
 
     # Wave 2c: diagnostic-aware miss stratification
     selected_misses = _stratify_misses(
-        misses, baseline_results, n_misses, rng, pipeline_schema,
+        misses,
+        baseline_results,
+        n_misses,
+        rng,
+        pipeline_schema,
     )
 
     diagnostic = selected_hits + selected_misses
@@ -324,7 +335,8 @@ def _stratify_misses(
         if r:
             diag = extract_sample_diagnostics(r, pipeline_schema)
             key = tuple(
-                f"{k}={diag[k]}" for k in ("gt_in_source", "gt_in_ranked", "terminated_at")
+                f"{k}={diag[k]}"
+                for k in ("gt_in_source", "gt_in_ranked", "terminated_at")
                 if k in diag
             )
         else:
@@ -431,9 +443,7 @@ def filter_variant_library(
 
     # Drop prompt_fields when no active step has a prompt template
     has_prompt_step = any(
-        step.prompt_meta is not None
-        for step in schema.nodes
-        if step.name in active_steps
+        step.prompt_meta is not None for step in schema.nodes if step.name in active_steps
     )
     filtered_pf = variant_library.get("prompt_fields", {})
     if not has_prompt_step:
@@ -450,8 +460,7 @@ def filter_variant_library(
         logger.debug("filter_variant_library: dropped pipeline_params %s", removed_pp)
     if not filtered_pf and variant_library.get("prompt_fields"):
         logger.debug(
-            "filter_variant_library: dropped all prompt_fields "
-            "(no active step with prompt_meta)"
+            "filter_variant_library: dropped all prompt_fields (no active step with prompt_meta)"
         )
 
     return result
@@ -463,6 +472,7 @@ def load_filtered_variant_library(
 ) -> dict:
     """Load variant library, filtering to active pipeline steps when possible."""
     from promptpotter.config.settings import load_variant_library
+
     lib = load_variant_library()
     if pipeline_params and pipeline_schema:
         lib = filter_variant_library(lib, pipeline_params, schema=pipeline_schema)
@@ -470,7 +480,7 @@ def load_filtered_variant_library(
 
 
 # ---------------------------------------------------------------------------
-# Plan persistence (formerly plan_persistence.py)
+# Plan persistence
 # ---------------------------------------------------------------------------
 
 SSPLAN_PREFIX = "ssplan_"

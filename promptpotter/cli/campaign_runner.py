@@ -129,13 +129,18 @@ async def cmd_init(args: argparse.Namespace) -> None:
     # Load data and run baseline (may be long-running)
     train_data = None
     if args.excel_path:
-        train_data, _st = prepare_datasets(session.store, session.backend_id, excel_path=args.excel_path)
+        train_data, _st = prepare_datasets(
+            session.store, session.backend_id, excel_path=args.excel_path
+        )
     elif session.queries:
         train_data = session.queries
 
     baseline, dataset, campaign_rounds, _br = await prepare_eval_context(
-        session, train_data, campaign_config,
-        run_baseline=args.run_baseline, pipeline_params=pipeline_params,
+        session,
+        train_data,
+        campaign_config,
+        run_baseline=args.run_baseline,
+        pipeline_params=pipeline_params,
     )
 
     # Update session with baseline results
@@ -146,24 +151,34 @@ async def cmd_init(args: argparse.Namespace) -> None:
     session.store.sessions.save(bid, sid, state)
 
     excl_str = f"{', '.join(excluded)} excluded" if excluded else "none excluded"
-    session.store.sessions.append_log(bid, sid, f"""# Campaign Report — {sid}
+    session.store.sessions.append_log(
+        bid,
+        sid,
+        f"""# Campaign Report — {sid}
 
 ## Setup
 - Backend: {args.backend_id} @ {args.backend_url}
-- Active steps: {', '.join(active)} ({excl_str})
+- Active steps: {", ".join(active)} ({excl_str})
 - Eval data: {len(dataset)} queries
-- Baseline: {baseline_acc:.1%}""")
+- Baseline: {baseline_acc:.1%}""",
+    )
 
     if getattr(args, "json_output", False):
-        print(json.dumps({
-            "session_id": sid,
-            "backend_id": bid,
-            "phase": state["phase"],
-            "baseline_accuracy": baseline_acc,
-            "dataset_count": len(dataset),
-            "active_steps": active,
-            "excluded_nodes": excluded,
-        }, indent=2, default=str))
+        print(
+            json.dumps(
+                {
+                    "session_id": sid,
+                    "backend_id": bid,
+                    "phase": state["phase"],
+                    "baseline_accuracy": baseline_acc,
+                    "dataset_count": len(dataset),
+                    "active_steps": active,
+                    "excluded_nodes": excluded,
+                },
+                indent=2,
+                default=str,
+            )
+        )
     else:
         print(f"\nSession created: {sid}")
         print(f"Baseline: {baseline_acc:.1%} ({len(dataset)} queries)")
@@ -186,13 +201,17 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
 
     session = await _reconstruct_svc(state["init_params"])
     task_context = await decompose_task_context(
-        task_description, state["campaign_config"], session,
+        task_description,
+        state["campaign_config"],
+        session,
     )
 
     state["task_context"] = task_context
     state["phase"] = "task-context"
     session.store.sessions.save(bid, sid, state)
-    session.store.sessions.append_log(bid, sid, f"## Task Context\n{json.dumps(task_context, indent=2)}")
+    session.store.sessions.append_log(
+        bid, sid, f"## Task Context\n{json.dumps(task_context, indent=2)}"
+    )
 
 
 async def cmd_scan(args: argparse.Namespace) -> None:
@@ -226,8 +245,12 @@ async def cmd_scan(args: argparse.Namespace) -> None:
         else state["campaign_config"].get("exploration_sample_size", 0)
     )
     _scan_bl, scan_df, _axis_profiles = await run_sensitivity_scan(
-        baseline, state["campaign_config"], scan_variants, train_data,
-        scan_sample_size=sample_size, session=session,
+        baseline,
+        state["campaign_config"],
+        scan_variants,
+        train_data,
+        scan_sample_size=sample_size,
+        session=session,
         experiment_id=state["init_params"]["experiment_id"],
         session_id=sid,
     )
@@ -238,9 +261,13 @@ async def cmd_scan(args: argparse.Namespace) -> None:
 
     records = scan_df.to_dict(orient="records") if scan_df is not None else []
     best = max(records, key=lambda r: r.get("accuracy", 0)) if records else {}
-    session.store.sessions.append_log(bid, sid, f"""## Scan
+    session.store.sessions.append_log(
+        bid,
+        sid,
+        f"""## Scan
 - Axes: {len(scan_variants)}, variants: {len(records)}
-- Best: {best.get('axis', '?')}={best.get('value_preview', '?')} → {best.get('accuracy', 0):.1%} (delta: {best.get('delta', 0):+.1%})""")
+- Best: {best.get("axis", "?")}={best.get("value_preview", "?")} → {best.get("accuracy", 0):.1%} (delta: {best.get("delta", 0):+.1%})""",
+    )
 
 
 async def cmd_scan_results(args: argparse.Namespace) -> None:
@@ -265,16 +292,21 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
     if not scan_df.empty:
         best_row = scan_df.loc[scan_df["accuracy"].idxmax()]
         print(f"Scan results: {len(scan_df)} variants across {scan_df['axis'].nunique()} axes")
-        print(f"Best: {best_row['axis']}={best_row.get('value_preview', '?')} "
-              f"({best_row['accuracy']:.1%}, delta={best_row.get('delta', 0):+.1%})")
+        print(
+            f"Best: {best_row['axis']}={best_row.get('value_preview', '?')} "
+            f"({best_row['accuracy']:.1%}, delta={best_row.get('delta', 0):+.1%})"
+        )
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     scan_baseline_sp = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
 
     campaign_rounds: list = []
     seed_campaign_from_scan(
-        scan_df, axis_profiles, scan_baseline_sp,
-        state.get("scan_variants", {}), campaign_rounds,
+        scan_df,
+        axis_profiles,
+        scan_baseline_sp,
+        state.get("scan_variants", {}),
+        campaign_rounds,
         state["campaign_config"],
     )
 
@@ -307,7 +339,9 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     # Re-run baseline (fast — cached) to populate baseline_results for critique
     _has_baseline = state.get("baseline_accuracy", 0) > 0
     _baseline, dataset, campaign_rounds, baseline_results = await prepare_eval_context(
-        session, train_data, campaign_config,
+        session,
+        train_data,
+        campaign_config,
         pipeline_params=pipeline_params,
         run_baseline=_has_baseline,
     )
@@ -315,12 +349,14 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     # Seed campaign_rounds with stored baseline when no eval has been run yet
     if not campaign_rounds and state.get("baseline_prompt_fields"):
         bl_ps = OptSearchPoint.from_prompt_fields(state["baseline_prompt_fields"])
-        campaign_rounds.append({
-            "round": "baseline",
-            "accuracy": state.get("baseline_accuracy", 0.0),
-            "prompt_fields": bl_ps,
-            "results": baseline_results or [],
-        })
+        campaign_rounds.append(
+            {
+                "round": "baseline",
+                "accuracy": state.get("baseline_accuracy", 0.0),
+                "prompt_fields": bl_ps,
+                "results": baseline_results or [],
+            }
+        )
 
     # Load scan context if available
     state["_session_id"] = sid  # for build_scan_context
@@ -336,8 +372,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     session.store.sessions.save(bid, sid, state)
 
     # Bidirectional control — CLI provides FileControlSurface as on_checkpoint
-    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.campaign.persistence_emitter import FileControlSurface
+    from promptpotter.services.campaign.state import RunCallbacks
 
     session_dir = session.store.sessions._session_dir(bid, sid)
     control = FileControlSurface(session_dir / "campaign_state.json")
@@ -352,8 +388,11 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     try:
         campaign_rounds, cycle_result = await run_optimization(
-            campaign_rounds, dataset, campaign_config,
-            session=session, pipeline_params=pipeline_params,
+            campaign_rounds,
+            dataset,
+            campaign_config,
+            session=session,
+            pipeline_params=pipeline_params,
             scan_context=scan_context,
             experiment_id=state.get("experiment_id"),
             task_context=state.get("task_context"),
@@ -497,21 +536,27 @@ async def cmd_results(args: argparse.Namespace) -> None:
 
     if getattr(args, "json_output", False):
         best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
-        print(json.dumps({
-            "cycle_id": cycle_id,
-            "n_rounds": len(campaign_rounds),
-            "best_accuracy": best.get("accuracy", 0),
-            "best_round": best.get("round"),
-            "baseline_accuracy": state.get("baseline_accuracy", 0),
-            "rounds": [
+        print(
+            json.dumps(
                 {
-                    "round": r.get("round"),
-                    "accuracy": r.get("accuracy", 0),
-                    "label": r.get("label", ""),
-                }
-                for r in campaign_rounds
-            ],
-        }, indent=2, default=str))
+                    "cycle_id": cycle_id,
+                    "n_rounds": len(campaign_rounds),
+                    "best_accuracy": best.get("accuracy", 0),
+                    "best_round": best.get("round"),
+                    "baseline_accuracy": state.get("baseline_accuracy", 0),
+                    "rounds": [
+                        {
+                            "round": r.get("round"),
+                            "accuracy": r.get("accuracy", 0),
+                            "label": r.get("label", ""),
+                        }
+                        for r in campaign_rounds
+                    ],
+                },
+                indent=2,
+                default=str,
+            )
+        )
     else:
         show_campaign_summary(campaign_rounds)
         show_flip_tracking(campaign_rounds)
@@ -519,17 +564,24 @@ async def cmd_results(args: argparse.Namespace) -> None:
 
     if args.save:
         save_campaign_winner(
-            campaign_rounds, state["campaign_config"],
-            session.store, bid, experiment_id=state.get("experiment_id", ""),
+            campaign_rounds,
+            state["campaign_config"],
+            session.store,
+            bid,
+            experiment_id=state.get("experiment_id", ""),
         )
         if not getattr(args, "json_output", False):
             print("Winner saved.")
 
     best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
-    session.store.sessions.append_log(bid, sid, f"""## Results
+    session.store.sessions.append_log(
+        bid,
+        sid,
+        f"""## Results
 - Rounds: {len(campaign_rounds)}
-- Best: {best.get('accuracy', 0):.1%} (round {best.get('round', '?')})
-- Saved: {args.save}""")
+- Best: {best.get("accuracy", 0):.1%} (round {best.get("round", "?")})
+- Saved: {args.save}""",
+    )
 
 
 async def cmd_status(args: argparse.Namespace) -> None:
@@ -618,8 +670,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="CLI campaign runner for PromptPotter optimization",
     )
     parser.add_argument("--session", default=None, help="Session ID (default: active)")
-    parser.add_argument("--json", action="store_true", dest="json_output",
-                        help="Emit machine-readable JSON instead of human-formatted text")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Emit machine-readable JSON instead of human-formatted text",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="Initialize services and create session")
@@ -643,7 +699,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_opt = sub.add_parser("optimize", help="Run optimization loop")
     p_opt.add_argument("--round", action="store_true", help="Pause after L1 generate for review")
-    p_opt.add_argument("--auto", action="store_true", help="Full loop (default — use dashboard to control)")
+    p_opt.add_argument(
+        "--auto", action="store_true", help="Full loop (default — use dashboard to control)"
+    )
 
     p_ctl = sub.add_parser("control", help="Write control signals to dashboard")
     ctl_mode = p_ctl.add_mutually_exclusive_group(required=True)
@@ -656,8 +714,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_prof = sub.add_parser("profile", help="Manage connector profile (per-backend defaults)")
     p_prof.add_argument("--backend-id", default="local")
     prof_mode = p_prof.add_mutually_exclusive_group()
-    prof_mode.add_argument("--show", action="store_true", default=True, help="Show profile (default)")
-    prof_mode.add_argument("--save", action="store_true", help="Save active session config as profile")
+    prof_mode.add_argument(
+        "--show", action="store_true", default=True, help="Show profile (default)"
+    )
+    prof_mode.add_argument(
+        "--save", action="store_true", help="Save active session config as profile"
+    )
     prof_mode.add_argument("--set", nargs=2, metavar=("KEY", "VALUE"), help="Set a profile field")
 
     p_res = sub.add_parser("results", help="Show results and optionally save")

@@ -20,11 +20,15 @@ def session_dir(tmp_path: Path) -> Path:
     """Create a session directory with a minimal session.json."""
     sdir = tmp_path / "test_backend" / "sessions" / "test_session"
     sdir.mkdir(parents=True)
-    (sdir / "session.json").write_text(json.dumps({
-        "phase": "optimizing",
-        "backend_id": "test_backend",
-        "session_id": "test_session",
-    }))
+    (sdir / "session.json").write_text(
+        json.dumps(
+            {
+                "phase": "optimizing",
+                "backend_id": "test_backend",
+                "session_id": "test_session",
+            }
+        )
+    )
     return sdir
 
 
@@ -47,9 +51,8 @@ def _make_mock_session_store(tmp_path: Path):
 def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Path) -> None:
     """Emitter lifecycle (init + on_phase + on_query + on_candidate + on_round + finalize)
     must produce all CAMPAIGN_SESSION_ARTIFACTS."""
-    from promptpotter.models.phase_event import PhaseEvent
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
-    from promptpotter.services.campaign.state import RoundResult
+    from promptpotter.services.campaign.state import PhaseEvent, RoundResult
 
     store = _make_mock_session_store(tmp_path)
 
@@ -62,40 +65,68 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     )
 
     # Simulate a single round lifecycle
-    emitter.on_phase(PhaseEvent(
-        phase="init", event="exit", round=0,
-        data={"cycle_id": "cycle_test_001", "baseline_accuracy": 0.5, "patience": 3},
-    ))
-    emitter.on_phase(PhaseEvent(
-        phase="l1_generate", event="enter", round=0,
-        data={"round": 0},
-    ))
-    emitter.on_phase(PhaseEvent(
-        phase="l1_generate", event="exit", round=0,
-        data={"candidates": [{"pipeline_params_override": {}}]},
-    ))
-    emitter.on_phase(PhaseEvent(
-        phase="l1_evaluate", event="enter", round=0,
-        data={},
-    ))
+    emitter.on_phase(
+        PhaseEvent(
+            phase="init",
+            event="exit",
+            round=0,
+            data={"cycle_id": "cycle_test_001", "baseline_accuracy": 0.5, "patience": 3},
+        )
+    )
+    emitter.on_phase(
+        PhaseEvent(
+            phase="l1_generate",
+            event="enter",
+            round=0,
+            data={"round": 0},
+        )
+    )
+    emitter.on_phase(
+        PhaseEvent(
+            phase="l1_generate",
+            event="exit",
+            round=0,
+            data={"candidates": [{"pipeline_params_override": {}}]},
+        )
+    )
+    emitter.on_phase(
+        PhaseEvent(
+            phase="l1_evaluate",
+            event="enter",
+            round=0,
+            data={},
+        )
+    )
 
     # Simulate a query evaluation
-    emitter.on_query_eval(0, 1, 0, 2, {
-        "query": "test_query",
-        "prediction": "test_pred",
-        "hit": True,
-        "cached": False,
-        "pipeline_data": {"total_time": 0.1, "terminated_at": "llm_ranking"},
-    })
-    emitter.on_query_eval(0, 1, 1, 2, {
-        "query": "test_query_2",
-        "prediction": "test_pred_2",
-        "hit": False,
-        "ground_truth_rank": 3,
-        "n_candidates": 10,
-        "cached": True,
-        "pipeline_data": {"total_time": 0.05, "terminated_at": "llm_ranking"},
-    })
+    emitter.on_query_eval(
+        0,
+        1,
+        0,
+        2,
+        {
+            "query": "test_query",
+            "prediction": "test_pred",
+            "hit": True,
+            "cached": False,
+            "pipeline_data": {"total_time": 0.1, "terminated_at": "llm_ranking"},
+        },
+    )
+    emitter.on_query_eval(
+        0,
+        1,
+        1,
+        2,
+        {
+            "query": "test_query_2",
+            "prediction": "test_pred_2",
+            "hit": False,
+            "ground_truth_rank": 3,
+            "n_candidates": 10,
+            "cached": True,
+            "pipeline_data": {"total_time": 0.05, "terminated_at": "llm_ranking"},
+        },
+    )
 
     # Simulate candidate eval
     emitter.on_candidate_eval(0, 1, {"accuracy": 0.6, "hits": 1, "total": 2})
@@ -157,9 +188,13 @@ def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
     from promptpotter.services.campaign.persistence_emitter import FileControlSurface
 
     state_path = session_dir / "campaign_state.json"
-    state_path.write_text(json.dumps({
-        "control": {"requested_state": "pause", "pause_before_l2_eval": False},
-    }))
+    state_path.write_text(
+        json.dumps(
+            {
+                "control": {"requested_state": "pause", "pause_before_l2_eval": False},
+            }
+        )
+    )
 
     surface = FileControlSurface(state_path)
     assert surface.check("after_round") == "pause"
@@ -170,9 +205,13 @@ def test_control_surface_resumes(session_dir: Path) -> None:
     from promptpotter.services.campaign.persistence_emitter import FileControlSurface
 
     state_path = session_dir / "campaign_state.json"
-    state_path.write_text(json.dumps({
-        "control": {"requested_state": "resume", "pause_before_l2_eval": False},
-    }))
+    state_path.write_text(
+        json.dumps(
+            {
+                "control": {"requested_state": "resume", "pause_before_l2_eval": False},
+            }
+        )
+    )
 
     surface = FileControlSurface(state_path)
     assert surface.check("after_round") is None
@@ -187,9 +226,13 @@ def test_control_surface_l2_pause(session_dir: Path) -> None:
     from promptpotter.services.campaign.persistence_emitter import FileControlSurface
 
     state_path = session_dir / "campaign_state.json"
-    state_path.write_text(json.dumps({
-        "control": {"requested_state": "running", "pause_before_l2_eval": True},
-    }))
+    state_path.write_text(
+        json.dumps(
+            {
+                "control": {"requested_state": "running", "pause_before_l2_eval": True},
+            }
+        )
+    )
 
     surface = FileControlSurface(state_path)
     # At non-L2 checkpoint: no pause

@@ -1,11 +1,5 @@
 """Search analysis utilities — stats, previews, and cohort sensitivity.
 
-Consolidates:
-- preview() truncation utility (formerly preview.py)
-- Statistical functions: wilson_ci, proportion_test, min_detectable_effect,
-  min_sample_size (formerly _stats.py)
-- Cohort sensitivity analysis (Wave 3e)
-
 Requires ``scipy`` for statistical functions (``pip install -e ".[stats]"``).
 """
 
@@ -55,14 +49,15 @@ def wilson_ci(hits: int, total: int, alpha: float = 0.05) -> tuple[float, float]
     p_hat = hits / total
     denom = 1 + z**2 / total
     center = (p_hat + z**2 / (2 * total)) / denom
-    margin = (
-        z * math.sqrt(p_hat * (1 - p_hat) / total + z**2 / (4 * total**2)) / denom
-    )
+    margin = z * math.sqrt(p_hat * (1 - p_hat) / total + z**2 / (4 * total**2)) / denom
     return (max(0.0, center - margin), min(1.0, center + margin))
 
 
 def proportion_test(
-    hits_a: int, total_a: int, hits_b: int, total_b: int,
+    hits_a: int,
+    total_a: int,
+    hits_b: int,
+    total_b: int,
 ) -> float:
     """Two-proportion z-test p-value (two-sided).
 
@@ -199,15 +194,17 @@ def cohort_sensitivity(
 
             delta = best_rate - baseline_rate
             if abs(delta) > 0.01:  # skip negligible
-                sensitivities.append(CohortSensitivity(
-                    axis=axis,
-                    cohort=cohort_name,
-                    cohort_size=len(cohort_queries),
-                    baseline_hit_rate=round(baseline_rate, 4),
-                    best_hit_rate=round(best_rate, 4),
-                    best_value=best_val,
-                    delta=round(delta, 4),
-                ))
+                sensitivities.append(
+                    CohortSensitivity(
+                        axis=axis,
+                        cohort=cohort_name,
+                        cohort_size=len(cohort_queries),
+                        baseline_hit_rate=round(baseline_rate, 4),
+                        best_hit_rate=round(best_rate, 4),
+                        best_value=best_val,
+                        delta=round(delta, 4),
+                    )
+                )
 
     sensitivities.sort(key=lambda s: -abs(s.delta))
 

@@ -1,15 +1,18 @@
-"""Campaign types — outcome models, artifact manifest, mutable loop state.
+"""Campaign types — outcome models, callbacks, mutable loop state.
 
-Consolidates:
-- StopReason, RoundResult, RunResult (formerly results.py)
-- CAMPAIGN_SESSION_ARTIFACTS (formerly artifacts.py)
-- EscalationCounters, LoopState, RunBackendSession
+PhaseEvent, StopReason, RoundResult, RunResult, RunCallbacks,
+EscalationCounters, LoopState, RunBackendSession, and the session
+artifact manifest.
 """
+
 from __future__ import annotations
 
 import enum
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from pydantic import BaseModel, Field
 
@@ -22,14 +25,26 @@ if TYPE_CHECKING:
     from promptpotter.services.campaign.escalation import DegradationCheck
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "CAMPAIGN_SESSION_ARTIFACTS",
     "EscalationCounters",
     "LoopState",
+    "OnCandidateEval",
+    "OnCheckpoint",
+    "OnPhase",
+    "OnQueryEval",
+    "OnRoundComplete",
+    "PhaseEvent",
     "RoundResult",
     "RunBackendSession",
+    "RunCallbacks",
     "RunResult",
     "StopReason",
+    "chain_callbacks",
+    "emit_phase",
+    "get_obs_trace",
 ]
 
 # ---------------------------------------------------------------------------
@@ -99,6 +114,7 @@ class RunResult(BaseModel):
     langfuse_trace_id: str | None = None
     cycle_id: str | None = None
     resumed_from_round: int = 0
+
 
 # ---------------------------------------------------------------------------
 # Mutable loop state
@@ -222,3 +238,114 @@ class RunBackendSession:
     resumed_from_round: int = 0
     search_memory: Any = None
     persistence_emitter: CampaignPersistenceEmitter | None = None
+
+
+# ---------------------------------------------------------------------------
+# PhaseEvent
+# ---------------------------------------------------------------------------
+
+
+class PhaseEvent(BaseModel):
+    """Emitted at phase boundaries during the feedback cycle.
+
+    Phases: init, l1_generate, l1_evaluate, refine_context, modify_plan.
+    Each phase emits an "enter" and "exit" event with phase-specific data.
+    """
+
+    model_config = {"frozen": True}
+
+    phase: str
+    event: str
+    round: int | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(UTC).isoformat(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Callback types and helpers
+# ---------------------------------------------------------------------------
+
+# (round_result, round_number)
+OnRoundComplete: TypeAlias = Callable[["RoundResult", int], None]
+# (candidate_index, total_candidates, scores_dict)
+OnCandidateEval: TypeAlias = Callable[[int, int, dict], None]
+# (candidate_index, total_candidates, query_index, total_queries, result_dict)
+OnQueryEval: TypeAlias = Callable[[int, int, int, int, dict], None]
+# (phase_event)
+OnPhase: TypeAlias = Callable[[PhaseEvent], None]
+# (checkpoint_name) -> "pause" | "stop" | None
+OnCheckpoint: TypeAlias = Callable[[str], str | None]
+
+
+@dataclass
+class RunCallbacks:
+    """Optional progress callbacks for the feedback cycle."""
+
+    on_round_complete: OnRoundComplete | None = None
+    on_candidate_eval: OnCandidateEval | None = None
+    on_query_eval: OnQueryEval | None = None
+    on_phase: OnPhase | None = None
+    on_checkpoint: OnCheckpoint | None = None
+
+
+def chain_callbacks(a: RunCallbacks, b: RunCallbacks) -> RunCallbacks:
+    """Compose two RunCallbacks so both fire on every event.
+
+    ``a`` fires first (typically persistence), ``b`` second (typically display).
+    For ``on_checkpoint``, returns the first non-None result.
+    """
+
+    def _chain(fn_a: Callable | None, fn_b: Callable | None) -> Callable | None:
+        if fn_a and fn_b:
+            return lambda *args, **kw: (fn_a(*args, **kw), fn_b(*args, **kw))
+        return fn_a or fn_b
+
+    def _chain_checkpoint(
+        fn_a: Callable | None,
+        fn_b: Callable | None,
+    ) -> Callable | None:
+        if fn_a and fn_b:
+
+            def _both(*args: object, **kw: object) -> str | None:
+                r = fn_a(*args, **kw)
+                if r is not None:
+                    return r
+                return fn_b(*args, **kw)
+
+            return _both
+        return fn_a or fn_b
+
+    return RunCallbacks(
+        on_round_complete=_chain(a.on_round_complete, b.on_round_complete),
+        on_candidate_eval=_chain(a.on_candidate_eval, b.on_candidate_eval),
+        on_query_eval=_chain(a.on_query_eval, b.on_query_eval),
+        on_phase=_chain(a.on_phase, b.on_phase),
+        on_checkpoint=_chain_checkpoint(a.on_checkpoint, b.on_checkpoint),
+    )
+
+
+def emit_phase(
+    on_phase: Callable[[PhaseEvent], None] | None,
+    phase: str,
+    event: str,
+    *,
+    round: int | None = None,
+    **data: Any,
+) -> None:
+    """Construct a PhaseEvent and call the callback if set."""
+    if on_phase is None:
+        return
+    pe = PhaseEvent(phase=phase, event=event, round=round, data=data)
+    on_phase(pe)
+
+
+def get_obs_trace(
+    state: LoopState,
+    obs_campaign_id: str,
+) -> tuple[Any | None, str | None]:
+    """Extract obs logger and trace_id from loop state."""
+    obs = state.eval_ctx.obs if state.eval_ctx else None
+    trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
+    return obs, trace_id

@@ -21,8 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from promptpotter.models.phase_event import PhaseEvent
-    from promptpotter.services.campaign.state import RoundResult
+    from promptpotter.services.campaign.state import PhaseEvent, RoundResult
     from promptpotter.services.stores.stores import SessionStore
 
 logger = logging.getLogger(__name__)
@@ -136,14 +135,18 @@ class CampaignPersistenceEmitter:
             self.log_path.write_text("", encoding="utf-8")
         if resume_from:
             self._log(f"\n{'=' * 70}")
-            self._log(f"  RESUMED — prior: {r.get('rounds_completed', 0)} rounds, best={r.get('best', 0):.1%}")
+            self._log(
+                f"  RESUMED — prior: {r.get('rounds_completed', 0)} rounds, best={r.get('best', 0):.1%}"
+            )
             self._log(f"{'=' * 70}\n")
 
     # -- Resume ----------------------------------------------------------------
 
     @classmethod
     def load_resume_state(
-        cls, session_dir: Path, baseline: float = 0.0,
+        cls,
+        session_dir: Path,
+        baseline: float = 0.0,
     ) -> dict[str, Any] | None:
         """Load prior campaign_state.json to build resume_from dict."""
         state_path = session_dir / "campaign_state.json"
@@ -202,7 +205,12 @@ class CampaignPersistenceEmitter:
         self._flush()
 
     def on_query_eval(
-        self, ci: int, ct: int, qi: int, qt: int, result: dict,
+        self,
+        ci: int,
+        ct: int,
+        qi: int,
+        qt: int,
+        result: dict,
     ) -> None:
         s = self._state
 
@@ -234,9 +242,14 @@ class CampaignPersistenceEmitter:
         self._round_queries += 1
         if is_cached:
             self._round_cache_hits += 1
-        s["cache_hit_rate"] = round(
-            self._round_cache_hits / self._round_queries, 3,
-        ) if self._round_queries else 0.0
+        s["cache_hit_rate"] = (
+            round(
+                self._round_cache_hits / self._round_queries,
+                3,
+            )
+            if self._round_queries
+            else 0.0
+        )
 
         # Quality
         has_error = bool(result.get("error") or _is_error(result))
@@ -257,9 +270,12 @@ class CampaignPersistenceEmitter:
 
         # Accumulate query
         q_entry: dict[str, Any] = {
-            "i": qi + 1, "q": (result.get("query") or "")[:50],
-            "hit": hit, "time": round(query_time, 1),
-            "step": terminated, "cached": is_cached,
+            "i": qi + 1,
+            "q": (result.get("query") or "")[:50],
+            "hit": hit,
+            "time": round(query_time, 1),
+            "step": terminated,
+            "cached": is_cached,
         }
         if not hit:
             rank = result.get("ground_truth_rank")
@@ -292,8 +308,10 @@ class CampaignPersistenceEmitter:
 
         # Compact current_queries -> candidate summary
         summary: dict[str, Any] = {
-            "id": f"C{idx + 1}", "acc": round(acc, 4),
-            "hits": hits, "total": n,
+            "id": f"C{idx + 1}",
+            "acc": round(acc, 4),
+            "hits": hits,
+            "total": n,
         }
         if comp is not None:
             summary["composite"] = round(comp, 4)
@@ -334,8 +352,10 @@ class CampaignPersistenceEmitter:
 
         # Compact round_candidates -> last_round
         s["last_round"] = {
-            "r": round_result.round, "best": round_result.label,
-            "acc": round(acc, 4), "improved": improved,
+            "r": round_result.round,
+            "best": round_result.label,
+            "acc": round(acc, 4),
+            "improved": improved,
             "candidates": s["round_candidates"],
         }
         s["round_candidates"] = []
@@ -354,7 +374,8 @@ class CampaignPersistenceEmitter:
             _rr_hits = round_result.hits
             _rr_total = round_result.total
             self._session_store.append_log(
-                self._backend_id, self._session_id,
+                self._backend_id,
+                self._session_id,
                 f"## Round {round_result.round} — Evaluated\n"
                 f"- {round_result.label}: {acc:.1%} — {mark}\n"
                 f"- Hits: {_rr_hits}/{_rr_total}, stall: {stall_count}",
@@ -368,14 +389,21 @@ class CampaignPersistenceEmitter:
         self._state["workflow"] = "idle"
         self._flush()
 
-    def finalize(self, n_rounds: int, best_accuracy: float, best_round: int,
-                 stop_reason: str, cycle_id: str | None = None) -> None:
+    def finalize(
+        self,
+        n_rounds: int,
+        best_accuracy: float,
+        best_round: int,
+        stop_reason: str,
+        cycle_id: str | None = None,
+    ) -> None:
         """Write final summary to campaign_log.md and set stop reason."""
         self.set_stop_reason(stop_reason)
 
         if self._session_store and self._backend_id and self._session_id:
             self._session_store.append_log(
-                self._backend_id, self._session_id,
+                self._backend_id,
+                self._session_id,
                 f"## Optimization Complete\n"
                 f"- Rounds: {n_rounds}, best: {best_accuracy:.1%} (round {best_round})\n"
                 f"- Stop reason: {stop_reason}\n"
@@ -453,7 +481,8 @@ class FileControlSurface:
             # Acknowledge resume: overwrite control to running
             data["control"]["requested_state"] = "running"
             self.state_path.write_text(
-                json.dumps(data, indent=2, default=str), encoding="utf-8",
+                json.dumps(data, indent=2, default=str),
+                encoding="utf-8",
             )
             logger.info("Control: resume acknowledged at %s", checkpoint_name)
             return None
@@ -562,29 +591,35 @@ class RoundRecorder:
         Encapsulates the serialization format so the optimization loop
         doesn't need to know the recorder's schema.
         """
-        self.add_action({
-            "type": "l1_evaluate",
-            "n_candidates": round_result.candidates_evaluated,
-            "n_queries": round_result.total,
-            "candidates": round_result.candidate_scores,
-        })
-        self.add_action({
-            "type": "decision",
-            "winner": round_result.label,
-            "accuracy": round_result.accuracy,
-            "composite": round_result.composite,
-            "improved": round_result.improved,
-            "stall_count": state.stall_count,
-            "winner_prompt_fields": round_result.prompt_fields,
-            "winner_pipeline_params": round_result.pipeline_params,
-        })
-        return self.flush(state_snapshot={
-            "opt_search_point_id": state.opt_sp.id,
-            "l2_directive": state.opt_sp.l2_directive or "",
-            "escalation_counters": {
-                "l2_stall": state.escalation.l2_stall_count,
-                "l3_stall": state.escalation.l3_stall_count,
-                "l2_round": state.escalation.l2_round,
-                "l3_round": state.escalation.l3_round,
-            },
-        })
+        self.add_action(
+            {
+                "type": "l1_evaluate",
+                "n_candidates": round_result.candidates_evaluated,
+                "n_queries": round_result.total,
+                "candidates": round_result.candidate_scores,
+            }
+        )
+        self.add_action(
+            {
+                "type": "decision",
+                "winner": round_result.label,
+                "accuracy": round_result.accuracy,
+                "composite": round_result.composite,
+                "improved": round_result.improved,
+                "stall_count": state.stall_count,
+                "winner_prompt_fields": round_result.prompt_fields,
+                "winner_pipeline_params": round_result.pipeline_params,
+            }
+        )
+        return self.flush(
+            state_snapshot={
+                "opt_search_point_id": state.opt_sp.id,
+                "l2_directive": state.opt_sp.l2_directive or "",
+                "escalation_counters": {
+                    "l2_stall": state.escalation.l2_stall_count,
+                    "l3_stall": state.escalation.l3_stall_count,
+                    "l2_round": state.escalation.l2_round,
+                    "l3_round": state.escalation.l3_round,
+                },
+            }
+        )

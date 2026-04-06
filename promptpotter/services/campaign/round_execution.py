@@ -1,9 +1,7 @@
 """Round execution — generate, evaluate, select winner, update state.
 
-Handles individual round mechanics for the feedback cycle. Includes
-adaptive eval set sampling (formerly adaptive_eval.py). Escalation
-logic (L2/L3) lives in ``escalation.py``; campaign lifecycle
-(create/resume/finalize) lives in ``lifecycle.py``.
+Handles individual round mechanics for the feedback cycle, including
+adaptive eval set sampling.
 """
 
 from __future__ import annotations
@@ -16,10 +14,6 @@ from promptpotter.models.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from promptpotter.services import llm_client as _llm_client
-from promptpotter.services.campaign.callbacks import (
-    RunCallbacks,
-    emit_phase,
-)
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import (
     CritiqueAgent,
@@ -29,8 +23,8 @@ from promptpotter.services.campaign.critique import (
     update_query_tracker,
 )
 from promptpotter.services.campaign.formatting import candidate_summaries
-from promptpotter.services.campaign.state import LoopState, RoundResult
-from promptpotter.services.tracing.node_tracer import observed_node
+from promptpotter.services.campaign.state import LoopState, RoundResult, RunCallbacks, emit_phase
+from promptpotter.services.tracing.observability_logger import observed_node
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
@@ -59,7 +53,9 @@ class PauseForReviewError(Exception):
         self.candidates = candidates
         self.round_num = round_num
         self.pause_point = pause_point  # "l1_generate", "before_l2_eval", "user_pause"
-        super().__init__(f"Paused at {pause_point}: {len(candidates)} candidates (round {round_num})")
+        super().__init__(
+            f"Paused at {pause_point}: {len(candidates)} candidates (round {round_num})"
+        )
 
 
 def _candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
@@ -370,7 +366,8 @@ async def execute_round(
         from promptpotter.services.metrics import compile_failure_analysis
 
         state.failure_analysis = compile_failure_analysis(
-            eval_out.winner_results, config.pipeline_schema,
+            eval_out.winner_results,
+            config.pipeline_schema,
         )
     else:
         state.failure_analysis = None
@@ -457,7 +454,7 @@ def update_round_state(
 
 
 # ---------------------------------------------------------------------------
-# Adaptive eval set sampling (formerly adaptive_eval.py)
+# Adaptive eval set sampling
 # ---------------------------------------------------------------------------
 
 # Never drop more than this fraction of the eval set per adaptation
@@ -491,14 +488,13 @@ def adapt_eval_set(
     max_drop = max(1, int(n_original * _MAX_DROP_FRACTION))
 
     # Find dead queries in current eval set
-    dead_in_current = {
-        p.query for p in query_difficulty.dead if p.query in current_queries
-    }
+    dead_in_current = {p.query for p in query_difficulty.dead if p.query in current_queries}
     to_drop = sorted(dead_in_current)[:max_drop]
 
     # Find discriminating queries NOT in current eval set
     disc_available = [
-        p.query for p in query_difficulty.discriminating
+        p.query
+        for p in query_difficulty.discriminating
         if p.query not in current_queries and p.query in pool_by_query
     ]
 
@@ -518,7 +514,8 @@ def adapt_eval_set(
 
     logger.info(
         "Adaptive sampling: dropped %d dead queries, added %d discriminating",
-        len(drop_set), len(replacements),
+        len(drop_set),
+        len(replacements),
     )
 
     return new_data, {

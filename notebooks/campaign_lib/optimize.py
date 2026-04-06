@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.phase_event import PhaseEvent
+from promptpotter.services.campaign.state import PhaseEvent
 from promptpotter.services.campaign.init import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
@@ -52,8 +52,8 @@ from .phase_display import (
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.campaign.state import RunCallbacks
     from promptpotter.services.campaign.init import BackendSession
     from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.scan_results import ScanContext
@@ -131,12 +131,16 @@ def show_feedback_preflight(
             difficulty_summary["total"] = len(difficulty_df)
 
         scan_context = prepare_scan_context(
-            scan_df, axis_profiles, scan_variants, baseline_acc,
+            scan_df,
+            axis_profiles,
+            scan_variants,
+            baseline_acc,
             difficulty_summary=difficulty_summary,
         )
 
     config = RunConfig.from_campaign_config(
-        campaign_config, pipeline_params=pipeline_params,
+        campaign_config,
+        pipeline_params=pipeline_params,
         scan_context=scan_context,
         pipeline_schema=pipeline_schema,
     )
@@ -144,7 +148,9 @@ def show_feedback_preflight(
     bl = _campaign_baseline_as_dict(campaign_rounds)
 
     _print_preflight_sections(
-        config, bl, dataset,
+        config,
+        bl,
+        dataset,
         campaign_config=campaign_config,
         scan_context=scan_context,
     )
@@ -152,8 +158,7 @@ def show_feedback_preflight(
     return scan_context
 
 
-def _print_preflight_sections(config, bl, dataset,
-                              *, campaign_config=None, scan_context=None):
+def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan_context=None):
     """Print three-section preflight walkthrough."""
     baseline_acc = bl["baseline_acc"]
     instruction = bl["instruction"]
@@ -178,13 +183,14 @@ def _print_preflight_sections(config, bl, dataset,
         _pipeline_label = "(default pipeline)"
         _nodes_detail = None
 
-    _est_calls = (config.max_rounds * config.n_variants * _eff_queries
-                  if config.max_rounds is not None else None)
+    _est_calls = (
+        config.max_rounds * config.n_variants * _eff_queries
+        if config.max_rounds is not None
+        else None
+    )
 
-    _l2_label = (f"enabled, patience={config.l2_patience}"
-                 if config.enable_l2 else "disabled")
-    _l3_label = (f"enabled, patience={config.l3_patience}"
-                 if config.enable_l3 else "disabled")
+    _l2_label = f"enabled, patience={config.l2_patience}" if config.enable_l2 else "disabled"
+    _l3_label = f"enabled, patience={config.l3_patience}" if config.enable_l3 else "disabled"
 
     _strategy = "SCAN-AWARE" if scan_context else "FREEFORM"
 
@@ -229,8 +235,7 @@ def _print_preflight_sections(config, bl, dataset,
     if baseline_results:
         n_failures = sum(1 for r in baseline_results if not r.get("hit"))
     print(f"  {CYAN}2. FAILURE ANALYSIS{RESET}")
-    print(f"     Up to {config.max_failures} failures extracted"
-          f" (currently {n_failures} available)")
+    print(f"     Up to {config.max_failures} failures extracted (currently {n_failures} available)")
 
     # Step 3: Context assembly
     print(f"  {CYAN}3. CONTEXT ASSEMBLY{RESET}")
@@ -240,8 +245,11 @@ def _print_preflight_sections(config, bl, dataset,
         leaderboard = scan_context.leaderboard_text
         n_leaderboard = leaderboard.count("\n") + 1 if leaderboard.strip() else 0
         tested = scan_context.tested_values
-        n_tested = sum(1 for line in tested.split("\n")
-                       if line.strip() and "values tested" in line) if tested else 0
+        n_tested = (
+            sum(1 for line in tested.split("\n") if line.strip() and "values tested" in line)
+            if tested
+            else 0
+        )
         sensitivity = scan_context.sensitivity_text
         n_axes = sensitivity.count("\n") + 1 if sensitivity.strip() else 0
         difficulty = scan_context.difficulty_text
@@ -260,8 +268,7 @@ def _print_preflight_sections(config, bl, dataset,
 
     # Step 4: LLM candidate generation
     print(f"  {CYAN}4. LLM CANDIDATE GENERATION{RESET}")
-    print(f"     Model: {config.model or '(default)'}  |  "
-          f"Temperature: {config.creativity}")
+    print(f"     Model: {config.model or '(default)'}  |  Temperature: {config.creativity}")
     print(f"     Candidates: {config.n_variants}")
     if scan_context:
         print("     Output: prompt + pipeline_params_override per candidate")
@@ -276,29 +283,32 @@ def _print_preflight_sections(config, bl, dataset,
 
     # Step 6: Winner selection
     print(f"  {CYAN}6. WINNER SELECTION{RESET}")
-    print(f"     Criterion: best accuracy >= baseline + "
-          f"{config.improvement_threshold:.1%}")
+    print(f"     Criterion: best accuracy >= baseline + {config.improvement_threshold:.1%}")
 
     # Step 7: Loop control
     print(f"  {CYAN}7. LOOP CONTROL{RESET}")
-    print(f"     Patience: {config.l1_patience} stalls → stop  |  "
-          f"L2: {_l2_label}  |  L3: {_l3_label}")
+    print(
+        f"     Patience: {config.l1_patience} stalls → stop  |  L2: {_l2_label}  |  L3: {_l3_label}"
+    )
 
     print("  " + "-" * 66)
     if _est_calls is not None:
-        print(f"  Est. backend calls     : {_est_calls}"
-              f"  ({config.max_rounds}r x {config.n_variants}c"
-              f" x {_eff_queries}q)")
+        print(
+            f"  Est. backend calls     : {_est_calls}"
+            f"  ({config.max_rounds}r x {config.n_variants}c"
+            f" x {_eff_queries}q)"
+        )
     else:
-        print(f"  Est. backend calls     : unlimited"
-              f"  (no max_rounds x {config.n_variants}c"
-              f" x {_eff_queries}q)")
+        print(
+            f"  Est. backend calls     : unlimited"
+            f"  (no max_rounds x {config.n_variants}c"
+            f" x {_eff_queries}q)"
+        )
 
     # ── Section 3: Scan Context Preview ──
     if scan_context:
         print()
-        print(f"  {BOLD}SCAN CONTEXT PREVIEW{RESET}"
-              " (injected into LLM meta-prompt)")
+        print(f"  {BOLD}SCAN CONTEXT PREVIEW{RESET} (injected into LLM meta-prompt)")
         print("  " + "-" * 66)
 
         # Leaderboard (top 10)
@@ -411,9 +421,7 @@ async def run_optimization_notebook(
     instruction = bl["instruction"]
 
     # --- Warn if scan context was lost (kernel restart) ---
-    if scan_context is None and any(
-        r.get("round") == "search" for r in campaign_rounds
-    ):
+    if scan_context is None and any(r.get("round") == "search" for r in campaign_rounds):
         print(f"  {YELLOW}⚠ Scan context not available — running without scan data.{RESET}")
         print("    Run the preflight cell to rebuild scan_context from scan variables.")
 
@@ -518,13 +526,14 @@ async def run_optimization_notebook(
             for rd in campaign_rounds
         )
         if has_comp:
-            print(_node_line(
-                f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
-                f" {'Rolling Avg':>13s} {'Trend':>8s}"))
+            print(
+                _node_line(
+                    f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
+                    f" {'Rolling Avg':>13s} {'Trend':>8s}"
+                )
+            )
         else:
-            print(_node_line(
-                f"{'Round':<7s} {'Accuracy':>9s}"
-                f" {'Rolling Avg':>13s} {'Trend':>8s}"))
+            print(_node_line(f"{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>8s}"))
 
         for rd in campaign_rounds:
             acc = rd["accuracy"]
@@ -547,22 +556,21 @@ async def run_optimization_notebook(
                 rl = "G"
             if has_comp:
                 comp = rd.get("composite", acc)
-                print(_node_line(
-                    f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f}"
-                    f" {rolling:>12.1%}  {trend}"))
+                print(_node_line(f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f} {rolling:>12.1%}  {trend}"))
             else:
-                print(_node_line(
-                    f"  {rl:<5s} {acc:>8.1%}"
-                    f" {rolling:>12.1%}  {trend}"))
+                print(_node_line(f"  {rl:<5s} {acc:>8.1%} {rolling:>12.1%}  {trend}"))
 
         # Plateau detection
         if len(_accs) >= 3:
             recent = _accs[-3:]
             recent_avg = sum(recent) / len(recent)
             if all(abs(a - recent_avg) < 0.005 for a in recent):
-                print(_node_line(
-                    f"{YELLOW}-- Plateau: rolling avg stable at"
-                    f" {recent_avg:.1%} for 3 rounds{RESET}"))
+                print(
+                    _node_line(
+                        f"{YELLOW}-- Plateau: rolling avg stable at"
+                        f" {recent_avg:.1%} for 3 rounds{RESET}"
+                    )
+                )
 
         print(_node_line(""))
 
@@ -570,13 +578,15 @@ async def run_optimization_notebook(
         _rr_hits = round_result.hits
         _rr_total = round_result.total
         if _rr_total == 0 and round_result.candidate_scores:
-            best_cs = max(round_result.candidate_scores,
-                          key=lambda s: s.get("accuracy", 0))
+            best_cs = max(round_result.candidate_scores, key=lambda s: s.get("accuracy", 0))
             _rr_hits = best_cs.get("hits", 0)
             _rr_total = best_cs.get("total", 0)
-        print(_node_line(
-            f"hits: {_rr_hits}/{_rr_total}"
-            f"  |  evaluated: {round_result.candidates_evaluated} candidates"))
+        print(
+            _node_line(
+                f"hits: {_rr_hits}/{_rr_total}"
+                f"  |  evaluated: {round_result.candidates_evaluated} candidates"
+            )
+        )
 
         # Per-round pipeline health stats
         if round_result.results:
@@ -588,6 +598,7 @@ async def run_optimization_notebook(
                 from promptpotter.services.campaign.round_execution import (
                     _candidate_keys_from_schema,
                 )
+
                 _ck = _candidate_keys_from_schema(config.pipeline_schema)
 
                 _results = round_result.results
@@ -601,42 +612,55 @@ async def run_optimization_notebook(
                         _deg += 1
 
                 if _td:
-                    print(_node_line(
-                        f"Pipeline: {' | '.join(f'{k}:{v}' for k, v in _td.most_common())}"))
+                    print(
+                        _node_line(
+                            f"Pipeline: {' | '.join(f'{k}:{v}' for k, v in _td.most_common())}"
+                        )
+                    )
                 if _deg > 0:
                     print(_node_line(f"Degradation: {_deg / _total:.0%}"))
 
-                _valid = [
-                    _r for _r in _results if not is_error_result(_r)
-                ]
+                _valid = [_r for _r in _results if not is_error_result(_r)]
                 if _valid:
+
                     def _recall_at_k(k):
                         return sum(
-                            1 for _r in _valid
-                            if (_rk := find_rank(
-                                get_candidates(_r, _ck),
-                                _r.get("ground_truth", ""),
-                            )) is not None and _rk <= k
+                            1
+                            for _r in _valid
+                            if (
+                                _rk := find_rank(
+                                    get_candidates(_r, _ck),
+                                    _r.get("ground_truth", ""),
+                                )
+                            )
+                            is not None
+                            and _rk <= k
                         ) / len(_valid)
 
-                    print(_node_line(
-                        f"Recall: top-1={_recall_at_k(1):.0%}"
-                        f" top-5={_recall_at_k(5):.0%}"))
+                    print(
+                        _node_line(
+                            f"Recall: top-1={_recall_at_k(1):.0%} top-5={_recall_at_k(5):.0%}"
+                        )
+                    )
             except Exception:
                 pass  # stats are best-effort
 
         # Improvement / patience status
         if round_result.improved:
-            print(_node_line(
-                f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}"))
+            print(_node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}"))
         else:
-            print(_node_line(
-                f"{YELLOW}⚠ No improvement"
-                f" ({stall_count}/{config.l1_patience} patience){RESET}"))
+            print(
+                _node_line(
+                    f"{YELLOW}⚠ No improvement ({stall_count}/{config.l1_patience} patience){RESET}"
+                )
+            )
             if stall_count >= config.l1_patience:
-                print(_node_line(
-                    f"{RED}Stopping: patience exhausted"
-                    f" ({config.l1_patience} consecutive stalls){RESET}"))
+                print(
+                    _node_line(
+                        f"{RED}Stopping: patience exhausted"
+                        f" ({config.l1_patience} consecutive stalls){RESET}"
+                    )
+                )
 
         print(_node_bottom())
 
@@ -653,14 +677,16 @@ async def run_optimization_notebook(
             if stored:
                 stored_bl = stored.get("baseline_accuracy")
                 if stored_bl is not None and stored_bl != baseline_acc:
-                    print(f"  {YELLOW}Using stored baseline {stored_bl:.1%}"
-                          f" (notebook had {baseline_acc:.1%}){RESET}")
+                    print(
+                        f"  {YELLOW}Using stored baseline {stored_bl:.1%}"
+                        f" (notebook had {baseline_acc:.1%}){RESET}"
+                    )
                     baseline_acc = stored_bl
 
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from promptpotter.services.campaign.callbacks import RunCallbacks, chain_callbacks
+    from promptpotter.services.campaign.state import RunCallbacks, chain_callbacks
 
     notebook_display_cb = RunCallbacks(
         on_round_complete=_on_round,
@@ -668,7 +694,11 @@ async def run_optimization_notebook(
         on_query_eval=_on_query,
         on_phase=_on_phase,
     )
-    callbacks = chain_callbacks(notebook_display_cb, display_callbacks) if display_callbacks else notebook_display_cb
+    callbacks = (
+        chain_callbacks(notebook_display_cb, display_callbacks)
+        if display_callbacks
+        else notebook_display_cb
+    )
 
     result = await run_optimization(
         instruction=instruction,
@@ -686,24 +716,32 @@ async def run_optimization_notebook(
 
     # --- Final summary ---
     if not campaign_rounds:
-        print(f"\n{YELLOW}{BOLD}[INTERRUPTED]{RESET} Feedback cycle "
-              f"stopped before any rounds completed.")
+        print(
+            f"\n{YELLOW}{BOLD}[INTERRUPTED]{RESET} Feedback cycle "
+            f"stopped before any rounds completed."
+        )
         print("  Resume: re-run this cell to restart.")
         return campaign_rounds, result
 
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
     interrupted = result.stop_reason == "interrupted"
-    title = (f"{YELLOW}{BOLD}INTERRUPTED{RESET} — stopped by user"
-             if interrupted
-             else f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}")
+    title = (
+        f"{YELLOW}{BOLD}INTERRUPTED{RESET} — stopped by user"
+        if interrupted
+        else f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}"
+    )
 
     print()
     print(_dbox_top())
     print(_dbox_line(title))
     print(_dbox_sep())
-    print(_dbox_line(f"Rounds       {result.n_rounds:<15d}"
-                     f"Best         {best['accuracy']:.1%}"
-                     f" (round {best['round']})"))
+    print(
+        _dbox_line(
+            f"Rounds       {result.n_rounds:<15d}"
+            f"Best         {best['accuracy']:.1%}"
+            f" (round {best['round']})"
+        )
+    )
     print(_dbox_line(f"Stop reason  {result.stop_reason}"))
     if interrupted:
         print(_dbox_line("Resume: re-run this cell -- rounds auto-restore"))
@@ -777,14 +815,18 @@ async def run_baseline_eval(
         pbar.update(1)
 
     from promptpotter.services.tracing.observability_logger import ObsLogger
+
     _obs = ObsLogger(session.store.base_dir, session.backend_id, langfuse=None)
 
     try:
         campaign_rounds, baseline_results = await _run_baseline_eval(
-            baseline, dataset, session.backend_client,
+            baseline,
+            dataset,
+            session.backend_client,
             pipeline_params=pipeline_params,
             pipeline_schema=session.pipeline_schema,
-            store=session.store, backend_id=session.backend_id,
+            store=session.store,
+            backend_id=session.backend_id,
             experiment_id=session.experiment_id,
             on_result=_on_result,
             index_terms=session.index_terms,

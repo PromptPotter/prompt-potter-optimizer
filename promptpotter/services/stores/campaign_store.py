@@ -6,6 +6,7 @@ Stores campaign metadata and per-trial results to disk:
     {backend_id}/campaigns/{campaign_id}.json        — metadata + trial index
     {backend_id}/campaigns/{campaign_id}/trial_NNNN.json  — trial detail
 """
+
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -50,7 +51,10 @@ class CampaignStore(EntityStore):
     # -- Campaign CRUD --
 
     def create(
-        self, backend_id: str, campaign_id: str, metadata: dict[str, Any],
+        self,
+        backend_id: str,
+        campaign_id: str,
+        metadata: dict[str, Any],
     ) -> Path:
         """Create a new campaign file with initial metadata."""
         path = self._entity_path(backend_id, campaign_id)
@@ -74,7 +78,10 @@ class CampaignStore(EntityStore):
         return path
 
     def update(
-        self, backend_id: str, campaign_id: str, updates: dict[str, Any],
+        self,
+        backend_id: str,
+        campaign_id: str,
+        updates: dict[str, Any],
     ) -> None:
         """Merge *updates* into the campaign file and write back (+ timestamp)."""
         path = self._entity_path(backend_id, campaign_id)
@@ -91,16 +98,18 @@ class CampaignStore(EntityStore):
         results = []
         for path in sorted(campaigns_dir.glob("*.json")):
             data = read_json(path)
-            results.append({
-                "campaign_id": data["campaign_id"],
-                "name": data.get("name", ""),
-                "status": data["status"],
-                "n_trials": data["n_trials"],
-                "best_accuracy": data["best_accuracy"],
-                "baseline_accuracy": data["baseline_accuracy"],
-                "created_at": data["created_at"],
-                "updated_at": data["updated_at"],
-            })
+            results.append(
+                {
+                    "campaign_id": data["campaign_id"],
+                    "name": data.get("name", ""),
+                    "status": data["status"],
+                    "n_trials": data["n_trials"],
+                    "best_accuracy": data["best_accuracy"],
+                    "baseline_accuracy": data["baseline_accuracy"],
+                    "created_at": data["created_at"],
+                    "updated_at": data["updated_at"],
+                }
+            )
         return results
 
     # -- Trial CRUD --
@@ -117,10 +126,7 @@ class CampaignStore(EntityStore):
         round_num = trial.get("round", 0)
 
         # Write trial detail
-        detail_path = (
-            self._trial_dir(backend_id, campaign_id)
-            / f"trial_{round_num:04d}.json"
-        )
+        detail_path = self._trial_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json"
         write_json(detail_path, trial)
 
         # Update campaign index
@@ -139,9 +145,7 @@ class CampaignStore(EntityStore):
             "created_at": trial.get("created_at", ""),
         }
         # Replace existing trial for same round (idempotent on replay)
-        data["trials"] = [
-            t for t in data["trials"] if t.get("round") != round_num
-        ]
+        data["trials"] = [t for t in data["trials"] if t.get("round") != round_num]
         data["trials"].append(summary)
         data["n_trials"] = len(data["trials"])
 
@@ -186,7 +190,7 @@ class CampaignStore(EntityStore):
             deleted = True
         return deleted
 
-    # -- High-level convenience methods (formerly in campaign_registry.py) --
+    # -- High-level convenience methods --
 
     def create_campaign(
         self,
@@ -253,7 +257,10 @@ class CampaignStore(EntityStore):
         self.add_trial(backend_id, campaign_id, trial)
         logger.info(
             "Recorded trial %s (round %d, acc=%.3f) in campaign %s",
-            trial_id, round_num, accuracy, campaign_id,
+            trial_id,
+            round_num,
+            accuracy,
+            campaign_id,
         )
         return trial
 
@@ -270,14 +277,13 @@ class CampaignStore(EntityStore):
         candidates: list[dict[str, Any]],
     ) -> None:
         """Persist generated candidates before evaluation (mid-round checkpoint)."""
-        path = (
-            self._trial_dir(backend_id, campaign_id)
-            / f"round_{round_num:04d}_candidates.json"
-        )
+        path = self._trial_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json"
         write_json(path, candidates)
         logger.debug(
             "Saved %d candidates for round %d → %s",
-            len(candidates), round_num, path.name,
+            len(candidates),
+            round_num,
+            path.name,
         )
 
     def load_round_candidates(
@@ -288,22 +294,20 @@ class CampaignStore(EntityStore):
     ) -> list[dict[str, Any]] | None:
         """Load persisted candidates for a round.  Returns None if not on disk."""
         return read_json_optional(
-            self._trial_dir(backend_id, campaign_id)
-            / f"round_{round_num:04d}_candidates.json",
+            self._trial_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json",
         )
 
     def delete_round_candidates(
-        self, backend_id: str, campaign_id: str, round_num: int,
+        self,
+        backend_id: str,
+        campaign_id: str,
+        round_num: int,
     ) -> None:
         """Delete persisted candidates for a round (forces fresh generation)."""
-        path = (
-            self._trial_dir(backend_id, campaign_id)
-            / f"round_{round_num:04d}_candidates.json"
-        )
+        path = self._trial_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json"
         if path.exists():
             path.unlink()
             logger.debug(
                 "Deleted cached candidates for round %d (escalation invalidation)",
                 round_num,
             )
-

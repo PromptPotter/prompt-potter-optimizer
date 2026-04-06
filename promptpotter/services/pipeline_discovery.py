@@ -10,7 +10,7 @@ built entirely from the live response.
 from __future__ import annotations
 
 import logging
-import time as _time
+import time
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
@@ -28,12 +28,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["parse_pipeline_response"]
+__all__ = ["compute_pipeline_view", "parse_pipeline_response"]
 
 
 # ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
     """Convert a ``_resolved_schema`` dict from the enriched response."""
@@ -41,9 +42,7 @@ def _parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
     props = json_schema.get("properties", {})
     fields = resolved.get("fields") or list(props.keys())
     field_descriptions = {
-        k: v.get("description", "")
-        for k, v in props.items()
-        if v.get("description")
+        k: v.get("description", "") for k, v in props.items() if v.get("description")
     }
     return NodeOutputSchema(
         family=resolved.get("family", ""),
@@ -107,6 +106,7 @@ def _extract_resolved_metadata(
 # Main parser
 # ---------------------------------------------------------------------------
 
+
 def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     """Parse a ``GET /pipeline`` JSON response into a PipelineSchema.
 
@@ -147,10 +147,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "param_keys": pk,
             "param_descriptions": opt.get("param_descriptions", {}),
             "langfuse_type": opt.get("langfuse_type", "span"),
-            "current_config": {
-                k: v for k, v in nc.items()
-                if k in pk
-            },
+            "current_config": {k: v for k, v in nc.items() if k in pk},
         }
 
         # Observation mappings
@@ -159,9 +156,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             step_kwargs["observation_name"] = obs_name
         obs_raw = opt.get("observation_mappings", [])
         if obs_raw:
-            step_kwargs["observation_mappings"] = [
-                ObservationMapping(**m) for m in obs_raw
-            ]
+            step_kwargs["observation_mappings"] = [ObservationMapping(**m) for m in obs_raw]
 
         # Merge resolved registry metadata
         rm = resolved_metadata.get(name, {})
@@ -174,7 +169,8 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
     logger.info(
         "Parsed pipeline '%s' with %d steps",
-        config.get("name", "unknown"), len(steps),
+        config.get("name", "unknown"),
+        len(steps),
     )
 
     return PipelineSchema(
@@ -199,14 +195,14 @@ def _get_cached(base_url: str) -> dict[str, Any] | None:
     if entry is None:
         return None
     ts, data = entry
-    if (_time.monotonic() - ts) > PIPELINE_CACHE_TTL:
+    if (time.monotonic() - ts) > PIPELINE_CACHE_TTL:
         del _PIPELINE_CACHE[base_url]
         return None
     return data
 
 
 def _set_cached(base_url: str, data: dict[str, Any]) -> None:
-    _PIPELINE_CACHE[base_url] = (_time.monotonic(), data)
+    _PIPELINE_CACHE[base_url] = (time.monotonic(), data)
 
 
 # ---------------------------------------------------------------------------

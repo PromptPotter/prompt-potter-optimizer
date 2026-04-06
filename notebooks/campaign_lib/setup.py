@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 from promptpotter.config.settings import load_variant_library
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.factory import (
+from promptpotter.services.campaign.config import (
     configure_pipeline as _configure_pipeline,
 )
-from promptpotter.services.campaign.factory import (
+from promptpotter.services.campaign.config import (
     create_llm_client as setup_llm,
 )
 from promptpotter.services.campaign.init import (
@@ -59,6 +59,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Task context decomposition
 # ---------------------------------------------------------------------------
+
 
 async def decompose_task_context(
     task_description: str,
@@ -125,7 +126,6 @@ def dev_reload() -> None:
         "promptpotter.shared.hashing",
         "promptpotter.services.campaign.config",
         "promptpotter.services.campaign.lifecycle",
-        "promptpotter.services.campaign.factory",
         "promptpotter.services.campaign.escalation",
         "promptpotter.services.campaign.layer_transitions",
         "promptpotter.services.campaign.critique",
@@ -193,7 +193,8 @@ def configure_pipeline(session: BackendSession, campaign_config: CampaignConfig)
     and prints a summary of active/excluded nodes.
     """
     result = _configure_pipeline(
-        session.pipeline_schema, campaign_config,
+        session.pipeline_schema,
+        campaign_config,
         exp_data=getattr(session, "exp_data", None),
     )
 
@@ -203,6 +204,7 @@ def configure_pipeline(session: BackendSession, campaign_config: CampaignConfig)
 
     # Set display tags from finalized schema (drives eval output formatting)
     from .display import set_display_tags
+
     set_display_tags(session.pipeline_schema)
 
     nodes_str = ", ".join(result.active_nodes)

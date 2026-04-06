@@ -1,20 +1,34 @@
-"""RunConfig — configuration for the optimization loop.
+"""Campaign configuration — CampaignConfig, RunConfig, pipeline setup, LLM client factory.
 
-Also defines ``CampaignConfig`` TypedDict — the typed schema for the
-``campaign_config`` dict that flows from notebooks / CLI through to
-services.
+``CampaignConfig`` is the typed schema for the ``campaign_config`` dict
+that flows from notebooks / CLI through to services.  ``RunConfig`` is
+the Pydantic model for the optimization loop.  ``configure_pipeline()``
+and ``create_llm_client()`` are factory helpers.
 """
 
 from __future__ import annotations
 
-from typing import TypedDict
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import BaseModel, Field
 
 from promptpotter.models.pipeline_schema import PipelineSchema
 from promptpotter.services.search.scan_results import ScanContext
 
-__all__ = ["CampaignConfig", "RunConfig"]
+if TYPE_CHECKING:
+    from promptpotter.services.llm_client import LLMClientBase
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "CampaignConfig",
+    "PipelineConfigResult",
+    "RunConfig",
+    "configure_pipeline",
+    "create_llm_client",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -113,13 +127,17 @@ class RunConfig(BaseModel):
     seed: int = Field(42, description="Random seed for subsampling")
 
     pipeline_schema: PipelineSchema | None = Field(None, description="Pipeline schema for eval")
-    prompt_node: str = Field("", description="Prompt-bearing node name (from schema.prompt_node_names())")
+    prompt_node: str = Field(
+        "", description="Prompt-bearing node name (from schema.prompt_node_names())"
+    )
 
     # Critique-guided generation
     enable_critique: bool = Field(True, description="Enable critique agent between rounds")
 
     # Scan-aware optimization
-    scan_context: ScanContext | None = Field(None, description="Scan analytics context for candidate gen")
+    scan_context: ScanContext | None = Field(
+        None, description="Scan analytics context for candidate gen"
+    )
 
     # Structured domain context (from TASK_DESCRIPTION decomposition)
     task_context: dict | None = Field(
@@ -222,7 +240,9 @@ class RunConfig(BaseModel):
             sample_size=campaign_config.get("sample_size", 0),
             seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
-            prompt_node=pipeline_schema.prompt_node_names()[0] if pipeline_schema and pipeline_schema.prompt_node_names() else "",
+            prompt_node=pipeline_schema.prompt_node_names()[0]
+            if pipeline_schema and pipeline_schema.prompt_node_names()
+            else "",
             scan_context=scan_context,
             task_context=task_context,
             enable_l2=opt.get("enable_l2", True),
@@ -235,6 +255,95 @@ class RunConfig(BaseModel):
             degradation_threshold=opt.get("degradation_threshold", 0.4),
             backend_warning_threshold=opt.get("backend_warning_threshold", 2),
             max_failures=opt.get("max_failures", 15),
-            stale_data_load_protocol=opt.get("stale_data_load_protocol", ["rerun", "samplescan", "sampleswitch"]),
+            stale_data_load_protocol=opt.get(
+                "stale_data_load_protocol", ["rerun", "samplescan", "sampleswitch"]
+            ),
             pause_before_eval=opt.get("pause_before_eval", False),
         )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline configuration and LLM client factory
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PipelineConfigResult:
+    """Result from ``configure_pipeline()``."""
+
+    pipeline_params: dict
+    active_nodes: list[str]
+    excluded_nodes: list[str]
+
+
+def configure_pipeline(
+    pipeline_schema: PipelineSchema | None,
+    campaign_config: CampaignConfig,
+    exp_data: dict | None = None,
+) -> PipelineConfigResult:
+    """Build pipeline_params from live pipeline schema and campaign_config.
+
+    Uses *pipeline_schema* (from ``GET /pipeline``) as the source of
+    truth for node names, falling back to *exp_data* only when the schema
+    is unavailable.  Reads ``exclude_nodes`` and ``pipeline_overrides`` from
+    *campaign_config*, stores the result back into
+    ``campaign_config["pipeline_params"]``, and returns a typed result.
+    """
+    from promptpotter.services.backend_client import extract_pipeline_config
+
+    exclude = campaign_config.get("exclude_nodes", [])
+    overrides = campaign_config.get("pipeline_overrides")
+
+    if pipeline_schema:
+        all_names = [n.name for n in pipeline_schema.nodes]
+    elif exp_data:
+        pipeline_config = extract_pipeline_config(exp_data)
+        all_names = [s["name"] for s in pipeline_config["steps"]]
+    else:
+        all_names = []
+
+    active = [n for n in all_names if n not in (exclude or [])]
+    pipeline_params: dict = {"steps": active}
+
+    # Seed with live config from GET /pipeline (no hidden defaults)
+    if pipeline_schema:
+        for node in pipeline_schema.nodes:
+            if node.name in active and node.current_config:
+                pipeline_params[node.name] = dict(node.current_config)
+
+    # Apply overrides for active nodes only (nested format: {"node": {"param": val}})
+    if overrides:
+        for key, value in overrides.items():
+            if isinstance(value, dict) and key in active:
+                pipeline_params.setdefault(key, {}).update(value)
+            elif isinstance(value, dict):
+                logger.debug("configure_pipeline: skipping override for inactive node %r", key)
+            else:
+                logger.warning(
+                    "configure_pipeline: ignoring non-nested override %r=%r "
+                    '(use {"node_name": {"param": value}} format)',
+                    key,
+                    value,
+                )
+
+    campaign_config["pipeline_params"] = pipeline_params
+
+    return PipelineConfigResult(
+        pipeline_params=pipeline_params,
+        active_nodes=active,
+        excluded_nodes=list(exclude) if exclude else [],
+    )
+
+
+def create_llm_client(
+    campaign_config: CampaignConfig,
+) -> tuple[LLMClientBase, str]:
+    """Create LLM client + model from campaign_config['optimizer_llm'].
+
+    Returns:
+        Tuple of (llm_client, model_name).
+    """
+    from promptpotter.services.llm_client import get_llm_client
+
+    optimizer_llm = campaign_config["optimizer_llm"]
+    return get_llm_client(optimizer_llm["provider"]), optimizer_llm["model"]

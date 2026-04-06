@@ -9,7 +9,6 @@ Derivation methods:
   node_param_keys()       → node name → param keys
   obs_extraction_map()    → observation name → extraction rules
   langfuse_type_map()     → node name → Langfuse as_type
-  (runtime filtering removed — no production consumers)
 """
 
 import enum
@@ -222,7 +221,9 @@ class PipelineSchema(BaseModel):
         """Return a copy with only nodes present in *steps*."""
         active = set(steps)
         return PipelineSchema(
-            name=self.name, version=self.version, description=self.description,
+            name=self.name,
+            version=self.version,
+            description=self.description,
             nodes=[n for n in self.nodes if n.name in active],
         )
 
@@ -370,7 +371,6 @@ class PipelineSchema(BaseModel):
                 if mapping.is_llm:
                     return mapping.pipeline_key
         return ""
-
 
 
 def is_result_step_compatible(

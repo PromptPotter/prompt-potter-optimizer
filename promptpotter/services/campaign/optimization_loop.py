@@ -17,9 +17,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.phase_event import PhaseEvent
 from promptpotter.services.backend_client import BackendClient
-from promptpotter.services.campaign.callbacks import RunCallbacks, emit_phase, get_obs_trace
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.escalation import escalate_l2
 from promptpotter.services.campaign.lifecycle import finalize_campaign
@@ -32,9 +30,13 @@ from promptpotter.services.campaign.round_execution import (
 )
 from promptpotter.services.campaign.state import (
     LoopState,
+    PhaseEvent,
     RoundResult,
+    RunCallbacks,
     RunResult,
     StopReason,
+    emit_phase,
+    get_obs_trace,
 )
 from promptpotter.services.metrics import compile_query_difficulty
 from promptpotter.services.search.scan_results import ScanContext
@@ -330,7 +332,7 @@ async def run_optimization(
 
     # Chain persistence callbacks (fires first) with caller display callbacks
     if _emitter:
-        from promptpotter.services.campaign.callbacks import chain_callbacks
+        from promptpotter.services.campaign.state import chain_callbacks
 
         persistence_cb = RunCallbacks(
             on_phase=_emitter.on_phase,
@@ -392,7 +394,13 @@ async def run_optimization(
                 escalation_checks=_round_checks,
                 search_memory=search_memory,
             )
-            update_round_state(state, round_result, round_num, active_steps=config.active_steps, prompt_node=config.prompt_node)
+            update_round_state(
+                state,
+                round_result,
+                round_num,
+                active_steps=config.active_steps,
+                prompt_node=config.prompt_node,
+            )
 
             # --- After probe round: reset flag + force L2 ---
             if is_probe:
@@ -481,7 +489,9 @@ async def run_optimization(
                 if len(_hist) >= 3:
                     _qd = compile_query_difficulty(_hist)
                     round_dataset, _adapt = adapt_eval_set(
-                        round_dataset, _qd, dataset,
+                        round_dataset,
+                        _qd,
+                        dataset,
                         seed=config.seed + round_num,
                     )
                     if not _adapt.get("unchanged"):
@@ -528,15 +538,19 @@ async def run_optimization(
 
     # -- Cleanup round recorder --
     from promptpotter.config.optimizer_pipeline import set_round_recorder
+
     set_round_recorder(None)
 
     # -- Finalize --
     finished_at = datetime.now(UTC).isoformat()
     obs = state.eval_ctx.obs if state.eval_ctx else None
     campaign_status = (
-        "paused" if stop_reason in (StopReason.PAUSED_FOR_REVIEW, StopReason.USER_PAUSED)
-        else "stopped" if stop_reason == StopReason.USER_STOPPED
-        else "interrupted" if stop_reason == StopReason.INTERRUPTED
+        "paused"
+        if stop_reason in (StopReason.PAUSED_FOR_REVIEW, StopReason.USER_PAUSED)
+        else "stopped"
+        if stop_reason == StopReason.USER_STOPPED
+        else "interrupted"
+        if stop_reason == StopReason.INTERRUPTED
         else "completed"
     )
     finalize_campaign(

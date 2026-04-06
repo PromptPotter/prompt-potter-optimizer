@@ -29,7 +29,7 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.eval_context import EvalContext
-    from promptpotter.services.campaign.callbacks import RunCallbacks
+    from promptpotter.services.campaign.state import RunCallbacks
     from promptpotter.services.search.scan_results import ScanContext
 
 logger = logging.getLogger(__name__)
@@ -129,8 +129,12 @@ async def l1_generate(
                     lines.append("    MUTATION SYNTAX (use as output_schema param):")
                     lines.append('      Add:     ["+", "field_name", "array", true, "description"]')
                     lines.append('      Remove:  ["-", "field_name"]')
-                    lines.append('      Replace: ["~", "old_name", "new_name", "array", true, "description"]')
-                    lines.append(f'    Example: {{"{node.name}": {{"output_schema": [["+", "domain_terms", "array", true, "Domain-specific database entry names"]]}}}}')
+                    lines.append(
+                        '      Replace: ["~", "old_name", "new_name", "array", true, "description"]'
+                    )
+                    lines.append(
+                        f'    Example: {{"{node.name}": {{"output_schema": [["+", "domain_terms", "array", true, "Domain-specific database entry names"]]}}}}'
+                    )
 
             # Token matching mechanics — so LLM understands the causal chain
             if pipeline_schema.get_node("token_matching"):
@@ -139,7 +143,9 @@ async def l1_generate(
                 lines.append("    and matched against database entry tokens.")
                 lines.append("    Score = shared_tokens / term_tokens.")
                 lines.append("    Adding fields that produce tokens matching database entries")
-                lines.append("    DIRECTLY improves retrieval. Removing noisy fields reduces false matches.")
+                lines.append(
+                    "    DIRECTLY improves retrieval. Removing noisy fields reduces false matches."
+                )
 
             schema_text = "\n".join(lines)
         if pipeline_schema.available_models:
@@ -199,8 +205,11 @@ async def l1_generate(
         pp_override.pop("steps", None)  # LLM must not override pipeline composition
         prompt_changes = {k: pp_override[k] for k in pp_override if k in PROMPT_STRING_FIELDS}
         tc_changes = {k: pp_override[k] for k in pp_override if k in _TASK_CONTEXT_OVERRIDES}
-        node_overrides = {k: pv for k, pv in pp_override.items()
-                          if k not in PROMPT_STRING_FIELDS and k not in _TASK_CONTEXT_OVERRIDES}
+        node_overrides = {
+            k: pv
+            for k, pv in pp_override.items()
+            if k not in PROMPT_STRING_FIELDS and k not in _TASK_CONTEXT_OVERRIDES
+        }
 
         # Safety net: auto-nest flat params the LLM may still emit
         if pipeline_schema:
@@ -222,8 +231,14 @@ async def l1_generate(
             if pipeline_schema.available_models:
                 _valid_models = set(pipeline_schema.available_models)
                 for _nn, _np in node_overrides.items():
-                    if isinstance(_np, dict) and "model" in _np and _np["model"] not in _valid_models:
-                        logger.warning("l1_generate: dropping invalid model %r for %s", _np["model"], _nn)
+                    if (
+                        isinstance(_np, dict)
+                        and "model" in _np
+                        and _np["model"] not in _valid_models
+                    ):
+                        logger.warning(
+                            "l1_generate: dropping invalid model %r for %s", _np["model"], _nn
+                        )
                         del _np["model"]
 
         child = opt_sp.derive_candidate(
@@ -319,13 +334,16 @@ async def l1_evaluate(
     for c in candidates:
         if isinstance(c, dict):
             candidate_pp.append(c.get("__pipeline_params_override__"))
-            osp_candidates.append(OptSearchPoint.from_prompt_fields(
-                {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
-            ))
+            osp_candidates.append(
+                OptSearchPoint.from_prompt_fields(
+                    {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
+                )
+            )
         else:
             candidate_pp.append(None)
             osp_candidates.append(
-                c if isinstance(c, OptSearchPoint)
+                c
+                if isinstance(c, OptSearchPoint)
                 else OptSearchPoint.from_prompt_fields(c.model_dump()),
             )
     all_candidate_results: dict[str, list[dict]] = {}
@@ -361,7 +379,11 @@ async def l1_evaluate(
                         del pp[k]
         else:
             pp = _sp_pipeline_params
-        _pn = ctx.pipeline_schema.prompt_node_names()[0] if ctx.pipeline_schema and ctx.pipeline_schema.prompt_node_names() else ""
+        _pn = (
+            ctx.pipeline_schema.prompt_node_names()[0]
+            if ctx.pipeline_schema and ctx.pipeline_schema.prompt_node_names()
+            else ""
+        )
         sp = osp_c.to_job_search_point(
             base_pipeline_params=pp,
             active_steps=active_steps,

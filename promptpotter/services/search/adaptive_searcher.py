@@ -3,6 +3,7 @@
 Iterates over active axes sorted by sensitivity, trying all variant values
 for each.  Axes are resolved when they produce no improvement.
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,8 +15,8 @@ from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.services.search.cohort_analysis import preview as _preview
 from promptpotter.services.search.smart_search import (
     ScanEvent,
-    _make_eval_fn,
     filter_variant_library,
+    make_eval_fn,
 )
 
 if TYPE_CHECKING:
@@ -80,13 +81,13 @@ async def adaptive_search(
 
     # Filter variant library to active pipeline steps
     variant_library = filter_variant_library(
-        variant_library, pipeline_params, schema=pipeline_schema,
+        variant_library,
+        pipeline_params,
+        schema=pipeline_schema,
     )
 
     # Filter and sort axes by sensitivity
-    active_axes = [
-        p for p in axis_profiles if p["exploration_budget"] != "skip"
-    ]
+    active_axes = [p for p in axis_profiles if p["exploration_budget"] != "skip"]
     active_axes.sort(key=lambda p: -p["sensitivity_range"])
 
     current_opt = baseline_opt
@@ -102,8 +103,9 @@ async def adaptive_search(
         source="adaptive_search",
         experiment_id=experiment_id,
     )
-    _eval_opt = _make_eval_fn(
-        dataset, _scan_ctx,
+    _eval_opt = make_eval_fn(
+        dataset,
+        _scan_ctx,
         get_params=lambda: current_params,
     )
 
@@ -114,15 +116,15 @@ async def adaptive_search(
 
     for round_num in range(1, max_rounds + 1):
         round_improved = False
-        _cb({
-            "type": "round_start",
-            "round": round_num, "max_rounds": max_rounds,
-            "current_accuracy": current_composite,
-            "active_axes": [
-                p["axis"] for p in active_axes
-                if p["axis"] not in resolved_axes
-            ],
-        })
+        _cb(
+            {
+                "type": "round_start",
+                "round": round_num,
+                "max_rounds": max_rounds,
+                "current_accuracy": current_composite,
+                "active_axes": [p["axis"] for p in active_axes if p["axis"] not in resolved_axes],
+            }
+        )
 
         for profile in active_axes:
             axis_name = profile["axis"]
@@ -140,19 +142,25 @@ async def adaptive_search(
             # Get values for this axis
             if axis_type == "prompt_field":
                 values = variant_library.get("prompt_fields", {}).get(
-                    axis_name, [],
+                    axis_name,
+                    [],
                 )
             else:
                 values = variant_library.get("pipeline_params", {}).get(
-                    axis_name, [],
+                    axis_name,
+                    [],
                 )
 
-            _cb({
-                "type": "axis_start",
-                "round": round_num,
-                "axis": axis_name, "axis_type": axis_type,
-                "cardinality": len(values), "budget": budget,
-            })
+            _cb(
+                {
+                    "type": "axis_start",
+                    "round": round_num,
+                    "axis": axis_name,
+                    "axis_type": axis_type,
+                    "cardinality": len(values),
+                    "budget": budget,
+                }
+            )
 
             best_value = (
                 getattr(current_opt, axis_name, "")
@@ -173,25 +181,32 @@ async def adaptive_search(
 
                 composite = scores.get("composite", scores["accuracy"])
                 delta = composite - current_composite
-                log_rows.append({
-                    "round": round_num,
-                    "axis": axis_name,
-                    "axis_type": axis_type,
-                    "value_preview": _preview(value),
-                    "accuracy": scores["accuracy"],
-                    "composite": composite,
-                    "delta": delta,
-                })
-                _cb({
-                    "type": "variant_done",
-                    "round": round_num,
-                    "axis": axis_name, "value_preview": _preview(value),
-                    "accuracy": scores["accuracy"], "delta": delta,
-                    "composite": composite,
-                    "hits": scores["hits"], "total": scores["total"],
-                    "results": scores.get("results", []),
-                    "cached": scores.get("cached", False),
-                })
+                log_rows.append(
+                    {
+                        "round": round_num,
+                        "axis": axis_name,
+                        "axis_type": axis_type,
+                        "value_preview": _preview(value),
+                        "accuracy": scores["accuracy"],
+                        "composite": composite,
+                        "delta": delta,
+                    }
+                )
+                _cb(
+                    {
+                        "type": "variant_done",
+                        "round": round_num,
+                        "axis": axis_name,
+                        "value_preview": _preview(value),
+                        "accuracy": scores["accuracy"],
+                        "delta": delta,
+                        "composite": composite,
+                        "hits": scores["hits"],
+                        "total": scores["total"],
+                        "results": scores.get("results", []),
+                        "cached": scores.get("cached", False),
+                    }
+                )
 
                 if composite > best_composite:
                     best_composite = composite
@@ -203,61 +218,74 @@ async def adaptive_search(
                 if axis_type == "prompt_field":
                     current_opt = current_opt.derive_candidate(
                         **{axis_name: best_value},
-                        changes_description=(
-                            f"adaptive_r{round_num}_{axis_name}"
-                        ),
+                        changes_description=(f"adaptive_r{round_num}_{axis_name}"),
                     )
                 else:
                     current_params[axis_name] = best_value
                 current_composite = best_composite
                 round_improved = True
-                _cb({
-                    "type": "axis_resolved",
-                    "round": round_num,
-                    "axis": axis_name, "action": "improved",
-                    "best_value": _preview(best_value),
-                    "improvement": round(improvement, 4),
-                    "new_accuracy": current_composite,
-                })
+                _cb(
+                    {
+                        "type": "axis_resolved",
+                        "round": round_num,
+                        "axis": axis_name,
+                        "action": "improved",
+                        "best_value": _preview(best_value),
+                        "improvement": round(improvement, 4),
+                        "new_accuracy": current_composite,
+                    }
+                )
             else:
                 resolved_axes.add(axis_name)
-                _cb({
-                    "type": "axis_resolved",
-                    "round": round_num,
-                    "axis": axis_name, "action": "skipped",
-                    "improvement": round(improvement, 4),
-                })
+                _cb(
+                    {
+                        "type": "axis_resolved",
+                        "round": round_num,
+                        "axis": axis_name,
+                        "action": "skipped",
+                        "improvement": round(improvement, 4),
+                    }
+                )
 
         if not round_improved:
             logger.info(
                 "Adaptive search: no improvement in round %d, stopping.",
                 round_num,
             )
-            _cb({
-                "type": "round_done",
-                "round": round_num, "improved": False,
-                "accuracy": current_composite,
-            })
+            _cb(
+                {
+                    "type": "round_done",
+                    "round": round_num,
+                    "improved": False,
+                    "accuracy": current_composite,
+                }
+            )
             break
-        _cb({
-            "type": "round_done",
-            "round": round_num, "improved": True,
-            "accuracy": current_composite,
-        })
+        _cb(
+            {
+                "type": "round_done",
+                "round": round_num,
+                "improved": True,
+                "accuracy": current_composite,
+            }
+        )
 
     log_df = pd.DataFrame(log_rows)
 
     # Persist search results to plan
     if store and backend_id and plan_id:
-        store.smart_search.update(backend_id, plan_id, {
-            "status": "search_complete",
-            "search_results": {
-                "best_opt": current_opt.model_dump(),
-                "best_params": current_params,
-                "log_rows": log_df.to_dict(orient="records")
-                if not log_df.empty else [],
+        store.smart_search.update(
+            backend_id,
+            plan_id,
+            {
+                "status": "search_complete",
+                "search_results": {
+                    "best_opt": current_opt.model_dump(),
+                    "best_params": current_params,
+                    "log_rows": log_df.to_dict(orient="records") if not log_df.empty else [],
+                },
             },
-        })
+        )
         logger.info("Saved search results to plan: %s", plan_id)
 
     return current_opt, current_params, log_df

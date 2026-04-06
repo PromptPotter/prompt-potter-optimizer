@@ -13,15 +13,15 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.phase_event import PhaseEvent
 from promptpotter.services.backend_client import BackendClient
-from promptpotter.services.campaign.callbacks import emit_phase
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import sample_thinking_styles
 from promptpotter.services.campaign.lifecycle import init_campaign
 from promptpotter.services.campaign.state import (
     LoopState,
+    PhaseEvent,
     RunBackendSession,
+    emit_phase,
 )
 from promptpotter.services.dataset_builder import subsample_dataset
 from promptpotter.services.metrics import compute_composite_score
@@ -131,7 +131,8 @@ def _restore_from_checkpoint(
                 logger.debug(
                     "Checkpoint missing %d OptSearchPoint field(s): %s "
                     "(using defaults — checkpoint predates schema change)",
-                    len(missing), ", ".join(sorted(missing)),
+                    len(missing),
+                    ", ".join(sorted(missing)),
                 )
             state.opt_sp = OptSearchPoint(**known)
         state.escalation.l2_round = _latest_trial.get("l2_round", 0)
@@ -343,14 +344,18 @@ async def init_cycle_state(
 
         from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
 
-        _session_dir = Path(config.project_root) / config.backend_id / "sessions" / config.session_id
+        _session_dir = (
+            Path(config.project_root) / config.backend_id / "sessions" / config.session_id
+        )
         _session_store = None
         if _store:
             from promptpotter.services.stores.stores import SessionStore
+
             _session_store = SessionStore(Path(config.project_root))
 
         resume_from = CampaignPersistenceEmitter.load_resume_state(
-            _session_dir, baseline=baseline_accuracy,
+            _session_dir,
+            baseline=baseline_accuracy,
         )
         persistence_emitter = CampaignPersistenceEmitter(
             _session_dir,
