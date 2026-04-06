@@ -281,11 +281,13 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
     logger.info("Task context decomposed%s: %d fields", cache_tag, len(result.task_context))
     task_context = result.task_context
 
-    ctx.state["task_context"] = task_context
+    ctx.state["task_context"] = task_context.to_dict()
     ctx.state["phase"] = "task-context"
     session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
     session.store.sessions.append_log(
-        ctx.backend_id, ctx.session_id, f"## Task Context\n{json.dumps(task_context, indent=2)}"
+        ctx.backend_id,
+        ctx.session_id,
+        f"## Task Context\n{json.dumps(task_context.to_dict(), indent=2)}",
     )
 
 

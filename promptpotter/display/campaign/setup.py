@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.config.settings import load_variant_library
 from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.task_context import TaskContext
 from promptpotter.services.campaign.bootstrap import (
     BackendContext,
     save_campaign_winner,
@@ -65,22 +66,19 @@ async def decompose_task_context(
     *,
     llm_client: LLMClientBase | None = None,
     model: str | None = None,
-) -> dict:
+) -> TaskContext:
     """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
 
     Delegates to ``promptpotter.services.search.context.decompose_task_context()``
     and prints the decomposed fields for visibility.
     """
     from promptpotter.services.search.context import (
-        TASK_CONTEXT_FIELDS,
-    )
-    from promptpotter.services.search.context import (
         decompose_task_context as _decompose_task_context,
     )
 
     if not task_description:
         print("  (no task description provided)")
-        return {}
+        return TaskContext()
 
     if llm_client is None or model is None:
         _client, _model = setup_llm(campaign_config)
@@ -98,8 +96,8 @@ async def decompose_task_context(
     cache_tag = " (cached)" if result.was_cached else ""
     print(f"TASK CONTEXT DECOMPOSITION{cache_tag}")
     print("-" * 50)
-    for f in TASK_CONTEXT_FIELDS:
-        val = result.task_context.get(f, "")
+    for f in result.task_context.FIELDS:
+        val = getattr(result.task_context, f, "")
         print(f"  {f}: {val or '(empty)'}")
 
     if result.consultation:

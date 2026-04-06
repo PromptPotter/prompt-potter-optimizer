@@ -56,6 +56,31 @@ def cycle_config_identity(
     return f"cycle_{digest}"
 
 
+def resolve_active_campaign_id(
+    campaign_config: dict,
+    pipeline_params: dict | None,
+    baseline_prompt_fields: dict | None,
+    dataset: list[dict],
+) -> str | None:
+    """Compute the cycle ID matching the current config, or None on failure.
+
+    Used by display layer to detect which stored campaign matches the active
+    notebook/CLI configuration.
+    """
+    try:
+        config = RunConfig.from_campaign_config(
+            campaign_config,
+            pipeline_params=pipeline_params,
+        )
+        bl_rendered = ""
+        if baseline_prompt_fields:
+            bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
+        return cycle_config_identity(config, bl_rendered, dataset)
+    except Exception:
+        logger.debug("Could not compute active campaign ID", exc_info=True)
+        return None
+
+
 def init_campaign(
     config: RunConfig,
     dataset: list[dict],

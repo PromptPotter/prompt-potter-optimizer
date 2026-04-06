@@ -127,14 +127,10 @@ async def decompose_scan_baseline(
 
     # Resolve prompt node from pipeline schema — only if the node is active
     prompt_node = ""
-    if session is not None:
-        ps = session.pipeline_schema
-        active_steps = set((pipeline_params or {}).get("steps", []))
-        if ps:
-            for name in ps.prompt_node_names():
-                if name in active_steps:
-                    prompt_node = name
-                    break
+    ps = session.pipeline_schema if session is not None else None
+    if ps:
+        active_steps = (pipeline_params or {}).get("steps", [])
+        prompt_node = ps.resolve_active_prompt_node(active_steps)
 
     result = await _decompose_scan_baseline(
         baseline,
@@ -142,8 +138,7 @@ async def decompose_scan_baseline(
         llm_client,
         llm_model,
         pipeline_params=pipeline_params,
-        store=store,
-        backend_id=backend_id,
+        session=session,
         scan_variants=scan_variants,
         force_restructure=force_restructure,
         prompt_node=prompt_node,
@@ -196,47 +191,21 @@ def show_variant_library(
     Returns:
         The filtered rich variant dict (objects with ``text``/``source``/``year``).
     """
+    from promptpotter.services.search.smart_search import filter_variant_library_display
+
     from .display import BOLD, GREEN, YELLOW
 
     rich = load_variant_library_rich()
-    all_fields = rich.get("prompt_fields", {})
-
-    if axes:
-        all_fields = {k: v for k, v in all_fields.items() if k in axes}
-
-    # Collect source summary across all fields
-    source_counts: dict[str, int] = {}
-    for variants in all_fields.values():
-        for v in variants:
-            s = v["source"] if isinstance(v, dict) else "PromptPotter"
-            source_counts[s] = source_counts.get(s, 0) + 1
+    lib = filter_variant_library_display(rich, axes=axes, source=source)
 
     print(f"{BOLD}Variant Library{RESET}")
-    print(f"  Sources: {', '.join(f'{s} ({n})' for s, n in source_counts.items())}")
+    print(f"  Sources: {', '.join(f'{s} ({n})' for s, n in lib.source_counts.items())}")
     if source:
         print(f"  Filter: source={source}")
     print()
 
-    filtered: dict[str, list] = {}
-    for field_name, variants in all_fields.items():
-        field_variants = []
-        for v in variants:
-            v_source = v.get("source", "") if isinstance(v, dict) else "PromptPotter"
-
-            if source and v_source != source:
-                continue
-            field_variants.append(v if isinstance(v, dict) else {"text": v, "source": v_source})
-
-        if not field_variants:
-            continue
-
-        filtered[field_name] = field_variants
-
-        # Count by source within this field
-        by_source: dict[str, int] = {}
-        for fv in field_variants:
-            s = fv["source"]
-            by_source[s] = by_source.get(s, 0) + 1
+    for field_name, field_variants in lib.fields.items():
+        by_source = lib.per_field_sources.get(field_name, {})
         src_summary = ", ".join(f"{s}: {n}" for s, n in by_source.items())
 
         print(f"  {CYAN}{BOLD}{field_name}{RESET} ({len(field_variants)} variants — {src_summary})")
@@ -252,7 +221,7 @@ def show_variant_library(
             print(f"    [{i:2d}] {color}[{tag}{year_str}]{RESET} {preview}")
         print()
 
-    return {"prompt_fields": filtered}
+    return {"prompt_fields": lib.fields}
 
 
 def resolve_scan_variants(
@@ -278,16 +247,12 @@ def resolve_scan_variants(
     if pipeline_schema is None and session is not None:
         pipeline_schema = session.pipeline_schema
 
-    # Flatten nested node groups for schema resolution (only applies to _schema axes)
-    flat_for_resolve: dict[str, list] = {}
-    for key, spec in scan_variants.items():
-        if isinstance(spec, list):
-            flat_for_resolve[key] = spec
-        elif isinstance(spec, dict):
-            for param, vals in spec.items():
-                if isinstance(vals, list):
-                    flat_for_resolve[param] = vals
+    from promptpotter.services.search.scan_advisor import (
+        flatten_scan_variants,
+        rebuild_nested_resolved,
+    )
 
+    flat_for_resolve = flatten_scan_variants(scan_variants)
     resolved, schema_labels = resolve_schema_axes(flat_for_resolve, pipeline_schema)
 
     # Display: group by prompt fields vs node params
@@ -310,19 +275,7 @@ def resolve_scan_variants(
                     else:
                         print(f"  {key}.{param}: {r_vals}")
 
-    # Rebuild nested resolved output
-    nested_resolved: dict = {}
-    for key, spec in scan_variants.items():
-        if isinstance(spec, list):
-            nested_resolved[key] = resolved.get(key, spec)
-        elif isinstance(spec, dict):
-            node_group = {}
-            for param, vals in spec.items():
-                if isinstance(vals, list):
-                    node_group[param] = resolved.get(param, vals)
-            nested_resolved[key] = node_group
-
-    return nested_resolved, schema_labels
+    return rebuild_nested_resolved(scan_variants, resolved), schema_labels
 
 
 # ===========================================================================
@@ -826,55 +779,7 @@ def audit_historical_data(
         prompt_index -- the historical prompt result index.
     """
     prompt_index = build_historical_index(store, backend_id)
-
-    # Display data inventory
-    inv = _build_data_inventory(prompt_index, store, backend_id)
-
-    tp = inv["total_prompts"]
-    tr = inv["total_results"]
-    print("=" * 70)
-    print(f"  DATA INVENTORY  ({tp} prompts, {tr} query results)")
-    print("=" * 70)
-
-    bp = inv["baseline_prompts"]
-    bq = inv["baseline_queries"]
-    print(f"  Baselines: {bp} plan baseline(s) -- {bq} queries cached")
-    print()
-
-    axes = inv["axes"]
-    if axes:
-        print(f"  {'Axis':<22s} {'Prompts':>8s} {'Queries':>8s} {'Distinct values':>16s}")
-        for axis_name, info in axes.items():
-            print(
-                f"  {axis_name:<22s} {info['n_prompts']:>8d} "
-                f"{info['n_queries']:>8d} {info['distinct_values']:>16d}"
-            )
-        print()
-    else:
-        print("  No axis variations found in stored plans.")
-        print()
-
-    pp = inv.get("pipeline_params", {})
-    if pp:
-        print("  Pipeline parameters (from sensitivity scans):")
-        for pname, info in pp.items():
-            card = info["cardinality"]
-            sens = info["sensitivity_range"]
-            budget = info["exploration_budget"]
-            print(f"    {pname:<24s} {card} values scanned  sensitivity: {sens:.3f}  [{budget}]")
-        print()
-    else:
-        print("  Pipeline parameters: not yet scanned")
-        print()
-
-    mp = inv["matched_prompts"]
-    mr = inv["matched_results"]
-    up = inv["unmatched_prompts"]
-    ur = inv["unmatched_results"]
-    print(f"  Identified: {mp}/{tp} prompts ({mr}/{tr} queries) via stored plans")
-    print(f"  Unmatched:  {up} prompts ({ur} queries)")
-    print("=" * 70)
-
+    show_data_inventory(prompt_index, store, backend_id)
     return prompt_index
 
 
@@ -935,6 +840,23 @@ async def resume_or_build_diagnostic(
     return plan_id, search_baseline, diagnostic, axis_profiles, variant_library
 
 
+def _display_improving_axes(scan_df, improving_axes: list) -> None:
+    """Print formatted summary of improving scan axes."""
+    if improving_axes:
+        print(f"Selected best from {len(improving_axes)} improving axes:")
+        for p in improving_axes:
+            axis_rows = scan_df[scan_df["axis"] == p["axis"]]
+            if not axis_rows.empty:
+                best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
+                print(
+                    f"  {p['axis']:<25s} best_delta=+{p['best_delta']:.1%}  "
+                    f"value_idx={int(best_row['value_idx'])}  "
+                    f"acc={best_row['accuracy']:.1%}"
+                )
+    else:
+        print("No axes improved over baseline -- using baseline as-is.")
+
+
 def select_scan_winner_notebook(
     scan_df,
     axis_profiles: list[dict],
@@ -961,19 +883,7 @@ def select_scan_winner_notebook(
     improving = [
         p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
     ]
-    if improving:
-        print(f"Selected best from {len(improving)} improving axes:")
-        for p in improving:
-            axis_rows = scan_df[scan_df["axis"] == p["axis"]]
-            if not axis_rows.empty:
-                best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
-                print(
-                    f"  {p['axis']:<25s} best_delta=+{p['best_delta']:.1%}  "
-                    f"value_idx={int(best_row['value_idx'])}  "
-                    f"acc={best_row['accuracy']:.1%}"
-                )
-    else:
-        print("No axes improved over baseline -- using baseline as-is.")
+    _display_improving_axes(scan_df, improving)
 
     if best_sp.sp_hash() != baseline.sp_hash():
         print(f"\nComposed winner: sp_hash={best_sp.sp_hash()[:12]}")
@@ -1009,19 +919,7 @@ def seed_campaign_from_scan(
     )
 
     # Print improving axes summary
-    if result.improving_axes:
-        print(f"Selected best from {len(result.improving_axes)} improving axes:")
-        for p in result.improving_axes:
-            axis_rows = scan_df[scan_df["axis"] == p["axis"]]
-            if not axis_rows.empty:
-                best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
-                print(
-                    f"  {p['axis']:<25s} best_delta=+{p['best_delta']:.1%}  "
-                    f"value_idx={int(best_row['value_idx'])}  "
-                    f"acc={best_row['accuracy']:.1%}"
-                )
-    else:
-        print("No axes improved over baseline -- using baseline as-is.")
+    _display_improving_axes(scan_df, result.improving_axes)
 
     # Print pipeline_params update
     if result.merged_pipeline_params:

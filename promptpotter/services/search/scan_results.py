@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.services.campaign.bootstrap import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.llm_client import LLMClientBase
     from promptpotter.services.project_store import ProjectStore
@@ -46,8 +47,7 @@ async def decompose_scan_baseline(
     llm_model: str,
     *,
     pipeline_params: dict | None = None,
-    store: ProjectStore | None = None,
-    backend_id: str = "",
+    session: BackendContext | None = None,
     scan_variants: dict | None = None,
     force_restructure: bool = False,
     prompt_node: str = "",
@@ -64,6 +64,11 @@ async def decompose_scan_baseline(
         and restructured field values.
     """
     from promptpotter.services.search.context import decompose_prompt_fields_cached
+
+    # Unpack session
+    store = session.store if session else None
+    backend_id = session.backend_id if session else ""
+    pipeline_schema = pipeline_schema or (session.pipeline_schema if session else None)
 
     # Resolve alias group for cache lookup
     can_cache = bool(store and backend_id)
@@ -425,6 +430,18 @@ def select_scan_winner(
         len(improving),
     )
     return best
+
+
+def compute_difficulty_summary(difficulty_df: Any) -> dict[str, int] | None:
+    """Aggregate query difficulty classification counts.
+
+    Returns None if the DataFrame is empty or None.
+    """
+    if difficulty_df is None or len(difficulty_df) == 0:
+        return None
+    summary: dict[str, int] = difficulty_df["classification"].value_counts().to_dict()
+    summary["total"] = len(difficulty_df)
+    return summary
 
 
 def prepare_scan_context(

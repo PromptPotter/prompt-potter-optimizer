@@ -74,6 +74,11 @@ def compute_accuracy(results: list) -> dict:
     return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
 
 
+def count_failures(results: list[dict]) -> int:
+    """Count non-hit results (misses + errors)."""
+    return sum(1 for r in results if not r.get("hit"))
+
+
 def count_degraded_queries(results: list[dict]) -> int:
     """Count queries that have pipeline degradation warnings."""
     return sum(

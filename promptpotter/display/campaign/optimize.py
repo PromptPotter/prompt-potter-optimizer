@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.task_context import TaskContext
 from promptpotter.services.campaign.bootstrap import (
     resolve_experiment_id as _resolve_experiment_id,
 )
@@ -118,15 +119,13 @@ def show_feedback_preflight(
     scan_context = None
     if scan_df is not None and axis_profiles is not None and scan_variants is not None:
         from promptpotter.services.search import prepare_scan_context
+        from promptpotter.services.search.scan_results import compute_difficulty_summary
 
         baseline_acc = 0.0
         if campaign_rounds:
             baseline_acc = campaign_rounds[-1].get("accuracy", 0.0)
 
-        difficulty_summary = None
-        if difficulty_df is not None and len(difficulty_df) > 0:
-            difficulty_summary = difficulty_df["classification"].value_counts().to_dict()
-            difficulty_summary["total"] = len(difficulty_df)
+        difficulty_summary = compute_difficulty_summary(difficulty_df)
 
         scan_context = prepare_scan_context(
             scan_df,
@@ -162,35 +161,14 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     instruction = bl["instruction"]
     baseline_results = bl["baseline_results"]
 
+    from promptpotter.services.campaign.config import compute_preflight_metrics
+
     _instr_preview = (instruction[:80] + "...") if len(instruction) > 80 else instruction
     _instr_preview = _instr_preview or "(empty)"
-    _eff_queries = config.sample_size if config.sample_size else len(dataset)
-    if config.sample_size:
-        _queries_label = f"{config.sample_size} of {len(dataset)}"
-    else:
-        _queries_label = f"all {len(dataset)}"
-    # Pipeline node display
-    pp = config.pipeline_params or {}
-    active_nodes = pp.get("steps", [])
     exclude = (campaign_config or {}).get("exclude_nodes", [])
-    total_nodes = len(active_nodes) + len(exclude)
-    if active_nodes:
-        _pipeline_label = f"{len(active_nodes)} of {total_nodes} nodes"
-        _nodes_detail = ", ".join(active_nodes)
-    else:
-        _pipeline_label = "(default pipeline)"
-        _nodes_detail = None
-
-    _est_calls = (
-        config.max_rounds * config.n_variants * _eff_queries
-        if config.max_rounds is not None
-        else None
+    m = compute_preflight_metrics(
+        config, len(dataset), exclude_nodes=exclude, has_scan_context=scan_context is not None
     )
-
-    _l2_label = f"enabled, patience={config.l2_patience}" if config.enable_l2 else "disabled"
-    _l3_label = f"enabled, patience={config.l3_patience}" if config.enable_l3 else "disabled"
-
-    _strategy = "SCAN-AWARE" if scan_context else "FREEFORM"
 
     # ── Section 1: Configuration Summary ──
     print()
@@ -202,20 +180,20 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     print("  " + "-" * 66)
     print(f"  Max rounds             : {config.max_rounds or 'unlimited'}")
     print(f"  Candidates per round   : {config.n_variants}")
-    print(f"  Queries per eval       : {_queries_label}")
+    print(f"  Queries per eval       : {m.queries_label}")
     print(f"  Improvement threshold  : {config.improvement_threshold:.1%}")
     print(f"  Patience (L1)          : {config.l1_patience} rounds")
-    print(f"  L2 (refine context)    : {_l2_label}")
-    print(f"  L3 (modify plan)       : {_l3_label}")
+    print(f"  L2 (refine context)    : {m.l2_label}")
+    print(f"  L3 (modify plan)       : {m.l3_label}")
     print("  " + "-" * 66)
     print(f"  Candidate model        : {config.model or '(default)'}")
     print(f"  Creativity             : {config.creativity}")
-    print(f"  Pipeline               : {_pipeline_label}")
-    if _nodes_detail:
-        print(f"    Nodes                : {_nodes_detail}")
+    print(f"  Pipeline               : {m.pipeline_label}")
+    if m.nodes_detail:
+        print(f"    Nodes                : {m.nodes_detail}")
     if exclude:
         print(f"    Excluded             : {', '.join(exclude)}")
-    print(f"  Strategy               : {_strategy}")
+    print(f"  Strategy               : {m.strategy}")
 
     # ── Section 2: Round Pipeline ──
     print()
@@ -229,15 +207,15 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     print(f"     Accuracy: {baseline_acc:.1%}  |  Prior results: {n_prior}")
 
     # Step 2: Failure analysis
-    n_failures = 0
-    if baseline_results:
-        n_failures = sum(1 for r in baseline_results if not r.get("hit"))
+    from promptpotter.services.metrics import count_failures
+
+    n_failures = count_failures(baseline_results) if baseline_results else 0
     print(f"  {CYAN}2. FAILURE ANALYSIS{RESET}")
     print(f"     Up to {config.max_failures} failures extracted (currently {n_failures} available)")
 
     # Step 3: Context assembly
     print(f"  {CYAN}3. CONTEXT ASSEMBLY{RESET}")
-    print(f"     Strategy: {_strategy}")
+    print(f"     Strategy: {m.strategy}")
     if scan_context:
         improving = scan_context.improving_axes
         leaderboard = scan_context.leaderboard_text
@@ -275,7 +253,7 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
 
     # Step 5: Backend evaluation
     print(f"  {CYAN}5. BACKEND EVALUATION{RESET}")
-    print(f"     Queries per candidate: {_queries_label}")
+    print(f"     Queries per candidate: {m.queries_label}")
     scoring = "composite (pipeline-aware)" if config.pipeline_schema else "accuracy"
     print(f"     Scoring: {scoring}")
 
@@ -286,21 +264,21 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     # Step 7: Loop control
     print(f"  {CYAN}7. LOOP CONTROL{RESET}")
     print(
-        f"     Patience: {config.l1_patience} stalls → stop  |  L2: {_l2_label}  |  L3: {_l3_label}"
+        f"     Patience: {config.l1_patience} stalls → stop  |  L2: {m.l2_label}  |  L3: {m.l3_label}"
     )
 
     print("  " + "-" * 66)
-    if _est_calls is not None:
+    if m.est_calls is not None:
         print(
-            f"  Est. backend calls     : {_est_calls}"
+            f"  Est. backend calls     : {m.est_calls}"
             f"  ({config.max_rounds}r x {config.n_variants}c"
-            f" x {_eff_queries}q)"
+            f" x {m.eff_queries}q)"
         )
     else:
         print(
             f"  Est. backend calls     : unlimited"
             f"  (no max_rounds x {config.n_variants}c"
-            f" x {_eff_queries}q)"
+            f" x {m.eff_queries}q)"
         )
 
     # ── Section 3: Scan Context Preview ──
@@ -365,7 +343,7 @@ async def run_optimization_notebook(
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
     session: BackendContext | None = None,
-    task_context: dict | None = None,
+    task_context: TaskContext | dict | None = None,
     session_id: str = "",
     display_callbacks: RunCallbacks | None = None,
 ) -> tuple[list, RunResult | None]:
@@ -779,14 +757,11 @@ async def run_baseline_eval(
         campaign_rounds, baseline_results = await _run_baseline_eval(
             baseline,
             dataset,
-            session.backend_client,
+            session,
             pipeline_params=pipeline_params,
             pipeline_schema=session.pipeline_schema,
-            store=session.store,
-            backend_id=session.backend_id,
             experiment_id=session.experiment_id,
             on_result=_on_result,
-            index_terms=session.index_terms,
             obs=_obs,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):

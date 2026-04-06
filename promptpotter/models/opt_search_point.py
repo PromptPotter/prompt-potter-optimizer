@@ -35,9 +35,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from promptpotter.models.search_point import SearchPoint
+from promptpotter.models.task_context import TaskContext
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
@@ -166,12 +167,21 @@ class OptSearchPoint(PromptTemplate):
 
     # -- L2 state ----------------------------------------------------------
     optimizer_params: dict[str, Any] = Field(default_factory=dict)
-    task_context: dict[str, Any] = Field(
-        default_factory=dict,
+    task_context: TaskContext = Field(
+        default_factory=TaskContext,
         description="Structured domain context (domain, pipeline_purpose, "
         "data_characteristics, optimization_goals, key_challenges). "
         "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
     )
+
+    @field_validator("task_context", mode="before")
+    @classmethod
+    def _coerce_task_context(cls, v: Any) -> TaskContext:
+        if isinstance(v, TaskContext):
+            return v
+        if isinstance(v, dict):
+            return TaskContext.from_dict(v)
+        return TaskContext()
 
     # -- Optimization memory -----------------------------------------------
     critique_text: str = ""
@@ -228,9 +238,9 @@ class OptSearchPoint(PromptTemplate):
 
     def render(self) -> str:
         """Render with upstream/downstream context injected around problem_description."""
-        tc = self.task_context or {}
-        upstream = tc.get("upstream_context", "")
-        downstream = tc.get("downstream_context", "")
+        tc = self.task_context
+        upstream = tc.upstream_context
+        downstream = tc.downstream_context
         if not upstream and not downstream:
             return super().render()
 
@@ -308,7 +318,7 @@ class OptSearchPoint(PromptTemplate):
             data["few_shot_examples"] = [ex.model_copy() for ex in self.few_shot_examples]
         # L2/L3 state
         data["optimizer_params"] = changes.pop("optimizer_params", dict(self.optimizer_params))
-        data["task_context"] = changes.pop("task_context", dict(self.task_context))
+        data["task_context"] = changes.pop("task_context", self.task_context.to_dict())
         data["plan"] = changes.pop("plan", self.plan)
         # Lineage
         data["parent_id"] = self.id

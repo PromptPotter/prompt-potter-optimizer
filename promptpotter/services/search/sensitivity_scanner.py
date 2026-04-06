@@ -29,8 +29,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.backend_client import BackendClient
-    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.services.campaign.bootstrap import BackendContext
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +38,10 @@ async def sensitivity_scan(
     baseline: JobSearchPoint,
     scan_variants: dict[str, list | dict],
     dataset: list,
-    backend_client: BackendClient,
+    session: BackendContext,
     *,
     baseline_opt: OptSearchPoint | None = None,
     sample_size: int = 0,
-    store: ProjectStore | None = None,
-    backend_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
     on_result: Callable | None = None,
@@ -63,14 +60,12 @@ async def sensitivity_scan(
             - Prompt fields: ``{"thinking_style": ["a", "b"]}`` (list → prompt)
             - Pipeline params: ``{"web_search": {"max_sites": [3, 5]}}`` (dict → node)
         dataset: Full evaluation dataset.
-        backend_client: Backend client for evaluation.
+        session: BackendContext bundling backend_client, store, backend_id.
         baseline_opt: OptSearchPoint for prompt-field perturbation. Required
             when scan_variants contains prompt_field axes.
         sample_size: If >0, subsample dataset to this many queries
             (deterministic seed=42). 0 means use all.
-        store: Optional ProjectStore for caching.
-        backend_id: Backend identifier.
-        pipeline_schema: Optional PipelineSchema for composite scoring.
+        pipeline_schema: Override PipelineSchema (defaults to session's).
         progress_cb: Optional callback for progress events.
         on_result: Optional per-result callback.
 
@@ -78,6 +73,12 @@ async def sensitivity_scan(
         Tuple of (per_variant_df, axis_profiles).
     """
     import pandas as pd
+
+    # Unpack session
+    backend_client = session.backend_client
+    store = session.store
+    backend_id = session.backend_id
+    pipeline_schema = pipeline_schema or session.pipeline_schema
 
     _cb = progress_cb or (lambda _e: None)
 

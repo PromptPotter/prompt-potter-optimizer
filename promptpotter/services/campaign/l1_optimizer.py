@@ -236,7 +236,7 @@ async def l1_generate(
             **prompt_changes,
         )
         if tc_changes:
-            child.task_context = {**child.task_context, **tc_changes}
+            child.task_context = child.task_context.merge(tc_changes)
         c_dict = child.prompt_field_dict()
         c_dict["id"] = child.id
         c_dict["parent_id"] = child.parent_id

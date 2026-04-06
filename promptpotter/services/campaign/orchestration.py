@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.task_context import TaskContext
 from promptpotter.services.campaign.bootstrap import BackendContext
 from promptpotter.services.campaign.campaign_data import extract_campaign_baseline
 from promptpotter.services.campaign.config import (
@@ -116,7 +117,7 @@ def build_run_config(
     *,
     pipeline_params: dict | None = None,
     scan_context: ScanContext | None = None,
-    task_context: dict | None = None,
+    task_context: TaskContext | dict | None = None,
     session_id: str = "",
 ) -> RunConfig:
     """Assemble a ``RunConfig`` from *campaign_config* and *session* context."""
@@ -165,7 +166,7 @@ async def run_optimization(
     pipeline_params: dict | None = None,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
-    task_context: dict | None = None,
+    task_context: TaskContext | dict | None = None,
     session_id: str = "",
     callbacks: RunCallbacks | None = None,
     langfuse_session_id: str | None = None,
@@ -267,11 +268,8 @@ async def run_scan_and_persist(
     prompt_node = ""
     ps = session.pipeline_schema
     if ps:
-        active_steps = set((pipeline_params or {}).get("steps", []))
-        for name in ps.prompt_node_names():
-            if name in active_steps:
-                prompt_node = name
-                break
+        active_steps = (pipeline_params or {}).get("steps", [])
+        prompt_node = ps.resolve_active_prompt_node(active_steps)
 
     # Decompose scan baseline
     llm_client, llm_model = create_llm_client(campaign_config)
@@ -281,8 +279,7 @@ async def run_scan_and_persist(
         llm_client,
         llm_model,
         pipeline_params=pipeline_params,
-        store=session.store,
-        backend_id=session.backend_id,
+        session=session,
         scan_variants=scan_variants,
         prompt_node=prompt_node,
         pipeline_schema=ps,
@@ -298,8 +295,6 @@ async def run_scan_and_persist(
     log(f"Running sensitivity scan ({len(scan_variants)} axes) ...")
     scan_kwargs: dict[str, Any] = {
         "sample_size": scan_sample_size,
-        "store": session.store,
-        "backend_id": session.backend_id,
         "pipeline_schema": ps,
         "experiment_id": experiment_id,
     }
@@ -312,7 +307,7 @@ async def run_scan_and_persist(
         scan_baseline_sp,
         scan_variants,
         dataset,
-        session.backend_client,
+        session,
         baseline_opt=baseline_opt,
         **scan_kwargs,
     )

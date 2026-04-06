@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.services.campaign.bootstrap import (
     apply_experiment_overrides,
 )
@@ -32,6 +31,63 @@ __all__ = [
     "load_experiment_config",
     "show_experiment_dashboard",
 ]
+
+
+def _print_resume_hint(
+    status: str,
+    n_trials: int,
+    *,
+    indent: str = "  ",
+    is_matching: bool = True,
+) -> None:
+    """Print a one-line resume/replay/fresh hint for a campaign."""
+    if not is_matching:
+        print(f"{indent}→ Config does NOT match — update campaign_config to resume")
+        return
+    if status == "completed" and n_trials > 0:
+        print(f"{indent}→ Re-run will REPLAY from cache (campaign completed)")
+    elif n_trials > 0:
+        print(f"{indent}→ Re-run will RESUME from round {n_trials}")
+    else:
+        print(f"{indent}→ Re-run starts fresh")
+
+
+def _format_campaign_summary(
+    store: ProjectStore,
+    backend_id: str,
+    campaign: dict,
+    *,
+    active_id: str | None = None,
+    show_updated: bool = False,
+) -> None:
+    """Print one campaign's summary line with optional active marker and config."""
+    cid = campaign["campaign_id"]
+    status = campaign["status"]
+    n = campaign["n_trials"]
+    best = f"{campaign['best_accuracy']:.1%}"
+    base = f"{campaign['baseline_accuracy']:.1%}"
+    is_active = cid == active_id
+
+    if active_id is not None:
+        marker = "  ●" if is_active else "   "
+        tag = "  <-- active" if is_active else ""
+        print(f"{marker} {cid}  {status:<12} {n} rounds  best={best}  base={base}{tag}")
+    else:
+        print(f"  {cid}  {status}  {n} rounds  best={best}  base={base}")
+
+    full = store.campaigns.load(backend_id, cid)
+    cfg = full.get("config", {}) if full else {}
+    if cfg:
+        model = str(cfg.get("model", "?"))[:30]
+        patience = cfg.get("patience", "?")
+        max_r = cfg.get("max_rounds", "?")
+        sample = cfg.get("sample_size", "?")
+        indent = "      " if active_id is not None else "    "
+        print(f"{indent}patience={patience}  rounds={max_r}  sample={sample}  model={model}")
+
+    if show_updated:
+        updated = campaign["updated_at"][:16].replace("T", " ")
+        print(f"    updated: {updated}")
 
 
 def list_campaigns(
@@ -98,25 +154,7 @@ def list_campaigns(
     print(f"\nCAMPAIGNS ({backend_id})")
     print("=" * 72)
     for c in sorted(campaigns, key=lambda x: x["updated_at"], reverse=True):
-        cid = c["campaign_id"]
-        status = c["status"]
-        n = c["n_trials"]
-        best = f"{c['best_accuracy']:.1%}"
-        base = f"{c['baseline_accuracy']:.1%}"
-        updated = c["updated_at"][:16].replace("T", " ")
-
-        print(f"  {cid}  {status}  {n} rounds  best={best}  base={base}")
-
-        # Inline config from stored campaign data
-        full = store.campaigns.load(backend_id, cid)
-        cfg = full.get("config", {}) if full else {}
-        if cfg:
-            model = cfg.get("model", "?")
-            patience = cfg.get("patience", "?")
-            max_r = cfg.get("max_rounds", "?")
-            sample = cfg.get("sample_size", "?")
-            print(f"    model={model}  patience={patience}  rounds={max_r}  sample={sample}")
-        print(f"    updated: {updated}")
+        _format_campaign_summary(store, backend_id, c, show_updated=True)
         print()
 
     print("=" * 72)
@@ -237,20 +275,11 @@ def show_experiment_dashboard(
     # --- Detect active campaign from current config ---
     active_id = None
     if campaign_config is not None and dataset is not None:
-        try:
-            from promptpotter.services.campaign.config import RunConfig
-            from promptpotter.services.campaign.lifecycle import cycle_config_identity
+        from promptpotter.services.campaign.lifecycle import resolve_active_campaign_id
 
-            config = RunConfig.from_campaign_config(
-                campaign_config,
-                pipeline_params=pipeline_params,
-            )
-            bl_rendered = ""
-            if baseline_prompt_fields:
-                bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
-            active_id = cycle_config_identity(config, bl_rendered, dataset)
-        except Exception:
-            logger.debug("Could not compute active campaign ID", exc_info=True)
+        active_id = resolve_active_campaign_id(
+            campaign_config, pipeline_params, baseline_prompt_fields, dataset
+        )
 
     # --- Detail mode ---
     if full_id is not None:
@@ -309,35 +338,18 @@ def show_experiment_dashboard(
             )
 
         is_active = full_id == active_id
-        if is_active:
-            if status == "completed" and n > 0:
-                print("  → Re-run will REPLAY from cache (campaign completed)")
-            elif n > 0:
-                print(f"  → Re-run will RESUME from round {n}")
-            else:
-                print("  → Re-run starts fresh")
-        else:
-            print("  → Config does NOT match — update campaign_config to resume")
+        _print_resume_hint(status, n, is_matching=is_active)
 
         print(f"{'=' * 72}\n")
         return pipeline_params or {}
 
     # --- Overview mode ---
     # Dataset runs summary
-    runs = store.dataset_runs.list_all(backend_id)
-    by_source: dict[str, int] = {}
-    best_acc = 0.0
-    best_name = ""
-    for r in runs:
-        name = r.get("name", "")
-        source = name.split("_")[0] if "_" in name else "other"
-        by_source[source] = by_source.get(source, 0) + 1
-        acc = r.get("scores", {}).get("accuracy", 0.0) or 0.0
-        if acc > best_acc:
-            best_acc = acc
-            best_name = name
+    from promptpotter.services.campaign.campaign_data import summarize_dataset_runs
 
-    source_str = ", ".join(f"{v} {k}" for k, v in sorted(by_source.items()))
+    runs = store.dataset_runs.list_all(backend_id)
+    run_summary = summarize_dataset_runs(runs)
+    source_str = ", ".join(f"{v} {k}" for k, v in sorted(run_summary.by_source.items()))
 
     # Campaigns
     campaigns = store.campaigns.list_all(backend_id)
@@ -346,9 +358,9 @@ def show_experiment_dashboard(
     print(f"  EXPERIMENT DASHBOARD ({backend_id})")
     print(f"{'=' * 72}")
     if runs:
-        print(f"  Dataset runs: {len(runs)} total ({source_str})")
-        if best_acc > 0:
-            print(f"  Best result: {best_acc:.1%} ({best_name})")
+        print(f"  Dataset runs: {run_summary.total} total ({source_str})")
+        if run_summary.best_accuracy > 0:
+            print(f"  Best result: {run_summary.best_accuracy:.1%} ({run_summary.best_name})")
     else:
         print("  Dataset runs: none")
 
@@ -357,39 +369,10 @@ def show_experiment_dashboard(
     else:
         print("\n  Campaigns (most recent first):")
         sorted_camps = sorted(campaigns, key=lambda x: x["updated_at"], reverse=True)
-        for _i, c in enumerate(sorted_camps):
-            cid = c["campaign_id"]
-            status = c["status"]
-            n = c["n_trials"]
-            best = f"{c['best_accuracy']:.1%}"
-            base = f"{c['baseline_accuracy']:.1%}"
-            is_active = cid == active_id
-
-            marker = "  ●" if is_active else "   "
-            tag = "  <-- active" if is_active else ""
-            print(f"{marker} {cid}  {status:<12} {n} rounds  best={best}  base={base}{tag}")
-
-            # Inline config
-            full = store.campaigns.load(backend_id, cid)
-            cfg = full.get("config", {}) if full else {}
-            if cfg:
-                model = str(cfg.get("model", "?"))[:30]
-                patience = cfg.get("patience", "?")
-                max_r = cfg.get("max_rounds", "?")
-                sample = cfg.get("sample_size", "?")
-                print(f"      patience={patience}  rounds={max_r}  sample={sample}  model={model}")
-
-            # Resume hint for active
-            if is_active:
-                ac = store.campaigns.load(backend_id, cid)
-                ac_status = ac["status"] if ac else "?"
-                ac_n = ac["n_trials"] if ac else 0
-                if ac_status == "completed" and ac_n > 0:
-                    print("      → Re-run will REPLAY from cache")
-                elif ac_n > 0:
-                    print(f"      → Re-run will RESUME from round {ac_n}")
-                else:
-                    print("      → Re-run starts fresh")
+        for c in sorted_camps:
+            _format_campaign_summary(store, backend_id, c, active_id=active_id)
+            if c["campaign_id"] == active_id:
+                _print_resume_hint(c["status"], c["n_trials"], indent="      ")
             print()
 
     print(f"{'=' * 72}")

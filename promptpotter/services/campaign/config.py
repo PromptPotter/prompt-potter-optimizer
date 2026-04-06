@@ -12,9 +12,10 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from promptpotter.models.pipeline_schema import PipelineSchema
+from promptpotter.models.task_context import TaskContext
 from promptpotter.services.search.scan_results import ScanContext
 
 if TYPE_CHECKING:
@@ -130,10 +131,21 @@ class RunConfig(BaseModel):
     )
 
     # Structured domain context (from TASK_DESCRIPTION decomposition)
-    task_context: dict | None = Field(
+    task_context: TaskContext | None = Field(
         None,
         description="Structured domain context for L1 gen and L2 refinement",
     )
+
+    @field_validator("task_context", mode="before")
+    @classmethod
+    def _coerce_task_context(cls, v: object) -> TaskContext | None:
+        if v is None:
+            return None
+        if isinstance(v, TaskContext):
+            return v
+        if isinstance(v, dict):
+            return TaskContext.from_dict(v)
+        return None
 
     # L2/L3 escalation
     enable_l2: bool = Field(True, description="Enable L2 refine_context loop")
@@ -204,7 +216,7 @@ class RunConfig(BaseModel):
         session_id: str = "",
         pipeline_schema: PipelineSchema | None = None,
         scan_context: ScanContext | None = None,
-        task_context: dict | None = None,
+        task_context: TaskContext | dict | None = None,
     ) -> RunConfig:
         """Build from the notebook's ``campaign_config`` dict.
 
@@ -324,6 +336,62 @@ def configure_pipeline(
         active_nodes=active,
         excluded_nodes=list(exclude) if exclude else [],
         filtered_schema=filtered,
+    )
+
+
+@dataclass
+class PreflightMetrics:
+    """Computed display metrics for the preflight walkthrough."""
+
+    eff_queries: int
+    queries_label: str
+    pipeline_label: str
+    nodes_detail: str | None
+    est_calls: int | None
+    l2_label: str
+    l3_label: str
+    strategy: str
+
+
+def compute_preflight_metrics(
+    config: RunConfig,
+    dataset_size: int,
+    exclude_nodes: list[str] | None = None,
+    has_scan_context: bool = False,
+) -> PreflightMetrics:
+    """Derive display-ready metrics from RunConfig and dataset size."""
+    eff_queries = config.sample_size if config.sample_size else dataset_size
+    if config.sample_size:
+        queries_label = f"{config.sample_size} of {dataset_size}"
+    else:
+        queries_label = f"all {dataset_size}"
+
+    pp = config.pipeline_params or {}
+    active_nodes = pp.get("steps", [])
+    excluded = exclude_nodes or []
+    total_nodes = len(active_nodes) + len(excluded)
+    if active_nodes:
+        pipeline_label = f"{len(active_nodes)} of {total_nodes} nodes"
+        nodes_detail: str | None = ", ".join(active_nodes)
+    else:
+        pipeline_label = "(default pipeline)"
+        nodes_detail = None
+
+    est_calls = (
+        config.max_rounds * config.n_variants * eff_queries
+        if config.max_rounds is not None
+        else None
+    )
+
+    return PreflightMetrics(
+        eff_queries=eff_queries,
+        queries_label=queries_label,
+        pipeline_label=pipeline_label,
+        nodes_detail=nodes_detail,
+        est_calls=est_calls,
+        l2_label=f"enabled, patience={config.l2_patience}" if config.enable_l2 else "disabled",
+        l3_label=f"enabled, patience={config.l3_patience}" if config.enable_l3 else "disabled",
+        strategy="SCAN-AWARE" if has_scan_context else "FREEFORM",
     )
 
 

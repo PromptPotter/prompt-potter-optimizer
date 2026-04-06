@@ -13,13 +13,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.bootstrap import load_baseline_prompt
+from promptpotter.services.campaign.bootstrap import BackendContext, load_baseline_prompt
 from promptpotter.services.campaign.config import CampaignConfig
 from promptpotter.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.backend_client import BackendClient
     from promptpotter.services.project_store import ProjectStore
 
 
@@ -85,14 +84,11 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
 async def run_baseline_eval(
     baseline: OptSearchPoint,
     dataset: list,
-    backend_client: BackendClient,
+    session: BackendContext,
     pipeline_params: dict | None = None,
-    store: ProjectStore | None = None,
-    backend_id: str = "",
     experiment_id: str = "",
     on_result: Callable | None = None,
     obs: Any | None = None,
-    index_terms: list[str] | None = None,
     prompt_node: str = "",
     pipeline_schema: Any | None = None,
 ) -> tuple[list, list]:
@@ -102,10 +98,8 @@ async def run_baseline_eval(
         baseline: Baseline OptSearchPoint.
         dataset: Evaluation data. If empty and store+experiment_id are
             provided, attempts to load from store.
-        backend_client: BackendClient for evaluation.
+        session: BackendContext bundling backend_client, store, backend_id, index_terms.
         pipeline_params: Optional pipeline parameter overrides.
-        store: Optional ProjectStore.
-        backend_id: Backend identifier.
         experiment_id: Experiment to load eval data from if dataset is empty.
         on_result: Optional callback for progress reporting.
         obs: Optional ObsLogger for dataset registration.
@@ -120,6 +114,12 @@ async def run_baseline_eval(
     from promptpotter.models.eval_context import EvalContext
     from promptpotter.services.eval_gateway import eval_search_point
     from promptpotter.shared.errors import graceful
+
+    # Unpack session
+    backend_client = session.backend_client
+    store = session.store
+    backend_id = session.backend_id
+    index_terms = session.index_terms
 
     if not dataset and store and experiment_id:
         from promptpotter.services.search.context import load_eval_dataset
@@ -204,10 +204,8 @@ async def prepare_eval_context(
         campaign_rounds, baseline_results = await run_baseline_eval(
             baseline,
             dataset,
-            svc.backend_client,
+            svc,
             pipeline_params=pipeline_params,
-            store=svc.store,
-            backend_id=svc.backend_id,
             pipeline_schema=pipeline_schema,
         )
 
@@ -299,3 +297,34 @@ def build_all_index_terms(
                 if gt:
                     gt_set.add(gt)
     return sorted(gt_set)
+
+
+@dataclass
+class DatasetRunSummary:
+    """Aggregated dataset run statistics for dashboard display."""
+
+    total: int
+    by_source: dict[str, int]
+    best_accuracy: float
+    best_name: str
+
+
+def summarize_dataset_runs(runs: list[dict]) -> DatasetRunSummary:
+    """Aggregate dataset runs by source prefix and find best accuracy."""
+    by_source: dict[str, int] = {}
+    best_acc = 0.0
+    best_name = ""
+    for r in runs:
+        name = r.get("name", "")
+        source = name.split("_")[0] if "_" in name else "other"
+        by_source[source] = by_source.get(source, 0) + 1
+        acc = r.get("scores", {}).get("accuracy", 0.0) or 0.0
+        if acc > best_acc:
+            best_acc = acc
+            best_name = name
+    return DatasetRunSummary(
+        total=len(runs),
+        by_source=by_source,
+        best_accuracy=best_acc,
+        best_name=best_name,
+    )

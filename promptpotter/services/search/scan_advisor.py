@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from promptpotter.config.optimizer_pipeline import llm_call
 from promptpotter.models.pipeline_schema import NodeOutputSchema, PipelineNode, PipelineSchema
+from promptpotter.models.task_context import TaskContext
 
 logger = logging.getLogger(__name__)
 
@@ -360,8 +361,13 @@ def _advisor_system_section(pipeline_description: str) -> str:
     )
 
 
-def _advisor_task_context_section(task_description: str | dict) -> str:
-    """Optional task context from user description or structured dict."""
+def _advisor_task_context_section(task_description: str | dict | TaskContext) -> str:
+    """Optional task context from user description or structured TaskContext."""
+    if isinstance(task_description, TaskContext):
+        tc_lines = "\n".join(f"- **{k}**: {v}" for k, v in task_description.items() if v)
+        if tc_lines:
+            return f"\n## Task Context\n{tc_lines}\n"
+        return ""
     if isinstance(task_description, dict) and task_description:
         tc_lines = "\n".join(f"- **{k}**: {v}" for k, v in task_description.items() if v)
         if tc_lines:
@@ -864,3 +870,44 @@ async def advise_scan_config(
 
     advisory["validation_warnings"] = warnings
     return advisory
+
+
+# ---------------------------------------------------------------------------
+# Scan variant flattening / rebuilding (extracted from display layer)
+# ---------------------------------------------------------------------------
+
+
+def flatten_scan_variants(scan_variants: dict) -> dict[str, list]:
+    """Flatten nested ``{"node": {"param": [...]}}`` to flat ``{"param": [...]}``.
+
+    List values pass through unchanged; dict values (node groups) are
+    expanded so each param becomes a top-level key.
+    """
+    flat: dict[str, list] = {}
+    for key, spec in scan_variants.items():
+        if isinstance(spec, list):
+            flat[key] = spec
+        elif isinstance(spec, dict):
+            for param, vals in spec.items():
+                if isinstance(vals, list):
+                    flat[param] = vals
+    return flat
+
+
+def rebuild_nested_resolved(scan_variants: dict, resolved: dict) -> dict:
+    """Rebuild nested structure after flat schema resolution.
+
+    Mirrors the original ``scan_variants`` shape, replacing list values
+    with their resolved counterparts from *resolved*.
+    """
+    nested: dict = {}
+    for key, spec in scan_variants.items():
+        if isinstance(spec, list):
+            nested[key] = resolved.get(key, spec)
+        elif isinstance(spec, dict):
+            node_group = {}
+            for param, vals in spec.items():
+                if isinstance(vals, list):
+                    node_group[param] = resolved.get(param, vals)
+            nested[key] = node_group
+    return nested

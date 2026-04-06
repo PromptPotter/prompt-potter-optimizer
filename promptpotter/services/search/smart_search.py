@@ -12,6 +12,7 @@ import logging
 import random
 from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, TypedDict
 
 from promptpotter.models.eval_context import EvalContext
@@ -791,3 +792,64 @@ async def adaptive_search(
         logger.info("Saved search results to plan: %s", plan_id)
 
     return current_opt, current_params, log_df
+
+
+# ---------------------------------------------------------------------------
+# Variant library filtering for display (extracted from display layer)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class FilteredVariantLibrary:
+    """Result of filtering the variant library by axes and/or source."""
+
+    fields: dict[str, list[dict]]
+    source_counts: dict[str, int]
+    per_field_sources: dict[str, dict[str, int]]
+
+
+def filter_variant_library_display(
+    rich: dict,
+    axes: list[str] | None = None,
+    source: str | None = None,
+) -> FilteredVariantLibrary:
+    """Filter variant library by axes and source, normalize variants.
+
+    Returns filtered fields with per-field and global source counts.
+    """
+    all_fields = rich.get("prompt_fields", {})
+    if axes:
+        all_fields = {k: v for k, v in all_fields.items() if k in axes}
+
+    # Global source counts
+    source_counts: dict[str, int] = {}
+    for variants in all_fields.values():
+        for v in variants:
+            s = v["source"] if isinstance(v, dict) else "PromptPotter"
+            source_counts[s] = source_counts.get(s, 0) + 1
+
+    filtered: dict[str, list[dict]] = {}
+    per_field_sources: dict[str, dict[str, int]] = {}
+    for field_name, variants in all_fields.items():
+        field_variants: list[dict] = []
+        for v in variants:
+            v_source = v.get("source", "") if isinstance(v, dict) else "PromptPotter"
+            if source and v_source != source:
+                continue
+            field_variants.append(v if isinstance(v, dict) else {"text": v, "source": v_source})
+
+        if not field_variants:
+            continue
+
+        filtered[field_name] = field_variants
+        by_source: dict[str, int] = {}
+        for fv in field_variants:
+            s = fv["source"]
+            by_source[s] = by_source.get(s, 0) + 1
+        per_field_sources[field_name] = by_source
+
+    return FilteredVariantLibrary(
+        fields=filtered,
+        source_counts=source_counts,
+        per_field_sources=per_field_sources,
+    )

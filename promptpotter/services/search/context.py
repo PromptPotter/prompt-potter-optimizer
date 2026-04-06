@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.optimizer_pipeline import llm_call
 from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
+from promptpotter.models.task_context import TaskContext
 from promptpotter.services.llm_client import LLMClientBase
 from promptpotter.services.project_store import ProjectStore
 from promptpotter.services.stores.base import (
@@ -30,22 +31,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-TASK_CONTEXT_FIELDS = (
-    "domain",
-    "pipeline_purpose",
-    "data_characteristics",
-    "optimization_goals",
-    "key_challenges",
-    "upstream_context",
-    "downstream_context",
-)
+TASK_CONTEXT_FIELDS = TaskContext.FIELDS
 
 
 @dataclass
 class TaskContextResult:
     """Result from ``decompose_task_context()``."""
 
-    task_context: dict
+    task_context: TaskContext
     consultation: str | None
     was_cached: bool
 
@@ -241,7 +234,7 @@ async def decompose_task_context(
         and cache-hit flag.
     """
     if not task_description:
-        return TaskContextResult(task_context={}, consultation=None, was_cached=False)
+        return TaskContextResult(task_context=TaskContext(), consultation=None, was_cached=False)
 
     # Content-hash for caching
     rp_hash = hashlib.sha256(
@@ -257,8 +250,9 @@ async def decompose_task_context(
         rp_hash=rp_hash,
     )
 
-    task_context = result.get("task_context", {})
-    task_context["raw_description"] = task_description
+    tc_dict = result.get("task_context", {})
+    tc_dict["raw_description"] = task_description
+    task_context = TaskContext.from_dict(tc_dict)
 
     return TaskContextResult(
         task_context=task_context,

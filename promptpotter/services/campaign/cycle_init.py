@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.task_context import TaskContext
 from promptpotter.services.backend_client import BackendClient
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import sample_thinking_styles
@@ -69,7 +70,7 @@ def _build_baseline_state(
         _bl_composite = baseline_accuracy
 
     opt_sp = OptSearchPoint(
-        task_context=config.task_context or {},
+        task_context=config.task_context or TaskContext(),
         persona=baseline_osp.persona,
         task_intent=baseline_osp.task_intent,
         problem_description=baseline_osp.problem_description,

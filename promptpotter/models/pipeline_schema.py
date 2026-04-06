@@ -280,6 +280,14 @@ class PipelineSchema(BaseModel):
         """
         return [node.name for node in self.nodes if node.prompt_meta is not None]
 
+    def resolve_active_prompt_node(self, active_steps: set[str] | list[str]) -> str:
+        """Return the first prompt-bearing node present in *active_steps*, or ``""``."""
+        steps = active_steps if isinstance(active_steps, set) else set(active_steps)
+        for name in self.prompt_node_names():
+            if name in steps:
+                return name
+        return ""
+
     def upstream_of(self, node_name: str) -> list[str]:
         """Node names strictly before *node_name* in pipeline order.
 

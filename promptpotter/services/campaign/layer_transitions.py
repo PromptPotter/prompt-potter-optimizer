@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from promptpotter.config.optimizer_pipeline import llm_call
 from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
 from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.task_context import TaskContext
 from promptpotter.services.campaign.formatting import (
     L2IntelligenceData,
     build_l2_search_memory_context,
@@ -52,7 +53,7 @@ class TransitionResult:
 
     opt_search_point: OptSearchPoint
     pipeline_params: dict | None = None
-    task_context: dict | None = None
+    task_context: TaskContext | None = None
     l2_directive: str = ""
     action: TransitionAction = TransitionAction.CONTINUE
     debug_prompt: str = ""
@@ -80,7 +81,7 @@ def _build_l2_prompt(
     task_context_section = ""
     if opt_sp.task_context:
         # Filter raw_description — already digested into structured fields
-        tc_display = {k: v for k, v in opt_sp.task_context.items() if k != "raw_description"}
+        tc_display = {k: v for k, v in opt_sp.task_context.items() if k != "raw_description" and v}
         task_context_section = (
             "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
             + json.dumps(tc_display, indent=2)
@@ -139,8 +140,8 @@ def _parse_l2_response(
 
     new_task_context = None
     if result.get("task_context") and isinstance(result["task_context"], dict):
-        merged = {**(opt_sp.task_context or {}), **result["task_context"]}
-        if merged != (opt_sp.task_context or {}):
+        merged = opt_sp.task_context.merge(result["task_context"])
+        if merged.to_dict() != opt_sp.task_context.to_dict():
             new_task_context = merged
 
     try:
