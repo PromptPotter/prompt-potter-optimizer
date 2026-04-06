@@ -8,10 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-# ---------------------------------------------------------------------------
-# Failure analysis
-# ---------------------------------------------------------------------------
-
 
 @dataclass
 class FailurePattern:
@@ -33,10 +29,6 @@ class FailureAnalysis:
     total_failures: int = 0
     total_results: int = 0
 
-
-# ---------------------------------------------------------------------------
-# Query difficulty
-# ---------------------------------------------------------------------------
 
 DifficultyClass = Literal["easy", "discriminating", "hard", "dead"]
 
@@ -72,11 +64,6 @@ class QueryDifficulty:
     @property
     def dead(self) -> list[QueryProfile]:
         return [p for p in self.profiles if p.classification == "dead"]
-
-
-# ---------------------------------------------------------------------------
-# Temporal trends
-# ---------------------------------------------------------------------------
 
 
 @dataclass

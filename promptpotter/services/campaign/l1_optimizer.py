@@ -37,11 +37,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["L1EvalResult", "l1_evaluate", "l1_generate"]
 
 
-# ---------------------------------------------------------------------------
-# L1 Evaluate result model
-# ---------------------------------------------------------------------------
-
-
 class L1EvalResult(BaseModel):
     """Structured return value from ``l1_evaluate()``."""
 
@@ -63,11 +58,6 @@ class L1EvalResult(BaseModel):
     # Populated post-eval by round_execution (critique phase)
     critique_text: str = ""
     thinking_styles: list[str] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# L1 Generate — candidate prompt variant generation
-# ---------------------------------------------------------------------------
 
 
 async def l1_generate(
@@ -256,11 +246,6 @@ async def l1_generate(
         candidates.append(c_dict)
 
     return candidates
-
-
-# ---------------------------------------------------------------------------
-# L1 Evaluate — candidate evaluation and winner selection
-# ---------------------------------------------------------------------------
 
 
 def _select_round_winner(

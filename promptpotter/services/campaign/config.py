@@ -31,11 +31,6 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# CampaignConfig TypedDict — typed schema for the campaign_config dict
-# ---------------------------------------------------------------------------
-
-
 class OptimizationConfig(TypedDict, total=False):
     """Optimization loop parameters (``campaign_config["optimization"]``)."""
 
@@ -95,11 +90,6 @@ class CampaignConfig(TypedDict, total=False):
     optimization: OptimizationConfig
     optimizer_llm: EvalLLMConfig
     smart_search: SmartSearchConfig
-
-
-# ---------------------------------------------------------------------------
-# RunConfig — Pydantic model for the optimization loop
-# ---------------------------------------------------------------------------
 
 
 class RunConfig(BaseModel):
@@ -260,11 +250,6 @@ class RunConfig(BaseModel):
             ),
             pause_before_eval=opt.get("pause_before_eval", False),
         )
-
-
-# ---------------------------------------------------------------------------
-# Pipeline configuration and LLM client factory
-# ---------------------------------------------------------------------------
 
 
 @dataclass

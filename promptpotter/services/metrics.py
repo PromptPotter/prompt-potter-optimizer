@@ -367,11 +367,6 @@ def compute_composite_score(
     )
 
 
-# ---------------------------------------------------------------------------
-# Wave 1b — Failure analysis compilation
-# ---------------------------------------------------------------------------
-
-
 def _classify_difficulty(hit_rate: float) -> DifficultyClass:
     if hit_rate >= 1.0 or hit_rate <= 0.0:
         return "dead"

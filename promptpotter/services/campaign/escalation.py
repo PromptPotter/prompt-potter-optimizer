@@ -39,11 +39,6 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Core types
-# ---------------------------------------------------------------------------
-
-
 class EscalationTarget(enum.StrEnum):
     """Where an escalation check directs the feedback cycle."""
 
@@ -78,11 +73,6 @@ class EscalationStrategy:
 DEFAULT_STRATEGIES: dict[str, EscalationStrategy] = {
     "web_search:low_document_count": EscalationStrategy(target=EscalationTarget.L2),
 }
-
-
-# ---------------------------------------------------------------------------
-# DegradationCheck — mid-evaluation escalation check
-# ---------------------------------------------------------------------------
 
 
 class DegradationCheck:
@@ -135,22 +125,12 @@ class DegradationCheck:
         )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def collect_warning_types(results: list[dict]) -> dict[str, int]:
     """Count occurrences of each warning type across results."""
     counts: Counter[str] = Counter()
     for r in results:
         counts.update(extract_warning_types(r))
     return dict(counts)
-
-
-# ---------------------------------------------------------------------------
-# Factory
-# ---------------------------------------------------------------------------
 
 
 def build_escalation_checks(config: RunConfig) -> list[DegradationCheck]:
@@ -160,11 +140,6 @@ def build_escalation_checks(config: RunConfig) -> list[DegradationCheck]:
     if threshold > 0:
         checks.append(DegradationCheck(threshold=threshold))
     return checks
-
-
-# ---------------------------------------------------------------------------
-# L2/L3 escalation execution
-# ---------------------------------------------------------------------------
 
 
 def _maybe_emit_backend_warning(

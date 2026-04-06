@@ -25,21 +25,12 @@ logger = logging.getLogger(__name__)
 _PROMPT_DIR = Path(__file__).parent / "optimizer_prompts"
 
 
-# ---------------------------------------------------------------------------
-# Local JSON loading (LRU-cached — files don't change at runtime)
-# ---------------------------------------------------------------------------
-
-
 @functools.lru_cache(maxsize=32)
 def _load_local(name: str) -> PromptTemplate:
     path = _PROMPT_DIR / f"{name}.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     return PromptTemplate(**data)
 
-
-# ---------------------------------------------------------------------------
-# Langfuse integration (optional, graceful degradation)
-# ---------------------------------------------------------------------------
 
 _LANGFUSE_PREFIX = "optimizer_"
 _LANGFUSE_CACHE_TTL = 300  # seconds
@@ -77,11 +68,6 @@ def _try_langfuse(name: str) -> PromptTemplate | None:
     except Exception:
         logger.debug("Langfuse prompt fetch failed for %s", name, exc_info=True)
         return None
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def load_optimizer_prompt(name: str) -> PromptTemplate:

@@ -31,11 +31,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Step-sequence matching helpers
-# ---------------------------------------------------------------------------
-
-
 def _steps_match(entry: dict, target_steps: frozenset[str]) -> bool:
     """Match by step sequence — which nodes ran."""
     entry_steps = frozenset((entry.get("pipeline_params") or {}).get("steps", []))
@@ -423,10 +418,6 @@ def assess_scan_coverage(
         "recommendation": recommendation,
     }
 
-
-# ---------------------------------------------------------------------------
-# Data inventory
-# ---------------------------------------------------------------------------
 
 # Layer 1 fields worth tracking as axes (skip instruction — always changes
 # between baselines due to the decomposition, and few_shot_examples).

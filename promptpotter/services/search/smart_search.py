@@ -36,11 +36,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Progress event types
-# ---------------------------------------------------------------------------
-
-
 class ScanEvent(TypedDict, total=False):
     """Progress event emitted by ``sensitivity_scan()`` and ``adaptive_search()``.
 
@@ -187,11 +182,6 @@ def make_eval_fn(
         return {**scores, "results": results, "cached": cached}
 
     return _eval_opt
-
-
-# ---------------------------------------------------------------------------
-# Diagnostic set builder
-# ---------------------------------------------------------------------------
 
 
 def build_diagnostic_set(
@@ -371,11 +361,6 @@ def _stratify_misses(
     return selected[:n_misses]
 
 
-# ---------------------------------------------------------------------------
-# Axis classification
-# ---------------------------------------------------------------------------
-
-
 def classify_axis(
     cardinality: int,
     sensitivity_range: float,
@@ -400,11 +385,6 @@ def classify_axis(
     if cardinality <= 5 and sensitivity_range <= 0.3:
         return "medium"
     return "high"
-
-
-# ---------------------------------------------------------------------------
-# Variant library filtering
-# ---------------------------------------------------------------------------
 
 
 def filter_variant_library(
@@ -484,10 +464,6 @@ def load_filtered_variant_library(
     return lib
 
 
-# ---------------------------------------------------------------------------
-# Plan persistence
-# ---------------------------------------------------------------------------
-
 SSPLAN_PREFIX = "ssplan_"
 
 
@@ -553,11 +529,6 @@ def deserialize_smart_search_plan(plan_data: dict) -> dict:
         "scan_results": plan_data.get("scan_results"),
         "search_results": plan_data.get("search_results"),
     }
-
-
-# ---------------------------------------------------------------------------
-# Adaptive search — importance-weighted coordinate descent
-# ---------------------------------------------------------------------------
 
 
 async def adaptive_search(

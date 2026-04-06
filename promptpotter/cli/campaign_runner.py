@@ -49,11 +49,6 @@ from promptpotter.services.project_store import ProjectStore
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 class _SessionCtx:
     """Loaded session state — eliminates repeated store/state/id boilerplate."""
 
@@ -133,7 +128,7 @@ async def _prepare_eval_context(
     pipeline_params: dict | None = None,
 ):
     """Load baseline + dataset, optionally run baseline eval."""
-    from promptpotter.services.campaign.bootstrap import (
+    from promptpotter.services.campaign.campaign_data import (
         prepare_eval_context as _svc_prepare,
     )
 
@@ -257,7 +252,7 @@ async def _run_optimization(
     Returns (campaign_rounds, RunResult | None).
     """
     from promptpotter.models.opt_search_point import OptSearchPoint
-    from promptpotter.services.campaign.bootstrap import extract_campaign_baseline
+    from promptpotter.services.campaign.campaign_data import extract_campaign_baseline
     from promptpotter.services.campaign.config import RunConfig
     from promptpotter.services.campaign.optimization_loop import (
         run_optimization as _svc_run_optimization,
@@ -323,16 +318,11 @@ async def _run_optimization(
     return campaign_rounds, result
 
 
-# ---------------------------------------------------------------------------
-# Subcommands
-# ---------------------------------------------------------------------------
-
-
 async def cmd_init(args: argparse.Namespace) -> None:
     """Initialize services, load datasets, configure pipeline, create session."""
     import httpx
 
-    from promptpotter.services.campaign.bootstrap import (
+    from promptpotter.services.campaign.campaign_data import (
         prepare_datasets as _prepare_datasets,
     )
 
@@ -1004,11 +994,6 @@ async def cmd_status(args: argparse.Namespace) -> None:
         print(f"\n--- campaign_log.md (last {len(tail)} lines) ---")
         for line in tail:
             print(line)
-
-
-# ---------------------------------------------------------------------------
-# Argparse
-# ---------------------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -246,11 +246,6 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
     return "\n\n".join(sections)
 
 
-# ---------------------------------------------------------------------------
-# SearchMemory context builders (Wave 3c)
-# ---------------------------------------------------------------------------
-
-
 def build_l1_search_memory_context(search_memory: Any) -> dict | None:
     """Build SearchMemory context dict for L1 generation prompt."""
     if search_memory is None:

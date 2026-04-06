@@ -24,11 +24,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/backends", tags=["Backends"])
 
 
-# ---------------------------------------------------------------------------
-# Request / response models
-# ---------------------------------------------------------------------------
-
-
 class RegisterBackendRequest(BaseModel):
     name: str = Field(..., description="Human-readable name")
     backend_type: str = Field(..., description="Backend type, e.g. 'default'")
@@ -61,11 +56,6 @@ class PipelineViewResponse(BaseModel):
     source: str = Field(description="Pipeline source: 'live', 'cached', or 'default'")
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _slugify(name: str) -> str:
     """Convert a name to a filesystem-safe slug."""
     slug = name.lower().strip()
@@ -78,11 +68,6 @@ def _get_backend_or_404(backend_id: str, store: ProjectStore) -> BackendConnecti
     if not backend:
         raise HTTPException(status_code=404, detail=f"Backend '{backend_id}' not found")
     return backend
-
-
-# ---------------------------------------------------------------------------
-# Backend CRUD
-# ---------------------------------------------------------------------------
 
 
 @router.post("", response_model=RegisterBackendResponse, status_code=201)
@@ -135,11 +120,6 @@ async def get_backend(backend_id: str, store: StoreDep):
         base_url=b.base_url,
         created_at=b.created_at,
     )
-
-
-# ---------------------------------------------------------------------------
-# Sync
-# ---------------------------------------------------------------------------
 
 
 @router.post("/{backend_id}/sync", response_model=SyncResponse)
@@ -198,11 +178,6 @@ async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep):
             detail=f"Experiment '{experiment_id}' not synced. Run POST /sync first.",
         )
     return data
-
-
-# ---------------------------------------------------------------------------
-# Pipeline discovery
-# ---------------------------------------------------------------------------
 
 
 @router.get("/{backend_id}/pipeline", response_model=PipelineViewResponse)

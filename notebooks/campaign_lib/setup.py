@@ -15,13 +15,15 @@ from promptpotter.services.campaign.config import (
 )
 from promptpotter.services.campaign.bootstrap import (
     BackendContext,
-    build_all_index_terms,
 )
 from promptpotter.services.campaign.bootstrap import (
     init_services as _init_services,
 )
 from promptpotter.services.campaign.bootstrap import (
     save_campaign_winner,
+)
+from promptpotter.services.campaign.campaign_data import (
+    build_all_index_terms,
 )
 from promptpotter.services.project_store import ProjectStore
 
@@ -326,9 +328,9 @@ async def prepare_eval_context(
     """Load baseline prompt, set dataset, optionally run baseline.
 
     Thin display wrapper around
-    ``promptpotter.services.campaign.bootstrap.prepare_eval_context()``.
+    ``promptpotter.services.campaign.campaign_data.prepare_eval_context()``.
     """
-    from promptpotter.services.campaign.bootstrap import (
+    from promptpotter.services.campaign.campaign_data import (
         prepare_eval_context as _prepare_eval_context,
     )
 
@@ -356,9 +358,9 @@ def prepare_datasets(
     """Load/create datasets, build session terms, and display summary.
 
     Thin display wrapper around
-    ``promptpotter.services.campaign.bootstrap.prepare_datasets()``.
+    ``promptpotter.services.campaign.campaign_data.prepare_datasets()``.
     """
-    from promptpotter.services.campaign.bootstrap import (
+    from promptpotter.services.campaign.campaign_data import (
         prepare_datasets as _prepare_datasets,
     )
 

@@ -44,22 +44,12 @@ if TYPE_CHECKING:
     from promptpotter.models.search_point import JobSearchPoint
 
 
-# ---------------------------------------------------------------------------
-# Supporting models
-# ---------------------------------------------------------------------------
-
-
 class FewShotExample(BaseModel):
     """An input/output pair used as a few-shot demonstration."""
 
     input: str
     output: str
     explanation: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# PromptTemplate — the 8-field prompt scheme
-# ---------------------------------------------------------------------------
 
 
 class PromptTemplate(SearchPoint):
@@ -156,11 +146,6 @@ class PromptTemplate(SearchPoint):
         if fse and isinstance(fse[0], dict):
             fse = [FewShotExample(**ex) for ex in fse]
         return cls(few_shot_examples=fse, **fields, **kwargs)
-
-
-# ---------------------------------------------------------------------------
-# OptSearchPoint
-# ---------------------------------------------------------------------------
 
 
 class OptSearchPoint(PromptTemplate):

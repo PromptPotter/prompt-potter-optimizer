@@ -15,11 +15,6 @@ from promptpotter.dependencies import StoreDep
 router = APIRouter()
 
 
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
-
-
 class CampaignSummary(BaseModel):
     campaign_id: str = Field(description="Unique campaign identifier")
     name: str = Field(description="Human-readable campaign name")
@@ -65,11 +60,6 @@ class CampaignDetailResponse(BaseModel):
         default=None,
         description="Langfuse trace ID if observability is enabled",
     )
-
-
-# ---------------------------------------------------------------------------
-# Endpoints — nested under /backends/{backend_id}/campaigns
-# ---------------------------------------------------------------------------
 
 
 @router.get(

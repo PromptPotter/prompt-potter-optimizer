@@ -40,11 +40,6 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Response model
-# ---------------------------------------------------------------------------
-
-
 class LLMResponse(BaseModel):
     """Standardized response from LLM providers."""
 
@@ -56,11 +51,6 @@ class LLMResponse(BaseModel):
     )
     finish_reason: str | None = Field(None, description="Why generation stopped")
     parsed: Any | None = Field(None, description="Parsed JSON if output_format='json'")
-
-
-# ---------------------------------------------------------------------------
-# Base client
-# ---------------------------------------------------------------------------
 
 
 class LLMClientBase(ABC):
@@ -94,11 +84,6 @@ class LLMClientBase(ABC):
 
 # JSON repair and parsing moved to promptpotter.shared.llm_parsing.
 _try_parse_json = try_parse_json
-
-
-# ---------------------------------------------------------------------------
-# OpenAI-compatible client (shared by OpenAI and Groq)
-# ---------------------------------------------------------------------------
 
 
 class OpenAICompatibleClient(LLMClientBase):
@@ -264,11 +249,6 @@ class OpenAICompatibleClient(LLMClientBase):
         )
 
 
-# ---------------------------------------------------------------------------
-# Anthropic client
-# ---------------------------------------------------------------------------
-
-
 class AnthropicClient(LLMClientBase):
     """Anthropic API client."""
 
@@ -338,10 +318,6 @@ class AnthropicClient(LLMClientBase):
             parsed=parsed,
         )
 
-
-# ---------------------------------------------------------------------------
-# Global singleton
-# ---------------------------------------------------------------------------
 
 _llm_client: LLMClientBase | None = None
 

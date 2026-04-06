@@ -48,10 +48,6 @@ __all__ = [
     "get_obs_trace",
 ]
 
-# ---------------------------------------------------------------------------
-# Campaign phase names (replaces magic strings)
-# ---------------------------------------------------------------------------
-
 
 class CampaignPhase(enum.StrEnum):
     """Feedback cycle phase names used in PhaseEvent and persistence."""
@@ -65,20 +61,12 @@ class CampaignPhase(enum.StrEnum):
     BACKEND_WARNING = "backend_warning"
 
 
-# ---------------------------------------------------------------------------
-# Artifact manifest
-# ---------------------------------------------------------------------------
-
 CAMPAIGN_SESSION_ARTIFACTS = {
     "campaign_state.json",
     "campaign_output.log",
     "campaign_log.md",
     "session.json",
 }
-
-# ---------------------------------------------------------------------------
-# Outcome models
-# ---------------------------------------------------------------------------
 
 
 class StopReason(enum.StrEnum):
@@ -132,11 +120,6 @@ class RunResult(BaseModel):
     langfuse_trace_id: str | None = None
     cycle_id: str | None = None
     resumed_from_round: int = 0
-
-
-# ---------------------------------------------------------------------------
-# Mutable loop state
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -258,11 +241,6 @@ class CycleContext:
     persistence_emitter: CampaignPersistenceEmitter | None = None
 
 
-# ---------------------------------------------------------------------------
-# PhaseEvent
-# ---------------------------------------------------------------------------
-
-
 class PhaseEvent(BaseModel):
     """Emitted at phase boundaries during the feedback cycle.
 
@@ -280,10 +258,6 @@ class PhaseEvent(BaseModel):
         default_factory=lambda: datetime.now(UTC).isoformat(),
     )
 
-
-# ---------------------------------------------------------------------------
-# Callback types and helpers
-# ---------------------------------------------------------------------------
 
 # (round_result, round_number)
 OnRoundComplete: TypeAlias = Callable[["RoundResult", int], None]

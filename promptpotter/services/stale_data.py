@@ -25,11 +25,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["execute_stale_data_protocol", "is_degraded"]
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def is_degraded(result: dict) -> bool:
     """Check if a result has pipeline degradation warnings."""
     return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
@@ -63,11 +58,6 @@ def compare_rerun(cached_result: dict, rerun_result: dict) -> dict:
     )
 
     return {"hit_change": hit_change, "rank_change": rank_change, "improved": improved}
-
-
-# ---------------------------------------------------------------------------
-# Protocol
-# ---------------------------------------------------------------------------
 
 
 async def execute_stale_data_protocol(

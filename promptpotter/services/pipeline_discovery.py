@@ -32,11 +32,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["compute_pipeline_view", "parse_pipeline_response"]
 
 
-# ---------------------------------------------------------------------------
-# Factory helpers
-# ---------------------------------------------------------------------------
-
-
 def _parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
     """Convert a ``_resolved_schema`` dict from the enriched response."""
     json_schema = resolved.get("json_schema", {})
@@ -101,11 +96,6 @@ def _extract_resolved_metadata(
             metadata[node_name] = entry
 
     return metadata
-
-
-# ---------------------------------------------------------------------------
-# Main parser
-# ---------------------------------------------------------------------------
 
 
 def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
@@ -183,10 +173,6 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     )
 
 
-# ---------------------------------------------------------------------------
-# TTL cache for pipeline responses
-# ---------------------------------------------------------------------------
-
 _PIPELINE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
@@ -204,11 +190,6 @@ def _get_cached(base_url: str) -> dict[str, Any] | None:
 
 def _set_cached(base_url: str, data: dict[str, Any]) -> None:
     _PIPELINE_CACHE[base_url] = (time.monotonic(), data)
-
-
-# ---------------------------------------------------------------------------
-# Dynamic pipeline view
-# ---------------------------------------------------------------------------
 
 
 async def compute_pipeline_view(

@@ -27,11 +27,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Scan baseline preparation
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class ScanBaselineResult:
     """Result from ``decompose_scan_baseline()``."""
@@ -152,11 +147,6 @@ async def decompose_scan_baseline(
     )
 
 
-# ---------------------------------------------------------------------------
-# Result models
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class ScanContext:
     """Structured scan context for the LLM meta-prompt."""
@@ -179,11 +169,6 @@ class DiagnosticResult:
     diagnostic: list
     summary: dict
     axis_profiles: list
-
-
-# ---------------------------------------------------------------------------
-# Diagnostic set resume / build
-# ---------------------------------------------------------------------------
 
 
 async def resume_or_build_diagnostic(
@@ -367,11 +352,6 @@ async def resume_or_build_diagnostic(
     )
 
 
-# ---------------------------------------------------------------------------
-# Scan winner selection
-# ---------------------------------------------------------------------------
-
-
 def select_scan_winner(
     scan_df: pd.DataFrame,
     axis_profiles: list[dict],
@@ -445,11 +425,6 @@ def select_scan_winner(
         len(improving),
     )
     return best
-
-
-# ---------------------------------------------------------------------------
-# Scan context preparation
-# ---------------------------------------------------------------------------
 
 
 def prepare_scan_context(
@@ -534,11 +509,6 @@ def prepare_scan_context(
         tested_values=tested_values,
         baseline_accuracy=baseline_accuracy,
     )
-
-
-# ---------------------------------------------------------------------------
-# Campaign seeding from scan results
-# ---------------------------------------------------------------------------
 
 
 @dataclass

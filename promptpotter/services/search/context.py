@@ -125,11 +125,6 @@ async def decompose_prompt_fields(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Restructure cache — alias-aware disk cache for LLM decomposition results
-# ---------------------------------------------------------------------------
-
-
 def _decomposition_cache_path(base_dir: Path, backend_id: str) -> Path:
     validate_path_component(backend_id)
     return base_dir / backend_id / "restructure_cache.json"
@@ -270,11 +265,6 @@ async def decompose_task_context(
         consultation=result.get("consultation"),
         was_cached=was_cached,
     )
-
-
-# ---------------------------------------------------------------------------
-# Eval dataset loading
-# ---------------------------------------------------------------------------
 
 
 def _extract_eval_from_traces(

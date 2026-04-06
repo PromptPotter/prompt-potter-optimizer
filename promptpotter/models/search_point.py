@@ -24,10 +24,6 @@ from promptpotter.shared.hashing import (
     sp_identity_hash,
 )
 
-# ---------------------------------------------------------------------------
-# Base
-# ---------------------------------------------------------------------------
-
 
 class SearchPoint(BaseModel):
     """A point in any pipeline's search space.
@@ -39,11 +35,6 @@ class SearchPoint(BaseModel):
     def render(self) -> str:
         """Render the key output of this search point (e.g., the prompt string)."""
         raise NotImplementedError
-
-
-# ---------------------------------------------------------------------------
-# JobSearchPoint (target layer)
-# ---------------------------------------------------------------------------
 
 
 class JobSearchPoint(SearchPoint):

@@ -27,11 +27,6 @@ logger = logging.getLogger(__name__)
 NOISE_THRESHOLD = 0.02  # delta below this is noise
 
 
-# ---------------------------------------------------------------------------
-# Data models
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class ValueRecord:
     """A concrete value observed for an axis, with its performance stats."""
@@ -72,11 +67,6 @@ class FailureCluster:
     query_count: int
     fraction: float
     example_queries: list[str] = field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# SearchMemory
-# ---------------------------------------------------------------------------
 
 
 class SearchMemory:

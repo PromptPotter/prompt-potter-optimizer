@@ -40,11 +40,6 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# CritiqueContext — all data available for critique analysis
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class CritiqueContext:
     """Bundles current-round results and round history for diagnostic analysis."""
@@ -78,11 +73,6 @@ class CritiqueContext:
     search_memory_context: dict | None = None
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def get_candidates(r: dict, candidate_keys: list[str] | None = None) -> list:
     """Extract candidates from a result dict, checking keys in order."""
     pd = r.get("pipeline_data") or {}
@@ -91,11 +81,6 @@ def get_candidates(r: dict, candidate_keys: list[str] | None = None) -> list:
         if val:
             return val
     return []
-
-
-# ---------------------------------------------------------------------------
-# Per-query warning inventory (cross-round tracking)
-# ---------------------------------------------------------------------------
 
 
 def extract_warning_types(result: dict) -> list[str]:
@@ -203,11 +188,6 @@ def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
             all_wtypes[wt] = all_wtypes.get(wt, 0) + c
     top_warning = max(all_wtypes, key=all_wtypes.get) if all_wtypes else ""  # type: ignore[arg-type]
     return warned_count, top_warning
-
-
-# ---------------------------------------------------------------------------
-# Prompt assembly — inline stat computation
-# ---------------------------------------------------------------------------
 
 
 def _summary_section(ctx: CritiqueContext) -> str:
@@ -554,11 +534,6 @@ def assemble_critique_sections(ctx: CritiqueContext) -> str:
             )
 
     return "\n\n".join(s for s in sections if s)
-
-
-# ---------------------------------------------------------------------------
-# CritiqueAgent — LLM-based analysis
-# ---------------------------------------------------------------------------
 
 
 class CritiqueAgent:

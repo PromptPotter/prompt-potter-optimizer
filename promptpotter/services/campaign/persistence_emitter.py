@@ -456,11 +456,6 @@ def _is_error(result: dict) -> bool:
     return pd.get("error") is not None or result.get("error") is not None
 
 
-# ---------------------------------------------------------------------------
-# Bidirectional control surface
-# ---------------------------------------------------------------------------
-
-
 class FileControlSurface:
     """Reads control signals from ``campaign_state.json`` at checkpoints.
 
@@ -509,11 +504,6 @@ class FileControlSurface:
             return "pause"
 
         return None
-
-
-# ---------------------------------------------------------------------------
-# Round recorder
-# ---------------------------------------------------------------------------
 
 
 class RoundRecorder:

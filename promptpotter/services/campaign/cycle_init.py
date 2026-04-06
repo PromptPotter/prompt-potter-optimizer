@@ -35,11 +35,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Baseline state construction
-# ---------------------------------------------------------------------------
-
-
 def _build_baseline_state(
     config: RunConfig,
     baseline_prompt_fields: dict | None,
@@ -102,11 +97,6 @@ def _build_baseline_state(
     return state, baseline_osp
 
 
-# ---------------------------------------------------------------------------
-# Checkpoint restore
-# ---------------------------------------------------------------------------
-
-
 def _restore_from_checkpoint(
     state: LoopState,
     config: RunConfig,
@@ -151,11 +141,6 @@ def _restore_from_checkpoint(
             len(state.opt_sp.escalation_journal),
             state.escalation.l2_round,
         )
-
-
-# ---------------------------------------------------------------------------
-# Eval context setup
-# ---------------------------------------------------------------------------
 
 
 def _setup_eval_context(
@@ -212,11 +197,6 @@ def _setup_eval_context(
     from promptpotter.services.campaign.escalation import build_escalation_checks
 
     return build_escalation_checks(config)
-
-
-# ---------------------------------------------------------------------------
-# Init coordinator
-# ---------------------------------------------------------------------------
 
 
 async def init_cycle_state(

@@ -292,11 +292,6 @@ async def modify_plan(
     )
 
 
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
-
 def _build_pipeline_prompt_section(
     pipeline_params: dict | None,
     pipeline_schema: PipelineSchema | None,

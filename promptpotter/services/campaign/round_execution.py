@@ -75,11 +75,6 @@ def _candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
     return keys
 
 
-# ---------------------------------------------------------------------------
-# Round execution helpers
-# ---------------------------------------------------------------------------
-
-
 async def _generate_or_load_candidates(
     round_num: int,
     state: LoopState,
@@ -429,11 +424,6 @@ async def execute_round(
     return round_result
 
 
-# ---------------------------------------------------------------------------
-# State management
-# ---------------------------------------------------------------------------
-
-
 def update_round_state(
     state: LoopState,
     rr: RoundResult,
@@ -458,10 +448,6 @@ def update_round_state(
     )
     state.update_current(rr, new_sp, round_num)
 
-
-# ---------------------------------------------------------------------------
-# Adaptive eval set sampling
-# ---------------------------------------------------------------------------
 
 # Never drop more than this fraction of the eval set per adaptation
 _MAX_DROP_FRACTION = 0.25

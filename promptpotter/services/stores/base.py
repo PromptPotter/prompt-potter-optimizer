@@ -125,11 +125,6 @@ def read_jsonl(path: Path) -> list[dict]:
     return items
 
 
-# ---------------------------------------------------------------------------
-# Generic entity store
-# ---------------------------------------------------------------------------
-
-
 class EntityStore:
     """Generic JSON entity store: ``{backend_id}/{subdir}/{entity_id}.json``.
 

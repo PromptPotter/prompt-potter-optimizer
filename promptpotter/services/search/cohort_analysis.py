@@ -14,11 +14,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Preview utility
-# ---------------------------------------------------------------------------
-
-
 def preview(value: Any, max_len: int = 40) -> str:
     """Truncated preview of a variant value."""
     if isinstance(value, dict) and "properties" in value:
@@ -28,11 +23,6 @@ def preview(value: Any, max_len: int = 40) -> str:
     if not s:
         return "(empty)"
     return s[:max_len] + ("..." if len(s) > max_len else "")
-
-
-# ---------------------------------------------------------------------------
-# Statistical utilities
-# ---------------------------------------------------------------------------
 
 
 def wilson_ci(hits: int, total: int, alpha: float = 0.05) -> tuple[float, float]:
@@ -110,11 +100,6 @@ def min_sample_size(target_mde: float, alpha: float = 0.05, power: float = 0.8) 
     z_beta = norm.ppf(power)
     n = math.ceil(((z_alpha + z_beta) / target_mde) ** 2 * 0.25)
     return max(n, 1)
-
-
-# ---------------------------------------------------------------------------
-# Cohort sensitivity analysis (Wave 3e)
-# ---------------------------------------------------------------------------
 
 
 @dataclass

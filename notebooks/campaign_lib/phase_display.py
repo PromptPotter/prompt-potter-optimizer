@@ -39,15 +39,7 @@ from .display import (
 )
 
 
-def fmt_pvalue(p: float) -> str:
-    """Format p-value with significance stars."""
-    if p < 0.001:
-        return "p<0.001 ***"
-    if p < 0.01:
-        return f"p={p:.3f} **"
-    if p < 0.05:
-        return f"p={p:.2f} *"
-    return f"p={p:.2f} (ns)"
+from .display import fmt_pvalue  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

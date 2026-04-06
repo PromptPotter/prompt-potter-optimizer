@@ -28,10 +28,6 @@ from promptpotter.models.pipeline_schema import NodeOutputSchema, PipelineNode, 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Schema mutation — type shortcut → JSON Schema property
-# ---------------------------------------------------------------------------
-
 _TYPE_MAP: dict[str, dict] = {
     "string": {"type": "string"},
     "array": {"type": "array", "items": {"type": "string"}},
@@ -40,11 +36,6 @@ _TYPE_MAP: dict[str, dict] = {
     "boolean": {"type": "boolean"},
     "object": {"type": "object"},
 }
-
-
-# ---------------------------------------------------------------------------
-# Schema mutation models
-# ---------------------------------------------------------------------------
 
 
 class SchemaMutation(BaseModel):
@@ -90,11 +81,6 @@ class SchemaVariant(BaseModel):
                     f"'{m.field_type}', {m.required}, '{m.description}')"
                 )
         return ", ".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Schema mutation parsing
-# ---------------------------------------------------------------------------
 
 
 def parse_mutation_tuples(raw: list[tuple]) -> SchemaVariant:
@@ -143,11 +129,6 @@ def parse_mutation_tuples(raw: list[tuple]) -> SchemaVariant:
     return SchemaVariant(mutations=mutations)
 
 
-# ---------------------------------------------------------------------------
-# Schema mutation path walker
-# ---------------------------------------------------------------------------
-
-
 def _walk_path(schema: dict, path: str) -> tuple[dict, list, str]:
     """Navigate dot-separated path through nested ``properties``.
 
@@ -163,11 +144,6 @@ def _walk_path(schema: dict, path: str) -> tuple[dict, list, str]:
     props = current.get("properties", {})
     req = current.get("required", [])
     return props, req, parts[-1]
-
-
-# ---------------------------------------------------------------------------
-# Schema mutation resolution
-# ---------------------------------------------------------------------------
 
 
 def resolve_mutation(baseline: dict, variant: SchemaVariant) -> dict:
@@ -216,11 +192,6 @@ def resolve_schema_variants(
 ) -> list[dict]:
     """Resolve variants against baseline. Baseline always at index 0."""
     return [copy.deepcopy(baseline)] + [resolve_mutation(baseline, v) for v in variants]
-
-
-# ---------------------------------------------------------------------------
-# Schema baseline extraction
-# ---------------------------------------------------------------------------
 
 
 def baseline_schema_from_node(output_schema: NodeOutputSchema) -> dict:

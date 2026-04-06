@@ -34,11 +34,6 @@ class NodeType(enum.StrEnum):
     CACHE = "cache"
 
 
-# ---------------------------------------------------------------------------
-# Observation mapping
-# ---------------------------------------------------------------------------
-
-
 class ObservationMapping(BaseModel):
     """Maps one trace observation field to a pipeline_data key.
 
@@ -53,11 +48,6 @@ class ObservationMapping(BaseModel):
     pipeline_key: str
     output_field: str | None = None
     is_llm: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Node metadata (output schema + prompt info)
-# ---------------------------------------------------------------------------
 
 
 class NodeOutputSchema(BaseModel):
@@ -92,21 +82,12 @@ class NodePromptMeta(BaseModel):
     description: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Display tag defaults (wire_type → short base tag, max 4 chars)
-# ---------------------------------------------------------------------------
-
 WIRE_TYPE_TAGS: dict[str, str] = {
     "generation": "ai",
     "retriever": "retr",
     "tool": "tool",
     "cache": "cach",
 }
-
-
-# ---------------------------------------------------------------------------
-# Pipeline node
-# ---------------------------------------------------------------------------
 
 
 class PipelineNode(BaseModel):
@@ -138,11 +119,6 @@ class PipelineNode(BaseModel):
     def is_llm(self) -> bool:
         """Whether this node makes an LLM call (any mapping has ``is_llm``)."""
         return any(m.is_llm for m in self.observation_mappings)
-
-
-# ---------------------------------------------------------------------------
-# Intermediate metrics
-# ---------------------------------------------------------------------------
 
 
 class IntermediateMetric(BaseModel):
@@ -184,11 +160,6 @@ NODE_TYPE_METRICS: dict[str, list[IntermediateMetric]] = {
     ],
     "enricher": [],
 }
-
-
-# ---------------------------------------------------------------------------
-# PipelineSchema
-# ---------------------------------------------------------------------------
 
 
 class PipelineSchema(BaseModel):
@@ -389,11 +360,6 @@ def is_result_step_compatible(
         return False
     target = target_nodes if isinstance(target_nodes, set) else set(target_nodes)
     return terminated_at in target
-
-
-# ---------------------------------------------------------------------------
-# Unified pipeline loading
-# ---------------------------------------------------------------------------
 
 
 def load_pipeline_from_dict(data: dict) -> PipelineSchema:

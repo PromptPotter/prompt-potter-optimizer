@@ -50,11 +50,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Node-level tracing
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class NodeTrace:
     """Mutable bag for node output and metrics, yielded by ``observed_node``."""
@@ -114,11 +109,6 @@ async def observed_node(
                 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _generate_obs_id(length: int = 32) -> str:
     """DateTime-prefixed hex ID (YYMMDDHHMMSS + random hex)."""
     prefix = datetime.now(UTC).strftime("%y%m%d%H%M%S")
@@ -129,11 +119,6 @@ def _generate_obs_id(length: int = 32) -> str:
 def _utcnow_iso() -> str:
     """UTC timestamp in ISO 8601 format with Z suffix."""
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-# ---------------------------------------------------------------------------
-# ObsLogger — file writes + cloud Langfuse
-# ---------------------------------------------------------------------------
 
 
 _UNSET = object()
@@ -1028,11 +1013,6 @@ class ObsLogger:
     def get_cloud_trace_id(self, campaign_id: str) -> str | None:
         """Return cloud Langfuse trace ID for a campaign, or None."""
         return self._cloud_trace_ids.get(campaign_id)
-
-
-# ---------------------------------------------------------------------------
-# Module-level helper (used by eval_gateway)
-# ---------------------------------------------------------------------------
 
 
 def log_eval_to_obs(

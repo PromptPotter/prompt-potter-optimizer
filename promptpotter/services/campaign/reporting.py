@@ -29,11 +29,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Table renderers
-# ---------------------------------------------------------------------------
-
-
 def _fmt_pct(value: float) -> str:
     return f"{value:.1%}"
 
@@ -240,10 +235,6 @@ def render_table(data: Any, config_name: str) -> str:
     rows = cfg["rows"](data)
     return _md_table(headers, rows)
 
-
-# ---------------------------------------------------------------------------
-# Supplemental document assembly
-# ---------------------------------------------------------------------------
 
 _DEFAULT_SECTIONS = [
     "comparison",

@@ -5,9 +5,6 @@ mappings, and service-level constants.  All modules that need these
 import from here.
 """
 
-# ---------------------------------------------------------------------------
-# Shared application constants
-# ---------------------------------------------------------------------------
 
 DATASET_NAME: str = "ground_truth"
 NO_RESULT: str = "NO_RESULT"
@@ -21,9 +18,6 @@ SCAN_TARGET_MDE: float = 0.15  # 15% minimum detectable effect for scan sizing
 # stores/dataset_run_store — file lock parameters
 LOCK_TIMEOUT: float = 5.0  # seconds before treating lock as stale
 
-# ---------------------------------------------------------------------------
-# Prompt field definitions
-# ---------------------------------------------------------------------------
 
 # Fields that render() assembles into the prompt string.
 PROMPT_STRING_FIELDS: list[str] = [

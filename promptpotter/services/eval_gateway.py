@@ -27,10 +27,6 @@ from promptpotter.services.stale_data import (
 from promptpotter.services.stale_data import is_degraded as _is_degraded
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
-# ---------------------------------------------------------------------------
-# Graceful 2-phase interrupt (inlined from shared/signals.py — single consumer)
-# ---------------------------------------------------------------------------
-
 
 @dataclass
 class InterruptState:
@@ -70,11 +66,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["EvalBatchResult", "eval_search_point"]
 
 
-# ---------------------------------------------------------------------------
-# Dataclass
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class EvalBatchResult:
     """Return value from ``_run_eval_batch()``.
@@ -92,11 +83,6 @@ class EvalBatchResult:
     switched_samples: int = 0
 
 
-# ---------------------------------------------------------------------------
-# Utilities
-# ---------------------------------------------------------------------------
-
-
 def _fill_remaining_errors(
     results: list[dict],
     dataset: list[dict],
@@ -112,11 +98,6 @@ def _fill_remaining_errors(
                 reason,
             )
         )
-
-
-# ---------------------------------------------------------------------------
-# Extracted helpers from _run_eval_batch
-# ---------------------------------------------------------------------------
 
 
 def _check_error_abort(
@@ -184,11 +165,6 @@ def _run_escalation_checks(
         if sig:
             return sig
     return None
-
-
-# ---------------------------------------------------------------------------
-# Batch evaluation
-# ---------------------------------------------------------------------------
 
 
 async def _run_eval_batch(
@@ -328,16 +304,6 @@ async def _run_eval_batch(
     if interrupt.stop_requested:
         return EvalBatchResult(results, completed=False, stop_reason="graceful", **stale)
     return EvalBatchResult(results, completed=True, **stale)
-
-
-# ---------------------------------------------------------------------------
-# Observability
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 async def eval_search_point(

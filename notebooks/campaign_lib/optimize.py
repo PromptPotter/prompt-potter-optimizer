@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent
-from promptpotter.services.campaign.bootstrap import (
+from promptpotter.services.campaign.campaign_data import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
 from promptpotter.services.campaign.bootstrap import (
@@ -757,24 +757,8 @@ async def run_optimization_notebook(
 
 
 # ---------------------------------------------------------------------------
-# Statistical helpers (from stats.py)
-# ---------------------------------------------------------------------------
-
-
-def fmt_ci(lower: float, upper: float) -> str:
-    """Format a CI as '[X.X%-Y.Y%]'."""
-    return f"[{lower:.1%}-{upper:.1%}]"
-
-
-def fmt_pvalue(p: float) -> str:
-    """Format p-value with significance stars."""
-    if p < 0.001:
-        return "p<0.001 ***"
-    if p < 0.01:
-        return f"p={p:.3f} **"
-    if p < 0.05:
-        return f"p={p:.2f} *"
-    return f"p={p:.2f} (ns)"
+# Statistical helpers — imported from display.py
+from .display import fmt_ci, fmt_pvalue  # noqa: E402,F811
 
 
 # ---------------------------------------------------------------------------
@@ -785,7 +769,7 @@ def fmt_pvalue(p: float) -> str:
 from promptpotter.services.campaign.bootstrap import (  # noqa: E402
     load_baseline_prompt,
 )
-from promptpotter.services.campaign.bootstrap import (  # noqa: E402
+from promptpotter.services.campaign.campaign_data import (  # noqa: E402
     run_baseline_eval as _run_baseline_eval,
 )
 

@@ -51,11 +51,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["run_optimization"]
 
 
-# ---------------------------------------------------------------------------
-# Extracted loop helpers (probe + escalation)
-# ---------------------------------------------------------------------------
-
-
 def _prepare_probe_data(
     state: LoopState,
     dataset: list[dict],
@@ -197,11 +192,6 @@ async def _handle_escalation_signal(
     return None
 
 
-# ---------------------------------------------------------------------------
-# Round loop helpers
-# ---------------------------------------------------------------------------
-
-
 def _checkpoint_round(
     campaign_store: "CampaignStore",
     cycle_id: str,
@@ -270,11 +260,6 @@ async def _check_stopping_conditions(
         else:
             return StopReason.PATIENCE
     return None
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 async def run_optimization(

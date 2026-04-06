@@ -27,11 +27,6 @@ from promptpotter.services.stores.base import (
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# PlanStore
-# ---------------------------------------------------------------------------
-
-
 class PlanStore(EntityStore):
     """File I/O for smart search plan persistence and resume."""
 
@@ -59,11 +54,6 @@ class PlanStore(EntityStore):
                 }
             )
         return results
-
-
-# ---------------------------------------------------------------------------
-# BackendStore
-# ---------------------------------------------------------------------------
 
 
 class BackendStore:
@@ -213,10 +203,6 @@ class BackendStore:
             self._backend_dir(backend_id) / "connector_profile.json",
         )
 
-
-# ---------------------------------------------------------------------------
-# SessionStore
-# ---------------------------------------------------------------------------
 
 # Thin pointer to the active session — survives across CLI invocations
 _ACTIVE_SESSION_PATH = Path(".promptpotter") / "active_session.json"

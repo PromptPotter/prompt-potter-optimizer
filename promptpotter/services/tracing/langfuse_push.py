@@ -35,11 +35,6 @@ if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
 
 
-# ---------------------------------------------------------------------------
-# Pipeline node extraction (merged from pipeline_nodes.py)
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class LangfuseObservation:
     """A single pipeline node ready to be pushed as a Langfuse observation."""
@@ -103,10 +98,6 @@ def extract_pipeline_nodes(
 
     return nodes
 
-
-# ---------------------------------------------------------------------------
-# Langfuse push
-# ---------------------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
 
@@ -253,11 +244,6 @@ def _register_dataset_items(
     return query_to_item_id
 
 
-# ---------------------------------------------------------------------------
-# push_run — single-run cloud push (one trace per query)
-# ---------------------------------------------------------------------------
-
-
 def push_run(
     lf: Any,
     store: ProjectStore,
@@ -391,11 +377,6 @@ def push_run(
         _save_state(store, backend_id, state)
 
     return trace_ids
-
-
-# ---------------------------------------------------------------------------
-# push_all_runs — batch push (renamed from backfill_to_langfuse)
-# ---------------------------------------------------------------------------
 
 
 def sync_langfuse_runs(
