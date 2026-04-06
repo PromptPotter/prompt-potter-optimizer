@@ -9,8 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from _helpers import MockCompletion, MockHTTPError, make_http_error
 
-from promptpotter.services.llm_client import OpenAICompatibleClient
-from promptpotter.shared.constants import LLM_MAX_APP_RETRIES
+from promptpotter.services.llm_client import LLM_MAX_APP_RETRIES, OpenAICompatibleClient
 
 
 @pytest.fixture(autouse=True)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -25,7 +26,39 @@ from promptpotter.services.stale_data import (
 )
 from promptpotter.services.stale_data import is_degraded as _is_degraded
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
-from promptpotter.shared.signals import graceful_interrupt
+
+# ---------------------------------------------------------------------------
+# Graceful 2-phase interrupt (inlined from shared/signals.py — single consumer)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class InterruptState:
+    """Mutable flag for graceful interrupt tracking."""
+
+    stop_requested: bool = False
+
+
+@contextmanager
+def _graceful_interrupt():
+    """1st Ctrl+C sets flag, 2nd cancels current asyncio task."""
+    import signal
+
+    state = InterruptState()
+    batch_task: asyncio.Task | None = asyncio.current_task()
+
+    def _handler(_signum: int, _frame: object) -> None:
+        if state.stop_requested:
+            if batch_task is not None and not batch_task.done():
+                batch_task.cancel()
+            return
+        state.stop_requested = True
+
+    old_handler = signal.signal(signal.SIGINT, _handler)
+    try:
+        yield state
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
 
 if TYPE_CHECKING:
     from promptpotter.models.eval_context import EvalContext
@@ -200,7 +233,7 @@ async def _run_eval_batch(
     consecutive_errors = 0
     n_reused = n_retried = n_probed = n_switched = 0
 
-    with graceful_interrupt() as interrupt:
+    with _graceful_interrupt() as interrupt:
         try:
             for i, qd in enumerate(dataset):
                 if interrupt.stop_requested:

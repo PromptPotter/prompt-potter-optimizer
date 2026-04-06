@@ -6,13 +6,13 @@ import logging
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.persistence import (
+from promptpotter.services.campaign.bootstrap import (
     apply_experiment_overrides,
 )
-from promptpotter.services.campaign.persistence import (
+from promptpotter.services.campaign.bootstrap import (
     diff_campaign_config as _diff_campaign_config,
 )
-from promptpotter.services.campaign.persistence import (
+from promptpotter.services.campaign.bootstrap import (
     resolve_experiment_id as _resolve_experiment_id,
 )
 

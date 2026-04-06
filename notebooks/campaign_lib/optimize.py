@@ -9,7 +9,7 @@ from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent
 from promptpotter.services.campaign.bootstrap import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
-from promptpotter.services.campaign.persistence import (
+from promptpotter.services.campaign.bootstrap import (
     resolve_experiment_id as _resolve_experiment_id,
 )
 from promptpotter.services.campaign.state import RunResult

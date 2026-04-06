@@ -16,16 +16,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from promptpotter.config.settings import settings
-from promptpotter.shared.constants import (
-    GROQ_BASE_URL,
-    GROQ_MAX_RETRIES,
-    GROQ_TIMEOUT,
-    LLM_BASE_DELAY,
-    LLM_MAX_APP_RETRIES,
-    LLM_RETRY_STATUSES,
-    OPENAI_MAX_RETRIES,
-)
 from promptpotter.shared.llm_parsing import try_parse_json
+
+# Provider defaults
+OPENAI_MAX_RETRIES: int = 5
+GROQ_MAX_RETRIES: int = 3
+GROQ_TIMEOUT: float = 60.0
+GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+
+# App-level retry (beyond SDK's own retry)
+LLM_RETRY_STATUSES: frozenset[int] = frozenset({429, 502, 503})
+LLM_MAX_APP_RETRIES: int = 3
+LLM_BASE_DELAY: float = 1.0  # seconds
 
 logger = logging.getLogger(__name__)
 

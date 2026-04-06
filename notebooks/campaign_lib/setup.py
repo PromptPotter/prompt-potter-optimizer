@@ -20,7 +20,7 @@ from promptpotter.services.campaign.bootstrap import (
 from promptpotter.services.campaign.bootstrap import (
     init_services as _init_services,
 )
-from promptpotter.services.campaign.persistence import (
+from promptpotter.services.campaign.bootstrap import (
     save_campaign_winner,
 )
 from promptpotter.services.project_store import ProjectStore

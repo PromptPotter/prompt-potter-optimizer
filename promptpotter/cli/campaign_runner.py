@@ -529,7 +529,7 @@ async def cmd_results(args: argparse.Namespace) -> None:
         show_flip_tracking,
         show_lineage_chain,
     )
-    from promptpotter.services.campaign.persistence import save_campaign_winner
+    from promptpotter.services.campaign.bootstrap import save_campaign_winner
 
     ctx = _load_session(args)
     session = await _reconstruct_svc(ctx.state["init_params"])

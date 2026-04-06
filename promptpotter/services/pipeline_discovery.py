@@ -21,7 +21,8 @@ from promptpotter.models.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.shared.constants import PIPELINE_CACHE_TTL
+
+PIPELINE_CACHE_TTL: float = 30.0  # TTL for cached GET /pipeline responses
 
 if TYPE_CHECKING:
     from promptpotter.services.backend_client import BackendClient
