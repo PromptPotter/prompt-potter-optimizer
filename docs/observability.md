@@ -87,7 +87,7 @@ When credentials are set **before** running a feedback cycle, traces are pushed 
 If you ran an optimization campaign without Langfuse credentials, all evaluation data is still on disk. Push it after the fact:
 
 ```python
-from campaign_lib import configure_langfuse, push_langfuse
+from promptpotter.display.campaign import configure_langfuse, push_langfuse
 
 # 1. Enable Langfuse (if not already in .env)
 configure_langfuse(

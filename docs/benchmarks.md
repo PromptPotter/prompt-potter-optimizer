@@ -201,7 +201,7 @@ python -m promptpotter.cli.export_results supplemental \
 ### From notebook
 
 ```python
-from notebooks.campaign_lib import generate_supplemental, generate_export_json
+from promptpotter.display.campaign import generate_supplemental, generate_export_json
 
 # Markdown
 md = generate_supplemental(store, backend_id)

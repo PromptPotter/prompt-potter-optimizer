@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from promptpotter.services.campaign.bootstrap import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.campaign.state import RunResult
     from promptpotter.services.search.scan_results import ScanContext
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
@@ -99,25 +98,9 @@ def _configure_pipeline(
     campaign_config: CampaignConfig,
 ) -> dict:
     """Configure pipeline, apply filtered schema to session. Returns pipeline_params."""
-    from promptpotter.services.campaign.config import (
-        configure_pipeline as _svc_configure,
-    )
+    from promptpotter.services.campaign.orchestration import configure_and_apply_pipeline
 
-    result = _svc_configure(
-        session.pipeline_schema,
-        campaign_config,
-        exp_data=getattr(session, "exp_data", None),
-    )
-
-    # Apply filtered schema (replaces manual filter_to_steps)
-    if result.filtered_schema:
-        session.pipeline_schema = result.filtered_schema
-
-    nodes_str = ", ".join(result.active_nodes)
-    excl_str = f" (excluded: {', '.join(result.excluded_nodes)})" if result.excluded_nodes else ""
-    logger.info("Active nodes: %s%s", nodes_str, excl_str)
-
-    return result.pipeline_params
+    return configure_and_apply_pipeline(session, campaign_config, log=logger.info)
 
 
 async def _prepare_eval_context(
@@ -128,194 +111,18 @@ async def _prepare_eval_context(
     pipeline_params: dict | None = None,
 ):
     """Load baseline + dataset, optionally run baseline eval."""
-    from promptpotter.services.campaign.campaign_data import (
-        prepare_eval_context as _svc_prepare,
+    from promptpotter.services.campaign.orchestration import (
+        prepare_eval_context as _orch_prepare,
     )
 
-    baseline, dataset, campaign_rounds, baseline_results = await _svc_prepare(
-        session.exp_data,
+    return await _orch_prepare(
+        session,
         train_data,
         campaign_config,
         run_baseline=run_baseline,
         pipeline_params=pipeline_params,
-        pipeline_schema=session.pipeline_schema,
-        svc=session,
+        log=logger.info,
     )
-
-    logger.info("Evaluation data: %d queries", len(dataset))
-    return baseline, dataset, campaign_rounds, baseline_results
-
-
-async def _run_scan(
-    baseline,
-    campaign_config: CampaignConfig,
-    scan_variants: dict,
-    dataset: list,
-    *,
-    scan_sample_size: int = 0,
-    session: BackendContext,
-    experiment_id: str = "",
-    session_id: str = "",
-):
-    """Prepare baseline, run sensitivity scan, persist results.
-
-    Returns (scan_baseline_sp, scan_df, axis_profiles).
-    """
-    from promptpotter.services.campaign.config import create_llm_client
-    from promptpotter.services.search.scan_results import (
-        decompose_scan_baseline as _decompose_scan_baseline,
-    )
-    from promptpotter.services.search.sensitivity_scanner import (
-        sensitivity_scan as _sensitivity_scan,
-    )
-
-    # Prepare scan baseline
-    llm_client, llm_model = create_llm_client(campaign_config)
-    prompt_node = ""
-    pipeline_params = _configure_pipeline(session, campaign_config)
-    ps = session.pipeline_schema
-    if ps:
-        active_steps = set((pipeline_params or {}).get("steps", []))
-        for name in ps.prompt_node_names():
-            if name in active_steps:
-                prompt_node = name
-                break
-
-    result = await _decompose_scan_baseline(
-        baseline,
-        campaign_config,
-        llm_client,
-        llm_model,
-        pipeline_params=pipeline_params,
-        store=session.store,
-        backend_id=session.backend_id,
-        scan_variants=scan_variants,
-        prompt_node=prompt_node,
-        pipeline_schema=ps,
-    )
-    scan_baseline_sp = result.baseline_jsp
-    baseline_opt = result.search_baseline
-
-    # Init backend session
-    if session.index_terms:
-        await session.backend_client.init_session(session.index_terms)
-
-    # Run scan
-    logger.info("Running sensitivity scan (%d axes) ...", len(scan_variants))
-    df, profiles = await _sensitivity_scan(
-        scan_baseline_sp,
-        scan_variants,
-        dataset,
-        session.backend_client,
-        baseline_opt=baseline_opt,
-        sample_size=scan_sample_size,
-        store=session.store,
-        backend_id=session.backend_id,
-        pipeline_schema=ps,
-        experiment_id=experiment_id,
-    )
-
-    if df is None or (hasattr(df, "empty") and df.empty):
-        logger.warning("Scan returned no results")
-        return scan_baseline_sp, None, []
-
-    logger.info("Sensitivity scan complete: %d variants evaluated", len(df))
-
-    # Persist scan results
-    if session_id and session.store and session.backend_id:
-        session.store.sessions.save_scan_results(
-            session.backend_id,
-            session_id,
-            df.to_dict(orient="records"),
-            profiles,
-        )
-        logger.info("Scan results persisted to session %s", session_id)
-
-    return scan_baseline_sp, df, profiles
-
-
-async def _run_optimization(
-    campaign_rounds: list,
-    dataset: list,
-    campaign_config: CampaignConfig,
-    *,
-    session: BackendContext,
-    pipeline_params: dict | None = None,
-    scan_context: ScanContext | None = None,
-    experiment_id: str | None = None,
-    task_context: dict | None = None,
-    session_id: str = "",
-    display_callbacks=None,
-) -> tuple[list, RunResult | None]:
-    """Build RunConfig and run the optimization loop.
-
-    Returns (campaign_rounds, RunResult | None).
-    """
-    from promptpotter.models.opt_search_point import OptSearchPoint
-    from promptpotter.services.campaign.campaign_data import extract_campaign_baseline
-    from promptpotter.services.campaign.config import RunConfig
-    from promptpotter.services.campaign.optimization_loop import (
-        run_optimization as _svc_run_optimization,
-    )
-    from promptpotter.services.campaign.state import RunCallbacks
-
-    config = RunConfig.from_campaign_config(
-        campaign_config,
-        backend_url=session.backend_client.base_url,
-        backend_id=session.backend_id,
-        project_root=str(session.store.base_dir),
-        pipeline_params=pipeline_params,
-        index_terms=session.index_terms,
-        session_id=session_id,
-        scan_context=scan_context,
-        pipeline_schema=session.pipeline_schema,
-        task_context=task_context,
-    )
-
-    bl = extract_campaign_baseline(campaign_rounds)
-
-    cb = display_callbacks or RunCallbacks()
-
-    def _on_round(round_result, stall_count):
-        """Append round entry to campaign_rounds."""
-        round_entry = round_result.model_dump()
-        ps_raw = round_entry.get("prompt_fields", {})
-        round_entry["prompt_fields"] = (
-            OptSearchPoint.from_prompt_fields(ps_raw) if isinstance(ps_raw, dict) else ps_raw
-        )
-        round_entry["round"] = len(campaign_rounds)
-        campaign_rounds.append(round_entry)
-
-    # Chain the round callback with any display callbacks
-    _original_on_round = cb.on_round_complete
-
-    def _chained_on_round(round_result, stall_count):
-        _on_round(round_result, stall_count)
-        if _original_on_round:
-            _original_on_round(round_result, stall_count)
-
-    cb = RunCallbacks(
-        on_round_complete=_chained_on_round,
-        on_candidate_eval=cb.on_candidate_eval,
-        on_query_eval=cb.on_query_eval,
-        on_phase=cb.on_phase,
-        on_checkpoint=cb.on_checkpoint,
-    )
-
-    result = await _svc_run_optimization(
-        bl.instruction,
-        dataset,
-        config,
-        baseline_prompt_fields=bl.baseline_ps,
-        baseline_accuracy=bl.baseline_acc,
-        baseline_results=bl.baseline_results,
-        callbacks=cb,
-        scan_context=scan_context,
-        experiment_id=experiment_id or "",
-        backend_client=session.backend_client,
-    )
-
-    return campaign_rounds, result
 
 
 async def cmd_init(args: argparse.Namespace) -> None:
@@ -515,7 +322,7 @@ async def cmd_scan(args: argparse.Namespace) -> None:
         len(node_axes),
     )
 
-    _configure_pipeline(session, ctx.state["campaign_config"])
+    from promptpotter.services.campaign.orchestration import run_scan_and_persist
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     baseline = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
@@ -526,15 +333,16 @@ async def cmd_scan(args: argparse.Namespace) -> None:
         if args.sample_size is not None
         else ctx.state["campaign_config"].get("exploration_sample_size", 0)
     )
-    _scan_bl, scan_df, _axis_profiles = await _run_scan(
+    _scan_bl, _baseline_opt, scan_df, _axis_profiles = await run_scan_and_persist(
         baseline,
         ctx.state["campaign_config"],
         scan_variants,
         train_data,
-        scan_sample_size=sample_size,
         session=session,
+        scan_sample_size=sample_size,
         experiment_id=ctx.state["init_params"]["experiment_id"],
         session_id=ctx.session_id,
+        log=logger.info,
     )
 
     ctx.state["scan_variants"] = scan_variants
@@ -681,8 +489,12 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     recorder = RoundRecorder(session_dir / "rounds")
     set_round_recorder(recorder)
 
+    from promptpotter.services.campaign.orchestration import (
+        run_optimization as _orch_run_optimization,
+    )
+
     try:
-        campaign_rounds, cycle_result = await _run_optimization(
+        cycle_result = await _orch_run_optimization(
             campaign_rounds,
             dataset,
             campaign_config,
@@ -692,7 +504,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             experiment_id=ctx.state.get("experiment_id"),
             task_context=ctx.state.get("task_context"),
             session_id=ctx.session_id,
-            display_callbacks=control_cb,
+            callbacks=control_cb,
         )
     finally:
         set_round_recorder(None)

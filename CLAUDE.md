@@ -97,7 +97,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 
 ### Three Entry Points
 
-1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `campaign_lib/` is pure display, delegates to services
+1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/display/campaign/` is pure display, delegates to services
 2. **CLI**: `promptpotter/cli/campaign_runner.py` — `init → [task-context] → [scan] → [scan-results] → optimize → results`
 3. **FastAPI API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`
 
@@ -122,7 +122,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 
 ### Notebook ↔ CLI Session Parity
 
-The notebook has no `session_id` — scan/campaign results don't persist. Root cause: `campaign_lib` wrappers accept `session_id` but notebook never passes one. Both entry points must eventually produce identical artifacts (whitelabel prerequisite).
+The notebook has no `session_id` — scan/campaign results don't persist. Root cause: display layer wrappers accept `session_id` but notebook never passes one. Both entry points must eventually produce identical artifacts (whitelabel prerequisite).
 
 ### TermNorm Backend
 

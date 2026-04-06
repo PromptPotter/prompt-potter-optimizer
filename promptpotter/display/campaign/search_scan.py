@@ -7,8 +7,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.search.smart_search import adaptive_search as _adaptive_search
 from promptpotter.services.search.sensitivity_scanner import sensitivity_scan as _sensitivity_scan
+from promptpotter.services.search.smart_search import adaptive_search as _adaptive_search
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
 from .display import (
@@ -21,8 +21,8 @@ from .display import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 

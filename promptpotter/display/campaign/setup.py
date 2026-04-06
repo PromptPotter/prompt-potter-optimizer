@@ -7,23 +7,18 @@ from typing import TYPE_CHECKING
 
 from promptpotter.config.settings import load_variant_library
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.config import (
-    configure_pipeline as _configure_pipeline,
-)
-from promptpotter.services.campaign.config import (
-    create_llm_client as setup_llm,
-)
 from promptpotter.services.campaign.bootstrap import (
     BackendContext,
+    save_campaign_winner,
 )
 from promptpotter.services.campaign.bootstrap import (
     init_services as _init_services,
 )
-from promptpotter.services.campaign.bootstrap import (
-    save_campaign_winner,
-)
 from promptpotter.services.campaign.campaign_data import (
     build_all_index_terms,
+)
+from promptpotter.services.campaign.config import (
+    create_llm_client as setup_llm,
 )
 from promptpotter.services.project_store import ProjectStore
 
@@ -141,6 +136,15 @@ def dev_reload() -> None:
         "promptpotter.services.search.smart_search",
         "promptpotter.services.search.sensitivity_scanner",
         "promptpotter.services.search.scan_baseline",
+        "promptpotter.services.campaign.orchestration",
+        # Display layer — safe to reload (no model classes)
+        "promptpotter.display.campaign.display",
+        "promptpotter.display.campaign.phase_display",
+        "promptpotter.display.campaign.optimize",
+        "promptpotter.display.campaign.setup",
+        "promptpotter.display.campaign.campaigns",
+        "promptpotter.display.campaign.search",
+        "promptpotter.display.campaign.search_scan",
         # NOTE: Do NOT reload promptpotter.models.* or dataclass modules —
         # Pydantic/dataclass classes break when reloaded (existing
         # instances fail type checks).  scan_results.py has ScanContext
@@ -191,29 +195,15 @@ async def show_pipeline_snapshot(session: BackendContext) -> dict:
 def configure_pipeline(session: BackendContext, campaign_config: CampaignConfig) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
-    Delegates to ``promptpotter.services.campaign.bootstrap.configure_pipeline()``
-    and prints a summary of active/excluded nodes.
+    Delegates to shared orchestration and adds display-specific tags.
     """
-    result = _configure_pipeline(
-        session.pipeline_schema,
-        campaign_config,
-        exp_data=getattr(session, "exp_data", None),
-    )
+    from promptpotter.services.campaign.orchestration import configure_and_apply_pipeline
 
-    # Apply filtered schema — excluded nodes cease to exist
-    if result.filtered_schema is not None:
-        session.pipeline_schema = result.filtered_schema
-
-    # Set display tags from finalized schema (drives eval output formatting)
     from .display import set_display_tags
 
+    pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
     set_display_tags(session.pipeline_schema)
-
-    nodes_str = ", ".join(result.active_nodes)
-    excl_str = f"  Excluded: {', '.join(result.excluded_nodes)}" if result.excluded_nodes else ""
-    print(f"Active nodes: {nodes_str}{excl_str}")
-
-    return result.pipeline_params
+    return pipeline_params
 
 
 # ---------------------------------------------------------------------------
@@ -327,25 +317,20 @@ async def prepare_eval_context(
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set dataset, optionally run baseline.
 
-    Thin display wrapper around
-    ``promptpotter.services.campaign.campaign_data.prepare_eval_context()``.
+    Delegates to shared orchestration with notebook display.
     """
-    from promptpotter.services.campaign.campaign_data import (
-        prepare_eval_context as _prepare_eval_context,
+    from promptpotter.services.campaign.orchestration import (
+        prepare_eval_context as _orch_prepare,
     )
 
-    baseline, dataset, campaign_rounds, baseline_results = await _prepare_eval_context(
-        session.exp_data,
+    return await _orch_prepare(
+        session,
         train_data,
         campaign_config,
         run_baseline=run_baseline,
         pipeline_params=pipeline_params,
-        pipeline_schema=session.pipeline_schema,
-        svc=session,
+        log=lambda msg: print(f"\n{msg}"),
     )
-
-    print(f"\nEvaluation data: {len(dataset)} queries")
-    return baseline, dataset, campaign_rounds, baseline_results
 
 
 def prepare_datasets(

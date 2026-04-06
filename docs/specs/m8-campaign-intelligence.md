@@ -355,7 +355,7 @@ Wave 1 ✅  Wave 2 ✅  Wave 3 ✅  Wave 4 ✅
 | `compute_pipeline_metrics()` | Aggregate metrics from node types | `promptpotter/services/metrics.py:99` |
 | `_parse_backend_response()` | Assembles per-query pipeline_data from schema | `promptpotter/services/eval_query.py` |
 | `obs_extraction_map()` | Schema -> observation mapping | `promptpotter/models/pipeline_schema.py` |
-| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `promptpotter/services/search/cohort_analysis.py` (re-exported by `notebooks/campaign_lib/optimize.py`) |
+| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `promptpotter/services/search/cohort_analysis.py` (re-exported by `promptpotter/display/campaign/optimize.py`) |
 | `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `promptpotter/services/search/smart_search.py:169` |
 | `LoopState` | Feedback cycle state (has `current_results` per round) | `promptpotter/services/campaign/state.py:38` |
 | `format_context_sections()` | Context injection point for LLM prompts | `promptpotter/services/campaign/formatting.py` |

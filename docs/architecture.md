@@ -4,7 +4,7 @@
 
 Two entry points, shared service core:
 
-1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `notebooks/campaign_lib/` (display layer wrapping services). No business logic in the notebook layer.
+1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `promptpotter/display/campaign/` (display layer wrapping services). No business logic in the notebook layer.
 2. **FastAPI API** (`promptpotter/main.py`) — REST at `/promptpotter/v1/`. Routers: `backends`, `campaigns`, `health`.
 
 All core logic lives in `promptpotter/services/`.
@@ -220,7 +220,7 @@ CampaignStore.load()          ← disk (campaign + trial JSON)
 campaign/export.py            ← pure transforms (flatten, compare, manifest)
         │                        No I/O, no display. Returns dicts/lists.
         ▼
-campaign_lib/reporting.py     ← markdown rendering (tables, supplemental doc)
+display/campaign/             ← markdown rendering (tables, supplemental doc)
         │                        Formatting only, no persistence.
         ▼
 cli/export_results.py         ← CLI file I/O (write .md or .json)

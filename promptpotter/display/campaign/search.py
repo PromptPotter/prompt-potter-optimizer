@@ -35,8 +35,8 @@ from promptpotter.services.search import (
     select_scan_winner as _select_scan_winner,
 )
 from promptpotter.services.search.scan_advisor import (
-    resolve_schema_axes,
     advisory_to_scan_variants,
+    resolve_schema_axes,
 )
 from promptpotter.services.search.scan_results import (
     decompose_scan_baseline as _decompose_scan_baseline,
@@ -59,8 +59,8 @@ from .display import (
 from .setup import setup_llm
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +69,10 @@ __all__ = [
     "advisory_to_scan_variants",
     # search_coverage
     "audit_historical_data",
-    # search_advisor
-    "load_task_description",
     # search_baseline
     "decompose_scan_baseline",
+    # search_advisor
+    "load_task_description",
     "preview_advisor_prompt",
     "resolve_scan_variants",
     # search_results

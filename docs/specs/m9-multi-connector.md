@@ -25,8 +25,8 @@ Methods derived from actual usage across `eval_query.py`, `eval_gateway.py`, and
 | `run_query` | `async (query: str, pipeline_params: dict \| None, prompt_override: str \| None) -> dict[str, Any]` | `eval_query.py` (via `eval_query_via_backend`) |
 | `fetch_experiments` | `async () -> dict[str, Any]` | `backend_client.py` (sync operations) |
 | `fetch_experiment` | `async (experiment_id: str, include_traces: bool) -> dict[str, Any]` | `backend_client.py` (sync operations) |
-| `extract_index_terms` | `@staticmethod (experiment_data: dict) -> list[str]` | `optimization_loop.py`, `campaign_lib/` |
-| `extract_replay_queries` | `@staticmethod (experiment_data: dict) -> list[dict[str, Any]]` | `campaign_lib/`, `DatasetLoadNode` (M6) |
+| `extract_index_terms` | `@staticmethod (experiment_data: dict) -> list[str]` | `optimization_loop.py`, `display/campaign/` |
+| `extract_replay_queries` | `@staticmethod (experiment_data: dict) -> list[dict[str, Any]]` | `display/campaign/`, `DatasetLoadNode` (M6) |
 
 ---
 

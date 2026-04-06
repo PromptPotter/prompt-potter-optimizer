@@ -36,11 +36,8 @@ from .display import (
     _dbox_top,
     _fmt_delta,
     _scoreboard,
+    fmt_pvalue,
 )
-
-
-from .display import fmt_pvalue  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Display state — tracks cycle metadata across callbacks (display-only)

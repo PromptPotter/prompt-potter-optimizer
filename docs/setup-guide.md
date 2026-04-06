@@ -118,7 +118,7 @@ python -m promptpotter.cli.export_results json \
 Or from the notebook:
 
 ```python
-from notebooks.campaign_lib import generate_supplemental
+from promptpotter.display.campaign import generate_supplemental
 md = generate_supplemental(session.store, session.backend_id)
 ```
 

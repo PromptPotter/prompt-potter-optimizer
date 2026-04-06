@@ -19,8 +19,8 @@ from promptpotter.services.campaign.bootstrap import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.project_store import ProjectStore
 
 

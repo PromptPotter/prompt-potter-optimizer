@@ -5,14 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent
-from promptpotter.services.campaign.campaign_data import (
-    extract_campaign_baseline as _extract_campaign_baseline,
-)
 from promptpotter.services.campaign.bootstrap import (
     resolve_experiment_id as _resolve_experiment_id,
 )
-from promptpotter.services.campaign.state import RunResult
+from promptpotter.services.campaign.campaign_data import (
+    extract_campaign_baseline as _extract_campaign_baseline,
+)
+from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, RunResult
 from promptpotter.services.search.cohort_analysis import (
     min_detectable_effect,
     proportion_test,
@@ -52,10 +51,9 @@ from .phase_display import (
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.services.campaign.bootstrap import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.state import RunCallbacks
-    from promptpotter.services.campaign.bootstrap import BackendContext
-    from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.scan_results import ScanContext
 
 __all__ = [
@@ -362,12 +360,7 @@ async def run_optimization_notebook(
     dataset: list,
     campaign_config: CampaignConfig,
     *,
-    store: ProjectStore | None = None,
-    backend_id: str = "",
-    backend_url: str = "http://127.0.0.1:8000",
     pipeline_params: dict | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-    index_terms: list[str] | None = None,
     langfuse_session_id: str | None = None,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
@@ -376,49 +369,35 @@ async def run_optimization_notebook(
     session_id: str = "",
     display_callbacks: RunCallbacks | None = None,
 ) -> tuple[list, RunResult | None]:
-    """Run optimization via feedback cycle with optional L2/L3 escalation.
+    """Run optimization via feedback cycle with notebook display.
 
-    Accepts and returns the ``campaign_rounds`` list format for downstream
-    notebook sections.
-
-    When ``scan_context`` is provided (from ``show_feedback_preflight()``),
-    runs in scan-aware mode with per-candidate pipeline_params overrides.
-
-    ``display_callbacks`` are entry-point-specific (display, control).
-    Persistence callbacks are auto-created by the optimization loop.
+    Delegates config assembly and round-append logic to shared
+    orchestration; keeps rich ANSI display callbacks.
 
     Returns:
         Tuple of (campaign_rounds, RunResult or None if interrupted).
     """
-    from promptpotter.services.campaign.config import RunConfig
-    from promptpotter.services.campaign.optimization_loop import run_optimization
+    from promptpotter.services.campaign.orchestration import build_run_config
 
-    # session shorthand
-    if session is not None:
-        store = store or session.store
-        backend_id = backend_id or session.backend_id
-        backend_url = backend_url or session.backend_client.base_url
-        index_terms = index_terms or session.index_terms
-        pipeline_schema = pipeline_schema or session.pipeline_schema
-
-    config = RunConfig.from_campaign_config(
-        campaign_config,
-        backend_url=backend_url,
-        backend_id=backend_id,
-        project_root=str(store.base_dir) if store else "",
-        pipeline_params=pipeline_params,
-        index_terms=index_terms,
-        session_id=session_id,
-        scan_context=scan_context,
-        pipeline_schema=pipeline_schema,
-        task_context=task_context,
+    # Session-derived locals for display closures
+    store = session.store if session else None
+    backend_id = session.backend_id if session else ""
+    pipeline_schema = session.pipeline_schema if session else None
+    config = (
+        build_run_config(
+            campaign_config,
+            session,
+            pipeline_params=pipeline_params,
+            scan_context=scan_context,
+            task_context=task_context,
+            session_id=session_id,
+        )
+        if session
+        else None
     )
 
     bl = _campaign_baseline_as_dict(campaign_rounds)
-    baseline_ps = bl["baseline_ps"]
     baseline_acc = bl["baseline_acc"]
-    baseline_results = bl["baseline_results"]
-    instruction = bl["instruction"]
 
     # --- Warn if scan context was lost (kernel restart) ---
     if scan_context is None and any(r.get("round") == "search" for r in campaign_rounds):
@@ -502,16 +481,9 @@ async def run_optimization_notebook(
             print(f"  {_box_bottom(width=w)}")
 
     def _on_round(round_result, stall_count):
+        # Round entry already appended by orchestration's round-append callback
         _query_counter[0] = 0
         _ds.stall_count = stall_count
-
-        round_entry = round_result.model_dump()
-        ps_raw = round_entry.get("prompt_fields", {})
-        round_entry["prompt_fields"] = (
-            OptSearchPoint.from_prompt_fields(ps_raw) if isinstance(ps_raw, dict) else ps_raw
-        )
-        round_entry["round"] = len(campaign_rounds)
-        campaign_rounds.append(round_entry)
 
         rn = _ds.round_num + 1
 
@@ -594,10 +566,10 @@ async def run_optimization_notebook(
                 from collections import Counter
 
                 from promptpotter.services.campaign.critique import get_candidates
-                from promptpotter.services.metrics import find_rank
                 from promptpotter.services.campaign.round_execution import (
                     _candidate_keys_from_schema,
                 )
+                from promptpotter.services.metrics import find_rank
 
                 _ck = _candidate_keys_from_schema(config.pipeline_schema)
 
@@ -686,6 +658,9 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
+    from promptpotter.services.campaign.orchestration import (
+        run_optimization as _orch_run_optimization,
+    )
     from promptpotter.services.campaign.state import RunCallbacks, chain_callbacks
 
     notebook_display_cb = RunCallbacks(
@@ -700,18 +675,19 @@ async def run_optimization_notebook(
         else notebook_display_cb
     )
 
-    result = await run_optimization(
-        instruction=instruction,
-        dataset=dataset,
-        config=config,
-        baseline_prompt_fields=baseline_ps,
-        baseline_accuracy=baseline_acc,
-        baseline_results=baseline_results,
+    result = await _orch_run_optimization(
+        campaign_rounds,
+        dataset,
+        campaign_config,
+        session=session,
+        pipeline_params=pipeline_params,
+        scan_context=scan_context,
+        experiment_id=experiment_id,
+        task_context=task_context,
+        session_id=session_id,
         callbacks=callbacks,
         langfuse_session_id=langfuse_session_id,
         cycle_id=resolved_cycle_id,
-        experiment_id=experiment_id or "",
-        backend_client=session.backend_client if session else None,
     )
 
     # --- Final summary ---
@@ -758,20 +734,17 @@ async def run_optimization_notebook(
 
 # ---------------------------------------------------------------------------
 # Statistical helpers — imported from display.py
-from .display import fmt_ci, fmt_pvalue  # noqa: E402,F811
-
-
 # ---------------------------------------------------------------------------
 # Baseline eval wrapper (from eval.py)
 # ---------------------------------------------------------------------------
-
-
 from promptpotter.services.campaign.bootstrap import (  # noqa: E402
     load_baseline_prompt,
 )
 from promptpotter.services.campaign.campaign_data import (  # noqa: E402
     run_baseline_eval as _run_baseline_eval,
 )
+
+from .display import fmt_ci, fmt_pvalue  # noqa: E402
 
 
 async def run_baseline_eval(

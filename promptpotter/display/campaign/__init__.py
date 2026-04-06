@@ -1,13 +1,15 @@
-"""Helper library for optimization_campaign.ipynb.
+"""Display layer for optimization campaigns.
 
-Thin notebook-facing layer that delegates to ``promptpotter.services`` for core logic
-and adds tqdm progress bars, print statements, and IPython display for
-interactive notebook use.
+Thin notebook/terminal-facing layer that delegates to ``promptpotter.services``
+for core logic and adds tqdm progress bars, print statements, and IPython
+display for interactive use.
 """
 
 # -- Setup (init, pipeline, LLM, langfuse, datasets) -------------------------
 
 # -- Re-exports from promptpotter.services.search (used directly in notebook) ----------
+# -- Reporting (supplemental materials) — direct from services ----------------
+from promptpotter.services.campaign.reporting import generate_export_json, generate_supplemental
 from promptpotter.services.search import (
     build_diagnostic_set,
     build_llm_context,
@@ -61,15 +63,12 @@ from .optimize import (
     wilson_ci,
 )
 
-# -- Reporting (supplemental materials) ---------------------------------------
-from .reporting import generate_export_json, generate_supplemental
-
 # -- Search: Advisor, Baseline, Coverage, Results, Variants -------------------
 from .search import (
     advisory_to_scan_variants,
     audit_historical_data,
-    load_task_description,
     decompose_scan_baseline,
+    load_task_description,
     preview_advisor_prompt,
     resolve_scan_variants,
     resume_or_build_diagnostic,
@@ -133,6 +132,7 @@ __all__ = [
     "build_tunable_params",
     "configure_langfuse",
     "configure_pipeline",
+    "decompose_scan_baseline",
     "decompose_task_context",
     "dev_reload",
     "diff_campaign_config",
@@ -153,7 +153,6 @@ __all__ = [
     "min_detectable_effect",
     "prepare_datasets",
     "prepare_eval_context",
-    "decompose_scan_baseline",
     "preview_advisor_prompt",
     "proportion_test",
     "push_langfuse",
