@@ -23,6 +23,8 @@ from typing import Any
 
 import requests
 
+from promptpotter.shared.errors import graceful
+
 logger = logging.getLogger(__name__)
 
 
@@ -191,7 +193,7 @@ class LangfuseLogger:
         if not self.enabled or not obs_id:
             return
 
-        try:
+        with graceful("Failed to end Langfuse observation"):
             child = self._open_observations.pop(obs_id, None)
             if child is None:
                 return
@@ -203,8 +205,6 @@ class LangfuseLogger:
             if kwargs:
                 child.update(**kwargs)
             child.end()
-        except Exception:
-            logger.warning("Failed to end Langfuse observation", exc_info=True)
 
     def create_span(
         self,
@@ -319,12 +319,10 @@ class LangfuseLogger:
         if not self.enabled or not self.client or not trace_id:
             return
 
-        try:
+        with graceful("Failed to end Langfuse trace"):
             root = self._trace_metadata.get(trace_id)
             if root:
                 root.end()
-        except Exception:
-            logger.warning("Failed to end Langfuse trace", exc_info=True)
 
     # ------------------------------------------------------------------
     # Dataset API
@@ -500,8 +498,6 @@ class LangfuseLogger:
     def flush(self) -> None:
         """Ensure all pending events are sent to Langfuse."""
         if self.enabled and self.client:
-            try:
+            with graceful("Failed to flush Langfuse events"):
                 self.client.flush()
-            except Exception:
-                logger.warning("Failed to flush Langfuse events", exc_info=True)
 

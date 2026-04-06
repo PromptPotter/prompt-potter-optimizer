@@ -136,6 +136,7 @@ class LoopState:
     **Mutation contract:** All mutations to ``opt_sp`` must occur within
     the sequential round loop body (round_execution, critique, escalation).
     The optimization loop is single-threaded — no concurrent access.
+    State transitions should use the named methods below.
     """
 
     rounds: list[RoundResult] = field(default_factory=list)
@@ -168,6 +169,44 @@ class LoopState:
     # Checkpoint schema version — incremented when LoopState/OptSearchPoint
     # fields change, so resume can detect stale checkpoints.
     state_version: int = 1
+
+    # -- State transition methods ------------------------------------------
+
+    def record_round_outcome(self, improved: bool) -> None:
+        """Update stall count after a round completes."""
+        self.stall_count = 0 if improved else self.stall_count + 1
+
+    def reset_stall_count(self) -> None:
+        """Reset stall count (e.g. after L2/L3 changes prompt)."""
+        self.stall_count = 0
+
+    def enter_probe_mode(self) -> None:
+        """Flag next round as a probe round (L2 action="probe")."""
+        self.probe_next_round = True
+
+    def exit_probe_mode(self) -> None:
+        """Clear probe flag after a probe round completes."""
+        self.probe_next_round = False
+
+    def update_current(
+        self,
+        rr: RoundResult,
+        search_point: JobSearchPoint,
+        round_num: int,
+    ) -> None:
+        """Apply a round result to current/best tracking.
+
+        Call after ``update_round_state()`` syncs prompt fields.
+        """
+        self.current_sp = search_point
+        self.current_accuracy = rr.accuracy
+        self.current_composite = rr.composite
+        self.current_results = list(rr.results)
+        if self.current_composite > self.best_composite:
+            self.best_composite = self.current_composite
+            self.best_accuracy = self.current_accuracy
+            self.best_round = round_num
+            self.best_sp = self.current_sp
 
 
 @dataclass

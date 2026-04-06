@@ -11,6 +11,7 @@ Every optimizer pipeline node uses this instead of calling ``chat()`` directly.
 
 from __future__ import annotations
 
+import contextvars
 import functools
 import json
 import logging
@@ -50,20 +51,21 @@ def get_node_config(node_name: str) -> dict:
 
 _LLM_DEFAULTS = {"temperature": 0.0, "max_tokens": 1000, "output_format": "text"}
 
-# -- Round recorder (set by CLI/webapp, None = no tracing) ----------------
+# -- Round recorder (per-task context, not a module global) ----------------
 
-_recorder: RoundRecorder | None = None
+_recorder_var: contextvars.ContextVar[RoundRecorder | None] = contextvars.ContextVar(
+    "round_recorder", default=None,
+)
 
 
 def set_round_recorder(recorder: RoundRecorder | None) -> None:
     """Wire the round recorder for LLM trace capture. None = disable."""
-    global _recorder
-    _recorder = recorder
+    _recorder_var.set(recorder)
 
 
 def get_round_recorder() -> RoundRecorder | None:
     """Return the active round recorder (for non-LLM actions)."""
-    return _recorder
+    return _recorder_var.get()
 
 
 async def llm_call(
@@ -102,6 +104,7 @@ async def llm_call(
     )
 
     # Trace to round recorder if active
+    _recorder = _recorder_var.get()
     if _recorder is not None:
         duration_s = round(_time.monotonic() - _t0, 2)
 

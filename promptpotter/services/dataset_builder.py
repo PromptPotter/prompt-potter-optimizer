@@ -130,3 +130,18 @@ def train_test_split(
         len(train), len(test_proc), len(test_mat),
     )
     return train, {"test_processes": test_proc, "test_material": test_mat}
+
+
+def subsample_dataset(
+    dataset: list[dict],
+    sample_size: int,
+    seed: int = 42,
+) -> list[dict]:
+    """Deterministic subsample of eval queries.
+
+    Returns the full list unchanged if ``sample_size <= 0`` or the dataset
+    is already small enough.
+    """
+    if sample_size > 0 and len(dataset) > sample_size:
+        return random.Random(seed).sample(dataset, sample_size)
+    return dataset

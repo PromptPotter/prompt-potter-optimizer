@@ -89,23 +89,6 @@ def _most_common_error_category(results: list) -> ErrorCategory | None:
     return Counter(cats).most_common(1)[0][0]
 
 
-def subsample_dataset(
-    dataset: list[dict],
-    sample_size: int,
-    seed: int = 42,
-) -> list[dict]:
-    """Deterministic subsample of eval queries.
-
-    Returns the full list unchanged if ``sample_size <= 0`` or the dataset
-    is already small enough.
-    """
-    if sample_size > 0 and len(dataset) > sample_size:
-        import random
-
-        return random.Random(seed).sample(dataset, sample_size)
-    return dataset
-
-
 def build_dataset_run_data(
     run_id: str,
     name: str,

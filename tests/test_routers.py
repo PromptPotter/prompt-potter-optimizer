@@ -121,15 +121,15 @@ def test_get_experiment_not_synced_404(api_client):
 
 def test_list_campaigns_empty(api_client, tmp_store):
     api_client.post("/api/v1/backends", json=REGISTER_PAYLOAD)
-    resp = api_client.get("/api/v1/campaigns", params={"backend_id": "test-backend"})
+    resp = api_client.get("/api/v1/backends/test-backend/campaigns")
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
 
 
 @pytest.mark.parametrize("path", [
-    "/api/v1/campaigns/nonexistent",
-    "/api/v1/campaigns/nonexistent/trials/0",
+    "/api/v1/backends/test-backend/campaigns/nonexistent",
+    "/api/v1/backends/test-backend/campaigns/nonexistent/trials/0",
 ])
 def test_campaign_404(api_client, path):
-    resp = api_client.get(path, params={"backend_id": "test-backend"})
+    resp = api_client.get(path)
     assert resp.status_code == 404

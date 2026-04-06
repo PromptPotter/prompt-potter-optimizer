@@ -445,22 +445,15 @@ def update_round_state(
     winner_fields = rr.prompt_fields  # dict of prompt fields
     for f in PROMPT_STRING_FIELDS:
         setattr(state.opt_sp, f, winner_fields.get(f, ""))
-    # Rebuild JobSearchPoint from opt_sp
+    # Rebuild JobSearchPoint from opt_sp and update current/best tracking
     assert state.current_sp is not None
     _pp = rr.pipeline_params if rr.pipeline_params is not None else state.current_sp.pipeline_params
-    state.current_sp = state.opt_sp.to_job_search_point(
+    new_sp = state.opt_sp.to_job_search_point(
         base_pipeline_params=_pp,
         active_steps=active_steps,
         prompt_node=prompt_node,
     )
-    state.current_accuracy = rr.accuracy
-    state.current_composite = rr.composite
-    state.current_results = list(rr.results)
-    if state.current_composite > state.best_composite:
-        state.best_composite = state.current_composite
-        state.best_accuracy = state.current_accuracy
-        state.best_round = round_num
-        state.best_sp = state.current_sp
+    state.update_current(rr, new_sp, round_num)
 
 
 # ---------------------------------------------------------------------------

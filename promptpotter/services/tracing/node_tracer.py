@@ -12,6 +12,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.shared.errors import graceful
+
 if TYPE_CHECKING:
     from promptpotter.services.tracing.observability_logger import ObsLogger
 
@@ -48,7 +50,7 @@ async def observed_node(
     obs_id: str | None = None
 
     if obs and trace_id:
-        try:
+        with graceful(f"observed_node start failed for {node_id}"):
             obs_id = obs.log_node_start(
                 trace_id=trace_id,
                 node_id=node_id,
@@ -56,8 +58,6 @@ async def observed_node(
                 obs_type=obs_type,
                 input_data={},
             )
-        except Exception:
-            logger.warning("observed_node start failed for %s", node_id, exc_info=True)
 
     t0 = time.perf_counter()
     try:
@@ -68,7 +68,7 @@ async def observed_node(
     finally:
         trace.duration_ms = (time.perf_counter() - t0) * 1000
         if obs and trace_id and obs_id:
-            try:
+            with graceful(f"observed_node end failed for {node_id}"):
                 obs.log_node_end(
                     obs_id=obs_id,
                     trace_id=trace_id,
@@ -77,5 +77,3 @@ async def observed_node(
                     metrics={"duration_ms": trace.duration_ms},
                     error=trace.error,
                 )
-            except Exception:
-                logger.warning("observed_node end failed for %s", node_id, exc_info=True)

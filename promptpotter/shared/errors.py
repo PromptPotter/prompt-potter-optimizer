@@ -51,18 +51,23 @@ class EscalationError(Exception):
 
 
 @contextmanager
-def graceful(msg: str):
-    """Suppress non-interrupt exceptions with a warning log.
+def graceful(msg: str, *, level: int = logging.WARNING):
+    """Suppress non-interrupt exceptions with a log message.
 
     Re-raises ``KeyboardInterrupt`` and ``asyncio.CancelledError``
     so that graceful-shutdown logic is never swallowed.
+
+    Args:
+        msg: Log message on failure.
+        level: Log level (default WARNING). Use ``logging.DEBUG`` for
+               observability/tracing code where failures are expected.
     """
     try:
         yield
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception:
-        logger.warning(msg, exc_info=True)
+        logger.log(level, msg, exc_info=True)
 
 
 def find_rank(candidates: list, ground_truth: str) -> int | None:

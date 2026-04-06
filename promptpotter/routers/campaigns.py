@@ -1,11 +1,12 @@
 """
 Campaign registry endpoints.
 
-Provides REST API for listing and viewing optimization campaigns.
+Provides REST API for listing and viewing optimization campaigns,
+nested under ``/backends/{backend_id}/campaigns``.
 """
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from promptpotter.dependencies import StoreDep
@@ -65,14 +66,17 @@ class CampaignDetailResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Endpoints
+# Endpoints — nested under /backends/{backend_id}/campaigns
 # ---------------------------------------------------------------------------
 
 
-@router.get("/campaigns", response_model=CampaignListResponse)
+@router.get(
+    "/backends/{backend_id}/campaigns",
+    response_model=CampaignListResponse,
+)
 async def list_campaigns(
     store: StoreDep,
-    backend_id: str = Query(..., description="Backend identifier"),
+    backend_id: str,
 ):
     """List all campaigns for a backend."""
     campaigns = store.campaigns.list_all(backend_id)
@@ -82,11 +86,14 @@ async def list_campaigns(
     )
 
 
-@router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
+@router.get(
+    "/backends/{backend_id}/campaigns/{campaign_id}",
+    response_model=CampaignDetailResponse,
+)
 async def get_campaign(
     store: StoreDep,
+    backend_id: str,
     campaign_id: str,
-    backend_id: str = Query(..., description="Backend identifier"),
 ):
     """Get campaign detail with trial summaries."""
     data = store.campaigns.load(backend_id, campaign_id)
@@ -96,14 +103,14 @@ async def get_campaign(
 
 
 @router.get(
-    "/campaigns/{campaign_id}/trials/{round_num}",
+    "/backends/{backend_id}/campaigns/{campaign_id}/trials/{round_num}",
     response_model=dict[str, Any],
 )
 async def get_trial(
     store: StoreDep,
+    backend_id: str,
     campaign_id: str,
     round_num: int,
-    backend_id: str = Query(..., description="Backend identifier"),
 ):
     """Get full trial detail for a specific round."""
     trial = store.campaigns.load_trial(backend_id, campaign_id, round_num)

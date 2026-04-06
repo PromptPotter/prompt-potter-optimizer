@@ -49,7 +49,7 @@ def _die(msg: str) -> None:
 
 async def _reconstruct_svc(init_params: dict):
     """Reconstruct BackendSession from stored init params (~1s)."""
-    from notebooks.campaign_lib.setup import init_services
+    from promptpotter.cli._services import init_services
 
     return await init_services(
         backend_url=init_params["backend_url"],
@@ -66,7 +66,7 @@ async def _reconstruct_svc(init_params: dict):
 
 async def cmd_init(args: argparse.Namespace) -> None:
     """Initialize services, load datasets, configure pipeline, create session."""
-    from notebooks.campaign_lib import (
+    from promptpotter.cli._services import (
         configure_pipeline,
         init_services,
         prepare_datasets,
@@ -166,7 +166,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
 
 async def cmd_task_context(args: argparse.Namespace) -> None:
     """Decompose task description into structured domain context."""
-    from notebooks.campaign_lib import decompose_task_context
+    from promptpotter.cli._services import decompose_task_context
 
     store = ProjectStore()
     state, bid, sid = store.sessions.load_active(args.session)
@@ -192,11 +192,12 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
 
 async def cmd_scan(args: argparse.Namespace) -> None:
     """Run sensitivity scan with provided variants."""
-    from notebooks.campaign_lib import (
+    from promptpotter.cli._services import (
         configure_pipeline,
         resolve_scan_variants,
         run_sensitivity_scan,
     )
+    from promptpotter.services.campaign.init import load_baseline_prompt
 
     store = ProjectStore()
     state, bid, sid = store.sessions.load_active(args.session)
@@ -209,8 +210,6 @@ async def cmd_scan(args: argparse.Namespace) -> None:
     session = await _reconstruct_svc(state["init_params"])
     resolve_scan_variants(scan_variants, session=session)
     configure_pipeline(session, state["campaign_config"])
-
-    from promptpotter.services.campaign.init import load_baseline_prompt
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     baseline = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
@@ -241,7 +240,8 @@ async def cmd_scan(args: argparse.Namespace) -> None:
 
 async def cmd_scan_results(args: argparse.Namespace) -> None:
     """Show scan analytics and seed campaign from scan winner."""
-    from notebooks.campaign_lib import seed_campaign_from_scan, show_scan_analytics
+    from promptpotter.cli._services import seed_campaign_from_scan
+    from promptpotter.services.campaign.init import load_baseline_prompt
 
     store = ProjectStore()
     state, bid, sid = store.sessions.load_active(args.session)
@@ -256,9 +256,12 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
     scan_df = pd.DataFrame(scan_data["scan_df"])
     axis_profiles = scan_data["axis_profiles"]
 
-    show_scan_analytics(scan_df, axis_profiles, session)
-
-    from promptpotter.services.campaign.init import load_baseline_prompt
+    # Print scan summary (CLI-friendly, no IPython)
+    if not scan_df.empty:
+        best_row = scan_df.loc[scan_df["accuracy"].idxmax()]
+        print(f"Scan results: {len(scan_df)} variants across {scan_df['axis'].nunique()} axes")
+        print(f"Best: {best_row['axis']}={best_row.get('value_preview', '?')} "
+              f"({best_row['accuracy']:.1%}, delta={best_row.get('delta', 0):+.1%})")
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     scan_baseline_sp = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
@@ -267,7 +270,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
     seed_campaign_from_scan(
         scan_df, axis_profiles, scan_baseline_sp,
         state.get("scan_variants", {}), campaign_rounds,
-        state["campaign_config"], pipeline_schema=session.pipeline_schema,
+        state["campaign_config"],
     )
 
     if campaign_rounds:
@@ -280,12 +283,13 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
-    from notebooks.campaign_lib import (
+    from promptpotter.cli._services import (
+        build_scan_context,
         configure_pipeline,
         prepare_eval_context,
-        run_optimization_notebook,
-        show_feedback_preflight,
+        run_optimization,
     )
+    from promptpotter.models.opt_search_point import OptSearchPoint
 
     store = ProjectStore()
     state, bid, sid = store.sessions.load_active(args.session)
@@ -305,8 +309,6 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     # Seed campaign_rounds with stored baseline when no eval has been run yet
     if not campaign_rounds and state.get("baseline_prompt_fields"):
-        from promptpotter.models.opt_search_point import OptSearchPoint
-
         bl_ps = OptSearchPoint.from_prompt_fields(state["baseline_prompt_fields"])
         campaign_rounds.append({
             "round": "baseline",
@@ -316,20 +318,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         })
 
     # Load scan context if available
-    scan_df, axis_profiles = None, None
-    scan_data = session.store.sessions.load_scan_results(bid, sid)
-    if scan_data:
-        import pandas as pd
-
-        scan_df = pd.DataFrame(scan_data["scan_df"])
-        axis_profiles = scan_data["axis_profiles"]
-
-    scan_context = show_feedback_preflight(
-        campaign_rounds, dataset, campaign_config,
-        pipeline_params=pipeline_params, pipeline_schema=session.pipeline_schema,
-        scan_df=scan_df, axis_profiles=axis_profiles,
-        scan_variants=state.get("scan_variants"),
-    )
+    state["_session_id"] = sid  # for build_scan_context
+    scan_context = build_scan_context(session, state, campaign_rounds, pipeline_params)
 
     # HITL: --round sets pause_before_eval via the control surface
     if args.round:
@@ -356,7 +346,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     set_round_recorder(recorder)
 
     try:
-        campaign_rounds, cycle_result = await run_optimization_notebook(
+        campaign_rounds, cycle_result = await run_optimization(
             campaign_rounds, dataset, campaign_config,
             session=session, pipeline_params=pipeline_params,
             scan_context=scan_context,
@@ -473,12 +463,12 @@ async def cmd_profile(args: argparse.Namespace) -> None:
 
 async def cmd_results(args: argparse.Namespace) -> None:
     """Show campaign results, optionally save winner."""
-    from notebooks.campaign_lib import (
-        save_campaign_winner,
+    from promptpotter.cli._services import (
         show_campaign_summary,
         show_flip_tracking,
         show_lineage_chain,
     )
+    from promptpotter.services.campaign.persistence import save_campaign_winner
 
     store = ProjectStore()
     state, bid, sid = store.sessions.load_active(args.session)
