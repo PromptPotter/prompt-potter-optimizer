@@ -239,7 +239,7 @@ Reference: `web_search`. Default chain works for **any** target pipeline node th
 |------|------|-------|-----------|
 | **1** | Emit `diagnostics.warnings[]` with `{step, code, message}` | Backend | **Yes** |
 | **2** | Add routing strategy for `{step}:{code}` | `escalation.py` | No (defaults to L2) |
-| **3** | Add anomaly detector | `critique_stats.py` | No |
+| **3** | Add anomaly detector | `critique.py` | No |
 | **4** | Set `degradation_threshold` | campaign config | **Yes** (0 = disabled) |
 
 Example -- adding `entity_profiling` error detection:
@@ -345,8 +345,7 @@ campaign_config = {
 
 | File | Role |
 |------|------|
-| `campaign/critique.py` | `CritiqueAgent`, `format_critique_for_prompt()`, pos/neg routing |
-| `campaign/critique_stats.py` | Pure stat computation, anomaly detection, meta-prompt assembly |
+| `campaign/critique.py` | `CritiqueAgent`, `format_critique_for_prompt()`, pos/neg routing, stat computation |
 | `campaign/escalation.py` | `DegradationCheck`, `DEFAULT_STRATEGIES`, `classify_warnings` |
 | `campaign/optimization_loop.py` | Orchestration, escalation journal, critique threading |
 | `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |

@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## What This Is
 
 PromptPotter Optimizer finds better prompts automatically. Give it a dataset (question + expected answer pairs) and point it at your LLM pipeline's evaluation endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer optimization loop. The backend can be anything from a single LLM call to a multi-step pipeline with retrieval, enrichment, and ranking. Currently tested with TermNorm (AI terminology normalization).
@@ -7,142 +9,141 @@ PromptPotter Optimizer finds better prompts automatically. Give it a dataset (qu
 ## Commands
 
 ```bash
+# Install (dev)
+pip install -e ".[dev,jupyter,stats]"
+
+# Lint & format
+ruff check promptpotter/ tests/
+ruff format promptpotter/ tests/
+
+# Type check
+mypy promptpotter/
+
+# Tests
+pytest tests/                          # all tests
+pytest tests/test_search_point.py      # single file
+pytest tests/ -k "test_name"           # single test by name
+
+# Run API server
+uvicorn promptpotter.main:app --port 8001 --reload
 
 # CLI campaign runner (HITL optimization from terminal)
 python -m promptpotter.cli.campaign_runner init --backend-url http://127.0.0.1:8000
-python -m promptpotter.cli.campaign_runner optimize --round   # generate → pause for review
+python -m promptpotter.cli.campaign_runner optimize --auto     # full loop
+python -m promptpotter.cli.campaign_runner optimize --round    # generate → pause for review
 python -m promptpotter.cli.campaign_runner optimize --evaluate # resume evaluation
-python -m promptpotter.cli.campaign_runner optimize --auto     # full loop, no pause
 
-# Export results (paper supplemental materials)
+# Export results
 python -m promptpotter.cli.export_results supplemental --backend-id local -o supplemental.md
 python -m promptpotter.cli.export_results json --backend-id local -o paper_results.json
 ```
 
-## CLI Workflow
+CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest --cov`. All must pass.
 
-The CLI campaign runner (`promptpotter/cli/campaign_runner.py`) follows a strict subcommand sequence. Each step persists to `SessionStore` so progress survives interrupts. Config via `--config` JSON file.
+## Code Conventions
 
-```
-init ──→ [task-context] ──→ [scan] ──→ [scan-results] ──→ optimize ──→ results
-```
+- **Python 3.13+**. Type hints: PEP 604 (`X | None`, `list[str]`) — no `Optional`, no `List`.
+- **Ruff** line-length 100, McCabe max complexity 15.
+- **Logging** via `logging` module, never `print()`. Setup in `promptpotter/config/logging.py`.
+- **No backward compatibility** — freely break signatures, rename, restructure. No shims.
+- Pipeline components are called **nodes**, not "building blocks" or "services".
+- **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
+- **`sample_size`**: Universal eval sampling parameter (0 = all). No synonyms.
+- **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
+- **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground so stale processes don't leak.
+- Version: `APP_VERSION` in `promptpotter/config/settings.py`.
 
-**Critical data flow:** `configure_pipeline(svc, campaign_config)` produces `pipeline_params` (with `exclude_nodes` applied). This must be threaded to every eval call — baseline, scan, and optimization. The configured `pipeline_params` is stored in `state["pipeline_params"]` and in the session directory.
+## Architecture
 
-**Session directory** (`{backend_id}/sessions/{session_id}/`):
-- `session.json` — config, phase, pipeline_params, cycle_id, best_accuracy
-- `campaign_state.json` — live optimization state (overwritten per update, carries counters across cycles via `resume_from`)
-- `campaign_output.log` — append-only eval log (ANSI-stripped)
-- `campaign_log.md` — structured campaign report
+### Mental Model
 
-**Bidirectional control:** Edit `campaign_state.json`'s `control.requested_state` to `"pause"`, `"resume"`, or `"stop"`. Set `control.pause_before_l2_eval: true` to pause after L2 generates new context. Or use `python -m promptpotter.cli.campaign_runner control --pause`.
-
-See [`docs/cli-workflow.md`](docs/cli-workflow.md) for the full subcommand reference.
-
-## Mental Model
-
-Three entry points (Jupyter notebook, CLI runner, web app), one service core in `promptpotter/services/`. The notebook is `notebooks/optimization_campaign.ipynb`; `campaign_lib` wraps services with display. The CLI (`promptpotter/cli/campaign_runner.py`) is a parallel orchestration layer with HITL support — generates candidates, pauses for human/AI review, then evaluates. All entry points produce identical persistent artifacts via the three-layer architecture:
+Three entry points (notebook, CLI, web API), one service core in `promptpotter/services/`. All entry points produce identical persistent artifacts via the three-layer I/O architecture.
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `run_optimization()` auto-creates `CampaignPersistenceEmitter` (`promptpotter/services/campaign/persistence_emitter.py`). Entry points MUST NOT write campaign artifacts directly — all persistence flows through the emitter. New artifacts must be added to `CAMPAIGN_SESSION_ARTIFACTS` (`promptpotter/services/campaign/state.py`); `tests/test_artifact_parity.py` enforces this.
-- **Display** (per-entry-point) — caller passes `display_callbacks: RunCallbacks` (`_campaign_utils.py`). MUST NOT write to disk.
-- **Control** (per-entry-point, optional) — `FileControlSurface` (`persistence_emitter.py`) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter`. Entry points MUST NOT write campaign artifacts directly. New artifacts → `CAMPAIGN_SESSION_ARTIFACTS` in `campaign/state.py`; `tests/test_artifact_parity.py` enforces.
+- **Display** (per-entry-point) — caller passes `RunCallbacks`. MUST NOT write to disk.
+- **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
-**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data is archived to `dataset_runs/` store. SearchMemory *(M8 — live)* aggregates all historical evaluation data into a materialized view (parameter impact, query patterns, failure modes) that feeds both loops.
+**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data archived to `dataset_runs/` store. SearchMemory (M8) aggregates historical data into a materialized view that feeds both loops.
 
-**Two-layer tracing:** Target layer (JobSearchPoint → dataset_runs/) and optimizer layer (OptSearchPoint → campaign trials). Both independently reconstructable from disk.
-
-**Pipeline composability:** `pipeline_params` (nested dicts keyed by node name) throughout PromptPotter. `node_config` only at the TermNorm wire boundary.
-
-**Per-node cache:** Single cache layer via `IntermediateCache`. Each node's output is cached independently with chained upstream dependency (`node_cache_key(node, config, upstream_hash)`). `walk_prefix()` finds the longest cached prefix from pipeline start. When ALL target nodes are cached, `eval_query_via_backend()` short-circuits via `_build_local_result()` — no backend call. `dataset_run_store` is archive-only (SearchMemory/campaigns, not cache lookup). See [`docs/architecture.md` § Node-Level Cache](docs/architecture.md#node-level-cache).
-
-**Two parameter namespaces:** Prompt scheme fields (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format` — rendered into a prompt string by `render()`) vs pipeline node params (nested dicts like `{"token_matching": {"thinking_style": "..."}}` — sent to backend nodes). These are orthogonal and may share names. L1 candidates use `pipeline_params_override` for both: keys matching `PROMPT_STRING_FIELDS` auto-route to `derive_candidate()` (updating prompt scheme fields); all other keys are nested under their node name (`{"web_search": {"max_sites": 5}}`). **No flat param format** — all pipeline params use nested format from LLM output through to backend. See [`docs/prompt-scheme.md`](docs/prompt-scheme.md).
-
-See [`docs/architecture.md`](docs/architecture.md) for diagrams, caching, pipeline discovery, and disk layout.
-
-## Data Model Reference
-
-All services follow: `f(SearchPoint, PipelineSchema, dataset) → scores`.
+### SearchPoint Hierarchy
 
 ```
 SearchPoint (abstract — render())
-    ├── JobSearchPoint      — target evaluation space (pipeline_params, frozen)
-    └── PromptTemplate      — 8-field prompt scheme (render/compile)
-            └── OptSearchPoint  — optimizer working state (+ lineage, L2/L3, memory)
+  ├── JobSearchPoint       — frozen target-layer spec (pipeline_params)
+  └── PromptTemplate       — 8-field prompt decomposition (persona, task_intent, etc.)
+      └── OptSearchPoint   — optimizer state (lineage, L2/L3, memory, escalation)
 ```
 
-`JobSearchPoint` bundles `pipeline_params` for frozen target eval. `OptSearchPoint.to_job_search_point()` projects optimizer state into target-layer. `PipelineSchema` describes pipelines. `EvalContext` bundles eval infrastructure.
+All services follow: `f(SearchPoint, PipelineSchema, dataset) → scores`. `JobSearchPoint` is the first positional arg to `eval_search_point()`. `OptSearchPoint` is the source of truth for all optimizer state; projected to `JobSearchPoint` via `to_job_search_point()`.
 
-See [`docs/architecture.md` § Data Models](docs/architecture.md#data-models) for the full class hierarchy, methods, and fields.
+### Two-Layer Tracing
 
-## Project Conventions
+Every state traced at **both** layers independently:
+- **Target layer**: `JobSearchPoint` → `eval_search_point()` → `dataset_runs/` (content-addressed, shared)
+- **Optimizer layer**: `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint)
 
-### Code Style
+### Evaluation Pipeline
 
-- **CLI command timeouts**: **30 seconds default for ALL CLI commands** — including `init`, `optimize`, `scan`. This is the diagnostic/development phase; we are analyzing algorithm behavior, not collecting data. 30s is enough to observe one round starting, check output, and verify fixes. Only increase timeout when explicitly told "ready for data collection".
-- **No background CLI commands**: Never run CLI campaign commands (`campaign_runner`) in the background or with `run_in_background`. Always foreground so stale processes don't leak and spam the backend. After any interrupted CLI run, verify with `ps aux | grep python` and kill orphans with `taskkill //PID <pid> //F`.
-- **Type hints**: PEP 604 (`X | None`), lowercase generics (`list[str]`)
-- **Logging**: `logging` module (no `print()` in services). Setup in `promptpotter/config/logging.py`.
-- **`sample_size`**: Universal eval sampling parameter (0 = all). No synonyms.
-- **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields. Surfaces schema violations immediately rather than hiding them behind silent defaults.
+`eval_search_point()` (in `eval_gateway.py`) is the single gateway for evaluation archival + observability. Per-node cache reuse via `IntermediateCache` — `walk_prefix()` finds longest cached prefix; when ALL target nodes cached, short-circuits via `_build_local_result()` (no backend call). `dataset_run_store` is archive-only. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
 
-### Architecture
+### Pipeline Params — Two Namespaces
 
-- **No backward compatibility** — freely break signatures, rename, restructure. No shims, no dual-format readers. Old data is regenerated, not supported.
-- **Pipeline reproducibility**: Notebook displays full pipeline config via `GET /pipeline` before any evaluation.
-- **EXPERIMENT_ID**: Single source of truth. Config must match stored experiment when set.
-- **Display parity**: Cached and fresh results use the same output format. A provenance indicator distinguishes data source for transparency.
-- **Graceful interrupt**: Signal-flag pattern — first Ctrl+C finishes in-flight call and saves; second force-quits. No completed work is ever discarded. See [architecture.md § Caching & Crash Recovery](docs/architecture.md#caching--crash-recovery).
-- **Error handling**: `graceful()` context manager in `shared/errors.py` is the standard suppress-and-log pattern. `EscalationError` carries structured `partial_results` for campaign flow control.
-- **`promptpotter/shared/`**: Leaf-level utilities shared by models and services (hashing, schema mutations). No domain model or service dependencies allowed.
-- **`promptpotter/shared/constants.py`**: Canonical source for `PROMPT_STRING_FIELDS`, `LAYER_FIELDS`, and `LAYER1_STRING_FIELDS`. All modules must import field lists from here — never define them locally.
-- **`promptpotter/config/optimizer_pipeline.py`**: Optimizer pipeline schema loader + `llm_call()` primitive. All optimizer nodes use this instead of calling `chat()` directly.
-- **HITL mode**: `RunConfig.pause_before_eval` (from `OptimizationConfig`) raises `PauseForReviewError` between L1 generate and L1 evaluate. Candidates are already persisted to `round_NNNN_candidates.json` before the pause. On resume (`run_optimization()` with same `cycle_id`), `load_round_candidates()` loads them and evaluation proceeds. Campaign finalized as `"paused"` with `StopReason.PAUSED_FOR_REVIEW`.
-- **SessionStore**: `store.sessions` manages cross-phase state (`session.json`, `scan_results.json`, `campaign_log.md`) under `{backend_id}/sessions/{session_id}/`. All entry points use the same store — pass `session_id` to `sensitivity_scan()` / `run_optimization_notebook()` to activate persistence.
-- **Nested-only pipeline params**: All pipeline params use nested format (`{"node_name": {"param": value}}`) from LLM output through to backend. No flat-to-nested resolution. LLM prompt instructs nested output; `PROMPT_STRING_FIELDS` split separates prompt fields (inherently flat) from node params. `l1_generate()` has a safety net that auto-nests any flat params the LLM still emits.
+Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`). No flat format. `PROMPT_STRING_FIELDS` is the canonical split (import from `shared/constants.py`, never define locally). L1 candidates use `pipeline_params_override`: keys matching `PROMPT_STRING_FIELDS` auto-route to `derive_candidate()` (prompt fields); all others nest under their node name. `l1_generate()` has a safety net that auto-nests flat params the LLM emits.
+
+### Self-Describing Pipeline
+
+`PipelineSchema` built entirely from backend's `GET /pipeline` — zero backend-specific constants in PromptPotter.
+
+### Three Entry Points
+
+1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `campaign_lib/` is pure display, delegates to services
+2. **CLI**: `promptpotter/cli/campaign_runner.py` — `init → [task-context] → [scan] → [scan-results] → optimize → results`
+3. **FastAPI API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`
+
+**CLI session directory** (`{backend_id}/sessions/{session_id}/`): `session.json`, `campaign_state.json` (live state, `control.requested_state` for pause/resume/stop), `campaign_output.log`, `campaign_log.md`.
+
+### Key Patterns
+
+- **Store**: `ProjectStore` facade over focused stores in `services/stores/`.
+- **Error handling**: `graceful()` context manager in `shared/errors.py`. `EscalationError` carries structured `partial_results`.
+- **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. No completed work discarded.
+- **HITL mode**: `RunConfig.pause_before_eval` raises `PauseForReviewError` between L1 generate and evaluate. Candidates persisted to `round_NNNN_candidates.json` before pause.
+- **Optimizer LLM calls**: All go through `llm_call()` in `config/optimizer_pipeline.py`, not `chat()` directly.
+- **`shared/`**: Leaf-level utilities only — no domain model or service dependencies allowed.
 
 ## Design Principles
 
-What's genuinely distinctive about how PromptPotter works.
+- **Prompt decomposition & variant library** — Backends have monolithic prompts. PromptPotter decomposes into 8 independent fields via LLM restructure, perturbs each independently. See `docs/prompt-scheme.md`.
+- **Prompt alias groups** — `register_alias`/`resolve_aliases` link equivalent prompt hashes so historical data is discoverable across forms. Transitive resolution.
+- **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic accessors only.
 
-- **Prompt decomposition & variant library** — Backends have monolithic prompts. PromptPotter decomposes them into independent fields via LLM restructure, then perturbs each field independently using a variant library. This turns one opaque prompt into a combinatorial search space where sensitivity scan can measure each axis and the feedback cycle can mutate specific fields. See [`docs/prompt-scheme.md`](docs/prompt-scheme.md).
+## Known Issues
 
-- **SearchPoint hierarchy as atomic unit** — `SearchPoint` → `PromptTemplate` (8-field scheme) → `OptSearchPoint` (+ lineage, L2/L3, memory). `JobSearchPoint` bundles `pipeline_params` for frozen target eval. Content-hashable, prevents accidental mutation. See [`docs/architecture.md` § Data Models](docs/architecture.md#data-models).
+### Notebook ↔ CLI Session Parity
 
-- **Prompt alias groups** — `register_alias` / `resolve_aliases` link equivalent prompt hashes so historical data is discoverable across forms. Resolution is transitive. Main use case: linking the backend's original monolithic prompt to its LLM-restructured decomposed form.
+The notebook has no `session_id` — scan/campaign results don't persist. Root cause: `campaign_lib` wrappers accept `session_id` but notebook never passes one. Both entry points must eventually produce identical artifacts (whitelabel prerequisite).
 
-- **Cross-campaign learning via SearchMemory** *(M8 — live)* — Evaluation data compounds across campaigns via a materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic data accessors only — each consumer composes what it needs. See [`docs/architecture.md` § SearchMemory](docs/architecture.md#searchmemory-m8-wave-3).
+### TermNorm Backend
 
-## Known Issue: Notebook ↔ CLI Session Parity
+- **`llm_ranking` broken — always exclude.** Produces `json_validate_failed` on ~50% of queries, 7–16s latency, falls back anyway. Set `"exclude_nodes": ["llm_ranking"]`. Effective pipeline: `cache_lookup → fuzzy_matching → web_search → entity_profiling → token_matching`.
+- **Without `llm_ranking`, prompt string fields have no effect.** Only `entity_profiling` has an LLM with its own fixed template. Optimization focuses on pipeline params: `entity_profiling` (model, temperature, schema), `web_search` (max_sites, num_results), `token_matching` (max_token_candidates), `fuzzy_matching` (threshold, scorer).
 
-**History:** The notebook (`optimization_campaign.ipynb`) was the original entry point through M7. M8 introduced the CLI runner with full `SessionStore` lifecycle (`session_id`, scan persistence, campaign state). The notebook was never retrofitted — it has no `session_id` and doesn't participate in the session lifecycle.
+## Roadmap
 
-**Symptoms:** Scan results, campaign state, and other session artifacts are not persisted when running from the notebook. Previous run data is not picked up on re-run. The CLI works correctly because it creates and threads `session_id` through all calls.
+M0–M7 complete (archived). **M8 complete** — Campaign Intelligence (SearchMemory, all 17 waves). **M9 future** — Multi-Connector Architecture. Benchmarks (HotPotQA, GSM8K) planned post-M8.
 
-**Root cause:** `campaign_lib` wrappers (`search_scan.py`, `optimize.py`) accept `session_id` but the notebook never passes one. Persistence is gated by `if session_id and store and backend_id:` — always falsy from the notebook.
+## Testing
 
-**Goal:** Both entry points must produce identical persistent artifacts and be able to resume from each other's state. Any service-layer change must be validated against both notebook and CLI paths. This is a prerequisite for whitelabel distribution.
+Minimal suite — only stable contracts tested. No volume tests, no O(n) complexity. Mock: `monkeypatch` for async, stdlib `unittest.mock` — no pytest-mock. See `tests/CLAUDE.md`.
 
-## Known Backend Issues (TermNorm)
+## Navigation
 
-- **`llm_ranking` node is broken — always exclude it.** The TermNorm `llm_ranking` node (LLM-driven re-ranking) is a leftover that produces `json_validate_failed` errors on ~50% of queries, triggers `max_tokens` retries, adds 7–16s latency per query, and falls back to token_matching scores anyway. Always set `"exclude_nodes": ["llm_ranking"]` in campaign configs. The `configs/datasets/lca-termnorm/campaign.json` already has this set. Do NOT attempt to enable it — the bug is in the backend, not in PromptPotter. The effective pipeline is: `cache_lookup → fuzzy_matching → web_search → entity_profiling → token_matching`.
-- **`direct_prompt` node** — Backend-only diagnostic node, not part of the optimization pipeline. Ignore it.
-- **Without `llm_ranking`, prompt string fields have no effect.** The only LLM node in the active pipeline is `entity_profiling`, which has its own fixed prompt template. PromptPotter's prompt scheme fields (`thinking_style`, `instruction`, etc.) only affect nodes with a prompt template that references them. With `llm_ranking` excluded, optimization must focus on pipeline params: `entity_profiling` (model, temperature, schema, raw_content_limit), `web_search` (max_sites, num_results, content_char_limit, query_prefix), `token_matching` (max_token_candidates), `fuzzy_matching` (threshold, scorer).
-
-## Evaluated & Rejected Refactorings
-
-- **PromptDecomposition sub-model on OptSearchPoint**: Evaluated 2026-03-26 and rejected. 15+ `getattr(opt_sp, field)` iteration sites across 7 files depend on flat fields via `PROMPT_STRING_FIELDS`. Extracting to `opt_sp.prompt.field` would add indirection at every site without clarity gain.
-- **OptimizationMemory sub-model on OptSearchPoint**: 9 memory fields accessed from 5 files in fragmented patterns. No clean seam exists.
-
-## Navigation Guide
-
-1. **This file** — overview, commands, data models, conventions
-2. [`docs/architecture.md`](docs/architecture.md) — system design, two-loop diagram, two-layer tracing, caching, pipeline discovery, disk layout
-3. [`docs/optimization.md`](docs/optimization.md) — L1/L2/L3 optimization loop, critique agent, escalation, configuration
-4. [`docs/node-standard.md`](docs/node-standard.md) — node type hierarchy, `llm_call()` primitive, pipeline declaration format
-5. [`docs/sensitivity-scan.md`](docs/sensitivity-scan.md) — OAT scan workflow, coverage, circuit breaker
-6. [`docs/cli-workflow.md`](docs/cli-workflow.md) — full CLI subcommand reference, eval output format, export commands
-7. [`docs/prompt-scheme.md`](docs/prompt-scheme.md) — prompt decomposition (8 fields), rendering, variant library
-8. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M8, M9) + roadmap
-9. [`docs/observability.md`](docs/observability.md), [`docs/setup-guide.md`](docs/setup-guide.md), [`docs/benchmarks.md`](docs/benchmarks.md), [`docs/information-flow.md`](docs/information-flow.md)
-
+1. [`docs/architecture.md`](docs/architecture.md) — system design, two-loop diagram, caching, disk layout
+2. [`docs/optimization.md`](docs/optimization.md) — L1/L2/L3 loop, critique, escalation
+3. [`docs/prompt-scheme.md`](docs/prompt-scheme.md) — 8-field decomposition, variant library
+4. [`docs/sensitivity-scan.md`](docs/sensitivity-scan.md) — OAT scan, coverage
+5. [`docs/cli-workflow.md`](docs/cli-workflow.md) — full CLI reference, eval output format
+6. [`docs/node-standard.md`](docs/node-standard.md) — node types, `llm_call()` primitive
+7. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M8, M9)
+8. [`docs/observability.md`](docs/observability.md), [`docs/setup-guide.md`](docs/setup-guide.md), [`docs/benchmarks.md`](docs/benchmarks.md), [`docs/information-flow.md`](docs/information-flow.md)

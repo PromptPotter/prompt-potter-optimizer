@@ -87,7 +87,7 @@ The feedback cycle should pick queries that maximise information about which pro
 - After each round, analyze per-query diagnostic variance across rounds using `extract_sample_diagnostics()`
 - Drop "dead" queries: queries that always hit or always miss regardless of prompt variant carry zero discriminative power
 - Replace with "discriminating" queries from the full eval pool: queries whose outcome changes depending on configuration
-- Implementation in `optimization_loop.py` or a new `adaptive_eval.py` module called by the cycle
+- Implementation in `round_execution.py` (`adapt_eval_set()`) called by the optimization loop
 - Uses `LoopState.current_results` (already tracked per round) as input
 - If the method works, it can later be offered to the sensitivity scan as an option
 
@@ -109,7 +109,7 @@ The feedback cycle should pick queries that maximise information about which pro
 
 ### 2a. Statistically grounded sample sizing
 
-- `build_diagnostic_set()` uses `min_detectable_effect(n)` (in `promptpotter/services/search/_stats.py`) to compute minimum n for a target MDE
+- `build_diagnostic_set()` uses `min_detectable_effect(n)` (in `promptpotter/services/search/cohort_analysis.py`) to compute minimum n for a target MDE
 - If user-specified `scan_sample_size` is below minimum for detecting a 15% effect, auto-adjust upward with a warning
 - This alone would have prevented the "3 queries = no signal" problem
 
@@ -355,13 +355,13 @@ Wave 1 ✅  Wave 2 ✅  Wave 3 ✅  Wave 4 ✅
 | `compute_pipeline_metrics()` | Aggregate metrics from node types | `promptpotter/services/metrics.py:99` |
 | `_parse_backend_response()` | Assembles per-query pipeline_data from schema | `promptpotter/services/eval_query.py` |
 | `obs_extraction_map()` | Schema -> observation mapping | `promptpotter/models/pipeline_schema.py` |
-| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `promptpotter/services/search/_stats.py` (re-exported by `notebooks/campaign_lib/stats.py`) |
+| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `promptpotter/services/search/cohort_analysis.py` (re-exported by `notebooks/campaign_lib/optimize.py`) |
 | `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `promptpotter/services/search/smart_search.py:169` |
 | `LoopState` | Feedback cycle state (has `current_results` per round) | `promptpotter/services/campaign/state.py:38` |
 | `format_context_sections()` | Context injection point for LLM prompts | `promptpotter/services/campaign/formatting.py` |
 | `DatasetRunStore` | All historical evaluations (per-query results with pipeline_data) | `promptpotter/services/stores/dataset_run_store.py` |
 | `CampaignStore` | Campaign trials, lineage, configs | `promptpotter/services/stores/campaign_store.py` |
-| `PlanStore` | Smart search plans with axis_profiles | `promptpotter/services/stores/plan_store.py` |
+| `PlanStore` | Smart search plans with axis_profiles | `promptpotter/services/stores/stores.py` |
 | `build_pipeline_overview()` | Advisor context layer (pipeline structure) | `promptpotter/services/search/scan_advisor.py` |
 
 ---

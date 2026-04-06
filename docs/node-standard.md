@@ -190,5 +190,4 @@ Excluding `llm_ranking` makes `token_matching` the last exit point. Cached full-
 
 - **TermNorm pipeline config:** `GET /pipeline` endpoint (see TermNorm repo)
 - **Optimizer pipeline config:** [`promptpotter/config/optimizer_pipeline.json`](../promptpotter/config/optimizer_pipeline.json)
-- **M7 spec:** [`docs/specs/archive/m7-optimizer-pipeline.md`](specs/archive/m7-optimizer-pipeline.md)
 - **Observability:** [`docs/observability.md`](observability.md) — node tracing via `observed_node`

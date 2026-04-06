@@ -17,7 +17,7 @@
 | M8 | Campaign Intelligence | **Next** |
 | M9 | Multi-Connector Architecture | Future |
 
-Archived specs (M0-M7, governance docs): [`docs/specs/archive/`](archive/)
+Archived specs (M0-M7, governance docs) are in git history.
 
 ---
 
