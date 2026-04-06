@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from promptpotter.services.campaign.artifacts import CAMPAIGN_SESSION_ARTIFACTS
+from promptpotter.services.campaign.state import CAMPAIGN_SESSION_ARTIFACTS
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     must produce all CAMPAIGN_SESSION_ARTIFACTS."""
     from promptpotter.models.phase_event import PhaseEvent
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
-    from promptpotter.services.campaign.results import RoundResult
+    from promptpotter.services.campaign.state import RoundResult
 
     store = _make_mock_session_store(tmp_path)
 
@@ -154,7 +154,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
 
 def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
     """FileControlSurface reads control signals from campaign_state.json."""
-    from promptpotter.services.campaign.control_surface import FileControlSurface
+    from promptpotter.services.campaign.persistence_emitter import FileControlSurface
 
     state_path = session_dir / "campaign_state.json"
     state_path.write_text(json.dumps({
@@ -167,7 +167,7 @@ def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
 
 def test_control_surface_resumes(session_dir: Path) -> None:
     """FileControlSurface acknowledges resume by clearing to running."""
-    from promptpotter.services.campaign.control_surface import FileControlSurface
+    from promptpotter.services.campaign.persistence_emitter import FileControlSurface
 
     state_path = session_dir / "campaign_state.json"
     state_path.write_text(json.dumps({
@@ -184,7 +184,7 @@ def test_control_surface_resumes(session_dir: Path) -> None:
 
 def test_control_surface_l2_pause(session_dir: Path) -> None:
     """FileControlSurface honors pause_before_l2_eval at before_l2_eval checkpoint."""
-    from promptpotter.services.campaign.control_surface import FileControlSurface
+    from promptpotter.services.campaign.persistence_emitter import FileControlSurface
 
     state_path = session_dir / "campaign_state.json"
     state_path.write_text(json.dumps({

@@ -12,7 +12,12 @@ from promptpotter.services.campaign.init import (
 from promptpotter.services.campaign.persistence import (
     resolve_experiment_id as _resolve_experiment_id,
 )
-from promptpotter.services.campaign.results import RunResult
+from promptpotter.services.campaign.state import RunResult
+from promptpotter.services.search.cohort_analysis import (
+    min_detectable_effect,
+    proportion_test,
+    wilson_ci,
+)
 from promptpotter.shared.errors import is_error_result
 
 from .display import (
@@ -32,6 +37,7 @@ from .display import (
     _dbox_top,
     _fmt_delta,
     _fmt_query_result,
+    _print_interrupt_banner,
     format_pipeline_overrides,
     show_progress,
 )
@@ -43,23 +49,28 @@ from .phase_display import (
     _node_top,
     _pp_val,
 )
-from .stats import (
-    fmt_ci,
-    wilson_ci,
-)
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.callbacks import RunCallbacks
+    from promptpotter.services.campaign._campaign_utils import RunCallbacks
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.init import BackendSession
     from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.scan_results import ScanContext
 
 __all__ = [
+    # stats
+    "fmt_ci",
+    "fmt_pvalue",
+    # eval
+    "load_baseline_prompt",
+    "min_detectable_effect",
+    "proportion_test",
+    "run_baseline_eval",
     "run_optimization_notebook",
     "show_feedback_preflight",
     "show_progress",
+    "wilson_ci",
 ]
 
 
@@ -648,7 +659,7 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from promptpotter.services.campaign.callbacks import RunCallbacks, chain_callbacks
+    from promptpotter.services.campaign._campaign_utils import RunCallbacks, chain_callbacks
 
     notebook_display_cb = RunCallbacks(
         on_round_complete=_on_round,
@@ -704,3 +715,98 @@ async def run_optimization_notebook(
     format_pipeline_overrides(result.winner_pipeline_params, pipeline_schema)
 
     return campaign_rounds, result
+
+
+# ---------------------------------------------------------------------------
+# Statistical helpers (from stats.py)
+# ---------------------------------------------------------------------------
+
+
+def fmt_ci(lower: float, upper: float) -> str:
+    """Format a CI as '[X.X%-Y.Y%]'."""
+    return f"[{lower:.1%}-{upper:.1%}]"
+
+
+def fmt_pvalue(p: float) -> str:
+    """Format p-value with significance stars."""
+    if p < 0.001:
+        return "p<0.001 ***"
+    if p < 0.01:
+        return f"p={p:.3f} **"
+    if p < 0.05:
+        return f"p={p:.2f} *"
+    return f"p={p:.2f} (ns)"
+
+
+# ---------------------------------------------------------------------------
+# Baseline eval wrapper (from eval.py)
+# ---------------------------------------------------------------------------
+
+
+from promptpotter.services.campaign.init import (  # noqa: E402
+    load_baseline_prompt,
+)
+from promptpotter.services.campaign.init import (  # noqa: E402
+    run_baseline_eval as _run_baseline_eval,
+)
+
+
+async def run_baseline_eval(
+    baseline: OptSearchPoint,
+    dataset: list,
+    campaign_config: CampaignConfig,
+    session: BackendSession,
+    pipeline_params: dict | None = None,
+) -> tuple:
+    """Evaluate baseline prompt and initialize campaign_rounds.
+
+    Returns:
+        (campaign_rounds, baseline_results).
+    """
+    import asyncio
+
+    from tqdm.auto import tqdm
+
+    pbar = tqdm(total=len(dataset) or 1, desc="Baseline eval", unit="query")
+
+    def _on_result(result, index, total):
+        pbar.total = total
+        is_cached = result.get("cached", False)
+        tqdm.write(_fmt_query_result(result, cached=is_cached))
+        pbar.update(1)
+
+    from promptpotter.services.tracing.observability_logger import ObsLogger
+    _obs = ObsLogger(session.store.base_dir, session.backend_id, langfuse=None)
+
+    try:
+        campaign_rounds, baseline_results = await _run_baseline_eval(
+            baseline, dataset, session.backend_client,
+            pipeline_params=pipeline_params,
+            pipeline_schema=session.pipeline_schema,
+            store=session.store, backend_id=session.backend_id,
+            experiment_id=session.experiment_id,
+            on_result=_on_result,
+            index_terms=session.index_terms,
+            obs=_obs,
+        )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        _print_interrupt_banner(
+            "Baseline eval",
+            completed=f"{pbar.n}/{pbar.total} queries",
+            saved="completed results are cached (re-run to restart)",
+            resume_hint="re-run this cell to continue from checkpoint",
+        )
+        return [], []
+    finally:
+        pbar.close()
+
+    show_progress(campaign_rounds)
+
+    failures = [r for r in baseline_results if not r["hit"] and not is_error_result(r)]
+    for r in failures[:5]:
+        print(
+            f"  MISS: {r['query'][:55]}  |  "
+            f"Pred: {r['predicted'][:35]}  |  GT: {r['ground_truth'][:35]}"
+        )
+
+    return campaign_rounds, baseline_results

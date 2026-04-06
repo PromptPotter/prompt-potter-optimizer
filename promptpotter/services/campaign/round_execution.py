@@ -1,6 +1,7 @@
 """Round execution — generate, evaluate, select winner, update state.
 
-Handles individual round mechanics for the feedback cycle. Escalation
+Handles individual round mechanics for the feedback cycle. Includes
+adaptive eval set sampling (formerly adaptive_eval.py). Escalation
 logic (L2/L3) lives in ``escalation.py``; campaign lifecycle
 (create/resume/finalize) lives in ``lifecycle.py``.
 """
@@ -8,6 +9,7 @@ logic (L2/L3) lives in ``escalation.py``; campaign lifecycle
 from __future__ import annotations
 
 import logging
+import random
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
@@ -15,10 +17,10 @@ from promptpotter.models.opt_search_point import OptSearchPoint
 # Module-level import for test monkeypatching.
 from promptpotter.services import llm_client as _llm_client
 from promptpotter.services.campaign._campaign_utils import (
+    RunCallbacks,
     candidate_summaries,
     emit_phase,
 )
-from promptpotter.services.campaign.callbacks import RunCallbacks
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import (
     CritiqueAgent,
@@ -27,13 +29,13 @@ from promptpotter.services.campaign.critique import (
     sample_thinking_styles,
     update_query_tracker,
 )
-from promptpotter.services.campaign.results import RoundResult
-from promptpotter.services.campaign.state import LoopState
+from promptpotter.services.campaign.state import LoopState, RoundResult
 from promptpotter.services.tracing.node_tracer import observed_node
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.models.analysis import QueryDifficulty
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.escalation import DegradationCheck
     from promptpotter.services.campaign.l1_optimizer import L1EvalResult
@@ -42,7 +44,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PauseForReviewError", "execute_round", "update_round_state"]
+__all__ = ["PauseForReviewError", "adapt_eval_set", "execute_round", "update_round_state"]
 
 
 class PauseForReviewError(Exception):
@@ -462,5 +464,74 @@ def update_round_state(
 
 
 # ---------------------------------------------------------------------------
-# Layer escalation helpers
+# Adaptive eval set sampling (formerly adaptive_eval.py)
 # ---------------------------------------------------------------------------
+
+# Never drop more than this fraction of the eval set per adaptation
+_MAX_DROP_FRACTION = 0.25
+
+# Minimum rounds of history before adaptation kicks in
+MIN_ROUNDS_FOR_ADAPTATION = 3
+
+
+def adapt_eval_set(
+    current_dataset: list[dict],
+    query_difficulty: QueryDifficulty,
+    full_pool: list[dict],
+    *,
+    seed: int = 42,
+) -> tuple[list[dict], dict]:
+    """Replace dead queries with discriminating ones from the full pool.
+
+    Args:
+        current_dataset: Current evaluation subset.
+        query_difficulty: Precomputed difficulty classification.
+        full_pool: Full evaluation dataset to draw replacements from.
+        seed: Random seed for reproducible sampling.
+
+    Returns:
+        Tuple of (new_dataset, summary_dict).
+    """
+    current_queries = {d["query"] for d in current_dataset}
+    pool_by_query = {d["query"]: d for d in full_pool}
+    n_original = len(current_dataset)
+    max_drop = max(1, int(n_original * _MAX_DROP_FRACTION))
+
+    # Find dead queries in current eval set
+    dead_in_current = {
+        p.query for p in query_difficulty.dead if p.query in current_queries
+    }
+    to_drop = sorted(dead_in_current)[:max_drop]
+
+    # Find discriminating queries NOT in current eval set
+    disc_available = [
+        p.query for p in query_difficulty.discriminating
+        if p.query not in current_queries and p.query in pool_by_query
+    ]
+
+    if not to_drop or not disc_available:
+        return current_dataset, {"dropped": 0, "added": 0, "unchanged": True}
+
+    rng = random.Random(seed)
+    rng.shuffle(disc_available)
+    n_swap = min(len(to_drop), len(disc_available))
+    replacements = disc_available[:n_swap]
+
+    # Build new eval set — only drop as many as we can replace
+    drop_set = set(to_drop[:n_swap])
+    new_data = [d for d in current_dataset if d["query"] not in drop_set]
+    for q in replacements:
+        new_data.append(pool_by_query[q])
+
+    logger.info(
+        "Adaptive sampling: dropped %d dead queries, added %d discriminating",
+        len(drop_set), len(replacements),
+    )
+
+    return new_data, {
+        "dropped": len(drop_set),
+        "added": len(replacements),
+        "dropped_queries": list(drop_set),
+        "added_queries": replacements,
+        "unchanged": False,
+    }

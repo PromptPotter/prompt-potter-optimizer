@@ -341,8 +341,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     session.store.sessions.save(bid, sid, state)
 
     # Bidirectional control — CLI provides FileControlSurface as on_checkpoint
-    from promptpotter.services.campaign.callbacks import RunCallbacks
-    from promptpotter.services.campaign.control_surface import FileControlSurface
+    from promptpotter.services.campaign._campaign_utils import RunCallbacks
+    from promptpotter.services.campaign.persistence_emitter import FileControlSurface
 
     session_dir = session.store.sessions._session_dir(bid, sid)
     control = FileControlSurface(session_dir / "campaign_state.json")
@@ -350,7 +350,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     # Round recorder — write rounds/round_NNN.json with full action traces
     from promptpotter.config.optimizer_pipeline import set_round_recorder
-    from promptpotter.services.campaign.round_recorder import RoundRecorder
+    from promptpotter.services.campaign.persistence_emitter import RoundRecorder
 
     recorder = RoundRecorder(session_dir / "rounds")
     set_round_recorder(recorder)

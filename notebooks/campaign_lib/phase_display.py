@@ -16,6 +16,11 @@ from promptpotter.models.phase_event import PhaseEvent
 if TYPE_CHECKING:
     from promptpotter.services.search.scan_results import ScanContext
 
+from promptpotter.services.search.cohort_analysis import (
+    min_detectable_effect,
+    proportion_test,
+)
+
 from .display import (
     BOLD,
     CYAN,
@@ -32,11 +37,17 @@ from .display import (
     _fmt_delta,
     _scoreboard,
 )
-from .stats import (
-    fmt_pvalue,
-    min_detectable_effect,
-    proportion_test,
-)
+
+
+def fmt_pvalue(p: float) -> str:
+    """Format p-value with significance stars."""
+    if p < 0.001:
+        return "p<0.001 ***"
+    if p < 0.01:
+        return f"p={p:.3f} **"
+    if p < 0.05:
+        return f"p={p:.2f} *"
+    return f"p={p:.2f} (ns)"
 
 # ---------------------------------------------------------------------------
 # Display state — tracks cycle metadata across callbacks (display-only)

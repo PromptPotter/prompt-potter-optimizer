@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.search.preview import preview as _preview
+from promptpotter.services.search.cohort_analysis import preview as _preview
 from promptpotter.services.search.smart_search import (
     ScanEvent,
     _make_eval_fn,

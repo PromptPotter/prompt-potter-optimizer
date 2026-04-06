@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import re
 
+from promptpotter.services.search.cohort_analysis import wilson_ci
 from promptpotter.shared.errors import is_error_result
 
-from .stats import fmt_ci, wilson_ci
+
+def fmt_ci(lower: float, upper: float) -> str:
+    """Format a CI as '[X.X%-Y.Y%]'."""
+    return f"[{lower:.1%}-{upper:.1%}]"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 

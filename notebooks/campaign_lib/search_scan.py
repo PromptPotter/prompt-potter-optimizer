@@ -398,7 +398,7 @@ async def run_sensitivity_scan(
         (scan_baseline_sp, scan_df, axis_profiles) — the JobSearchPoint
         baseline, per-variant DataFrame, and axis profile list.
     """
-    from .search_baseline import prepare_scan_baseline
+    from .search import prepare_scan_baseline
 
     scan_baseline_sp, search_baseline, _scan_diag = await prepare_scan_baseline(
         baseline, campaign_config,

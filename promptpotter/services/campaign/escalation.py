@@ -24,8 +24,7 @@ from promptpotter.shared.errors import EscalationError
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import RunConfig
-    from promptpotter.services.campaign.results import StopReason
-    from promptpotter.services.campaign.state import LoopState
+    from promptpotter.services.campaign.state import LoopState, StopReason
     from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
@@ -427,8 +426,8 @@ async def escalate_l2(
     When *from_degradation* is True, L2/L3 patience exhaustion resets counters
     instead of stopping — the degradation investigation loop continues.
     """
-    from promptpotter.services.campaign.results import StopReason
     from promptpotter.services.campaign.round_execution import PauseForReviewError
+    from promptpotter.services.campaign.state import StopReason
 
     esc = state.escalation
 

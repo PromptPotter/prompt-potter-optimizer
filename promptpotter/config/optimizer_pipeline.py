@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.round_recorder import RoundRecorder
+    from promptpotter.services.campaign.persistence_emitter import RoundRecorder
 
 from promptpotter.services.llm_client import LLMClientBase, LLMResponse
 

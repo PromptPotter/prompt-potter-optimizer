@@ -1,12 +1,20 @@
-"""Mutable state types — LoopState, EscalationCounters, RunBackendSession."""
+"""Campaign types — outcome models, artifact manifest, mutable loop state.
+
+Consolidates:
+- StopReason, RoundResult, RunResult (formerly results.py)
+- CAMPAIGN_SESSION_ARTIFACTS (formerly artifacts.py)
+- EscalationCounters, LoopState, RunBackendSession
+"""
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, Field
+
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.search_point import JobSearchPoint
-from promptpotter.services.campaign.results import RoundResult
 
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
@@ -14,7 +22,87 @@ if TYPE_CHECKING:
     from promptpotter.services.campaign.escalation import DegradationCheck
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
 
-__all__ = ["EscalationCounters", "LoopState", "RunBackendSession"]
+__all__ = [
+    "CAMPAIGN_SESSION_ARTIFACTS",
+    "EscalationCounters",
+    "LoopState",
+    "RoundResult",
+    "RunBackendSession",
+    "RunResult",
+    "StopReason",
+]
+
+# ---------------------------------------------------------------------------
+# Artifact manifest
+# ---------------------------------------------------------------------------
+
+CAMPAIGN_SESSION_ARTIFACTS = {
+    "campaign_state.json",
+    "campaign_output.log",
+    "campaign_log.md",
+    "session.json",
+}
+
+# ---------------------------------------------------------------------------
+# Outcome models
+# ---------------------------------------------------------------------------
+
+
+class StopReason(enum.StrEnum):
+    """Feedback cycle termination reasons."""
+
+    PATIENCE = "patience_exhausted"
+    PERFECT = "perfect_score"
+    MAX_ROUNDS = "max_rounds"
+    INTERRUPTED = "interrupted"
+    ABORT = "escalation_abort"
+    L2_PATIENCE = "l2_patience_exhausted"
+    L3_PATIENCE = "l3_patience_exhausted"
+    HARD_CAP = "hard_cap_reached"
+    PAUSED_FOR_REVIEW = "paused_for_review"
+    USER_PAUSED = "user_paused"
+    USER_STOPPED = "user_stopped"
+
+
+class RoundResult(BaseModel):
+    """Result of a single feedback cycle round."""
+
+    round: int
+    label: str
+    accuracy: float
+    composite: float = 0.0
+    hits: int
+    total: int
+    improved: bool
+    prompt_fields: dict
+    pipeline_params: dict | None = None
+    results: list[dict] = Field(default_factory=list)
+    candidates_evaluated: int
+    candidate_scores: list[dict] = Field(default_factory=list)
+    degraded_queries: int = 0
+    escalation_signal: dict | None = None
+
+
+class RunResult(BaseModel):
+    """Final result of the feedback cycling process."""
+
+    rounds: list[RoundResult]
+    n_rounds: int
+    best_accuracy: float
+    best_round: int
+    baseline_accuracy: float
+    winner_prompt_fields: dict
+    winner_pipeline_params: dict | None = None
+    stop_reason: str
+    started_at: str
+    finished_at: str
+    langfuse_trace_id: str | None = None
+    cycle_id: str | None = None
+    resumed_from_round: int = 0
+
+# ---------------------------------------------------------------------------
+# Mutable loop state
+# ---------------------------------------------------------------------------
 
 
 @dataclass

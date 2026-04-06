@@ -1,21 +1,13 @@
-"""Campaign persistence emitter — writes campaign_state.json + campaign_output.log.
+"""Campaign persistence — emitter, control surface, and round recorder.
+
+Consolidates all file-based campaign I/O:
+- CampaignPersistenceEmitter — writes campaign_state.json + campaign_output.log
+- FileControlSurface — reads control signals from campaign_state.json
+- RoundRecorder — writes round_NNN.json action traces
 
 Auto-created by ``run_optimization()`` so every entry point (notebook, CLI,
-web app) produces identical persistent artifacts.  Display and control are
-separate layers — see CLAUDE.md § Three-layer I/O architecture.
-
-Produces two files in the session directory:
-
-1. ``campaign_state.json`` — single JSON, overwritten on every update.
-   Contains execution state + accumulator arrays (queries within current
-   candidate, candidates within current round).  Resets accumulators on
-   candidate/round transitions.  Supports ``resume_from`` to carry over
-   historical counters across cycles.
-
-   The ``control`` section is written with defaults.  A separate
-   ``FileControlSurface`` reads it back for bidirectional control.
-
-2. ``campaign_output.log`` — append-only plain-text log.
+web app) produces identical persistent artifacts.  Display is a separate
+layer — see CLAUDE.md § Three-layer I/O architecture.
 """
 
 from __future__ import annotations
@@ -24,17 +16,18 @@ import json
 import logging
 import re
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from promptpotter.models.phase_event import PhaseEvent
-    from promptpotter.services.campaign.results import RoundResult
-    from promptpotter.services.stores.session_store import SessionStore
+    from promptpotter.services.campaign.state import RoundResult
+    from promptpotter.services.stores.stores import SessionStore
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CampaignPersistenceEmitter"]
+__all__ = ["CampaignPersistenceEmitter", "FileControlSurface", "RoundRecorder"]
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -425,3 +418,173 @@ class CampaignPersistenceEmitter:
 def _is_error(result: dict) -> bool:
     pd = result.get("pipeline_data") or {}
     return pd.get("error") is not None or result.get("error") is not None
+
+
+# ---------------------------------------------------------------------------
+# Bidirectional control surface
+# ---------------------------------------------------------------------------
+
+
+class FileControlSurface:
+    """Reads control signals from ``campaign_state.json`` at checkpoints.
+
+    The persistence emitter writes the file; this class only reads the
+    ``control`` section back.  Returns ``"pause"`` or ``"stop"`` when the
+    user requested it, else ``None``.
+    """
+
+    def __init__(self, state_path: Path) -> None:
+        self.state_path = state_path
+
+    def check(self, checkpoint_name: str) -> str | None:
+        """Read control section. Returns action or None.
+
+        Called at natural checkpoints (after_round, before_l2, before_l3).
+        """
+        try:
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+        control = data.get("control", {})
+        requested = control.get("requested_state", "running")
+
+        if requested == "resume":
+            # Acknowledge resume: overwrite control to running
+            data["control"]["requested_state"] = "running"
+            self.state_path.write_text(
+                json.dumps(data, indent=2, default=str), encoding="utf-8",
+            )
+            logger.info("Control: resume acknowledged at %s", checkpoint_name)
+            return None
+
+        if requested == "pause":
+            logger.info("Control: pause requested at %s", checkpoint_name)
+            return "pause"
+
+        if requested == "stop":
+            logger.info("Control: stop requested at %s", checkpoint_name)
+            return "stop"
+
+        # Check L2-specific pause
+        if checkpoint_name == "before_l2_eval" and control.get("pause_before_l2_eval"):
+            logger.info("Control: pause_before_l2_eval active at %s", checkpoint_name)
+            return "pause"
+
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Round recorder
+# ---------------------------------------------------------------------------
+
+
+class RoundRecorder:
+    """Accumulates actions within a round, writes ``round_NNN.json`` on flush."""
+
+    def __init__(self, rounds_dir: Path) -> None:
+        self.rounds_dir = rounds_dir
+        self._current_round: int = 0
+        self._actions: list[dict[str, Any]] = []
+        self._started_at: str = ""
+        self._has_escalation = False
+
+    def begin_round(self, round_num: int) -> None:
+        """Start recording a new round. Flushes any pending actions."""
+        if self._actions:
+            logger.warning(
+                "RoundRecorder: unflushed actions from round %d discarded",
+                self._current_round,
+            )
+        self._current_round = round_num
+        self._actions = []
+        self._started_at = datetime.now(UTC).isoformat()
+        self._has_escalation = False
+
+    def add_action(self, action: dict[str, Any]) -> None:
+        """Append an action to the current round's trace."""
+        action.setdefault("timestamp", datetime.now(UTC).isoformat())
+        if action.get("type") in ("l2_refine_context", "l3_modify_plan"):
+            self._has_escalation = True
+        self._actions.append(action)
+
+    def flush(self, state_snapshot: dict[str, Any] | None = None) -> Path | None:
+        """Write the round file and reset. Returns the written path."""
+        if not self._actions:
+            return None
+
+        self.rounds_dir.mkdir(parents=True, exist_ok=True)
+
+        suffix = ""
+        if self._has_escalation:
+            for a in self._actions:
+                if a.get("type") == "l2_refine_context":
+                    suffix = "_l2"
+                    break
+                if a.get("type") == "l3_modify_plan":
+                    suffix = "_l3"
+                    break
+
+        filename = f"round_{self._current_round:03d}{suffix}.json"
+        path = self.rounds_dir / filename
+
+        record = {
+            "round": self._current_round,
+            "started_at": self._started_at,
+            "finished_at": datetime.now(UTC).isoformat(),
+            "actions": self._actions,
+        }
+        if state_snapshot:
+            record["state_snapshot"] = state_snapshot
+
+        path.write_text(
+            json.dumps(record, indent=2, default=str, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.debug(
+            "Round %d recorded: %d actions → %s",
+            self._current_round,
+            len(self._actions),
+            filename,
+        )
+
+        self._actions = []
+        self._has_escalation = False
+        return path
+
+    def record_round_outcome(
+        self,
+        round_result: Any,
+        state: Any,
+    ) -> Path | None:
+        """Record eval + decision actions for a normal round, then flush.
+
+        Encapsulates the serialization format so the optimization loop
+        doesn't need to know the recorder's schema.
+        """
+        self.add_action({
+            "type": "l1_evaluate",
+            "n_candidates": round_result.candidates_evaluated,
+            "n_queries": round_result.total,
+            "candidates": round_result.candidate_scores,
+        })
+        self.add_action({
+            "type": "decision",
+            "winner": round_result.label,
+            "accuracy": round_result.accuracy,
+            "composite": round_result.composite,
+            "improved": round_result.improved,
+            "stall_count": state.stall_count,
+            "winner_prompt_fields": round_result.prompt_fields,
+            "winner_pipeline_params": round_result.pipeline_params,
+        })
+        return self.flush(state_snapshot={
+            "opt_search_point_id": state.opt_sp.id,
+            "l2_directive": state.opt_sp.l2_directive or "",
+            "escalation_counters": {
+                "l2_stall": state.escalation.l2_stall_count,
+                "l3_stall": state.escalation.l3_stall_count,
+                "l2_round": state.escalation.l2_round,
+                "l3_round": state.escalation.l3_round,
+            },
+        })

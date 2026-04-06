@@ -7,8 +7,7 @@
 
 | Milestone | Spec file | Pre-reading hint |
 |-----------|-----------|-----------------|
-| Parity: Entry-Point Parity | [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md) | `promptpotter/services/campaign/persistence_emitter.py`, `promptpotter/services/campaign/optimization_loop.py`, `notebooks/campaign_lib/optimize.py`, `promptpotter/services/campaign/callbacks.py` |
 | M8: Campaign Intelligence | [`m8-campaign-intelligence.md`](m8-campaign-intelligence.md) | `promptpotter/services/eval_gateway.py`, `promptpotter/services/eval_query.py`, `promptpotter/services/search/smart_search.py`, `promptpotter/services/campaign/l1_optimizer.py`, `promptpotter/services/search/search_memory.py` |
 | M9: Multi-Connector | [`m9-multi-connector.md`](m9-multi-connector.md) | `promptpotter/services/backend_client.py` |
 
-Archived specs (M0-M7, governance docs) are in [`docs/specs/archive/`](archive/).
+Archived specs (M0-M7) are in git history. Entry-point parity docs absorbed into CLAUDE.md § Three-layer I/O architecture.

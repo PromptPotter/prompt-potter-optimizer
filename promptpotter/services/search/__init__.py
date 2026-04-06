@@ -25,13 +25,6 @@ from promptpotter.services.search.coverage import (
 # eval_dataset
 from promptpotter.services.search.eval_dataset import load_eval_dataset
 
-# plan_persistence
-from promptpotter.services.search.plan_persistence import (
-    deserialize_smart_search_plan,
-    serialize_smart_search_plan,
-    smart_search_plan_identity,
-)
-
 # scan_advisor
 from promptpotter.services.search.scan_advisor import (
     advise_scan_config,
@@ -54,12 +47,16 @@ from promptpotter.services.search.scan_results import (
 )
 from promptpotter.services.search.sensitivity_scanner import sensitivity_scan
 
+# plan persistence (in smart_search)
 # smart_search
 from promptpotter.services.search.smart_search import (
     ScanEvent,
     build_diagnostic_set,
+    deserialize_smart_search_plan,
     filter_variant_library,
     load_filtered_variant_library,
+    serialize_smart_search_plan,
+    smart_search_plan_identity,
 )
 
 __all__ = [

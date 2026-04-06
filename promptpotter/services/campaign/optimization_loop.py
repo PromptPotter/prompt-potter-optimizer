@@ -22,9 +22,7 @@ from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.phase_event import PhaseEvent
 from promptpotter.services.backend_client import BackendClient
-from promptpotter.services.campaign._campaign_utils import emit_phase, get_obs_trace
-from promptpotter.services.campaign.adaptive_eval import adapt_eval_set
-from promptpotter.services.campaign.callbacks import RunCallbacks
+from promptpotter.services.campaign._campaign_utils import RunCallbacks, emit_phase, get_obs_trace
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import sample_thinking_styles
 from promptpotter.services.campaign.escalation import escalate_l2
@@ -32,13 +30,19 @@ from promptpotter.services.campaign.lifecycle import (
     finalize_campaign,
     init_campaign,
 )
-from promptpotter.services.campaign.results import RoundResult, RunResult, StopReason
 from promptpotter.services.campaign.round_execution import (
     PauseForReviewError,
+    adapt_eval_set,
     execute_round,
     update_round_state,
 )
-from promptpotter.services.campaign.state import LoopState, RunBackendSession
+from promptpotter.services.campaign.state import (
+    LoopState,
+    RoundResult,
+    RunBackendSession,
+    RunResult,
+    StopReason,
+)
 from promptpotter.services.eval_gateway import subsample_dataset
 from promptpotter.services.metrics import compile_query_difficulty, compute_composite_score
 from promptpotter.services.search.scan_results import ScanContext
@@ -502,7 +506,7 @@ async def _init_cycle_state(
         _session_dir = Path(config.project_root) / config.backend_id / "sessions" / config.session_id
         _session_store = None
         if _store:
-            from promptpotter.services.stores.session_store import SessionStore
+            from promptpotter.services.stores.stores import SessionStore
             _session_store = SessionStore(Path(config.project_root))
 
         resume_from = CampaignPersistenceEmitter.load_resume_state(
@@ -669,7 +673,7 @@ async def run_optimization(
 
     # Chain persistence callbacks (fires first) with caller display callbacks
     if _emitter:
-        from promptpotter.services.campaign.callbacks import chain_callbacks
+        from promptpotter.services.campaign._campaign_utils import chain_callbacks
 
         persistence_cb = RunCallbacks(
             on_phase=_emitter.on_phase,

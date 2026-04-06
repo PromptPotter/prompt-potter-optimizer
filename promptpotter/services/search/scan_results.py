@@ -81,12 +81,13 @@ async def resume_or_build_diagnostic(
 
     from promptpotter.config.settings import load_variant_library
     from promptpotter.services.search.context import decompose_prompt_fields
-    from promptpotter.services.search.plan_persistence import (
+    from promptpotter.services.search.smart_search import (
+        _profiles_from_rows,
+        build_diagnostic_set,
         deserialize_smart_search_plan,
         serialize_smart_search_plan,
         smart_search_plan_identity,
     )
-    from promptpotter.services.search.smart_search import _profiles_from_rows, build_diagnostic_set
 
     ss = campaign_config.get("smart_search", {})
     if variant_library is None:

@@ -28,12 +28,10 @@ Layout on disk::
 
 from pathlib import Path
 
-from promptpotter.services.stores.backend_store import BackendStore
 from promptpotter.services.stores.campaign_store import CampaignStore
 from promptpotter.services.stores.dataset_run_store import DatasetRunStore
 from promptpotter.services.stores.intermediate_cache import IntermediateCache
-from promptpotter.services.stores.plan_store import PlanStore
-from promptpotter.services.stores.session_store import SessionStore
+from promptpotter.services.stores.stores import BackendStore, PlanStore, SessionStore
 
 BASE_DIR = Path(".promptpotter") / "projects"
 

@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.pipeline_schema import is_result_step_compatible
 from promptpotter.services.project_store import ProjectStore
-from promptpotter.services.search.plan_persistence import deserialize_smart_search_plan
-from promptpotter.services.search.preview import preview
+from promptpotter.services.search.cohort_analysis import preview
+from promptpotter.services.search.smart_search import deserialize_smart_search_plan
 from promptpotter.services.stores.dataset_run_store import config_hash
 from promptpotter.shared.constants import DEFAULT_DIAGNOSTIC_QUERIES, PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import HASH_TRUNCATE
