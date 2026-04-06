@@ -38,7 +38,7 @@ from promptpotter.services.search.scan_advisor import (
     resolve_schema_axes,
     advisory_to_scan_variants,
 )
-from promptpotter.services.search.scan_baseline import (
+from promptpotter.services.search.scan_results import (
     decompose_scan_baseline as _decompose_scan_baseline,
 )
 from promptpotter.services.search.scan_results import (

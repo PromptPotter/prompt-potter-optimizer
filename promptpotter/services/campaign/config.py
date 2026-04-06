@@ -274,6 +274,7 @@ class PipelineConfigResult:
     pipeline_params: dict
     active_nodes: list[str]
     excluded_nodes: list[str]
+    filtered_schema: PipelineSchema | None = None
 
 
 def configure_pipeline(
@@ -328,10 +329,16 @@ def configure_pipeline(
 
     campaign_config["pipeline_params"] = pipeline_params
 
+    # Filter schema to active nodes only
+    filtered = pipeline_schema
+    if pipeline_schema and exclude:
+        filtered = pipeline_schema.filter_to_steps(active)
+
     return PipelineConfigResult(
         pipeline_params=pipeline_params,
         active_nodes=active,
         excluded_nodes=list(exclude) if exclude else [],
+        filtered_schema=filtered,
     )
 
 

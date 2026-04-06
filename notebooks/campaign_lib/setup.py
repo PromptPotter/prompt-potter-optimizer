@@ -198,9 +198,9 @@ def configure_pipeline(session: BackendContext, campaign_config: CampaignConfig)
         exp_data=getattr(session, "exp_data", None),
     )
 
-    # Replace schema with filtered version — excluded nodes cease to exist
-    if session.pipeline_schema and result.excluded_nodes:
-        session.pipeline_schema = session.pipeline_schema.filter_to_steps(result.active_nodes)
+    # Apply filtered schema — excluded nodes cease to exist
+    if result.filtered_schema is not None:
+        session.pipeline_schema = result.filtered_schema
 
     # Set display tags from finalized schema (drives eval output formatting)
     from .display import set_display_tags

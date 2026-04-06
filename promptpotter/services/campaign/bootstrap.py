@@ -449,7 +449,7 @@ async def run_baseline_eval(
     from promptpotter.services.eval_gateway import eval_search_point
 
     if not dataset and store and experiment_id:
-        from promptpotter.services.search.eval_dataset import load_eval_dataset
+        from promptpotter.services.search.context import load_eval_dataset
 
         dataset = load_eval_dataset(store, backend_id, experiment_id)
 

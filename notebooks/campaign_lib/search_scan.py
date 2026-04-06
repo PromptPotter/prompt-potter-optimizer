@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.search.adaptive_searcher import adaptive_search as _adaptive_search
+from promptpotter.services.search.smart_search import adaptive_search as _adaptive_search
 from promptpotter.services.search.sensitivity_scanner import sensitivity_scan as _sensitivity_scan
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 

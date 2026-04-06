@@ -73,55 +73,40 @@ def _md_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def render_comparison_table(comparison: dict[str, Any]) -> str:
-    """Render campaign comparison as a markdown table.
-
-    Columns: Strategy | Baseline | Best | Delta | 95% CI | Rounds | Budget | Stop Reason
-    """
-    headers = ["Strategy", "Baseline", "Best", "Delta", "95% CI", "Rounds", "Budget", "Stop"]
-    rows = []
-    for s in comparison["summary_table"]:
-        rows.append(
-            [
-                s["name"],
-                _fmt_pct(s["baseline"]),
-                _fmt_pct(s["best"]),
-                f"+{s['improvement']:.1%}" if s["improvement"] > 0 else _fmt_pct(s["improvement"]),
-                _fmt_ci(s["ci_lower"], s["ci_upper"]),
-                str(s["rounds_to_best"]),
-                str(s["eval_budget"]),
-                s.get("stop_reason", ""),
-            ]
-        )
-    return _md_table(headers, rows)
-
-
-def render_significance_table(comparison: dict[str, Any]) -> str:
-    """Render pairwise significance tests between campaigns."""
-    pairs = comparison.get("pairwise_significance", [])
-    if not pairs:
-        return ""
-
-    headers = ["Campaign A", "Campaign B", "p-value", "Significance"]
-    rows = [
-        [p["campaign_a"], p["campaign_b"], f"{p['p_value']:.4f}", _fmt_pvalue(p["p_value"])]
-        for p in pairs
+def _comparison_rows(data: dict[str, Any]) -> list[list[str]]:
+    return [
+        [
+            s["name"],
+            _fmt_pct(s["baseline"]),
+            _fmt_pct(s["best"]),
+            f"+{s['improvement']:.1%}" if s["improvement"] > 0 else _fmt_pct(s["improvement"]),
+            _fmt_ci(s["ci_lower"], s["ci_upper"]),
+            str(s["rounds_to_best"]),
+            str(s["eval_budget"]),
+            s.get("stop_reason", ""),
+        ]
+        for s in data["summary_table"]
     ]
-    return _md_table(headers, rows)
 
 
-def render_convergence_table(comparison: dict[str, Any]) -> str:
-    """Per-round accuracy for all campaigns, side by side."""
-    convergence = comparison.get("convergence", {})
-    if not convergence:
-        return ""
+def _significance_rows(data: dict[str, Any]) -> list[list[str]]:
+    return [
+        [p["campaign_a"], p["campaign_b"], f"{p['p_value']:.4f}", _fmt_pvalue(p["p_value"])]
+        for p in data["pairwise_significance"]
+    ]
 
+
+def _convergence_headers(data: dict[str, Any]) -> list[str]:
+    return ["Round", *data["convergence"].keys()]
+
+
+def _convergence_rows(data: dict[str, Any]) -> list[list[str]]:
+    convergence = data["convergence"]
     campaign_ids = list(convergence.keys())
     all_rounds: set[int] = set()
     for series in convergence.values():
         all_rounds.update(entry["round"] for entry in series)
 
-    headers = ["Round", *campaign_ids]
     rows = []
     for r in sorted(all_rounds):
         row = [str(r)]
@@ -130,18 +115,12 @@ def render_convergence_table(comparison: dict[str, Any]) -> str:
             match = next((e for e in series if e["round"] == r), None)
             row.append(_fmt_pct(match["accuracy"]) if match else "-")
         rows.append(row)
-    return _md_table(headers, rows)
+    return rows
 
 
-def render_parameter_impact_table(memory_summary: dict[str, Any]) -> str:
-    """Axis impact ranking table."""
-    impacts = memory_summary.get("parameter_impact", [])
-    if not impacts:
-        return ""
-
-    headers = ["Axis", "Effect Size", "Consistency", "Classification", "Best Value", "n"]
+def _parameter_impact_rows(data: dict[str, Any]) -> list[list[str]]:
     rows = []
-    for ai in impacts:
+    for ai in data["parameter_impact"]:
         top_val = ai["top_values"][0]["value"] if ai["top_values"] else "-"
         rows.append(
             [
@@ -153,36 +132,25 @@ def render_parameter_impact_table(memory_summary: dict[str, Any]) -> str:
                 str(ai["sample_count"]),
             ]
         )
-    return _md_table(headers, rows)
+    return rows
 
 
-def render_failure_analysis_table(failures: list[dict[str, Any]]) -> str:
-    """Failure pattern table."""
-    if not failures:
-        return ""
-
-    headers = ["Pattern", "Count", "Fraction", "Example Queries"]
-    rows = [
+def _failure_rows(data: list[dict[str, Any]]) -> list[list[str]]:
+    return [
         [
             f["pattern"],
             str(f["query_count"]),
             _fmt_pct(f["fraction"]),
             "; ".join(f["example_queries"][:2]),
         ]
-        for f in failures
+        for f in data
     ]
-    return _md_table(headers, rows)
 
 
-def render_query_difficulty_summary(difficulty: dict[str, Any]) -> str:
-    """Query classification summary table."""
-    s = difficulty.get("summary", {})
-    if not s:
-        return ""
-
-    headers = ["Class", "Count", "Fraction"]
+def _difficulty_rows(data: dict[str, Any]) -> list[list[str]]:
+    s = data["summary"]
     total = s.get("total", 1) or 1
-    rows = [
+    return [
         ["Easy (hit rate >= 80%)", str(s.get("n_easy", 0)), _fmt_pct(s["n_easy"] / total)],
         [
             "Discriminating (var >= 0.1)",
@@ -192,24 +160,84 @@ def render_query_difficulty_summary(difficulty: dict[str, Any]) -> str:
         ["Hard (0 < hit rate < 20%)", str(s.get("n_hard", 0)), _fmt_pct(s["n_hard"] / total)],
         ["Dead (hit rate = 0%)", str(s.get("n_dead", 0)), _fmt_pct(s["n_dead"] / total)],
     ]
-    return _md_table(headers, rows)
 
 
-def render_trend_table(trends: list[dict[str, Any]]) -> str:
-    """Round-over-round stability table."""
-    if not trends:
-        return ""
-
-    headers = ["Transition", "Improved", "Regressed", "Unchanged"]
-    rows = [
+def _trend_rows(data: list[dict[str, Any]]) -> list[list[str]]:
+    return [
         [
             f"R{t['from_round']}->R{t['to_round']}",
             str(t["n_improved"]),
             str(t["n_regressed"]),
             str(t["n_unchanged"]),
         ]
-        for t in trends
+        for t in data
     ]
+
+
+_TableConfig = dict[str, Any]
+
+_TABLE_CONFIGS: dict[str, _TableConfig] = {
+    "comparison": {
+        "headers": ["Strategy", "Baseline", "Best", "Delta", "95% CI", "Rounds", "Budget", "Stop"],
+        "rows": _comparison_rows,
+        "guard": None,
+    },
+    "significance": {
+        "headers": ["Campaign A", "Campaign B", "p-value", "Significance"],
+        "rows": _significance_rows,
+        "guard": "pairwise_significance",
+    },
+    "convergence": {
+        "headers": _convergence_headers,
+        "rows": _convergence_rows,
+        "guard": "convergence",
+    },
+    "parameter_impact": {
+        "headers": ["Axis", "Effect Size", "Consistency", "Classification", "Best Value", "n"],
+        "rows": _parameter_impact_rows,
+        "guard": "parameter_impact",
+    },
+    "failure_analysis": {
+        "headers": ["Pattern", "Count", "Fraction", "Example Queries"],
+        "rows": _failure_rows,
+        "guard": None,  # guard is the data itself (list)
+    },
+    "query_difficulty": {
+        "headers": ["Class", "Count", "Fraction"],
+        "rows": _difficulty_rows,
+        "guard": "summary",
+    },
+    "trends": {
+        "headers": ["Transition", "Improved", "Regressed", "Unchanged"],
+        "rows": _trend_rows,
+        "guard": None,  # guard is the data itself (list)
+    },
+}
+
+
+def render_table(data: Any, config_name: str) -> str:
+    """Generic table renderer driven by ``_TABLE_CONFIGS``.
+
+    Args:
+        data: The structured data to render (dict or list depending on table).
+        config_name: Key into ``_TABLE_CONFIGS``.
+
+    Returns:
+        Markdown table string, or ``""`` if the guard path is empty.
+    """
+    cfg = _TABLE_CONFIGS[config_name]
+
+    # Check guard — either a key path into data, or None (data itself is the guard)
+    guard = cfg["guard"]
+    if guard is not None:
+        guarded = data.get(guard) if isinstance(data, dict) else data
+        if not guarded:
+            return ""
+    elif not data:
+        return ""
+
+    headers = cfg["headers"](data) if callable(cfg["headers"]) else cfg["headers"]
+    rows = cfg["rows"](data)
     return _md_table(headers, rows)
 
 
@@ -283,18 +311,18 @@ def generate_supplemental(
 
     if "comparison" in active_sections:
         parts.append("## Campaign Comparison\n")
-        parts.append(render_comparison_table(comparison))
+        parts.append(render_table(comparison, "comparison"))
         parts.append("")
 
     if "convergence" in active_sections:
-        table = render_convergence_table(comparison)
+        table = render_table(comparison, "convergence")
         if table:
             parts.append("## Convergence\n")
             parts.append(table)
             parts.append("")
 
     if "significance" in active_sections:
-        table = render_significance_table(comparison)
+        table = render_table(comparison, "significance")
         if table:
             parts.append("## Pairwise Significance\n")
             parts.append(table)
@@ -303,7 +331,7 @@ def generate_supplemental(
     if "parameter_impact" in active_sections and search_memory is not None:
         memory_summary = export_search_memory_summary(search_memory)
         parts.append("## Parameter Impact\n")
-        parts.append(render_parameter_impact_table(memory_summary))
+        parts.append(render_table(memory_summary, "parameter_impact"))
         parts.append("")
 
         qp = memory_summary["query_patterns"]
@@ -315,22 +343,26 @@ def generate_supplemental(
 
     if "failure_analysis" in active_sections and failure_analysis is not None:
         failures = export_failure_analysis(failure_analysis)
-        if failures:
+        table = render_table(failures, "failure_analysis")
+        if table:
             parts.append("## Failure Analysis\n")
-            parts.append(render_failure_analysis_table(failures))
+            parts.append(table)
             parts.append("")
 
     if "query_difficulty" in active_sections and query_difficulty is not None:
         diff = export_query_difficulty(query_difficulty)
-        parts.append("## Query Difficulty\n")
-        parts.append(render_query_difficulty_summary(diff))
-        parts.append("")
+        table = render_table(diff, "query_difficulty")
+        if table:
+            parts.append("## Query Difficulty\n")
+            parts.append(table)
+            parts.append("")
 
     if "trends" in active_sections and trend_analysis is not None:
         trends = export_trend_analysis(trend_analysis)
-        if trends:
+        table = render_table(trends, "trends")
+        if table:
             parts.append("## Round Stability\n")
-            parts.append(render_trend_table(trends))
+            parts.append(table)
             parts.append("")
 
     if "reproducibility" in active_sections:

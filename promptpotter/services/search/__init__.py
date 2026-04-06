@@ -5,9 +5,7 @@ Re-exports entry-point functions so callers use one import path::
     from promptpotter.services.search import sensitivity_scan, adaptive_search, ...
 """
 
-# sensitivity_scanner / adaptive_searcher
-from promptpotter.services.search.adaptive_searcher import adaptive_search
-
+# smart_search (includes adaptive_search)
 # coverage
 from promptpotter.services.search.coverage import (
     assess_scan_coverage,
@@ -25,11 +23,9 @@ from promptpotter.services.search.scan_advisor import (
     preview_advisor_prompt,
 )
 
-# scan_baseline
-from promptpotter.services.search.scan_baseline import decompose_scan_baseline
-
-# scan_results
+# scan_results (also absorbs scan_baseline)
 from promptpotter.services.search.scan_results import (
+    decompose_scan_baseline,
     prepare_scan_context,
     resume_or_build_diagnostic,
     seed_campaign_from_scan,
@@ -39,6 +35,7 @@ from promptpotter.services.search.sensitivity_scanner import sensitivity_scan
 
 # smart_search
 from promptpotter.services.search.smart_search import (
+    adaptive_search,
     build_diagnostic_set,
     load_filtered_variant_library,
 )
