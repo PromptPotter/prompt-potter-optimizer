@@ -33,6 +33,11 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+from promptpotter.config.settings import (
+    DEFAULT_BACKEND_ID,
+    DEFAULT_BACKEND_URL,
+    DEFAULT_EXPERIMENT_ID,
+)
 from promptpotter.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -618,9 +623,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="Initialize services and create session")
-    p_init.add_argument("--backend-url", default="http://127.0.0.1:8000")
-    p_init.add_argument("--backend-id", default="local")
-    p_init.add_argument("--experiment-id", default="1_production_historical")
+    p_init.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
+    p_init.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
+    p_init.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
     p_init.add_argument("--dataset-name", default=None)
     p_init.add_argument("--excel-path", default=None)
     p_init.add_argument("--config", default=None, help="Campaign config JSON file")

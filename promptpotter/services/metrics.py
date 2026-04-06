@@ -25,6 +25,25 @@ if TYPE_CHECKING:
     )
 
 
+def find_rank(candidates: list, ground_truth: str) -> int | None:
+    """Find 1-based rank of ground_truth in a candidates list.
+
+    Works with plain strings, dicts with a ``candidate`` key,
+    and list/tuple entries (uses first element).
+    """
+    if not candidates or not ground_truth:
+        return None
+    for i, c in enumerate(candidates):
+        name = (
+            c.get("candidate", c)
+            if isinstance(c, dict)
+            else (c[0] if isinstance(c, (list, tuple)) else str(c))
+        )
+        if str(name) == ground_truth:
+            return i + 1
+    return None
+
+
 def compute_accuracy(results: list) -> dict:
     """Compute accuracy metrics from evaluation results.
 

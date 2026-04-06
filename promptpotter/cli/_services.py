@@ -11,6 +11,12 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.config.settings import (
+    DEFAULT_BACKEND_ID,
+    DEFAULT_BACKEND_URL,
+    DEFAULT_EXPERIMENT_ID,
+)
+
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.init import BackendSession
@@ -26,9 +32,9 @@ logger = logging.getLogger(__name__)
 
 
 async def init_services(
-    backend_url: str = "http://127.0.0.1:8000",
-    backend_id: str = "local",
-    experiment_id: str = "1_production_historical",
+    backend_url: str = DEFAULT_BACKEND_URL,
+    backend_id: str = DEFAULT_BACKEND_ID,
+    experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
 ) -> BackendSession:
     """Initialize services (logging + service init)."""

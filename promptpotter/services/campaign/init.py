@@ -15,6 +15,11 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from promptpotter.config.settings import (
+    DEFAULT_BACKEND_ID,
+    DEFAULT_BACKEND_URL,
+    DEFAULT_EXPERIMENT_ID,
+)
 from promptpotter.models.backend import BackendConnection
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.services.backend_client import BackendClient
@@ -161,9 +166,9 @@ def load_baseline_prompt(
 
 
 async def init_services(
-    backend_url: str = "http://127.0.0.1:8000",
-    backend_id: str = "local",
-    experiment_id: str = "1_production_historical",
+    backend_url: str = DEFAULT_BACKEND_URL,
+    backend_id: str = DEFAULT_BACKEND_ID,
+    experiment_id: str = DEFAULT_EXPERIMENT_ID,
     project_root: Path | None = None,
     dataset_name: str | None = None,
     on_status: Callable[[str], None] | None = None,

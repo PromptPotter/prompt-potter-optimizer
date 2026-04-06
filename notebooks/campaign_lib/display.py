@@ -251,7 +251,7 @@ def _infer_terminated_step(step_timings: dict) -> str | None:
 
 def _find_gt_rank(r: dict) -> int | None:
     """Find ground truth rank in candidates. Returns 1-indexed rank or None."""
-    from promptpotter.services.campaign.critique import find_rank
+    from promptpotter.services.metrics import find_rank
 
     gt = r.get("ground_truth", "")
     if not gt:

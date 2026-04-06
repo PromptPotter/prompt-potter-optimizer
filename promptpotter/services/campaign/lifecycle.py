@@ -5,7 +5,6 @@ campaign resume/create logic, and campaign finalization.
 Shared helpers (graceful, emit_phase, etc.) live in ``_campaign_utils.py``.
 """
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -155,17 +154,13 @@ def init_campaign(
                 baseline_accuracy=baseline_accuracy,
                 session_id=langfuse_session_id,
             )
-        try:
+        with graceful("Dataset registration failed"):
             dataset_item_map = obs.register_dataset(DATASET_NAME, dataset)
             if dataset_item_map:
                 logger.debug(
                     "Registered %d dataset items for '%s'",
                     len(dataset_item_map), DATASET_NAME,
                 )
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception:
-            logger.warning("Dataset registration failed", exc_info=True)
 
     return campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id
 

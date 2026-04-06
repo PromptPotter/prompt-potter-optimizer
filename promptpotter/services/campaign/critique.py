@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING
 from promptpotter.config.optimizer_pipeline import llm_call
 from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
 from promptpotter.config.settings import load_variant_library
-from promptpotter.shared.errors import find_rank, is_error_result
+from promptpotter.services.metrics import find_rank
+from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
@@ -30,7 +31,6 @@ __all__ = [
     "CritiqueContext",
     "assemble_critique_sections",
     "extract_warning_types",
-    "find_rank",
     "format_critique_for_prompt",
     "get_candidates",
     "sample_thinking_styles",

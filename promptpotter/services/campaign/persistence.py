@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import UTC
 from typing import TYPE_CHECKING
+
+from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
@@ -111,7 +112,7 @@ def save_campaign_winner(
     if experiment_id:
         full_id = resolve_experiment_id(store, backend_id, experiment_id)
         if full_id:
-            try:
+            with graceful("Campaign metadata update skipped", level=logging.DEBUG):
                 store.campaigns.update(
                     backend_id,
                     full_id,
@@ -121,10 +122,6 @@ def save_campaign_winner(
                         "winner_filename": filename,
                     },
                 )
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                raise
-            except Exception:
-                pass  # campaign may not exist yet
 
     logger.info("Winner saved: %s (acc=%.1f%%)", filename, winner_acc * 100)
     return {

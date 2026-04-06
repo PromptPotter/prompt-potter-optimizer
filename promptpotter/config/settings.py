@@ -9,6 +9,11 @@ from pydantic_settings import BaseSettings
 
 APP_VERSION: str = "0.6.1"
 
+# Defaults for backend connection (not env-driven — override via CLI args)
+DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
+DEFAULT_BACKEND_ID = "local"
+DEFAULT_EXPERIMENT_ID = "1_production_historical"
+
 
 class Settings(BaseSettings):
     """Application configuration settings."""
