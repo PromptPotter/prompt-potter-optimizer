@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         PipelineNode,
         PipelineSchema,
     )
+    from promptpotter.models.query_result import QueryResult
 
 
 __all__ = [
@@ -58,7 +59,7 @@ def find_rank(candidates: list, ground_truth: str) -> int | None:
     return None
 
 
-def compute_accuracy(results: list) -> dict:
+def compute_accuracy(results: list[QueryResult]) -> dict:
     """Compute accuracy metrics from evaluation results.
 
     Args:
@@ -74,19 +75,19 @@ def compute_accuracy(results: list) -> dict:
     return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
 
 
-def count_failures(results: list[dict]) -> int:
+def count_failures(results: list[QueryResult]) -> int:
     """Count non-hit results (misses + errors)."""
     return sum(1 for r in results if not r.get("hit"))
 
 
-def count_degraded_queries(results: list[dict]) -> int:
+def count_degraded_queries(results: list[QueryResult]) -> int:
     """Count queries that have pipeline degradation warnings."""
     return sum(
         1 for r in results if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
     )
 
 
-def _step_executed(step_name: str, result: dict) -> bool:
+def _step_executed(step_name: str, result: QueryResult) -> bool:
     """Check if a pipeline step executed for a result (via step_timings or terminated_at)."""
     pd = result.get("pipeline_data") or {}
     if pd.get("terminated_at") == step_name:
@@ -104,7 +105,7 @@ def _extract_candidate_label(c) -> str:
 
 def _compute_recall(
     step: PipelineNode,
-    results: list[dict],
+    results: list[QueryResult],
     candidate_key: str = "candidate_ranking",
 ) -> float:
     """Fraction of queries where GT appears in the candidate list for *step*."""
@@ -121,7 +122,7 @@ def _compute_recall(
     return found / len(scoped)
 
 
-def _compute_cache_hit_rate(step: PipelineNode, results: list[dict]) -> float:
+def _compute_cache_hit_rate(step: PipelineNode, results: list[QueryResult]) -> float:
     """Fraction of queries resolved by cache (non-null cache timing)."""
     if not results:
         return 0.0
@@ -140,7 +141,7 @@ def _compute_cache_hit_rate(step: PipelineNode, results: list[dict]) -> float:
 def _compute_type_metric(
     metric_def: IntermediateMetric,
     step: PipelineNode,
-    results: list[dict],
+    results: list[QueryResult],
 ) -> float:
     """Compute a single type-based metric value."""
     if metric_def.name in ("source_recall", "candidate_recall"):
@@ -151,7 +152,7 @@ def _compute_type_metric(
 
 
 def extract_sample_diagnostics(
-    result: dict,
+    result: QueryResult,
     pipeline_schema: PipelineSchema,
 ) -> dict[str, float | bool | int | str | None]:
     """Extract per-query diagnostic signals from a single evaluation result.
@@ -295,7 +296,7 @@ def _diag_cache(
 
 def compute_pipeline_metrics(
     pipeline_schema: PipelineSchema,
-    results: list[dict],
+    results: list[QueryResult],
     *,
     metric_weights: dict[str, float] | None = None,
     accuracy_weight: float = 0.9,
@@ -355,7 +356,7 @@ def compute_pipeline_metrics(
 
 
 def compute_composite_score(
-    results: list,
+    results: list[QueryResult],
     pipeline_schema: PipelineSchema,
     *,
     accuracy_weight: float = 0.9,
@@ -408,7 +409,7 @@ def _auto_name(key: tuple[str, ...]) -> str:
 
 
 def compile_failure_analysis(
-    results: list[dict],
+    results: list[QueryResult],
     pipeline_schema: PipelineSchema,
     *,
     max_patterns: int = 5,
@@ -460,7 +461,7 @@ def compile_failure_analysis(
 
 
 def compile_query_difficulty(
-    historical_results: list[list[dict]],
+    historical_results: list[list[QueryResult]],
 ) -> QueryDifficulty:
     """Classify queries by hit rate across multiple evaluation rounds.
 
@@ -495,7 +496,7 @@ def compile_query_difficulty(
 
 
 def compile_temporal_trends(
-    round_results: list[tuple[int, list[dict]]],
+    round_results: list[tuple[int, list[QueryResult]]],
 ) -> TrendAnalysis:
     """Track query-level changes across consecutive rounds.
 
@@ -538,7 +539,7 @@ def compile_temporal_trends(
 
 
 def attribute_bottleneck(
-    results: list[dict],
+    results: list[QueryResult],
     pipeline_schema: PipelineSchema,
 ) -> dict[str, list[str]]:
     """Map terminated_at steps to relevant param_keys (Wave 3d).

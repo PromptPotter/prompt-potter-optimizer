@@ -476,12 +476,12 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     ctx.state["phase"] = "optimizing"
     session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
 
-    # Bidirectional control — CLI provides FileControlSurface as on_checkpoint
-    from promptpotter.services.campaign.persistence_emitter import FileControlSurface
+    # Bidirectional control — CLI provides CampaignControlReader as on_checkpoint
+    from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
     from promptpotter.services.campaign.state import RunCallbacks
 
     session_dir = session.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
-    control = FileControlSurface(session_dir / "campaign_state.json")
+    control = CampaignControlReader(session_dir / "campaign_state.json")
     control_cb = RunCallbacks(on_checkpoint=control.check)
 
     # Round recorder — write rounds/round_NNN.json with full action traces

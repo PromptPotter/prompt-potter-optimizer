@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from promptpotter.models.evaluator import EvalResult, ExactMatchEvaluator
+from promptpotter.models.query_result import QueryResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
 
@@ -68,7 +69,7 @@ def _build_local_result(
     node_outputs: dict,
     target_steps: list[str],
     pipeline_schema: PipelineSchema,
-) -> dict:
+) -> QueryResult:
     """Construct an eval result locally from intermediate cache (no backend call).
 
     Used when the intermediate cache covers ALL target steps — the backend
@@ -125,7 +126,7 @@ def _build_local_result(
     }
 
 
-def _error_result(query: str, ground_truth: str, error_msg: str) -> dict:
+def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
     """Build a standard error result dict."""
     return {
         "query": query,
@@ -153,7 +154,7 @@ async def eval_query_via_backend(
     pipeline_schema: PipelineSchema | None = None,
     intermediate_cache: IntermediateCache | None = None,
     backend_id: str = "",
-) -> dict:
+) -> QueryResult:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint."""
     query = query_data["query"]
     ground_truth = query_data["ground_truth"]

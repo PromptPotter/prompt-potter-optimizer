@@ -202,9 +202,9 @@ async def resume_or_build_diagnostic(
     from promptpotter.config.settings import load_variant_library
     from promptpotter.services.search.context import decompose_prompt_fields
     from promptpotter.services.search.smart_search import (
+        build_axis_profiles,
         build_diagnostic_set,
         deserialize_smart_search_plan,
-        profiles_from_rows,
         serialize_smart_search_plan,
         smart_search_plan_identity,
     )
@@ -247,7 +247,7 @@ async def resume_or_build_diagnostic(
             for name, vals in _vl.get("pipeline_params", {}).items():
                 if len(vals) > 1:
                     _axes.append((name, "pipeline_param", vals))
-            partial_profiles = profiles_from_rows(
+            partial_profiles = build_axis_profiles(
                 partial_rows,
                 _axes,
                 len(plan["diagnostic"]),

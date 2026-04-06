@@ -16,6 +16,7 @@ from promptpotter.services.metrics import find_rank
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.models.query_result import QueryResult
     from promptpotter.services.backend_client import BackendClient
     from promptpotter.services.search.search_memory import SearchMemory
     from promptpotter.services.stores.intermediate_cache import IntermediateCache
@@ -25,12 +26,12 @@ logger = logging.getLogger(__name__)
 __all__ = ["execute_stale_data_protocol", "is_degraded"]
 
 
-def is_degraded(result: dict) -> bool:
+def is_degraded(result: QueryResult) -> bool:
     """Check if a result has pipeline degradation warnings."""
     return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
 
 
-def find_gt_rank(result: dict) -> int | None:
+def find_gt_rank(result: QueryResult) -> int | None:
     """Find ground truth rank in final_ranking. Returns 1-indexed or None."""
     gt = result.get("ground_truth", "")
     if not gt:
@@ -39,7 +40,7 @@ def find_gt_rank(result: dict) -> int | None:
     return find_rank(pd.get("final_ranking", []), gt)
 
 
-def compare_rerun(cached_result: dict, rerun_result: dict) -> dict:
+def compare_rerun(cached_result: QueryResult, rerun_result: QueryResult) -> dict:
     """Compare rerun to cached result. Returns improvement summary."""
     cached_hit = cached_result.get("hit", False)
     rerun_hit = rerun_result.get("hit", False)
@@ -63,7 +64,7 @@ def compare_rerun(cached_result: dict, rerun_result: dict) -> dict:
 async def execute_stale_data_protocol(
     protocol_steps: list[str],
     query_data: dict,
-    cached_result: dict,
+    cached_result: QueryResult,
     backend_client: BackendClient,
     *,
     pipeline_params: dict | None = None,
@@ -73,7 +74,7 @@ async def execute_stale_data_protocol(
     search_memory: SearchMemory | None = None,
     stale_data_observations: dict[str, int | dict] | None = None,
     stop_check: Callable[[], bool] | None = None,
-) -> tuple[dict, str]:
+) -> tuple[QueryResult, str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
     Hyperparameters are read from the ``l1_evaluate`` node config in

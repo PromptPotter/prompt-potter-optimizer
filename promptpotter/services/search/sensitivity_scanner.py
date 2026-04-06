@@ -20,7 +20,7 @@ from promptpotter.services.eval_gateway import eval_search_point
 from promptpotter.services.search.cohort_analysis import preview as _preview
 from promptpotter.services.search.smart_search import (
     ScanEvent,
-    profiles_from_rows,
+    build_axis_profiles,
 )
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import most_common_error_category
@@ -396,7 +396,7 @@ async def sensitivity_scan(
                         f"variant evals returned all errors. {detail}"
                     )
                     logger.error(reason)
-                    profiles = profiles_from_rows(rows, axes, len(dataset))
+                    profiles = build_axis_profiles(rows, axes, len(dataset))
                     for profile in profiles:
                         _cb({"type": "axis_done", **profile})
                     _cb({"type": "scan_aborted", "reason": reason})
@@ -405,7 +405,7 @@ async def sensitivity_scan(
                 _consecutive_all_error = 0
 
     # Build axis profiles and annotate pruned axes (Wave 2b)
-    profiles = profiles_from_rows(rows, axes, len(dataset))
+    profiles = build_axis_profiles(rows, axes, len(dataset))
     for profile in profiles:
         profile["pruned"] = profile["axis"] in _pruned_axes
         _cb({"type": "axis_done", **profile})

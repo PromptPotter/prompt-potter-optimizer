@@ -231,3 +231,73 @@ cli/export_results.py         ← CLI file I/O (write .md or .json)
 **`reporting.py`** functions: `render_comparison_table()`, `render_convergence_table()`, `render_significance_table()`, `render_parameter_impact_table()`, `generate_supplemental()`, `generate_export_json()`.
 
 The supplemental document includes: campaign comparison, convergence, pairwise significance, parameter impact, failure analysis, query difficulty, and a reproducibility manifest. See [`docs/benchmarks.md`](benchmarks.md) for the benchmark methodology and result table format.
+
+## Context Object Lifecycle
+
+Nine context/config objects flow through the system. Understanding when each is created, who owns it, and how long it lives is essential for working in the codebase.
+
+### Data flow
+
+```
+USER INPUT (notebook / CLI)
+  │
+  ├─ CampaignConfig (TypedDict, mutable)     ← user-provided dict
+  │     │
+  │     ▼
+  │  configure_pipeline() mutates pipeline_params in-place
+  │     │
+  ▼     ▼
+init_services()
+  │
+  ▼
+BackendContext (dataclass)                    ← session-scoped infra bundle
+  │  store, backend_client, pipeline_schema, index_terms, exp_data
+  │
+  ├──► build_run_config()
+  │       │
+  │       ▼
+  │    RunConfig (Pydantic, immutable)        ← validated campaign config
+  │       │
+  │       ├──► init_cycle_state()
+  │       │       │
+  │       │       ├─ LoopState (mutable)      ← round-by-round optimizer state
+  │       │       │    └─ opt_sp: OptSearchPoint (source of truth)
+  │       │       │    └─ eval_ctx: EvalContext (infra for eval calls)
+  │       │       │
+  │       │       ▼
+  │       │    CycleContext (return bundle)
+  │       │       │
+  │       ▼       ▼
+  │    optimization_loop.run_optimization()
+  │       │
+  │       │  PER ROUND:
+  │       ├──► ContextData (ephemeral)        ← L1 prompt formatting bundle
+  │       ├──► CritiqueContext (ephemeral)     ← per-round diagnostic stats
+  │       └──► LoopState mutated (current_sp, stall_count, opt_sp, ...)
+  │
+  ▼
+[optional] prepare_scan_context()
+  └─ ScanContext (read-only)                  ← pre-formatted scan analytics
+       injected into RunConfig.scan_context
+```
+
+### Lifecycle table
+
+| Object | Defined in | Created by | Lifetime | Mutated? | Checkpointed? |
+|--------|-----------|------------|----------|----------|---------------|
+| **CampaignConfig** | `campaign/config.py` | User (notebook/CLI) | Session | Yes (`configure_pipeline` sets `pipeline_params`) | No (stored in campaign metadata) |
+| **RunConfig** | `campaign/config.py` | `from_campaign_config()` | Campaign | No (immutable Pydantic model) | No |
+| **BackendContext** | `campaign/bootstrap.py` | `init_services()` | Session | Rarely (`pipeline_schema` filtered) | No |
+| **EvalContext** | `models/eval_context.py` | `cycle_init._setup_eval_context()` | Cycle | `candidate_idx`, `stale_data_observations` per eval | No |
+| **CycleContext** | `campaign/state.py` | `cycle_init.init_cycle_state()` | Cycle | No (bundles LoopState) | No |
+| **LoopState** | `campaign/state.py` | `cycle_init._build_baseline_state()` | Cycle | Intensely (every round) | Yes (`opt_sp` + escalation) |
+| **CritiqueContext** | `campaign/critique.py` | `execute_round()` | Per-round | No (read-only stats) | No |
+| **ContextData** | `campaign/formatting.py` | `l1_generate()` | Per-generation | No (formatting input) | No |
+| **ScanContext** | `search/scan_results.py` | `prepare_scan_context()` | Campaign | No (read-only) | No |
+
+### Key invariants
+
+- **Single source of truth**: All optimizer state (critique, plan, task_context, escalation_journal, warning_inventory) lives on `LoopState.opt_sp` (`OptSearchPoint`). Only `opt_sp` is checkpointed between rounds.
+- **Infrastructure vs. state**: `BackendContext` and `EvalContext` carry infrastructure references (clients, stores). `LoopState` carries mutable optimization state. Don't conflate them.
+- **Ephemeral bundles**: `CritiqueContext` and `ContextData` exist only during a single function call. They're formatting/diagnostic snapshots, not persistent state.
+- **Config pipeline**: `CampaignConfig` (user dict, flexible) → `RunConfig` (validated, immutable) is a one-way transformation. Services read `RunConfig`, never `CampaignConfig` directly.

@@ -29,6 +29,7 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.eval_context import EvalContext
+    from promptpotter.models.query_result import QueryResult
     from promptpotter.services.campaign.state import RunCallbacks
     from promptpotter.services.search.scan_results import ScanContext
 
@@ -50,8 +51,8 @@ class L1EvalResult(BaseModel):
     improved: bool
     candidates_evaluated: int
     candidate_scores: list[dict[str, Any]]
-    winner_results: list[dict[str, Any]]
-    all_eval_results: list[dict[str, Any]] = Field(default_factory=list)
+    winner_results: list[QueryResult]
+    all_eval_results: list[QueryResult] = Field(default_factory=list)
     escalation_signal: dict[str, Any] | None = None
     degraded_queries: int = 0
 
@@ -63,7 +64,7 @@ class L1EvalResult(BaseModel):
 async def l1_generate(
     opt_sp: OptSearchPoint,
     current_accuracy: float,
-    current_results: list,
+    current_results: list[QueryResult],
     n_variants: int,
     creativity: float,
     llm_client: LLMClientBase,

@@ -22,6 +22,7 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.models.query_result import QueryResult
     from promptpotter.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ __all__ = [
 class CritiqueContext:
     """Bundles current-round results and round history for diagnostic analysis."""
 
-    results: list[dict]
+    results: list[QueryResult]
     accuracy: float
     composite: float = 0.0
     degraded_queries: int = 0
@@ -83,7 +84,7 @@ def get_candidates(r: dict, candidate_keys: list[str] | None = None) -> list:
     return []
 
 
-def extract_warning_types(result: dict) -> list[str]:
+def extract_warning_types(result: QueryResult) -> list[str]:
     """Extract warning type strings from a single eval result."""
     pd = result.get("pipeline_data") or {}
     diag = pd.get("diagnostics") or {}
@@ -102,7 +103,7 @@ def extract_warning_types(result: dict) -> list[str]:
 
 def update_query_tracker(
     tracker: dict[str, dict],
-    results: list[dict],
+    results: list[QueryResult],
 ) -> None:
     """Merge current round's results into the per-query warning inventory.
 
@@ -202,7 +203,7 @@ def _summary_section(ctx: CritiqueContext) -> str:
 
 
 def _pipeline_health_section(
-    results: list[dict],
+    results: list[QueryResult],
     anomalies: list[str],
     *,
     degradation_threshold: float = 0.4,
@@ -243,7 +244,7 @@ def _pipeline_health_section(
 
 
 def _rank_analysis_section(
-    results: list[dict],
+    results: list[QueryResult],
     anomalies: list[str],
     candidate_keys: list[str] | None = None,
     *,
@@ -371,7 +372,7 @@ def _round_evolution_section(
     return "\n".join(lines)
 
 
-def _query_category_section(results: list[dict]) -> str:
+def _query_category_section(results: list[QueryResult]) -> str:
     """Failures grouped by termination step (counts only)."""
     step_counts: Counter[str] = Counter()
     for r in results:
@@ -391,7 +392,7 @@ def _query_category_section(results: list[dict]) -> str:
 
 
 def _failure_details_section(
-    results: list[dict],
+    results: list[QueryResult],
     candidate_keys: list[str] | None = None,
     near_miss_queries: set[str] | None = None,
     pipeline_schema: PipelineSchema | None = None,
@@ -440,7 +441,7 @@ def _failure_details_section(
     return "\n".join(lines)
 
 
-def _success_details_section(results: list[dict]) -> str:
+def _success_details_section(results: list[QueryResult]) -> str:
     """Per-query success count + brief samples."""
     successes = [r for r in results if r.get("hit")]
     if not successes:

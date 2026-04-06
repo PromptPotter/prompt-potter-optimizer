@@ -22,6 +22,7 @@ from promptpotter.models.search_point import JobSearchPoint
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.eval_context import EvalContext
+    from promptpotter.models.query_result import QueryResult
     from promptpotter.services.campaign.escalation import DegradationCheck
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
 
@@ -160,7 +161,7 @@ class LoopState:
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
     current_composite: float = 0.0
-    current_results: list[dict] = field(default_factory=list)
+    current_results: list[QueryResult] = field(default_factory=list)
     best_accuracy: float = 0.0
     best_composite: float = 0.0
     best_round: int = -1

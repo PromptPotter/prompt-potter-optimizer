@@ -189,8 +189,8 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
 
 
 def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
-    """FileControlSurface reads control signals from campaign_state.json."""
-    from promptpotter.services.campaign.persistence_emitter import FileControlSurface
+    """CampaignControlReader reads control signals from campaign_state.json."""
+    from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
 
     state_path = session_dir / "campaign_state.json"
     state_path.write_text(
@@ -201,13 +201,13 @@ def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
         )
     )
 
-    surface = FileControlSurface(state_path)
+    surface = CampaignControlReader(state_path)
     assert surface.check("after_round") == "pause"
 
 
 def test_control_surface_resumes(session_dir: Path) -> None:
-    """FileControlSurface acknowledges resume by clearing to running."""
-    from promptpotter.services.campaign.persistence_emitter import FileControlSurface
+    """CampaignControlReader acknowledges resume by clearing to running."""
+    from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
 
     state_path = session_dir / "campaign_state.json"
     state_path.write_text(
@@ -218,7 +218,7 @@ def test_control_surface_resumes(session_dir: Path) -> None:
         )
     )
 
-    surface = FileControlSurface(state_path)
+    surface = CampaignControlReader(state_path)
     assert surface.check("after_round") is None
 
     # Verify it wrote "running" back
@@ -227,8 +227,8 @@ def test_control_surface_resumes(session_dir: Path) -> None:
 
 
 def test_control_surface_l2_pause(session_dir: Path) -> None:
-    """FileControlSurface honors pause_before_l2_eval at before_l2_eval checkpoint."""
-    from promptpotter.services.campaign.persistence_emitter import FileControlSurface
+    """CampaignControlReader honors pause_before_l2_eval at before_l2_eval checkpoint."""
+    from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
 
     state_path = session_dir / "campaign_state.json"
     state_path.write_text(
@@ -239,7 +239,7 @@ def test_control_surface_l2_pause(session_dir: Path) -> None:
         )
     )
 
-    surface = FileControlSurface(state_path)
+    surface = CampaignControlReader(state_path)
     # At non-L2 checkpoint: no pause
     assert surface.check("after_round") is None
     # At L2 checkpoint: pause

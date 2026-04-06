@@ -37,15 +37,12 @@ async def sensitivity_scan(
     baseline,
     scan_variants: dict[str, list],
     dataset: list,
-    backend_client=None,
+    session: BackendContext,
     *,
     baseline_opt: OptSearchPoint | None = None,
     sample_size: int = 0,
-    store=None,
-    backend_id: str = "",
     pipeline_schema=None,
     experiment_id: str = "",
-    session: BackendContext | None = None,
     session_id: str = "",
 ) -> tuple:
     """Run a sensitivity scan with progress output.
@@ -55,15 +52,11 @@ async def sensitivity_scan(
 
     Returns (per_variant_df, axis_profiles).
     """
-    # session shorthand: extract infrastructure params if provided
-    if session is not None:
-        backend_client = backend_client or session.backend_client
-        store = store or session.store
-        backend_id = backend_id or session.backend_id
-        pipeline_schema = pipeline_schema or session.pipeline_schema
-        index_terms = session.index_terms
-        if index_terms and backend_client:
-            await backend_client.init_session(index_terms)
+    store = session.store
+    backend_id = session.backend_id
+    pipeline_schema = pipeline_schema or session.pipeline_schema
+    if session.index_terms:
+        await session.backend_client.init_session(session.index_terms)
 
     # Print scan overview
     print("Running sensitivity scan...")
@@ -238,28 +231,18 @@ async def adaptive_search(
     baseline_ps,
     variant_library: dict,
     dataset: list,
-    backend_client=None,
+    session: BackendContext,
     axis_profiles: list[dict] | None = None,
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
-    store=None,
-    backend_id: str = "",
     pipeline_params: dict | None = None,
-    index_terms: list | None = None,
     plan_id: str = "",
     experiment_id: str = "",
-    session: BackendContext | None = None,
 ) -> tuple:
     """Run adaptive coordinate descent search with progress output.
 
     Returns (best_ps, best_pipeline_params, search_log_df).
     """
-    # session shorthand
-    if session is not None:
-        backend_client = backend_client or session.backend_client
-        store = store or session.store
-        backend_id = backend_id or session.backend_id
-        index_terms = index_terms or session.index_terms
 
     active = [p for p in (axis_profiles or []) if p["exploration_budget"] != "skip"]
     print(f"Adaptive search: {len(active)} active axes, max {max_rounds} rounds")
@@ -282,14 +265,11 @@ async def adaptive_search(
             baseline_ps,
             variant_library,
             dataset,
-            backend_client,
+            session,
             axis_profiles,
             max_rounds=max_rounds,
             stop_threshold=stop_threshold,
-            store=store,
-            backend_id=backend_id,
             pipeline_params=pipeline_params,
-            index_terms=index_terms,
             progress_cb=cb,
             plan_id=plan_id,
             experiment_id=experiment_id,

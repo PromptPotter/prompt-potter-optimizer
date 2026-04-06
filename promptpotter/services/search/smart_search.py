@@ -31,8 +31,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.backend_client import BackendClient
-    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.services.campaign.bootstrap import BackendContext
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +104,7 @@ class ScanEvent(TypedDict, total=False):
     estimated_eval_cost: int
 
 
-def profiles_from_rows(
+def build_axis_profiles(
     rows: list[dict],
     axes: list[tuple],
     n_eval: int,
@@ -536,14 +535,11 @@ async def adaptive_search(
     baseline_opt: OptSearchPoint,
     variant_library: dict,
     dataset: list,
-    backend_client: BackendClient,
+    session: BackendContext,
     axis_profiles: list[dict],
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
-    store: ProjectStore | None = None,
-    backend_id: str = "",
     pipeline_params: dict | None = None,
-    index_terms: list | None = None,
     progress_cb: Callable[[ScanEvent], None] | None = None,
     plan_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
@@ -577,10 +573,16 @@ async def adaptive_search(
     """
     import pandas as pd
 
+    # Unpack session
+    backend_client = session.backend_client
+    store = session.store
+    backend_id = session.backend_id
+    pipeline_schema = pipeline_schema or session.pipeline_schema
+
     _cb = progress_cb or (lambda _e: None)
 
-    if index_terms:
-        await backend_client.init_session(index_terms)
+    if session.index_terms:
+        await backend_client.init_session(session.index_terms)
 
     # Filter variant library to active pipeline steps
     variant_library = filter_variant_library(

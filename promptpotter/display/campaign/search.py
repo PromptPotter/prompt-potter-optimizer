@@ -35,7 +35,7 @@ from promptpotter.services.search import (
     select_scan_winner as _select_scan_winner,
 )
 from promptpotter.services.search.scan_advisor import (
-    advisory_to_scan_variants,
+    convert_advisory_to_scan_variants,
     resolve_schema_axes,
 )
 from promptpotter.services.search.scan_results import (
@@ -65,10 +65,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    # search_variants
-    "advisory_to_scan_variants",
     # search_coverage
     "audit_historical_data",
+    # search_variants
+    "convert_advisory_to_scan_variants",
     # search_baseline
     "decompose_scan_baseline",
     # search_advisor
@@ -98,8 +98,6 @@ async def decompose_scan_baseline(
     campaign_config: CampaignConfig,
     pipeline_params: dict | None = None,
     *,
-    store=None,
-    backend_id: str = "",
     scan_variants: dict | None = None,
     force_restructure: bool = False,
     session: BackendContext | None = None,
@@ -113,11 +111,6 @@ async def decompose_scan_baseline(
         (baseline_jsp, search_baseline, scan_diag)
     """
     from .setup import configure_pipeline
-
-    # session shorthand: extract store/backend_id if provided
-    if session is not None:
-        store = store or session.store
-        backend_id = backend_id or session.backend_id
 
     # Fresh pipeline defaults when not explicitly provided
     if pipeline_params is None and session is not None:
@@ -459,7 +452,7 @@ async def run_scan_advisor(
 ) -> tuple[dict, dict, dict]:
     """Run scan advisor + extract/display proposed variants.
 
-    Calls scan_advisor(), then advisory_to_scan_variants(), prints summary.
+    Calls scan_advisor(), then convert_advisory_to_scan_variants(), prints summary.
     Returns (advisory, scan_variants, schema_labels).
     """
     advisory = await scan_advisor(
@@ -471,7 +464,7 @@ async def run_scan_advisor(
     if not advisory:
         return {}, {}, {}
 
-    proposed, schema_labels = advisory_to_scan_variants(
+    proposed, schema_labels = convert_advisory_to_scan_variants(
         advisory,
         pipeline_schema=session.pipeline_schema,
     )

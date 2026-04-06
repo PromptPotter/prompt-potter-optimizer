@@ -2,7 +2,7 @@
 
 Consolidates all file-based campaign I/O:
 - CampaignPersistenceEmitter — writes campaign_state.json + campaign_output.log
-- FileControlSurface — reads control signals from campaign_state.json
+- CampaignControlReader — reads control signals from campaign_state.json
 - RoundRecorder — writes round_NNN.json action traces
 
 Auto-created by ``run_optimization()`` so every entry point (notebook, CLI,
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CampaignPersistenceEmitter", "FileControlSurface", "RoundRecorder"]
+__all__ = ["CampaignControlReader", "CampaignPersistenceEmitter", "RoundRecorder"]
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -108,7 +108,7 @@ class CampaignPersistenceEmitter:
             "current_queries": [],
             "round_candidates": [],
             "last_round": None,
-            # Bidirectional control surface (defaults — FileControlSurface reads back)
+            # Bidirectional control surface (defaults — CampaignControlReader reads back)
             "control": {
                 "requested_state": "running",
                 "pause_before_l2_eval": config.pause_before_eval,
@@ -456,7 +456,7 @@ def _is_error(result: dict) -> bool:
     return pd.get("error") is not None or result.get("error") is not None
 
 
-class FileControlSurface:
+class CampaignControlReader:
     """Reads control signals from ``campaign_state.json`` at checkpoints.
 
     The persistence emitter writes the file; this class only reads the

@@ -147,7 +147,7 @@ def _walk_path(schema: dict, path: str) -> tuple[dict, list, str]:
     return props, req, parts[-1]
 
 
-def resolve_mutation(baseline: dict, variant: SchemaVariant) -> dict:
+def apply_mutation(baseline: dict, variant: SchemaVariant) -> dict:
     """Apply a ``SchemaVariant`` to a baseline JSON Schema (deep copy)."""
     schema = copy.deepcopy(baseline)
     for m in variant.mutations:
@@ -187,12 +187,12 @@ def resolve_mutation(baseline: dict, variant: SchemaVariant) -> dict:
     return schema
 
 
-def resolve_schema_variants(
+def build_schema_variants(
     baseline: dict,
     variants: list[SchemaVariant],
 ) -> list[dict]:
     """Resolve variants against baseline. Baseline always at index 0."""
-    return [copy.deepcopy(baseline)] + [resolve_mutation(baseline, v) for v in variants]
+    return [copy.deepcopy(baseline)] + [apply_mutation(baseline, v) for v in variants]
 
 
 def baseline_schema_from_node(output_schema: NodeOutputSchema) -> dict:
@@ -701,7 +701,7 @@ def resolve_schema_axes(
                 try:
                     variants = [parse_mutation_tuples(sv) for sv in vals]
                     baseline = baseline_schema_from_node(node.output_schema)
-                    resolved[axis_name] = resolve_schema_variants(baseline, variants)
+                    resolved[axis_name] = build_schema_variants(baseline, variants)
                     schema_labels[axis_name] = ["(baseline)"] + [v.render_label() for v in variants]
                     continue
                 except (ValueError, KeyError) as e:
@@ -715,7 +715,7 @@ def resolve_schema_axes(
     return resolved, schema_labels
 
 
-def advisory_to_scan_variants(
+def convert_advisory_to_scan_variants(
     advisory: dict,
     pipeline_schema: PipelineSchema | None = None,
 ) -> tuple[dict, dict[str, list[str]]]:

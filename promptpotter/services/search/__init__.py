@@ -16,10 +16,10 @@ from promptpotter.services.search.coverage import (
 # scan_advisor
 from promptpotter.services.search.scan_advisor import (
     advise_scan_config,
-    advisory_to_scan_variants,
     build_llm_context,
     build_pipeline_overview,
     build_tunable_params,
+    convert_advisory_to_scan_variants,
     preview_advisor_prompt,
 )
 
@@ -43,7 +43,6 @@ from promptpotter.services.search.smart_search import (
 __all__ = [
     "adaptive_search",
     "advise_scan_config",
-    "advisory_to_scan_variants",
     "assess_scan_coverage",
     "build_data_inventory",
     "build_diagnostic_set",
@@ -51,6 +50,7 @@ __all__ = [
     "build_pipeline_overview",
     "build_prompt_result_index",
     "build_tunable_params",
+    "convert_advisory_to_scan_variants",
     "decompose_scan_baseline",
     "load_filtered_variant_library",
     "prepare_scan_context",

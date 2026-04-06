@@ -65,8 +65,8 @@ from .optimize import (
 
 # -- Search: Advisor, Baseline, Coverage, Results, Variants -------------------
 from .search import (
-    advisory_to_scan_variants,
     audit_historical_data,
+    convert_advisory_to_scan_variants,
     decompose_scan_baseline,
     load_task_description,
     preview_advisor_prompt,
@@ -116,8 +116,6 @@ __all__ = [
     "YELLOW",
     # Search: Scan
     "adaptive_search",
-    # Search: Variants
-    "advisory_to_scan_variants",
     # Campaigns
     "apply_experiment_overrides",
     # Search: Results & Coverage
@@ -132,6 +130,8 @@ __all__ = [
     "build_tunable_params",
     "configure_langfuse",
     "configure_pipeline",
+    # Search: Variants
+    "convert_advisory_to_scan_variants",
     "decompose_scan_baseline",
     "decompose_task_context",
     "dev_reload",
