@@ -4,6 +4,7 @@ Exact match evaluator.
 Compares expected and actual values for exact equality,
 with optional whitespace stripping.
 """
+
 from enum import StrEnum
 from typing import Any
 
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 
 class EvalResult(StrEnum):
     """Evaluation result status."""
+
     PASS = "pass"
     FAIL = "fail"
     ERROR = "error"
@@ -22,10 +24,7 @@ class EvaluationOutput(BaseModel):
 
     result: EvalResult = Field(..., description="pass, fail, or error")
     score: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Evaluation score (0.0 = failure, 1.0 = match)"
+        ..., ge=0.0, le=1.0, description="Evaluation score (0.0 = failure, 1.0 = match)"
     )
     expected: Any = Field(..., description="Expected value")
     actual: Any = Field(..., description="Actual value from workflow")

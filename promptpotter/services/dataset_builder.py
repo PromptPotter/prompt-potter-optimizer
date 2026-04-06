@@ -31,10 +31,10 @@ __all__ = [
 # Column mapping per Excel sheet type.
 # Keys = sheet names, values = {"query": <col>, "gt": <col>}.
 SHEET_COLUMN_MAP: dict[str, dict[str, str]] = {
-    "Sheet1":    {"query": "Material name in BOM", "gt": "Dataset in SP"},
-    "Material":  {"query": "Material name in BOM", "gt": "Dataset in SP"},
-    "Processes":  {"query": "Ausgangsliste",        "gt": "Eintrag aus Zielliste"},
-    "Processing": {"query": "Ausgangsliste",        "gt": "Eintrag aus Zielliste"},
+    "Sheet1": {"query": "Material name in BOM", "gt": "Dataset in SP"},
+    "Material": {"query": "Material name in BOM", "gt": "Dataset in SP"},
+    "Processes": {"query": "Ausgangsliste", "gt": "Eintrag aus Zielliste"},
+    "Processing": {"query": "Ausgangsliste", "gt": "Eintrag aus Zielliste"},
 }
 
 
@@ -74,7 +74,10 @@ def load_excel_ground_truth(
         if query_col not in headers or gt_col not in headers:
             logger.warning(
                 "Sheet %r: expected columns %r and %r but found %s",
-                sheet_name, query_col, gt_col, headers,
+                sheet_name,
+                query_col,
+                gt_col,
+                headers,
             )
             continue
 
@@ -85,18 +88,23 @@ def load_excel_ground_truth(
             query = str(row_vals[qi]).strip() if row_vals[qi] is not None else ""
             gt = str(row_vals[gi]).strip() if row_vals[gi] is not None else ""
             if query and gt:
-                rows.append({
-                    "query": query,
-                    "ground_truth": gt,
-                    "source_sheet": sheet_name,
-                })
+                rows.append(
+                    {
+                        "query": query,
+                        "ground_truth": gt,
+                        "source_sheet": sheet_name,
+                    }
+                )
 
     wb.close()
     logger.info(
         "Loaded %d ground-truth pairs from %s (%s)",
-        len(rows), path,
-        ", ".join(f"{s}: {sum(1 for r in rows if r['source_sheet'] == s)}"
-                  for s in dict.fromkeys(r["source_sheet"] for r in rows)),
+        len(rows),
+        path,
+        ", ".join(
+            f"{s}: {sum(1 for r in rows if r['source_sheet'] == s)}"
+            for s in dict.fromkeys(r["source_sheet"] for r in rows)
+        ),
     )
     return rows
 
@@ -140,12 +148,15 @@ def train_test_split(
     if overlap:
         logger.warning(
             "Duplicate queries across test sets (%d): %s",
-            len(overlap), list(overlap)[:5],
+            len(overlap),
+            list(overlap)[:5],
         )
 
     logger.info(
         "Split: %d train, %d test_processes, %d test_material",
-        len(train), len(test_proc), len(test_mat),
+        len(train),
+        len(test_proc),
+        len(test_mat),
     )
     return train, {"test_processes": test_proc, "test_material": test_mat}
 
@@ -193,8 +204,7 @@ def build_dataset_run_data(
         "source": source,
         "created_at": datetime.now(UTC).isoformat(),
         "dataset_run_items": [
-            {k: v for k, v in r.items() if k != "precomputed_through"}
-            for r in results
+            {k: v for k, v in r.items() if k != "precomputed_through"} for r in results
         ],
     }
     data["sp_hash"] = sp_h

@@ -59,9 +59,10 @@ def test_derivation_methods():
 
     # langfuse_type_map
     assert schema.langfuse_type_map() == {
-        "search": "tool", "rank": "generation", "cache": "span",
+        "search": "tool",
+        "rank": "generation",
+        "cache": "span",
     }
-
 
 
 class TestParsePipelineResponse:
@@ -191,24 +192,31 @@ class TestParsePipelineResponse:
                 "step_a": {
                     "type": "LLMGeneration",
                     "config": {
-                        "schema_family": "my_schema", "schema_version": 1,
-                        "prompt_family": "my_prompt", "prompt_version": 2,
+                        "schema_family": "my_schema",
+                        "schema_version": 1,
+                        "prompt_family": "my_prompt",
+                        "prompt_version": 2,
                     },
                 },
                 "step_b": {"type": "DeterministicFunction", "config": {"threshold": 0.8}},
             },
             "resolved_schemas": {
                 "my_schema/1": {
-                    "family": "my_schema", "version": 1, "fields": ["field1", "field2"],
-                    "json_schema": {"properties": {
-                        "field1": {"type": "string", "description": "First field"},
-                        "field2": {"type": "number"},
-                    }},
+                    "family": "my_schema",
+                    "version": 1,
+                    "fields": ["field1", "field2"],
+                    "json_schema": {
+                        "properties": {
+                            "field1": {"type": "string", "description": "First field"},
+                            "field2": {"type": "number"},
+                        }
+                    },
                 },
             },
             "resolved_prompts": {
                 "my_prompt/2": {
-                    "family": "my_prompt", "version": 2,
+                    "family": "my_prompt",
+                    "version": 2,
                     "template_variables": ["input", "context"],
                     "template": "You are a {{input}} with {{context}}",
                 },
@@ -238,7 +246,8 @@ class TestParsePipelineResponse:
                         "type": "LLMGeneration",
                         "runtime": "backend",
                         "config": {
-                            "schema_family": "entity_profile", "schema_version": 1,
+                            "schema_family": "entity_profile",
+                            "schema_version": 1,
                             "temperature": 0.3,
                         },
                         "optimizer": {
@@ -249,12 +258,18 @@ class TestParsePipelineResponse:
                 },
                 "resolved_schemas": {
                     "entity_profile/1": {
-                        "family": "entity_profile", "version": 1,
+                        "family": "entity_profile",
+                        "version": 1,
                         "fields": ["entity_name", "core_concept"],
-                        "json_schema": {"properties": {
-                            "entity_name": {"type": "string", "description": "Canonical name"},
-                            "core_concept": {"type": "string", "description": "Conceptual essence"},
-                        }},
+                        "json_schema": {
+                            "properties": {
+                                "entity_name": {"type": "string", "description": "Canonical name"},
+                                "core_concept": {
+                                    "type": "string",
+                                    "description": "Conceptual essence",
+                                },
+                            }
+                        },
                     },
                 },
             },

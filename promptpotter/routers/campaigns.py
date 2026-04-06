@@ -4,6 +4,7 @@ Campaign registry endpoints.
 Provides REST API for listing and viewing optimization campaigns,
 nested under ``/backends/{backend_id}/campaigns``.
 """
+
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -61,7 +62,8 @@ class CampaignDetailResponse(BaseModel):
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
     trials: list[TrialSummary] = Field(description="Ordered list of trial summaries")
     langfuse_trace_id: str | None = Field(
-        default=None, description="Langfuse trace ID if observability is enabled",
+        default=None,
+        description="Langfuse trace ID if observability is enabled",
     )
 
 

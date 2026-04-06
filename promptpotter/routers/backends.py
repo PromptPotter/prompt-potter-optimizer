@@ -34,7 +34,8 @@ class RegisterBackendRequest(BaseModel):
     backend_type: str = Field(..., description="Backend type, e.g. 'default'")
     base_url: str = Field(..., description="Backend API base URL")
     id: str | None = Field(
-        None, description="Custom ID (auto-generated from name if omitted)",
+        None,
+        description="Custom ID (auto-generated from name if omitted)",
     )
 
 
@@ -89,9 +90,7 @@ async def register_backend(request: RegisterBackendRequest, store: StoreDep):
     """Register a new backend connection."""
     backend_id = request.id or _slugify(request.name)
     if store.backends.get(backend_id):
-        raise HTTPException(
-            status_code=409, detail=f"Backend '{backend_id}' already exists"
-        )
+        raise HTTPException(status_code=409, detail=f"Backend '{backend_id}' already exists")
 
     backend = BackendConnection(
         id=backend_id,

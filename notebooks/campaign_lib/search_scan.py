@@ -22,7 +22,7 @@ from .display import (
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.campaign.init import BackendSession
+    from promptpotter.services.campaign.bootstrap import BackendContext
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ async def sensitivity_scan(
     backend_id: str = "",
     pipeline_schema=None,
     experiment_id: str = "",
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
     session_id: str = "",
 ) -> tuple:
     """Run a sensitivity scan with progress output.
@@ -80,12 +80,15 @@ async def sensitivity_scan(
     n_axes = sum(1 for v in scan_variants.values() if len(v) > 1)
     n_configs = sum(len(v) for v in scan_variants.values() if len(v) > 1)
     n_eval = sample_size if sample_size > 0 else len(dataset)
-    n_cached = sum(
-        e.get("item_count", 0)
-        for e in store.dataset_runs.list_all(backend_id)
-    ) if store and backend_id else 0
-    print(f"  Axes: {n_axes}, variants: {n_configs}, "
-          f"queries/variant: {n_eval}, cached results: {n_cached}")
+    n_cached = (
+        sum(e.get("item_count", 0) for e in store.dataset_runs.list_all(backend_id))
+        if store and backend_id
+        else 0
+    )
+    print(
+        f"  Axes: {n_axes}, variants: {n_configs}, "
+        f"queries/variant: {n_eval}, cached results: {n_cached}"
+    )
     print(f"  Estimated calls: ~{n_configs * n_eval}")
 
     cb, on_result_cb = _make_scan_progress_cb()
@@ -100,10 +103,14 @@ async def sensitivity_scan(
     try:
         print("  Evaluating baseline...")
         df, profiles = await _sensitivity_scan(
-            baseline, scan_variants, dataset, backend_client,
+            baseline,
+            scan_variants,
+            dataset,
+            backend_client,
             baseline_opt=baseline_opt,
             sample_size=sample_size,
-            store=store, backend_id=backend_id,
+            store=store,
+            backend_id=backend_id,
             pipeline_schema=pipeline_schema,
             progress_cb=cb,
             on_result=on_result_cb,
@@ -131,7 +138,8 @@ async def sensitivity_scan(
     # Persist scan results via SessionStore if session is active
     if session_id and store and backend_id:
         store.sessions.save_scan_results(
-            backend_id, session_id,
+            backend_id,
+            session_id,
             df.to_dict(orient="records"),
             profiles,
         )
@@ -161,8 +169,7 @@ def _make_scan_progress_cb():
             baseline_results.extend(event.get("results", []))
             is_cached = event.get("cached", False)
             cached = " [cached]" if is_cached else ""
-            print(f"  Baseline: {event['hits']}/{event['total']} "
-                  f"({event['accuracy']:.1%}){cached}")
+            print(f"  Baseline: {event['hits']}/{event['total']} ({event['accuracy']:.1%}){cached}")
             # Per-query lines already printed by _on_result in real-time
 
         elif t == "axis_start":
@@ -170,8 +177,7 @@ def _make_scan_progress_cb():
             total = event["total_axes"]
             card = event["cardinality"]
             print(f"\n{'=' * 70}")
-            print(f"  Axis {ai}/{total}: {event['axis']} "
-                  f"({event['axis_type']}, {card} values)")
+            print(f"  Axis {ai}/{total}: {event['axis']} ({event['axis_type']}, {card} values)")
             print(f"{'=' * 70}")
 
         elif t == "variant_done":
@@ -198,8 +204,9 @@ def _make_scan_progress_cb():
                 marker = ""
 
             cache_str = " [cached]" if cached else ""
-            print(f"  [{vi}] {preview:<42s} {hits}/{total}  "
-                  f"{acc:.1%}  {delta_str}{marker}{cache_str}")
+            print(
+                f"  [{vi}] {preview:<42s} {hits}/{total}  {acc:.1%}  {delta_str}{marker}{cache_str}"
+            )
             # Per-query lines already printed by _on_result in real-time
 
         elif t == "axis_done":
@@ -207,14 +214,18 @@ def _make_scan_progress_cb():
             sr = event["sensitivity_range"]
             bd = event["best_delta"]
             wd = event["worst_delta"]
-            print(f"  >> {event['axis']}: range={sr:.1%}, "
-                  f"best={bd:+.1%}, worst={wd:+.1%}, budget={budget}")
+            print(
+                f"  >> {event['axis']}: range={sr:.1%}, "
+                f"best={bd:+.1%}, worst={wd:+.1%}, budget={budget}"
+            )
 
         elif t == "axis_pruned":
             tested = event["variants_tested"]
             remaining = event["remaining_skipped"]
-            print(f"  >> PRUNED: {event['axis']} — {tested} variants "
-                  f"overlap baseline CI, skipping {remaining} remaining")
+            print(
+                f"  >> PRUNED: {event['axis']} — {tested} variants "
+                f"overlap baseline CI, skipping {remaining} remaining"
+            )
 
         elif t == "scan_aborted":
             reason = event.get("reason", "unknown")
@@ -239,7 +250,7 @@ async def adaptive_search(
     index_terms: list | None = None,
     plan_id: str = "",
     experiment_id: str = "",
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
 ) -> tuple:
     """Run adaptive coordinate descent search with progress output.
 
@@ -270,11 +281,15 @@ async def adaptive_search(
     _httpcore_log.setLevel(logging.WARNING)
     try:
         best_ps, best_params, log_df = await _adaptive_search(
-            baseline_ps, variant_library, dataset, backend_client,
+            baseline_ps,
+            variant_library,
+            dataset,
+            backend_client,
             axis_profiles,
             max_rounds=max_rounds,
             stop_threshold=stop_threshold,
-            store=store, backend_id=backend_id,
+            store=store,
+            backend_id=backend_id,
             pipeline_params=pipeline_params,
             index_terms=index_terms,
             progress_cb=cb,
@@ -283,6 +298,7 @@ async def adaptive_search(
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         import pandas as _pd
+
         _print_interrupt_banner(
             "Adaptive search",
             saved="completed evaluations saved via eval_search_point",
@@ -294,8 +310,7 @@ async def adaptive_search(
         _httpcore_log.setLevel(_prev_httpcore)
 
     if not log_df.empty:
-        print(f"\nSearch log: {len(log_df)} evaluations across "
-              f"{log_df['round'].nunique()} rounds")
+        print(f"\nSearch log: {len(log_df)} evaluations across {log_df['round'].nunique()} rounds")
         best_row = log_df.loc[log_df["accuracy"].idxmax()]
         print(
             f"  Best found: {best_row['axis']}={best_row['value_preview']} "
@@ -327,8 +342,7 @@ def _make_search_progress_cb():
             axis = event["axis"]
             card = event["cardinality"]
             budget = event["budget"]
-            print(f"\n  -- {axis} ({event['axis_type']}, "
-                  f"{card} values, budget={budget}) --")
+            print(f"\n  -- {axis} ({event['axis_type']}, {card} values, budget={budget}) --")
 
         elif t == "variant_done":
             preview = event["value_preview"]
@@ -349,8 +363,7 @@ def _make_search_progress_cb():
                 marker = ""
 
             cache_str = " [cached]" if cached else ""
-            print(f"    {preview:<42s} {hits}/{total}  "
-                  f"{acc:.1%}  {delta_str}{marker}{cache_str}")
+            print(f"    {preview:<42s} {hits}/{total}  {acc:.1%}  {delta_str}{marker}{cache_str}")
 
             results = event.get("results", [])
             for r in results:
@@ -363,8 +376,7 @@ def _make_search_progress_cb():
                 imp = event["improvement"]
                 bv = event["best_value"]
                 new_acc = event["new_accuracy"]
-                print(f"  ** {axis} IMPROVED +{imp:.1%} -> "
-                      f"{new_acc:.1%} (best: {bv})")
+                print(f"  ** {axis} IMPROVED +{imp:.1%} -> {new_acc:.1%} (best: {bv})")
             else:
                 print(f"  -- {axis}: no improvement, resolved")
 
@@ -386,29 +398,34 @@ async def run_sensitivity_scan(
     dataset: list,
     *,
     scan_sample_size: int = 0,
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
     experiment_id: str = "",
     session_id: str = "",
 ):
     """Prepare scan baseline and run sensitivity scan in one call.
 
-    Absorbs ``prepare_scan_baseline()`` and ``sensitivity_scan()`` plumbing.
+    Absorbs ``decompose_scan_baseline()`` and ``sensitivity_scan()`` plumbing.
 
     Returns:
         (scan_baseline_sp, scan_df, axis_profiles) — the JobSearchPoint
         baseline, per-variant DataFrame, and axis profile list.
     """
-    from .search import prepare_scan_baseline
+    from .search import decompose_scan_baseline
 
-    scan_baseline_sp, search_baseline, _scan_diag = await prepare_scan_baseline(
-        baseline, campaign_config,
-        session=session, scan_variants=scan_variants,
+    scan_baseline_sp, search_baseline, _scan_diag = await decompose_scan_baseline(
+        baseline,
+        campaign_config,
+        session=session,
+        scan_variants=scan_variants,
     )
     scan_df, axis_profiles = await sensitivity_scan(
-        scan_baseline_sp, scan_variants, dataset,
+        scan_baseline_sp,
+        scan_variants,
+        dataset,
         baseline_opt=search_baseline,
         sample_size=scan_sample_size,
-        session=session, experiment_id=experiment_id,
+        session=session,
+        experiment_id=experiment_id,
         session_id=session_id,
     )
     return scan_baseline_sp, scan_df, axis_profiles

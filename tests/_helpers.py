@@ -9,6 +9,7 @@ class MockCompletion:
     class Choice:
         class Message:
             content = '{"result": "ok"}'
+
         message = Message()
         finish_reason = "stop"
 
@@ -18,6 +19,7 @@ class MockCompletion:
         prompt_tokens = 10
         completion_tokens = 5
         total_tokens = 15
+
     usage = Usage()
     model = "test-model"
 

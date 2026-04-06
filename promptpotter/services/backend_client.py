@@ -71,7 +71,8 @@ class BackendClient:
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         """GET ``{base_url}{path}`` and return parsed JSON."""
         resp = await self._get_http().get(
-            f"{self.base_url}{path}", **({"params": params} if params else {}),
+            f"{self.base_url}{path}",
+            **({"params": params} if params else {}),
         )
         resp.raise_for_status()
         return resp.json()
@@ -127,7 +128,9 @@ class BackendClient:
         return await self._get_json("/experiments")
 
     async def fetch_experiment(
-        self, experiment_id: str, include_traces: bool = True,
+        self,
+        experiment_id: str,
+        include_traces: bool = True,
     ) -> dict[str, Any]:
         """GET /experiments/{id}/mappings — includes mappings, runs, eval results."""
         return await self._get_json(
@@ -188,7 +191,9 @@ class BackendClient:
                 wire_overrides[k] = v
             else:
                 logger.debug(
-                    "run_query: dropping non-dict pipeline_param %r=%r", k, v,
+                    "run_query: dropping non-dict pipeline_param %r=%r",
+                    k,
+                    v,
                 )
 
         if wire_overrides:
@@ -237,7 +242,9 @@ class BackendClient:
     # -- high-level sync --------------------------------------------------
 
     async def sync_experiments(
-        self, store: ProjectStore, backend_id: str,
+        self,
+        store: ProjectStore,
+        backend_id: str,
         include_traces: bool = True,
     ) -> int:
         """Fetch all experiments and store verbatim. Returns count."""
@@ -249,23 +256,32 @@ class BackendClient:
             exp_id = exp["experiment_id"]
             if exp_id:
                 detail = await self.fetch_experiment(
-                    exp_id, include_traces=include_traces,
+                    exp_id,
+                    include_traces=include_traces,
                 )
                 store.backends.save_sync(
-                    backend_id, f"experiments/{exp_id}.json", detail,
+                    backend_id,
+                    f"experiments/{exp_id}.json",
+                    detail,
                 )
         return len(experiments)
 
     async def sync_experiment(
-        self, store: ProjectStore, backend_id: str, experiment_id: str,
+        self,
+        store: ProjectStore,
+        backend_id: str,
+        experiment_id: str,
         include_traces: bool = True,
     ) -> dict[str, Any]:
         """Fetch one experiment and store verbatim."""
         detail = await self.fetch_experiment(
-            experiment_id, include_traces=include_traces,
+            experiment_id,
+            include_traces=include_traces,
         )
         store.backends.save_sync(
-            backend_id, f"experiments/{experiment_id}.json", detail,
+            backend_id,
+            f"experiments/{experiment_id}.json",
+            detail,
         )
         return detail
 
@@ -292,4 +308,3 @@ class BackendClient:
         from promptpotter.config.connectors.termnorm import extract_queries
 
         return extract_queries(experiment_data)
-

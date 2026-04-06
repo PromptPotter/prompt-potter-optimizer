@@ -32,10 +32,7 @@ class TestMinSampleSize:
 class TestBuildDiagnosticSetAutoAdjust:
     def _make_data(self, n: int) -> tuple[list, list]:
         dataset = [{"query": f"q{i}", "ground_truth": f"gt{i}"} for i in range(n)]
-        baseline = [
-            {"query": f"q{i}", "hit": i % 2 == 0}
-            for i in range(n)
-        ]
+        baseline = [{"query": f"q{i}", "hit": i % 2 == 0} for i in range(n)]
         return dataset, baseline
 
     def test_small_n_adjusted_upward(self):

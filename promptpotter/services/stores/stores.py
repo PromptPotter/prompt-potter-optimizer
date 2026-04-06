@@ -5,6 +5,7 @@ that follow identical patterns (EntityStore base or standalone CRUD).
 Larger stores (CampaignStore, DatasetRunStore, IntermediateCache) remain
 in their own modules.
 """
+
 from __future__ import annotations
 
 import json
@@ -47,14 +48,16 @@ class PlanStore(EntityStore):
             data = read_json(path)
             config = data.get("config", {})
             scan = data.get("scan_results", {})
-            results.append({
-                "plan_id": data["plan_id"],
-                "status": data["status"],
-                "n_diagnostic": config.get("n_diagnostic", "?"),
-                "max_rounds": config.get("max_rounds", "?"),
-                "n_axis_profiles": len(scan.get("axis_profiles", [])),
-                "variant_library_hash": data.get("variant_library_hash", ""),
-            })
+            results.append(
+                {
+                    "plan_id": data["plan_id"],
+                    "status": data["status"],
+                    "n_diagnostic": config.get("n_diagnostic", "?"),
+                    "max_rounds": config.get("max_rounds", "?"),
+                    "n_axis_profiles": len(scan.get("axis_profiles", [])),
+                    "variant_library_hash": data.get("variant_library_hash", ""),
+                }
+            )
         return results
 
 
@@ -149,16 +152,18 @@ class BackendStore:
         items = []
         for p in sorted(d.glob("*.json")):
             data = read_json(p)
-            items.append({
-                "execution_id": data["execution_id"],
-                "backend_id": data["backend_id"],
-                "experiment_id": data["experiment_id"],
-                "variant_label": data.get("variant_label", ""),
-                "pipeline_notation": data.get("pipeline_notation", ""),
-                "query_count": data.get("query_count", 0),
-                "successful_count": data.get("successful_count", 0),
-                "created_at": data.get("created_at", ""),
-            })
+            items.append(
+                {
+                    "execution_id": data["execution_id"],
+                    "backend_id": data["backend_id"],
+                    "experiment_id": data["experiment_id"],
+                    "variant_label": data.get("variant_label", ""),
+                    "pipeline_notation": data.get("pipeline_notation", ""),
+                    "query_count": data.get("query_count", 0),
+                    "successful_count": data.get("successful_count", 0),
+                    "created_at": data.get("created_at", ""),
+                }
+            )
         return items
 
     # -- datasets (absorbed from DatasetStore) --------------------------------
@@ -262,8 +267,7 @@ class SessionStore:
         if not sessions_dir.exists():
             return []
         return sorted(
-            d.name for d in sessions_dir.iterdir()
-            if d.is_dir() and (d / "session.json").exists()
+            d.name for d in sessions_dir.iterdir() if d.is_dir() and (d / "session.json").exists()
         )
 
     def latest_session_id(self, backend_id: str) -> str | None:
@@ -282,11 +286,14 @@ class SessionStore:
     ) -> None:
         """Persist sensitivity scan results (fills the persistence gap)."""
         path = self._session_dir(backend_id, session_id) / "scan_results.json"
-        write_json(path, {
-            "scan_df": scan_df_records,
-            "axis_profiles": axis_profiles,
-            "saved_at": datetime.now(UTC).isoformat(),
-        })
+        write_json(
+            path,
+            {
+                "scan_df": scan_df_records,
+                "axis_profiles": axis_profiles,
+                "saved_at": datetime.now(UTC).isoformat(),
+            },
+        )
 
     def load_scan_results(
         self,
@@ -328,7 +335,8 @@ class SessionStore:
         )
 
     def load_active(
-        self, session_override: str | None = None,
+        self,
+        session_override: str | None = None,
     ) -> tuple[dict[str, Any], str, str]:
         """Load active session state + backend_id + session_id.
 

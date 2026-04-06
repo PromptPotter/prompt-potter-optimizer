@@ -15,6 +15,7 @@ Usage:
     langfuse.end_trace(trace_id)
     langfuse.flush()
 """
+
 import logging
 import os
 import time
@@ -64,6 +65,7 @@ class LangfuseLogger:
                 os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
 
                 from langfuse import Langfuse
+
                 self.client = Langfuse()
             except ImportError:
                 logger.warning("langfuse package not installed — observability disabled")
@@ -373,7 +375,7 @@ class LangfuseLogger:
                 return getattr(item, "id", None)
             except Exception as exc:
                 if "429" in str(exc) and attempt < _max_retries - 1:
-                    delay = 2 ** attempt
+                    delay = 2**attempt
                     logger.debug("Langfuse 429 rate limit, retry in %ds", delay)
                     time.sleep(delay)
                     continue
@@ -478,14 +480,16 @@ class LangfuseLogger:
                         return False
 
                     # Short-term rate limit — back off and retry
-                    wait = min(2 ** attempt, retry_after or 2 ** attempt)
+                    wait = min(2**attempt, retry_after or 2**attempt)
                     logger.debug("Rate limited, waiting %ds (attempt %d)", wait, attempt + 1)
                     time.sleep(wait)
                     continue
 
                 # Other HTTP error
                 logger.warning(
-                    "Link item to run HTTP %s: %s", resp.status_code, resp.text[:200],
+                    "Link item to run HTTP %s: %s",
+                    resp.status_code,
+                    resp.text[:200],
                 )
                 return False
 
@@ -500,4 +504,3 @@ class LangfuseLogger:
         if self.enabled and self.client:
             with graceful("Failed to flush Langfuse events"):
                 self.client.flush()
-

@@ -1,6 +1,7 @@
 """
 Shared I/O helpers for file-based stores.
 """
+
 import contextlib
 import json
 import os
@@ -160,5 +161,3 @@ class EntityStore:
         data = read_json(path)
         data.update(updates)
         write_json(path, data)
-
-

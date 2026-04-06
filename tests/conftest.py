@@ -1,4 +1,5 @@
 """Shared test fixtures."""
+
 import pytest
 
 from promptpotter.services.tracing.langfuse_client import LangfuseLogger

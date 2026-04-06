@@ -10,6 +10,7 @@ Three-level hierarchy (see ``opt_search_point.py`` for full tree)::
 
 Formula: ``f(JobSearchPoint, PipelineSchema, dataset) → scores``
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -27,6 +28,7 @@ from promptpotter.shared.hashing import (
 # Base
 # ---------------------------------------------------------------------------
 
+
 class SearchPoint(BaseModel):
     """A point in any pipeline's search space.
 
@@ -42,6 +44,7 @@ class SearchPoint(BaseModel):
 # ---------------------------------------------------------------------------
 # JobSearchPoint (target layer)
 # ---------------------------------------------------------------------------
+
 
 class JobSearchPoint(SearchPoint):
     """A point in the target evaluation space.

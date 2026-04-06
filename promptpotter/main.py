@@ -1,6 +1,7 @@
 """
 PromptPotter Optimizer API — main FastAPI application entry point.
 """
+
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -46,6 +47,7 @@ async def scalar_docs():
         title=app.title,
     )
 
+
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
@@ -69,6 +71,7 @@ app.add_middleware(
 # Health check
 _health = APIRouter()
 
+
 @_health.get("/health")
 async def health_check():
     return {
@@ -77,6 +80,7 @@ async def health_check():
         "timestamp": datetime.now(UTC).isoformat(),
         "version": APP_VERSION,
     }
+
 
 # Include routers
 app.include_router(_health, prefix="/api/v1", tags=["Health"])

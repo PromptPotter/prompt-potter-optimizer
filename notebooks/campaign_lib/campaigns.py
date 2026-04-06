@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.campaign.init import BackendSession
+    from promptpotter.services.campaign.bootstrap import BackendContext
     from promptpotter.services.project_store import ProjectStore
 
 
@@ -68,9 +68,16 @@ def list_campaigns(
         cfg = campaign.get("config", {})
         if cfg:
             print("\n  Config (copy to campaign_config):")
-            for k in ["max_rounds", "patience", "n_variants", "creativity",
-                       "improvement_threshold", "model",
-                       "sample_size", "seed"]:
+            for k in [
+                "max_rounds",
+                "patience",
+                "n_variants",
+                "creativity",
+                "improvement_threshold",
+                "model",
+                "sample_size",
+                "seed",
+            ]:
                 if k in cfg:
                     print(f"    {k}: {cfg[k]}")
             pp = cfg.get("pipeline_params")
@@ -108,8 +115,7 @@ def list_campaigns(
             patience = cfg.get("patience", "?")
             max_r = cfg.get("max_rounds", "?")
             sample = cfg.get("sample_size", "?")
-            print(f"    model={model}  patience={patience}  "
-                  f"rounds={max_r}  sample={sample}")
+            print(f"    model={model}  patience={patience}  rounds={max_r}  sample={sample}")
         print(f"    updated: {updated}")
         print()
 
@@ -132,7 +138,9 @@ def diff_campaign_config(
         return {}
 
     diffs = _diff_campaign_config(
-        campaign.get("config", {}), campaign_config, pipeline_params,
+        campaign.get("config", {}),
+        campaign_config,
+        pipeline_params,
     )
 
     print(f"\nDiff: current config vs {campaign_id}")
@@ -166,7 +174,7 @@ def load_experiment_config(
 
 
 def load_and_apply_experiment(
-    session: BackendSession,
+    session: BackendContext,
     campaign_config: CampaignConfig,
     experiment_id: str,
     pipeline_params: dict | None = None,
@@ -177,7 +185,9 @@ def load_and_apply_experiment(
     Returns updated *pipeline_params* (or the original if nothing changed).
     """
     stored_cfg = load_experiment_config(
-        session.store, session.backend_id, experiment_id,
+        session.store,
+        session.backend_id,
+        experiment_id,
     )
     if stored_cfg:
         pp_override = apply_experiment_overrides(campaign_config, stored_cfg)
@@ -196,7 +206,7 @@ def show_experiment_dashboard(
     dataset: list | None = None,
     pipeline_params: dict | None = None,
     baseline_prompt_fields: dict | None = None,
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
 ) -> dict:
     """Unified experiment dashboard — overview or detail by experiment ID.
 
@@ -211,7 +221,10 @@ def show_experiment_dashboard(
     # Apply experiment overrides when resuming
     if experiment_id and session is not None:
         pipeline_params = load_and_apply_experiment(
-            session, campaign_config, experiment_id, pipeline_params,
+            session,
+            campaign_config,
+            experiment_id,
+            pipeline_params,
         )
 
     # --- Resolve short ID ---
@@ -229,7 +242,8 @@ def show_experiment_dashboard(
             from promptpotter.services.campaign.lifecycle import cycle_config_identity
 
             config = RunConfig.from_campaign_config(
-                campaign_config, pipeline_params=pipeline_params,
+                campaign_config,
+                pipeline_params=pipeline_params,
             )
             bl_rendered = ""
             if baseline_prompt_fields:
@@ -259,9 +273,16 @@ def show_experiment_dashboard(
         cfg = campaign.get("config", {})
         if cfg:
             print("\n  Config (copy to campaign_config to resume):")
-            for k in ["max_rounds", "patience", "n_variants", "creativity",
-                       "improvement_threshold", "model",
-                       "sample_size", "seed"]:
+            for k in [
+                "max_rounds",
+                "patience",
+                "n_variants",
+                "creativity",
+                "improvement_threshold",
+                "model",
+                "sample_size",
+                "seed",
+            ]:
                 if k in cfg:
                     print(f"    {k}: {cfg[k]}")
             pp = cfg.get("pipeline_params")
@@ -269,8 +290,7 @@ def show_experiment_dashboard(
                 # Show keys only, not full nested dicts
                 pp_keys = sorted(pp.keys())
                 pp_summary = ", ".join(
-                    f"{k}={str(pp[k])[:25]}" if not isinstance(pp[k], (dict, list))
-                    else f"{k}=..."
+                    f"{k}={str(pp[k])[:25]}" if not isinstance(pp[k], (dict, list)) else f"{k}=..."
                     for k in pp_keys[:6]
                 )
                 if len(pp_keys) > 6:
@@ -281,7 +301,10 @@ def show_experiment_dashboard(
         if campaign_config is not None:
             print()
             diff_campaign_config(
-                store, backend_id, full_id, campaign_config,
+                store,
+                backend_id,
+                full_id,
+                campaign_config,
                 pipeline_params=pipeline_params,
             )
 
@@ -344,8 +367,7 @@ def show_experiment_dashboard(
 
             marker = "  ●" if is_active else "   "
             tag = "  <-- active" if is_active else ""
-            print(f"{marker} {cid}  {status:<12} {n} rounds  "
-                  f"best={best}  base={base}{tag}")
+            print(f"{marker} {cid}  {status:<12} {n} rounds  best={best}  base={base}{tag}")
 
             # Inline config
             full = store.campaigns.load(backend_id, cid)
@@ -355,8 +377,7 @@ def show_experiment_dashboard(
                 patience = cfg.get("patience", "?")
                 max_r = cfg.get("max_rounds", "?")
                 sample = cfg.get("sample_size", "?")
-                print(f"      patience={patience}  rounds={max_r}  "
-                      f"sample={sample}  model={model}")
+                print(f"      patience={patience}  rounds={max_r}  sample={sample}  model={model}")
 
             # Resume hint for active
             if is_active:

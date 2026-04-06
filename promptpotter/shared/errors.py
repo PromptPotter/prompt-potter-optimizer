@@ -2,6 +2,7 @@
 
 Leaf module — no domain model or service dependencies.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -91,4 +92,3 @@ def most_common_error_category(results: list) -> ErrorCategory | None:
     if not cats:
         return None
     return Counter(cats).most_common(1)[0][0]
-

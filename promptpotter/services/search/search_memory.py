@@ -162,10 +162,7 @@ class SearchMemory:
     def dead_queries(self, max_hit_rate: float = 0.0) -> list[QueryRecord]:
         """Return queries that never hit (or always hit if max_hit_rate=1.0)."""
         records = self._build_query_records()
-        return [
-            q for q in records
-            if q.hit_rate <= max_hit_rate or q.hit_rate >= 1.0
-        ]
+        return [q for q in records if q.hit_rate <= max_hit_rate or q.hit_rate >= 1.0]
 
     def query_sensitive_axes(self, query: str) -> list[str]:
         """Return axes that most affect this query's outcome.
@@ -213,12 +210,14 @@ class SearchMemory:
         total = sum(len(qs) for qs in mode_queries.values())
         clusters = []
         for mode, queries in sorted(mode_queries.items(), key=lambda x: -len(x[1])):
-            clusters.append(FailureCluster(
-                failure_mode=mode,
-                query_count=len(queries),
-                fraction=len(queries) / total if total else 0.0,
-                example_queries=queries[:3],
-            ))
+            clusters.append(
+                FailureCluster(
+                    failure_mode=mode,
+                    query_count=len(queries),
+                    fraction=len(queries) / total if total else 0.0,
+                    example_queries=queries[:3],
+                )
+            )
             if len(clusters) >= max_clusters:
                 break
         return clusters
@@ -259,10 +258,7 @@ class SearchMemory:
         Returns True if new data was incorporated.
         """
         index_entries = store.dataset_runs.list_all(backend_id)
-        new_ids = [
-            e["run_id"] for e in index_entries
-            if e["run_id"] not in self._watermark
-        ]
+        new_ids = [e["run_id"] for e in index_entries if e["run_id"] not in self._watermark]
         if not new_ids:
             return False
 
@@ -275,7 +271,8 @@ class SearchMemory:
 
         logger.debug(
             "SearchMemory refreshed: %d new runs (total watermark: %d)",
-            len(new_ids), len(self._watermark),
+            len(new_ids),
+            len(self._watermark),
         )
         return True
 
@@ -283,10 +280,7 @@ class SearchMemory:
         """Persist to disk."""
         data = {
             "watermark": sorted(self._watermark),
-            "axis_values": {
-                axis: dict(vals.items())
-                for axis, vals in self._axis_values.items()
-            },
+            "axis_values": {axis: dict(vals.items()) for axis, vals in self._axis_values.items()},
             "query_hits": dict(self._query_hits),
             "query_failure_modes": dict(self._query_failure_modes),
             "bottleneck_counts": dict(self._bottleneck_counts),
@@ -365,7 +359,9 @@ class SearchMemory:
                 self._total_failures += 1
 
     def _compute_axis_impact(
-        self, axis: str, values: dict[str, list[float]],
+        self,
+        axis: str,
+        values: dict[str, list[float]],
     ) -> AxisImpact | None:
         """Compute effect size and consistency for one axis."""
         all_means = []
@@ -377,8 +373,11 @@ class SearchMemory:
 
         if len(all_means) < 2:
             return AxisImpact(
-                axis=axis, effect_size=0.0, consistency=0.0,
-                classification="dead", sample_count=total_samples,
+                axis=axis,
+                effect_size=0.0,
+                consistency=0.0,
+                classification="dead",
+                sample_count=total_samples,
             )
 
         # Effect size: mean pairwise |delta| across value means
@@ -424,13 +423,15 @@ class SearchMemory:
                 from collections import Counter
 
                 dominant = Counter(modes).most_common(1)[0][0]
-            records.append(QueryRecord(
-                query=query,
-                hit_rate=round(hit_rate, 4),
-                n_evaluations=len(hits),
-                variance=round(variance, 4),
-                dominant_failure_mode=dominant,
-            ))
+            records.append(
+                QueryRecord(
+                    query=query,
+                    hit_rate=round(hit_rate, 4),
+                    n_evaluations=len(hits),
+                    variance=round(variance, 4),
+                    dominant_failure_mode=dominant,
+                )
+            )
         return records
 
 

@@ -3,6 +3,7 @@
 Leaf module shared by llm_client and service-layer callers.
 Lives in ``promptpotter/shared/`` — no domain model or service dependencies.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,7 @@ def try_parse_json(content: str, provider: str) -> Any | None:
     if text.startswith("```"):
         first_nl = text.find("\n")
         if first_nl != -1:
-            text = text[first_nl + 1:]
+            text = text[first_nl + 1 :]
         if text.endswith("```"):
             text = text[:-3]
         text = text.strip()
@@ -32,7 +33,7 @@ def try_parse_json(content: str, provider: str) -> Any | None:
     # Best-effort repair of malformed JSON (Groq/kimi artifacts)
     try:
         repaired = text.replace("\\\\n", "\\n").replace("\\\\t", "\\t")
-        repaired = re.sub(r'(?<=[{,\s])(\w+)\s*:', r'"\1":', repaired)
+        repaired = re.sub(r"(?<=[{,\s])(\w+)\s*:", r'"\1":', repaired)
         repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
         # Truncate after last balanced closing brace
         depth = 0

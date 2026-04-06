@@ -83,19 +83,19 @@ class DatasetRunStore:
     def _load_index(self, backend_id: str) -> dict:
         """Return cached index, loading from disk on first access."""
         if backend_id not in self._index_cache:
-            self._index_cache[backend_id] = (
-                read_json_optional(self._index_path(backend_id))
-                or {"dataset_runs": [], "total": 0, "schema_version": DATASET_RUNS_SCHEMA_VERSION}
-            )
+            self._index_cache[backend_id] = read_json_optional(self._index_path(backend_id)) or {
+                "dataset_runs": [],
+                "total": 0,
+                "schema_version": DATASET_RUNS_SCHEMA_VERSION,
+            }
         return self._index_cache[backend_id]
 
     def _load_aliases(self, backend_id: str) -> dict:
         """Return cached alias data, loading from disk on first access."""
         if backend_id not in self._alias_cache:
-            self._alias_cache[backend_id] = (
-                read_json_optional(self._alias_path(backend_id))
-                or {"groups": []}
-            )
+            self._alias_cache[backend_id] = read_json_optional(self._alias_path(backend_id)) or {
+                "groups": []
+            }
         return self._alias_cache[backend_id]
 
     def _invalidate_cache(self, backend_id: str) -> None:
@@ -120,7 +120,10 @@ class DatasetRunStore:
     # -- complete runs --------------------------------------------------------
 
     def save(
-        self, backend_id: str, run_id: str, data: dict[str, Any],
+        self,
+        backend_id: str,
+        run_id: str,
+        data: dict[str, Any],
     ) -> Path:
         """Write detail file and upsert the index.
 
@@ -178,7 +181,9 @@ class DatasetRunStore:
         return detail_path
 
     def load_by_id(
-        self, backend_id: str, run_id: str,
+        self,
+        backend_id: str,
+        run_id: str,
     ) -> dict[str, Any] | None:
         """Load a dataset run detail file directly by run_id (no index scan)."""
         return read_json_optional(self._runs_dir(backend_id) / f"{run_id}.json")

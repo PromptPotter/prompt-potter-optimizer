@@ -48,13 +48,32 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+class _SessionCtx:
+    """Loaded session state — eliminates repeated store/state/id boilerplate."""
+
+    __slots__ = ("backend_id", "session_id", "state", "store")
+
+    def __init__(self, store: ProjectStore, state: dict, backend_id: str, session_id: str):
+        self.store = store
+        self.state = state
+        self.backend_id = backend_id
+        self.session_id = session_id
+
+
+def _load_session(args: argparse.Namespace) -> _SessionCtx:
+    """Load active session from disk."""
+    store = ProjectStore()
+    state, backend_id, session_id = store.sessions.load_active(args.session)
+    return _SessionCtx(store, state, backend_id, session_id)
+
+
 def _die(msg: str) -> None:
     sys.exit(f"ERROR: {msg}")
 
 
 async def _reconstruct_svc(init_params: dict):
-    """Reconstruct BackendSession from stored init params (~1s)."""
-    from promptpotter.cli._services import init_services
+    """Reconstruct BackendContext from stored init params (~1s)."""
+    from promptpotter.cli.cli_services import init_services
 
     return await init_services(
         backend_url=init_params["backend_url"],
@@ -71,12 +90,14 @@ async def _reconstruct_svc(init_params: dict):
 
 async def cmd_init(args: argparse.Namespace) -> None:
     """Initialize services, load datasets, configure pipeline, create session."""
-    from promptpotter.cli._services import (
+    from promptpotter.cli.cli_services import (
         configure_pipeline,
         init_services,
-        prepare_datasets,
         prepare_eval_context,
         show_pipeline_snapshot,
+    )
+    from promptpotter.services.campaign.bootstrap import (
+        prepare_datasets as _prepare_datasets,
     )
 
     session = await init_services(
@@ -122,16 +143,15 @@ async def cmd_init(args: argparse.Namespace) -> None:
         "experiment_id": None,
     }
 
-    bid = session.backend_id
-    sid = session.store.sessions.create(bid, state)
-    session.store.sessions.save_active_pointer(bid, sid)
+    backend_id = session.backend_id
+    session_id = session.store.sessions.create(backend_id, state)
+    session.store.sessions.save_active_pointer(backend_id, session_id)
 
     # Load data and run baseline (may be long-running)
     train_data = None
     if args.excel_path:
-        train_data, _st = prepare_datasets(
-            session.store, session.backend_id, excel_path=args.excel_path
-        )
+        ds_result = _prepare_datasets(session.store, session.backend_id, args.excel_path)
+        train_data = ds_result.train_data
     elif session.queries:
         train_data = session.queries
 
@@ -148,13 +168,13 @@ async def cmd_init(args: argparse.Namespace) -> None:
     state["baseline_prompt_fields"] = baseline.prompt_field_dict()
     state["dataset_count"] = len(dataset)
     state["baseline_accuracy"] = baseline_acc
-    session.store.sessions.save(bid, sid, state)
+    session.store.sessions.save(backend_id, session_id, state)
 
     excl_str = f"{', '.join(excluded)} excluded" if excluded else "none excluded"
     session.store.sessions.append_log(
-        bid,
-        sid,
-        f"""# Campaign Report — {sid}
+        backend_id,
+        session_id,
+        f"""# Campaign Report — {session_id}
 
 ## Setup
 - Backend: {args.backend_id} @ {args.backend_url}
@@ -167,8 +187,8 @@ async def cmd_init(args: argparse.Namespace) -> None:
         print(
             json.dumps(
                 {
-                    "session_id": sid,
-                    "backend_id": bid,
+                    "session_id": session_id,
+                    "backend_id": backend_id,
                     "phase": state["phase"],
                     "baseline_accuracy": baseline_acc,
                     "dataset_count": len(dataset),
@@ -180,16 +200,15 @@ async def cmd_init(args: argparse.Namespace) -> None:
             )
         )
     else:
-        print(f"\nSession created: {sid}")
+        print(f"\nSession created: {session_id}")
         print(f"Baseline: {baseline_acc:.1%} ({len(dataset)} queries)")
 
 
 async def cmd_task_context(args: argparse.Namespace) -> None:
     """Decompose task description into structured domain context."""
-    from promptpotter.cli._services import decompose_task_context
+    from promptpotter.cli.cli_services import decompose_task_context
 
-    store = ProjectStore()
-    state, bid, sid = store.sessions.load_active(args.session)
+    ctx = _load_session(args)
 
     task_description = ""
     if args.task_file:
@@ -199,41 +218,40 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
     if not task_description:
         _die("Provide --task-file or --task-text")
 
-    session = await _reconstruct_svc(state["init_params"])
+    session = await _reconstruct_svc(ctx.state["init_params"])
     task_context = await decompose_task_context(
         task_description,
-        state["campaign_config"],
+        ctx.state["campaign_config"],
         session,
     )
 
-    state["task_context"] = task_context
-    state["phase"] = "task-context"
-    session.store.sessions.save(bid, sid, state)
+    ctx.state["task_context"] = task_context
+    ctx.state["phase"] = "task-context"
+    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
     session.store.sessions.append_log(
-        bid, sid, f"## Task Context\n{json.dumps(task_context, indent=2)}"
+        ctx.backend_id, ctx.session_id, f"## Task Context\n{json.dumps(task_context, indent=2)}"
     )
 
 
 async def cmd_scan(args: argparse.Namespace) -> None:
     """Run sensitivity scan with provided variants."""
-    from promptpotter.cli._services import (
+    from promptpotter.cli.cli_services import (
         configure_pipeline,
         resolve_scan_variants,
         run_sensitivity_scan,
     )
-    from promptpotter.services.campaign.init import load_baseline_prompt
+    from promptpotter.services.campaign.bootstrap import load_baseline_prompt
 
-    store = ProjectStore()
-    state, bid, sid = store.sessions.load_active(args.session)
+    ctx = _load_session(args)
 
     if not args.variants_file:
         _die("--variants-file required")
     with open(args.variants_file) as f:
         scan_variants = json.load(f)
 
-    session = await _reconstruct_svc(state["init_params"])
+    session = await _reconstruct_svc(ctx.state["init_params"])
     resolve_scan_variants(scan_variants, session=session)
-    configure_pipeline(session, state["campaign_config"])
+    configure_pipeline(session, ctx.state["campaign_config"])
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     baseline = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
@@ -242,28 +260,28 @@ async def cmd_scan(args: argparse.Namespace) -> None:
     sample_size = (
         args.sample_size
         if args.sample_size is not None
-        else state["campaign_config"].get("exploration_sample_size", 0)
+        else ctx.state["campaign_config"].get("exploration_sample_size", 0)
     )
     _scan_bl, scan_df, _axis_profiles = await run_sensitivity_scan(
         baseline,
-        state["campaign_config"],
+        ctx.state["campaign_config"],
         scan_variants,
         train_data,
         scan_sample_size=sample_size,
         session=session,
-        experiment_id=state["init_params"]["experiment_id"],
-        session_id=sid,
+        experiment_id=ctx.state["init_params"]["experiment_id"],
+        session_id=ctx.session_id,
     )
 
-    state["scan_variants"] = scan_variants
-    state["phase"] = "scan"
-    session.store.sessions.save(bid, sid, state)
+    ctx.state["scan_variants"] = scan_variants
+    ctx.state["phase"] = "scan"
+    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
 
     records = scan_df.to_dict(orient="records") if scan_df is not None else []
     best = max(records, key=lambda r: r.get("accuracy", 0)) if records else {}
     session.store.sessions.append_log(
-        bid,
-        sid,
+        ctx.backend_id,
+        ctx.session_id,
         f"""## Scan
 - Axes: {len(scan_variants)}, variants: {len(records)}
 - Best: {best.get("axis", "?")}={best.get("value_preview", "?")} → {best.get("accuracy", 0):.1%} (delta: {best.get("delta", 0):+.1%})""",
@@ -272,14 +290,15 @@ async def cmd_scan(args: argparse.Namespace) -> None:
 
 async def cmd_scan_results(args: argparse.Namespace) -> None:
     """Show scan analytics and seed campaign from scan winner."""
-    from promptpotter.cli._services import seed_campaign_from_scan
-    from promptpotter.services.campaign.init import load_baseline_prompt
+    from promptpotter.services.campaign.bootstrap import load_baseline_prompt
+    from promptpotter.services.search.scan_results import (
+        seed_campaign_from_scan as _seed_campaign_from_scan,
+    )
 
-    store = ProjectStore()
-    state, bid, sid = store.sessions.load_active(args.session)
-    session = await _reconstruct_svc(state["init_params"])
+    ctx = _load_session(args)
+    session = await _reconstruct_svc(ctx.state["init_params"])
 
-    scan_data = session.store.sessions.load_scan_results(bid, sid)
+    scan_data = session.store.sessions.load_scan_results(ctx.backend_id, ctx.session_id)
     if not scan_data:
         _die("No scan results. Run 'scan' first.")
 
@@ -301,26 +320,26 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
     scan_baseline_sp = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
 
     campaign_rounds: list = []
-    seed_campaign_from_scan(
+    _seed_result = _seed_campaign_from_scan(
         scan_df,
         axis_profiles,
         scan_baseline_sp,
-        state.get("scan_variants", {}),
+        ctx.state.get("scan_variants", {}),
         campaign_rounds,
-        state["campaign_config"],
+        ctx.state["campaign_config"],
     )
 
     if campaign_rounds:
-        state["baseline_accuracy"] = campaign_rounds[-1].get("accuracy", 0.0)
-        state["baseline_prompt_fields"] = campaign_rounds[-1].get("prompt_fields", {})
+        ctx.state["baseline_accuracy"] = campaign_rounds[-1].get("accuracy", 0.0)
+        ctx.state["baseline_prompt_fields"] = campaign_rounds[-1].get("prompt_fields", {})
 
-    state["phase"] = "scan-results"
-    session.store.sessions.save(bid, sid, state)
+    ctx.state["phase"] = "scan-results"
+    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
 
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
-    from promptpotter.cli._services import (
+    from promptpotter.cli.cli_services import (
         build_scan_context,
         configure_pipeline,
         prepare_eval_context,
@@ -328,16 +347,15 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     )
     from promptpotter.models.opt_search_point import OptSearchPoint
 
-    store = ProjectStore()
-    state, bid, sid = store.sessions.load_active(args.session)
-    campaign_config = state["campaign_config"]
+    ctx = _load_session(args)
+    campaign_config = ctx.state["campaign_config"]
 
-    session = await _reconstruct_svc(state["init_params"])
+    session = await _reconstruct_svc(ctx.state["init_params"])
     pipeline_params = configure_pipeline(session, campaign_config)
     train_data = session.queries or []
 
     # Re-run baseline (fast — cached) to populate baseline_results for critique
-    _has_baseline = state.get("baseline_accuracy", 0) > 0
+    _has_baseline = ctx.state.get("baseline_accuracy", 0) > 0
     _baseline, dataset, campaign_rounds, baseline_results = await prepare_eval_context(
         session,
         train_data,
@@ -347,20 +365,20 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     )
 
     # Seed campaign_rounds with stored baseline when no eval has been run yet
-    if not campaign_rounds and state.get("baseline_prompt_fields"):
-        bl_ps = OptSearchPoint.from_prompt_fields(state["baseline_prompt_fields"])
+    if not campaign_rounds and ctx.state.get("baseline_prompt_fields"):
+        bl_ps = OptSearchPoint.from_prompt_fields(ctx.state["baseline_prompt_fields"])
         campaign_rounds.append(
             {
                 "round": "baseline",
-                "accuracy": state.get("baseline_accuracy", 0.0),
+                "accuracy": ctx.state.get("baseline_accuracy", 0.0),
                 "prompt_fields": bl_ps,
                 "results": baseline_results or [],
             }
         )
 
     # Load scan context if available
-    state["_session_id"] = sid  # for build_scan_context
-    scan_context = build_scan_context(session, state, campaign_rounds, pipeline_params)
+    ctx.state["_session_id"] = ctx.session_id  # for build_scan_context
+    scan_context = build_scan_context(session, ctx.state, campaign_rounds, pipeline_params)
 
     # HITL: --round sets pause_before_eval via the control surface
     if args.round:
@@ -368,14 +386,14 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     else:
         campaign_config.setdefault("optimization", {}).pop("pause_before_eval", None)
 
-    state["phase"] = "optimizing"
-    session.store.sessions.save(bid, sid, state)
+    ctx.state["phase"] = "optimizing"
+    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
 
     # Bidirectional control — CLI provides FileControlSurface as on_checkpoint
     from promptpotter.services.campaign.persistence_emitter import FileControlSurface
     from promptpotter.services.campaign.state import RunCallbacks
 
-    session_dir = session.store.sessions._session_dir(bid, sid)
+    session_dir = session.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
     control = FileControlSurface(session_dir / "campaign_state.json")
     control_cb = RunCallbacks(on_checkpoint=control.check)
 
@@ -394,9 +412,9 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             session=session,
             pipeline_params=pipeline_params,
             scan_context=scan_context,
-            experiment_id=state.get("experiment_id"),
-            task_context=state.get("task_context"),
-            session_id=sid,
+            experiment_id=ctx.state.get("experiment_id"),
+            task_context=ctx.state.get("task_context"),
+            session_id=ctx.session_id,
             display_callbacks=control_cb,
         )
     finally:
@@ -411,10 +429,10 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         with contextlib.suppress(json.JSONDecodeError, OSError):
             _emitter_state = json.loads(_state_path.read_text(encoding="utf-8"))
 
-    state["phase"] = "optimize"
-    state["cycle_id"] = _emitter_state.get("cycle_id")
-    state["best_accuracy"] = _emitter_state.get("best", state.get("baseline_accuracy", 0.0))
-    session.store.sessions.save(bid, sid, state)
+    ctx.state["phase"] = "optimize"
+    ctx.state["cycle_id"] = _emitter_state.get("cycle_id")
+    ctx.state["best_accuracy"] = _emitter_state.get("best", ctx.state.get("baseline_accuracy", 0.0))
+    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
 
     # Write structured result for AI/machine consumption
     result_path = session_dir / "optimize_result.json"
@@ -435,9 +453,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
 async def cmd_control(args: argparse.Namespace) -> None:
     """Write control signals to campaign_state.json (bidirectional dashboard)."""
-    store = ProjectStore()
-    _state, bid, sid = store.sessions.load_active(args.session)
-    session_dir = store.sessions._session_dir(bid, sid)
+    ctx = _load_session(args)
+    session_dir = ctx.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
     state_path = session_dir / "campaign_state.json"
 
     if not state_path.exists():
@@ -475,14 +492,14 @@ async def cmd_control(args: argparse.Namespace) -> None:
 async def cmd_profile(args: argparse.Namespace) -> None:
     """Manage connector profile — persistent per-backend defaults."""
     store = ProjectStore()
-    bid = args.backend_id
+    backend_id = args.backend_id
 
     if args.save:
         # Save active session's campaign_config as the backend profile
-        state, bid, _sid = store.sessions.load_active(args.session)
+        state, backend_id, _sid = store.sessions.load_active(args.session)
         profile = state.get("campaign_config", {})
-        store.backends.save_connector_profile(bid, profile)
-        print(f"Profile saved for '{bid}'.")
+        store.backends.save_connector_profile(backend_id, profile)
+        print(f"Profile saved for '{backend_id}'.")
         return
 
     if args.set:
@@ -491,34 +508,33 @@ async def cmd_profile(args: argparse.Namespace) -> None:
             value = json.loads(raw_value)
         except json.JSONDecodeError:
             value = raw_value
-        profile = store.backends.load_connector_profile(bid) or {}
+        profile = store.backends.load_connector_profile(backend_id) or {}
         profile[key] = value
-        store.backends.save_connector_profile(bid, profile)
-        print(f"Profile '{bid}': {key} = {json.dumps(value)}")
+        store.backends.save_connector_profile(backend_id, profile)
+        print(f"Profile '{backend_id}': {key} = {json.dumps(value)}")
         return
 
     # Default: --show
-    profile = store.backends.load_connector_profile(bid)
+    profile = store.backends.load_connector_profile(backend_id)
     if not profile:
-        print(f"No connector profile for '{bid}'. Use --save or --set to create one.")
+        print(f"No connector profile for '{backend_id}'. Use --save or --set to create one.")
         return
     print(json.dumps(profile, indent=2, default=str))
 
 
 async def cmd_results(args: argparse.Namespace) -> None:
     """Show campaign results, optionally save winner."""
-    from promptpotter.cli._services import (
+    from promptpotter.cli.cli_services import (
         show_campaign_summary,
         show_flip_tracking,
         show_lineage_chain,
     )
     from promptpotter.services.campaign.persistence import save_campaign_winner
 
-    store = ProjectStore()
-    state, bid, sid = store.sessions.load_active(args.session)
-    session = await _reconstruct_svc(state["init_params"])
+    ctx = _load_session(args)
+    session = await _reconstruct_svc(ctx.state["init_params"])
 
-    campaigns = session.store.campaigns.list_campaigns(bid)
+    campaigns = session.store.campaigns.list_campaigns(ctx.backend_id)
     if not campaigns:
         if getattr(args, "json_output", False):
             print(json.dumps({"error": "no_campaigns"}, indent=2))
@@ -530,7 +546,7 @@ async def cmd_results(args: argparse.Namespace) -> None:
     cycle_id = latest.get("campaign_id", "")
     campaign_rounds = []
     for i in range(latest.get("n_trials", 0)):
-        trial = session.store.campaigns.load_trial(bid, cycle_id, i)
+        trial = session.store.campaigns.load_trial(ctx.backend_id, cycle_id, i)
         if trial:
             campaign_rounds.append(trial)
 
@@ -543,7 +559,7 @@ async def cmd_results(args: argparse.Namespace) -> None:
                     "n_rounds": len(campaign_rounds),
                     "best_accuracy": best.get("accuracy", 0),
                     "best_round": best.get("round"),
-                    "baseline_accuracy": state.get("baseline_accuracy", 0),
+                    "baseline_accuracy": ctx.state.get("baseline_accuracy", 0),
                     "rounds": [
                         {
                             "round": r.get("round"),
@@ -565,18 +581,18 @@ async def cmd_results(args: argparse.Namespace) -> None:
     if args.save:
         save_campaign_winner(
             campaign_rounds,
-            state["campaign_config"],
+            ctx.state["campaign_config"],
             session.store,
-            bid,
-            experiment_id=state.get("experiment_id", ""),
+            ctx.backend_id,
+            experiment_id=ctx.state.get("experiment_id", ""),
         )
         if not getattr(args, "json_output", False):
             print("Winner saved.")
 
     best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
     session.store.sessions.append_log(
-        bid,
-        sid,
+        ctx.backend_id,
+        ctx.session_id,
         f"""## Results
 - Rounds: {len(campaign_rounds)}
 - Best: {best.get("accuracy", 0):.1%} (round {best.get("round", "?")})
@@ -586,20 +602,19 @@ async def cmd_results(args: argparse.Namespace) -> None:
 
 async def cmd_status(args: argparse.Namespace) -> None:
     """Print live dashboard from campaign_state.json (or session state if idle)."""
-    store = ProjectStore()
-    state, bid, sid = store.sessions.load_active(args.session)
-    session_dir = store.sessions._session_dir(bid, sid)
+    ctx = _load_session(args)
+    session_dir = ctx.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
     state_path = session_dir / "campaign_state.json"
 
     # Machine-readable JSON mode
     if getattr(args, "json_output", False):
         output: dict[str, Any] = {
-            "session_id": sid,
-            "phase": state["phase"],
-            "backend_id": bid,
-            "backend_url": state["init_params"]["backend_url"],
-            "baseline_accuracy": state.get("baseline_accuracy", 0),
-            "dataset_count": state.get("dataset_count"),
+            "session_id": ctx.session_id,
+            "phase": ctx.state["phase"],
+            "backend_id": ctx.backend_id,
+            "backend_url": ctx.state["init_params"]["backend_url"],
+            "baseline_accuracy": ctx.state.get("baseline_accuracy", 0),
+            "dataset_count": ctx.state.get("dataset_count"),
         }
         import contextlib
 
@@ -617,11 +632,11 @@ async def cmd_status(args: argparse.Namespace) -> None:
         return
 
     # Human-readable mode
-    print(f"Session: {sid}")
-    print(f"Phase: {state['phase']}")
-    print(f"Backend: {bid} @ {state['init_params']['backend_url']}")
-    print(f"Eval data: {state.get('dataset_count', '?')} queries")
-    print(f"Baseline: {state.get('baseline_accuracy', 0):.1%}")
+    print(f"Session: {ctx.session_id}")
+    print(f"Phase: {ctx.state['phase']}")
+    print(f"Backend: {ctx.backend_id} @ {ctx.state['init_params']['backend_url']}")
+    print(f"Eval data: {ctx.state.get('dataset_count', '?')} queries")
+    print(f"Baseline: {ctx.state.get('baseline_accuracy', 0):.1%}")
 
     # Live dashboard from campaign_state.json
     if state_path.exists():
@@ -650,7 +665,7 @@ async def cmd_status(args: argparse.Namespace) -> None:
         except (json.JSONDecodeError, OSError):
             pass
 
-    log = store.sessions.load_log(bid, sid)
+    log = ctx.store.sessions.load_log(ctx.backend_id, ctx.session_id)
     if log:
         lines = log.splitlines()
         tail = lines[-20:] if len(lines) > 20 else lines

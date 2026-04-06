@@ -58,9 +58,8 @@ def compare_rerun(cached_result: dict, rerun_result: dict) -> dict:
         else None
     )
 
-    improved = (
-        (not cached_hit and rerun_hit)
-        or (cached_rank is not None and rerun_rank is not None and rerun_rank < cached_rank)
+    improved = (not cached_hit and rerun_hit) or (
+        cached_rank is not None and rerun_rank is not None and rerun_rank < cached_rank
     )
 
     return {"hit_change": hit_change, "rank_change": rank_change, "improved": improved}
@@ -107,16 +106,8 @@ async def execute_stale_data_protocol(
         if step == "rerun":
             trigger_count = cfg.get("rerun_trigger_count", 3)
             obs_entry = (stale_data_observations or {}).get(query, 0)
-            obs_count = (
-                obs_entry.get("obs_count", 0)
-                if isinstance(obs_entry, dict)
-                else obs_entry
-            )
-            last_rerun = (
-                obs_entry.get("last_rerun")
-                if isinstance(obs_entry, dict)
-                else None
-            )
+            obs_count = obs_entry.get("obs_count", 0) if isinstance(obs_entry, dict) else obs_entry
+            last_rerun = obs_entry.get("last_rerun") if isinstance(obs_entry, dict) else None
             if obs_count < trigger_count:
                 if stale_data_observations is not None:
                     stale_data_observations[query] = {

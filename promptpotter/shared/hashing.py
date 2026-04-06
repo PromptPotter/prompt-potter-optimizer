@@ -79,5 +79,3 @@ def eval_content_hash(
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params
     return _hash_dict(blob_dict)
-
-

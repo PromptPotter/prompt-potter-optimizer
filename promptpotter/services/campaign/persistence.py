@@ -145,13 +145,19 @@ def diff_campaign_config(
     from promptpotter.services.campaign.config import RunConfig
 
     current = RunConfig.from_campaign_config(
-        campaign_config, pipeline_params=pipeline_params,
+        campaign_config,
+        pipeline_params=pipeline_params,
     ).model_dump()
 
     keys = [
-        "max_rounds", "patience", "n_variants", "creativity",
-        "improvement_threshold", "model",
-        "sample_size", "seed",
+        "max_rounds",
+        "patience",
+        "n_variants",
+        "creativity",
+        "improvement_threshold",
+        "model",
+        "sample_size",
+        "seed",
     ]
 
     diffs: dict[str, dict] = {}

@@ -356,12 +356,9 @@ def _build_search_memory_section(search_memory: Any) -> str:
         lines.append("Parameter impact rankings (by effect size):")
         for a in rankings:
             top_vals = search_memory.top_k_values(a.axis, k=3)
-            val_str = ", ".join(
-                f"{v.value_preview} ({v.mean_accuracy:.1%})" for v in top_vals
-            )
+            val_str = ", ".join(f"{v.value_preview} ({v.mean_accuracy:.1%})" for v in top_vals)
             lines.append(
-                f"  - {a.axis}: effect={a.effect_size:.3f}, "
-                f"{a.classification} [{val_str}]"
+                f"  - {a.axis}: effect={a.effect_size:.3f}, {a.classification} [{val_str}]"
             )
 
     bottleneck = search_memory.bottleneck_distribution()
@@ -511,15 +508,13 @@ def resolve_schema_axes(
                     variants = [parse_mutation_tuples(sv) for sv in vals]
                     baseline = baseline_schema_from_node(node.output_schema)
                     resolved[axis_name] = resolve_schema_variants(baseline, variants)
-                    schema_labels[axis_name] = (
-                        ["(baseline)"] + [v.render_label() for v in variants]
-                    )
+                    schema_labels[axis_name] = ["(baseline)"] + [v.render_label() for v in variants]
                     continue
                 except (ValueError, KeyError) as e:
                     logger.warning(
-                        "Schema axis '%s' mutation parse failed, "
-                        "falling through to raw values: %s",
-                        axis_name, e,
+                        "Schema axis '%s' mutation parse failed, falling through to raw values: %s",
+                        axis_name,
+                        e,
                     )
         resolved[axis_name] = vals
 

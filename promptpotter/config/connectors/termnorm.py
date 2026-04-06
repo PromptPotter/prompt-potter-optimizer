@@ -16,9 +16,7 @@ from typing import Any
 
 BACKEND_NAME = "TermNorm Local"
 BACKEND_TYPE = "termnorm"
-DATASET_DESCRIPTION = (
-    "TermNorm production ground truth queries for prompt evaluation"
-)
+DATASET_DESCRIPTION = "TermNorm production ground truth queries for prompt evaluation"
 PIPELINE_TRACE_NAME = "termnorm_pipeline"
 
 
@@ -97,12 +95,14 @@ def extract_queries(experiment_data: dict) -> list[dict[str, Any]]:
         if primary not in gt_map:
             continue
 
-        queries.append({
-            **build_query_item(query),
-            "ground_truth": gt_map[primary],
-            "original_predicted": er.get("predicted", ""),
-            "original_latency_ms": er.get("latency_ms", 0),
-            "original_confidence": er.get("confidence", 0),
-        })
+        queries.append(
+            {
+                **build_query_item(query),
+                "ground_truth": gt_map[primary],
+                "original_predicted": er.get("predicted", ""),
+                "original_latency_ms": er.get("latency_ms", 0),
+                "original_confidence": er.get("confidence", 0),
+            }
+        )
 
     return queries

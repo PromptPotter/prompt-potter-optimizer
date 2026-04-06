@@ -34,6 +34,7 @@ _TYPE_MAP: dict[str, dict] = {
 # Models
 # ---------------------------------------------------------------------------
 
+
 class SchemaMutation(BaseModel):
     """One atomic mutation against a baseline JSON Schema."""
 
@@ -83,6 +84,7 @@ class SchemaVariant(BaseModel):
 # Parsing
 # ---------------------------------------------------------------------------
 
+
 def parse_mutation_tuples(raw: list[tuple]) -> SchemaVariant:
     """Parse a list of raw tuples into a ``SchemaVariant``.
 
@@ -99,22 +101,31 @@ def parse_mutation_tuples(raw: list[tuple]) -> SchemaVariant:
             mutations.append(SchemaMutation(op="remove", path=t[1]))
         elif op_char == "+":
             if len(t) != 5:
-                raise ValueError(
-                    f"Add tuple must be ('+', path, type, required, desc): {t!r}"
+                raise ValueError(f"Add tuple must be ('+', path, type, required, desc): {t!r}")
+            mutations.append(
+                SchemaMutation(
+                    op="add",
+                    path=t[1],
+                    field_type=t[2],
+                    required=t[3],
+                    description=t[4],
                 )
-            mutations.append(SchemaMutation(
-                op="add", path=t[1], field_type=t[2], required=t[3], description=t[4],
-            ))
+            )
         elif op_char == "~":
             if len(t) != 6:
                 raise ValueError(
-                    f"Replace tuple must be ('~', old_path, new_name, type, required, desc): "
-                    f"{t!r}"
+                    f"Replace tuple must be ('~', old_path, new_name, type, required, desc): {t!r}"
                 )
-            mutations.append(SchemaMutation(
-                op="replace", path=t[1], new_field=t[2],
-                field_type=t[3], required=t[4], description=t[5],
-            ))
+            mutations.append(
+                SchemaMutation(
+                    op="replace",
+                    path=t[1],
+                    new_field=t[2],
+                    field_type=t[3],
+                    required=t[4],
+                    description=t[5],
+                )
+            )
         else:
             raise ValueError(f"Unknown mutation op '{op_char}': {t!r}")
     return SchemaVariant(mutations=mutations)
@@ -123,6 +134,7 @@ def parse_mutation_tuples(raw: list[tuple]) -> SchemaVariant:
 # ---------------------------------------------------------------------------
 # Path walker
 # ---------------------------------------------------------------------------
+
 
 def _walk_path(schema: dict, path: str) -> tuple[dict, list, str]:
     """Navigate dot-separated path through nested ``properties``.
@@ -144,6 +156,7 @@ def _walk_path(schema: dict, path: str) -> tuple[dict, list, str]:
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
+
 
 def resolve_mutation(baseline: dict, variant: SchemaVariant) -> dict:
     """Apply a ``SchemaVariant`` to a baseline JSON Schema (deep copy)."""
@@ -190,14 +203,13 @@ def resolve_schema_variants(
     variants: list[SchemaVariant],
 ) -> list[dict]:
     """Resolve variants against baseline. Baseline always at index 0."""
-    return [copy.deepcopy(baseline)] + [
-        resolve_mutation(baseline, v) for v in variants
-    ]
+    return [copy.deepcopy(baseline)] + [resolve_mutation(baseline, v) for v in variants]
 
 
 # ---------------------------------------------------------------------------
 # Baseline extraction
 # ---------------------------------------------------------------------------
+
 
 def baseline_schema_from_node(output_schema: NodeOutputSchema) -> dict:
     """Extract the baseline JSON Schema dict from a ``NodeOutputSchema``.

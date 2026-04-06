@@ -94,14 +94,25 @@ async def decompose_prompt_fields(
     )
     result = extract_parsed_json(response)
 
-    for key in ("persona", "task_intent", "problem_description",
-                "instruction", "thinking_style", "answer_format"):
+    for key in (
+        "persona",
+        "task_intent",
+        "problem_description",
+        "instruction",
+        "thinking_style",
+        "answer_format",
+    ):
         result.setdefault(key, "")
 
     # Ensure task_context sub-dict exists with domain fields
     tc = result.setdefault("task_context", {})
-    for key in ("domain", "pipeline_purpose", "data_characteristics",
-                "optimization_goals", "key_challenges"):
+    for key in (
+        "domain",
+        "pipeline_purpose",
+        "data_characteristics",
+        "optimization_goals",
+        "key_challenges",
+    ):
         tc.setdefault(key, "")
 
     return result
@@ -110,7 +121,6 @@ async def decompose_prompt_fields(
 # ---------------------------------------------------------------------------
 # Restructure cache — alias-aware disk cache for LLM decomposition results
 # ---------------------------------------------------------------------------
-
 
 
 def _decomposition_cache_path(base_dir: Path, backend_id: str) -> Path:
@@ -176,7 +186,9 @@ async def decompose_prompt_fields_cached(
     if can_cache and not force and alias_hashes:
         assert store_base_dir is not None
         cached = load_cached_decomposition(
-            store_base_dir, backend_id, alias_hashes,
+            store_base_dir,
+            backend_id,
+            alias_hashes,
         )
         if cached is not None:
             logger.debug("decompose_prompt_fields_cached: hit (alias group)")
@@ -184,7 +196,8 @@ async def decompose_prompt_fields_cached(
 
     # --- cache miss: call LLM ---
     layer1_fields = await decompose_prompt_fields(
-        context_input, llm_client,
+        context_input,
+        llm_client,
         model=model,
     )
 
@@ -194,12 +207,16 @@ async def decompose_prompt_fields_cached(
         save_key = rp_hash
         if not save_key:
             instruction = (
-                context_input if isinstance(context_input, str)
+                context_input
+                if isinstance(context_input, str)
                 else json.dumps(context_input, sort_keys=True)
             )
             save_key = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
         save_decomposition_cache(
-            store_base_dir, backend_id, save_key, layer1_fields,
+            store_base_dir,
+            backend_id,
+            save_key,
+            layer1_fields,
         )
 
     return layer1_fields, False

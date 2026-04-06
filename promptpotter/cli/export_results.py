@@ -65,14 +65,18 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "supplemental":
         content = generate_supplemental(
-            store, args.backend_id, campaign_ids=campaign_ids,
+            store,
+            args.backend_id,
+            campaign_ids=campaign_ids,
         )
         output.write_text(content, encoding="utf-8")
         print(f"Supplemental materials written to {output}")
 
     elif args.command == "json":
         data = generate_export_json(
-            store, args.backend_id, campaign_ids=campaign_ids,
+            store,
+            args.backend_id,
+            campaign_ids=campaign_ids,
         )
         output.write_text(
             json.dumps(data, indent=2, default=str, ensure_ascii=False),

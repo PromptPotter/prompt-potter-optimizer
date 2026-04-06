@@ -81,16 +81,18 @@ def render_comparison_table(comparison: dict[str, Any]) -> str:
     headers = ["Strategy", "Baseline", "Best", "Delta", "95% CI", "Rounds", "Budget", "Stop"]
     rows = []
     for s in comparison["summary_table"]:
-        rows.append([
-            s["name"],
-            _fmt_pct(s["baseline"]),
-            _fmt_pct(s["best"]),
-            f"+{s['improvement']:.1%}" if s["improvement"] > 0 else _fmt_pct(s["improvement"]),
-            _fmt_ci(s["ci_lower"], s["ci_upper"]),
-            str(s["rounds_to_best"]),
-            str(s["eval_budget"]),
-            s.get("stop_reason", ""),
-        ])
+        rows.append(
+            [
+                s["name"],
+                _fmt_pct(s["baseline"]),
+                _fmt_pct(s["best"]),
+                f"+{s['improvement']:.1%}" if s["improvement"] > 0 else _fmt_pct(s["improvement"]),
+                _fmt_ci(s["ci_lower"], s["ci_upper"]),
+                str(s["rounds_to_best"]),
+                str(s["eval_budget"]),
+                s.get("stop_reason", ""),
+            ]
+        )
     return _md_table(headers, rows)
 
 
@@ -141,14 +143,16 @@ def render_parameter_impact_table(memory_summary: dict[str, Any]) -> str:
     rows = []
     for ai in impacts:
         top_val = ai["top_values"][0]["value"] if ai["top_values"] else "-"
-        rows.append([
-            ai["axis"],
-            f"{ai['effect_size']:.3f}",
-            _fmt_pct(ai["consistency"]),
-            ai["classification"],
-            top_val,
-            str(ai["sample_count"]),
-        ])
+        rows.append(
+            [
+                ai["axis"],
+                f"{ai['effect_size']:.3f}",
+                _fmt_pct(ai["consistency"]),
+                ai["classification"],
+                top_val,
+                str(ai["sample_count"]),
+            ]
+        )
     return _md_table(headers, rows)
 
 
@@ -179,14 +183,14 @@ def render_query_difficulty_summary(difficulty: dict[str, Any]) -> str:
     headers = ["Class", "Count", "Fraction"]
     total = s.get("total", 1) or 1
     rows = [
-        ["Easy (hit rate >= 80%)", str(s.get("n_easy", 0)),
-         _fmt_pct(s["n_easy"] / total)],
-        ["Discriminating (var >= 0.1)", str(s.get("n_discriminating", 0)),
-         _fmt_pct(s["n_discriminating"] / total)],
-        ["Hard (0 < hit rate < 20%)", str(s.get("n_hard", 0)),
-         _fmt_pct(s["n_hard"] / total)],
-        ["Dead (hit rate = 0%)", str(s.get("n_dead", 0)),
-         _fmt_pct(s["n_dead"] / total)],
+        ["Easy (hit rate >= 80%)", str(s.get("n_easy", 0)), _fmt_pct(s["n_easy"] / total)],
+        [
+            "Discriminating (var >= 0.1)",
+            str(s.get("n_discriminating", 0)),
+            _fmt_pct(s["n_discriminating"] / total),
+        ],
+        ["Hard (0 < hit rate < 20%)", str(s.get("n_hard", 0)), _fmt_pct(s["n_hard"] / total)],
+        ["Dead (hit rate = 0%)", str(s.get("n_dead", 0)), _fmt_pct(s["n_dead"] / total)],
     ]
     return _md_table(headers, rows)
 
@@ -260,13 +264,13 @@ def generate_supplemental(
     # Load campaigns
     if campaign_ids:
         campaigns = [
-            c for cid in campaign_ids
-            if (c := store.campaigns.load(backend_id, cid)) is not None
+            c for cid in campaign_ids if (c := store.campaigns.load(backend_id, cid)) is not None
         ]
     else:
         summaries = store.campaigns.list_all(backend_id)
         campaigns = [
-            c for s in summaries
+            c
+            for s in summaries
             if (c := store.campaigns.load(backend_id, s["campaign_id"])) is not None
         ]
 
@@ -353,13 +357,13 @@ def generate_export_json(
     """
     if campaign_ids:
         campaigns = [
-            c for cid in campaign_ids
-            if (c := store.campaigns.load(backend_id, cid)) is not None
+            c for cid in campaign_ids if (c := store.campaigns.load(backend_id, cid)) is not None
         ]
     else:
         summaries = store.campaigns.list_all(backend_id)
         campaigns = [
-            c for s in summaries
+            c
+            for s in summaries
             if (c := store.campaigns.load(backend_id, s["campaign_id"])) is not None
         ]
 
@@ -367,16 +371,15 @@ def generate_export_json(
         "comparison": compare_campaigns(campaigns) if campaigns else {},
         "campaigns": {
             c["campaign_id"]: {
-                "metadata": {
-                    k: v for k, v in c.items()
-                    if k not in ("trials",)
-                },
+                "metadata": {k: v for k, v in c.items() if k not in ("trials",)},
                 "trials": flatten_campaign_trials(c),
             }
             for c in campaigns
         },
         "reproducibility": build_reproducibility_manifest(
-            campaigns, backend_id, pipeline_schema,
+            campaigns,
+            backend_id,
+            pipeline_schema,
         ),
     }
 

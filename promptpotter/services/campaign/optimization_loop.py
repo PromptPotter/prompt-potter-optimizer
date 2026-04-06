@@ -19,9 +19,9 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.services.backend_client import BackendClient
 from promptpotter.services.campaign.config import RunConfig
+from promptpotter.services.campaign.cycle_init import init_cycle_state
 from promptpotter.services.campaign.escalation import escalate_l2
 from promptpotter.services.campaign.lifecycle import finalize_campaign
-from promptpotter.services.campaign.loop_init import init_cycle_state
 from promptpotter.services.campaign.round_execution import (
     PauseForReviewError,
     adapt_eval_set,
@@ -29,6 +29,7 @@ from promptpotter.services.campaign.round_execution import (
     update_round_state,
 )
 from promptpotter.services.campaign.state import (
+    CampaignPhase,
     LoopState,
     PhaseEvent,
     RoundResult,
@@ -116,7 +117,7 @@ async def _handle_escalation_signal(
     assert signal is not None
     emit_phase(
         on_phase,
-        "escalation",
+        CampaignPhase.ESCALATION,
         "enter",
         round=round_num,
         check_name=signal["check_name"],
@@ -192,7 +193,7 @@ async def _handle_escalation_signal(
             cycle_id,
             round_num + 1,
         )
-    emit_phase(on_phase, "escalation", "exit", round=round_num)
+    emit_phase(on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
     return None
 
 

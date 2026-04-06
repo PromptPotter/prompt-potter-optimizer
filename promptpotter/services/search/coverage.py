@@ -5,6 +5,7 @@ build_data_inventory summarizes what the historical index contains.
 build_prompt_result_index builds the cross-run query lookup.
 diagnose_scan_variants checks scan variant coverage via step-sequence matching.
 """
+
 from __future__ import annotations
 
 import copy
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Step-sequence matching helpers
 # ---------------------------------------------------------------------------
+
 
 def _steps_match(entry: dict, target_steps: frozenset[str]) -> bool:
     """Match by step sequence — which nodes ran."""
@@ -146,8 +148,10 @@ def diagnose_scan_variants(
                     target_pp.setdefault(axis_node, {})[axis_name] = v
                 target_ch = config_hash(target_pp, baseline_rp_hash)
                 entries = [
-                    e for e in step_matches
-                    if config_hash(e.get("pipeline_params"), e.get("rendered_prompt_hash", "")) == target_ch
+                    e
+                    for e in step_matches
+                    if config_hash(e.get("pipeline_params"), e.get("rendered_prompt_hash", ""))
+                    == target_ch
                 ]
 
             value_counts[key] = sum(e.get("item_count", 0) for e in entries)
@@ -299,26 +303,30 @@ def assess_scan_coverage(
                 usable_count += 1
             axis_saved += n_cached
             axis_needed += max(0, n_diagnostic - n_cached)
-            variants_detail.append({
-                "value_preview": preview(value),
-                "n_cached": n_cached,
-                "usable": is_usable,
-            })
+            variants_detail.append(
+                {
+                    "value_preview": preview(value),
+                    "n_cached": n_cached,
+                    "usable": is_usable,
+                }
+            )
 
         required = axis_requirements.get(axis_name, len(non_baseline))
         sufficient = usable_count >= required
         total_calls_saved += axis_saved
         if not sufficient:
             total_calls_needed += axis_needed
-        axes_detail.append({
-            "axis": axis_name,
-            "axis_type": "prompt_field",
-            "n_values": len(non_baseline),
-            "n_usable": usable_count,
-            "n_required": required,
-            "sufficient": sufficient,
-            "variants": variants_detail,
-        })
+        axes_detail.append(
+            {
+                "axis": axis_name,
+                "axis_type": "prompt_field",
+                "n_values": len(non_baseline),
+                "n_usable": usable_count,
+                "n_required": required,
+                "sufficient": sufficient,
+                "variants": variants_detail,
+            }
+        )
 
     # --- Pipeline-param axes: discover historical data instead of blanket reject ---
     pp_calls_needed = 0
@@ -343,29 +351,32 @@ def assess_scan_coverage(
                 if q in cached:
                     n_cached_total += 1
                     if target_steps and is_result_step_compatible(
-                        cached[q], target_steps,
+                        cached[q],
+                        target_steps,
                     ):
                         n_step_compatible += 1
 
         pp_calls_needed += n_calls
         total_calls_needed += n_calls
         required = axis_requirements.get(axis_name, len(non_baseline))
-        axes_detail.append({
-            "axis": axis_name,
-            "axis_type": "pipeline_param",
-            "n_values": len(non_baseline),
-            "n_usable": 0,
-            "n_required": required,
-            "sufficient": False,
-            "n_cached_historical": n_cached_total,
-            "n_step_compatible": n_step_compatible,
-            "note": (
-                f"{n_cached_total} historical results found"
-                f" ({n_step_compatible} step-compatible)"
-                if n_cached_total
-                else "No historical data — needs fresh backend calls"
-            ),
-        })
+        axes_detail.append(
+            {
+                "axis": axis_name,
+                "axis_type": "pipeline_param",
+                "n_values": len(non_baseline),
+                "n_usable": 0,
+                "n_required": required,
+                "sufficient": False,
+                "n_cached_historical": n_cached_total,
+                "n_step_compatible": n_step_compatible,
+                "note": (
+                    f"{n_cached_total} historical results found"
+                    f" ({n_step_compatible} step-compatible)"
+                    if n_cached_total
+                    else "No historical data — needs fresh backend calls"
+                ),
+            }
+        )
 
     # --- Summary ---
     pf_axes = [a for a in axes_detail if a["axis_type"] == "prompt_field"]
@@ -387,8 +398,7 @@ def assess_scan_coverage(
         )
         if total_calls_needed > 0:
             recommendation += (
-                " Tip: lower min_queries or reduce axis_requirements"
-                " to accept sparser coverage."
+                " Tip: lower min_queries or reduce axis_requirements to accept sparser coverage."
             )
 
     return {
@@ -421,8 +431,11 @@ def assess_scan_coverage(
 # Layer 1 fields worth tracking as axes (skip instruction — always changes
 # between baselines due to the decomposition, and few_shot_examples).
 _INVENTORY_AXES = (
-    "persona", "task_intent", "problem_description",
-    "thinking_style", "answer_format",
+    "persona",
+    "task_intent",
+    "problem_description",
+    "thinking_style",
+    "answer_format",
 )
 
 

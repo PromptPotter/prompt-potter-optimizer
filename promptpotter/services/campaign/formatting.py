@@ -75,13 +75,15 @@ def format_context_sections(ctx: ContextData) -> str:
     if fa and fa.patterns:
         fa_lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
         for i, pat in enumerate(fa.patterns[:3], 1):
-            fa_lines.append(
-                f"  {i}. {pat.name} — {pat.query_count} queries ({pat.fraction:.0%})"
-            )
+            fa_lines.append(f"  {i}. {pat.name} — {pat.query_count} queries ({pat.fraction:.0%})")
             if pat.example_queries:
                 examples = ", ".join(f'"{q}"' for q in pat.example_queries[:2])
                 fa_lines.append(f"     Examples: {examples}")
-            sig = {k: v for k, v in pat.signals.items() if k not in ("error", "degraded", "total_time_ms")}
+            sig = {
+                k: v
+                for k, v in pat.signals.items()
+                if k not in ("error", "degraded", "total_time_ms")
+            }
             if sig:
                 sig_str = ", ".join(f"{k}={v}" for k, v in list(sig.items())[:4])
                 fa_lines.append(f"     Signals: {sig_str}")
@@ -259,8 +261,7 @@ def build_l1_search_memory_context(search_memory: Any) -> dict | None:
     clusters = search_memory.failure_clusters(3)
     if clusters:
         ctx["failure_clusters"] = "; ".join(
-            f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)"
-            for c in clusters
+            f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)" for c in clusters
         )
 
     dead = search_memory.dead_queries()
@@ -270,15 +271,13 @@ def build_l1_search_memory_context(search_memory: Any) -> dict | None:
     rankings = search_memory.axis_rankings()[:3]
     if rankings:
         ctx["top_axes"] = "; ".join(
-            f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})"
-            for a in rankings
+            f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})" for a in rankings
         )
         # Top values for the highest-impact axis
         top_vals = search_memory.top_k_values(rankings[0].axis, k=3)
         if top_vals:
             ctx["top_values"] = "; ".join(
-                f"{v.value_preview} (acc={v.mean_accuracy:.1%})"
-                for v in top_vals
+                f"{v.value_preview} (acc={v.mean_accuracy:.1%})" for v in top_vals
             )
 
     return ctx if ctx else None
@@ -294,8 +293,7 @@ def build_l2_search_memory_context(search_memory: Any) -> dict | None:
     rankings = search_memory.axis_rankings()[:5]
     if rankings:
         ctx["axis_rankings"] = "; ".join(
-            f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})"
-            for a in rankings
+            f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})" for a in rankings
         )
 
     bottleneck = search_memory.bottleneck_distribution()

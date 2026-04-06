@@ -18,9 +18,7 @@ class BackendConnection(BaseModel):
     name: str = Field(..., description="Human-readable name")
     backend_type: str = Field(..., description="Backend type, e.g. 'default'")
     base_url: str = Field(..., description="Backend API base URL")
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     last_synced_at: str | None = None
 
 
@@ -32,8 +30,7 @@ class ExecutionResultItem(BaseModel):
     process: str | None = None
     query_fields: dict[str, Any] = Field(
         default_factory=dict,
-        description="Generic query metadata. Connector-specific fields ( "
-        "populated per connector).",
+        description="Generic query metadata. Connector-specific fields ( populated per connector).",
     )
     ground_truth: str
     predicted: str
@@ -58,9 +55,7 @@ class Execution(BaseModel):
     source_run_id: str | None = None
     index_terms_count: int | None = None
     limitations: list[str] = Field(default_factory=list)
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     pipeline_params: dict[str, Any] = Field(
         default_factory=dict,
         description="Pipeline parameter overrides forwarded to the backend",

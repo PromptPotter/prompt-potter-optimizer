@@ -1,6 +1,7 @@
 """
 Application settings and configuration.
 """
+
 import functools
 import json
 from pathlib import Path

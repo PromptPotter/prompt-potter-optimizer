@@ -37,19 +37,21 @@ def flatten_campaign_trials(campaign: dict[str, Any]) -> list[dict[str, Any]]:
         accuracy = trial.get("accuracy", 0.0)
         ci_lower, ci_upper = wilson_ci(hits, total)
 
-        rows.append({
-            "campaign_id": campaign["campaign_id"],
-            "round": trial.get("round", 0),
-            "label": trial.get("label", ""),
-            "accuracy": accuracy,
-            "hits": hits,
-            "total": total,
-            "improved": trial.get("improved", False),
-            "baseline_accuracy": baseline_acc,
-            "improvement_delta": accuracy - baseline_acc,
-            "ci_lower": ci_lower,
-            "ci_upper": ci_upper,
-        })
+        rows.append(
+            {
+                "campaign_id": campaign["campaign_id"],
+                "round": trial.get("round", 0),
+                "label": trial.get("label", ""),
+                "accuracy": accuracy,
+                "hits": hits,
+                "total": total,
+                "improved": trial.get("improved", False),
+                "baseline_accuracy": baseline_acc,
+                "improvement_delta": accuracy - baseline_acc,
+                "ci_lower": ci_lower,
+                "ci_upper": ci_upper,
+            }
+        )
 
     rows.sort(key=lambda r: r["round"])
     return rows
@@ -86,41 +88,46 @@ def compare_campaigns(campaigns: list[dict[str, Any]]) -> dict[str, Any]:
 
         ci_lower, ci_upper = wilson_ci(best_hits, best_total)
 
-        summary_table.append({
-            "campaign_id": cid,
-            "name": campaign.get("name", cid),
-            "baseline": baseline,
-            "best": best_acc,
-            "improvement": best_acc - baseline,
-            "rounds_to_best": rounds_to_best,
-            "total_rounds": len(trials),
-            "stop_reason": campaign.get("stop_reason", ""),
-            "eval_budget": sum(t.get("total", 0) for t in trials),
-            "ci_lower": ci_lower,
-            "ci_upper": ci_upper,
-        })
+        summary_table.append(
+            {
+                "campaign_id": cid,
+                "name": campaign.get("name", cid),
+                "baseline": baseline,
+                "best": best_acc,
+                "improvement": best_acc - baseline,
+                "rounds_to_best": rounds_to_best,
+                "total_rounds": len(trials),
+                "stop_reason": campaign.get("stop_reason", ""),
+                "eval_budget": sum(t.get("total", 0) for t in trials),
+                "ci_lower": ci_lower,
+                "ci_upper": ci_upper,
+            }
+        )
 
         convergence[cid] = [
-            {"round": t.get("round", 0), "accuracy": t.get("accuracy", 0.0)}
-            for t in trials
+            {"round": t.get("round", 0), "accuracy": t.get("accuracy", 0.0)} for t in trials
         ]
 
-        best_trials.append({
-            "campaign_id": cid,
-            "hits": best_hits,
-            "total": best_total,
-        })
+        best_trials.append(
+            {
+                "campaign_id": cid,
+                "hits": best_hits,
+                "total": best_total,
+            }
+        )
 
     # Pairwise significance tests
     pairwise: list[dict[str, Any]] = []
     for i, a in enumerate(best_trials):
-        for b in best_trials[i + 1:]:
+        for b in best_trials[i + 1 :]:
             p = proportion_test(a["hits"], a["total"], b["hits"], b["total"])
-            pairwise.append({
-                "campaign_a": a["campaign_id"],
-                "campaign_b": b["campaign_id"],
-                "p_value": p,
-            })
+            pairwise.append(
+                {
+                    "campaign_a": a["campaign_id"],
+                    "campaign_b": b["campaign_id"],
+                    "p_value": p,
+                }
+            )
 
     return {
         "summary_table": summary_table,

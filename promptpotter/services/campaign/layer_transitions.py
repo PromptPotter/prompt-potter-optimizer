@@ -86,13 +86,15 @@ def _build_l2_prompt(
             + json.dumps(tc_display, indent=2)
         )
 
-    intelligence_sections = format_l2_intelligence(L2IntelligenceData(
-        escalation_section=escalation_section,
-        warning_inventory=opt_sp.warning_inventory or None,
-        critique_text=opt_sp.critique_text,
-        l2_directive=opt_sp.l2_directive,
-        search_memory_context=build_l2_search_memory_context(search_memory),
-    ))
+    intelligence_sections = format_l2_intelligence(
+        L2IntelligenceData(
+            escalation_section=escalation_section,
+            warning_inventory=opt_sp.warning_inventory or None,
+            critique_text=opt_sp.critique_text,
+            l2_directive=opt_sp.l2_directive,
+            search_memory_context=build_l2_search_memory_context(search_memory),
+        )
+    )
 
     response_schema_suffix = (
         "\nReturn a JSON object with:\n"
@@ -187,7 +189,10 @@ async def refine_context(
     available.
     """
     prompt, _template, _compile_vars = _build_l2_prompt(
-        opt_sp, pipeline_params, pipeline_schema, escalation_context,
+        opt_sp,
+        pipeline_params,
+        pipeline_schema,
+        escalation_context,
         search_memory=search_memory,
     )
 

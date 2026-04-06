@@ -23,7 +23,13 @@ from promptpotter.services.campaign.critique import (
     update_query_tracker,
 )
 from promptpotter.services.campaign.formatting import candidate_summaries
-from promptpotter.services.campaign.state import LoopState, RoundResult, RunCallbacks, emit_phase
+from promptpotter.services.campaign.state import (
+    CampaignPhase,
+    LoopState,
+    RoundResult,
+    RunCallbacks,
+    emit_phase,
+)
 from promptpotter.services.tracing.observability_logger import observed_node
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
@@ -48,11 +54,11 @@ class PauseForReviewError(Exception):
         self,
         candidates: list[dict],
         round_num: int,
-        pause_point: str = "l1_generate",
+        pause_point: str = CampaignPhase.L1_GENERATE,
     ) -> None:
         self.candidates = candidates
         self.round_num = round_num
-        self.pause_point = pause_point  # "l1_generate", "before_l2_eval", "user_pause"
+        self.pause_point = pause_point  # CampaignPhase.L1_GENERATE, "before_l2_eval", "user_pause"
         super().__init__(
             f"Paused at {pause_point}: {len(candidates)} candidates (round {round_num})"
         )
@@ -98,7 +104,7 @@ async def _generate_or_load_candidates(
     assert state.current_sp is not None
     emit_phase(
         on_phase,
-        "l1_generate",
+        CampaignPhase.L1_GENERATE,
         "enter",
         round=round_num,
         current_accuracy=state.current_accuracy,
@@ -125,7 +131,7 @@ async def _generate_or_load_candidates(
             )
             emit_phase(
                 on_phase,
-                "l1_generate",
+                CampaignPhase.L1_GENERATE,
                 "exit",
                 round=round_num,
                 n_candidates=len(persisted),
@@ -170,7 +176,7 @@ async def _generate_or_load_candidates(
 
     emit_phase(
         on_phase,
-        "l1_generate",
+        CampaignPhase.L1_GENERATE,
         "exit",
         round=round_num,
         n_candidates=len(candidates),
@@ -198,7 +204,7 @@ async def _evaluate_candidates(
 
     emit_phase(
         callbacks.on_phase,
-        "l1_evaluate",
+        CampaignPhase.L1_EVALUATE,
         "enter",
         round=round_num,
         n_candidates=len(candidates),
@@ -296,7 +302,7 @@ async def _evaluate_candidates(
 
     emit_phase(
         callbacks.on_phase,
-        "l1_evaluate",
+        CampaignPhase.L1_EVALUATE,
         "exit",
         round=round_num,
         winner_label=eval_out.label,

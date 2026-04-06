@@ -64,7 +64,6 @@ class EvalBatchResult:
 # ---------------------------------------------------------------------------
 
 
-
 def _fill_remaining_errors(
     results: list[dict],
     dataset: list[dict],
@@ -124,12 +123,15 @@ def _log_batch_summary(
     if n_reused:
         logger.info(
             "Per-node cache reuse: %d/%d queries had partial/full upstream cache",
-            n_reused, n_total,
+            n_reused,
+            n_total,
         )
     if n_retried or n_probed or n_switched:
         logger.info(
             "Stale data protocol: %d rerun, %d samplescan, %d sampleswitch",
-            n_retried, n_probed, n_switched,
+            n_retried,
+            n_probed,
+            n_switched,
         )
 
 
@@ -206,7 +208,8 @@ async def _run_eval_batch(
                     break
 
                 result = await eval_query_via_backend(
-                    qd, backend_client,
+                    qd,
+                    backend_client,
                     pipeline_params=search_point.pipeline_params,
                     pipeline_schema=pipeline_schema,
                     intermediate_cache=_intermediate_cache,
@@ -217,7 +220,10 @@ async def _run_eval_batch(
                 # Stale data protocol on degraded results
                 if _is_degraded(result) and _stale_protocol:
                     result, step_taken = await _execute_stale_data_protocol(
-                        _stale_protocol, qd, result, backend_client,
+                        _stale_protocol,
+                        qd,
+                        result,
+                        backend_client,
                         pipeline_params=search_point.pipeline_params,
                         pipeline_schema=pipeline_schema,
                         intermediate_cache=_intermediate_cache,
@@ -239,12 +245,17 @@ async def _run_eval_batch(
 
                 # Error abort check
                 consecutive_errors, abort_reason = _check_error_abort(
-                    result, was_cached, consecutive_errors, max_consecutive_errors,
+                    result,
+                    was_cached,
+                    consecutive_errors,
+                    max_consecutive_errors,
                 )
                 if abort_reason:
                     logger.warning(
                         "Aborting eval: %s on query %d. Marking remaining %d queries as errors.",
-                        abort_reason, i + 1, len(dataset) - i - 1,
+                        abort_reason,
+                        i + 1,
+                        len(dataset) - i - 1,
                     )
                     _fill_remaining_errors(results, dataset, i + 1, abort_reason)
                     break
@@ -254,19 +265,32 @@ async def _run_eval_batch(
 
                 # Escalation checks — run after display
                 esc_signal = _run_escalation_checks(
-                    escalation_checks, results, candidate_idx, n_total_candidates,
+                    escalation_checks,
+                    results,
+                    candidate_idx,
+                    n_total_candidates,
                 )
                 if esc_signal:
                     raise EscalationError(esc_signal, results)
         except (KeyboardInterrupt, asyncio.CancelledError):
-            logger.warning("Eval batch force-interrupted at query %d/%d.", len(results), len(dataset))
+            logger.warning(
+                "Eval batch force-interrupted at query %d/%d.", len(results), len(dataset)
+            )
             return EvalBatchResult(
-                results, completed=False, stop_reason="force",
-                retried_degraded=n_retried, probed_degraded=n_probed, switched_samples=n_switched,
+                results,
+                completed=False,
+                stop_reason="force",
+                retried_degraded=n_retried,
+                probed_degraded=n_probed,
+                switched_samples=n_switched,
             )
 
     _log_batch_summary(n_reused, len(dataset), n_retried, n_probed, n_switched)
-    stale = {"retried_degraded": n_retried, "probed_degraded": n_probed, "switched_samples": n_switched}
+    stale = {
+        "retried_degraded": n_retried,
+        "probed_degraded": n_probed,
+        "switched_samples": n_switched,
+    }
 
     if interrupt.stop_requested:
         return EvalBatchResult(results, completed=False, stop_reason="graceful", **stale)

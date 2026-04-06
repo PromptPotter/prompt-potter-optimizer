@@ -42,10 +42,11 @@ def _default_backend_type() -> str:
 
     return BACKEND_TYPE
 
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "BackendSession",
+    "BackendContext",
     "CampaignBaseline",
     "DatasetSummary",
     "build_all_index_terms",
@@ -56,7 +57,7 @@ __all__ = [
 
 
 @dataclass
-class BackendSession:
+class BackendContext:
     """Return value from ``init_services()``."""
 
     store: ProjectStore
@@ -88,8 +89,10 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
     """
     if not campaign_rounds:
         return CampaignBaseline(
-            baseline_ps=None, baseline_acc=0.0,
-            baseline_results=None, instruction="",
+            baseline_ps=None,
+            baseline_acc=0.0,
+            baseline_results=None,
+            instruction="",
         )
 
     tip = campaign_rounds[-1]
@@ -172,7 +175,7 @@ async def init_services(
     project_root: Path | None = None,
     dataset_name: str | None = None,
     on_status: Callable[[str], None] | None = None,
-) -> BackendSession:
+) -> BackendContext:
     """Initialize store, client, and load experiment data.
 
     If experiment data is not in the project store, attempts an automatic
@@ -195,7 +198,7 @@ async def init_services(
             traces.
 
     Returns:
-        BackendSession with all service handles and loaded data.
+        BackendContext with all service handles and loaded data.
     """
 
     def _status(msg: str) -> None:
@@ -235,7 +238,7 @@ async def init_services(
         logger.info("Could not fetch pipeline schema: %s", exc)
         _status("Pipeline: unavailable")
 
-    base = BackendSession(
+    base = BackendContext(
         store=store,
         backend_id=backend_id,
         experiment_id=experiment_id,
@@ -638,5 +641,3 @@ def build_all_index_terms(
                 if gt:
                     gt_set.add(gt)
     return sorted(gt_set)
-
-

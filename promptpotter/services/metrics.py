@@ -219,7 +219,9 @@ def _gt_position(candidates: list, ground_truth: str) -> int | None:
 
 
 def _diag_candidate_source(
-    node: PipelineNode, pd: dict, gt: str,
+    node: PipelineNode,
+    pd: dict,
+    gt: str,
 ) -> dict[str, float | bool | int | str | None]:
     from promptpotter.models.pipeline_schema import NODE_TYPE_METRICS
 
@@ -235,7 +237,9 @@ def _diag_candidate_source(
 
 
 def _diag_ranker(
-    node: PipelineNode, pd: dict, gt: str,
+    node: PipelineNode,
+    pd: dict,
+    gt: str,
 ) -> dict[str, float | bool | int | str | None]:
     from promptpotter.models.pipeline_schema import NODE_TYPE_METRICS
 
@@ -265,7 +269,8 @@ def _diag_ranker(
 
 
 def _diag_enricher(
-    node: PipelineNode, pd: dict,
+    node: PipelineNode,
+    pd: dict,
 ) -> dict[str, float | bool | int | str | None]:
     # Count enriched fields from observation mappings if available
     n = 0
@@ -276,7 +281,8 @@ def _diag_enricher(
 
 
 def _diag_cache(
-    node: PipelineNode, pd: dict,
+    node: PipelineNode,
+    pd: dict,
 ) -> dict[str, float | bool | int | str | None]:
     timings = pd.get("step_timings") or {}
     return {"cache_hit": timings.get(node.name) is not None}
@@ -433,14 +439,16 @@ def compile_failure_analysis(
     total_failures = len(failures)
     patterns: list[FailurePattern] = []
     for key, group in sorted(groups.items(), key=lambda x: -len(x[1])):
-        patterns.append(FailurePattern(
-            name=_auto_name(key),
-            query_count=len(group),
-            fraction=len(group) / total_failures,
-            diagnostic_key=key,
-            example_queries=[r.get("query", "") for r in group[:max_examples]],
-            signals=diag_cache.get(key, {}),
-        ))
+        patterns.append(
+            FailurePattern(
+                name=_auto_name(key),
+                query_count=len(group),
+                fraction=len(group) / total_failures,
+                diagnostic_key=key,
+                example_queries=[r.get("query", "") for r in group[:max_examples]],
+                signals=diag_cache.get(key, {}),
+            )
+        )
         if len(patterns) >= max_patterns:
             break
 
@@ -474,12 +482,14 @@ def compile_query_difficulty(
     profiles = []
     for query, hits in sorted(query_hits.items()):
         hit_rate = sum(hits) / len(hits) if hits else 0.0
-        profiles.append(QueryProfile(
-            query=query,
-            hit_rate=hit_rate,
-            n_evaluations=len(hits),
-            classification=_classify_difficulty(hit_rate),
-        ))
+        profiles.append(
+            QueryProfile(
+                query=query,
+                hit_rate=hit_rate,
+                n_evaluations=len(hits),
+                classification=_classify_difficulty(hit_rate),
+            )
+        )
 
     return QueryDifficulty(profiles=profiles)
 
@@ -514,13 +524,15 @@ def compile_temporal_trends(
         regressed = [q for q in sorted(common) if from_hits[q] and not to_hits[q]]
         unchanged = len(common) - len(improved) - len(regressed)
 
-        snapshots.append(RoundSnapshot(
-            from_round=from_round,
-            to_round=to_round,
-            improved_queries=improved,
-            regressed_queries=regressed,
-            unchanged_queries=unchanged,
-        ))
+        snapshots.append(
+            RoundSnapshot(
+                from_round=from_round,
+                to_round=to_round,
+                improved_queries=improved,
+                regressed_queries=regressed,
+                unchanged_queries=unchanged,
+            )
+        )
 
     return TrendAnalysis(snapshots=snapshots)
 

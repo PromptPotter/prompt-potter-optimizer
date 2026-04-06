@@ -13,11 +13,11 @@ from promptpotter.services.campaign.config import (
 from promptpotter.services.campaign.config import (
     create_llm_client as setup_llm,
 )
-from promptpotter.services.campaign.init import (
-    BackendSession,
+from promptpotter.services.campaign.bootstrap import (
+    BackendContext,
     build_all_index_terms,
 )
-from promptpotter.services.campaign.init import (
+from promptpotter.services.campaign.bootstrap import (
     init_services as _init_services,
 )
 from promptpotter.services.campaign.persistence import (
@@ -64,7 +64,7 @@ __all__ = [
 async def decompose_task_context(
     task_description: str,
     campaign_config: CampaignConfig,
-    session: BackendSession,
+    session: BackendContext,
     *,
     llm_client: LLMClientBase | None = None,
     model: str | None = None,
@@ -149,7 +149,7 @@ def dev_reload() -> None:
             importlib.reload(sys.modules[mod])
 
 
-async def show_pipeline_snapshot(session: BackendSession) -> dict:
+async def show_pipeline_snapshot(session: BackendContext) -> dict:
     """Fetch and display full pipeline config from backend.
 
     Prints: pipeline name/version, node list, resolved schemas/prompts,
@@ -186,10 +186,10 @@ async def show_pipeline_snapshot(session: BackendSession) -> dict:
     return config
 
 
-def configure_pipeline(session: BackendSession, campaign_config: CampaignConfig) -> dict:
+def configure_pipeline(session: BackendContext, campaign_config: CampaignConfig) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
-    Delegates to ``promptpotter.services.campaign.init.configure_pipeline()``
+    Delegates to ``promptpotter.services.campaign.bootstrap.configure_pipeline()``
     and prints a summary of active/excluded nodes.
     """
     result = _configure_pipeline(
@@ -224,7 +224,7 @@ async def init_services(
     backend_id: str = "local",
     experiment_id: str = "1_production_historical",
     dataset_name: str | None = None,
-) -> BackendSession:
+) -> BackendContext:
     """Initialize store, client, and load experiment data.
 
     When *dataset_name* is provided, loads ground-truth data from the
@@ -317,7 +317,7 @@ async def show_backend_status(client) -> dict:
 
 
 async def prepare_eval_context(
-    session: BackendSession,
+    session: BackendContext,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = False,
@@ -326,9 +326,9 @@ async def prepare_eval_context(
     """Load baseline prompt, set dataset, optionally run baseline.
 
     Thin display wrapper around
-    ``promptpotter.services.campaign.init.prepare_eval_context()``.
+    ``promptpotter.services.campaign.bootstrap.prepare_eval_context()``.
     """
-    from promptpotter.services.campaign.init import (
+    from promptpotter.services.campaign.bootstrap import (
         prepare_eval_context as _prepare_eval_context,
     )
 
@@ -356,9 +356,9 @@ def prepare_datasets(
     """Load/create datasets, build session terms, and display summary.
 
     Thin display wrapper around
-    ``promptpotter.services.campaign.init.prepare_datasets()``.
+    ``promptpotter.services.campaign.bootstrap.prepare_datasets()``.
     """
-    from promptpotter.services.campaign.init import (
+    from promptpotter.services.campaign.bootstrap import (
         prepare_datasets as _prepare_datasets,
     )
 

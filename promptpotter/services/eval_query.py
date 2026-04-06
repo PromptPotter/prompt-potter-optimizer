@@ -83,10 +83,12 @@ def _build_local_result(
     ranked: list[dict] = []
     for item in raw_ranked:
         if isinstance(item, dict):
-            ranked.append({
-                "candidate": item.get("candidate") or item.get("term", NO_RESULT),
-                "score": item.get("score", 0),
-            })
+            ranked.append(
+                {
+                    "candidate": item.get("candidate") or item.get("term", NO_RESULT),
+                    "score": item.get("score", 0),
+                }
+            )
         else:
             ranked.append({"candidate": str(item), "score": 0})
 
@@ -104,7 +106,9 @@ def _build_local_result(
         if node_data is not None and step != last_node:
             pd[step] = node_data
 
-    gt_rank = next((i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth), None)
+    gt_rank = next(
+        (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth), None
+    )
     n_candidates = len(ranked)
     return {
         "query": query,
@@ -171,7 +175,9 @@ async def eval_query_via_backend(
 
             prefix_keys = compute_prefix_keys(pipeline_params or {}, pipeline_schema)
             node_outputs_hit, cached_steps = intermediate_cache.walk_prefix(
-                backend_id, query, prefix_keys,
+                backend_id,
+                query,
+                prefix_keys,
             )
             if node_outputs_hit:
                 precomputed = node_outputs_hit
@@ -179,7 +185,11 @@ async def eval_query_via_backend(
         # Full coverage: all target steps cached — skip backend entirely
         if precomputed and cached_steps == _target_steps:
             return _build_local_result(
-                query, ground_truth, precomputed, _target_steps, pipeline_schema,
+                query,
+                ground_truth,
+                precomputed,
+                _target_steps,
+                pipeline_schema,
             )
 
         resp = await backend_client.run_query(
@@ -196,14 +206,19 @@ async def eval_query_via_backend(
             for node_name, cache_key in prefix_keys:
                 if node_name in node_outputs and node_name not in precomputed_set:
                     intermediate_cache.put_node(
-                        backend_id, node_name, cache_key, query, node_outputs[node_name],
+                        backend_id,
+                        node_name,
+                        cache_key,
+                        query,
+                        node_outputs[node_name],
                     )
 
         ranked = data.get("final_ranking", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
         if predicted == "ERROR":
             return _error_result(
-                query, ground_truth,
+                query,
+                ground_truth,
                 f"[{ErrorCategory.PIPELINE}] Backend returned ERROR as candidate"
                 " — pipeline internal failure for this query.",
             )

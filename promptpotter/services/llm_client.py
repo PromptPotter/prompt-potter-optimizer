@@ -6,6 +6,7 @@ OpenAI, Anthropic). Chat completions, JSON mode, token tracking, and
 exponential backoff for transient 503/429 errors. ``get_llm_client(provider)``
 returns a configured singleton.
 """
+
 import asyncio
 import logging
 from abc import ABC, abstractmethod
@@ -87,7 +88,6 @@ class LLMClientBase(ABC):
             LLMResponse with content and usage info.
         """
         ...
-
 
 
 # JSON repair and parsing moved to promptpotter.shared.llm_parsing.
@@ -178,17 +178,14 @@ class OpenAICompatibleClient(LLMClientBase):
                         f"set EXPERIMENT_ID = None to use current config."
                     ) from exc
                 # Groq JSON mode: invalid generation — try to salvage
-                is_json_validate_failed = (
-                    status == 400
-                    and "json_validate_failed" in str(exc)
-                )
+                is_json_validate_failed = status == 400 and "json_validate_failed" in str(exc)
                 if is_json_validate_failed:
                     # Extract failed_generation from error body and try repair
                     err_str = str(exc)
                     fg_key = "'failed_generation': '"
                     fg_start = err_str.find(fg_key)
                     if fg_start >= 0:
-                        fg_text = err_str[fg_start + len(fg_key):]
+                        fg_text = err_str[fg_start + len(fg_key) :]
                         # Find matching end quote (skip escaped quotes)
                         fg_end = fg_text.rfind("'}")
                         if fg_end > 0:
@@ -210,12 +207,13 @@ class OpenAICompatibleClient(LLMClientBase):
                     # Repair failed — fall through to retry
                     last_exc = exc
                     if attempt < LLM_MAX_APP_RETRIES:
-                        delay = LLM_BASE_DELAY * (2 ** attempt)
+                        delay = LLM_BASE_DELAY * (2**attempt)
                         logger.info(
-                            "%s JSON validation failed (attempt %d/%d), "
-                            "retrying in %.1fs",
-                            self._provider_name, attempt + 1,
-                            LLM_MAX_APP_RETRIES + 1, delay,
+                            "%s JSON validation failed (attempt %d/%d), retrying in %.1fs",
+                            self._provider_name,
+                            attempt + 1,
+                            LLM_MAX_APP_RETRIES + 1,
+                            delay,
                         )
                         await asyncio.sleep(delay)
                         continue
@@ -225,12 +223,15 @@ class OpenAICompatibleClient(LLMClientBase):
                 if status in LLM_RETRY_STATUSES or is_connection:
                     last_exc = exc
                     if attempt < LLM_MAX_APP_RETRIES:
-                        delay = LLM_BASE_DELAY * (2 ** attempt)
+                        delay = LLM_BASE_DELAY * (2**attempt)
                         logger.warning(
-                            "%s request failed (attempt %d/%d, status=%s), "
-                            "retrying in %.1fs: %s",
-                            self._provider_name, attempt + 1,
-                            LLM_MAX_APP_RETRIES + 1, status, delay, exc,
+                            "%s request failed (attempt %d/%d, status=%s), retrying in %.1fs: %s",
+                            self._provider_name,
+                            attempt + 1,
+                            LLM_MAX_APP_RETRIES + 1,
+                            status,
+                            delay,
+                            exc,
                         )
                         await asyncio.sleep(delay)
                         continue
@@ -303,9 +304,7 @@ class AnthropicClient(LLMClientBase):
             if msg["role"] == "system":
                 system_message = msg["content"]
             else:
-                anthropic_messages.append(
-                    {"role": msg["role"], "content": msg["content"]}
-                )
+                anthropic_messages.append({"role": msg["role"], "content": msg["content"]})
 
         model_name = model or settings.LLM_MODEL
 
@@ -320,13 +319,9 @@ class AnthropicClient(LLMClientBase):
 
         response = await client.messages.create(**request_params)
 
-        content = "".join(
-            block.text for block in response.content if hasattr(block, "text")
-        )
+        content = "".join(block.text for block in response.content if hasattr(block, "text"))
         parsed = (
-            _try_parse_json(content, "Anthropic")
-            if output_format == "json" and content
-            else None
+            _try_parse_json(content, "Anthropic") if output_format == "json" and content else None
         )
 
         return LLMResponse(
@@ -335,9 +330,7 @@ class AnthropicClient(LLMClientBase):
             usage={
                 "prompt_tokens": response.usage.input_tokens,
                 "completion_tokens": response.usage.output_tokens,
-                "total_tokens": (
-                    response.usage.input_tokens + response.usage.output_tokens
-                ),
+                "total_tokens": (response.usage.input_tokens + response.usage.output_tokens),
             },
             finish_reason=response.stop_reason,
             parsed=parsed,
@@ -386,6 +379,7 @@ def _resolve_provider() -> str:
         ("anthropic", settings.ANTHROPIC_API_KEY),
         ("openai", settings.OPENAI_API_KEY),
     ]
+
     def _has_key(key: str | None) -> bool:
         return bool(key) and key not in _PLACEHOLDER_KEYS
 

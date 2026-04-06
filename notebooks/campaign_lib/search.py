@@ -39,7 +39,7 @@ from promptpotter.services.search.scan_advisor import (
     advisory_to_scan_variants,
 )
 from promptpotter.services.search.scan_baseline import (
-    prepare_scan_baseline as _prepare_scan_baseline,
+    decompose_scan_baseline as _decompose_scan_baseline,
 )
 from promptpotter.services.search.scan_results import (
     seed_campaign_from_scan as _seed_campaign_from_scan,
@@ -60,7 +60,7 @@ from .setup import setup_llm
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.campaign.init import BackendSession
+    from promptpotter.services.campaign.bootstrap import BackendContext
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ __all__ = [
     # search_advisor
     "load_task_description",
     # search_baseline
-    "prepare_scan_baseline",
+    "decompose_scan_baseline",
     "preview_advisor_prompt",
     "resolve_scan_variants",
     # search_results
@@ -93,7 +93,7 @@ __all__ = [
 # ===========================================================================
 
 
-async def prepare_scan_baseline(
+async def decompose_scan_baseline(
     baseline,
     campaign_config: CampaignConfig,
     pipeline_params: dict | None = None,
@@ -102,11 +102,11 @@ async def prepare_scan_baseline(
     backend_id: str = "",
     scan_variants: dict | None = None,
     force_restructure: bool = False,
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
-    Delegates to ``promptpotter.services.search.scan_baseline.prepare_scan_baseline()``
+    Delegates to ``promptpotter.services.search.scan_baseline.decompose_scan_baseline()``
     and prints restructured fields + historical diagnostic.
 
     Returns:
@@ -136,8 +136,11 @@ async def prepare_scan_baseline(
                     prompt_node = name
                     break
 
-    result = await _prepare_scan_baseline(
-        baseline, campaign_config, llm_client, llm_model,
+    result = await _decompose_scan_baseline(
+        baseline,
+        campaign_config,
+        llm_client,
+        llm_model,
         pipeline_params=pipeline_params,
         store=store,
         backend_id=backend_id,
@@ -156,13 +159,16 @@ async def prepare_scan_baseline(
             print(f"  {DIM}{field}:{RESET} {val[:80]}{'...' if len(val) > 80 else ''}")
         else:
             print(f"  {DIM}{field}:{RESET} (empty)")
-    print(f"Search baseline: {result.search_baseline.id[:12]} "
-          f"(render: {len(result.search_baseline.render())} chars)")
+    print(
+        f"Search baseline: {result.search_baseline.id[:12]} "
+        f"(render: {len(result.search_baseline.render())} chars)"
+    )
 
     # Historical diagnostic display
     if result.prompt_index is not None:
         _print_historical_diagnostic(
-            result.prompt_index, scan_diagnosis=result.scan_diag,
+            result.prompt_index,
+            scan_diagnosis=result.scan_diag,
         )
 
     return result.baseline_jsp, result.search_baseline, result.scan_diag
@@ -174,7 +180,7 @@ async def prepare_scan_baseline(
 
 
 def show_variant_library(
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
     *,
     axes: list[str] | None = None,
     source: str | None = None,
@@ -253,7 +259,7 @@ def resolve_scan_variants(
     scan_variants: dict,
     pipeline_schema: PipelineSchema | None = None,
     *,
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
 ) -> tuple[dict, dict[str, list[str]]]:
     """Resolve schema mutation tuples and display the resolved variants.
 
@@ -326,7 +332,7 @@ def resolve_scan_variants(
 
 def preview_advisor_prompt(
     campaign_config: CampaignConfig | None = None,
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
     *,
     task_description: str | dict = "",
     raw: bool = False,
@@ -428,7 +434,7 @@ def _display_scan_advisory(advisory: dict) -> None:
 
 async def scan_advisor(
     campaign_config: CampaignConfig,
-    session: BackendSession,
+    session: BackendContext,
     *,
     task_description: str | dict = "",
     model: str = "",
@@ -465,7 +471,7 @@ async def scan_advisor(
     print(f"  {pipeline_schema.name} v{pipeline_schema.version} — {len(nodes)} nodes{excluded}")
     if task_description:
         if isinstance(task_description, dict):
-            domain = task_description.get('domain', '?')
+            domain = task_description.get("domain", "?")
             print(f"  Domain: {domain}")
         else:
             print(f"  Task: {task_description[:80].strip()}")
@@ -493,7 +499,7 @@ async def scan_advisor(
 
 async def run_scan_advisor(
     campaign_config: CampaignConfig,
-    session: BackendSession,
+    session: BackendContext,
     *,
     task_description: str | dict = "",
     model: str = "",
@@ -504,7 +510,8 @@ async def run_scan_advisor(
     Returns (advisory, scan_variants, schema_labels).
     """
     advisory = await scan_advisor(
-        campaign_config, session,
+        campaign_config,
+        session,
         task_description=task_description,
         model=model,
     )
@@ -512,7 +519,8 @@ async def run_scan_advisor(
         return {}, {}, {}
 
     proposed, schema_labels = advisory_to_scan_variants(
-        advisory, pipeline_schema=session.pipeline_schema,
+        advisory,
+        pipeline_schema=session.pipeline_schema,
     )
 
     # Print copy-pasteable Python dict (nested format)
@@ -571,24 +579,19 @@ def _print_historical_diagnostic(
         print(f"{DIM}Historical data: (none){RESET}")
         return
 
-    print(
-        f"{CYAN}Historical data:{RESET}"
-        f" {n_results} results across {n_prompts} unique prompts"
-    )
+    print(f"{CYAN}Historical data:{RESET} {n_results} results across {n_prompts} unique prompts")
 
     if scan_diagnosis:
         n_matching = scan_diagnosis["n_matching_runs"]
         n_cached = scan_diagnosis["n_matching_results"]
-        print(f"Matching runs (step sequence): {n_matching},"
-              f" {n_cached} cached results")
+        print(f"Matching runs (step sequence): {n_matching}, {n_cached} cached results")
 
     # Scan variant coverage
     if not (scan_diagnosis and scan_diagnosis["axes"]):
         return
 
     n_matching = scan_diagnosis["n_matching_runs"]
-    print(f"{CYAN}Scan variant coverage"
-          f" ({n_matching} matching runs):{RESET}")
+    print(f"{CYAN}Scan variant coverage ({n_matching} matching runs):{RESET}")
 
     # Footnote lookup for very long values
     legend: list[tuple[str, str]] = []
@@ -626,9 +629,7 @@ def _print_historical_diagnostic(
             if count > 0:
                 chunks.append(f"{display}\u2192{count} \u2713")
             else:
-                chunks.append(
-                    f"{display}\u2192{DIM}\u2717{RESET}"
-                )
+                chunks.append(f"{display}\u2192{DIM}\u2717{RESET}")
 
         # Try single-line after axis label
         joined = gap.join(chunks)
@@ -669,7 +670,10 @@ def show_scan_coverage(
 ) -> dict:
     """Print a formatted coverage report and return the raw dict."""
     result = _assess_scan_coverage(
-        baseline_ps, variant_library, diagnostic, prompt_index,
+        baseline_ps,
+        variant_library,
+        diagnostic,
+        prompt_index,
         pipeline_params=pipeline_params,
         min_queries=min_queries,
         axis_requirements=axis_requirements,
@@ -683,8 +687,10 @@ def show_scan_coverage(
     print("=" * 70)
     print(f"  COVERAGE ADVISOR  (min_queries={result['min_queries']})")
     print("=" * 70)
-    print(f"  Baseline: {bl['n_cached']}/{bl['n_needed']} queries cached"
-          f" {'[ok]' if bl['sufficient'] else '[!!]'}")
+    print(
+        f"  Baseline: {bl['n_cached']}/{bl['n_needed']} queries cached"
+        f" {'[ok]' if bl['sufficient'] else '[!!]'}"
+    )
     print()
 
     pf_axes = [a for a in axes if a["axis_type"] == "prompt_field"]
@@ -696,23 +702,20 @@ def show_scan_coverage(
             label = "value" if a["n_values"] == 1 else "values"
             usable_parts = []
             if a.get("variants"):
-                n_partial = sum(
-                    1 for v in a["variants"]
-                    if 0 < v["n_cached"] < min_queries
-                )
+                n_partial = sum(1 for v in a["variants"] if 0 < v["n_cached"] < min_queries)
                 usable_parts.append(f"{a['n_usable']} usable")
                 if n_partial:
                     usable_parts.append(f"{n_partial} partial")
-                n_uncovered = sum(
-                    1 for v in a["variants"] if v["n_cached"] == 0
-                )
+                n_uncovered = sum(1 for v in a["variants"] if v["n_cached"] == 0)
                 if n_uncovered:
                     usable_parts.append(f"{n_uncovered} uncovered")
             detail = f"  ({', '.join(usable_parts)})" if usable_parts else ""
             mark = "[ok]" if a["sufficient"] else "[!!]"
-            print(f"    {a['axis']:<22s} {a['n_values']} {label:<6s} "
-                  f"| {a['n_usable']}/{a['n_required']} required  "
-                  f"{mark}{detail}")
+            print(
+                f"    {a['axis']:<22s} {a['n_values']} {label:<6s} "
+                f"| {a['n_usable']}/{a['n_required']} required  "
+                f"{mark}{detail}"
+            )
         print()
 
     if pp_axes:
@@ -723,11 +726,15 @@ def show_scan_coverage(
             n_compat = a.get("n_step_compatible", 0)
             n_calls = a["n_values"] * n_diag
             if n_hist:
-                print(f"    {a['axis']:<22s} {a['n_values']} variants "
-                      f"| {n_hist} cached ({n_compat} step-compatible)")
+                print(
+                    f"    {a['axis']:<22s} {a['n_values']} variants "
+                    f"| {n_hist} cached ({n_compat} step-compatible)"
+                )
             else:
-                print(f"    {a['axis']:<22s} {a['n_values']} variants "
-                      f"x {n_diag} queries = {n_calls} calls (no historical data)")
+                print(
+                    f"    {a['axis']:<22s} {a['n_values']} variants "
+                    f"x {n_diag} queries = {n_calls} calls (no historical data)"
+                )
         print()
 
     saved = summary["backend_calls_saved"]
@@ -743,8 +750,7 @@ def show_scan_coverage(
     print(f"  Summary: {saved} cached, {needed} still needed{breakdown}")
     print(f"  >> {result['recommendation']}")
 
-    if (summary["backend_calls_saved"] == 0
-            and sum(len(v) for v in prompt_index.values()) > 0):
+    if summary["backend_calls_saved"] == 0 and sum(len(v) for v in prompt_index.values()) > 0:
         n_total = sum(len(v) for v in prompt_index.values())
         print(f"\n  Note: {n_total} results exist in the index under other baselines.")
         print("  The current search_baseline was rebuilt and has no cached data yet.")
@@ -777,8 +783,10 @@ def show_data_inventory(
     if axes:
         print(f"  {'Axis':<22s} {'Prompts':>8s} {'Queries':>8s} {'Distinct values':>16s}")
         for axis_name, info in axes.items():
-            print(f"  {axis_name:<22s} {info['n_prompts']:>8d} "
-                  f"{info['n_queries']:>8d} {info['distinct_values']:>16d}")
+            print(
+                f"  {axis_name:<22s} {info['n_prompts']:>8d} "
+                f"{info['n_queries']:>8d} {info['distinct_values']:>16d}"
+            )
         print()
     else:
         print("  No axis variations found in stored plans.")
@@ -791,8 +799,7 @@ def show_data_inventory(
             card = info["cardinality"]
             sens = info["sensitivity_range"]
             budget = info["exploration_budget"]
-            print(f"    {pname:<24s} {card} values scanned  "
-                  f"sensitivity: {sens:.3f}  [{budget}]")
+            print(f"    {pname:<24s} {card} values scanned  sensitivity: {sens:.3f}  [{budget}]")
         print()
     else:
         print("  Pipeline parameters: not yet scanned")
@@ -838,8 +845,10 @@ def audit_historical_data(
     if axes:
         print(f"  {'Axis':<22s} {'Prompts':>8s} {'Queries':>8s} {'Distinct values':>16s}")
         for axis_name, info in axes.items():
-            print(f"  {axis_name:<22s} {info['n_prompts']:>8d} "
-                  f"{info['n_queries']:>8d} {info['distinct_values']:>16d}")
+            print(
+                f"  {axis_name:<22s} {info['n_prompts']:>8d} "
+                f"{info['n_queries']:>8d} {info['distinct_values']:>16d}"
+            )
         print()
     else:
         print("  No axis variations found in stored plans.")
@@ -852,8 +861,7 @@ def audit_historical_data(
             card = info["cardinality"]
             sens = info["sensitivity_range"]
             budget = info["exploration_budget"]
-            print(f"    {pname:<24s} {card} values scanned  "
-                  f"sensitivity: {sens:.3f}  [{budget}]")
+            print(f"    {pname:<24s} {card} values scanned  sensitivity: {sens:.3f}  [{budget}]")
         print()
     else:
         print("  Pipeline parameters: not yet scanned")
@@ -879,7 +887,7 @@ async def resume_or_build_diagnostic(
     campaign_config: CampaignConfig,
     baseline,
     baseline_results: list,
-    session: BackendSession,
+    session: BackendContext,
     dataset: list,
     scan_variants: dict | None = None,
 ) -> tuple[str, object, list, list, dict]:
@@ -992,8 +1000,12 @@ def seed_campaign_from_scan(
         return baseline
 
     result = _seed_campaign_from_scan(
-        scan_df, axis_profiles, baseline, scan_variants,
-        campaign_rounds, campaign_config,
+        scan_df,
+        axis_profiles,
+        baseline,
+        scan_variants,
+        campaign_rounds,
+        campaign_config,
     )
 
     # Print improving axes summary
@@ -1031,7 +1043,7 @@ def seed_campaign_from_scan(
     return result.best_sp
 
 
-def show_scan_analytics(scan_df, axis_profiles, session: BackendSession):
+def show_scan_analytics(scan_df, axis_profiles, session: BackendContext):
     """Display scan leaderboard and query difficulty if results are available.
 
     Returns difficulty_df (or None if scan_df is empty/None).

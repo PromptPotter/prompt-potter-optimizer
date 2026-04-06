@@ -16,8 +16,10 @@ from promptpotter.shared.constants import LLM_MAX_APP_RETRIES
 @pytest.fixture(autouse=True)
 def _instant_sleep(monkeypatch):
     """Eliminate real asyncio.sleep — we test retry logic, not delays."""
+
     async def _noop(seconds):
         pass
+
     monkeypatch.setattr("asyncio.sleep", _noop)
 
 
@@ -36,13 +38,20 @@ def llm_client():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status_code,n_failures,expected_calls,succeeds", [
-    (503, 2, 3, True),
-    (429, 1, 2, True),
-    (503, LLM_MAX_APP_RETRIES + 1, LLM_MAX_APP_RETRIES + 1, False),
-])
+@pytest.mark.parametrize(
+    "status_code,n_failures,expected_calls,succeeds",
+    [
+        (503, 2, 3, True),
+        (429, 1, 2, True),
+        (503, LLM_MAX_APP_RETRIES + 1, LLM_MAX_APP_RETRIES + 1, False),
+    ],
+)
 async def test_llm_retry_transient(
-    llm_client, status_code, n_failures, expected_calls, succeeds,
+    llm_client,
+    status_code,
+    n_failures,
+    expected_calls,
+    succeeds,
 ):
 
     client, mock_async = llm_client

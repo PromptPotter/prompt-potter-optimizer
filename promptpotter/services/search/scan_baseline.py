@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ScanBaselineResult:
-    """Result from ``prepare_scan_baseline()``."""
+    """Result from ``decompose_scan_baseline()``."""
 
     baseline_jsp: JobSearchPoint
     search_baseline: OptSearchPoint
@@ -36,7 +36,7 @@ class ScanBaselineResult:
     prompt_index: dict | None = field(default=None)
 
 
-async def prepare_scan_baseline(
+async def decompose_scan_baseline(
     baseline: OptSearchPoint,
     campaign_config: CampaignConfig,
     llm_client: LLMClientBase,
@@ -71,11 +71,13 @@ async def prepare_scan_baseline(
             baseline.render().encode(),
         ).hexdigest()[:16]
         alias_hashes = store.dataset_runs.resolve_aliases(
-            backend_id, original_hash,
+            backend_id,
+            original_hash,
         )
 
     layer1_fields, was_cached = await decompose_prompt_fields_cached(
-        baseline.instruction, llm_client,
+        baseline.instruction,
+        llm_client,
         model=llm_model,
         store_base_dir=store.base_dir if can_cache else None,
         backend_id=backend_id,
@@ -116,14 +118,19 @@ async def prepare_scan_baseline(
             search_baseline.render().encode(),
         ).hexdigest()[:16]
         store.dataset_runs.register_alias(
-            backend_id, original_hash, restructured_hash,
+            backend_id,
+            original_hash,
+            restructured_hash,
         )
 
         prompt_index = build_prompt_result_index(store, backend_id)
 
         if scan_variants:
             scan_diag = diagnose_scan_variants(
-                store, backend_id, scan_variants, baseline_jsp,
+                store,
+                backend_id,
+                scan_variants,
+                baseline_jsp,
                 pipeline_schema=pipeline_schema,
             )
 

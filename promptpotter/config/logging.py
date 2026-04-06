@@ -5,6 +5,7 @@ Call ``setup_logging()`` explicitly from entry points (``promptpotter.main``,
 notebook ``init_services()``) to configure the root logger.
 All modules should use ``logger = logging.getLogger(__name__)``.
 """
+
 import logging
 import sys
 

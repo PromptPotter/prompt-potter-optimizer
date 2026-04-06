@@ -18,9 +18,12 @@ import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
+
+from promptpotter.services.campaign.state import CampaignPhase
 
 if TYPE_CHECKING:
+    from promptpotter.services.campaign.config import RunConfig
     from promptpotter.services.campaign.state import PhaseEvent, RoundResult
     from promptpotter.services.stores.stores import SessionStore
 
@@ -45,15 +48,9 @@ class CampaignPersistenceEmitter:
     def __init__(
         self,
         session_dir: Path,
+        config: RunConfig,
         *,
         session_store: SessionStore | None = None,
-        backend_id: str = "",
-        session_id: str = "",
-        max_rounds: int = 10,
-        l1_patience: int = 3,
-        active_nodes: list[str] | None = None,
-        excluded_nodes: list[str] | None = None,
-        config: dict[str, Any] | None = None,
         resume_from: dict[str, Any] | None = None,
     ) -> None:
         self.state_path = session_dir / "campaign_state.json"
@@ -61,11 +58,9 @@ class CampaignPersistenceEmitter:
 
         # Session store for campaign_log.md writes
         self._session_store = session_store
-        self._backend_id = backend_id
-        self._session_id = session_id
+        self._backend_id = config.backend_id
+        self._session_id = config.session_id
 
-        cfg = config or {}
-        opt = cfg.get("optimization", {})
         r = resume_from or {}
 
         self._state: dict[str, Any] = {
@@ -73,10 +68,10 @@ class CampaignPersistenceEmitter:
             "workflow": "optimize",
             "phase": "init",
             "round": 0,
-            "max_rounds": max_rounds,
+            "max_rounds": config.max_rounds or 999,
             "candidate": "",
             "query": "",
-            "patience": f"0/{l1_patience}",
+            "patience": f"0/{config.l1_patience}",
             "layer": "L1",
             "baseline": r.get("baseline", 0.0),
             "best": r.get("best", 0.0),
@@ -91,8 +86,8 @@ class CampaignPersistenceEmitter:
             "avg_query_time_s": 0.0,
             "eta_s": 0.0,
             # Pipeline
-            "active_nodes": active_nodes or [],
-            "excluded_nodes": excluded_nodes or [],
+            "active_nodes": list(config.active_steps),
+            "excluded_nodes": [],
             "terminated_at": None,
             "cache_hit_rate": 0.0,
             # Quality
@@ -106,9 +101,9 @@ class CampaignPersistenceEmitter:
             "total_queries_evaluated": r.get("total_queries_evaluated", 0),
             "total_backend_calls": r.get("total_backend_calls", 0),
             # Config
-            "model": cfg.get("optimizer_llm", {}).get("model", ""),
-            "n_variants": opt.get("n_variants", 5),
-            "sample_size": cfg.get("sample_size", 0),
+            "model": config.model or "",
+            "n_variants": config.n_variants,
+            "sample_size": config.sample_size,
             # Accumulators (reset on transitions)
             "current_queries": [],
             "round_candidates": [],
@@ -116,7 +111,7 @@ class CampaignPersistenceEmitter:
             # Bidirectional control surface (defaults — FileControlSurface reads back)
             "control": {
                 "requested_state": "running",
-                "pause_before_l2_eval": opt.get("pause_before_l2_eval", False),
+                "pause_before_l2_eval": config.pause_before_eval,
             },
         }
 
@@ -167,42 +162,55 @@ class CampaignPersistenceEmitter:
 
     # -- Callbacks -------------------------------------------------------------
 
+    # Phase dispatch table — maps (phase, event) to handler methods.
+    _PHASE_DISPATCH: ClassVar[dict[tuple[str, str], str]] = {
+        (CampaignPhase.INIT, "exit"): "_on_init_exit",
+        (CampaignPhase.L1_GENERATE, "enter"): "_on_generate_enter",
+        (CampaignPhase.L1_GENERATE, "exit"): "_on_generate_exit",
+        (CampaignPhase.L1_EVALUATE, "enter"): "_on_evaluate_enter",
+    }
+
     def on_phase(self, event: PhaseEvent) -> None:
         s = self._state
         s["phase"] = event.phase
         if event.round is not None:
             s["round"] = event.round
 
-        data = event.data
+        handler_name = self._PHASE_DISPATCH.get((event.phase, event.event))
+        if handler_name:
+            getattr(self, handler_name)(event.data)
 
-        if event.phase == "init" and event.event == "exit":
-            s["cycle_id"] = data.get("cycle_id")
-            s["baseline"] = data.get("baseline_accuracy", 0.0)
-            patience_max = data.get("patience", s["max_rounds"])
-            s["patience"] = f"0/{patience_max}"
-
-        elif event.phase == "l1_generate" and event.event == "enter":
-            s["round"] = data.get("round", s["round"])
-            self._round_start = time.monotonic()
-            self._round_cache_hits = 0
-            self._round_queries = 0
-            self._round_degraded = 0
-            s["degraded_count"] = 0
-            s["round_elapsed_s"] = 0.0
-            s["current_queries"] = []
-            s["round_candidates"] = []
-
-        elif event.phase == "l1_generate" and event.event == "exit":
-            self._candidates_meta = data.get("candidates", [])
-
-        elif event.phase == "l1_evaluate" and event.event == "enter":
-            s["phase"] = "evaluating"
-
-        elif event.phase in ("refine_context", "modify_plan"):
-            s["layer"] = "L2" if event.phase == "refine_context" else "L3"
+        # L2/L3 layer label (both enter and exit)
+        if event.phase in (CampaignPhase.REFINE_CONTEXT, CampaignPhase.MODIFY_PLAN):
+            s["layer"] = "L2" if event.phase == CampaignPhase.REFINE_CONTEXT else "L3"
 
         self._log(f"--- {event.phase} {event.event} (round {event.round}) ---")
         self._flush()
+
+    def _on_init_exit(self, data: dict) -> None:
+        s = self._state
+        s["cycle_id"] = data.get("cycle_id")
+        s["baseline"] = data.get("baseline_accuracy", 0.0)
+        patience_max = data.get("patience", s["max_rounds"])
+        s["patience"] = f"0/{patience_max}"
+
+    def _on_generate_enter(self, data: dict) -> None:
+        s = self._state
+        s["round"] = data.get("round", s["round"])
+        self._round_start = time.monotonic()
+        self._round_cache_hits = 0
+        self._round_queries = 0
+        self._round_degraded = 0
+        s["degraded_count"] = 0
+        s["round_elapsed_s"] = 0.0
+        s["current_queries"] = []
+        s["round_candidates"] = []
+
+    def _on_generate_exit(self, data: dict) -> None:
+        self._candidates_meta = data.get("candidates", [])
+
+    def _on_evaluate_enter(self, data: dict) -> None:
+        self._state["phase"] = "evaluating"
 
     def on_query_eval(
         self,

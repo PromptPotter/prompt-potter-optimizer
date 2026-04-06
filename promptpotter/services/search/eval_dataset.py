@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 # Extraction
 # ---------------------------------------------------------------------------
 
+
 def _extract_eval_from_traces(
     exp_data: dict,
     schema: PipelineSchema,
@@ -91,12 +92,14 @@ def _extract_eval_from_traces(
                 pipeline_data["total_time"] = score["value"] / 1000.0
                 break
 
-        dataset.append({
-            "query": query,
-            "ground_truth": ground_truth,
-            "pipeline_data": pipeline_data,
-            "status": "success",
-        })
+        dataset.append(
+            {
+                "query": query,
+                "ground_truth": ground_truth,
+                "pipeline_data": pipeline_data,
+                "status": "success",
+            }
+        )
 
     return dataset
 
@@ -116,12 +119,14 @@ def load_eval_dataset(
         3. Empty list if neither found
     """
     exp_data = store.backends.load_sync(
-        backend_id, f"experiments/{experiment_id}.json",
+        backend_id,
+        f"experiments/{experiment_id}.json",
     )
 
     if exp_data:
         if schema is None:
             from promptpotter.models.pipeline_schema import PipelineSchema
+
             schema = PipelineSchema()
         dataset = _extract_eval_from_traces(exp_data, schema=schema)
         if dataset:
@@ -134,15 +139,15 @@ def load_eval_dataset(
     for ex_summary in executions:
         if ex_summary.get("experiment_id") == experiment_id:
             execution = store.backends.load_execution(
-                backend_id, ex_summary["execution_id"],
+                backend_id,
+                ex_summary["execution_id"],
             )
             if execution:
                 req_key = schema.required_pipeline_key()
                 dataset = [
-                    r.model_dump() for r in execution.results
-                    if r.status == "success"
-                    and r.pipeline_data
-                    and r.pipeline_data.get(req_key)
+                    r.model_dump()
+                    for r in execution.results
+                    if r.status == "success" and r.pipeline_data and r.pipeline_data.get(req_key)
                 ]
                 if dataset:
                     if sample_size > 0 and len(dataset) > sample_size:

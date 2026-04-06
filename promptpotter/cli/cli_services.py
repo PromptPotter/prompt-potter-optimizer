@@ -18,8 +18,8 @@ from promptpotter.config.settings import (
 )
 
 if TYPE_CHECKING:
+    from promptpotter.services.campaign.bootstrap import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.campaign.init import BackendSession
     from promptpotter.services.campaign.state import RunResult
     from promptpotter.services.search.scan_results import ScanContext
 
@@ -36,10 +36,10 @@ async def init_services(
     backend_id: str = DEFAULT_BACKEND_ID,
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
-) -> BackendSession:
+) -> BackendContext:
     """Initialize services (logging + service init)."""
     from promptpotter.config.logging import setup_logging
-    from promptpotter.services.campaign.init import init_services as _init_services
+    from promptpotter.services.campaign.bootstrap import init_services as _init_services
 
     setup_logging()
 
@@ -56,7 +56,7 @@ async def init_services(
 
 
 def configure_pipeline(
-    session: BackendSession,
+    session: BackendContext,
     campaign_config: CampaignConfig,
 ) -> dict:
     """Configure pipeline and filter schema.  Returns pipeline_params."""
@@ -83,7 +83,7 @@ def configure_pipeline(
     return result.pipeline_params
 
 
-async def show_pipeline_snapshot(session: BackendSession) -> dict:
+async def show_pipeline_snapshot(session: BackendContext) -> dict:
     """Fetch and log pipeline config.  Returns raw config dict."""
     import httpx
 
@@ -106,37 +106,15 @@ async def show_pipeline_snapshot(session: BackendSession) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def prepare_datasets(
-    store,
-    backend_id: str,
-    excel_path: str | None = None,
-    *,
-    force: bool = False,
-) -> tuple[list[dict] | None, list[str]]:
-    """Load datasets and return (train_data, index_terms)."""
-    from promptpotter.services.campaign.init import (
-        prepare_datasets as _prepare_datasets,
-    )
-
-    result = _prepare_datasets(store, backend_id, excel_path, force=force)
-    logger.info(
-        "Datasets: %d train, %d unique queries, %d session terms",
-        len(result.splits.get("train", [])),
-        result.n_unique_queries,
-        len(result.index_terms),
-    )
-    return result.train_data, result.index_terms
-
-
 async def prepare_eval_context(
-    session: BackendSession,
+    session: BackendContext,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = False,
     pipeline_params: dict | None = None,
 ):
     """Load baseline + dataset, optionally run baseline eval."""
-    from promptpotter.services.campaign.init import (
+    from promptpotter.services.campaign.bootstrap import (
         prepare_eval_context as _prepare_eval_context,
     )
 
@@ -162,7 +140,7 @@ async def prepare_eval_context(
 async def decompose_task_context(
     task_description: str,
     campaign_config: CampaignConfig,
-    session: BackendSession,
+    session: BackendContext,
 ) -> dict:
     """Decompose task description into structured context fields."""
     from promptpotter.services.campaign.config import create_llm_client
@@ -195,7 +173,7 @@ async def decompose_task_context(
 
 def resolve_scan_variants(
     scan_variants: dict,
-    session: BackendSession,
+    session: BackendContext,
 ) -> None:
     """Resolve schema mutation tuples and log the result."""
     from promptpotter.services.search.scan_advisor import resolve_schema_axes
@@ -231,7 +209,7 @@ async def run_sensitivity_scan(
     dataset: list,
     *,
     scan_sample_size: int = 0,
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
     experiment_id: str = "",
     session_id: str = "",
 ):
@@ -241,7 +219,7 @@ async def run_sensitivity_scan(
     """
     from promptpotter.services.campaign.config import create_llm_client
     from promptpotter.services.search.scan_baseline import (
-        prepare_scan_baseline as _prepare_scan_baseline,
+        decompose_scan_baseline as _decompose_scan_baseline,
     )
     from promptpotter.services.search.sensitivity_scanner import (
         sensitivity_scan as _sensitivity_scan,
@@ -262,7 +240,7 @@ async def run_sensitivity_scan(
                 prompt_node = name
                 break
 
-    result = await _prepare_scan_baseline(
+    result = await _decompose_scan_baseline(
         baseline,
         campaign_config,
         llm_client,
@@ -315,51 +293,13 @@ async def run_sensitivity_scan(
     return scan_baseline_sp, df, profiles
 
 
-def seed_campaign_from_scan(
-    scan_df,
-    axis_profiles: list,
-    baseline,
-    scan_variants: dict[str, list],
-    campaign_rounds: list,
-    campaign_config: CampaignConfig,
-):
-    """Select scan winner and seed campaign_rounds.  Returns best_sp."""
-    from promptpotter.services.search.scan_results import (
-        seed_campaign_from_scan as _seed_campaign_from_scan,
-    )
-
-    if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
-        logger.info("No scan data — using baseline as-is")
-        return baseline
-
-    result = _seed_campaign_from_scan(
-        scan_df,
-        axis_profiles,
-        baseline,
-        scan_variants,
-        campaign_rounds,
-        campaign_config,
-    )
-
-    if result.improving_axes:
-        logger.info(
-            "Seeded from %d improving axes, best delta=+%.1f%%",
-            len(result.improving_axes),
-            max(a["best_delta"] for a in result.improving_axes) * 100,
-        )
-    else:
-        logger.info("No improving axes — using baseline")
-
-    return result.best_sp
-
-
 # ---------------------------------------------------------------------------
 # Optimization
 # ---------------------------------------------------------------------------
 
 
 def build_scan_context(
-    session: BackendSession,
+    session: BackendContext,
     state: dict[str, Any],
     campaign_rounds: list,
     pipeline_params: dict | None = None,
@@ -397,7 +337,7 @@ async def run_optimization(
     dataset: list,
     campaign_config: CampaignConfig,
     *,
-    session: BackendSession,
+    session: BackendContext,
     pipeline_params: dict | None = None,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
@@ -410,8 +350,8 @@ async def run_optimization(
     Returns (campaign_rounds, RunResult | None).
     """
     from promptpotter.models.opt_search_point import OptSearchPoint
+    from promptpotter.services.campaign.bootstrap import extract_campaign_baseline
     from promptpotter.services.campaign.config import RunConfig
-    from promptpotter.services.campaign.init import extract_campaign_baseline
     from promptpotter.services.campaign.optimization_loop import (
         run_optimization as _run_optimization,
     )

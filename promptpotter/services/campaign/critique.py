@@ -210,8 +210,6 @@ def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
 # ---------------------------------------------------------------------------
 
 
-
-
 def _summary_section(ctx: CritiqueContext) -> str:
     total = len(ctx.results)
     return (
@@ -412,7 +410,6 @@ def _query_category_section(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
-
 def _failure_details_section(
     results: list[dict],
     candidate_keys: list[str] | None = None,
@@ -539,14 +536,19 @@ def assemble_critique_sections(ctx: CritiqueContext) -> str:
     if ctx.pipeline_schema:
         cap_lines: list[str] = []
         for node in ctx.pipeline_schema.nodes:
-            if node.output_schema and node.output_schema.fields and "output_schema" in node.param_keys:
+            if (
+                node.output_schema
+                and node.output_schema.fields
+                and "output_schema" in node.param_keys
+            ):
                 cap_lines.append(
                     f"  {node.name} has mutable output_schema"
                     f" (current fields: {', '.join(node.output_schema.fields)})"
                 )
         if cap_lines:
             sections.append(
-                "## AVAILABLE SCHEMA MUTATIONS\n" + "\n".join(cap_lines)
+                "## AVAILABLE SCHEMA MUTATIONS\n"
+                + "\n".join(cap_lines)
                 + "\n  Use output_schema param with +/-/~ mutation tuples"
                 " to add/remove/replace fields."
             )

@@ -12,12 +12,14 @@ def fmt_ci(lower: float, upper: float) -> str:
     """Format a CI as '[X.X%-Y.Y%]'."""
     return f"[{lower:.1%}-{upper:.1%}]"
 
+
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 
 def _visible_len(text: str) -> int:
     """Length of text after stripping ANSI escape codes."""
     return len(_ANSI_RE.sub("", text))
+
 
 __all__ = [
     "BLUE",
@@ -51,24 +53,24 @@ __all__ = [
 ]
 
 # ANSI foreground colors
-RESET   = "\033[0m"
-BOLD    = "\033[1m"
-DIM     = "\033[2m"
-RED     = "\033[31m"
-GREEN   = "\033[32m"
-YELLOW  = "\033[33m"
-BLUE    = "\033[34m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+BLUE = "\033[34m"
 MAGENTA = "\033[35m"
-CYAN    = "\033[36m"
+CYAN = "\033[36m"
 
 # ---------------------------------------------------------------------------
 # Box-drawing helpers (pure formatting, no business logic)
 # ---------------------------------------------------------------------------
 
 # Display geometry — single source of truth for terminal widths
-BOX_WIDTH = 70          # standard box width
-NODE_FRAME_WIDTH = 74   # node frame width (phase_display.py)
-_W = BOX_WIDTH          # internal alias
+BOX_WIDTH = 70  # standard box width
+NODE_FRAME_WIDTH = 74  # node frame width (phase_display.py)
+_W = BOX_WIDTH  # internal alias
 
 
 def _box_top(label: str = "", label_right: str = "", width: int = _W) -> str:
@@ -165,15 +167,15 @@ def _scoreboard(
     lines.append(f"  {_box_top('SCOREBOARD', width=w)}")
 
     has_composite = any(
-        s.get("composite") is not None and s.get("composite") != s["accuracy"]
-        for s in ranked
+        s.get("composite") is not None and s.get("composite") != s["accuracy"] for s in ranked
     )
     if has_composite:
-        hdr = (f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}"
-               f"  {'Composite':>9s}  {'Delta':>7s}")
+        hdr = (
+            f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}"
+            f"  {'Composite':>9s}  {'Delta':>7s}"
+        )
     else:
-        hdr = (f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}"
-               f"  {'Delta':>7s}")
+        hdr = f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}  {'Delta':>7s}"
     lines.append(f"  {_box_line(hdr, width=w)}")
 
     for i, s in enumerate(ranked, 1):
@@ -193,11 +195,12 @@ def _scoreboard(
 
         if has_composite:
             comp = s.get("composite", acc)
-            row = (f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}"
-                   f"   {comp:>8.4f}   {delta_str:>7s}{winner_mark}")
+            row = (
+                f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}"
+                f"   {comp:>8.4f}   {delta_str:>7s}{winner_mark}"
+            )
         else:
-            row = (f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}"
-                   f"   {delta_str:>7s}{winner_mark}")
+            row = f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}   {delta_str:>7s}{winner_mark}"
 
         lines.append(f"  {_box_line(row, width=w)}")
 
@@ -370,11 +373,12 @@ def show_progress(campaign_rounds: list, window: int = 8) -> None:
     )
 
     if has_composite:
-        print(f"\n{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
-              f" {'Rolling Avg':>13s} {'Trend':>8s}")
+        print(
+            f"\n{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
+            f" {'Rolling Avg':>13s} {'Trend':>8s}"
+        )
     else:
-        print(f"\n{'Round':<7s} {'Accuracy':>9s}"
-              f" {'Rolling Avg':>13s} {'Trend':>8s}")
+        print(f"\n{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>8s}")
     accuracies = []
 
     for rd in campaign_rounds:
@@ -400,24 +404,18 @@ def show_progress(campaign_rounds: list, window: int = 8) -> None:
 
         if has_composite:
             comp = rd.get("composite", acc)
-            print(
-                f"  {round_label:<5s} {acc:>8.1%} {comp:>9.4f}"
-                f" {rolling_avg:>12.1%}  {trend_str}"
-            )
+            print(f"  {round_label:<5s} {acc:>8.1%} {comp:>9.4f} {rolling_avg:>12.1%}  {trend_str}")
         else:
-            print(
-                f"  {round_label:<5s} {acc:>8.1%}"
-                f" {rolling_avg:>12.1%}  {trend_str}"
-            )
+            print(f"  {round_label:<5s} {acc:>8.1%} {rolling_avg:>12.1%}  {trend_str}")
 
     # Plateau detection
     if len(accuracies) >= 3:
         recent = accuracies[-3:]
         recent_avg = sum(recent) / len(recent)
         if all(abs(a - recent_avg) < 0.005 for a in recent):
-            print(f"  {YELLOW}-- Plateau: rolling avg stable at"
-                  f" {recent_avg:.1%} for 3 rounds{RESET}")
-
+            print(
+                f"  {YELLOW}-- Plateau: rolling avg stable at {recent_avg:.1%} for 3 rounds{RESET}"
+            )
 
 
 def show_axis_profiles(profiles: list[dict]) -> None:
@@ -426,8 +424,7 @@ def show_axis_profiles(profiles: list[dict]) -> None:
         print("No axis profiles to display.")
         return
 
-    print(f"\n{'Rank':<5s} {'Axis':<25s} {'Type':<15s} "
-          f"{'Card':<5s} {'Range':<8s} {'Budget':<8s}")
+    print(f"\n{'Rank':<5s} {'Axis':<25s} {'Type':<15s} {'Card':<5s} {'Range':<8s} {'Budget':<8s}")
     print("-" * 70)
     for rank, p in enumerate(profiles, 1):
         print(
@@ -463,15 +460,17 @@ def show_scan_leaderboard(
         label = r["value_preview"]
         if r["delta"] == 0.0:
             label = f"{label} (baseline)"
-        rows.append({
-            "rank": i + 1,
-            "axis": r["axis"],
-            "variant": label,
-            "accuracy": f"{r['accuracy']:.1%}",
-            "delta": f"{r['delta']:+.1%}" if r["delta"] != 0.0 else "-",
-            "hits/total": f"{r['hits']}/{r['total']}",
-            "errors": int(r.get("errors", 0)),
-        })
+        rows.append(
+            {
+                "rank": i + 1,
+                "axis": r["axis"],
+                "variant": label,
+                "accuracy": f"{r['accuracy']:.1%}",
+                "delta": f"{r['delta']:+.1%}" if r["delta"] != 0.0 else "-",
+                "hits/total": f"{r['hits']}/{r['total']}",
+                "errors": int(r.get("errors", 0)),
+            }
+        )
 
     print("VARIANT LEADERBOARD (all scan combos)")
     print("=" * 70)
@@ -483,17 +482,19 @@ def show_scan_leaderboard(
     for axis_name, grp in scan_df.groupby("axis", sort=False):
         prof = profile_lookup.get(axis_name, {})
         accs = grp["accuracy"]
-        axis_rows.append({
-            "axis": axis_name,
-            "type": prof.get("axis_type", grp["axis_type"].iloc[0]),
-            "variants": len(grp),
-            "mean_acc": f"{accs.mean():.1%}",
-            "std_acc": f"{accs.std():.1%}" if len(grp) > 1 else "-",
-            "best_acc": f"{accs.max():.1%}",
-            "worst_acc": f"{accs.min():.1%}",
-            "sensitivity": f"{prof.get('sensitivity_range', accs.max() - accs.min()):.3f}",
-            "budget": prof.get("exploration_budget", "?"),
-        })
+        axis_rows.append(
+            {
+                "axis": axis_name,
+                "type": prof.get("axis_type", grp["axis_type"].iloc[0]),
+                "variants": len(grp),
+                "mean_acc": f"{accs.mean():.1%}",
+                "std_acc": f"{accs.std():.1%}" if len(grp) > 1 else "-",
+                "best_acc": f"{accs.max():.1%}",
+                "worst_acc": f"{accs.min():.1%}",
+                "sensitivity": f"{prof.get('sensitivity_range', accs.max() - accs.min()):.3f}",
+                "budget": prof.get("exploration_budget", "?"),
+            }
+        )
 
     print("\nPER-AXIS STATISTICS")
     print("=" * 70)
@@ -533,7 +534,9 @@ def show_scan_query_difficulty(
             if q not in query_stats:
                 query_stats[q] = {
                     "ground_truth": item.get("ground_truth", ""),
-                    "n_evals": 0, "n_hits": 0, "n_errors": 0,
+                    "n_evals": 0,
+                    "n_hits": 0,
+                    "n_errors": 0,
                 }
             qs = query_stats[q]
             qs["n_evals"] += 1
@@ -562,14 +565,16 @@ def show_scan_query_difficulty(
         else:
             classification = "discriminating"
 
-        rows.append({
-            "query": query[:60],
-            "ground_truth": qs["ground_truth"][:50],
-            "hit_rate": hit_rate,
-            "hits/evals": f"{qs['n_hits']}/{n}",
-            "error_rate": error_rate,
-            "classification": classification,
-        })
+        rows.append(
+            {
+                "query": query[:60],
+                "ground_truth": qs["ground_truth"][:50],
+                "hit_rate": hit_rate,
+                "hits/evals": f"{qs['n_hits']}/{n}",
+                "error_rate": error_rate,
+                "classification": classification,
+            }
+        )
 
     df = pd.DataFrame(rows).sort_values("hit_rate", ascending=True).reset_index(drop=True)
 
@@ -653,14 +658,16 @@ def show_campaign_summary(campaign_rounds: list) -> None:
 
     rows = []
     for rd in campaign_rounds:
-        rows.append({
-            "round": rd["round"],
-            "label": rd["label"][:40],
-            "hit@1": rd["hits"],
-            "total": rd["total"],
-            "accuracy": f"{rd['accuracy']:.1%}",
-            "prompt_id": rd["prompt_fields"].id[:12],
-        })
+        rows.append(
+            {
+                "round": rd["round"],
+                "label": rd["label"][:40],
+                "hit@1": rd["hits"],
+                "total": rd["total"],
+                "accuracy": f"{rd['accuracy']:.1%}",
+                "prompt_id": rd["prompt_fields"].id[:12],
+            }
+        )
 
     print(f"CAMPAIGN SUMMARY ({len(campaign_rounds)} rounds)")
     print(f"{'=' * 70}")
@@ -688,13 +695,15 @@ def show_flip_tracking(campaign_rounds: list) -> None:
         b_hit = br["hit"]
         f_hit = fr["hit"]
         if b_hit != f_hit:
-            flips.append({
-                "query": br["query"][:50],
-                "flip": "MISS->HIT" if f_hit else "HIT->MISS",
-                "base_pred": br["predicted"][:35],
-                "final_pred": fr["predicted"][:35],
-                "ground_truth": br["ground_truth"][:35],
-            })
+            flips.append(
+                {
+                    "query": br["query"][:50],
+                    "flip": "MISS->HIT" if f_hit else "HIT->MISS",
+                    "base_pred": br["predicted"][:35],
+                    "final_pred": fr["predicted"][:35],
+                    "ground_truth": br["ground_truth"][:35],
+                }
+            )
 
     gained = sum(1 for f in flips if f["flip"] == "MISS->HIT")
     lost = sum(1 for f in flips if f["flip"] == "HIT->MISS")
@@ -721,11 +730,7 @@ def show_lineage_chain(campaign_rounds: list) -> None:
         parent = ps.parent_id[:12] if ps.parent_id else "root"
         arrow = "  " if i == 0 else "  -> "
         print(
-            f"{arrow}[{ps.id[:12]}] Round {rd['round']}: "
-            f"{rd['label'][:40]} ({rd['accuracy']:.1%})"
+            f"{arrow}[{ps.id[:12]}] Round {rd['round']}: {rd['label'][:40]} ({rd['accuracy']:.1%})"
         )
         if ps.parent_id:
-            print(
-                f"       parent: {parent}  |  "
-                f"changes: {ps.changes_description or 'none'}"
-            )
+            print(f"       parent: {parent}  |  changes: {ps.changes_description or 'none'}")

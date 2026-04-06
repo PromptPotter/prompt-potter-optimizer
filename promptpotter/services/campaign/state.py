@@ -1,7 +1,7 @@
 """Campaign types — outcome models, callbacks, mutable loop state.
 
 PhaseEvent, StopReason, RoundResult, RunResult, RunCallbacks,
-EscalationCounters, LoopState, RunBackendSession, and the session
+EscalationCounters, LoopState, CycleContext, and the session
 artifact manifest.
 """
 
@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CAMPAIGN_SESSION_ARTIFACTS",
+    "CampaignPhase",
+    "CycleContext",
     "EscalationCounters",
     "LoopState",
     "OnCandidateEval",
@@ -38,7 +40,6 @@ __all__ = [
     "OnRoundComplete",
     "PhaseEvent",
     "RoundResult",
-    "RunBackendSession",
     "RunCallbacks",
     "RunResult",
     "StopReason",
@@ -46,6 +47,23 @@ __all__ = [
     "emit_phase",
     "get_obs_trace",
 ]
+
+# ---------------------------------------------------------------------------
+# Campaign phase names (replaces magic strings)
+# ---------------------------------------------------------------------------
+
+
+class CampaignPhase(enum.StrEnum):
+    """Feedback cycle phase names used in PhaseEvent and persistence."""
+
+    INIT = "init"
+    L1_GENERATE = "l1_generate"
+    L1_EVALUATE = "l1_evaluate"
+    REFINE_CONTEXT = "refine_context"
+    MODIFY_PLAN = "modify_plan"
+    ESCALATION = "escalation"
+    BACKEND_WARNING = "backend_warning"
+
 
 # ---------------------------------------------------------------------------
 # Artifact manifest
@@ -226,7 +244,7 @@ class LoopState:
 
 
 @dataclass
-class RunBackendSession:
+class CycleContext:
     """Return type for ``_init_cycle_state()`` — replaces a 7-tuple."""
 
     state: LoopState

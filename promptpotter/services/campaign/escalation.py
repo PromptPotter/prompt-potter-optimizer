@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.services.campaign.critique import extract_warning_types
-from promptpotter.services.campaign.state import PhaseEvent, emit_phase
+from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.services.metrics import count_degraded_queries
 from promptpotter.shared.errors import EscalationError
 
@@ -193,7 +193,7 @@ def _maybe_emit_backend_warning(
 
     emit_phase(
         on_phase,
-        "backend_warning",
+        CampaignPhase.BACKEND_WARNING,
         "notify",
         round=round_num,
         message=(
@@ -272,7 +272,7 @@ async def _do_l2_transition(
 
     emit_phase(
         on_phase,
-        "refine_context",
+        CampaignPhase.REFINE_CONTEXT,
         "enter",
         round=round_num,
         l2_round=state.escalation.l2_round,
@@ -308,7 +308,7 @@ async def _do_l2_transition(
 
     emit_phase(
         on_phase,
-        "refine_context",
+        CampaignPhase.REFINE_CONTEXT,
         "exit",
         round=round_num,
         l2_round=state.escalation.l2_round,
@@ -363,7 +363,7 @@ async def _do_l3_transition(
     ]
     emit_phase(
         on_phase,
-        "modify_plan",
+        CampaignPhase.MODIFY_PLAN,
         "enter",
         round=round_num,
         l3_round=state.escalation.l3_round,
@@ -394,7 +394,7 @@ async def _do_l3_transition(
     state.escalation.best_composite_at_l2_entry = state.best_composite
     emit_phase(
         on_phase,
-        "modify_plan",
+        CampaignPhase.MODIFY_PLAN,
         "exit",
         round=round_num,
         l3_round=state.escalation.l3_round,

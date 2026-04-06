@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.state import PhaseEvent
-from promptpotter.services.campaign.init import (
+from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent
+from promptpotter.services.campaign.bootstrap import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
 from promptpotter.services.campaign.persistence import (
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.state import RunCallbacks
-    from promptpotter.services.campaign.init import BackendSession
+    from promptpotter.services.campaign.bootstrap import BackendContext
     from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.scan_results import ScanContext
 
@@ -371,7 +371,7 @@ async def run_optimization_notebook(
     langfuse_session_id: str | None = None,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
-    session: BackendSession | None = None,
+    session: BackendContext | None = None,
     task_context: dict | None = None,
     session_id: str = "",
     display_callbacks: RunCallbacks | None = None,
@@ -434,10 +434,10 @@ async def run_optimization_notebook(
     def _on_phase(event: PhaseEvent) -> None:
         _dispatch_phase(event, _ds)
         # Reset query counter on escalation exit (on_round is skipped)
-        if event.phase == "escalation" and event.event == "exit":
+        if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             _query_counter[0] = 0
         # On resume: clear stale optimization rounds before replay re-appends them
-        if event.phase == "init" and event.event == "exit":
+        if event.phase == CampaignPhase.INIT and event.event == "exit":
             resumed = event.data.get("resumed_from_round", 0)
             if resumed > 0:
                 del campaign_rounds[initial_len:]
@@ -782,10 +782,10 @@ def fmt_pvalue(p: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-from promptpotter.services.campaign.init import (  # noqa: E402
+from promptpotter.services.campaign.bootstrap import (  # noqa: E402
     load_baseline_prompt,
 )
-from promptpotter.services.campaign.init import (  # noqa: E402
+from promptpotter.services.campaign.bootstrap import (  # noqa: E402
     run_baseline_eval as _run_baseline_eval,
 )
 
@@ -794,7 +794,7 @@ async def run_baseline_eval(
     baseline: OptSearchPoint,
     dataset: list,
     campaign_config: CampaignConfig,
-    session: BackendSession,
+    session: BackendContext,
     pipeline_params: dict | None = None,
 ) -> tuple:
     """Evaluate baseline prompt and initialize campaign_rounds.

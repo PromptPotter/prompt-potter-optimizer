@@ -87,21 +87,19 @@ def extract_pipeline_nodes(
     node_params = pipeline_data.get("pipeline_params") or {}
 
     for node in schema.nodes:
-        output = {
-            k: pipeline_data[k]
-            for k in node.output_keys
-            if pipeline_data.get(k) is not None
-        }
+        output = {k: pipeline_data[k] for k in node.output_keys if pipeline_data.get(k) is not None}
         if not output:
             continue
-        nodes.append(LangfuseObservation(
-            name=node.name,
-            as_type=node.langfuse_type,
-            input={"query": query},
-            output=output,
-            metadata=_node_meta(timings, node_params, node.name, schema),
-            model=llm_provider or None if node.is_llm else None,
-        ))
+        nodes.append(
+            LangfuseObservation(
+                name=node.name,
+                as_type=node.langfuse_type,
+                input={"query": query},
+                output=output,
+                metadata=_node_meta(timings, node_params, node.name, schema),
+                model=llm_provider or None if node.is_llm else None,
+            )
+        )
 
     return nodes
 
@@ -121,6 +119,7 @@ ORIGIN_ORDER = [
     "smart_search_winner",
     "other",
 ]
+
 
 def classify_run_origin(source: str = "") -> str:
     """Classify a dataset run's origin from its ``source`` field.
@@ -144,7 +143,7 @@ def _fresh_state() -> dict[str, Any]:
     return {
         "backfilled_run_ids": [],
         "last_backfill_at": None,
-        "langfuse_trace_ids": {},   # {run_id: [trace_id, ...]}
+        "langfuse_trace_ids": {},  # {run_id: [trace_id, ...]}
         "dataset_items": {},
     }
 
@@ -154,7 +153,9 @@ def _save_state(store: ProjectStore, backend_id: str, state: dict[str, Any]) -> 
 
 
 def _collect_ground_truth(
-    store: ProjectStore, backend_id: str, summaries: list[dict],
+    store: ProjectStore,
+    backend_id: str,
+    summaries: list[dict],
 ) -> dict[str, str]:
     """Extract unique (query -> ground_truth) pairs from all dataset_runs."""
     gt_map: dict[str, str] = {}
@@ -339,8 +340,13 @@ def push_run(
             nodes = extract_pipeline_nodes(pipeline, query, schema=schema)
             for node in nodes:
                 lf.create_span(
-                    trace_id, node.name, node.input, node.output, node.metadata,
-                    as_type=node.as_type, model=node.model,
+                    trace_id,
+                    node.name,
+                    node.input,
+                    node.output,
+                    node.metadata,
+                    as_type=node.as_type,
+                    model=node.model,
                     usage_details=node.usage_details,
                 )
 
@@ -472,7 +478,9 @@ def push_all_runs(
     _emit("Collecting ground truth from dataset runs...")
     gt_map = _collect_ground_truth(store, backend_id, summaries)
     try:
-        query_to_item_id = _register_dataset_items(lf, gt_map, state, on_progress, dataset_name=dataset_name)
+        query_to_item_id = _register_dataset_items(
+            lf, gt_map, state, on_progress, dataset_name=dataset_name
+        )
     except RuntimeError as exc:
         _emit(f"  SKIP: {exc}")
         return {"skipped": True, "reason": str(exc)}
@@ -509,7 +517,10 @@ def push_all_runs(
             rid = run_summary["run_id"]
 
             trace_ids = push_run(
-                lf, store, backend_id, rid,
+                lf,
+                store,
+                backend_id,
+                rid,
                 query_to_item_id=query_to_item_id,
                 session_id=session_id,
                 _state=state,

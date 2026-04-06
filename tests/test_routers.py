@@ -126,10 +126,13 @@ def test_list_campaigns_empty(api_client, tmp_store):
     assert resp.json()["total"] == 0
 
 
-@pytest.mark.parametrize("path", [
-    "/api/v1/backends/test-backend/campaigns/nonexistent",
-    "/api/v1/backends/test-backend/campaigns/nonexistent/trials/0",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/backends/test-backend/campaigns/nonexistent",
+        "/api/v1/backends/test-backend/campaigns/nonexistent/trials/0",
+    ],
+)
 def test_campaign_404(api_client, path):
     resp = api_client.get(path)
     assert resp.status_code == 404

@@ -1,4 +1,5 @@
 """Tests for OptSearchPoint model."""
+
 from promptpotter.models.opt_search_point import FewShotExample, OptSearchPoint
 
 

@@ -18,9 +18,10 @@ from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import sample_thinking_styles
 from promptpotter.services.campaign.lifecycle import init_campaign
 from promptpotter.services.campaign.state import (
+    CampaignPhase,
+    CycleContext,
     LoopState,
     PhaseEvent,
-    RunBackendSession,
     emit_phase,
 )
 from promptpotter.services.dataset_builder import subsample_dataset
@@ -231,11 +232,11 @@ async def init_cycle_state(
     experiment_id: str,
     backend_client: BackendClient | None,
     started_at: str,
-) -> RunBackendSession:
+) -> CycleContext:
     """Initialize all cycle state: baseline, resume, obs, eval context."""
     emit_phase(
         on_phase,
-        "init",
+        CampaignPhase.INIT,
         "enter",
         max_rounds=config.max_rounds,
         patience=config.l1_patience,
@@ -326,7 +327,7 @@ async def init_cycle_state(
 
     emit_phase(
         on_phase,
-        "init",
+        CampaignPhase.INIT,
         "exit",
         cycle_id=cycle_id,
         resumed_from_round=resumed_from_round,
@@ -359,17 +360,12 @@ async def init_cycle_state(
         )
         persistence_emitter = CampaignPersistenceEmitter(
             _session_dir,
+            config,
             session_store=_session_store,
-            backend_id=config.backend_id,
-            session_id=config.session_id,
-            max_rounds=config.max_rounds or 999,
-            l1_patience=config.l1_patience,
-            active_nodes=list(config.active_steps),
-            config={},  # raw campaign config not available here; emitter uses defaults
             resume_from=resume_from,
         )
 
-    return RunBackendSession(
+    return CycleContext(
         state=state,
         campaign_store=campaign_store,
         cycle_id=cycle_id,

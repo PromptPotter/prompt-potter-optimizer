@@ -26,6 +26,7 @@ Two-layer tracing:
 ADR-8: Mutable (not frozen). Updated in-place during the feedback cycle,
 serialized via ``model_dump()`` at checkpoint time.
 """
+
 from __future__ import annotations
 
 import copy
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 # Supporting models
 # ---------------------------------------------------------------------------
 
+
 class FewShotExample(BaseModel):
     """An input/output pair used as a few-shot demonstration."""
 
@@ -58,6 +60,7 @@ class FewShotExample(BaseModel):
 # ---------------------------------------------------------------------------
 # PromptTemplate — the 8-field prompt scheme
 # ---------------------------------------------------------------------------
+
 
 class PromptTemplate(SearchPoint):
     """The 8-field prompt decomposition scheme.
@@ -159,6 +162,7 @@ class PromptTemplate(SearchPoint):
 # OptSearchPoint
 # ---------------------------------------------------------------------------
 
+
 class OptSearchPoint(PromptTemplate):
     """Optimizer-level search point — the optimizer's full working state.
 
@@ -173,9 +177,7 @@ class OptSearchPoint(PromptTemplate):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     parent_id: str | None = None
     changes_description: str = ""
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     # -- L2 state ----------------------------------------------------------
     optimizer_params: dict[str, Any] = Field(default_factory=dict)
