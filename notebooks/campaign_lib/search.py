@@ -35,7 +35,7 @@ from promptpotter.services.search import (
     select_scan_winner as _select_scan_winner,
 )
 from promptpotter.services.search.scan_advisor import (
-    _resolve_schema_axes,
+    resolve_schema_axes,
     advisory_to_scan_variants,
 )
 from promptpotter.services.search.scan_baseline import (
@@ -258,7 +258,7 @@ def resolve_scan_variants(
     """Resolve schema mutation tuples and display the resolved variants.
 
     Convenience wrapper for notebook use — resolves schema axes via
-    ``_resolve_schema_axes`` and prints a summary.
+    ``resolve_schema_axes`` and prints a summary.
 
     Accepts nested format: ``{"thinking_style": [...], "web_search": {"max_sites": [...]}}``
 
@@ -282,7 +282,7 @@ def resolve_scan_variants(
                 if isinstance(vals, list):
                     flat_for_resolve[param] = vals
 
-    resolved, schema_labels = _resolve_schema_axes(flat_for_resolve, pipeline_schema)
+    resolved, schema_labels = resolve_schema_axes(flat_for_resolve, pipeline_schema)
 
     # Display: group by prompt fields vs node params
     for key, spec in scan_variants.items():

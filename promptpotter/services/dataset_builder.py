@@ -4,11 +4,29 @@ Loads BOM-example.xlsx sheets, extracts query/ground_truth pairs,
 and splits into train + per-domain test sets.
 """
 
+from __future__ import annotations
+
+import hashlib
 import logging
 import random
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from promptpotter.shared.hashing import HASH_TRUNCATE
+
+if TYPE_CHECKING:
+    from promptpotter.models.search_point import JobSearchPoint
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "SHEET_COLUMN_MAP",
+    "build_dataset_run_data",
+    "load_excel_ground_truth",
+    "subsample_dataset",
+    "train_test_split",
+]
 
 # Column mapping per Excel sheet type.
 # Keys = sheet names, values = {"query": <col>, "gt": <col>}.
@@ -145,3 +163,43 @@ def subsample_dataset(
     if sample_size > 0 and len(dataset) > sample_size:
         return random.Random(seed).sample(dataset, sample_size)
     return dataset
+
+
+def build_dataset_run_data(
+    run_id: str,
+    name: str,
+    content_hash: str,
+    search_point: JobSearchPoint,
+    scores: dict,
+    results: list,
+    *,
+    source: str = "",
+    experiment_id: str = "",
+    prompt_node_names: list[str] | None = None,
+) -> dict:
+    """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
+    rendered_prompt = search_point.render()
+    sp_h = search_point.sp_hash(prompt_node_names)
+    data: dict = {
+        "run_id": run_id,
+        "name": name,
+        "content_hash": content_hash,
+        "prompt_fields_id": sp_h,
+        "rendered_prompt_hash": hashlib.sha256(
+            rendered_prompt.encode(),
+        ).hexdigest()[:HASH_TRUNCATE],
+        "item_count": scores["total"],
+        "scores": scores,
+        "source": source,
+        "created_at": datetime.now(UTC).isoformat(),
+        "dataset_run_items": [
+            {k: v for k, v in r.items() if k != "precomputed_through"}
+            for r in results
+        ],
+    }
+    data["sp_hash"] = sp_h
+    if search_point.pipeline_params:
+        data["pipeline_params"] = search_point.pipeline_params
+    if experiment_id:
+        data["experiment_id"] = experiment_id
+    return data

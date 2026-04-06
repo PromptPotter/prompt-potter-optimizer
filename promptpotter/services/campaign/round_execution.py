@@ -16,9 +16,8 @@ from promptpotter.models.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from promptpotter.services import llm_client as _llm_client
-from promptpotter.services.campaign._campaign_utils import (
+from promptpotter.services.campaign.callbacks import (
     RunCallbacks,
-    candidate_summaries,
     emit_phase,
 )
 from promptpotter.services.campaign.config import RunConfig
@@ -29,6 +28,7 @@ from promptpotter.services.campaign.critique import (
     sample_thinking_styles,
     update_query_tracker,
 )
+from promptpotter.services.campaign.formatting import candidate_summaries
 from promptpotter.services.campaign.state import LoopState, RoundResult
 from promptpotter.services.tracing.node_tracer import observed_node
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS

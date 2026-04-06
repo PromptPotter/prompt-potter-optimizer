@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.phase_event import PhaseEvent
-from promptpotter.services.campaign._campaign_utils import emit_phase
+from promptpotter.services.campaign.callbacks import emit_phase
 from promptpotter.services.campaign.critique import extract_warning_types
 from promptpotter.services.metrics import count_degraded_queries
 from promptpotter.shared.errors import EscalationError

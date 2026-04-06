@@ -33,6 +33,8 @@ from promptpotter.services.stores.dataset_run_store import DatasetRunStore
 from promptpotter.services.stores.intermediate_cache import IntermediateCache
 from promptpotter.services.stores.stores import BackendStore, PlanStore, SessionStore
 
+__all__ = ["ProjectStore"]
+
 BASE_DIR = Path(".promptpotter") / "projects"
 
 

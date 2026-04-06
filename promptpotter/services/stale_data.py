@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["execute_stale_data_protocol", "is_degraded"]
+
 
 # ---------------------------------------------------------------------------
 # Helpers

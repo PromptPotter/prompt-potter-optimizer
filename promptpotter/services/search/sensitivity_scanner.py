@@ -15,13 +15,14 @@ from typing import TYPE_CHECKING
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.search_point import JobSearchPoint
-from promptpotter.services.eval_gateway import _most_common_error_category, eval_search_point
+from promptpotter.services.eval_gateway import eval_search_point
 from promptpotter.services.search.cohort_analysis import preview as _preview
 from promptpotter.services.search.smart_search import (
     ScanEvent,
     _profiles_from_rows,
 )
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
+from promptpotter.shared.errors import most_common_error_category
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -173,7 +174,7 @@ async def sensitivity_scan(
     # Circuit breaker: abort if baseline eval is all-errors
     baseline_errors = baseline_scores.get("errors", 0)
     if baseline_errors == baseline_scores["total"] > 0:
-        dominant = _most_common_error_category(baseline_results)
+        dominant = most_common_error_category(baseline_results)
         if dominant == "CLIENT":
             reason = (
                 f"Baseline eval failed: all {baseline_scores['total']} queries "
@@ -349,7 +350,7 @@ async def sensitivity_scan(
             if not cached and variant_errors == scores["total"] > 0:
                 _consecutive_all_error += 1
                 if _consecutive_all_error >= 2:
-                    dominant = _most_common_error_category(results)
+                    dominant = most_common_error_category(results)
                     if dominant == "CLIENT":
                         detail = "Client errors (HTTP 4xx). Check pipeline configuration."
                     elif dominant == "CONNECTION":

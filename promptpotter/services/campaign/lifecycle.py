@@ -2,7 +2,7 @@
 
 Configuration identity hashing, observability initialization,
 campaign resume/create logic, and campaign finalization.
-Shared helpers (graceful, emit_phase, etc.) live in ``_campaign_utils.py``.
+Shared helpers (graceful, emit_phase, etc.) live in ``callbacks.py``.
 """
 
 import hashlib

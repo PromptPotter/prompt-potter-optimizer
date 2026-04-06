@@ -901,3 +901,34 @@ class ObsLogger:
     def get_cloud_trace_id(self, campaign_id: str) -> str | None:
         """Return cloud Langfuse trace ID for a campaign, or None."""
         return self._cloud_trace_ids.get(campaign_id)
+
+
+# ---------------------------------------------------------------------------
+# Module-level helper (used by eval_gateway)
+# ---------------------------------------------------------------------------
+
+
+def log_eval_to_obs(
+    store_base_dir: Path,
+    backend_id: str,
+    run_id: str,
+    content_hash: str,
+    scores: dict,
+    prompt_fields_id: str,
+    obs: ObsLogger | None,
+) -> None:
+    """Log eval run to local obs store.
+
+    Creates a temporary ObsLogger if ``obs`` is None.
+    Langfuse push is handled separately via push_all_runs().
+    """
+    with graceful("ObsLogger.log_dataset_run failed"):
+        _obs = obs or ObsLogger(store_base_dir, backend_id)
+        _obs.log_dataset_run(
+            run_id=run_id,
+            content_hash=content_hash,
+            accuracy=scores["accuracy"],
+            total=scores["total"],
+            hits=scores["hits"],
+            prompt_fields_id=prompt_fields_id,
+        )

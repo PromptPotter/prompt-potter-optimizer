@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["BackendClient", "extract_pipeline_config"]
+
 
 def extract_pipeline_config(exp_data: dict) -> dict:
     """Extract pipeline config (steps + params) from synced experiment data."""

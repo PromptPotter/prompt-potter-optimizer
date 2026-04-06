@@ -26,6 +26,8 @@ _evaluator = ExactMatchEvaluator({"strip": True})
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["eval_query_via_backend"]
+
 
 def _parse_backend_response(
     backend_data: dict,

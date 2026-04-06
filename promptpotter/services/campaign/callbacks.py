@@ -1,9 +1,6 @@
-"""Small utilities and callback types shared across the campaign package.
+"""Callback types and event helpers shared across the campaign package.
 
-Consolidates:
-- RunCallbacks, chain_callbacks, callback type aliases (formerly callbacks.py)
-- emit_phase, get_obs_trace, candidate_summaries
-
+RunCallbacks, chain_callbacks, callback type aliases, and emit_phase.
 Used by optimization_loop, round_execution, escalation, and lifecycle.
 """
 
@@ -26,7 +23,6 @@ __all__ = [
     "OnQueryEval",
     "OnRoundComplete",
     "RunCallbacks",
-    "candidate_summaries",
     "chain_callbacks",
     "emit_phase",
     "get_obs_trace",
@@ -122,16 +118,3 @@ def get_obs_trace(
     return obs, trace_id
 
 
-def candidate_summaries(candidates: list[dict]) -> list[dict]:
-    """Build compact per-candidate summary dicts for phase event data."""
-    summaries = []
-    for i, c in enumerate(candidates):
-        pp_override = c.get("__pipeline_params_override__")
-        summary: dict = {
-            "idx": i,
-            "changes_description": c.get("changes_description", ""),
-        }
-        if pp_override:
-            summary["pipeline_params_override"] = pp_override
-        summaries.append(summary)
-    return summaries

@@ -15,7 +15,7 @@ from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.phase_event import PhaseEvent
 from promptpotter.services.backend_client import BackendClient
-from promptpotter.services.campaign._campaign_utils import emit_phase
+from promptpotter.services.campaign.callbacks import emit_phase
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import sample_thinking_styles
 from promptpotter.services.campaign.lifecycle import init_campaign

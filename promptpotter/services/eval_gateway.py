@@ -9,14 +9,12 @@ and observability logging.  Single-query evaluation lives in
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
-from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from promptpotter.services.dataset_builder import build_dataset_run_data
 from promptpotter.services.eval_query import (
     _error_result,
     eval_query_via_backend,
@@ -26,18 +24,17 @@ from promptpotter.services.stale_data import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
 from promptpotter.services.stale_data import is_degraded as _is_degraded
-from promptpotter.shared.errors import ErrorCategory, is_error_result
-from promptpotter.shared.hashing import HASH_TRUNCATE
+from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 from promptpotter.shared.signals import graceful_interrupt
 
 if TYPE_CHECKING:
     from promptpotter.models.eval_context import EvalContext
     from promptpotter.models.search_point import JobSearchPoint
     from promptpotter.services.backend_client import BackendClient
-    from promptpotter.services.project_store import ProjectStore
-    from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["EvalBatchResult", "eval_search_point"]
 
 
 # ---------------------------------------------------------------------------
@@ -66,67 +63,6 @@ class EvalBatchResult:
 # Utilities
 # ---------------------------------------------------------------------------
 
-
-def _error_category(error: str | None) -> ErrorCategory | None:
-    """Extract error category from a ``[TAG] ...`` prefixed error string."""
-    if error and error.startswith("["):
-        bracket_end = error.find("]")
-        if bracket_end > 0:
-            tag = error[1:bracket_end]
-            try:
-                return ErrorCategory(tag)
-            except ValueError:
-                return None
-    return None
-
-
-def _most_common_error_category(results: list) -> ErrorCategory | None:
-    """Return the most common error category across errored results."""
-    cats = [_error_category(r.get("error")) for r in results if is_error_result(r)]
-    cats = [c for c in cats if c]
-    if not cats:
-        return None
-    return Counter(cats).most_common(1)[0][0]
-
-
-def build_dataset_run_data(
-    run_id: str,
-    name: str,
-    content_hash: str,
-    search_point: JobSearchPoint,
-    scores: dict,
-    results: list,
-    *,
-    source: str = "",
-    experiment_id: str = "",
-    prompt_node_names: list[str] | None = None,
-) -> dict:
-    """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
-    rendered_prompt = search_point.render()
-    sp_h = search_point.sp_hash(prompt_node_names)
-    data: dict = {
-        "run_id": run_id,
-        "name": name,
-        "content_hash": content_hash,
-        "prompt_fields_id": sp_h,
-        "rendered_prompt_hash": hashlib.sha256(
-            rendered_prompt.encode(),
-        ).hexdigest()[:HASH_TRUNCATE],
-        "item_count": scores["total"],
-        "scores": scores,
-        "source": source,
-        "created_at": datetime.now(UTC).isoformat(),
-        "dataset_run_items": [
-            {k: v for k, v in r.items() if k != "precomputed_through"}
-            for r in results
-        ],
-    }
-    data["sp_hash"] = sp_h
-    if search_point.pipeline_params:
-        data["pipeline_params"] = search_point.pipeline_params
-    if experiment_id:
-        data["experiment_id"] = experiment_id
-    return data
 
 
 def _fill_remaining_errors(
@@ -168,7 +104,7 @@ def _check_error_abort(
         return consecutive_errors, None
     if not is_error_result(result):
         return 0, None
-    cat = _error_category(result.get("error"))
+    cat = error_category(result.get("error"))
     if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
         return consecutive_errors, f"skipped_after_{cat or 'pipeline'}_error"
     consecutive_errors += 1
@@ -342,38 +278,6 @@ async def _run_eval_batch(
 # ---------------------------------------------------------------------------
 
 
-def _log_eval_to_obs(
-    store: ProjectStore,
-    backend_id: str,
-    run_id: str,
-    content_hash: str,
-    scores: dict,
-    prompt_fields_id: str,
-    obs: ObsLogger | None,
-) -> None:
-    """Log eval run to local obs store.
-
-    Langfuse push is handled separately via push_all_runs() to ensure
-    dataset-item linking is always present.
-    """
-    from promptpotter.shared.errors import graceful
-
-    with graceful("ObsLogger.log_dataset_run failed"):
-        _obs = obs
-        if _obs is None:
-            from promptpotter.services.tracing.observability_logger import ObsLogger
-
-            _obs = ObsLogger(store.base_dir, backend_id)
-        _obs.log_dataset_run(
-            run_id=run_id,
-            content_hash=content_hash,
-            accuracy=scores["accuracy"],
-            total=scores["total"],
-            hits=scores["hits"],
-            prompt_fields_id=prompt_fields_id,
-        )
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -470,8 +374,10 @@ async def eval_search_point(
     # --- finalize: save complete run + observability ---
     _save_run(results, scores)
     if store and backend_id:
-        _log_eval_to_obs(
-            store,
+        from promptpotter.services.tracing.observability_logger import log_eval_to_obs
+
+        log_eval_to_obs(
+            store.base_dir,
             backend_id,
             run_id,
             content_hash,

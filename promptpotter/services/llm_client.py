@@ -28,6 +28,14 @@ from promptpotter.shared.llm_parsing import try_parse_json
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "AnthropicClient",
+    "LLMClientBase",
+    "LLMResponse",
+    "OpenAICompatibleClient",
+    "get_llm_client",
+]
+
 
 # ---------------------------------------------------------------------------
 # Response model

@@ -197,7 +197,7 @@ def resolve_scan_variants(
     session: BackendSession,
 ) -> None:
     """Resolve schema mutation tuples and log the result."""
-    from promptpotter.services.search.scan_advisor import _resolve_schema_axes
+    from promptpotter.services.search.scan_advisor import resolve_schema_axes
     from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
     pipeline_schema = session.pipeline_schema
@@ -211,7 +211,7 @@ def resolve_scan_variants(
                 if isinstance(vals, list):
                     flat_for_resolve[param] = vals
 
-    _resolved, _schema_labels = _resolve_schema_axes(flat_for_resolve, pipeline_schema)
+    _resolved, _schema_labels = resolve_schema_axes(flat_for_resolve, pipeline_schema)
 
     # Log summary
     prompt_axes = [k for k in scan_variants if k in PROMPT_STRING_FIELDS]
@@ -395,7 +395,7 @@ async def run_optimization(
     Returns (campaign_rounds, RunResult | None).
     """
     from promptpotter.models.opt_search_point import OptSearchPoint
-    from promptpotter.services.campaign._campaign_utils import RunCallbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.campaign.config import RunConfig
     from promptpotter.services.campaign.init import extract_campaign_baseline
     from promptpotter.services.campaign.optimization_loop import (

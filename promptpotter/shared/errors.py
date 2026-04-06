@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+from collections import Counter
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -69,4 +70,25 @@ def graceful(msg: str, *, level: int = logging.WARNING):
     except Exception:
         logger.log(level, msg, exc_info=True)
 
+
+def error_category(error: str | None) -> ErrorCategory | None:
+    """Extract error category from a ``[TAG] ...`` prefixed error string."""
+    if error and error.startswith("["):
+        bracket_end = error.find("]")
+        if bracket_end > 0:
+            tag = error[1:bracket_end]
+            try:
+                return ErrorCategory(tag)
+            except ValueError:
+                return None
+    return None
+
+
+def most_common_error_category(results: list) -> ErrorCategory | None:
+    """Return the most common error category across errored results."""
+    cats = [error_category(r.get("error")) for r in results if is_error_result(r)]
+    cats = [c for c in cats if c]
+    if not cats:
+        return None
+    return Counter(cats).most_common(1)[0][0]
 

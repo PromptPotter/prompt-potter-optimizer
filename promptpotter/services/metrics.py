@@ -25,6 +25,20 @@ if TYPE_CHECKING:
     )
 
 
+__all__ = [
+    "attribute_bottleneck",
+    "compile_failure_analysis",
+    "compile_query_difficulty",
+    "compile_temporal_trends",
+    "compute_accuracy",
+    "compute_composite_score",
+    "compute_pipeline_metrics",
+    "count_degraded_queries",
+    "extract_sample_diagnostics",
+    "find_rank",
+]
+
+
 def find_rank(candidates: list, ground_truth: str) -> int | None:
     """Find 1-based rank of ground_truth in a candidates list.
 

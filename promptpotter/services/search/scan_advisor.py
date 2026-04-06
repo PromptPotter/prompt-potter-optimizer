@@ -480,7 +480,7 @@ def _resolve_excluded_nodes(
     return _excluded_from_schema(schema, pipeline_params)
 
 
-def _resolve_schema_axes(
+def resolve_schema_axes(
     raw_variants: dict,
     pipeline_schema: PipelineSchema | None,
 ) -> tuple[dict, dict[str, list[str]]]:
@@ -561,7 +561,7 @@ def advisory_to_scan_variants(
         if ax.get("node"):
             node_map[ax["axis"]] = ax["node"]
 
-    resolved, schema_labels = _resolve_schema_axes(raw, pipeline_schema)
+    resolved, schema_labels = resolve_schema_axes(raw, pipeline_schema)
 
     # Group resolved axes under node names (nested format)
     nested: dict[str, dict] = {}

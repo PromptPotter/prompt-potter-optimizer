@@ -52,7 +52,7 @@ from .phase_display import (
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign._campaign_utils import RunCallbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.init import BackendSession
     from promptpotter.services.project_store import ProjectStore
@@ -660,7 +660,7 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from promptpotter.services.campaign._campaign_utils import RunCallbacks, chain_callbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks, chain_callbacks
 
     notebook_display_cb = RunCallbacks(
         on_round_complete=_on_round,

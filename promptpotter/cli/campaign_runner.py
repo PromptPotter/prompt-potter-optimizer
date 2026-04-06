@@ -336,7 +336,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     session.store.sessions.save(bid, sid, state)
 
     # Bidirectional control — CLI provides FileControlSurface as on_checkpoint
-    from promptpotter.services.campaign._campaign_utils import RunCallbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.campaign.persistence_emitter import FileControlSurface
 
     session_dir = session.store.sessions._session_dir(bid, sid)

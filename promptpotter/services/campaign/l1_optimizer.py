@@ -29,7 +29,7 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.eval_context import EvalContext
-    from promptpotter.services.campaign._campaign_utils import RunCallbacks
+    from promptpotter.services.campaign.callbacks import RunCallbacks
     from promptpotter.services.search.scan_results import ScanContext
 
 logger = logging.getLogger(__name__)

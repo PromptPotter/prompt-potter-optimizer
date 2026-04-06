@@ -20,6 +20,7 @@ __all__ = [
     "L2IntelligenceData",
     "build_l1_search_memory_context",
     "build_l2_search_memory_context",
+    "candidate_summaries",
     "format_context_sections",
     "format_l2_intelligence",
 ]
@@ -304,3 +305,18 @@ def build_l2_search_memory_context(search_memory: Any) -> dict | None:
         )
 
     return ctx if ctx else None
+
+
+def candidate_summaries(candidates: list[dict]) -> list[dict]:
+    """Build compact per-candidate summary dicts for phase event data."""
+    summaries = []
+    for i, c in enumerate(candidates):
+        pp_override = c.get("__pipeline_params_override__")
+        summary: dict = {
+            "idx": i,
+            "changes_description": c.get("changes_description", ""),
+        }
+        if pp_override:
+            summary["pipeline_params_override"] = pp_override
+        summaries.append(summary)
+    return summaries
