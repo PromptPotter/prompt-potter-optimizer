@@ -4,6 +4,8 @@ Configuration identity hashing, observability initialization,
 campaign resume/create logic, and campaign finalization.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
@@ -242,7 +244,7 @@ def finalize_campaign(
     campaign_store,
     cycle_id: str | None,
     config: RunConfig,
-    state: "LoopState",
+    state: LoopState,
     stop_reason: str,
     finished_at: str,
     obs,

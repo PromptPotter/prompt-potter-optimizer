@@ -211,7 +211,7 @@ def configure_pipeline(session: BackendContext, campaign_config: CampaignConfig)
 
 async def init_services(
     backend_url: str = "http://127.0.0.1:8000",
-    backend_id: str = "local",
+    backend_id: str = "",
     experiment_id: str = "1_production_historical",
     dataset_name: str | None = None,
 ) -> BackendContext:
@@ -224,7 +224,8 @@ async def init_services(
 
     setup_logging()
 
-    project_root = Path(__file__).resolve().parent.parent.parent
+    # campaign/setup.py → display → promptpotter → repo_root
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
 
     session = await _init_services(
         backend_url=backend_url,

@@ -17,6 +17,7 @@ from promptpotter.config.optimizer_pipeline import llm_call
 from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.pipeline_schema import PipelineSchema
+from promptpotter.models.query_result import QueryResult
 from promptpotter.services.campaign.formatting import (
     ContextData,
     format_context_sections,
@@ -29,7 +30,6 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.eval_context import EvalContext
-    from promptpotter.models.query_result import QueryResult
     from promptpotter.services.campaign.state import RunCallbacks
     from promptpotter.services.search.scan_results import ScanContext
 

@@ -28,10 +28,9 @@ pytest tests/ -k "test_name"           # single test by name
 uvicorn promptpotter.main:app --port 8001 --reload
 
 # CLI campaign runner (HITL optimization from terminal)
-python -m promptpotter.cli.campaign_runner init --backend-url http://127.0.0.1:8000
+python -m promptpotter.cli.campaign_runner init --backend-url http://127.0.0.1:8000 --backend-id local
 python -m promptpotter.cli.campaign_runner optimize --auto     # full loop
 python -m promptpotter.cli.campaign_runner optimize --round    # generate → pause for review
-python -m promptpotter.cli.campaign_runner optimize --evaluate # resume evaluation
 
 # Export results
 python -m promptpotter.cli.export_results supplemental --backend-id local -o supplemental.md
@@ -65,6 +64,14 @@ Three entry points (notebook, CLI, web API), one service core in `promptpotter/s
 - **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
 **Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data archived to `dataset_runs/` store. SearchMemory (M8) aggregates historical data into a materialized view that feeds both loops.
+
+### Connector Profile
+
+Per-backend defaults live in `.promptpotter/projects/{backend_id}/connector_profile.json`. This is the CLI's equivalent of the notebook's `campaign_config` — it carries `exclude_nodes`, `pipeline_overrides`, and any other campaign config keys. The CLI loads it at init time and merges with `--config` file overrides.
+
+The notebook hardcodes these values in `campaign_config` directly. Both entry points must stay in sync — the connector profile should mirror the notebook's config.
+
+**`--backend-id` is required** (no default). All entry points must pass it explicitly.
 
 ### SearchPoint Hierarchy
 

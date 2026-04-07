@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.config.settings import (
-    DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
@@ -97,7 +96,7 @@ def load_baseline_prompt(
 
 async def init_services(
     backend_url: str = DEFAULT_BACKEND_URL,
-    backend_id: str = DEFAULT_BACKEND_ID,
+    backend_id: str = "",
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     project_root: Path | None = None,
     dataset_name: str | None = None,
@@ -110,8 +109,8 @@ async def init_services(
             on_status(msg)
 
     if project_root is None:
-        # Default: assume called from notebooks/ subdirectory
-        project_root = Path(__file__).resolve().parent.parent
+        # campaign/bootstrap.py → services → promptpotter → repo_root
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
 
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
     client = BackendClient(backend_url)
