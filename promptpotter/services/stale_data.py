@@ -8,15 +8,14 @@ from the ``l1_evaluate`` optimizer node config.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.services.eval_query import eval_query_via_backend
 from promptpotter.services.metrics import find_rank
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.models.query_result import QueryResult
     from promptpotter.services.backend_client import BackendClient
     from promptpotter.services.search.search_memory import SearchMemory
     from promptpotter.services.stores.intermediate_cache import IntermediateCache
@@ -26,12 +25,12 @@ logger = logging.getLogger(__name__)
 __all__ = ["execute_stale_data_protocol", "is_degraded"]
 
 
-def is_degraded(result: QueryResult) -> bool:
+def is_degraded(result: Mapping[str, Any]) -> bool:
     """Check if a result has pipeline degradation warnings."""
     return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
 
 
-def find_gt_rank(result: QueryResult) -> int | None:
+def find_gt_rank(result: Mapping[str, Any]) -> int | None:
     """Find ground truth rank in final_ranking. Returns 1-indexed or None."""
     gt = result.get("ground_truth", "")
     if not gt:
@@ -40,7 +39,7 @@ def find_gt_rank(result: QueryResult) -> int | None:
     return find_rank(pd.get("final_ranking", []), gt)
 
 
-def compare_rerun(cached_result: QueryResult, rerun_result: QueryResult) -> dict:
+def compare_rerun(cached_result: Mapping[str, Any], rerun_result: Mapping[str, Any]) -> dict:
     """Compare rerun to cached result. Returns improvement summary."""
     cached_hit = cached_result.get("hit", False)
     rerun_hit = rerun_result.get("hit", False)
@@ -64,7 +63,7 @@ def compare_rerun(cached_result: QueryResult, rerun_result: QueryResult) -> dict
 async def execute_stale_data_protocol(
     protocol_steps: list[str],
     query_data: dict,
-    cached_result: QueryResult,
+    cached_result: dict[str, Any],
     backend_client: BackendClient,
     *,
     pipeline_params: dict | None = None,
@@ -75,7 +74,7 @@ async def execute_stale_data_protocol(
     stale_data_observations: dict[str, int | dict] | None = None,
     stop_check: Callable[[], bool] | None = None,
     scorer: Callable[[dict], float] | None = None,
-) -> tuple[QueryResult, str]:
+) -> tuple[dict[str, Any], str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
     Hyperparameters are read from the ``l1_evaluate`` node config in
@@ -88,7 +87,9 @@ async def execute_stale_data_protocol(
     """
     from promptpotter.config.optimizer_pipeline import get_optimizer_schema
 
-    cfg = get_optimizer_schema().get_node("l1_evaluate").current_config
+    node = get_optimizer_schema().get_node("l1_evaluate")
+    assert node is not None, "l1_evaluate node missing from optimizer schema"
+    cfg = node.current_config
     query = query_data["query"]
     result = cached_result
 
@@ -115,14 +116,16 @@ async def execute_stale_data_protocol(
                     "rerun_prior_outcome": last_rerun,
                 }, "below_threshold"
 
-            result = await eval_query_via_backend(
-                query_data,
-                backend_client,
-                pipeline_params=pipeline_params,
-                pipeline_schema=pipeline_schema,
-                intermediate_cache=intermediate_cache,
-                backend_id=backend_id,
-                scorer=scorer,
+            result = dict(
+                await eval_query_via_backend(
+                    query_data,
+                    backend_client,
+                    pipeline_params=pipeline_params,
+                    pipeline_schema=pipeline_schema,
+                    intermediate_cache=intermediate_cache,
+                    backend_id=backend_id,
+                    scorer=scorer,
+                )
             )
             comparison = compare_rerun(cached_result, result)
             result["retry_of_degraded"] = True
@@ -141,14 +144,16 @@ async def execute_stale_data_protocol(
             n_candidates = cfg.get("samplescan_candidates", 3)
             resolved_threshold = cfg.get("samplescan_threshold", 0.5)
 
-            result = await eval_query_via_backend(
-                query_data,
-                backend_client,
-                pipeline_params=None,
-                pipeline_schema=pipeline_schema,
-                intermediate_cache=None,
-                backend_id=backend_id,
-                scorer=scorer,
+            result = dict(
+                await eval_query_via_backend(
+                    query_data,
+                    backend_client,
+                    pipeline_params=None,
+                    pipeline_schema=pipeline_schema,
+                    intermediate_cache=None,
+                    backend_id=backend_id,
+                    scorer=scorer,
+                )
             )
             result["samplescan_probe"] = True
             result["samplescan_config"] = {

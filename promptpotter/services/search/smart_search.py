@@ -11,9 +11,9 @@ import json
 import logging
 import random
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
@@ -61,6 +61,7 @@ class ScanEvent(TypedDict, total=False):
         "variant_done",
         "axis_done",
         "axis_resolved",
+        "axis_pruned",
         "round_start",
         "round_done",
         "scan_aborted",
@@ -96,6 +97,9 @@ class ScanEvent(TypedDict, total=False):
     current_accuracy: float
     active_axes: list[str]
     improved: bool
+    # axis_pruned
+    variants_tested: int
+    remaining_skipped: int
     # axis_done profile fields
     sensitivity_range: float
     best_delta: float
@@ -315,9 +319,9 @@ def _stratify_misses(
     pattern_buckets: dict[tuple[str, ...], list[dict]] = defaultdict(list)
     for item in miss_pool:
         q = item["query"]
-        r = result_by_query.get(q)
-        if r:
-            diag = extract_sample_diagnostics(r, pipeline_schema)
+        matched = result_by_query.get(q)
+        if matched:
+            diag = extract_sample_diagnostics(matched, pipeline_schema)
             key = tuple(
                 f"{k}={diag[k]}"
                 for k in ("gt_in_source", "gt_in_ranked", "terminated_at")
@@ -459,7 +463,7 @@ SSPLAN_PREFIX = "ssplan_"
 def smart_search_plan_identity(
     baseline_instruction: str,
     variant_library: dict,
-    smart_search_config: dict,
+    smart_search_config: Mapping[str, Any],
     seed: int = 42,
 ) -> str:
     """Compute a stable identity hash for a smart search plan."""

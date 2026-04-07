@@ -35,7 +35,7 @@ __all__ = [
 
 async def sensitivity_scan(
     baseline,
-    scan_variants: dict[str, list],
+    scan_variants: dict[str, list | dict],
     dataset: list,
     session: BackendContext,
     *,
@@ -268,7 +268,7 @@ async def adaptive_search(
             variant_library,
             dataset,
             session,
-            axis_profiles,
+            axis_profiles or [],
             max_rounds=max_rounds,
             stop_threshold=stop_threshold,
             pipeline_params=pipeline_params,
@@ -374,7 +374,7 @@ def _make_search_progress_cb():
 async def run_sensitivity_scan(
     baseline,
     campaign_config: CampaignConfig,
-    scan_variants: dict[str, list],
+    scan_variants: dict[str, list | dict],
     dataset: list,
     *,
     scan_sample_size: int = 0,
@@ -398,6 +398,7 @@ async def run_sensitivity_scan(
         session=session,
         scan_variants=scan_variants,
     )
+    assert session is not None
     scan_df, axis_profiles = await sensitivity_scan(
         scan_baseline_sp,
         scan_variants,

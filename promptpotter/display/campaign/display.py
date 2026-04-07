@@ -13,6 +13,15 @@ def fmt_ci(lower: float, upper: float) -> str:
     return f"[{lower:.1%}-{upper:.1%}]"
 
 
+def fmt_pvalue(p: float) -> str:
+    """Format a p-value with significance marker."""
+    if p < 0.01:
+        return f"p={p:.3f} **"
+    if p < 0.05:
+        return f"p={p:.3f} *"
+    return f"p={p:.3f}"
+
+
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 

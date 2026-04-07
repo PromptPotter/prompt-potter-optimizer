@@ -651,6 +651,7 @@ async def run_optimization_notebook(
         else notebook_display_cb
     )
 
+    assert session is not None, "session (BackendContext) required for optimization"
     result = await _orch_run_optimization(
         campaign_rounds,
         dataset,
@@ -675,6 +676,8 @@ async def run_optimization_notebook(
         return campaign_rounds, result
 
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
+    if result is None:
+        return campaign_rounds, result
     interrupted = result.stop_reason == "interrupted"
     title = (
         f"{YELLOW}{BOLD}INTERRUPTED{RESET} — stopped by user"

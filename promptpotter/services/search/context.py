@@ -387,7 +387,7 @@ def load_eval_dataset(
                 backend_id,
                 ex_summary["execution_id"],
             )
-            if execution:
+            if execution and schema is not None:
                 req_key = schema.required_pipeline_key()
                 dataset = [
                     r.model_dump()

@@ -11,8 +11,9 @@ import json
 import logging
 import random
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.optimizer_pipeline import llm_call
 from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
@@ -74,7 +75,7 @@ class CritiqueContext:
     search_memory_context: dict | None = None
 
 
-def get_candidates(r: dict, candidate_keys: list[str] | None = None) -> list:
+def get_candidates(r: Mapping[str, Any], candidate_keys: list[str] | None = None) -> list:
     """Extract candidates from a result dict, checking keys in order."""
     pd = r.get("pipeline_data") or {}
     for key in candidate_keys or []:
@@ -84,7 +85,7 @@ def get_candidates(r: dict, candidate_keys: list[str] | None = None) -> list:
     return []
 
 
-def extract_warning_types(result: QueryResult) -> list[str]:
+def extract_warning_types(result: Mapping[str, Any]) -> list[str]:
     """Extract warning type strings from a single eval result."""
     pd = result.get("pipeline_data") or {}
     diag = pd.get("diagnostics") or {}

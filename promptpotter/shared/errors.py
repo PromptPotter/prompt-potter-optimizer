@@ -9,8 +9,9 @@ import asyncio
 import enum
 import logging
 from collections import Counter
+from collections.abc import Mapping
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.escalation import EscalationSignal
@@ -28,7 +29,7 @@ class ErrorCategory(enum.StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
-def is_error_result(result: dict) -> bool:
+def is_error_result(result: Mapping[str, Any]) -> bool:
     """Return True if *result* represents a failed evaluation.
 
     Catches all error forms:
@@ -46,7 +47,7 @@ class EscalationError(Exception):
     collected before the escalation triggered.
     """
 
-    def __init__(self, signal: EscalationSignal, partial_results: list[dict]):
+    def __init__(self, signal: EscalationSignal, partial_results: list):
         self.signal = signal
         self.partial_results = partial_results
         super().__init__(f"EscalationCheck '{signal.check_name}' triggered")

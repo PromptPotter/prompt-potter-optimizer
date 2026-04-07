@@ -74,6 +74,7 @@ async def decompose_scan_baseline(
     alias_hashes: set[str] | None = None
     original_hash = ""
     if can_cache:
+        assert store is not None
         original_hash = hashlib.sha256(
             baseline.render().encode(),
         ).hexdigest()[:16]
@@ -86,7 +87,7 @@ async def decompose_scan_baseline(
         baseline.instruction,
         llm_client,
         model=llm_model,
-        store_base_dir=store.base_dir if can_cache else None,
+        store_base_dir=store.base_dir if store and can_cache else None,
         backend_id=backend_id,
         alias_hashes=alias_hashes,
         rp_hash=original_hash if can_cache else "",
@@ -113,6 +114,7 @@ async def decompose_scan_baseline(
     scan_diag = None
     prompt_index = None
     if can_cache:
+        assert store is not None
         from promptpotter.services.search.coverage import (
             build_prompt_result_index,
             diagnose_scan_variants,
@@ -563,11 +565,11 @@ def seed_campaign_from_scan(
 
     merged_pp = None
     if best_sp.pipeline_params:
-        existing_pp = campaign_config.get("pipeline_params", {})
+        existing_pp: dict = campaign_config.get("pipeline_params") or {}
         merged = {**existing_pp, **best_sp.pipeline_params}
         if "steps" in existing_pp:
             merged["steps"] = existing_pp["steps"]
-            excluded = set(campaign_config.get("exclude_nodes", []))
+            excluded = set(campaign_config.get("exclude_nodes") or [])
             for node_name in excluded:
                 merged.pop(node_name, None)
         campaign_config["pipeline_params"] = merged

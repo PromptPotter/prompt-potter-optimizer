@@ -375,7 +375,7 @@ def _resolve_provider() -> str:
 def _make_mock_client() -> LLMClientBase:
     """Lazy-load MockLLMClient (lives in tests package)."""
     try:
-        from tests.mock_llm_client import MockLLMClient
+        from tests.mock_llm_client import MockLLMClient  # type: ignore[import-not-found]
     except ImportError as err:
         raise ValueError(
             "No LLM API keys configured and test mock unavailable. "

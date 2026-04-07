@@ -258,7 +258,7 @@ def show_experiment_dashboard(
         backend_id = backend_id or session.backend_id
 
     # Apply experiment overrides when resuming
-    if experiment_id and session is not None:
+    if experiment_id and session is not None and campaign_config is not None:
         pipeline_params = load_and_apply_experiment(
             session,
             campaign_config,
@@ -269,6 +269,7 @@ def show_experiment_dashboard(
     # --- Resolve short ID ---
     full_id = None
     if experiment_id is not None:
+        assert store is not None
         full_id = _resolve_experiment_id(store, backend_id, experiment_id)
         if full_id is None:
             return pipeline_params or {}
@@ -287,6 +288,7 @@ def show_experiment_dashboard(
 
     # --- Detail mode ---
     if full_id is not None:
+        assert store is not None
         campaign = store.campaigns.load(backend_id, full_id)
         if campaign is None:
             print(f"Campaign {full_id} not found.")
@@ -348,6 +350,7 @@ def show_experiment_dashboard(
         return pipeline_params or {}
 
     # --- Overview mode ---
+    assert store is not None
     # Dataset runs summary
     from promptpotter.services.campaign.campaign_data import summarize_dataset_runs
 

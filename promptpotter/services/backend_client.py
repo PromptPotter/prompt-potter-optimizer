@@ -70,9 +70,10 @@ class BackendClient:
 
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         """GET ``{base_url}{path}`` and return parsed JSON."""
+        kwargs: dict[str, Any] = {"params": params} if params else {}
         resp = await self._get_http().get(
             f"{self.base_url}{path}",
-            **({"params": params} if params else {}),
+            **kwargs,
         )
         resp.raise_for_status()
         return resp.json()

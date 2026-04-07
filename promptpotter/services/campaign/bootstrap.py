@@ -11,7 +11,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
@@ -224,7 +224,6 @@ async def init_services(
     return base
 
 
-
 def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
     """Convert DatasetStore items to the query format used by replay/eval."""
     queries = []
@@ -280,7 +279,7 @@ def apply_experiment_overrides(
     for key, path in _OVERRIDE_KEYS.items():
         val = stored_cfg.get(key)
         if val is not None:
-            target = campaign_config
+            target: dict[str, Any] = cast(dict[str, Any], campaign_config)
             for p in path:
                 target = target.setdefault(p, {})
             target[key] = val

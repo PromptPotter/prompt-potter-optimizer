@@ -6,7 +6,8 @@ Pure computation — no I/O, no eval infrastructure dependencies.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.errors import is_error_result
 
@@ -83,7 +84,7 @@ def count_failures(results: list[QueryResult]) -> int:
     return sum(1 for r in results if not r.get("hit"))
 
 
-def count_degraded_queries(results: list[QueryResult]) -> int:
+def count_degraded_queries(results: Sequence[Mapping[str, Any]]) -> int:
     """Count queries that have pipeline degradation warnings."""
     return sum(
         1 for r in results if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
@@ -118,7 +119,7 @@ def _compute_recall(
     found = 0
     for r in scoped:
         pd = r.get("pipeline_data") or {}
-        candidates = pd.get(candidate_key, [])
+        candidates: list[Any] = pd.get(candidate_key, [])  # type: ignore[assignment]
         gt = r.get("ground_truth", "")
         if any(_extract_candidate_label(c) == gt for c in candidates):
             found += 1
@@ -155,7 +156,7 @@ def _compute_type_metric(
 
 
 def extract_sample_diagnostics(
-    result: QueryResult,
+    result: Mapping[str, Any],
     pipeline_schema: PipelineSchema,
 ) -> dict[str, float | bool | int | str | None]:
     """Extract per-query diagnostic signals from a single evaluation result.
@@ -202,7 +203,7 @@ def extract_sample_diagnostics(
 
 def _extract_node_diagnostics(
     node: PipelineNode,
-    pipeline_data: dict,
+    pipeline_data: Mapping[str, Any],
     ground_truth: str,
 ) -> dict[str, float | bool | int | str | None]:
     """Extract per-query diagnostics for a single node, dispatched on node_type."""
@@ -229,7 +230,7 @@ def _gt_position(candidates: list, ground_truth: str) -> int | None:
 
 def _diag_candidate_source(
     node: PipelineNode,
-    pd: dict,
+    pd: Mapping[str, Any],
     gt: str,
 ) -> dict[str, float | bool | int | str | None]:
     from promptpotter.models.pipeline_schema import NODE_TYPE_METRICS
@@ -247,7 +248,7 @@ def _diag_candidate_source(
 
 def _diag_ranker(
     node: PipelineNode,
-    pd: dict,
+    pd: Mapping[str, Any],
     gt: str,
 ) -> dict[str, float | bool | int | str | None]:
     from promptpotter.models.pipeline_schema import NODE_TYPE_METRICS
@@ -263,7 +264,7 @@ def _diag_ranker(
         scores = []
         for c in candidates[:2]:
             if isinstance(c, dict):
-                scores.append(float(c.get("score", c.get("similarity", 0.0))))
+                scores.append(float(c.get("score") or c.get("similarity") or 0.0))
             elif isinstance(c, (list, tuple)) and len(c) >= 2:
                 scores.append(float(c[1]))
         if len(scores) == 2:
@@ -279,7 +280,7 @@ def _diag_ranker(
 
 def _diag_enricher(
     node: PipelineNode,
-    pd: dict,
+    pd: Mapping[str, Any],
 ) -> dict[str, float | bool | int | str | None]:
     # Count enriched fields from observation mappings if available
     n = 0
@@ -291,7 +292,7 @@ def _diag_enricher(
 
 def _diag_cache(
     node: PipelineNode,
-    pd: dict,
+    pd: Mapping[str, Any],
 ) -> dict[str, float | bool | int | str | None]:
     timings = pd.get("step_timings") or {}
     return {"cache_hit": timings.get(node.name) is not None}
@@ -431,7 +432,7 @@ def compile_failure_analysis(
         return FailureAnalysis(total_failures=0, total_results=len(results))
 
     # Group by diagnostic key
-    groups: dict[tuple[str, ...], list[dict]] = defaultdict(list)
+    groups: dict[tuple[str, ...], list[QueryResult]] = defaultdict(list)
     diag_cache: dict[tuple[str, ...], dict] = {}
     for r in failures:
         diag = extract_sample_diagnostics(r, pipeline_schema)
@@ -464,7 +465,7 @@ def compile_failure_analysis(
 
 
 def compile_query_difficulty(
-    historical_results: list[list[QueryResult]],
+    historical_results: Sequence[Sequence[Mapping[str, Any]]],
 ) -> QueryDifficulty:
     """Classify queries by hit rate across multiple evaluation rounds.
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.config import RunConfig
+from promptpotter.services.campaign.config import CampaignConfig, RunConfig
 from promptpotter.shared.constants import DATASET_NAME
 from promptpotter.shared.errors import graceful
 
@@ -62,7 +62,7 @@ def cycle_config_identity(
 
 
 def resolve_active_campaign_id(
-    campaign_config: dict,
+    campaign_config: CampaignConfig,
     pipeline_schema: PipelineSchema | None,
     baseline_prompt_fields: dict | None,
     dataset: list[dict],

@@ -8,6 +8,7 @@ Unified visual system with three weight levels:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -711,7 +712,7 @@ def _print_backend_warning(d: dict, state: _CycleDisplayState) -> None:
 # Phase dispatch
 # ---------------------------------------------------------------------------
 
-_PHASE_HANDLERS: dict[str, callable] = {
+_PHASE_HANDLERS: dict[str, Callable] = {
     "init:enter": _print_init_enter,
     "init:exit": _print_init_exit,
     "l1_generate:enter": _print_l1_generate_enter,

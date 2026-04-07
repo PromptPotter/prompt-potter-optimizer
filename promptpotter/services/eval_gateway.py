@@ -13,8 +13,9 @@ import logging
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.models.query_result import QueryResult
 from promptpotter.services.dataset_builder import build_dataset_run_data
 from promptpotter.services.eval_query import (
     _error_result,
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
     from promptpotter.models.eval_context import EvalContext
     from promptpotter.models.search_point import JobSearchPoint
     from promptpotter.services.backend_client import BackendClient
+    from promptpotter.services.campaign.escalation import EscalationSignal
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +87,8 @@ class EvalBatchResult:
 
 
 def _fill_remaining_errors(
-    results: list[dict],
-    dataset: list[dict],
+    results: list[QueryResult],
+    dataset: list[dict[str, Any]],
     start_idx: int,
     reason: str,
 ) -> None:
@@ -102,7 +104,7 @@ def _fill_remaining_errors(
 
 
 def _check_error_abort(
-    result: dict,
+    result: QueryResult,
     was_cached: bool,
     consecutive_errors: int,
     max_consecutive_errors: int,
@@ -152,10 +154,10 @@ def _log_batch_summary(
 
 def _run_escalation_checks(
     checks: list | None,
-    results: list[dict],
+    results: list[QueryResult],
     candidate_idx: int,
     n_total_candidates: int,
-) -> object | None:
+) -> EscalationSignal | None:
     """Run escalation checks and return the first triggered signal, or None."""
     if not checks:
         return None
@@ -173,7 +175,7 @@ async def _run_eval_batch(
     dataset: list,
     backend_client: BackendClient,
     *,
-    on_result: Callable[[dict, int, int], None] | None = None,
+    on_result: Callable[[QueryResult, int, int], None] | None = None,
     ctx: EvalContext | None = None,
 ) -> EvalBatchResult:
     """Evaluate a prompt on all dataset queries via the backend.
@@ -208,7 +210,7 @@ async def _run_eval_batch(
     if ctx and ctx.store:
         _intermediate_cache = ctx.store.intermediate_cache
 
-    results: list = []
+    results: list[QueryResult] = []
     consecutive_errors = 0
     n_reused = n_retried = n_probed = n_switched = 0
 
@@ -232,10 +234,10 @@ async def _run_eval_batch(
 
                 # Stale data protocol on degraded results
                 if _is_degraded(result) and _stale_protocol:
-                    result, step_taken = await _execute_stale_data_protocol(
+                    stale_result, step_taken = await _execute_stale_data_protocol(
                         _stale_protocol,
                         qd,
-                        result,
+                        cast(dict[str, Any], result),
                         backend_client,
                         pipeline_params=search_point.pipeline_params,
                         pipeline_schema=pipeline_schema,
@@ -252,6 +254,7 @@ async def _run_eval_batch(
                         n_probed += 1
                     elif step_taken == "sampleswitch":
                         n_switched += 1
+                    result = cast(QueryResult, stale_result)
 
                 if was_cached:
                     n_reused += 1
@@ -300,15 +303,23 @@ async def _run_eval_batch(
             )
 
     _log_batch_summary(n_reused, len(dataset), n_retried, n_probed, n_switched)
-    stale = {
-        "retried_degraded": n_retried,
-        "probed_degraded": n_probed,
-        "switched_samples": n_switched,
-    }
 
     if interrupt.stop_requested:
-        return EvalBatchResult(results, completed=False, stop_reason="graceful", **stale)
-    return EvalBatchResult(results, completed=True, **stale)
+        return EvalBatchResult(
+            results,
+            completed=False,
+            stop_reason="graceful",
+            retried_degraded=n_retried,
+            probed_degraded=n_probed,
+            switched_samples=n_switched,
+        )
+    return EvalBatchResult(
+        results,
+        completed=True,
+        retried_degraded=n_retried,
+        probed_degraded=n_probed,
+        switched_samples=n_switched,
+    )
 
 
 async def eval_search_point(
@@ -317,7 +328,7 @@ async def eval_search_point(
     ctx: EvalContext,
     *,
     label: str = "Eval",
-    on_result: Callable[[dict, int, int], None] | None = None,
+    on_result: Callable[[QueryResult, int, int], None] | None = None,
     source: str = "",
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt via backend with per-node caching and finalization.
@@ -384,6 +395,7 @@ async def eval_search_point(
         if not batch.completed:
             # Graceful or force stop — save partial results then re-raise
             if results:
+                assert pipeline_schema is not None, "pipeline_schema required for scoring"
                 _save_run(results, compute_composite_score(results, pipeline_schema), partial=True)
                 logger.info(
                     "Saved partial run (%d/%d queries) for SP %s",
@@ -395,6 +407,7 @@ async def eval_search_point(
     except _EscalationError as e:
         results = e.partial_results
         escalation_signal = e.signal
+    assert pipeline_schema is not None, "pipeline_schema required for scoring"
     scores = compute_composite_score(results, pipeline_schema)
     if escalation_signal:
         scores["escalation_signal"] = escalation_signal.to_dict()

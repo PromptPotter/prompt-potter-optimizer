@@ -131,7 +131,7 @@ def _build_local_result(
     }
     if scorer:
         result["score"] = scorer(result)
-    return result
+    return result  # type: ignore[return-value]
 
 
 def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
@@ -253,7 +253,7 @@ async def eval_query_via_backend(
             result["precomputed_through"] = list(precomputed.keys())
         if scorer:
             result["score"] = scorer(result)
-        return result
+        return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)
         logger.warning("eval_query_via_backend for %s: %s", query[:60], error_msg)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -64,7 +64,7 @@ class L1EvalResult(BaseModel):
 async def l1_generate(
     opt_sp: OptSearchPoint,
     current_accuracy: float,
-    current_results: list[QueryResult],
+    current_results: list[dict],
     n_variants: int,
     creativity: float,
     llm_client: LLMClientBase,
@@ -260,9 +260,13 @@ def _select_round_winner(
     current_acc = current_best["accuracy"]
     current_composite = current_best.get("composite", current_acc)
 
+    assert pipeline_schema is not None, "_select_round_winner requires pipeline_schema"
+
     # Score each candidate once, reuse for selection and display
     candidate_scores = {
-        c.id: compute_composite_score(all_candidate_results[c.id], pipeline_schema)
+        c.id: compute_composite_score(
+            cast(list[QueryResult], all_candidate_results[c.id]), pipeline_schema
+        )
         for c in candidates
     }
 
@@ -349,20 +353,21 @@ async def l1_evaluate(
         _cpp = candidate_pp[idx]
         if _cpp:
             # Deep merge: preserve existing node dicts while applying overrides
-            pp: dict | None = copy.deepcopy(_sp_pipeline_params or {})
+            merged: dict = copy.deepcopy(_sp_pipeline_params or {})
             for k, v in _cpp.items():
-                if isinstance(v, dict) and isinstance(pp.get(k), dict):
-                    pp[k] = {**pp[k], **v}
+                if isinstance(v, dict) and isinstance(merged.get(k), dict):
+                    merged[k] = {**merged[k], **v}
                 else:
-                    pp[k] = v
+                    merged[k] = v
             # Safety net: drop overrides for nodes not in active steps
             _schema = ctx.pipeline_schema
             if _schema:
                 _active = set(_schema.active_steps)
-                for k in list(pp):
-                    if k != "steps" and isinstance(pp[k], dict) and k not in _active:
+                for k in list(merged):
+                    if k != "steps" and isinstance(merged[k], dict) and k not in _active:
                         logger.warning("Dropping LLM override for excluded node %r", k)
-                        del pp[k]
+                        del merged[k]
+            pp: dict | None = merged
         else:
             pp = _sp_pipeline_params
         sp = osp_c.to_job_search_point(

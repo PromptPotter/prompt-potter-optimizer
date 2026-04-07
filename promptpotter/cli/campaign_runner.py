@@ -26,7 +26,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.bootstrap import BackendContext
@@ -35,8 +35,8 @@ if TYPE_CHECKING:
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
@@ -153,7 +153,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
         p_nodes = [n.name for n in ps.nodes]
         logger.info("Pipeline: %s %s (%d nodes: %s)", ps.name, ps.version, len(p_nodes), p_nodes)
 
-    pipeline_params = _configure_pipeline(session, campaign_config)
+    pipeline_params = _configure_pipeline(session, cast("CampaignConfig", campaign_config))
 
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     excluded = campaign_config.get("exclude_nodes", [])
@@ -194,7 +194,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
     baseline, dataset, campaign_rounds, _br = await _prepare_eval_context(
         session,
         train_data,
-        campaign_config,
+        cast("CampaignConfig", campaign_config),
         run_baseline=args.run_baseline,
         pipeline_params=pipeline_params,
     )
@@ -366,6 +366,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
     scan_data = session.store.sessions.load_scan_results(ctx.backend_id, ctx.session_id)
     if not scan_data:
         _die("No scan results. Run 'scan' first.")
+        return  # unreachable, but tells mypy scan_data is not None below
 
     import pandas as pd
 
@@ -388,7 +389,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
     _seed_result = _seed_campaign_from_scan(
         scan_df,
         axis_profiles,
-        scan_baseline_sp,
+        scan_baseline_sp.to_job_search_point(),
         ctx.state.get("scan_variants", {}),
         campaign_rounds,
         ctx.state["campaign_config"],
@@ -610,7 +611,7 @@ async def cmd_results(args: argparse.Namespace) -> None:
     ctx = _load_session(args)
     session = await _init_services(**ctx.state["init_params"])
 
-    campaigns = session.store.campaigns.list_campaigns(ctx.backend_id)
+    campaigns = session.store.campaigns.list_all(ctx.backend_id)
     if not campaigns:
         if getattr(args, "json_output", False):
             print(json.dumps({"error": "no_campaigns"}, indent=2))

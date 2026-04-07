@@ -78,6 +78,7 @@ def _build_baseline_state(
     logger.debug("Using provided baseline (acc=%.3f)", baseline_accuracy)
 
     if current_results:
+        assert config.pipeline_schema is not None, "pipeline_schema required for composite score"
         _bl_composite = compute_composite_score(
             current_results,
             config.pipeline_schema,

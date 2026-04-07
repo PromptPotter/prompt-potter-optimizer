@@ -241,7 +241,7 @@ async def _evaluate_candidates(
             crit_llm = _llm_client.get_llm_client()
             agent = CritiqueAgent(crit_llm, model=config.model)
             # Build critique-specific SearchMemory context
-            _crit_sm_ctx = None
+            _crit_sm_ctx: dict[str, str] | None = None
             _sm = state.search_memory
             if _sm:
                 _crit_sm_ctx = {}

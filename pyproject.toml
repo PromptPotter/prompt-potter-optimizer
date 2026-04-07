@@ -87,8 +87,13 @@ module = [
     "openpyxl.*",
     "pandas.*",
     "requests.*",
+    "scipy.*",
+    "tqdm.*",
+    "IPython.*",
+    "tests.*",
 ]
 ignore_missing_imports = true
+follow_untyped_imports = false
 
 [tool.ruff]
 target-version = "py313"
