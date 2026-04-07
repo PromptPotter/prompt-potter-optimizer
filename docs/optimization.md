@@ -42,7 +42,7 @@
 │         (OR warning_inventory when no report), task_context,           │
 │         pipeline schema param keys                                     │
 │    out: updated task_context + meta-settings (creativity,              │
-│         n_variants, sample_size)                                       │
+│         n_variants, eval_sample_size)                                       │
 │    L2 does NOT set pipeline_params — that's L1's job.                  │
 │                                                                        │
 │  L3 MODIFY PLAN (LLM) — if L2 stalls                                  │
@@ -56,7 +56,7 @@
 |-------|---------|-----------------|
 | **L1 Generate** | pipeline_params (query_prefix, max_sites, schema, temperature, ...) | `task_context`, meta-settings |
 | **Critique** | what to focus on (suggested_axes, priority_fix) | pipeline_params values |
-| **L2 Refine** | `task_context`, meta-settings (creativity, n_variants, sample_size), `l2_directive` | pipeline_params |
+| **L2 Refine** | `task_context`, meta-settings (creativity, n_variants, eval_sample_size), `l2_directive` | pipeline_params |
 | **L3 Plan** | strategic plan | pipeline_params, `task_context` |
 
 ---
@@ -74,7 +74,7 @@ Tunable parameters discovered from the target pipeline's active nodes. Changed e
 | Prompt fields | LLM nodes (`llm_ranking`, `entity_profiling`) | `prompt`, `persona`, `task_intent`, `instruction`, `thinking_style`, `answer_format` |
 | Model params | Any LLM node | `temperature`, `model`, `max_tokens` |
 | Output schema | LLM nodes with structured output | `output_schema` field overrides |
-| Pipeline params | Non-LLM nodes (`fuzzy_matching`, `token_matching`) | thresholds, weights, `sample_size` |
+| Pipeline params | Non-LLM nodes (`fuzzy_matching`, `token_matching`) | thresholds, weights, `eval_sample_size` |
 
 Which parameters are Layer 1 depends on the target pipeline config — not a fixed list. Prompt fields only affect nodes with a prompt template referencing them (see CLAUDE.md Known Backend Issues for TermNorm-specific constraints). The scan advisor reads the full pipeline snapshot to recommend which axes to optimize.
 
@@ -84,7 +84,7 @@ Adjusted when Layer 1 improvements stall:
 
 | Field | Purpose |
 |-------|---------|
-| `optimizer_params` | Meta-settings (creativity, n_variants, sample_size, variant_strategy) |
+| `optimizer_params` | Meta-settings (creativity, n_variants, eval_sample_size, variant_strategy) |
 | `task_context` | Structured domain context (domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges, raw_description). Decomposed from `TASK_DESCRIPTION` at init. L2 can refine individual fields. |
 
 ### Layer 3: Modify Plan
@@ -301,13 +301,13 @@ Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestam
 
 ```python
 campaign_config = {
-    "sample_size": 35,                 # queries per eval (0 = all)
+    "eval_eval_sample_size": 35,             # queries per eval (0 = all)
     "exclude_nodes": ["llm_ranking"],  # target pipeline nodes to skip
     "optimization": {
         "n_variants": 5,
         "creativity": 0.7,
         "improvement_threshold": 0.01,
-        "patience": 3,
+        "l1_patience": 3,
         "max_rounds": 10,
         "enable_critique": True,               # critique-guided generation
         "degradation_threshold": 0.4,          # 0 = disabled
@@ -315,7 +315,7 @@ campaign_config = {
         "l2_patience": 2,             # None = unlimited during degradation
         "enable_l3": True,             # modify plan on L2 stall
         "l3_patience": 1,             # None = unlimited during degradation
-        "escalation_checks": [         # pluggable mid-eval checks
+        "degradation_checks": [         # pluggable mid-eval checks
             {"name": "degradation", "threshold": 0.3, "target": "l3"},
         ],
         "stale_data_load_protocol": ["rerun", "samplescan", "sampleswitch"],  # 3-step ladder for cached degraded queries

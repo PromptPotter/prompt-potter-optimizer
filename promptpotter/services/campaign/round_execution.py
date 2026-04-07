@@ -187,12 +187,12 @@ async def _evaluate_candidates(
     candidates: list[dict],
     round_num: int,
     state: LoopState,
-    round_dataset: list[dict],
+    eval_dataset: list[dict],
     config: RunConfig,
     callbacks: RunCallbacks,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
-    escalation_checks: list[DegradationCheck] | None = None,
+    degradation_checks: list[DegradationCheck] | None = None,
 ) -> L1EvalResult:
     """Evaluate candidates and run critique analysis."""
     from promptpotter.services.campaign.l1_optimizer import l1_evaluate
@@ -203,19 +203,19 @@ async def _evaluate_candidates(
         "enter",
         round=round_num,
         n_candidates=len(candidates),
-        n_queries=len(round_dataset),
+        n_queries=len(eval_dataset),
         current_best_accuracy=state.current_accuracy,
         improvement_threshold=config.improvement_threshold,
         current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None,
     )
 
-    baseline_label = f"round_{round_num}" if round_num > 0 else "baseline"
+    current_best_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
         "accuracy": state.current_accuracy,
         "composite": state.current_composite,
         "prompt_fields": state.opt_sp.prompt_field_dict(),
         "results": state.current_results,
-        "label": baseline_label,
+        "label": current_best_label,
     }
 
     async with observed_node(
@@ -225,13 +225,13 @@ async def _evaluate_candidates(
         assert state.current_sp is not None
         eval_out = await l1_evaluate(
             candidates,
-            round_dataset,
+            eval_dataset,
             current_best,
             state.eval_ctx,
             pipeline_params=state.current_sp.pipeline_params,
             improvement_threshold=config.improvement_threshold,
             callbacks=callbacks,
-            escalation_checks=escalation_checks,
+            degradation_checks=degradation_checks,
         )
 
         # Critique analysis
@@ -313,13 +313,13 @@ async def _evaluate_candidates(
 async def execute_round(
     round_num: int,
     state: LoopState,
-    round_dataset: list[dict],
+    eval_dataset: list[dict],
     config: RunConfig,
     obs_campaign_id: str,
     campaign_store: CampaignStore | None,
     cycle_id: str | None,
     callbacks: RunCallbacks,
-    escalation_checks: list[DegradationCheck] | None = None,
+    degradation_checks: list[DegradationCheck] | None = None,
     search_memory: Any = None,
 ) -> RoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
@@ -336,7 +336,7 @@ async def execute_round(
         campaign_store,
         cycle_id,
         callbacks.on_phase,
-        n_eval_queries=len(round_dataset),
+        n_eval_queries=len(eval_dataset),
         obs=obs,
         trace_id=trace_id,
         search_memory=search_memory,
@@ -349,12 +349,12 @@ async def execute_round(
         candidates,
         round_num,
         state,
-        round_dataset,
+        eval_dataset,
         config,
         callbacks,
         obs=obs,
         trace_id=trace_id,
-        escalation_checks=escalation_checks,
+        degradation_checks=degradation_checks,
     )
 
     # Update state with critique + thinking styles from eval output

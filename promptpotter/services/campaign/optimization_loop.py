@@ -307,8 +307,8 @@ async def run_optimization(
     campaign_store = init.campaign_store
     cycle_id = init.cycle_id
     obs_campaign_id = init.obs_campaign_id
-    round_dataset = init.round_dataset
-    escalation_checks = init.escalation_checks
+    eval_dataset = init.eval_dataset
+    degradation_checks = init.degradation_checks
     resumed_from_round = init.resumed_from_round
     search_memory = init.search_memory
     _emitter = init.persistence_emitter
@@ -341,14 +341,14 @@ async def run_optimization(
             # --- Probe vs normal round data ---
             is_probe = state.probe_next_round
             if is_probe:
-                _round_data, _round_checks = _prepare_probe_data(
+                round_eval_data, _round_checks = _prepare_probe_data(
                     state,
                     dataset,
                     round_num,
                 )
             else:
-                _round_data = round_dataset
-                _round_checks = escalation_checks
+                round_eval_data = eval_dataset
+                _round_checks = degradation_checks
 
             logger.debug(
                 "Optimization round %d (clean=%d/%d, acc=%.3f, stall=%d/%d%s)",
@@ -371,13 +371,13 @@ async def run_optimization(
             round_result = await execute_round(
                 round_num,
                 state,
-                _round_data,
+                round_eval_data,
                 config,
                 obs_campaign_id,
                 campaign_store,
                 cycle_id,
                 cb,
-                escalation_checks=_round_checks,
+                degradation_checks=_round_checks,
                 search_memory=search_memory,
             )
             update_round_state(
@@ -393,7 +393,7 @@ async def run_optimization(
                     state,
                     config,
                     round_num,
-                    _round_data,
+                    round_eval_data,
                     cb.on_phase,
                     obs_campaign_id,
                     on_checkpoint=cb.on_checkpoint,
@@ -473,8 +473,8 @@ async def run_optimization(
                 _hist = [r.results for r in state.rounds if r.results]
                 if len(_hist) >= 3:
                     _qd = compile_query_difficulty(_hist)
-                    round_dataset, _adapt = adapt_eval_set(
-                        round_dataset,
+                    eval_dataset, _adapt = adapt_eval_set(
+                        eval_dataset,
                         _qd,
                         dataset,
                         seed=config.seed + round_num,

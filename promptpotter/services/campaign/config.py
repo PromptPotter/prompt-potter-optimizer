@@ -35,7 +35,7 @@ __all__ = [
 class OptimizationConfig(TypedDict, total=False):
     """Optimization loop parameters (``campaign_config["optimization"]``)."""
 
-    patience: int
+    l1_patience: int
     max_rounds: int | None
     n_variants: int
     creativity: float
@@ -84,9 +84,8 @@ class CampaignConfig(TypedDict, total=False):
     """
 
     dataset_name: str
-    sample_size: int
-    exploration_sample_size: int
-    exploration_rate: float
+    eval_sample_size: int
+    scan_sample_size: int
     exclude_nodes: list[str]
     pipeline_overrides: dict
     pipeline_params: dict | None
@@ -110,7 +109,7 @@ class RunConfig(BaseModel):
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
     session_id: str = Field("", description="Session ID for persistence emitter")
-    sample_size: int = Field(0, description="Subsample size (0 = use all)")
+    eval_sample_size: int = Field(0, description="Eval subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
 
     pipeline_schema: PipelineSchema | None = Field(
@@ -229,7 +228,7 @@ class RunConfig(BaseModel):
         optimizer_llm = campaign_config.get("optimizer_llm", {})
         return cls(
             max_rounds=opt.get("max_rounds", 10),
-            l1_patience=opt.get("patience", 3),
+            l1_patience=opt.get("l1_patience", 3),
             n_variants=opt.get("n_variants", 5),
             creativity=opt.get("creativity", 0.7),
             improvement_threshold=opt.get("improvement_threshold", 0.01),
@@ -237,7 +236,7 @@ class RunConfig(BaseModel):
             backend_id=backend_id,
             project_root=project_root,
             session_id=session_id,
-            sample_size=campaign_config.get("sample_size", 0),
+            eval_sample_size=campaign_config.get("eval_sample_size", 0),
             seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
             scan_context=scan_context,
@@ -360,9 +359,9 @@ def compute_preflight_metrics(
     has_scan_context: bool = False,
 ) -> PreflightMetrics:
     """Derive display-ready metrics from RunConfig and dataset size."""
-    eff_queries = config.sample_size if config.sample_size else dataset_size
-    if config.sample_size:
-        queries_label = f"{config.sample_size} of {dataset_size}"
+    eff_queries = config.eval_sample_size if config.eval_sample_size else dataset_size
+    if config.eval_sample_size:
+        queries_label = f"{config.eval_sample_size} of {dataset_size}"
     else:
         queries_label = f"all {dataset_size}"
 

@@ -56,7 +56,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest --cov`. A
 - **No backward compatibility** — freely break signatures, rename, restructure. No shims.
 - Pipeline components are called **nodes**, not "building blocks" or "services".
 - **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
-- **`sample_size`**: Universal eval sampling parameter (0 = all). No synonyms.
+- **Two-tier eval sampling**: `eval_sample_size` (0 = all) controls the optimization loop eval set. `scan_sample_size` controls sensitivity scan queries. Round cost ≈ `n_variants × effective_eval_size`.
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
 - **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground so stale processes don't leak.
 - Version: `APP_VERSION` in `promptpotter/config/settings.py`.

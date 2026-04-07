@@ -2,9 +2,8 @@
   "campaign_config": {
     "dataset_name": "train",
     "scoring": "rr(ground_truth_rank)",
-    "sample_size": 0,
-    "exploration_sample_size": 10,
-    "exploration_rate": 0.5,
+    "eval_sample_size": 0,
+    "scan_sample_size": 10,
     "exclude_nodes": ["llm_ranking"],
     "pipeline_overrides": {
       "web_search": {
@@ -19,7 +18,7 @@
       }
     },
     "optimization": {
-      "patience": 3,
+      "l1_patience": 3,
       "max_rounds": 15,
       "n_variants": 5,
       "creativity": 0.7,

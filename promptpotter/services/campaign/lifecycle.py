@@ -40,12 +40,12 @@ def cycle_config_identity(
     payload = json.dumps(
         {
             "max_rounds": config.max_rounds,
-            "patience": config.l1_patience,
+            "l1_patience": config.l1_patience,
             "n_variants": config.n_variants,
             "creativity": config.creativity,
             "improvement_threshold": config.improvement_threshold,
             "model": config.model,
-            "sample_size": config.sample_size,
+            "eval_sample_size": config.eval_sample_size,
             "seed": config.seed,
             "active_steps": list(config.pipeline_schema.active_steps)
             if config.pipeline_schema
@@ -224,7 +224,7 @@ def _validate_config_match(
         "creativity",
         "improvement_threshold",
         "model",
-        "sample_size",
+        "eval_sample_size",
     ]
     mismatches = []
     for k in check_keys:

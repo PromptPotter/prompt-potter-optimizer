@@ -34,7 +34,7 @@ class EvalContext:
     source: str = ""
     experiment_id: str = ""
     # Escalation checks (passed through to _run_eval_batch)
-    escalation_checks: list[DegradationCheck] | None = None
+    degradation_checks: list[DegradationCheck] | None = None
     # Mutated per-candidate in l1_evaluate loop
     candidate_idx: int = 0
     n_total_candidates: int = 1

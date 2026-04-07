@@ -152,7 +152,7 @@ def _log_batch_summary(
         )
 
 
-def _run_escalation_checks(
+def _run_degradation_checks(
     checks: list | None,
     results: list[QueryResult],
     candidate_idx: int,
@@ -194,7 +194,7 @@ async def _run_eval_batch(
 
     # Unpack ctx with defaults for test compatibility
     pipeline_schema = ctx.pipeline_schema if ctx else None
-    escalation_checks = ctx.escalation_checks if ctx else None
+    degradation_checks = ctx.degradation_checks if ctx else None
     candidate_idx = ctx.candidate_idx if ctx else 0
     n_total_candidates = ctx.n_total_candidates if ctx else 1
     max_consecutive_errors = ctx.max_consecutive_errors if ctx else 3
@@ -281,8 +281,8 @@ async def _run_eval_batch(
                     on_result(result, i, len(dataset))
 
                 # Escalation checks — run after display
-                esc_signal = _run_escalation_checks(
-                    escalation_checks,
+                esc_signal = _run_degradation_checks(
+                    degradation_checks,
                     results,
                     candidate_idx,
                     n_total_candidates,

@@ -80,9 +80,9 @@ def _format_campaign_summary(
     cfg = full.get("config", {}) if full else {}
     if cfg:
         model = str(cfg.get("model", "?"))[:30]
-        patience = cfg.get("patience", "?")
+        patience = cfg.get("l1_patience", "?")
         max_r = cfg.get("max_rounds", "?")
-        sample = cfg.get("sample_size", "?")
+        sample = cfg.get("eval_sample_size", "?")
         indent = "      " if active_id is not None else "    "
         print(f"{indent}patience={patience}  rounds={max_r}  sample={sample}  model={model}")
 
@@ -127,12 +127,12 @@ def list_campaigns(
             print("\n  Config (copy to campaign_config):")
             for k in [
                 "max_rounds",
-                "patience",
+                "l1_patience",
                 "n_variants",
                 "creativity",
                 "improvement_threshold",
                 "model",
-                "sample_size",
+                "eval_sample_size",
                 "seed",
             ]:
                 if k in cfg:
@@ -310,12 +310,12 @@ def show_experiment_dashboard(
             print("\n  Config (copy to campaign_config to resume):")
             for k in [
                 "max_rounds",
-                "patience",
+                "l1_patience",
                 "n_variants",
                 "creativity",
                 "improvement_threshold",
                 "model",
-                "sample_size",
+                "eval_sample_size",
                 "seed",
             ]:
                 if k in cfg:

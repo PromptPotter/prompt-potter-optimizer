@@ -311,7 +311,7 @@ async def l1_evaluate(
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
     callbacks: RunCallbacks | None = None,
-    escalation_checks: list | None = None,
+    degradation_checks: list | None = None,
 ) -> L1EvalResult:
     """Evaluate candidates and select the round winner."""
     from promptpotter.services.eval_gateway import eval_search_point
@@ -339,7 +339,7 @@ async def l1_evaluate(
     candidate_scores: list[dict] = []
 
     escalation_signal = None
-    ctx.escalation_checks = escalation_checks
+    ctx.degradation_checks = degradation_checks
     ctx.n_total_candidates = len(osp_candidates)
 
     for idx, osp_c in enumerate(osp_candidates):

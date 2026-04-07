@@ -273,12 +273,12 @@ def apply_experiment_overrides(
     Returns updated pipeline_params if stored, else None.
     """
     _OVERRIDE_KEYS: dict[str, tuple[str, ...]] = {
-        "patience": ("optimization",),
+        "l1_patience": ("optimization",),
         "max_rounds": ("optimization",),
         "n_variants": ("optimization",),
         "creativity": ("optimization",),
         "model": ("optimizer_llm",),
-        "sample_size": (),
+        "eval_sample_size": (),
     }
     for key, path in _OVERRIDE_KEYS.items():
         val = stored_cfg.get(key)
@@ -366,12 +366,12 @@ def diff_campaign_config(
 
     keys = [
         "max_rounds",
-        "patience",
+        "l1_patience",
         "n_variants",
         "creativity",
         "improvement_threshold",
         "model",
-        "sample_size",
+        "eval_sample_size",
         "seed",
     ]
 

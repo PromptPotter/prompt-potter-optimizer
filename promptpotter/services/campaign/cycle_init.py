@@ -45,8 +45,8 @@ class CycleInit(NamedTuple):
     campaign_store: CampaignStore | None
     cycle_id: str | None
     obs_campaign_id: str
-    round_dataset: list[dict[str, Any]]
-    escalation_checks: list[DegradationCheck]
+    eval_dataset: list[dict[str, Any]]
+    degradation_checks: list[DegradationCheck]
     resumed_from_round: int
     search_memory: SearchMemory | None
     persistence_emitter: CampaignPersistenceEmitter | None
@@ -175,7 +175,7 @@ def _setup_eval_context(
     """Wire up EvalContext on state and build escalation checks.
 
     Returns:
-        escalation_checks list.
+        degradation_checks list.
     """
     from promptpotter.shared.scoring import compile_scorer
 
@@ -212,9 +212,9 @@ def _setup_eval_context(
                 _restructured_hash[:8],
             )
 
-    from promptpotter.services.campaign.escalation import build_escalation_checks
+    from promptpotter.services.campaign.escalation import build_degradation_checks
 
-    return build_escalation_checks(config)
+    return build_degradation_checks(config)
 
 
 async def init_cycle_state(
@@ -240,7 +240,7 @@ async def init_cycle_state(
         patience=config.l1_patience,
         n_variants=config.n_variants,
         model=config.model or "(default)",
-        sample_size=config.sample_size,
+        sample_size=config.eval_sample_size,
         enable_l2=config.enable_l2,
         enable_l3=config.enable_l3,
         dataset_count=len(dataset),
@@ -264,7 +264,7 @@ async def init_cycle_state(
     if _index_terms:
         await _bc.init_session(_index_terms)
 
-    round_dataset = subsample_dataset(dataset, config.sample_size, config.seed)
+    eval_dataset = subsample_dataset(dataset, config.eval_sample_size, config.seed)
 
     # 1. Build baseline state
     state, baseline_osp = _build_baseline_state(
@@ -296,7 +296,7 @@ async def init_cycle_state(
     state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
     # 3. Eval context + escalation checks
-    escalation_checks = _setup_eval_context(
+    degradation_checks = _setup_eval_context(
         state,
         config,
         instruction,
@@ -337,7 +337,7 @@ async def init_cycle_state(
         resumed_from_round=resumed_from_round,
         baseline_accuracy=baseline_accuracy,
         obs_enabled=obs is not None,
-        sample_count=len(round_dataset),
+        sample_count=len(eval_dataset),
         enable_critique=config.enable_critique,
         restored_state=_restored,
     )
@@ -374,8 +374,8 @@ async def init_cycle_state(
         campaign_store=campaign_store,
         cycle_id=cycle_id,
         obs_campaign_id=obs_campaign_id,
-        round_dataset=round_dataset,
-        escalation_checks=escalation_checks,
+        eval_dataset=eval_dataset,
+        degradation_checks=degradation_checks,
         resumed_from_round=resumed_from_round,
         search_memory=search_memory,
         persistence_emitter=persistence_emitter,

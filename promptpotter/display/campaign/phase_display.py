@@ -345,7 +345,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
         _dbox_line(f"Max rounds     {state.max_rounds or 999!s:<15s}Patience    {state.patience}")
     )
     print(_dbox_line(f"Candidates     {d.get('n_variants', 0)}"))
-    sample = d.get("sample_size", 0)
+    sample = d.get("eval_sample_size", 0)
     total = d.get("dataset_count", 0)
     eff_n = sample if sample else total
     state.baseline_total = eff_n

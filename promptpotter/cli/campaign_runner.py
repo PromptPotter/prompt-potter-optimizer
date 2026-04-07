@@ -321,7 +321,7 @@ async def cmd_scan(args: argparse.Namespace) -> None:
     sample_size = (
         args.sample_size
         if args.sample_size is not None
-        else ctx.state["campaign_config"].get("exploration_sample_size", 0)
+        else ctx.state["campaign_config"].get("scan_sample_size", 0)
     )
     _scan_bl, _baseline_opt, scan_df, _axis_profiles = await run_scan_and_persist(
         baseline,

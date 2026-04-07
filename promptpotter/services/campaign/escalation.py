@@ -35,7 +35,7 @@ __all__ = [
     "EscalationSignal",
     "EscalationStrategy",
     "EscalationTarget",
-    "build_escalation_checks",
+    "build_degradation_checks",
     "collect_warning_types",
 ]
 
@@ -134,8 +134,8 @@ def collect_warning_types(results: list[dict]) -> dict[str, int]:
     return dict(counts)
 
 
-def build_escalation_checks(config: RunConfig) -> list[DegradationCheck]:
-    """Build enabled escalation checks from RunConfig."""
+def build_degradation_checks(config: RunConfig) -> list[DegradationCheck]:
+    """Build enabled degradation checks from RunConfig."""
     checks: list[DegradationCheck] = []
     threshold = getattr(config, "degradation_threshold", 0.0)
     if threshold > 0:

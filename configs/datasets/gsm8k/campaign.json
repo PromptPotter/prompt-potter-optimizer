@@ -1,12 +1,11 @@
 {
   "campaign_config": {
-    "sample_size": 200,
-    "exploration_sample_size": 50,
-    "exploration_rate": 0.5,
+    "eval_sample_size": 200,
+    "scan_sample_size": 50,
     "exclude_nodes": [],
     "pipeline_overrides": {},
     "optimization": {
-      "patience": 3,
+      "l1_patience": 3,
       "max_rounds": 15,
       "n_variants": 5,
       "creativity": 0.7,

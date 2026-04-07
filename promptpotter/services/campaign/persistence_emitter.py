@@ -105,7 +105,7 @@ class CampaignPersistenceEmitter:
             # Config
             "model": config.model or "",
             "n_variants": config.n_variants,
-            "sample_size": config.sample_size,
+            "eval_sample_size": config.eval_sample_size,
             # Accumulators (reset on transitions)
             "current_queries": [],
             "round_candidates": [],
