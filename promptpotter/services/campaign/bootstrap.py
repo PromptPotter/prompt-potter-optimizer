@@ -1,7 +1,8 @@
 """Campaign initialization service.
 
-Sets up project store, backend client, auto-syncs experiment data,
-and returns a services dict ready for use.
+Sets up project store, backend client, and loads campaign data.
+Prefers dataset loading via DatasetStore; falls back to experiment
+sync from backend when no dataset_name is provided.
 """
 
 from __future__ import annotations
@@ -106,7 +107,10 @@ async def init_services(
     dataset_name: str | None = None,
     on_status: Callable[[str], None] | None = None,
 ) -> BackendContext:
-    """Initialize store, client, pipeline schema, and load experiment/dataset data."""
+    """Initialize store, client, pipeline schema, and load eval data.
+
+    Priority: dataset_name (from DatasetStore) > experiment sync (from backend).
+    """
 
     def _status(msg: str) -> None:
         if on_status:

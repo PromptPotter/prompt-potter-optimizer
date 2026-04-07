@@ -14,9 +14,10 @@
 ```
 --backend-url http://127.0.0.1:8000
 --backend-id local
---dataset-name train
 --config configs/datasets/lca-termnorm/campaign.json
 ```
+
+`dataset_name` is set in `campaign.json` (`"train"` — 984 items). The `--dataset-name` CLI flag is optional; if provided it overrides the config value.
 
 ## Data
 

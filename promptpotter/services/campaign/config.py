@@ -77,11 +77,13 @@ class CampaignConfig(TypedDict, total=False):
     """Top-level campaign configuration.
 
     All keys are optional — a minimal connector profile (e.g. just
-    ``exclude_nodes``) is valid input.  The dict is mutated in place by
+    ``exclude_nodes``) is valid input.  ``dataset_name`` specifies the
+    default DatasetStore split.  The dict is mutated in place by
     ``configure_pipeline()`` (sets ``pipeline_params``) and the CLI
     (sets ``optimization.pause_before_eval``).
     """
 
+    dataset_name: str
     sample_size: int
     exploration_sample_size: int
     exploration_rate: float

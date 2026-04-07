@@ -2,10 +2,11 @@
 
 ## System Overview
 
-Two entry points, shared service core:
+Three entry points, shared service core:
 
 1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `promptpotter/display/campaign/` (display layer wrapping services). No business logic in the notebook layer.
-2. **FastAPI API** (`promptpotter/main.py`) — REST at `/promptpotter/v1/`. Routers: `backends`, `campaigns`, `health`.
+2. **CLI** — `promptpotter/cli/campaign_runner.py` — terminal-based HITL workflow: `init → [task-context] → [scan] → [scan-results] → optimize → results`
+3. **FastAPI API** (`promptpotter/main.py`) — REST at `/api/v1/`. Routers: `backends`, `campaigns`.
 
 All core logic lives in `promptpotter/services/`.
 

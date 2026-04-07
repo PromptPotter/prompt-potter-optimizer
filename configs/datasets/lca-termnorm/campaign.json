@@ -1,5 +1,6 @@
 {
   "campaign_config": {
+    "dataset_name": "train",
     "scoring": "rr(ground_truth_rank)",
     "sample_size": 0,
     "exploration_sample_size": 10,

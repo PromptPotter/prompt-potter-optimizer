@@ -131,20 +131,24 @@ async def cmd_init(args: argparse.Namespace) -> None:
         prepare_datasets as _prepare_datasets,
     )
 
-    session = await _init_services(
-        backend_url=args.backend_url,
-        backend_id=args.backend_id,
-        experiment_id=args.experiment_id,
-        dataset_name=args.dataset_name,
-    )
-
-    # Priority: --config file > connector profile > empty dict
-    profile = session.store.backends.load_connector_profile(args.backend_id) or {}
+    # Load campaign config first so dataset_name fallback is available
     config_data: dict = {}
     if args.config:
         with open(args.config) as f:
             config_data = json.load(f)
     file_config = config_data.get("campaign_config", config_data) or {}
+
+    dataset_name = args.dataset_name or file_config.get("dataset_name")
+
+    session = await _init_services(
+        backend_url=args.backend_url,
+        backend_id=args.backend_id,
+        experiment_id=args.experiment_id,
+        dataset_name=dataset_name,
+    )
+
+    # Priority: --config file > connector profile > empty dict
+    profile = session.store.backends.load_connector_profile(args.backend_id) or {}
     campaign_config = {**profile, **file_config}
 
     # Log pipeline snapshot from session (already loaded in init_services)
@@ -165,7 +169,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
             "backend_url": args.backend_url,
             "backend_id": args.backend_id,
             "experiment_id": args.experiment_id,
-            "dataset_name": args.dataset_name,
+            "dataset_name": dataset_name,
         },
         "campaign_config": campaign_config,
         "pipeline_params": pipeline_params,
@@ -426,7 +430,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     )
 
     # Seed campaign_rounds with stored baseline when no eval has been run yet
-    if not campaign_rounds and ctx.state.get("baseline_prompt_fields"):
+    if not campaign_rounds and ctx.state.get("baseline_prompt_fields") is not None:
         bl_ps = OptSearchPoint.from_prompt_fields(ctx.state["baseline_prompt_fields"])
         campaign_rounds.append(
             {

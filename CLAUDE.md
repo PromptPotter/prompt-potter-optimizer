@@ -28,10 +28,18 @@ pytest tests/ -k "test_name"           # single test by name
 uvicorn promptpotter.main:app --port 8001 --reload
 
 # CLI campaign runner (HITL optimization from terminal)
-python -m promptpotter.cli.campaign_runner init --backend-url http://127.0.0.1:8000
+python -m promptpotter.cli.campaign_runner init \
+    --backend-url http://127.0.0.1:8000 \
+    --config configs/datasets/lca-termnorm/campaign.json
+python -m promptpotter.cli.campaign_runner task-context \
+    --task-file configs/datasets/lca-termnorm/task_description.md
+python -m promptpotter.cli.campaign_runner scan \
+    --variants-file configs/datasets/lca-termnorm/scan_variants.json
+python -m promptpotter.cli.campaign_runner scan-results
 python -m promptpotter.cli.campaign_runner optimize --auto     # full loop
 python -m promptpotter.cli.campaign_runner optimize --round    # generate → pause for review
-python -m promptpotter.cli.campaign_runner optimize --evaluate # resume evaluation
+python -m promptpotter.cli.campaign_runner results
+python -m promptpotter.cli.campaign_runner status              # live dashboard
 
 # Export results
 python -m promptpotter.cli.export_results supplemental --backend-id local -o supplemental.md
