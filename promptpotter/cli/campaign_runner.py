@@ -501,7 +501,6 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             dataset,
             campaign_config,
             session=session,
-            pipeline_params=pipeline_params,
             scan_context=scan_context,
             experiment_id=ctx.state.get("experiment_id"),
             task_context=ctx.state.get("task_context"),

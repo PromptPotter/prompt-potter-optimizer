@@ -137,7 +137,6 @@ def show_feedback_preflight(
 
     config = RunConfig.from_campaign_config(
         campaign_config,
-        pipeline_params=pipeline_params,
         scan_context=scan_context,
         pipeline_schema=pipeline_schema,
     )
@@ -365,7 +364,6 @@ async def run_optimization_notebook(
         build_run_config(
             campaign_config,
             session,
-            pipeline_params=pipeline_params,
             scan_context=scan_context,
             task_context=task_context,
             session_id=session_id,
@@ -658,7 +656,6 @@ async def run_optimization_notebook(
         dataset,
         campaign_config,
         session=session,
-        pipeline_params=pipeline_params,
         scan_context=scan_context,
         experiment_id=experiment_id,
         task_context=task_context,

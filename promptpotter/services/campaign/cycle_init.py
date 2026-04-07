@@ -9,18 +9,17 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_context import TaskContext
-from promptpotter.services.backend_client import BackendClient
+from promptpotter.services.campaign.bootstrap import BackendContext
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import sample_thinking_styles
 from promptpotter.services.campaign.lifecycle import init_campaign
 from promptpotter.services.campaign.state import (
     CampaignPhase,
-    CycleContext,
     LoopState,
     PhaseEvent,
     emit_phase,
@@ -31,9 +30,26 @@ from promptpotter.services.search.search_memory import SearchMemory
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
+    from promptpotter.services.backend_client import BackendClient
+    from promptpotter.services.campaign.escalation import DegradationCheck
+    from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
     from promptpotter.services.stores.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
+
+
+class CycleInit(NamedTuple):
+    """Return type for ``init_cycle_state()``."""
+
+    state: LoopState
+    campaign_store: CampaignStore | None
+    cycle_id: str | None
+    obs_campaign_id: str
+    round_dataset: list[dict[str, Any]]
+    escalation_checks: list[DegradationCheck]
+    resumed_from_round: int
+    search_memory: SearchMemory | None
+    persistence_emitter: CampaignPersistenceEmitter | None
 
 
 def _build_baseline_state(
@@ -80,10 +96,10 @@ def _build_baseline_state(
         plan=baseline_osp.plan,
         optimizer_params=dict(baseline_osp.optimizer_params),
     )
+    schema = config.pipeline_schema
     baseline_sp = opt_sp.to_job_search_point(
-        base_pipeline_params=config.pipeline_params,
-        active_steps=config.active_steps,
-        prompt_node=config.prompt_node,
+        base_pipeline_params=schema.to_pipeline_params() if schema else None,
+        schema=schema,
     )
     state = LoopState(
         current_sp=baseline_sp,
@@ -153,17 +169,14 @@ def _setup_eval_context(
     obs: Any,
     experiment_id: str,
     cycle_id: str | None,
+    session: BackendContext | None = None,
 ) -> list:
     """Wire up EvalContext on state and build escalation checks.
 
     Returns:
         escalation_checks list.
     """
-    _store = None
-    if config.project_root:
-        from promptpotter.services.project_store import ProjectStore
-
-        _store = ProjectStore(config.project_root)
+    _store = session.store if session else None
     state.eval_ctx = EvalContext(
         backend_client=backend_client,
         store=_store,
@@ -211,9 +224,9 @@ async def init_cycle_state(
     langfuse_session_id: str | None,
     cycle_id: str | None,
     experiment_id: str,
-    backend_client: BackendClient | None,
+    session: BackendContext | None,
     started_at: str,
-) -> CycleContext:
+) -> CycleInit:
     """Initialize all cycle state: baseline, resume, obs, eval context."""
     emit_phase(
         on_phase,
@@ -230,7 +243,9 @@ async def init_cycle_state(
         baseline_accuracy=baseline_accuracy,
         has_scan_context=config.scan_context is not None,
         enable_critique=config.enable_critique,
-        pipeline_params=config.pipeline_params,
+        pipeline_params=config.pipeline_schema.to_pipeline_params()
+        if config.pipeline_schema
+        else None,
         node_param_keys=(
             {s: sorted(k) for s, k in config.pipeline_schema.node_param_keys().items()}
             if config.pipeline_schema
@@ -238,9 +253,12 @@ async def init_cycle_state(
         ),
     )
 
-    _bc = backend_client or BackendClient(config.backend_url)
-    if config.index_terms:
-        await _bc.init_session(config.index_terms)
+    if session is None:
+        raise ValueError("session (BackendContext) is required for init_cycle_state")
+    _bc = session.backend_client
+    _index_terms = session.index_terms or None
+    if _index_terms:
+        await _bc.init_session(_index_terms)
 
     round_dataset = subsample_dataset(dataset, config.sample_size, config.seed)
 
@@ -283,6 +301,7 @@ async def init_cycle_state(
         obs,
         experiment_id,
         cycle_id,
+        session=session,
     )
 
     # 4. SearchMemory — load + refresh from historical data
@@ -346,7 +365,7 @@ async def init_cycle_state(
             resume_from=resume_from,
         )
 
-    return CycleContext(
+    return CycleInit(
         state=state,
         campaign_store=campaign_store,
         cycle_id=cycle_id,

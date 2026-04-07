@@ -4,8 +4,15 @@ import pydantic
 import pytest
 
 from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.pipeline_schema import NodePromptMeta, PipelineNode, PipelineSchema
 from promptpotter.models.search_point import JobSearchPoint
 from promptpotter.shared.hashing import eval_content_hash
+
+
+def _schema_with_prompt_node(name: str = "llm_ranking") -> PipelineSchema:
+    """Build a minimal PipelineSchema with a single prompt-bearing node."""
+    node = PipelineNode(name=name, prompt_meta=NodePromptMeta())
+    return PipelineSchema(nodes=[node])
 
 
 def _make_jsp(instruction: str = "Rank by relevance.", **kwargs) -> JobSearchPoint:
@@ -108,7 +115,7 @@ def test_prompt_fields_render_ordering_and_few_shot():
 def test_derive_with_prompt_fields():
     """derive(prompt_fields=...) merges fields, re-renders, preserves others."""
     osp = OptSearchPoint(persona="Expert", instruction="Rank by relevance.")
-    sp = osp.to_job_search_point(prompt_node="llm_ranking")
+    sp = osp.to_job_search_point(schema=_schema_with_prompt_node())
 
     sp2 = sp.derive(prompt_fields={"instruction": "Sort by name."})
     assert sp2.prompt_fields["instruction"] == "Sort by name."
@@ -120,14 +127,14 @@ def test_derive_with_prompt_fields():
 def test_derive_prompt_fields_sp_hash_consistency():
     """derive(prompt_fields=...) produces the same sp_hash as a fresh projection."""
     osp = OptSearchPoint(persona="Expert", instruction="Rank items.")
-    sp = osp.to_job_search_point(prompt_node="llm_ranking")
+    sp = osp.to_job_search_point(schema=_schema_with_prompt_node())
 
     # Derive with a field change
     sp_derived = sp.derive(prompt_fields={"instruction": "Sort items."})
 
     # Fresh projection with the same change
     osp2 = osp.derive_candidate(instruction="Sort items.")
-    sp_fresh = osp2.to_job_search_point(prompt_node="llm_ranking")
+    sp_fresh = osp2.to_job_search_point(schema=_schema_with_prompt_node())
 
     assert sp_derived.sp_hash() == sp_fresh.sp_hash()
     assert sp_derived.render() == sp_fresh.render()
@@ -151,7 +158,7 @@ def test_to_job_search_point_populates_prompt_fields():
         thinking_style="Step by step",
         instruction="Rank items.",
     )
-    sp = osp.to_job_search_point(prompt_node="llm_ranking")
+    sp = osp.to_job_search_point(schema=_schema_with_prompt_node())
     assert sp.prompt_fields is not None
     assert sp.prompt_fields["persona"] == "Expert"
     assert sp.prompt_fields["thinking_style"] == "Step by step"
@@ -173,7 +180,7 @@ def test_to_job_search_point_includes_few_shot_block():
         instruction="Rank.",
         few_shot_examples=[FewShotExample(input="a", output="b")],
     )
-    sp = osp.to_job_search_point(prompt_node="llm_ranking")
+    sp = osp.to_job_search_point(schema=_schema_with_prompt_node())
     assert "few_shot_block" in sp.prompt_fields
     assert "Input: a" in sp.prompt_fields["few_shot_block"]
 

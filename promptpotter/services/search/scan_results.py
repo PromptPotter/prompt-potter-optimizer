@@ -50,7 +50,6 @@ async def decompose_scan_baseline(
     session: BackendContext | None = None,
     scan_variants: dict | None = None,
     force_restructure: bool = False,
-    prompt_node: str = "",
     pipeline_schema: PipelineSchema | None = None,
 ) -> ScanBaselineResult:
     """Restructure baseline instruction into PromptPotter's internal fields.
@@ -105,11 +104,9 @@ async def decompose_scan_baseline(
         restructured_fields[f] = getattr(search_baseline, f, "") or ""
 
     # Build JobSearchPoint for evaluation
-    _steps = (pipeline_params or {}).get("steps", [])
     baseline_jsp = search_baseline.to_job_search_point(
         base_pipeline_params=pipeline_params,
-        active_steps=_steps or None,
-        prompt_node=prompt_node,
+        schema=pipeline_schema,
     )
 
     # Historical data diagnostic via sp_hash matching
@@ -364,7 +361,7 @@ def select_scan_winner(
     scan_variants: dict[str, list],
     *,
     baseline_opt: OptSearchPoint | None = None,
-    prompt_node: str = "",
+    pipeline_schema: PipelineSchema | None = None,
 ) -> JobSearchPoint:
     """Pick best variant per sensitive axis from OAT scan results.
 
@@ -413,11 +410,9 @@ def select_scan_winner(
             **prompt_changes,
             changes_description="scan_winner",
         )
-        _steps = (baseline.pipeline_params or {}).get("steps", [])
         best = best_opt.to_job_search_point(
             base_pipeline_params=baseline.pipeline_params,
-            active_steps=_steps or None,
-            prompt_node=prompt_node,
+            schema=pipeline_schema,
         )
     if param_changes:
         best = best.derive(

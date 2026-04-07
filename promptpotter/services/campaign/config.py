@@ -104,22 +104,16 @@ class RunConfig(BaseModel):
     creativity: float = Field(0.7, description="Temperature for candidate generation")
     improvement_threshold: float = Field(0.01, description="Min accuracy delta")
     model: str | None = Field(None, description="LLM model identifier")
-    backend_url: str = Field(..., description="Backend URL for evaluation")
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
-    pipeline_params: dict | None = Field(None, description="Pipeline parameter overrides")
-    active_steps: tuple[str, ...] = Field(
-        default_factory=tuple,
-        description="Immutable active node sequence — authoritative source of pipeline composition",
-    )
-    index_terms: list[str] | None = Field(None, description="Backend session terms")
     session_id: str = Field("", description="Session ID for persistence emitter")
     sample_size: int = Field(0, description="Subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
 
-    pipeline_schema: PipelineSchema | None = Field(None, description="Pipeline schema for eval")
-    prompt_node: str = Field(
-        "", description="Prompt-bearing node name (from schema.prompt_node_names())"
+    pipeline_schema: PipelineSchema | None = Field(
+        None,
+        description="Filtered pipeline schema with overrides baked in — single source of truth "
+        "for active nodes, prompt node, and initial per-node config",
     )
 
     # Critique-guided generation
@@ -208,11 +202,8 @@ class RunConfig(BaseModel):
         cls,
         campaign_config: CampaignConfig,
         *,
-        backend_url: str = "",
         backend_id: str = "",
         project_root: str = "",
-        pipeline_params: dict | None = None,
-        index_terms: list[str] | None = None,
         session_id: str = "",
         pipeline_schema: PipelineSchema | None = None,
         scan_context: ScanContext | None = None,
@@ -222,6 +213,8 @@ class RunConfig(BaseModel):
 
         Uses RunConfig field defaults for any missing keys — a minimal
         connector profile (e.g. just ``exclude_nodes``) is valid input.
+        ``pipeline_schema`` should be the filtered schema with overrides
+        already baked in (from ``configure_pipeline()``).
         """
         opt = campaign_config.get("optimization", {})
         optimizer_llm = campaign_config.get("optimizer_llm", {})
@@ -232,19 +225,12 @@ class RunConfig(BaseModel):
             creativity=opt.get("creativity", 0.7),
             improvement_threshold=opt.get("improvement_threshold", 0.01),
             model=optimizer_llm.get("model"),
-            backend_url=backend_url,
             backend_id=backend_id,
             project_root=project_root,
-            pipeline_params=pipeline_params,
-            active_steps=tuple(pipeline_params.get("steps", [])) if pipeline_params else (),
-            index_terms=index_terms,
             session_id=session_id,
             sample_size=campaign_config.get("sample_size", 0),
             seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
-            prompt_node=pipeline_schema.prompt_node_names()[0]
-            if pipeline_schema and pipeline_schema.prompt_node_names()
-            else "",
             scan_context=scan_context,
             task_context=task_context,
             enable_l2=opt.get("enable_l2", True),
@@ -279,13 +265,18 @@ def configure_pipeline(
     campaign_config: CampaignConfig,
     exp_data: dict | None = None,
 ) -> PipelineConfigResult:
-    """Build pipeline_params from live pipeline schema and campaign_config.
+    """Build pipeline identity from live pipeline schema and campaign_config.
 
     Uses *pipeline_schema* (from ``GET /pipeline``) as the source of
     truth for node names, falling back to *exp_data* only when the schema
     is unavailable.  Reads ``exclude_nodes`` and ``pipeline_overrides`` from
-    *campaign_config*, stores the result back into
-    ``campaign_config["pipeline_params"]``, and returns a typed result.
+    *campaign_config*.
+
+    The returned ``filtered_schema`` is the single source of truth for
+    pipeline identity: filtered to active nodes, with user overrides baked
+    into ``PipelineNode.current_config``.  ``pipeline_params`` is derived
+    from it via ``to_pipeline_params()`` and stored back into
+    *campaign_config* for downstream consumers.
     """
     from promptpotter.services.backend_client import extract_pipeline_config
 
@@ -301,19 +292,18 @@ def configure_pipeline(
         all_names = []
 
     active = [n for n in all_names if n not in (exclude or [])]
-    pipeline_params: dict = {"steps": active}
 
-    # Seed with live config from GET /pipeline (no hidden defaults)
-    if pipeline_schema:
-        for node in pipeline_schema.nodes:
-            if node.name in active and node.current_config:
-                pipeline_params[node.name] = dict(node.current_config)
+    # Filter schema to active nodes only
+    filtered = pipeline_schema
+    if pipeline_schema and exclude:
+        filtered = pipeline_schema.filter_to_steps(active)
 
-    # Apply overrides for active nodes only (nested format: {"node": {"param": val}})
+    # Validate and apply overrides — bake into schema's current_config
+    valid_overrides: dict[str, dict] = {}
     if overrides:
         for key, value in overrides.items():
             if isinstance(value, dict) and key in active:
-                pipeline_params.setdefault(key, {}).update(value)
+                valid_overrides[key] = value
             elif isinstance(value, dict):
                 logger.debug("configure_pipeline: skipping override for inactive node %r", key)
             else:
@@ -323,13 +313,13 @@ def configure_pipeline(
                     key,
                     value,
                 )
+    if filtered and valid_overrides:
+        filtered = filtered.with_overrides(valid_overrides)
+
+    # Derive pipeline_params from the fully resolved schema
+    pipeline_params = filtered.to_pipeline_params() if filtered else {"steps": active}
 
     campaign_config["pipeline_params"] = pipeline_params
-
-    # Filter schema to active nodes only
-    filtered = pipeline_schema
-    if pipeline_schema and exclude:
-        filtered = pipeline_schema.filter_to_steps(active)
 
     return PipelineConfigResult(
         pipeline_params=pipeline_params,
@@ -366,8 +356,8 @@ def compute_preflight_metrics(
     else:
         queries_label = f"all {dataset_size}"
 
-    pp = config.pipeline_params or {}
-    active_nodes = pp.get("steps", [])
+    schema = config.pipeline_schema
+    active_nodes = list(schema.active_steps) if schema else []
     excluded = exclude_nodes or []
     total_nodes = len(active_nodes) + len(excluded)
     if active_nodes:

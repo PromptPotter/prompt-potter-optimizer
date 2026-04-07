@@ -89,7 +89,6 @@ async def run_baseline_eval(
     experiment_id: str = "",
     on_result: Callable | None = None,
     obs: Any | None = None,
-    prompt_node: str = "",
     pipeline_schema: Any | None = None,
 ) -> tuple[list, list]:
     """Evaluate baseline prompt and build initial campaign_rounds list.
@@ -146,11 +145,9 @@ async def run_baseline_eval(
         with graceful("Dataset registration in run_baseline_eval failed"):
             obs.register_dataset(DATASET_NAME, dataset)
 
-    _steps = (pipeline_params or {}).get("steps", [])
     sp = baseline.to_job_search_point(
         base_pipeline_params=pipeline_params,
-        active_steps=_steps or None,
-        prompt_node=prompt_node,
+        schema=pipeline_schema,
     )
     ctx = EvalContext(
         backend_client=backend_client,

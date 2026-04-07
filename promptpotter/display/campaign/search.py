@@ -118,12 +118,7 @@ async def decompose_scan_baseline(
 
     llm_client, llm_model = setup_llm(campaign_config)
 
-    # Resolve prompt node from pipeline schema — only if the node is active
-    prompt_node = ""
     ps = session.pipeline_schema if session is not None else None
-    if ps:
-        active_steps = (pipeline_params or {}).get("steps", [])
-        prompt_node = ps.resolve_active_prompt_node(active_steps)
 
     result = await _decompose_scan_baseline(
         baseline,
@@ -134,7 +129,6 @@ async def decompose_scan_baseline(
         session=session,
         scan_variants=scan_variants,
         force_restructure=force_restructure,
-        prompt_node=prompt_node,
         pipeline_schema=ps,
     )
 

@@ -16,6 +16,7 @@ from promptpotter.shared.constants import DATASET_NAME
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.state import LoopState
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,9 @@ def cycle_config_identity(
             "model": config.model,
             "sample_size": config.sample_size,
             "seed": config.seed,
-            "active_steps": list(config.active_steps),
+            "active_steps": list(config.pipeline_schema.active_steps)
+            if config.pipeline_schema
+            else [],
             "baseline_rendered": baseline_rendered,
             "dataset_pairs": sorted(
                 (d.get("query", ""), d.get("ground_truth", "")) for d in dataset
@@ -58,7 +61,7 @@ def cycle_config_identity(
 
 def resolve_active_campaign_id(
     campaign_config: dict,
-    pipeline_params: dict | None,
+    pipeline_schema: PipelineSchema | None,
     baseline_prompt_fields: dict | None,
     dataset: list[dict],
 ) -> str | None:
@@ -70,7 +73,7 @@ def resolve_active_campaign_id(
     try:
         config = RunConfig.from_campaign_config(
             campaign_config,
-            pipeline_params=pipeline_params,
+            pipeline_schema=pipeline_schema,
         )
         bl_rendered = ""
         if baseline_prompt_fields:

@@ -18,6 +18,7 @@ from promptpotter.services.campaign.bootstrap import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.bootstrap import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.project_store import ProjectStore
@@ -167,7 +168,7 @@ def diff_campaign_config(
     backend_id: str,
     campaign_id: str,
     campaign_config: CampaignConfig,
-    pipeline_params: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Show parameter differences between current config and a stored campaign."""
     campaign = store.campaigns.load(backend_id, campaign_id)
@@ -178,7 +179,7 @@ def diff_campaign_config(
     diffs = _diff_campaign_config(
         campaign.get("config", {}),
         campaign_config,
-        pipeline_params,
+        pipeline_schema,
     )
 
     print(f"\nDiff: current config vs {campaign_id}")
@@ -278,7 +279,10 @@ def show_experiment_dashboard(
         from promptpotter.services.campaign.lifecycle import resolve_active_campaign_id
 
         active_id = resolve_active_campaign_id(
-            campaign_config, pipeline_params, baseline_prompt_fields, dataset
+            campaign_config,
+            session.pipeline_schema if session else None,
+            baseline_prompt_fields,
+            dataset,
         )
 
     # --- Detail mode ---
@@ -334,7 +338,7 @@ def show_experiment_dashboard(
                 backend_id,
                 full_id,
                 campaign_config,
-                pipeline_params=pipeline_params,
+                pipeline_schema=session.pipeline_schema if session else None,
             )
 
         is_active = full_id == active_id

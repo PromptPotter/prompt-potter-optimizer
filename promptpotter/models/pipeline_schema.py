@@ -167,6 +167,11 @@ class PipelineSchema(BaseModel):
 
     Carries enough information for all PromptPotter services to operate
     generically: evaluation, sensitivity scan, observability, and Langfuse push.
+
+    After ``configure_pipeline()`` filters and applies overrides, the schema
+    is the single source of truth for pipeline identity at campaign start:
+    active nodes (via ``nodes``), prompt node (derivable), and initial
+    per-node config (baked into ``PipelineNode.current_config``).
     """
 
     model_config = {"frozen": True}
@@ -176,6 +181,48 @@ class PipelineSchema(BaseModel):
     description: str = ""
     nodes: list[PipelineNode] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
+
+    # -------------------------------------------------------------------
+    # Pipeline identity — derived from nodes
+    # -------------------------------------------------------------------
+
+    @property
+    def active_steps(self) -> tuple[str, ...]:
+        """Node names in pipeline order (schema is pre-filtered to active nodes)."""
+        return tuple(n.name for n in self.nodes)
+
+    @property
+    def prompt_node(self) -> str:
+        """First prompt-bearing node, or ``""`` if none."""
+        names = self.prompt_node_names()
+        return names[0] if names else ""
+
+    def to_pipeline_params(self) -> dict:
+        """Build initial pipeline_params dict from this schema.
+
+        Produces the wire-format dict with ``steps`` + per-node config,
+        suitable for ``JobSearchPoint`` construction.
+        """
+        pp: dict = {"steps": list(self.active_steps)}
+        for node in self.nodes:
+            if node.current_config:
+                pp[node.name] = dict(node.current_config)
+        return pp
+
+    def with_overrides(self, overrides: dict[str, dict]) -> "PipelineSchema":
+        """Return a new schema with overrides applied to node ``current_config``.
+
+        Since PipelineSchema is frozen, reconstructs with updated nodes.
+        Only applies overrides for nodes present in the schema.
+        """
+        updated_nodes: list[PipelineNode] = []
+        for node in self.nodes:
+            if node.name in overrides:
+                merged = {**node.current_config, **overrides[node.name]}
+                updated_nodes.append(node.model_copy(update={"current_config": merged}))
+            else:
+                updated_nodes.append(node)
+        return self.model_copy(update={"nodes": updated_nodes})
 
     # -------------------------------------------------------------------
     # Lookup helpers

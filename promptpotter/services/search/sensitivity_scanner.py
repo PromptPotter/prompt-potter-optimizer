@@ -285,14 +285,11 @@ async def sensitivity_scan(
                 assert baseline_opt is not None, (
                     "baseline_opt required for prompt_field perturbation"
                 )
-                _pn = _prompt_node
-                _steps = (baseline.pipeline_params or {}).get("steps", [])
                 perturbed = baseline_opt.derive_candidate(
                     **{axis_name: value},
                 ).to_job_search_point(
                     base_pipeline_params=baseline.pipeline_params,
-                    active_steps=_steps or None,
-                    prompt_node=_pn,
+                    schema=pipeline_schema,
                 )
             else:
                 pp = copy.deepcopy(baseline.pipeline_params or {})

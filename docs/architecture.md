@@ -234,7 +234,7 @@ The supplemental document includes: campaign comparison, convergence, pairwise s
 
 ## Context Object Lifecycle
 
-Nine context/config objects flow through the system. Understanding when each is created, who owns it, and how long it lives is essential for working in the codebase.
+Eight context/config objects flow through the system. Understanding when each is created, who owns it, and how long it lives is essential for working in the codebase.
 
 ### Data flow
 
@@ -256,16 +256,13 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
   ├──► build_run_config()
   │       │
   │       ▼
-  │    RunConfig (Pydantic, immutable)        ← validated campaign config
+  │    RunConfig (Pydantic, immutable)        ← validated optimization config
   │       │
-  │       ├──► init_cycle_state()
+  ├──────►├──► init_cycle_state(config, session)
   │       │       │
   │       │       ├─ LoopState (mutable)      ← round-by-round optimizer state
   │       │       │    └─ opt_sp: OptSearchPoint (source of truth)
-  │       │       │    └─ eval_ctx: EvalContext (infra for eval calls)
-  │       │       │
-  │       │       ▼
-  │       │    CycleContext (return bundle)
+  │       │       │    └─ eval_ctx: EvalContext (uses session.store directly)
   │       │       │
   │       ▼       ▼
   │    optimization_loop.run_optimization()
@@ -281,6 +278,8 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
        injected into RunConfig.scan_context
 ```
 
+`BackendContext` is threaded alongside `RunConfig` into `init_cycle_state()` so that `EvalContext` reuses `session.store` directly instead of creating a duplicate `ProjectStore`. Infrastructure fields (`backend_url`, `index_terms`) live only on `BackendContext`, not duplicated on `RunConfig`.
+
 ### Lifecycle table
 
 | Object | Defined in | Created by | Lifetime | Mutated? | Checkpointed? |
@@ -289,15 +288,17 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
 | **RunConfig** | `campaign/config.py` | `from_campaign_config()` | Campaign | No (immutable Pydantic model) | No |
 | **BackendContext** | `campaign/bootstrap.py` | `init_services()` | Session | Rarely (`pipeline_schema` filtered) | No |
 | **EvalContext** | `models/eval_context.py` | `cycle_init._setup_eval_context()` | Cycle | `candidate_idx`, `stale_data_observations` per eval | No |
-| **CycleContext** | `campaign/state.py` | `cycle_init.init_cycle_state()` | Cycle | No (bundles LoopState) | No |
 | **LoopState** | `campaign/state.py` | `cycle_init._build_baseline_state()` | Cycle | Intensely (every round) | Yes (`opt_sp` + escalation) |
 | **CritiqueContext** | `campaign/critique.py` | `execute_round()` | Per-round | No (read-only stats) | No |
 | **ContextData** | `campaign/formatting.py` | `l1_generate()` | Per-generation | No (formatting input) | No |
 | **ScanContext** | `search/scan_results.py` | `prepare_scan_context()` | Campaign | No (read-only) | No |
 
+`init_cycle_state()` returns a `CycleInit` NamedTuple (defined in `cycle_init.py`) bundling LoopState + cycle infrastructure. It is immediately destructured by its single consumer.
+
 ### Key invariants
 
 - **Single source of truth**: All optimizer state (critique, plan, task_context, escalation_journal, warning_inventory) lives on `LoopState.opt_sp` (`OptSearchPoint`). Only `opt_sp` is checkpointed between rounds.
 - **Infrastructure vs. state**: `BackendContext` and `EvalContext` carry infrastructure references (clients, stores). `LoopState` carries mutable optimization state. Don't conflate them.
+- **No store duplication**: `EvalContext.store` is `BackendContext.store` — not a separately constructed `ProjectStore`.
 - **Ephemeral bundles**: `CritiqueContext` and `ContextData` exist only during a single function call. They're formatting/diagnostic snapshots, not persistent state.
 - **Config pipeline**: `CampaignConfig` (user dict, flexible) → `RunConfig` (validated, immutable) is a one-way transformation. Services read `RunConfig`, never `CampaignConfig` directly.

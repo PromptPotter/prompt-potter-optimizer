@@ -115,7 +115,6 @@ def build_run_config(
     campaign_config: CampaignConfig,
     session: BackendContext,
     *,
-    pipeline_params: dict | None = None,
     scan_context: ScanContext | None = None,
     task_context: TaskContext | dict | None = None,
     session_id: str = "",
@@ -123,11 +122,8 @@ def build_run_config(
     """Assemble a ``RunConfig`` from *campaign_config* and *session* context."""
     return RunConfig.from_campaign_config(
         campaign_config,
-        backend_url=session.backend_client.base_url,
         backend_id=session.backend_id,
         project_root=str(session.store.base_dir),
-        pipeline_params=pipeline_params,
-        index_terms=session.index_terms,
         session_id=session_id,
         scan_context=scan_context,
         pipeline_schema=session.pipeline_schema,
@@ -163,7 +159,6 @@ async def run_optimization(
     campaign_config: CampaignConfig,
     *,
     session: BackendContext,
-    pipeline_params: dict | None = None,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
     task_context: TaskContext | dict | None = None,
@@ -187,7 +182,6 @@ async def run_optimization(
     config = build_run_config(
         campaign_config,
         session,
-        pipeline_params=pipeline_params,
         scan_context=scan_context,
         task_context=task_context,
         session_id=session_id,
@@ -226,7 +220,7 @@ async def run_optimization(
         scan_context=scan_context,
         cycle_id=cycle_id,
         experiment_id=experiment_id or "",
-        backend_client=session.backend_client,
+        session=session,
     )
 
 
@@ -261,15 +255,10 @@ async def run_scan_and_persist(
         sensitivity_scan as _sensitivity_scan,
     )
 
-    # Configure pipeline (ensures filtered schema is applied)
+    # Configure pipeline (ensures filtered schema is applied with overrides baked in)
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log)
 
-    # Resolve prompt node from pipeline schema
-    prompt_node = ""
     ps = session.pipeline_schema
-    if ps:
-        active_steps = (pipeline_params or {}).get("steps", [])
-        prompt_node = ps.resolve_active_prompt_node(active_steps)
 
     # Decompose scan baseline
     llm_client, llm_model = create_llm_client(campaign_config)
@@ -281,7 +270,6 @@ async def run_scan_and_persist(
         pipeline_params=pipeline_params,
         session=session,
         scan_variants=scan_variants,
-        prompt_node=prompt_node,
         pipeline_schema=ps,
     )
     scan_baseline_sp = result.baseline_jsp

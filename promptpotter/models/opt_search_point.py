@@ -42,6 +42,7 @@ from promptpotter.models.task_context import TaskContext
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
+    from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.models.search_point import JobSearchPoint
 
 
@@ -258,8 +259,7 @@ class OptSearchPoint(PromptTemplate):
         self,
         base_pipeline_params: dict | None = None,
         *,
-        active_steps: tuple[str, ...] | list[str] | None = None,
-        prompt_node: str = "",
+        schema: PipelineSchema | None = None,
     ) -> JobSearchPoint:
         """Project into a JobSearchPoint for target-layer evaluation.
 
@@ -267,14 +267,17 @@ class OptSearchPoint(PromptTemplate):
         a frozen JobSearchPoint with ``prompt_fields`` populated for
         variant derivation.
 
-        When *active_steps* is provided, unconditionally sets
-        ``pp["steps"]`` — pipeline composition is immutable per campaign
-        and must not depend on what ``base_pipeline_params`` carries.
+        When *schema* is provided, derives ``active_steps`` and
+        ``prompt_node`` from it — pipeline composition is immutable per
+        campaign and must not depend on what ``base_pipeline_params``
+        carries.
         """
         from promptpotter.models.search_point import JobSearchPoint
 
         pp = copy.deepcopy(base_pipeline_params or {})
-        if active_steps is not None:
+        active_steps = schema.active_steps if schema else ()
+        prompt_node = schema.prompt_node if schema else ""
+        if active_steps:
             pp["steps"] = list(active_steps)
         rendered = self.render()
         if rendered and prompt_node:

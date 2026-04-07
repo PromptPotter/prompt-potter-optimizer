@@ -1,8 +1,7 @@
 """Campaign types — outcome models, callbacks, mutable loop state.
 
 PhaseEvent, StopReason, RoundResult, RunResult, RunCallbacks,
-EscalationCounters, LoopState, CycleContext, and the session
-artifact manifest.
+EscalationCounters, LoopState, and the session artifact manifest.
 """
 
 from __future__ import annotations
@@ -23,15 +22,12 @@ if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.eval_context import EvalContext
     from promptpotter.models.query_result import QueryResult
-    from promptpotter.services.campaign.escalation import DegradationCheck
-    from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "CAMPAIGN_SESSION_ARTIFACTS",
     "CampaignPhase",
-    "CycleContext",
     "EscalationCounters",
     "LoopState",
     "OnCandidateEval",
@@ -225,21 +221,6 @@ class LoopState:
             self.best_accuracy = self.current_accuracy
             self.best_round = round_num
             self.best_sp = self.current_sp
-
-
-@dataclass
-class CycleContext:
-    """Return type for ``_init_cycle_state()`` — replaces a 7-tuple."""
-
-    state: LoopState
-    campaign_store: Any = None
-    cycle_id: str | None = None
-    obs_campaign_id: str = ""
-    round_dataset: list[dict[str, Any]] = field(default_factory=list)
-    escalation_checks: list[DegradationCheck] = field(default_factory=list)
-    resumed_from_round: int = 0
-    search_memory: Any = None
-    persistence_emitter: CampaignPersistenceEmitter | None = None
 
 
 class PhaseEvent(BaseModel):

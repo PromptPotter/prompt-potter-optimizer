@@ -56,6 +56,7 @@ def _graceful_interrupt():
     finally:
         signal.signal(signal.SIGINT, old_handler)
 
+
 if TYPE_CHECKING:
     from promptpotter.models.eval_context import EvalContext
     from promptpotter.models.search_point import JobSearchPoint

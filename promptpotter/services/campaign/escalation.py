@@ -22,6 +22,7 @@ from promptpotter.services.metrics import count_degraded_queries
 from promptpotter.shared.errors import EscalationError
 
 if TYPE_CHECKING:
+    from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.config import RunConfig
     from promptpotter.services.campaign.state import LoopState, StopReason
     from promptpotter.services.tracing.observability_logger import ObsLogger
@@ -192,8 +193,7 @@ def _rebuild_current_sp(
     state: LoopState,
     tr: Any,
     *,
-    active_steps: tuple[str, ...] = (),
-    prompt_node: str = "",
+    schema: PipelineSchema | None = None,
 ) -> None:
     """Update opt_sp from a transition result and rebuild current_sp."""
     new_opt = tr.opt_search_point
@@ -204,8 +204,7 @@ def _rebuild_current_sp(
     pp = getattr(tr, "pipeline_params", None) or cur.pipeline_params
     state.current_sp = state.opt_sp.to_job_search_point(
         base_pipeline_params=pp,
-        active_steps=active_steps,
-        prompt_node=prompt_node,
+        schema=schema,
     )
 
 
@@ -271,7 +270,7 @@ async def _do_l2_transition(
         )
     # Rebuild first — inherit_memory preserves accumulated state,
     # then apply L2's new values to the rebuilt opt_sp.
-    _rebuild_current_sp(state, tr, active_steps=config.active_steps, prompt_node=config.prompt_node)
+    _rebuild_current_sp(state, tr, schema=config.pipeline_schema)
     if tr.task_context:
         state.opt_sp.task_context = tr.task_context
     state.opt_sp.l2_directive = tr.l2_directive
@@ -359,7 +358,7 @@ async def _do_l3_transition(
             pipeline_params=current_pp,
             pipeline_schema=config.pipeline_schema,
         )
-    _rebuild_current_sp(state, tr, active_steps=config.active_steps, prompt_node=config.prompt_node)
+    _rebuild_current_sp(state, tr, schema=config.pipeline_schema)
     state.escalation.l3_round += 1
     state.escalation.best_accuracy_at_l3_entry = state.best_accuracy
     state.escalation.best_composite_at_l3_entry = state.best_composite

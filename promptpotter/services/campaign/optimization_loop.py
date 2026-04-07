@@ -17,7 +17,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.services.backend_client import BackendClient
+from promptpotter.services.campaign.bootstrap import BackendContext
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.cycle_init import init_cycle_state
 from promptpotter.services.campaign.escalation import escalate_l2
@@ -275,7 +275,7 @@ async def run_optimization(
     scan_context: ScanContext | None = None,
     cycle_id: str | None = None,
     experiment_id: str = "",
-    backend_client: "BackendClient | None" = None,
+    session: BackendContext | None = None,
 ) -> RunResult:
     """Run iterative optimization with feedback cycling.
 
@@ -300,7 +300,7 @@ async def run_optimization(
         langfuse_session_id,
         cycle_id,
         experiment_id,
-        backend_client,
+        session,
         started_at,
     )
     state = init.state
@@ -384,8 +384,7 @@ async def run_optimization(
                 state,
                 round_result,
                 round_num,
-                active_steps=config.active_steps,
-                prompt_node=config.prompt_node,
+                schema=config.pipeline_schema,
             )
 
             # --- After probe round: reset flag + force L2 ---

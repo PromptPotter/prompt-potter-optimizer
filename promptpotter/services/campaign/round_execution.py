@@ -229,7 +229,6 @@ async def _evaluate_candidates(
             current_best,
             state.eval_ctx,
             pipeline_params=state.current_sp.pipeline_params,
-            active_steps=config.active_steps,
             improvement_threshold=config.improvement_threshold,
             callbacks=callbacks,
             escalation_checks=escalation_checks,
@@ -429,8 +428,7 @@ def update_round_state(
     rr: RoundResult,
     round_num: int,
     *,
-    active_steps: tuple[str, ...] = (),
-    prompt_node: str = "",
+    schema: PipelineSchema | None = None,
 ) -> None:
     """Apply round result to loop state (shared by escalation + normal paths)."""
     state.rounds.append(rr)
@@ -443,8 +441,7 @@ def update_round_state(
     _pp = rr.pipeline_params if rr.pipeline_params is not None else state.current_sp.pipeline_params
     new_sp = state.opt_sp.to_job_search_point(
         base_pipeline_params=_pp,
-        active_steps=active_steps,
-        prompt_node=prompt_node,
+        schema=schema,
     )
     state.update_current(rr, new_sp, round_num)
 

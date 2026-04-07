@@ -86,7 +86,9 @@ class CampaignPersistenceEmitter:
             "avg_query_time_s": 0.0,
             "eta_s": 0.0,
             # Pipeline
-            "active_nodes": list(config.active_steps),
+            "active_nodes": list(config.pipeline_schema.active_steps)
+            if config.pipeline_schema
+            else [],
             "excluded_nodes": [],
             "terminated_at": None,
             "cache_hit_rate": 0.0,

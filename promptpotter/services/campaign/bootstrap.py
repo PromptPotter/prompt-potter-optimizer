@@ -345,14 +345,14 @@ def save_campaign_winner(
 def diff_campaign_config(
     stored_config: dict,
     campaign_config: CampaignConfig,
-    pipeline_params: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, dict]:
     """Compute parameter differences between stored and current campaign config."""
     from promptpotter.services.campaign.config import RunConfig
 
     current = RunConfig.from_campaign_config(
         campaign_config,
-        pipeline_params=pipeline_params,
+        pipeline_schema=pipeline_schema,
     ).model_dump()
 
     keys = [
@@ -373,8 +373,9 @@ def diff_campaign_config(
         if sv != cv:
             diffs[k] = {"stored": sv, "current": cv}
 
+    # Compare pipeline params (derived from schema)
     sp = stored_config.get("pipeline_params")
-    cp = current.get("pipeline_params")
+    cp = pipeline_schema.to_pipeline_params() if pipeline_schema else None
     if sp != cp:
         for pk in sorted(set(sp or {}) | set(cp or {})):
             sv = (sp or {}).get(pk)

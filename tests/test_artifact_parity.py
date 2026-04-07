@@ -58,7 +58,6 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     store = _make_mock_session_store(tmp_path)
 
     config = RunConfig(
-        backend_url="http://test",
         backend_id="test_backend",
         session_id="test_session",
         max_rounds=5,

@@ -5,7 +5,6 @@ mappings, and service-level constants.  All modules that need these
 import from here.
 """
 
-
 DATASET_NAME: str = "ground_truth"
 NO_RESULT: str = "NO_RESULT"
 DEFAULT_DIAGNOSTIC_QUERIES: int = 6

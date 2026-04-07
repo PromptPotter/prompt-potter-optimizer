@@ -305,7 +305,6 @@ async def l1_evaluate(
     ctx: EvalContext,
     *,
     pipeline_params: dict | None = None,
-    active_steps: tuple[str, ...] = (),
     improvement_threshold: float = 0.01,
     callbacks: RunCallbacks | None = None,
     escalation_checks: list | None = None,
@@ -357,23 +356,18 @@ async def l1_evaluate(
                 else:
                     pp[k] = v
             # Safety net: drop overrides for nodes not in active steps
-            if active_steps:
-                _active = set(active_steps)
+            _schema = ctx.pipeline_schema
+            if _schema:
+                _active = set(_schema.active_steps)
                 for k in list(pp):
                     if k != "steps" and isinstance(pp[k], dict) and k not in _active:
                         logger.warning("Dropping LLM override for excluded node %r", k)
                         del pp[k]
         else:
             pp = _sp_pipeline_params
-        _pn = (
-            ctx.pipeline_schema.prompt_node_names()[0]
-            if ctx.pipeline_schema and ctx.pipeline_schema.prompt_node_names()
-            else ""
-        )
         sp = osp_c.to_job_search_point(
             base_pipeline_params=pp,
-            active_steps=active_steps,
-            prompt_node=_pn,
+            schema=ctx.pipeline_schema,
         )
         ctx.candidate_idx = idx
         results, scores, cached = await eval_search_point(
