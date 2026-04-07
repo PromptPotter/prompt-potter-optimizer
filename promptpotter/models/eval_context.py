@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -43,3 +44,5 @@ class EvalContext:
     search_memory: SearchMemory | None = None
     # Mutable dict extracted from opt_sp.stale_data_observations — updated during eval
     stale_data_observations: dict[str, int | dict] | None = None
+    # Per-dataset scoring formula (compiled callable from shared/scoring.py)
+    scorer: Callable[[dict], float] | None = None

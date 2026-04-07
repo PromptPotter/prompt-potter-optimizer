@@ -760,6 +760,7 @@ async def run_baseline_eval(
             experiment_id=session.experiment_id,
             on_result=_on_result,
             obs=_obs,
+            scoring_formula=campaign_config.get("scoring"),
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         _print_interrupt_banner(

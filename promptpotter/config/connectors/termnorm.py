@@ -12,14 +12,6 @@ from __future__ import annotations
 
 from typing import Any
 
-# -- Defaults ---------------------------------------------------------------
-
-BACKEND_NAME = "TermNorm Local"
-BACKEND_TYPE = "termnorm"
-DATASET_DESCRIPTION = "TermNorm production ground truth queries for prompt evaluation"
-PIPELINE_TRACE_NAME = "termnorm_pipeline"
-
-
 # -- Query parsing ----------------------------------------------------------
 
 

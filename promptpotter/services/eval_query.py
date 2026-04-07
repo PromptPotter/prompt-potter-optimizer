@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import httpx
@@ -24,6 +25,9 @@ if TYPE_CHECKING:
     from promptpotter.services.stores.intermediate_cache import IntermediateCache
 
 _evaluator = ExactMatchEvaluator({"strip": True})
+
+# Type alias for per-dataset scoring callable (see shared/scoring.py)
+Scorer = Callable[[dict], float]
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +73,7 @@ def _build_local_result(
     node_outputs: dict,
     target_steps: list[str],
     pipeline_schema: PipelineSchema,
+    scorer: Scorer | None = None,
 ) -> QueryResult:
     """Construct an eval result locally from intermediate cache (no backend call).
 
@@ -111,7 +116,7 @@ def _build_local_result(
         (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth), None
     )
     n_candidates = len(ranked)
-    return {
+    result: dict = {
         "query": query,
         "predicted": predicted,
         "ground_truth": ground_truth,
@@ -124,6 +129,9 @@ def _build_local_result(
         "precomputed_through": list(target_steps),
         "cached": True,
     }
+    if scorer:
+        result["score"] = scorer(result)
+    return result
 
 
 def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
@@ -154,6 +162,7 @@ async def eval_query_via_backend(
     pipeline_schema: PipelineSchema | None = None,
     intermediate_cache: IntermediateCache | None = None,
     backend_id: str = "",
+    scorer: Scorer | None = None,
 ) -> QueryResult:
     """Evaluate a reranker prompt on a single query via the backend /matches endpoint."""
     query = query_data["query"]
@@ -191,6 +200,7 @@ async def eval_query_via_backend(
                 precomputed,
                 _target_steps,
                 pipeline_schema,
+                scorer=scorer,
             )
 
         resp = await backend_client.run_query(
@@ -224,17 +234,25 @@ async def eval_query_via_backend(
                 " — pipeline internal failure for this query.",
             )
         eval_output = _evaluator.evaluate(ground_truth, predicted)
-        result = {
+        gt_rank = next(
+            (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth),
+            None,
+        )
+        result: dict = {
             "query": query,
             "predicted": predicted,
             "ground_truth": ground_truth,
             "hit": eval_output.result == EvalResult.PASS,
             "score": eval_output.score,
             "error": None,
+            "n_candidates": len(ranked),
+            "ground_truth_rank": gt_rank,
             "pipeline_data": _parse_backend_response(data, ranked, pipeline_schema),
         }
         if precomputed:
             result["precomputed_through"] = list(precomputed.keys())
+        if scorer:
+            result["score"] = scorer(result)
         return result
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)

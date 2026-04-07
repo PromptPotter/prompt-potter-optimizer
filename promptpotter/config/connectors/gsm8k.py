@@ -12,11 +12,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# -- Defaults ---------------------------------------------------------------
-
-BACKEND_NAME = "GSM8K Benchmark"
-BACKEND_TYPE = "benchmark"
-DATASET_DESCRIPTION = "GSM8K test set"
 DATASET_SIZE = 1319
 METRICS = ["exact_match_numeric"]
 

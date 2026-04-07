@@ -90,6 +90,7 @@ async def run_baseline_eval(
     on_result: Callable | None = None,
     obs: Any | None = None,
     pipeline_schema: Any | None = None,
+    scoring_formula: str | None = None,
 ) -> tuple[list, list]:
     """Evaluate baseline prompt and build initial campaign_rounds list.
 
@@ -103,6 +104,7 @@ async def run_baseline_eval(
         on_result: Optional callback for progress reporting.
         obs: Optional ObsLogger for dataset registration.
         pipeline_schema: Optional PipelineSchema for composite scoring.
+        scoring_formula: Optional per-dataset scoring expression.
 
     Returns:
         Tuple of (campaign_rounds, baseline_results).
@@ -113,6 +115,7 @@ async def run_baseline_eval(
     from promptpotter.models.eval_context import EvalContext
     from promptpotter.services.eval_gateway import eval_search_point
     from promptpotter.shared.errors import graceful
+    from promptpotter.shared.scoring import compile_scorer
 
     # Unpack session
     backend_client = session.backend_client
@@ -156,6 +159,7 @@ async def run_baseline_eval(
         pipeline_schema=pipeline_schema,
         obs=obs,
         source="baseline",
+        scorer=compile_scorer(scoring_formula),
     )
     baseline_results, scores, _cached = await eval_search_point(
         sp,
@@ -204,6 +208,7 @@ async def prepare_eval_context(
             svc,
             pipeline_params=pipeline_params,
             pipeline_schema=pipeline_schema,
+            scoring_formula=campaign_config.get("scoring"),
         )
 
     return baseline, dataset, campaign_rounds, baseline_results

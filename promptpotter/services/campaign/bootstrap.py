@@ -82,9 +82,13 @@ def load_baseline_prompt(
         matched_key, matched_prompt = next(iter(prompts.items()))
 
     if matched_prompt is None:
-        raise RuntimeError(
-            f"No prompt found for nodes {names} in synced experiment data. "
-            "Re-sync the experiment after the prompt registry is initialized."
+        logger.info(
+            "No prompt found for nodes %s — baseline uses empty prompt (param-only optimization)",
+            names,
+        )
+        return OptSearchPoint(
+            instruction="",
+            changes_description="Baseline (no prompt node active — param-only optimization)",
         )
 
     label = names[0] if names else matched_key
@@ -116,18 +120,6 @@ async def init_services(
     client = BackendClient(backend_url)
     _status(f"Backend: {backend_url}")
 
-    if not store.backends.get(backend_id):
-        from promptpotter.config.connectors.termnorm import BACKEND_NAME, BACKEND_TYPE
-
-        store.backends.register(
-            BackendConnection(
-                id=backend_id,
-                name=BACKEND_NAME,
-                backend_type=BACKEND_TYPE,
-                base_url=backend_url,
-            )
-        )
-
     # Fetch pipeline schema (best-effort — non-fatal)
     pipeline_schema = None
     try:
@@ -142,6 +134,20 @@ async def init_services(
     except Exception as exc:
         logger.info("Could not fetch pipeline schema: %s", exc)
         _status("Pipeline: unavailable")
+
+    # Register backend connection
+    if not store.backends.get(backend_id):
+        backend_name = pipeline_schema.name if pipeline_schema else "Unknown"
+        backend_type = "backend" if pipeline_schema else "unknown"
+
+        store.backends.register(
+            BackendConnection(
+                id=backend_id,
+                name=backend_name,
+                backend_type=backend_type,
+                base_url=backend_url,
+            )
+        )
 
     base = BackendContext(
         store=store,
@@ -216,6 +222,7 @@ async def init_services(
     base.exp_data = exp_data
     base.index_terms = index_terms
     return base
+
 
 
 def _dataset_items_to_queries(items: list[dict]) -> list[dict]:

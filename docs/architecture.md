@@ -101,7 +101,11 @@ eval_search_point()
 
 ## Pipeline Discovery
 
-`GET /pipeline` returns the target pipeline config with resolved registry metadata. `parse_pipeline_response()` builds `PipelineSchema` entirely from the live response. Each node carries an `optimizer` sub-object (`param_keys`, `observation_mappings`). No backend-specific constants in PromptPotter service code — all backend knowledge comes from the live `GET /pipeline` response.
+`GET /pipeline` returns the target pipeline config with resolved registry metadata. `parse_pipeline_response()` builds `PipelineSchema` from the response. Each node carries an `optimizer` sub-object (`param_keys`, `observation_mappings`). Per-dataset `pipeline.json` files in `configs/datasets/{name}/` provide static pipeline declarations (used for reference and future local-only datasets). Backend registration derives `backend_name`/`backend_type` from `pipeline_schema.name`. No backend-specific constants in PromptPotter service code.
+
+### Per-Dataset Scoring
+
+Each dataset can declare a scoring formula in `campaign.json["scoring"]`. If absent, binary exact-match (`hit`) is used. See `shared/scoring.py`.
 
 ## Optimizer Pipeline
 

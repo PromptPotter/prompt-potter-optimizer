@@ -176,6 +176,8 @@ def _setup_eval_context(
     Returns:
         escalation_checks list.
     """
+    from promptpotter.shared.scoring import compile_scorer
+
     _store = session.store if session else None
     state.eval_ctx = EvalContext(
         backend_client=backend_client,
@@ -188,6 +190,7 @@ def _setup_eval_context(
         max_consecutive_errors=config.max_consecutive_errors,
         stale_data_load_protocol=config.stale_data_load_protocol,
         stale_data_observations=state.opt_sp.stale_data_observations,
+        scorer=compile_scorer(config.scoring_formula),
     )
 
     # Alias: raw instruction ↔ restructured baseline

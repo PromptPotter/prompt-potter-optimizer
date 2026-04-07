@@ -39,7 +39,7 @@ python -m promptpotter.cli.campaign_runner init \
 
 Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config, and optionally evaluates the baseline prompt.
 
-Produces: `session.json` with `pipeline_params`, `init_params`, `phase: "initialized"`.
+Produces: `session.json` with `pipeline_params`, `init_params`, `phase: "init"`.
 
 ### task-context
 

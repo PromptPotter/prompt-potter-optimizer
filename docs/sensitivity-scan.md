@@ -80,7 +80,7 @@ Standard sensitivity scan measures per-axis accuracy deltas over the full query 
 
 1. Failure clusters from SearchMemory group queries by `terminated_at` step (e.g., `web_search`, `token_matching`).
 2. Per-query hit/miss results from scan rows are aggregated per cohort.
-3. For each (axis, cohort) pair, the delta between baseline hit rate and best-value hit rate is computed.
+3. For each (axis, cohort) pair, the delta between baseline accuracy and best-value accuracy is computed. When `campaign.json` declares a `"scoring"` formula (e.g. `"rr(ground_truth_rank)"`), that formula drives accuracy; otherwise binary hit/miss is used.
 4. Results are ranked by absolute delta and ingested into SearchMemory via `ingest_cohort_analysis()`.
 
 **What it enables:**

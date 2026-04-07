@@ -47,6 +47,7 @@ async def sensitivity_scan(
     on_result: Callable | None = None,
     experiment_id: str = "",
     pruning_enabled: bool = True,
+    scoring_formula: str | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """OAT perturbation scan over all axes.
 
@@ -87,6 +88,8 @@ async def sensitivity_scan(
         dataset = random.Random(42).sample(dataset, sample_size)
 
     # Build EvalContext once for all scan evaluations
+    from promptpotter.shared.scoring import compile_scorer
+
     scan_ctx = EvalContext(
         backend_client=backend_client,
         store=store,
@@ -94,6 +97,7 @@ async def sensitivity_scan(
         pipeline_schema=pipeline_schema,
         source="sensitivity_scan",
         experiment_id=experiment_id,
+        scorer=compile_scorer(scoring_formula),
     )
 
     # Resolve active prompt node — only if the prompt node is in active steps

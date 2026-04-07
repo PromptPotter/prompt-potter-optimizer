@@ -1,5 +1,6 @@
 {
   "campaign_config": {
+    "scoring": "rr(ground_truth_rank)",
     "sample_size": 0,
     "exploration_sample_size": 10,
     "exploration_rate": 0.5,

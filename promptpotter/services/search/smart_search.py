@@ -533,6 +533,7 @@ async def adaptive_search(
     plan_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
     experiment_id: str = "",
+    scoring_formula: str | None = None,
 ) -> tuple[OptSearchPoint, dict, pd.DataFrame]:
     """Coordinate descent with per-axis budget from sensitivity profiles.
 
@@ -589,6 +590,8 @@ async def adaptive_search(
     resolved_axes: set[str] = set()
     log_rows: list[dict] = []
 
+    from promptpotter.shared.scoring import compile_scorer
+
     _scan_ctx = EvalContext(
         backend_client=backend_client,
         store=store,
@@ -596,6 +599,7 @@ async def adaptive_search(
         pipeline_schema=pipeline_schema,
         source="adaptive_search",
         experiment_id=experiment_id,
+        scorer=compile_scorer(scoring_formula),
     )
     _eval_opt = make_eval_fn(
         dataset,

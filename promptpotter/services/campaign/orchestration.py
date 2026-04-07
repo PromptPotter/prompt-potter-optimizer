@@ -285,6 +285,7 @@ async def run_scan_and_persist(
         "sample_size": scan_sample_size,
         "pipeline_schema": ps,
         "experiment_id": experiment_id,
+        "scoring_formula": campaign_config.get("scoring"),
     }
     if progress_cb is not None:
         scan_kwargs["progress_cb"] = progress_cb

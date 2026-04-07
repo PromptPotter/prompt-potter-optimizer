@@ -74,6 +74,7 @@ async def execute_stale_data_protocol(
     search_memory: SearchMemory | None = None,
     stale_data_observations: dict[str, int | dict] | None = None,
     stop_check: Callable[[], bool] | None = None,
+    scorer: Callable[[dict], float] | None = None,
 ) -> tuple[QueryResult, str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
@@ -121,6 +122,7 @@ async def execute_stale_data_protocol(
                 pipeline_schema=pipeline_schema,
                 intermediate_cache=intermediate_cache,
                 backend_id=backend_id,
+                scorer=scorer,
             )
             comparison = compare_rerun(cached_result, result)
             result["retry_of_degraded"] = True
@@ -146,6 +148,7 @@ async def execute_stale_data_protocol(
                 pipeline_schema=pipeline_schema,
                 intermediate_cache=None,
                 backend_id=backend_id,
+                scorer=scorer,
             )
             result["samplescan_probe"] = True
             result["samplescan_config"] = {

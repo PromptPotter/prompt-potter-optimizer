@@ -44,6 +44,7 @@ async def sensitivity_scan(
     pipeline_schema=None,
     experiment_id: str = "",
     session_id: str = "",
+    scoring_formula: str | None = None,
 ) -> tuple:
     """Run a sensitivity scan with progress output.
 
@@ -106,6 +107,7 @@ async def sensitivity_scan(
             progress_cb=cb,
             on_result=on_result_cb,
             experiment_id=experiment_id,
+            scoring_formula=scoring_formula,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         _print_interrupt_banner(
@@ -405,5 +407,6 @@ async def run_sensitivity_scan(
         session=session,
         experiment_id=experiment_id,
         session_id=session_id,
+        scoring_formula=campaign_config.get("scoring"),
     )
     return scan_baseline_sp, scan_df, axis_profiles

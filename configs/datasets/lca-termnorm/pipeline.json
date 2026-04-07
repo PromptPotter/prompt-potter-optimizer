@@ -1,0 +1,539 @@
+{
+  "name": "TermNorm",
+  "version": "v1.1",
+  "description": "TermNorm AI terminology normalization pipeline",
+  "backend_name": "TermNorm Local",
+  "backend_type": "termnorm",
+  "required_step": "entity_profile",
+  "template_variables": [
+    "{{core_concept}}",
+    "{{entity_profile_json}}",
+    "{{matches}}"
+  ],
+  "dataset_name": "termnorm_ground_truth",
+  "available_models": [
+    "openai/gpt-oss-120b",
+    "meta-llama/llama-4-scout-17b-16e-instruct"
+  ],
+  "nodes": {
+    "cache_lookup": {
+      "type": "cache",
+      "runtime": "frontend",
+      "short_circuit": true,
+      "node_role": "cache",
+      "description": "Checks the cache for previously resolved queries. Short-circuits the pipeline on hit.",
+      "config": {},
+      "optimizer": {
+        "langfuse_type": "span"
+      }
+    },
+    "fuzzy_matching": {
+      "type": "retriever",
+      "runtime": "frontend",
+      "short_circuit": true,
+      "node_role": "candidate_source",
+      "description": "Fuzzy string matching against the database index. Short-circuits on high-confidence matches, bypassing web search and LLM profiling entirely.",
+      "config": {
+        "threshold": 70,
+        "scorer": "WRatio",
+        "limit": 5
+      },
+      "optimizer": {
+        "display_tag": "fuzz",
+        "param_keys": [
+          "threshold",
+          "scorer"
+        ],
+        "param_descriptions": {
+          "threshold": "Minimum similarity score (0-100) to accept a fuzzy match",
+          "scorer": "Scoring algorithm for fuzzy string comparison"
+        },
+        "langfuse_type": "span"
+      }
+    },
+    "web_search": {
+      "type": "tool",
+      "runtime": "backend",
+      "node_role": "enricher",
+      "description": "Searches the web for contextual information about the input query. Retrieved content provides the primary raw context that entity_profiling uses to generate structured profiles \u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u20ac\udc9d the quality of web results directly determines profiling quality.",
+      "config": {
+        "max_sites": 7,
+        "num_results": 20,
+        "content_char_limit": 800,
+        "fallback_keywords_limit": 8,
+        "query_prefix": "",
+        "query_suffix": "",
+        "brave_api_timeout": 10,
+        "scrape_timeout": 5,
+        "http_content_limit": 50000,
+        "min_page_text_length": 100,
+        "max_page_text_length": 10000,
+        "title_truncate_length": 100,
+        "scrape_workers": 10,
+        "scrape_max_retries": 1,
+        "scrape_retry_delay": 1.0,
+        "scrape_retry_status_codes": [
+          429,
+          500,
+          502,
+          503,
+          504
+        ],
+        "scrape_jitter": 0.5,
+        "scrape_headers": {
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "DNT": "1",
+          "Upgrade-Insecure-Requests": "1",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "none",
+          "Sec-Fetch-User": "?1"
+        },
+        "user_agents": [
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:138.0) Gecko/20100101 Firefox/138.0",
+          "Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0"
+        ],
+        "skip_extensions": [
+          ".pdf",
+          ".doc",
+          ".docx",
+          ".ppt",
+          ".pptx",
+          ".xls",
+          ".xlsx"
+        ],
+        "skip_domains": [
+          "academia.edu",
+          "researchgate.net",
+          "arxiv.org",
+          "ieee.org",
+          "linkedin.com",
+          "facebook.com",
+          "instagram.com",
+          "twitter.com",
+          "x.com"
+        ],
+        "search_language": "en",
+        "search_country": "US",
+        "accept_language": "en-US,en;q=0.9",
+        "html_strip_tags": [
+          "script",
+          "style",
+          "nav",
+          "header",
+          "footer"
+        ],
+        "min_keyword_length": 3,
+        "keyword_split_chars": [
+          "/",
+          "-"
+        ],
+        "spellcheck": true,
+        "result_filter": "",
+        "extra_snippets": true,
+        "freshness": ""
+      },
+      "optimizer": {
+        "display_tag": "webS",
+        "param_keys": [
+          "max_sites",
+          "num_results",
+          "content_char_limit",
+          "query_prefix",
+          "query_suffix"
+        ],
+        "param_descriptions": {
+          "query_prefix": "Text prepended to the input query before web search \u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u20ac\udc9d controls search focus, domain targeting, and terminology framing (e.g. 'LCA database' narrows to domain)",
+          "query_suffix": "Text appended to the input query before web search \u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u20ac\udc9d adds qualifiers, constraints, or context keywords (e.g. 'material composition' adds specificity)",
+          "num_results": "Number of search engine results to request",
+          "max_sites": "Maximum number of web pages to fetch and extract content from",
+          "content_char_limit": "Maximum characters of content to extract per web page"
+        },
+        "observation_name": "web_search",
+        "observation_mappings": [
+          {
+            "pipeline_key": "web_sources",
+            "output_field": "sources"
+          },
+          {
+            "pipeline_key": "web_search_status",
+            "output_field": "status"
+          }
+        ],
+        "langfuse_type": "tool"
+      }
+    },
+    "entity_profiling": {
+      "type": "generation",
+      "runtime": "backend",
+      "node_role": "enricher",
+      "description": "LLM-driven step that generates a structured entity profile from the input query and web-sourced raw content. Produces the required pipeline output (entity_profile). Profile quality depends on both the LLM configuration and the quality of upstream web_search results.",
+      "config": {
+        "model": "openai/gpt-oss-120b",
+        "temperature": 0.3,
+        "max_tokens": null,
+        "raw_content_limit": 5000,
+        "per_site_content_limit": 500,
+        "prompt_family": "entity_profiling",
+        "prompt_version": 1,
+        "schema_family": "entity_profile",
+        "schema_version": 1
+      },
+      "optimizer": {
+        "param_keys": [
+          "raw_content_limit",
+          "temperature",
+          "max_tokens",
+          "prompt",
+          "output_schema",
+          "model"
+        ],
+        "param_descriptions": {
+          "raw_content_limit": "Maximum characters of web-sourced raw content passed as context to the profiling LLM \u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u20ac\udc9d bounds how much of web_search output is visible to the model",
+          "temperature": "LLM sampling temperature for profile generation",
+          "max_tokens": "Maximum tokens in the LLM profile generation response"
+        },
+        "input_keys": [
+          "web_sources"
+        ],
+        "observation_name": "entity_profiling",
+        "observation_mappings": [
+          {
+            "pipeline_key": "entity_profile",
+            "output_field": null,
+            "is_llm": true
+          }
+        ],
+        "langfuse_type": "generation"
+      }
+    },
+    "token_matching": {
+      "type": "retriever",
+      "runtime": "backend",
+      "node_role": "candidate_source",
+      "description": "Token-level retrieval matching entity profile fields against database entries. Candidate pool quality depends on the entity profile generated upstream.",
+      "config": {
+        "max_token_candidates": 20,
+        "tokenization_regex": "[a-zA-Z0-9]+"
+      },
+      "optimizer": {
+        "display_tag": "rank",
+        "param_keys": [
+          "max_token_candidates"
+        ],
+        "param_descriptions": {
+          "max_token_candidates": "Maximum number of candidates to return from token matching"
+        },
+        "input_keys": [
+          "entity_profile"
+        ],
+        "observation_name": "token_matching",
+        "observation_mappings": [
+          {
+            "pipeline_key": "candidate_ranking",
+            "output_field": "candidates"
+          }
+        ],
+        "langfuse_type": "retriever"
+      }
+    },
+    "llm_ranking": {
+      "type": "generation",
+      "runtime": "backend",
+      "node_role": "ranker",
+      "description": "LLM-driven re-ranking of token-matched candidates using a ranking prompt. Selects the best match from the candidate pool.",
+      "config": {
+        "model": "openai/gpt-oss-120b",
+        "temperature": 0.0,
+        "max_tokens": 4000,
+        "sample_size": 20,
+        "debug_output_limit": 20,
+        "relevance_weight_core": 0.7,
+        "prompt_family": "llm_ranking",
+        "prompt_version": 1,
+        "schema_family": "llm_ranking_output",
+        "schema_version": 1
+      },
+      "optimizer": {
+        "param_keys": [
+          "temperature",
+          "max_tokens",
+          "sample_size",
+          "prompt",
+          "output_schema",
+          "model",
+          "relevance_weight_core"
+        ],
+        "param_descriptions": {
+          "temperature": "LLM sampling temperature for ranking",
+          "max_tokens": "Maximum tokens in the LLM ranking response",
+          "sample_size": "Number of candidates sampled from the pool for LLM ranking",
+          "relevance_weight_core": "Weight given to core-concept relevance in ranking score"
+        },
+        "input_keys": [
+          "candidate_ranking",
+          "entity_profile"
+        ],
+        "observation_name": "llm_ranking",
+        "observation_mappings": [
+          {
+            "pipeline_key": "final_ranking",
+            "output_field": "ranked_candidates",
+            "is_llm": true
+          }
+        ],
+        "langfuse_type": "generation"
+      }
+    },
+    "direct_prompt": {
+      "type": "generation",
+      "runtime": "backend",
+      "node_role": "",
+      "description": "Direct LLM prompt for simple queries \u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u20ac\udc9d bypasses the full pipeline.",
+      "config": {
+        "model": "openai/gpt-oss-120b",
+        "temperature": 0.0,
+        "max_tokens": 300,
+        "accept_threshold": 0.75,
+        "correction_top_n": 10
+      },
+      "optimizer": {
+        "langfuse_type": "generation"
+      }
+    }
+  },
+  "pipelines": {
+    "default": [
+      "cache_lookup",
+      "fuzzy_matching",
+      "web_search",
+      "entity_profiling",
+      "token_matching",
+      "llm_ranking"
+    ]
+  },
+  "cache": {
+    "high_confidence_threshold": 0.8,
+    "verified_methods": [
+      "UserChoice",
+      "DirectEdit",
+      "cached",
+      "fuzzy"
+    ]
+  },
+  "llm_defaults": {
+    "provider": "groq",
+    "model": "openai/gpt-oss-120b",
+    "timeout": 60,
+    "retry_attempts": 3,
+    "retry_backoff_base": 2,
+    "token_estimation_multiplier": 1.3,
+    "token_limit": 100000,
+    "seed": null,
+    "logprobs": null
+  },
+  "resolved_schemas": {
+    "entity_profile/1": {
+      "family": "entity_profile",
+      "version": 1,
+      "description": "Entity profile extraction schema for web research pipeline",
+      "fields": [
+        "entity_name",
+        "core_concept",
+        "distinguishing_features",
+        "key_properties",
+        "technical_specifications",
+        "alternative_names",
+        "classification_aliases",
+        "constituent_materials",
+        "manufacturing_processes",
+        "applications",
+        "notes"
+      ],
+      "json_schema": {
+        "type": "object",
+        "properties": {
+          "entity_name": {
+            "type": "string"
+          },
+          "core_concept": {
+            "type": "string",
+            "description": "The single word that defines what this expression represents"
+          },
+          "distinguishing_features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "key_properties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "technical_specifications": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Explicit technical specs, dimensions, codes, ratings, tolerances"
+          },
+          "alternative_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "classification_aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Full spectrum of valid ways this entity could be referenced using expert-level terminology, from precise to generic"
+          },
+          "constituent_materials": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "All materials that make up this product, both explicit and standard/typical materials inferred from domain knowledge"
+          },
+          "manufacturing_processes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Both stated and inferred manufacturing processes based on product type, materials, and industry standards"
+          },
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Direct and derived applications based on product characteristics"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "entity_name",
+          "core_concept",
+          "distinguishing_features",
+          "key_properties",
+          "technical_specifications",
+          "alternative_names",
+          "classification_aliases",
+          "constituent_materials",
+          "manufacturing_processes",
+          "applications",
+          "notes"
+        ]
+      }
+    },
+    "llm_ranking_output/1": {
+      "family": "llm_ranking_output",
+      "version": 1,
+      "description": "LLM ranking step output schema \u00e2\u20ac\u201d structured candidate evaluation",
+      "fields": [
+        "profile_summary",
+        "core_concept_description",
+        "ranked_candidates"
+      ],
+      "json_schema": {
+        "type": "object",
+        "properties": {
+          "profile_summary": {
+            "type": "string",
+            "description": "1-2 sentence summary of the entity profile"
+          },
+          "core_concept_description": {
+            "type": "string",
+            "description": "Description of the core concept match"
+          },
+          "ranked_candidates": {
+            "type": "array",
+            "description": "Candidates ranked by relevance score",
+            "items": {
+              "type": "object",
+              "properties": {
+                "candidate": {
+                  "type": "string"
+                },
+                "core_concept_score": {
+                  "type": "number"
+                },
+                "spec_score": {
+                  "type": "number"
+                },
+                "evaluation_reasoning": {
+                  "type": "string"
+                },
+                "key_match_factors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "spec_gaps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "candidate",
+                "core_concept_score",
+                "spec_score",
+                "evaluation_reasoning",
+                "key_match_factors"
+              ]
+            }
+          }
+        },
+        "required": [
+          "profile_summary",
+          "core_concept_description",
+          "ranked_candidates"
+        ]
+      }
+    }
+  },
+  "resolved_prompts": {
+    "entity_profiling/1": {
+      "family": "entity_profiling",
+      "version": 1,
+      "description": "Extract comprehensive entity profile from web research data with US/GB spelling variants",
+      "template_variables": [
+        "query",
+        "format_string",
+        "combined_text"
+      ],
+      "template": "You are a comprehensive technical database API specialized in exhaustive entity profiling. Extract ALL possible information about '{{query}}' from the research data and return it in this exact JSON format:\n{{format_string}}\n\nCRITICAL SPELLING REQUIREMENT: In ALL arrays, after each term, immediately add its US/GB spelling variant if different. Example: [\"colour\", \"color\", \"analyse\", \"analyze\"]. This is MANDATORY for every array field.\n\nCORE CONCEPT IDENTIFICATION: Within '{{query}}', certain words carry more semantic weight than others. Material names, product codes, and specifications describe WHAT is involved, but other terms describe the fundamental NATURE of what is being expressed. Identify the single word that defines the conceptual essence - typically the term that indicates an activity, action, method, or process rather than an object or material. Output only this one defining word.\n\nPROFESSIONAL CLASSIFICATION ALIASES: Generate the full spectrum of expert-level references for this entity, spanning precise technical descriptors to broader categorical terms. These terms stem from domain-specific terminology and industry-standard nomenclature that professionals recognize. Include approximations and near-equivalent terms that experts use when exact terminology doesn't exist, accepting that some terms may not be perfect equivalents but represent the best available expert terminology for referencing similar concepts.\n\nGENERIC TECHNICAL INFERENCE INSTRUCTION: Given the product or technical description '{{query}}', perform comprehensive analysis to extract and infer:\n\n1. **Explicit Information**: Directly stated specifications, dimensions, materials, codes, and properties\n2. **Implicit Information**: Commonly associated materials, manufacturing processes, applications, and technical characteristics that are standard for this type of product/component, even if not explicitly mentioned\n3. **Manufacturing Processes**: Both stated and inferred processes based on product type, materials, and specifications\n4. **Material Composition**: Complete material breakdown including standard/typical materials used in such products\n5. **Applications & Use Cases**: Direct and derived applications based on product characteristics\n\n**Include domain knowledge**: Draw from technical standards, industry practices, and material science to infer missing but relevant information.\n\nCRITICAL INSTRUCTIONS FOR RICH ATTRIBUTE COLLECTION:\n- MAXIMIZE diversity: Include ALL synonyms, trade names, scientific names, abbreviations, acronyms, regional terms, industry terminology\n- COMPREHENSIVE extraction: Capture every property, specification, feature, attribute, including numerical values and compositional data\n- PRIORITIZE completeness over brevity: Aim for 5-10+ items per array field - be thorough, not minimal\n---\nRESEARCH DATA:\n{{combined_text}}\n---\nREMEMBER: Every term must be followed by its US/GB variant if different. Return only the JSON object with ALL fields maximally populated."
+    },
+    "llm_ranking/1": {
+      "family": "llm_ranking",
+      "version": 1,
+      "description": "Rank candidate matches based on entity profile relevance with core concept weighting",
+      "template_variables": [
+        "core_concept",
+        "entity_profile_json",
+        "matches"
+      ],
+      "template": "You are a candidate evaluation expert.\n\nTASK 1: Analyze profile and core concept (PRIMARY FACTOR - 70% WEIGHT)\n- Summarize the profile in 1-2 sentences capturing key details\n- Identify the entity_category from the profile\n- Think step-by-step: What are the most important distinguishing features of this entity?\n- CRITICAL: Prioritize candidates that match the core_concept: '{{core_concept}}'\n- Higher match = more of the distinguishing features present in the candidate name\n\nTASK 2: Evaluate candidate matches (20 candidates provided)\n- Each candidate will receive a relevance_score from 0.0 to 1.0\n- 0.95+ : Exact or near-perfect semantic match (contains most/all distinguishing features + matches core_concept)\n- 0.80-0.94 : Strong match (contains several key features + aligns with core_concept)\n- 0.50-0.79 : Moderate match (contains some features OR loosely relates to core_concept)\n- 0.00-0.49 : Weak/poor match (missing most features, doesn't match core_concept)\n\nENTITY PROFILE (JSON):\n{{entity_profile_json}}\n\nCANDIDATE MATCHES TO EVALUATE:\n{{matches}}\n\nIMPORTANT: Return a valid JSON response matching this exact structure:\n{\n    \"reasoning\": \"[1-2 sentences explaining profile, entity_category, and key features]\",\n    \"ranked_candidates\": [\n        {\n            \"rank\": 1,\n            \"candidate\": \"...\",\n            \"relevance_score\": 0.95,\n            \"rationale\": \"[Brief explanation - 1 sentence]\"\n        }\n    ]\n}\n\nRules:\n- Include ALL 20 candidates in ranked_candidates array\n- Rank 1 = highest relevance_score\n- relevance_score must decrease or stay equal as rank increases\n- Return ONLY valid JSON, no other text"
+    }
+  }
+}

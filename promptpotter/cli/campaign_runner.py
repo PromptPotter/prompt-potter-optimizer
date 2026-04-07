@@ -127,8 +127,6 @@ async def _prepare_eval_context(
 
 async def cmd_init(args: argparse.Namespace) -> None:
     """Initialize services, load datasets, configure pipeline, create session."""
-    import httpx
-
     from promptpotter.services.campaign.campaign_data import (
         prepare_datasets as _prepare_datasets,
     )
@@ -149,18 +147,11 @@ async def cmd_init(args: argparse.Namespace) -> None:
     file_config = config_data.get("campaign_config", config_data) or {}
     campaign_config = {**profile, **file_config}
 
-    # Fetch and log pipeline snapshot
-    try:
-        pipeline_raw = await session.backend_client.fetch_pipeline()
-    except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
-        logger.warning("Backend unreachable: %s", exc)
-        pipeline_raw = {}
-    pipeline_cfg = pipeline_raw.get("data", pipeline_raw)
-    if pipeline_cfg:
-        p_name = pipeline_cfg.get("name", "?")
-        p_version = pipeline_cfg.get("version", "?")
-        p_nodes = list(pipeline_cfg.get("nodes", {}).keys())
-        logger.info("Pipeline: %s %s (%d nodes: %s)", p_name, p_version, len(p_nodes), p_nodes)
+    # Log pipeline snapshot from session (already loaded in init_services)
+    if session.pipeline_schema:
+        ps = session.pipeline_schema
+        p_nodes = [n.name for n in ps.nodes]
+        logger.info("Pipeline: %s %s (%d nodes: %s)", ps.name, ps.version, len(p_nodes), p_nodes)
 
     pipeline_params = _configure_pipeline(session, campaign_config)
 

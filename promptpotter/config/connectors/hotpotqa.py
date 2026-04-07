@@ -11,11 +11,6 @@ from __future__ import annotations
 
 from typing import Any
 
-# -- Defaults ---------------------------------------------------------------
-
-BACKEND_NAME = "HotPotQA Benchmark"
-BACKEND_TYPE = "benchmark"
-DATASET_DESCRIPTION = "HotPotQA validation set (distractor setting)"
 DATASET_SIZE = 7405
 METRICS = ["token_f1", "exact_match"]
 

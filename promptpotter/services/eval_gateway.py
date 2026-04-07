@@ -201,6 +201,8 @@ async def _run_eval_batch(
     _search_memory = ctx.search_memory if ctx else None
     _stale_observations = ctx.stale_data_observations if ctx else None
 
+    _scorer = ctx.scorer if ctx else None
+
     _intermediate_cache = None
     _backend_id = ctx.backend_id if ctx else ""
     if ctx and ctx.store:
@@ -224,6 +226,7 @@ async def _run_eval_batch(
                     pipeline_schema=pipeline_schema,
                     intermediate_cache=_intermediate_cache,
                     backend_id=_backend_id,
+                    scorer=_scorer,
                 )
                 was_cached = bool(result.get("precomputed_through"))
 
@@ -240,6 +243,7 @@ async def _run_eval_batch(
                         backend_id=_backend_id,
                         search_memory=_search_memory,
                         stale_data_observations=_stale_observations,
+                        scorer=_scorer,
                         stop_check=lambda: interrupt.stop_requested,
                     )
                     if step_taken == "rerun":

@@ -71,7 +71,10 @@ def compute_accuracy(results: list[QueryResult]) -> dict:
     total = len(results)
     hits = sum(1 for r in results if r.get("hit"))
     errors = sum(1 for r in results if is_error_result(r))
-    accuracy = hits / total if total else 0.0
+    # Use mean per-query score (continuous) instead of binary hit rate.
+    # For exact-match scoring (score is 0 or 1), this equals hits/total.
+    # For rank-weighted scoring, this yields MRR.
+    accuracy = sum(r.get("score", 0.0) for r in results) / total if total else 0.0
     return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
 
 

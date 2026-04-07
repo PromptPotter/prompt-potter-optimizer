@@ -91,6 +91,7 @@ class CampaignConfig(TypedDict, total=False):
     optimization: OptimizationConfig
     optimizer_llm: EvalLLMConfig
     smart_search: SmartSearchConfig
+    scoring: str
 
 
 class RunConfig(BaseModel):
@@ -191,6 +192,12 @@ class RunConfig(BaseModel):
         description="Near-miss/miss ratio above which critique flags ranking issues",
     )
 
+    # Per-dataset scoring formula (see shared/scoring.py)
+    scoring_formula: str | None = Field(
+        None,
+        description="Python expression evaluated per query result (None = exact match)",
+    )
+
     # HITL mode
     pause_before_eval: bool = Field(
         False,
@@ -247,6 +254,7 @@ class RunConfig(BaseModel):
                 "stale_data_load_protocol", ["rerun", "samplescan", "sampleswitch"]
             ),
             pause_before_eval=opt.get("pause_before_eval", False),
+            scoring_formula=campaign_config.get("scoring"),
         )
 
 
