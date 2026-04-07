@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from promptpotter.services.campaign.bootstrap import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.search.scan_results import ScanContext
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -301,15 +300,9 @@ async def cmd_scan(args: argparse.Namespace) -> None:
 
     session = await _init_services(**ctx.state["init_params"])
 
-    # Inline resolve_scan_variants
-    flat_for_resolve: dict[str, list] = {}
-    for key, spec in scan_variants.items():
-        if isinstance(spec, list):
-            flat_for_resolve[key] = spec
-        elif isinstance(spec, dict):
-            for param, vals in spec.items():
-                if isinstance(vals, list):
-                    flat_for_resolve[param] = vals
+    from promptpotter.services.search.scan_advisor import flatten_scan_variants
+
+    flat_for_resolve = flatten_scan_variants(scan_variants)
     resolve_schema_axes(flat_for_resolve, session.pipeline_schema)
     prompt_axes = [k for k in scan_variants if k in PROMPT_STRING_FIELDS]
     node_axes = [k for k in scan_variants if k not in PROMPT_STRING_FIELDS]
@@ -409,8 +402,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
-    from promptpotter.models.opt_search_point import OptSearchPoint
-    from promptpotter.services.search import prepare_scan_context
+    from promptpotter.services.campaign.orchestration import load_scan_context
 
     ctx = _load_session(args)
     campaign_config = ctx.state["campaign_config"]
@@ -421,7 +413,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     # Re-run baseline (fast — cached) to populate baseline_results for critique
     _has_baseline = ctx.state.get("baseline_accuracy", 0) > 0
-    _baseline, dataset, campaign_rounds, baseline_results = await _prepare_eval_context(
+    _baseline, dataset, campaign_rounds, _baseline_results = await _prepare_eval_context(
         session,
         train_data,
         campaign_config,
@@ -429,39 +421,14 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         run_baseline=_has_baseline,
     )
 
-    # Seed campaign_rounds with stored baseline when no eval has been run yet
-    if not campaign_rounds and ctx.state.get("baseline_prompt_fields") is not None:
-        bl_ps = OptSearchPoint.from_prompt_fields(ctx.state["baseline_prompt_fields"])
-        campaign_rounds.append(
-            {
-                "round": "baseline",
-                "accuracy": ctx.state.get("baseline_accuracy", 0.0),
-                "prompt_fields": bl_ps,
-                "results": baseline_results or [],
-            }
-        )
-
-    # Load scan context if available (inline build_scan_context)
-    scan_context: ScanContext | None = None
-    scan_data = session.store.sessions.load_scan_results(
-        session.backend_id,
+    # Load scan context via shared orchestration function
+    baseline_acc = campaign_rounds[-1].get("accuracy", 0.0) if campaign_rounds else 0.0
+    scan_context = load_scan_context(
+        session,
         ctx.session_id,
+        ctx.state.get("scan_variants") or {},
+        baseline_acc,
     )
-    if scan_data:
-        import pandas as pd
-
-        scan_df = pd.DataFrame(scan_data["scan_df"])
-        axis_profiles = scan_data["axis_profiles"]
-        scan_variants = ctx.state.get("scan_variants") or {}
-        baseline_acc = 0.0
-        if campaign_rounds:
-            baseline_acc = campaign_rounds[-1].get("accuracy", 0.0)
-        scan_context = prepare_scan_context(
-            scan_df,
-            axis_profiles,
-            scan_variants,
-            baseline_acc,
-        )
 
     # HITL: --round sets pause_before_eval via the control surface
     if args.round:
@@ -506,18 +473,12 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     finally:
         set_round_recorder(None)
 
-    # Read back cycle_id and best from persisted campaign_state.json
-    import contextlib
-
     _state_path = session_dir / "campaign_state.json"
-    _emitter_state = {}
-    if _state_path.exists():
-        with contextlib.suppress(json.JSONDecodeError, OSError):
-            _emitter_state = json.loads(_state_path.read_text(encoding="utf-8"))
 
     ctx.state["phase"] = "optimize"
-    ctx.state["cycle_id"] = _emitter_state.get("cycle_id")
-    ctx.state["best_accuracy"] = _emitter_state.get("best", ctx.state.get("baseline_accuracy", 0.0))
+    if cycle_result:
+        ctx.state["cycle_id"] = cycle_result.cycle_id
+        ctx.state["best_accuracy"] = cycle_result.best_accuracy
     session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
 
     # Write structured result for AI/machine consumption

@@ -53,7 +53,7 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
     """
     if not campaign_rounds:
         return CampaignBaseline(
-            baseline_ps=None,
+            baseline_ps={},
             baseline_acc=0.0,
             baseline_results=None,
             instruction="",

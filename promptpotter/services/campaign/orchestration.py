@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "build_run_config",
     "configure_and_apply_pipeline",
+    "load_scan_context",
     "prepare_eval_context",
     "run_optimization",
     "run_scan_and_persist",
@@ -225,7 +226,38 @@ async def run_optimization(
 
 
 # ---------------------------------------------------------------------------
-# 5. Run sensitivity scan + persist
+# 5. Load scan context from persisted scan results
+# ---------------------------------------------------------------------------
+
+
+def load_scan_context(
+    session: BackendContext,
+    session_id: str,
+    scan_variants: dict,
+    baseline_acc: float,
+) -> ScanContext | None:
+    """Reconstruct scan context from persisted scan results.
+
+    Shared by CLI and notebook — avoids inlining DataFrame construction
+    in each entry point.
+    """
+    scan_data = session.store.sessions.load_scan_results(
+        session.backend_id,
+        session_id,
+    )
+    if not scan_data:
+        return None
+    import pandas as pd
+
+    from promptpotter.services.search.scan_results import prepare_scan_context
+
+    scan_df = pd.DataFrame(scan_data["scan_df"])
+    axis_profiles = scan_data["axis_profiles"]
+    return prepare_scan_context(scan_df, axis_profiles, scan_variants, baseline_acc)
+
+
+# ---------------------------------------------------------------------------
+# 6. Run sensitivity scan + persist
 # ---------------------------------------------------------------------------
 
 
