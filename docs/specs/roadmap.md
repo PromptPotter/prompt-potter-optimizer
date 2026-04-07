@@ -75,6 +75,8 @@ Full spec: [`m9-multi-connector.md`](m9-multi-connector.md)
 
 | Feature | Notes |
 |---------|-------|
+| Multimodal / non-textual modalities | Extend beyond Q&A text to other input types (RNAseq, X-ray, image, audio). Requires modality-specific evaluation, dataset formats, and scoring functions. |
+| Publication-ready results export | Generate paper-ready figures, tables, and statistical summaries (confidence intervals, significance tests, effect sizes) directly from campaign data. |
 | TermNorm Variant Comparison | Needs ConnectorProtocol + pipeline comparison (post-M9) |
 | Web scrape ablation | Quality vs cost/latency tradeoff |
 | Streamlit Dashboard | Campaign browser, trial comparison, dataset explorer |

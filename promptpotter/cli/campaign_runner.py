@@ -39,6 +39,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from promptpotter.config.settings import (
+    DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
@@ -72,7 +73,7 @@ def _die(msg: str) -> None:
 
 async def _init_services(
     backend_url: str = DEFAULT_BACKEND_URL,
-    backend_id: str = "",
+    backend_id: str = DEFAULT_BACKEND_ID,
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
 ) -> BackendContext:
@@ -824,7 +825,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_init = sub.add_parser("init", help="Initialize services and create session")
     p_init.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
-    p_init.add_argument("--backend-id", required=True)
+    p_init.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
     p_init.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
     p_init.add_argument("--dataset-name", default=None)
     p_init.add_argument("--excel-path", default=None)
@@ -856,7 +857,7 @@ def build_parser() -> argparse.ArgumentParser:
     ctl_mode.add_argument("--no-pause-l2", action="store_true", help="Disable L2 pause")
 
     p_prof = sub.add_parser("profile", help="Manage connector profile (per-backend defaults)")
-    p_prof.add_argument("--backend-id", required=True)
+    p_prof.add_argument("--backend-id", default="local")
     prof_mode = p_prof.add_mutually_exclusive_group()
     prof_mode.add_argument(
         "--show", action="store_true", default=True, help="Show profile (default)"

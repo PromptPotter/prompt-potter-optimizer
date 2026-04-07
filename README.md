@@ -5,16 +5,51 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.6.1-orange.svg)](CHANGELOG.md)
 
-**Automatic prompt optimization for LLMs.** Give it a dataset, it finds a better prompt.
+**Automatic prompt optimization for LLMs.** Give it a labeled dataset, it finds a better prompt.
 
 ## TL;DR
 
-Give it a dataset and an LLM. PromptPotter systematically searches for a better prompt — measuring accuracy, critiquing failures, and iterating through a 3-layer optimization loop. Same setup as academic benchmarks (HotPotQA, GSM8K), same loop for complex pipelines. Exports paper-ready results with confidence intervals and significance tests. See [`docs/benchmarks.md`](docs/benchmarks.md) for the comparison protocol.
+Give it a labeled dataset and an LLM. PromptPotter systematically searches for a better prompt — measuring accuracy, critiquing failures, and iterating through a 3-layer optimization loop. Same setup as academic benchmarks (HotPotQA, GSM8K), same loop for complex pipelines. Exports paper-ready results with confidence intervals and significance tests. See [`docs/benchmarks.md`](docs/benchmarks.md) for the comparison protocol.
+
+At its core, PromptPotter just collects a lot of datapoints. Every evaluation is stored, every parameter combination is tracked, and the optimizer uses this accumulated evidence to make better decisions each round.
+
+```
+  ┌──────────────────────────────────────────────────────────┐
+  │  l1_generate ────► l1_evaluate (+ critique)              │
+  │       ▲                 │                                │
+  │       │  critique OR l2_directive                         │
+  │       │  + thinking_styles                               │
+  │       └──────── ◄───────┘                                │
+  │                                                          │
+  │  stall?       ──► l2_refine_context ──► resume L1        │
+  │  degradation? ──► l2_refine_context ──► resume L1        │
+  │  l2 stall?    ──► l3_modify_plan    ──► resume L2+L1     │
+  └──────────────────────────────────────────────────────────┘
+```
+
+L2 can also mutate the prompt structure itself — adding or removing fields to widen or narrow the search space:
+
+```
+L2 REFINE ──► add_field("domain_constraints")
+              remove_field("persona")
+                    │
+                    ▼
+┌─ PROMPT SCHEME ──────────────────────────┐
+│  1. task_intent                          │
+│  2. problem_description                  │
+│  3. instruction                          │
+│  4. thinking_style                       │
+│  5. answer_format                        │
+│  6. domain_constraints          ← NEW    │
+│                                          │
+│  +/- [???]                               │
+└──────────────────────────────────────────┘
+```
 
 ## The 4-Step Workflow
 
-1. **Provide a dataset** — input/output pairs (and any extra context)
-2. **Describe your pipeline** — a schema of your LLM application's steps
+1. **Provide a labeled dataset** — input/output pairs (and any extra context)
+2. **Provide your `pipeline.json`** — your backend serves this via `GET /pipeline`. It declares every node, its parameters, and their allowed values. The optimizer only searches parameters defined in this file — nothing else is touched.
 3. **Sensitivity scan** — measure which axes matter at a given `sample_size`; statistical confidence in each axis guides how aggressively the optimizer should change it
 4. **Optimize** — run the feedback cycle from the scan's best starting point
 
@@ -113,6 +148,12 @@ The notebook uses `promptpotter/display/campaign/` wrapping services with progre
 - Pipeline config fetch, dataset loading (Excel + trace-based)
 - Scan advisor → sensitivity scan → coverage advisor
 - Feedback cycle with patience, campaign rounds, Langfuse sync
+
+## Limitations
+
+- **Parameter-based optimization only** — PromptPotter optimizes any pipeline that exposes tunable parameters (prompts, thresholds, model settings). It cannot optimize internal model weights, neural architectures, or modality-specific representations (e.g. image embeddings, DNA sequences).
+- **Requires a labeled dataset** — you need input/output pairs. No labeled data, no optimization.
+- **Langfuse dependency** — observability is currently coupled to Langfuse (v2). It works but adds operational complexity and is not optional for full tracing.
 
 ## Documentation
 
