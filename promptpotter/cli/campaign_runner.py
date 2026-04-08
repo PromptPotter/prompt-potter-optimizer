@@ -105,7 +105,7 @@ async def _prepare_eval_context(
     session: BackendContext,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
-    run_baseline: bool = False,
+    run_baseline: bool = True,
     pipeline_params: dict | None = None,
 ):
     """Load baseline + dataset, optionally run baseline eval."""
@@ -197,7 +197,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
         session,
         train_data,
         cast("CampaignConfig", campaign_config),
-        run_baseline=args.run_baseline,
+        run_baseline=not args.skip_baseline,
         pipeline_params=pipeline_params,
     )
 
@@ -786,7 +786,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--dataset-name", default=None)
     p_init.add_argument("--excel-path", default=None)
     p_init.add_argument("--config", default=None, help="Campaign config JSON file")
-    p_init.add_argument("--run-baseline", action="store_true")
+    p_init.add_argument("--skip-baseline", action="store_true")
 
     p_tc = sub.add_parser("task-context", help="Decompose task description")
     p_tc.add_argument("--task-file", default=None)

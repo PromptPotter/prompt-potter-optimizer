@@ -20,7 +20,7 @@ Steps in brackets are optional. Minimum viable workflow: `init` then `optimize -
 
 | Step | Command | What it does | Reads from |
 |------|---------|-------------|------------|
-| 1 | `init` | Connect to backend, configure pipeline, run baseline eval | Config file |
+| 1 | `init` | Connect to backend, configure pipeline, evaluate baseline | Config file |
 | 2 | `task-context` | Decompose a task description into structured domain context | init_params |
 | 3 | `scan` | Run sensitivity scan over parameter variants | init_params, config |
 | 4 | `scan-results` | Seed campaign from scan winner | scan_results |
@@ -33,11 +33,10 @@ Steps in brackets are optional. Minimum viable workflow: `init` then `optimize -
 ```bash
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
-    --config configs/datasets/lca-termnorm/campaign.json \
-    --run-baseline
+    --config configs/datasets/lca-termnorm/campaign.json
 ```
 
-Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config, and optionally evaluates the baseline prompt.
+Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config, and evaluates the baseline prompt. Pass `--skip-baseline` to defer baseline evaluation (optimize will run it automatically).
 
 Produces: `session.json` with `pipeline_params`, `init_params`, `phase: "init"`.
 
@@ -140,8 +139,7 @@ A complete workflow from initialization to export:
 # 1. Initialize session against a running backend
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
-    --config configs/datasets/lca-termnorm/campaign.json \
-    --run-baseline
+    --config configs/datasets/lca-termnorm/campaign.json
 
 # 2. (Optional) Add domain context
 python -m promptpotter.cli.campaign_runner task-context \
@@ -172,7 +170,7 @@ python -m promptpotter.cli.export_results supplemental \
 `configure_pipeline(svc, campaign_config)` is the single source of truth for pipeline configuration. It applies `exclude_nodes`, `pipeline_overrides`, and returns `pipeline_params` with an active `steps` list.
 
 This `pipeline_params` dict flows to every eval call:
-- `init --run-baseline` — baseline eval uses the configured pipeline
+- `init` — baseline eval uses the configured pipeline (runs by default)
 - `optimize` — each candidate is evaluated with the configured pipeline
 - `scan` — builds per-variant pipeline_params (one axis changed at a time)
 

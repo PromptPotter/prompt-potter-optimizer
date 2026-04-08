@@ -189,7 +189,7 @@ async def prepare_eval_context(
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
     *,
-    run_baseline: bool = False,
+    run_baseline: bool = True,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
     svc: Any = None,

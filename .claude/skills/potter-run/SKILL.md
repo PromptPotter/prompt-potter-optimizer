@@ -16,7 +16,7 @@ All commands: `python -m promptpotter.cli.campaign_runner <cmd> [flags]`
 
 | Command | Purpose | Key Flags |
 |---------|---------|-----------|
-| `init` | Connect to backend, configure pipeline, run baseline | `--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--run-baseline` |
+| `init` | Connect to backend, configure pipeline, evaluate baseline | `--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--skip-baseline` |
 | `task-context` | Decompose task description into structured context | `--task-file`, `--task-text` |
 | `scan` | Run sensitivity scan over parameter variants | `--variants-file` (required), `--sample-size` |
 | `scan-results` | Show scan analytics, seed campaign from winner | — |
@@ -27,7 +27,7 @@ All commands: `python -m promptpotter.cli.campaign_runner <cmd> [flags]`
 
 Export (separate entrypoint): `python -m promptpotter.cli.export_results <format> --backend-id <id> -o <file>`
 
-**Global flags on all commands**: `--session <id>` (target specific session), `--json` (machine-readable output).
+**Global flags on all commands**: `--session <id>` (target specific session).
 
 ---
 
@@ -132,7 +132,8 @@ python -m promptpotter.cli.campaign_runner init \
     --config configs/datasets/lca-termnorm/campaign.json
 ```
 
-- Timeout: 30 seconds
+- Baseline eval runs by default (can take 20-80 min for large datasets). For datasets with >100 queries, warn the user about duration before running. Pass `--skip-baseline` to defer — optimize will run it automatically.
+- Timeout: 30 seconds (for init without baseline). With baseline, ask user for extended timeout.
 - Run in **foreground** (never background)
 - Check output for: session ID, baseline accuracy, query count
 - If `llm_ranking` appears in active nodes for TermNorm, STOP — the config is wrong
@@ -270,7 +271,7 @@ python -m promptpotter.cli.export_results supplemental \
 - **If something fails**: read the error category (`[CLIENT]`, `[SERVER]`, `[CONNECTION]`, `[PIPELINE]`), then check `campaign_log.md` at `.promptpotter/projects/{backend_id}/sessions/{session_id}/campaign_log.md`
 - **After interrupts**: check for orphan processes — `tasklist | findstr python` (Windows) or `ps aux | grep python` (Linux/Mac)
 - **Between phases**: summarize what happened and what comes next. Don't just dump CLI output.
-- **Use `--json` flag** when you need to parse command output programmatically
+- **Baseline runs by default** — `init` evaluates baseline automatically. If user skipped it (`--skip-baseline`), `optimize` will run it before the loop starts.
 
 ## References
 

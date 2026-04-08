@@ -311,7 +311,7 @@ async def prepare_eval_context(
     session: BackendContext,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
-    run_baseline: bool = False,
+    run_baseline: bool = True,
     pipeline_params: dict | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set dataset, optionally run baseline.

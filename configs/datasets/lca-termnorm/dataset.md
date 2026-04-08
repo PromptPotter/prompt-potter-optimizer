@@ -17,6 +17,8 @@
 --config configs/datasets/lca-termnorm/campaign.json
 ```
 
+Baseline eval runs by default. Add `--skip-baseline` to defer (optimize will run it automatically).
+
 `dataset_name` is set in `campaign.json` (`"train"` — 984 items). The `--dataset-name` CLI flag is optional; if provided it overrides the config value.
 
 ## Data

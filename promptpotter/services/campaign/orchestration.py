@@ -81,7 +81,7 @@ async def prepare_eval_context(
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
     *,
-    run_baseline: bool = False,
+    run_baseline: bool = True,
     pipeline_params: dict | None = None,
     log: Callable[[str], None] = logger.info,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
