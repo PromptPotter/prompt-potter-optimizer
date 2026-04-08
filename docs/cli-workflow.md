@@ -20,7 +20,7 @@ Steps in brackets are optional. Minimum viable workflow: `init` then `optimize -
 
 | Step | Command | What it does | Reads from |
 |------|---------|-------------|------------|
-| 1 | `init` | Connect to backend, configure pipeline, evaluate baseline | Config file |
+| 1 | `init` | Connect to backend, configure pipeline (baseline deferred) | Config file |
 | 2 | `task-context` | Decompose a task description into structured domain context | init_params |
 | 3 | `scan` | Run sensitivity scan over parameter variants | init_params, config |
 | 4 | `scan-results` | Seed campaign from scan winner | scan_results |
@@ -36,7 +36,7 @@ python -m promptpotter.cli.campaign_runner init \
     --config configs/datasets/lca-termnorm/campaign.json
 ```
 
-Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config, and evaluates the baseline prompt. Pass `--skip-baseline` to defer baseline evaluation (optimize will run it automatically).
+Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config. Baseline is skipped by default (`--skip-baseline`) — the optimizer evaluates it automatically before the first round. Omit `--skip-baseline` only when you have substantial historical data and want an explicit baseline comparison before starting.
 
 Produces: `session.json` with `pipeline_params`, `init_params`, `phase: "init"`.
 
@@ -170,7 +170,7 @@ python -m promptpotter.cli.export_results supplemental \
 `configure_pipeline(svc, campaign_config)` is the single source of truth for pipeline configuration. It applies `exclude_nodes`, `pipeline_overrides`, and returns `pipeline_params` with an active `steps` list.
 
 This `pipeline_params` dict flows to every eval call:
-- `init` — baseline eval uses the configured pipeline (runs by default)
+- `init` — baseline eval uses the configured pipeline (skipped by default, runs automatically before first optimize round)
 - `optimize` — each candidate is evaluated with the configured pipeline
 - `scan` — builds per-variant pipeline_params (one axis changed at a time)
 

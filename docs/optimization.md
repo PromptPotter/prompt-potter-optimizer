@@ -139,7 +139,7 @@ L2 REFINE ──► add_field("domain_constraints")
 Critique-guided optimization with 3-layer escalation, inspired by [PromptWizard](https://arxiv.org/abs/2405.18369)'s critique-and-refine pattern.
 
 ```
-INIT: baseline eval (+ scan analytics when available) → bootstrap critique + sample thinking styles
+INIT: configure pipeline (baseline deferred to first optimize round) → bootstrap critique + sample thinking styles
   ↓
 ROUND 0: Growth (bootstrap critique + styles) → Eval → critique₀ → winner vs current best
   ↓
@@ -153,7 +153,7 @@ Each round:
 2. **Eval + Critique** -- Evaluate candidates via the backend, compare by composite score against the current best (previous winner). Generate a **critique** of remaining failures/successes, fed forward to next round.
 3. **Loop control** -- Stall counter on no improvement. Patience exhausted: escalate L2 (`task_context`) then L3 (strategy). Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (e.g., `DegradationCheck` on target pipeline regression). Stop on `max_rounds` or perfect accuracy.
 
-**Init** bootstraps the first critique from baseline results. When scan data is available (leaderboard, axis sensitivity, query difficulty), it feeds into both the bootstrap critique and subsequent rounds via `prepare_scan_context()`.
+**Init** configures the pipeline; baseline evaluation is deferred and runs automatically when `optimize` starts. The first critique is bootstrapped from baseline results at that point. When scan data is available (leaderboard, axis sensitivity, query difficulty), it feeds into both the bootstrap critique and subsequent rounds via `prepare_scan_context()`.
 
 ---
 

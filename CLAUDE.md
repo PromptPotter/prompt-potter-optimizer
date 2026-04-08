@@ -30,7 +30,8 @@ uvicorn promptpotter.main:app --port 8001 --reload
 # CLI campaign runner (HITL optimization from terminal)
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
-    --config configs/datasets/lca-termnorm/campaign.json
+    --config configs/datasets/lca-termnorm/campaign.json \
+    --skip-baseline
 python -m promptpotter.cli.campaign_runner task-context \
     --task-file configs/datasets/lca-termnorm/task_description.md
 python -m promptpotter.cli.campaign_runner scan \
@@ -57,6 +58,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest --cov`. A
 - Pipeline components are called **nodes**, not "building blocks" or "services".
 - **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
 - **Two-tier eval sampling**: `eval_sample_size` (0 = all) controls the optimization loop eval set. `scan_sample_size` controls sensitivity scan queries. Round cost ≈ `n_variants × effective_eval_size`.
+- **Skip baseline by default**: Always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists (≥ 50 unique queries, ≥ 5 dataset runs) and the user requests comparison.
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
 - **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground so stale processes don't leak.
 - Version: `APP_VERSION` in `promptpotter/config/settings.py`.

@@ -16,7 +16,7 @@ All commands: `python -m promptpotter.cli.campaign_runner <cmd> [flags]`
 
 | Command | Purpose | Key Flags |
 |---------|---------|-----------|
-| `init` | Connect to backend, configure pipeline, evaluate baseline | `--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--skip-baseline` |
+| `init` | Connect to backend, configure pipeline | `--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--skip-baseline` |
 | `task-context` | Decompose task description into structured context | `--task-file`, `--task-text` |
 | `scan` | Run sensitivity scan over parameter variants | `--variants-file` (required), `--sample-size` |
 | `scan-results` | Show scan analytics, seed campaign from winner | — |
@@ -37,14 +37,19 @@ Gather context silently — the dashboard in Phase 0.7 is the first thing the us
 
 1. `ls configs/datasets/` — list available datasets
 2. Read `dataset.md`, `task_description.md`, `campaign.json` for the target dataset
-3. Check prerequisites: `curl -s {backend_url}/status` for backend type, or check implementation status for llm-only
-4. Read `promptpotter/config/settings.py` → `APP_VERSION`
+3. **Classify dataset type** from `dataset.md`: `backend` (needs running server) or `llm-only` (needs DatasetLoader + local eval adapter + scorer)
+4. **Readiness check** (type-dependent):
+   - `backend`: `curl -s {backend_url}/status` — is the server running?
+   - `llm-only`: check `dataset.md` Status section — is the infrastructure implemented? If "Not yet implemented", note what's missing.
+5. Read `promptpotter/config/settings.py` → `APP_VERSION`
 
-**Only print if**: no dataset argument (ask which to run), dataset not implemented (say what's needed), or backend is down (say to start it). Otherwise stay silent — findings go into the dashboard.
+**Only print if**: no dataset argument (list available datasets with readiness status — read `reference/benchmark-datasets.md` for prioritization guidance if user asks which to run first), dataset not implemented (explain what's missing per `dataset.md`), or backend is down (say to start it). Otherwise stay silent — findings go into the dashboard.
 
 ---
 
-## Phase 0.5: Session Check & Resume (silent — findings go into dashboard)
+## Phase 0.5: Session Check & Data Assessment (silent — findings go into dashboard)
+
+### Session check
 
 1. Run `python -m promptpotter.cli.campaign_runner status` (timeout 10s, ignore errors)
 2. If an active session exists — read `session.json` and `campaign_state.json`, decide how to proceed:
@@ -53,6 +58,31 @@ Gather context silently — the dashboard in Phase 0.7 is the first thing the us
    - **`control.requested_state` is `"pause"` or `"stop"`** → offer to resume (`control --resume`) or review results
    - **Otherwise** → resume from current phase (`init`→Ph2, `task-context`→Ph3/4, `scan`/`scan-results`→Ph4, `optimizing`→`optimize --auto`, `optimize`→Ph5)
 3. No active session → Phase 1
+
+### Data assessment
+
+Count existing evaluation data to decide the starting strategy:
+
+```python
+# Count dataset runs and unique evaluated queries
+import json
+from pathlib import Path
+dr = Path('.promptpotter/projects/{backend_id}/dataset_runs')
+runs = list(dr.glob('*.json'))
+unique_queries = set()
+best_acc, best_name = 0.0, ""
+for f in runs:
+    d = json.loads(f.read_text(encoding='utf-8'))
+    for item in d.get('dataset_run_items', []):
+        unique_queries.add(item.get('query', ''))
+    acc = d.get('scores', {}).get('accuracy', 0.0) or 0.0
+    if acc > best_acc:
+        best_acc, best_name = acc, d.get('run_id', f.name)
+```
+
+**Decision thresholds:**
+- **Minimal data** (< 50 unique queries OR < 5 dataset runs) → skip baseline, go straight to `init --skip-baseline` + optimize from config defaults. This is the common case.
+- **Substantial data** (≥ 50 unique queries AND ≥ 5 dataset runs) → show existing leaderboard using CLI commands (`results`, `scan-results`) and/or `show_experiment_dashboard()`. Propose using the best-performing config as starting point rather than config defaults.
 
 Do NOT print anything here. All session info (including any issues) appears in the dashboard.
 
@@ -87,8 +117,13 @@ OPTIMIZATION STATUS (only for resumed/completed campaigns — omit if pre-optimi
   Stop:     {stop_reason or "running"}
   Cache:    {cache_hit_rate}%        Queries evaluated: {total}
 
+DATA ASSESSMENT (from Phase 0.5)
+  Dataset runs: {n_runs}    Unique queries evaluated: {n_unique}
+  {if substantial: "Leaderboard available — run `results` or `scan-results` to review"}
+  {if minimal: "Minimal data — starting from config defaults"}
+
 WARNINGS (only if any — omit section if clean)
-  ⚠ {e.g. "0% baseline — session initialized without --config, recommend fresh start"}
+  ⚠ {e.g. "backend unreachable", "llm_ranking in active nodes"}
 
 SESSION FILES
   {full_path_to_session_dir}/
@@ -121,7 +156,7 @@ Read the init flags from the dataset's `dataset.md` and construct the command:
 
 ```bash
 python -m promptpotter.cli.campaign_runner init \
-    {init flags from dataset.md}
+    {init flags from dataset.md} --skip-baseline
 ```
 
 For example, lca-termnorm's `dataset.md` specifies:
@@ -129,16 +164,25 @@ For example, lca-termnorm's `dataset.md` specifies:
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
     --backend-id local \
-    --config configs/datasets/lca-termnorm/campaign.json
+    --config configs/datasets/lca-termnorm/campaign.json \
+    --skip-baseline
 ```
 
-- Baseline eval runs by default (can take 20-80 min for large datasets). For datasets with >100 queries, warn the user about duration before running. Pass `--skip-baseline` to defer — optimize will run it automatically.
-- Timeout: 30 seconds (for init without baseline). With baseline, ask user for extended timeout.
+- **Always `--skip-baseline`** — baseline eval is deferred. The optimizer runs it automatically before the first round. Explicit baseline eval is only useful when Phase 0.5 data assessment found substantial historical data AND the user explicitly requests a fresh baseline.
+- Timeout: 30 seconds
 - Run in **foreground** (never background)
-- Check output for: session ID, baseline accuracy, query count
+- Check output for: session ID, query count
 - If `llm_ranking` appears in active nodes for TermNorm, STOP — the config is wrong
 
-Report: session ID, active pipeline, baseline accuracy, query count.
+### When substantial data exists (from Phase 0.5)
+
+If the data assessment found ≥ 50 unique queries and ≥ 5 dataset runs, show the leaderboard before init:
+
+1. Run `python -m promptpotter.cli.campaign_runner results` (if a prior campaign exists) or `scan-results` (if scan data exists) — these are the existing leaderboard/dashboard displays
+2. Present the best-performing configuration and accuracy to the user
+3. Ask: "Start from the best known config, or fresh from defaults?"
+
+Report: session ID, active pipeline, query count.
 
 ---
 
@@ -182,6 +226,14 @@ python -m promptpotter.cli.campaign_runner optimize --round
 - **Foreground only**, never background — these make API calls that cost money.
 - **Timeout**: 30s default. NEVER exceed 60s without explicit user permission. For long runs, use `--round` repeatedly.
 - Graceful stop: first Ctrl+C saves state, second force-quits.
+
+### Benchmark vs Backend Optimization
+
+For `llm-only` benchmark datasets, optimization behaves differently:
+- **No per-node caching** — every eval is a fresh LLM call (no round-over-round speedup from IntermediateCache)
+- **Prompt-only surface** — no pipeline params to tune, all improvement comes from prompt quality
+- **Different convergence profile** — no short-circuit nodes to exploit; accuracy gains are purely from better prompting
+- Read `reference/benchmark-datasets.md` for the full cost model and readiness checklist
 
 ### Understanding the Optimization Loop
 
@@ -266,17 +318,19 @@ python -m promptpotter.cli.export_results supplemental \
 - **Never run CLI commands in background** — stale processes leak and waste API credits. This includes letting foreground commands auto-background by hitting timeout limits.
 - **Always read dataset.md before anything** — it's the source of truth for how to operate each dataset
 - **Resume by default** — only create new sessions when explicitly asked
+- **Skip baseline by default** — always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists AND the user requests it.
+- **Data-driven start** — Phase 0.5 assesses existing data. Minimal data (< 50 queries, < 5 runs) → go straight to optimize from config defaults. Substantial data → show leaderboard via existing CLI commands (`results`, `scan-results`), propose best-known config as starting point.
 - **Report costs before optimize**: Read `eval_sample_size`, `n_variants`, and dataset count from the session. Each round evaluates all candidates against the same `eval_dataset` (subsampled once at init from `eval_sample_size`; 0 = full dataset). Cost/round = `n_variants x effective_dataset_size`. `scan_sample_size` is only used for the sensitivity scan (Phase 3), not optimization.
 - **Be the data scientist**: interpret results, explain what the optimizer is doing, suggest next steps
 - **If something fails**: read the error category (`[CLIENT]`, `[SERVER]`, `[CONNECTION]`, `[PIPELINE]`), then check `campaign_log.md` at `.promptpotter/projects/{backend_id}/sessions/{session_id}/campaign_log.md`
 - **After interrupts**: check for orphan processes — `tasklist | findstr python` (Windows) or `ps aux | grep python` (Linux/Mac)
 - **Between phases**: summarize what happened and what comes next. Don't just dump CLI output.
-- **Baseline runs by default** — `init` evaluates baseline automatically. If user skipped it (`--skip-baseline`), `optimize` will run it before the loop starts.
 
 ## References
 
-For deeper context on optimization mechanics and troubleshooting:
+For deeper context on optimization mechanics, dataset types, and troubleshooting:
 
+- `reference/benchmark-datasets.md` — dataset types, readiness checklist, prioritization criteria, scoring system, cost model
 - `reference/optimization-layers.md` — L1/L2/L3 escalation model, configuration, what to tell the user
 - `reference/troubleshooting.md` — error diagnosis, stop reason recovery, stall strategies
 - `docs/optimization.md` — full 3-layer model, critique agent, escalation chain, configuration reference
