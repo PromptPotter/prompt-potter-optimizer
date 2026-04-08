@@ -86,43 +86,54 @@ Built by `build_l2_search_memory_context()`.[^l2fmt] Injected via
 
 [^l2fmt]: `services/campaign/formatting.py:build_l2_search_memory_context()`.
 
-### Critique Agent
+### Critique Agent (Every-Round Intelligence Hub)
 
-Built inline in `round_execution.py:244-259`.[^crit] Passed as
-`search_memory_context` on `CritiqueContext`.
+Built inline in `round_execution.py`.[^crit] Passed as
+`search_memory_context` on `CritiqueContext`. Critique is the
+**every-round intelligence hub** — it runs every round, is the sole
+reader of raw eval results, AND receives SearchMemory intelligence to
+frame its analysis.
 
 | Signal | Source accessor | Prompt text |
 |--------|----------------|-------------|
 | Discriminating queries | `discriminating_queries()` | "12 queries vary across configs" |
 | Failure clusters | `failure_clusters(3)` | "web_search (45%); token_matching (30%)" |
+| Tractability profiles | `persistent_failures(3)` | "5 intractable (never hit); 3 chronic" |
+| Axis exhaustion | `exhausted_axes()` | "web_search.max_sites (5 values tested, effect=0.008)" |
+| Value trends | `axis_value_trend()` | "web_search.max_sites: increasing" |
 
 The critique agent also receives `round_history` — a list of
 per-round dicts with accuracy, composite, pipeline_params, degraded
-count, and candidate count.[^rh] This is the only round-over-round
-trajectory data that reaches any LLM.
+count, and candidate count.[^rh]
 
-[^crit]: `services/campaign/round_execution.py`, lines 244–259.
-[^rh]: `round_execution.py`, lines 265–274 — built from `state.rounds`.
+[^crit]: `services/campaign/round_execution.py`.
+[^rh]: `round_execution.py` — built from `state.rounds`.
 
 ## 3. Design Principle: L1 Stays Clean
 
 L1 generate is a candidate generator — it should focus on producing
 diverse, high-quality configurations, not reasoning about sample-level
-diagnostics. Detailed failure analysis and strategic intelligence feed
-into **L2 Refine** (the meta-controller) and into **deterministic code
-triage** (no LLM needed).
+diagnostics. **Critique is the every-round intelligence hub** — it
+receives raw eval results AND SearchMemory signals to produce
+well-informed `critique_text`. L2 fires only on escalation and receives
+strategic meta-intelligence (trajectory, candidate comparison, failure
+group × axis) for redirection decisions. Deterministic code handles
+per-query triage (no LLM needed).
 
-**Two-tier architecture for sample intelligence:**
+**Three-tier intelligence architecture:**
 
-| Tier | Handled by | What | Example |
-|------|-----------|------|---------|
-| **Deterministic** | Code (statistics) | Sample triage that can be resolved without LLM reasoning | Exclude intractable queries (never hit across N configs), deprioritize chronically degraded samples |
-| **Strategic** | L2 Refine (LLM) | Failure group insights that require meta-reasoning about optimization strategy | "45% of failures are web_search bottlenecks — adjust exploration toward max_sites and content_char_limit" |
+| Tier | Handled by | Fires when | What | Example |
+|------|-----------|------------|------|---------|
+| **Deterministic** | Code (statistics) | Every round | Per-query triage without LLM reasoning | CI-gated intractable exclusion, eval set adaptation |
+| **Every-round** | Critique (LLM) | Every round | Frame this-round analysis with historical context | Tractability profiles, axis exhaustion, value trends |
+| **Strategic** | L2 Refine (LLM) | Escalation only | Meta-reasoning about why optimization is stuck | Round trajectory, candidate comparison, failure group × axis |
 
 L1 continues to receive: critique text, scan context, failure analysis
 patterns, and SearchMemory summaries (failure clusters, top axes, dead
-queries). These are sufficient for candidate generation. The deeper
-per-query and failure-group intelligence goes to L2.
+queries). These are sufficient for candidate generation. L3 receives
+the aggregate SearchMemory picture (axis rankings, bottleneck
+distribution, failure clusters, persistent failures) for strategic
+plan pivots.
 
 ## 4. Foundation: Two-Tier Sample Intelligence
 
@@ -135,9 +146,10 @@ handled without LLM involvement.
 
 **Current:** `_query_hits` stores full Bernoulli sequence per query.
 `dead_queries()` returns never-hit queries.
-**Missing:** A `persistent_failures(min_streak)` accessor that returns
-queries failing in N consecutive recent evaluations across different
-configs. These are classified into:
+`persistent_failures(min_streak)` returns queries failing in N
+consecutive recent evaluations. `intractable_queries_ci()` uses
+Wilson CI for confidence-bounded exclusion.
+These are classified into:
 
 - **Intractable** (failed with every config ever tried) → exclude from
   eval set automatically. No signal for the optimizer.
@@ -193,11 +205,27 @@ from directing L1 toward approaches already tested and found wanting.
 **Building blocks:** `L1EvalResult.candidate_scores` and
 `L1EvalResult.all_candidate_results` carry this data.
 
-## 5. Priority Order
+## 5. Status
 
-| Item | Tier | Target | Value | Effort | Dependencies |
-|------|------|--------|-------|--------|--------------|
-| B — Failure streak triage | Deterministic | Code | High | Low | `_query_hits` already tracked |
-| A — Round trajectory | Strategic | L2 | High | Low | `state.rounds` already available |
-| C — Failure group × axis | Strategic | L2 | Medium | Medium | Needs producer rewired from scan |
-| D — Candidate comparison | Strategic | L2 | Medium | Low | `candidate_scores` already available |
+All four originally planned items are implemented:
+
+| Item | Tier | Target | Status |
+|------|------|--------|--------|
+| B — Failure streak triage + CI gating | Deterministic | Code | **Done** — `persistent_failures()` + `intractable_queries_ci()` pre-filter eval set |
+| A — Round trajectory | Strategic | L2 | **Done** — `build_round_trajectory()` in L2 intelligence bundle |
+| C — Failure group × axis | Strategic | L2 | **Done** — `parameter_failure_correlation()` in L2 context (scan-only producer) |
+| D — Candidate comparison | Strategic | L2 | **Done** — `build_candidate_comparison()` in L2 intelligence bundle |
+
+Additional intelligence items added during M8 completion:
+
+| Item | Tier | Target | Status |
+|------|------|--------|--------|
+| Critique tractability profiles | Every-round | Critique | **Done** |
+| Axis exhaustion detection | Every-round | Critique | **Done** — `exhausted_axes()` |
+| Value momentum/direction | Every-round | Critique | **Done** — `axis_value_trend()` |
+| L3 SearchMemory intelligence | Strategic | L3 | **Done** — `build_l3_search_memory_context()` |
+| Diminishing returns detector | Both | Critique + L2 | Planned |
+| Candidate diversity monitor | Strategic | L2 | Planned |
+| Query improvement attribution | Both | Critique + L2 | Planned |
+| Cross-candidate failure diff | Every-round | Critique | Planned |
+| Failure group refresh in optimization loop | Strategic | L2 | Planned |

@@ -9,19 +9,19 @@ The workhorse. Generates N candidate `OptSearchPoint`s (prompt field variants + 
 **Input**: critique from previous round (or `l2_directive` after L2 runs), task_context, thinking_styles, scan_context, search_memory.
 **Output**: winner candidate (or no improvement → stall counter increments).
 
-After evaluation, the **Critique Agent** analyzes results — pipeline health, rank analysis, failure details, query categories — and produces a compact critique that feeds the next L1 round. Critique and L1 Generate are **mutually exclusive with l2_directive**: when L2 fires, its directive replaces critique as L1's primary signal.
+After evaluation, the **Critique Agent** (every-round intelligence hub) analyzes results — pipeline health, rank analysis, failure details, query categories — enriched with SearchMemory intelligence (failure clusters, discriminating queries, tractability profiles, axis exhaustion, value trends). It produces a compact critique that feeds the next L1 round. Critique and L1 Generate are **mutually exclusive with l2_directive**: when L2 fires, its directive replaces critique as L1's primary signal.
 
 **Stall**: When L1 fails to improve for `patience` consecutive rounds → escalate to L2.
 
-## L2 Refine Context (on L1 stall)
+## L2 Refine Context (escalation only — on L1 stall or degradation)
 
-Meta-controller. Adjusts the optimization environment rather than generating candidates directly.
+Escalation-only meta-controller. Adjusts the optimization environment rather than generating candidates directly. **Only fires when L1 stalls or degradation is detected** — not during normal rounds.
 
 **Decides**: `task_context` refinements, meta-settings (`creativity`, `n_variants`, `sample_size`), and produces an `l2_directive` (2-3 sentence diagnostic + action guidance) injected into L1's next meta-prompt.
 
 **Does NOT decide**: `pipeline_params` — that stays L1's job.
 
-**Input**: critique, previous l2_directive (to evolve/supersede), escalation report (or warning_inventory), task_context, pipeline schema param keys.
+**Input**: critique, previous l2_directive (to evolve/supersede), escalation report (or warning_inventory), task_context, pipeline schema param keys, round trajectory summary, candidate comparison from last round, SearchMemory (axis rankings, bottleneck distribution, failure group × axis, persistent failures).
 
 **Stall**: When L2 runs `l2_patience` times without L1 improving → escalate to L3.
 
@@ -32,6 +32,8 @@ Strategic replanner. Rewrites the high-level optimization plan when both L1 and 
 **Decides**: new strategic `plan` that fundamentally changes what L1 explores.
 
 **Does NOT decide**: `pipeline_params`, `task_context`.
+
+**Input**: current plan, L2 history (last 3 rounds), rendered prompt, pipeline section, SearchMemory aggregate picture (axis rankings, bottleneck distribution, failure clusters, persistent failures).
 
 **Stall**: When L3 runs `l3_patience` times without improvement → `l3_patience_exhausted` stop.
 

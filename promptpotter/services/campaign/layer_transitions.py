@@ -21,7 +21,12 @@ from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_context import TaskContext
 from promptpotter.services.campaign.formatting import (
     L2IntelligenceData,
+    assess_candidate_diversity,
+    build_candidate_comparison,
     build_l2_search_memory_context,
+    build_l3_search_memory_context,
+    build_round_trajectory,
+    classify_trajectory,
     format_l2_intelligence,
 )
 from promptpotter.shared.llm_parsing import extract_parsed_json
@@ -66,6 +71,8 @@ def _build_l2_prompt(
     pipeline_schema: PipelineSchema | None,
     escalation_context: dict | None,
     search_memory: object | None = None,
+    rounds: list | None = None,
+    candidate_scores: list[dict] | None = None,
 ) -> tuple[str, PromptTemplate, dict]:
     """Assemble the L2 refine_context prompt from all context sources.
 
@@ -94,6 +101,12 @@ def _build_l2_prompt(
             critique_text=opt_sp.critique_text,
             l2_directive=opt_sp.l2_directive,
             search_memory_context=build_l2_search_memory_context(search_memory),
+            round_trajectory=build_round_trajectory(rounds) if rounds else None,
+            trajectory_classification=classify_trajectory(rounds) if rounds else None,
+            candidate_comparison=(
+                build_candidate_comparison(candidate_scores) if candidate_scores else None
+            ),
+            diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
         )
     )
 
@@ -181,6 +194,8 @@ async def refine_context(
     pipeline_schema: PipelineSchema | None = None,
     escalation_context: dict | None = None,
     search_memory: object | None = None,
+    rounds: list | None = None,
+    candidate_scores: list[dict] | None = None,
 ) -> TransitionResult:
     """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
 
@@ -195,6 +210,8 @@ async def refine_context(
         pipeline_schema,
         escalation_context,
         search_memory=search_memory,
+        rounds=rounds,
+        candidate_scores=candidate_scores,
     )
 
     response = await llm_call(
@@ -221,6 +238,7 @@ async def modify_plan(
     temperature: float = 0.5,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
+    search_memory: object | None = None,
 ) -> TransitionResult:
     """LLM-driven L3 adjustment: suggest a new strategic plan.
 
@@ -248,11 +266,27 @@ async def modify_plan(
         '  "rationale": 1-2 sentence explanation of the strategic shift'
     )
 
+    # SearchMemory intelligence — aggregate strategic picture for L3
+    sm_section = ""
+    sm_ctx = build_l3_search_memory_context(search_memory)
+    if sm_ctx:
+        sm_lines = ["HISTORICAL INTELLIGENCE:"]
+        if sm_ctx.get("axis_rankings"):
+            sm_lines.append(f"  Axis impact rankings: {sm_ctx['axis_rankings']}")
+        if sm_ctx.get("bottleneck_distribution"):
+            sm_lines.append(f"  Bottleneck distribution: {sm_ctx['bottleneck_distribution']}")
+        if sm_ctx.get("failure_clusters"):
+            sm_lines.append(f"  Failure clusters: {sm_ctx['failure_clusters']}")
+        if sm_ctx.get("persistent_failures"):
+            sm_lines.append(f"  Persistent failures: {sm_ctx['persistent_failures']}")
+        sm_section = "\n".join(sm_lines)
+
     _compile_vars = {
         "current_plan": opt_sp.plan or "(none — default strategy)",
         "l2_summary": l2_summary,
         "rendered_prompt": opt_sp.render(),
         "pipeline_section": pipeline_section,
+        "intelligence_section": sm_section,
         "response_schema_suffix": response_schema_suffix,
     }
     _template = load_optimizer_prompt("l3_modify_plan")

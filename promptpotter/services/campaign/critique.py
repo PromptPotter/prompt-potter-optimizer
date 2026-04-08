@@ -504,7 +504,7 @@ def assemble_critique_sections(ctx: CritiqueContext) -> str:
         )
         sections.insert(1, anomaly_block)
 
-    # SearchMemory historical context (Wave 3c)
+    # SearchMemory historical context (Wave 3c + M8 completion)
     smc = ctx.search_memory_context
     if smc:
         sm_lines = ["## HISTORICAL INTELLIGENCE"]
@@ -512,6 +512,18 @@ def assemble_critique_sections(ctx: CritiqueContext) -> str:
             sm_lines.append(f"  Discriminating queries: {smc['discriminating_queries']}")
         if smc.get("failure_clusters"):
             sm_lines.append(f"  Failure clusters: {smc['failure_clusters']}")
+        if smc.get("tractability"):
+            sm_lines.append(f"  Query tractability: {smc['tractability']}")
+        if smc.get("exhausted_axes"):
+            sm_lines.append(f"  Exhausted axes (DO NOT suggest these): {smc['exhausted_axes']}")
+        if smc.get("value_trends"):
+            sm_lines.append(f"  Value trends: {smc['value_trends']}")
+        if smc.get("trajectory"):
+            sm_lines.append(f"  [TRAJECTORY] {smc['trajectory']}")
+        if smc.get("improvement_attribution"):
+            sm_lines.append(f"  WHAT WORKED:\n{smc['improvement_attribution']}")
+        if smc.get("cross_candidate_diff"):
+            sm_lines.append(f"  MISSED OPPORTUNITIES:\n{smc['cross_candidate_diff']}")
         sections.append("\n".join(sm_lines))
 
     # Pipeline mutation capabilities — teach critique about schema mutations

@@ -299,6 +299,24 @@ async def run_optimization(
     if state.eval_ctx and search_memory:
         state.eval_ctx.search_memory = search_memory
 
+    # Pre-filter intractable queries (hit_rate=0 across all prior evals)
+    if search_memory:
+        intractable = [
+            q for q in search_memory.persistent_failures(min_streak=3) if q.hit_rate == 0
+        ]
+        if intractable:
+            intractable_queries = {q.query for q in intractable}
+            before = len(eval_dataset)
+            eval_dataset = [d for d in eval_dataset if d.get("query") not in intractable_queries]
+            excluded = before - len(eval_dataset)
+            if excluded:
+                logger.info(
+                    "Pre-filtered %d intractable queries from eval set (%d → %d)",
+                    excluded,
+                    before,
+                    len(eval_dataset),
+                )
+
     # Chain persistence callbacks (fires first) with caller display callbacks
     if _emitter:
         from promptpotter.services.campaign.state import chain_callbacks
@@ -373,6 +391,25 @@ async def run_optimization(
                 round_num,
                 schema=config.pipeline_schema,
             )
+
+            # Record query flips for improvement attribution
+            if search_memory and len(state.rounds) >= 2:
+                prev_round = state.rounds[-2]
+                curr_round = state.rounds[-1]
+                if prev_round.results and curr_round.results:
+                    desc = (
+                        curr_round.candidate_scores[0].get("changes_description", "")
+                        if curr_round.candidate_scores
+                        else ""
+                    )
+                    _flips = search_memory.record_query_flips(
+                        round_num,
+                        desc,
+                        prev_round.results,
+                        curr_round.results,
+                    )
+                    if _flips:
+                        logger.debug("Round %d: %d query flips recorded", round_num, _flips)
 
             # --- After probe round: reset flag + force L2 ---
             if is_probe:
@@ -452,8 +489,35 @@ async def run_optimization(
 
                 _sm_store = state.eval_ctx.store
                 if search_memory.refresh(_sm_store, config.backend_id):
+                    # Periodically recompute failure group correlations
+                    if (
+                        round_num > 0
+                        and round_num % 5 == 0
+                        and search_memory.recompute_failure_group_correlations()
+                    ):
+                        logger.info(
+                            "SearchMemory: recomputed failure group correlations at round %d",
+                            round_num,
+                        )
                     _sm_path = Path(_sm_store.base_dir) / config.backend_id / "search_memory.json"
                     search_memory.save(_sm_path)
+
+            # Pre-filter intractable queries — CI-gated exclusion from eval set
+            if search_memory and round_num >= 2 and not is_probe:
+                _intractable = search_memory.intractable_queries_ci()
+                if _intractable:
+                    _intractable_queries = {q.query for q in _intractable}
+                    _before = len(eval_dataset)
+                    eval_dataset = [
+                        d for d in eval_dataset if d.get("query") not in _intractable_queries
+                    ]
+                    _excluded = _before - len(eval_dataset)
+                    if _excluded:
+                        logger.info(
+                            "Intractable query exclusion: removed %d/%d queries (CI-gated)",
+                            _excluded,
+                            _before,
+                        )
 
             # Adaptive eval set — swap dead queries for discriminating ones
             if round_num >= 2 and not is_probe:

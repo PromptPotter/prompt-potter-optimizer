@@ -328,42 +328,48 @@ def _merge_pipeline_params(
     return merged
 
 
-async def l1_evaluate(
+def _parse_candidates(
     candidates: list[dict],
-    dataset: list,
-    current_best: dict[str, Any],
-    ctx: EvalContext,
-    *,
-    pipeline_params: dict | None = None,
-    improvement_threshold: float = 0.01,
-    callbacks: RunCallbacks | None = None,
-    degradation_checks: list | None = None,
-) -> L1EvalResult:
-    """Evaluate candidates and select the round winner."""
-    from promptpotter.services.eval_gateway import eval_search_point
+    pipeline_params: dict | None,
+    schema: PipelineSchema | None,
+) -> tuple[list[OptSearchPoint], list[dict | None], list[dict | None]]:
+    """Normalize raw candidate dicts into OptSearchPoints with merged params.
 
-    # Normalize current_best prompt_fields to OptSearchPoint once at entry
-    cb = dict(current_best)
-    if isinstance(cb.get("prompt_fields"), dict):
-        cb["prompt_fields"] = OptSearchPoint.from_prompt_fields(cb["prompt_fields"])
-
-    # Parse candidates: extract pipeline param overrides, build OptSearchPoints
-    candidate_overrides: list[dict | None] = []
-    osp_candidates: list[OptSearchPoint] = []
-    merged_pp: list[dict | None] = []
+    Returns (osp_candidates, merged_pipeline_params, raw_overrides).
+    """
+    overrides: list[dict | None] = []
+    osp_list: list[OptSearchPoint] = []
+    merged: list[dict | None] = []
     for c in candidates:
         override = c.get("__pipeline_params_override__")
-        candidate_overrides.append(override)
-        osp_candidates.append(
+        overrides.append(override)
+        osp_list.append(
             OptSearchPoint.from_prompt_fields(
                 {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
             )
         )
-        merged_pp.append(_merge_pipeline_params(pipeline_params, override, ctx.pipeline_schema))
+        merged.append(_merge_pipeline_params(pipeline_params, override, schema))
+    return osp_list, merged, overrides
+
+
+async def _run_candidate_evals(
+    osp_candidates: list[OptSearchPoint],
+    merged_pp: list[dict | None],
+    candidate_overrides: list[dict | None],
+    dataset: list,
+    ctx: EvalContext,
+    *,
+    degradation_checks: list | None = None,
+    callbacks: RunCallbacks | None = None,
+) -> tuple[dict[str, list[dict]], list[dict], dict | None]:
+    """Evaluate each candidate against the dataset.
+
+    Returns (all_candidate_results, candidate_scores, escalation_signal).
+    """
+    from promptpotter.services.eval_gateway import eval_search_point
 
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []
-
     escalation_signal = None
     n_candidates = len(osp_candidates)
 
@@ -415,6 +421,42 @@ async def l1_evaluate(
 
         if escalation_signal:
             break
+
+    return all_candidate_results, candidate_scores, escalation_signal
+
+
+async def l1_evaluate(
+    candidates: list[dict],
+    dataset: list,
+    current_best: dict[str, Any],
+    ctx: EvalContext,
+    *,
+    pipeline_params: dict | None = None,
+    improvement_threshold: float = 0.01,
+    callbacks: RunCallbacks | None = None,
+    degradation_checks: list | None = None,
+) -> L1EvalResult:
+    """Evaluate candidates and select the round winner."""
+    # Normalize current_best prompt_fields to OptSearchPoint once at entry
+    cb = dict(current_best)
+    if isinstance(cb.get("prompt_fields"), dict):
+        cb["prompt_fields"] = OptSearchPoint.from_prompt_fields(cb["prompt_fields"])
+
+    # Parse → Evaluate → Select → Package
+    osp_candidates, merged_pp, overrides = _parse_candidates(
+        candidates,
+        pipeline_params,
+        ctx.pipeline_schema,
+    )
+    all_candidate_results, candidate_scores, escalation_signal = await _run_candidate_evals(
+        osp_candidates,
+        merged_pp,
+        overrides,
+        dataset,
+        ctx,
+        degradation_checks=degradation_checks,
+        callbacks=callbacks,
+    )
 
     evaluated_candidates = [
         c

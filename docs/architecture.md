@@ -116,9 +116,9 @@ Five nodes, declared in `promptpotter/config/optimizer_pipeline.json`:
 |------|---------|---------|
 | `l1_generate` | Candidate generation (sole `pipeline_params` decider) | Every round |
 | `l1_evaluate` | Eval + winner selection + stale data protocol | Every round |
-| `critique` | Sole intelligence bridge — structured analysis of eval results (summary, priority_fix, axes, highlights) | After L1 evaluate |
-| `l2_refine_context` | Refine `task_context` + meta-settings (creativity, n_variants, sample_size) | L1 patience exhausted or degradation |
-| `l3_modify_plan` | Strategic replanning | L2 patience exhausted |
+| `critique` | Every-round intelligence hub — sole reader of raw eval results + SearchMemory consumer (tractability, axis exhaustion, value trends) | Every round (after L1 evaluate) |
+| `l2_refine_context` | Escalation-only meta-controller — refine `task_context` + meta-settings; receives round trajectory, candidate comparison, failure group × axis | L1 patience exhausted or degradation |
+| `l3_modify_plan` | Strategic replanning; receives SearchMemory aggregate picture (axis rankings, bottlenecks, clusters, persistent failures) | L2 patience exhausted |
 
 `l1_evaluate` also carries the **stale data load protocol** config: `stale_data_load_protocol` (step sequence), `rerun_trigger_count`, `samplescan_candidates`, `samplescan_threshold`, `sampleswitch_min_degradation_rate` — all tunable via `optimizer.param_keys`.
 
@@ -174,25 +174,27 @@ A materialized view over all historical `dataset_runs/` that compounds evaluatio
 
 | Pillar | What it tracks | Key accessors |
 |--------|---------------|---------------|
-| Parameter Impact | Effect size + consistency per axis, top-5 historically-best values | `axis_rankings()`, `top_k_values(axis)`, `axis_impact(axis)` |
-| Query Patterns | Hit rate, variance (discriminative power), dominant failure mode per query | `query_tractability()`, `discriminating_queries()`, `dead_queries()` |
-| Failure Modes | Bottleneck distribution by terminated_at step, failure clusters | `bottleneck_distribution()`, `failure_clusters()` |
+| Parameter Impact | Effect size + consistency per axis, top-5 historically-best values, axis exhaustion, value trends | `axis_rankings()`, `top_k_values(axis)`, `axis_impact(axis)`, `exhausted_axes()`, `axis_value_trend()` |
+| Query Patterns | Hit rate, variance (discriminative power), dominant failure mode per query, CI-gated intractable detection | `query_tractability()`, `discriminating_queries()`, `dead_queries()`, `persistent_failures()`, `intractable_queries_ci()` |
+| Failure Modes | Bottleneck distribution by terminated_at step, failure clusters, failure group × axis correlation | `bottleneck_distribution()`, `failure_clusters()`, `parameter_failure_correlation()` |
 | Degradation | Per-query degradation count (warnings in `pipeline_data.diagnostics`) | `query_degradation_rate(query)` |
 
 Degradation tracking feeds the stale data protocol's `sampleswitch` step: queries with historically high degradation rates are candidates for exclusion from the eval set.
 
 **Design:** Atomic data accessors only -- no LLM text formatting. Each consumer (scan_advisor, L1, L2, critique) queries the subset it needs and composes its own prompt section. This avoids coupling SearchMemory to any particular prompt format.
 
-**Consumer matrix:**
+**Consumer matrix** (critique = every-round hub, L2 = escalation-only, L3 = L2-stall):
 
 | Consumer | What it reads | Purpose |
 |----------|--------------|---------|
 | Scan advisor | `axis_rankings()`, `top_k_values()`, `bottleneck_distribution()` | Prioritize impactful axes, suggest historically-best values |
 | L1 Generate | `failure_clusters()`, `dead_queries()`, `top_k_values()` | Focus candidates on failure modes, avoid dead-end values |
-| L2 Refine | `axis_rankings()`, `bottleneck_distribution()` | Inform context refinement with parameter landscape |
-| Critique | `discriminating_queries()`, `failure_clusters()` | Enrich failure analysis with cross-campaign patterns |
+| Critique | `discriminating_queries()`, `failure_clusters()`, `persistent_failures()`, `exhausted_axes()`, `axis_value_trend()` | Every-round intelligence hub — frames analysis with tractability, axis exhaustion, value trends |
+| L2 Refine | `axis_rankings()`, `bottleneck_distribution()`, `parameter_failure_correlation()`, `persistent_failures()` + round trajectory + candidate comparison | Escalation-only strategic intelligence for meta-reasoning |
+| L3 Plan | `axis_rankings()`, `bottleneck_distribution()`, `failure_clusters()`, `persistent_failures()` | Aggregate strategic picture for plan pivots |
+| Code (deterministic) | `intractable_queries_ci()`, `persistent_failures()` | CI-gated query exclusion from eval set — no LLM |
 
-Per-query failure group analysis (axis sensitivity per failure group, failure-mode correlation) has accessor methods on SearchMemory but the producer pipeline is not yet wired. See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full intelligence feed design and gap analysis.
+Failure group × axis correlation producer runs after sensitivity scan; periodic refresh during optimization rounds is planned. See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full intelligence feed design.
 
 Implementation: `promptpotter/services/search/search_memory.py`.
 

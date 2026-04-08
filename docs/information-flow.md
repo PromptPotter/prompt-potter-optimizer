@@ -48,27 +48,42 @@ What gets injected into each LLM node's prompt, where it originates, and how it 
 
 ### SearchMemory (cross-campaign)
 
-Each consumer queries a **tailored subset** via a dedicated builder. L3 receives none — it plans from outcomes only.
+Each consumer queries a **tailored subset** via a dedicated builder. Critique is the every-round intelligence hub; L2 fires on escalation only; L3 receives the aggregate strategic picture.
 
-| Method | L1 Generate | Critique | L2 Refine |
-|--------|-------------|----------|-----------|
-| `failure_clusters()` | via `build_l1_search_memory_context()` | via inline dict in `round_execution.py` | — |
-| `dead_queries()` | via `build_l1_search_memory_context()` | — | — |
-| `axis_rankings()` | via `build_l1_search_memory_context()` — top axes | — | via `build_l2_search_memory_context()` |
-| `top_k_values()` | via `build_l1_search_memory_context()` | — | — |
-| `discriminating_queries()` | — | via inline dict in `round_execution.py` | — |
-| `bottleneck_distribution()` | — | — | via `build_l2_search_memory_context()` |
+| Method | L1 Generate | Critique | L2 Refine | L3 Plan |
+|--------|-------------|----------|-----------|---------|
+| `failure_clusters()` | `build_l1_search_memory_context()` | inline `round_execution.py` | — | `build_l3_search_memory_context()` |
+| `dead_queries()` | `build_l1_search_memory_context()` | — | — | — |
+| `axis_rankings()` | `build_l1_search_memory_context()` (top 3) | — | `build_l2_search_memory_context()` (top 5) | `build_l3_search_memory_context()` (top 5) |
+| `top_k_values()` | `build_l1_search_memory_context()` | — | — | — |
+| `discriminating_queries()` | — | inline `round_execution.py` | — | — |
+| `bottleneck_distribution()` | — | — | `build_l2_search_memory_context()` | `build_l3_search_memory_context()` |
+| `persistent_failures()` | — | inline (tractability profiles) | `build_l2_search_memory_context()` | `build_l3_search_memory_context()` |
+| `exhausted_axes()` | — | inline (axis exhaustion) | — | — |
+| `axis_value_trend()` | — | inline (value trends) | — | — |
+| `intractable_queries_ci()` | — | — | — | — |
+| `parameter_failure_correlation()` | — | — | `build_l2_search_memory_context()` | — |
 
 ### Planned Intelligence Extensions
 
 By design, L1 stays clean — it generates candidates. Deeper sample intelligence is handled in two tiers: deterministic code triage (no LLM) and L2 strategic intelligence.
 
-| Item | Tier | Target | Data exists | Status |
-|------|------|--------|-------------|--------|
-| **Failure streak triage** | Deterministic | Code — exclude/deprioritize | `SearchMemory._query_hits` | Planned |
-| **Round trajectory** | Strategic | L2 Refine | `state.rounds` | Planned |
-| **Failure group × axis** | Strategic | L2 Refine | `SearchMemory.ingest_failure_group_analysis()` | Wired — producer runs after scan |
-| **Candidate comparison** | Strategic | L2 Refine | `L1EvalResult.candidate_scores` | Planned |
+| Item | Tier | Target | Status |
+|------|------|--------|--------|
+| **Failure streak triage** | Deterministic | Code — `persistent_failures()` pre-filters eval set | Done |
+| **Intractable query CI gating** | Deterministic | Code — `intractable_queries_ci()` confidence-bounded exclusion | Done |
+| **Round trajectory** | Strategic | L2 Refine — `build_round_trajectory()` | Done |
+| **Candidate comparison** | Strategic | L2 Refine — `build_candidate_comparison()` | Done |
+| **Failure group × axis** | Strategic | L2 Refine — `parameter_failure_correlation()` | Done (scan-only producer; periodic refresh planned) |
+| **L3 SearchMemory intelligence** | Strategic | L3 Plan — `build_l3_search_memory_context()` | Done |
+| **Critique tractability profiles** | Every-round | Critique — intractable/chronic/intermittent classification | Done |
+| **Axis exhaustion detection** | Every-round | Critique — `exhausted_axes()` | Done |
+| **Value momentum/direction** | Every-round | Critique — `axis_value_trend()` | Done |
+| **Diminishing returns detector** | Both | Critique (anomaly flag) + L2 (strategic context) | Planned |
+| **Candidate diversity monitor** | Strategic | L2 — detect mode collapse in candidate generation | Planned |
+| **Query improvement attribution** | Both | Critique (this-round) + L2 (cross-round patterns) | Planned |
+| **Cross-candidate failure diff** | Every-round | Critique — missed opportunities from non-winner candidates | Planned |
+| **Failure group refresh in loop** | Strategic | L2 — periodic recomputation during optimization | Planned |
 
 See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design.
 

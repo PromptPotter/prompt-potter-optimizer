@@ -256,6 +256,8 @@ async def _do_l2_transition(
 
     client = _llm_client.get_llm_client()
     async with observed_node(f"l2_refine_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
+        # Pass round trajectory and last round's candidate scores for L2 intelligence
+        _last_candidates = state.rounds[-1].candidate_scores if state.rounds else []
         tr = await layer_transitions.refine_context(
             state.opt_sp,
             client,
@@ -265,6 +267,8 @@ async def _do_l2_transition(
             pipeline_schema=config.pipeline_schema,
             escalation_context=escalation_context,
             search_memory=state.search_memory,
+            rounds=state.rounds,
+            candidate_scores=_last_candidates,
         )
     # Rebuild first — inherit_memory preserves accumulated state,
     # then apply L2's new values to the rebuilt opt_sp.
@@ -355,6 +359,7 @@ async def _do_l3_transition(
             temperature=config.l3_temperature,
             pipeline_params=current_pp,
             pipeline_schema=config.pipeline_schema,
+            search_memory=state.search_memory,
         )
     _rebuild_current_sp(state, tr, schema=config.pipeline_schema)
     state.escalation.l3_round += 1

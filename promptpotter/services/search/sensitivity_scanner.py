@@ -313,7 +313,7 @@ async def sensitivity_scan(
             composite = scores.get("composite", acc)
             delta = composite - baseline_composite
             variant_errors = scores.get("errors", 0)
-            # Per-query hit map for cohort sensitivity (Wave 3e)
+            # Per-query hit map for failure group sensitivity (Wave 3e)
             _pq_hits = {r.get("query", ""): bool(r.get("hit")) for r in results if r.get("query")}
             rows.append(
                 {

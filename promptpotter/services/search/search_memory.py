@@ -103,6 +103,16 @@ class SearchMemory:
         self._bottleneck_counts: dict[str, int] = defaultdict(int)
         self._total_failures: int = 0
 
+        # Failure group analysis (populated by ingest_failure_group_analysis)
+        # {query: [axis_names]}
+        self._query_axis_sensitivity: dict[str, list[str]] = {}
+        # {axis: {failure_mode: delta}}
+        self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
+
+        # Query improvement attribution — tracks what caused hit/miss flips
+        # [{query, round, changes_description, old_hit, new_hit}]
+        self._query_flips: list[dict[str, Any]] = []
+
     # --- Parameter Impact ---
 
     def axis_rankings(self) -> list[AxisImpact]:
@@ -160,7 +170,7 @@ class SearchMemory:
         Uses failure group analysis results if available. Falls back to empty
         list when no per-query scan data has been ingested.
         """
-        if not hasattr(self, "_query_axis_sensitivity"):
+        if not self._query_axis_sensitivity:
             return []
         return self._query_axis_sensitivity.get(query, [])
 
@@ -197,6 +207,44 @@ class SearchMemory:
                     )
                 )
         records.sort(key=lambda r: r.hit_rate)  # intractable first
+        return records
+
+    def intractable_queries_ci(
+        self, max_upper_ci: float = 0.05, min_evals: int = 8
+    ) -> list[QueryRecord]:
+        """Return queries confidently identified as intractable via Wilson CI.
+
+        A query is intractable when the upper bound of its Wilson confidence
+        interval is below ``max_upper_ci`` with at least ``min_evals``
+        evaluations.  More principled than streak-based ``persistent_failures``.
+        """
+        from promptpotter.services.search.failure_group_analysis import wilson_ci
+
+        records = []
+        for query, hits_list in self._query_hits.items():
+            n = len(hits_list)
+            if n < min_evals:
+                continue
+            n_hits = sum(hits_list)
+            _lower, upper = wilson_ci(n_hits, n)
+            if upper <= max_upper_ci:
+                hit_rate = n_hits / n
+                modes = self._query_failure_modes.get(query, [])
+                dominant = ""
+                if modes:
+                    from collections import Counter
+
+                    dominant = Counter(modes).most_common(1)[0][0]
+                records.append(
+                    QueryRecord(
+                        query=query,
+                        hit_rate=round(hit_rate, 4),
+                        n_evaluations=n,
+                        variance=round(hit_rate * (1 - hit_rate), 4),
+                        dominant_failure_mode=dominant,
+                    )
+                )
+        records.sort(key=lambda r: r.hit_rate)
         return records
 
     # --- Degradation ---
@@ -247,12 +295,73 @@ class SearchMemory:
                 break
         return clusters
 
+    def exhausted_axes(self, min_values: int = 4, max_effect: float = 0.02) -> list[AxisImpact]:
+        """Return axes that have been thoroughly tested with negligible effect.
+
+        An axis is "exhausted" when we've tried ``min_values``+ distinct values
+        and the effect size is below ``max_effect`` — further exploration is
+        unlikely to yield improvement.
+        """
+        exhausted = []
+        for axis, values in self._axis_values.items():
+            if len(values) < min_values:
+                continue
+            impact = self._compute_axis_impact(axis, values)
+            if impact and impact.effect_size <= max_effect:
+                exhausted.append(impact)
+        exhausted.sort(key=lambda a: a.effect_size)
+        return exhausted
+
+    def axis_value_trend(self, axis: str) -> str:
+        """Analyze accuracy trend across numeric values for an axis.
+
+        Returns one of: "increasing", "decreasing", "peaked", "flat", or
+        "non_numeric" when values can't be parsed as numbers.
+        """
+        values = self._axis_values.get(axis, {})
+        if len(values) < 3:
+            return "flat"
+
+        # Try to parse value previews as numbers
+        numeric_pairs: list[tuple[float, float]] = []
+        for v_preview, accs in values.items():
+            if not accs:
+                continue
+            try:
+                num = float(v_preview)
+            except (ValueError, TypeError):
+                return "non_numeric"
+            numeric_pairs.append((num, sum(accs) / len(accs)))
+
+        if len(numeric_pairs) < 3:
+            return "flat"
+
+        numeric_pairs.sort(key=lambda p: p[0])
+        means = [p[1] for p in numeric_pairs]
+
+        # Compute successive deltas
+        deltas = [means[i + 1] - means[i] for i in range(len(means) - 1)]
+        positive = sum(1 for d in deltas if d > NOISE_THRESHOLD)
+        negative = sum(1 for d in deltas if d < -NOISE_THRESHOLD)
+        total = len(deltas)
+
+        if positive > total * 0.6 and negative == 0:
+            return "increasing"
+        if negative > total * 0.6 and positive == 0:
+            return "decreasing"
+        if positive > 0 and negative > 0:
+            # Check for peak: increases then decreases
+            peak_idx = means.index(max(means))
+            if 0 < peak_idx < len(means) - 1:
+                return "peaked"
+        return "flat"
+
     def parameter_failure_correlation(self, axis: str) -> dict[str, float]:
         """Return failure-mode correlation for an axis.
 
         Returns {failure_mode: delta} from failure group analysis if available.
         """
-        if not hasattr(self, "_axis_failure_group_deltas"):
+        if not self._axis_failure_group_deltas:
             return {}
         return self._axis_failure_group_deltas.get(axis, {})
 
@@ -262,8 +371,8 @@ class SearchMemory:
         Populates per-query sensitive axes and per-axis failure correlations
         from ``FailureGroupResult``.
         """
-        self._query_axis_sensitivity: dict[str, list[str]] = {}
-        self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
+        self._query_axis_sensitivity.clear()
+        self._axis_failure_group_deltas.clear()
 
         for s in result.sensitivities:
             # Per-axis → failure mode deltas
@@ -274,6 +383,135 @@ class SearchMemory:
                     self._query_axis_sensitivity[query] = []
                 if s.axis not in self._query_axis_sensitivity[query]:
                     self._query_axis_sensitivity[query].append(s.axis)
+
+    def record_query_flips(
+        self,
+        round_num: int,
+        changes_description: str,
+        prev_results: list[dict],
+        new_results: list[dict],
+    ) -> int:
+        """Record queries that flipped hit/miss between rounds.
+
+        Returns count of flips recorded.
+        """
+        prev_hits: dict[str, bool] = {}
+        for r in prev_results:
+            q = r.get("query", "")
+            if q:
+                prev_hits[q] = bool(r.get("hit"))
+
+        count = 0
+        for r in new_results:
+            q = r.get("query", "")
+            if not q or q not in prev_hits:
+                continue
+            new_hit = bool(r.get("hit"))
+            old_hit = prev_hits[q]
+            if new_hit != old_hit:
+                self._query_flips.append(
+                    {
+                        "query": q,
+                        "round": round_num,
+                        "changes_description": changes_description[:80],
+                        "old_hit": old_hit,
+                        "new_hit": new_hit,
+                    }
+                )
+                count += 1
+        return count
+
+    def query_flip_history(self, query: str | None = None, limit: int = 20) -> list[dict]:
+        """Return recent query hit/miss flips, optionally filtered by query."""
+        flips = self._query_flips
+        if query:
+            flips = [f for f in flips if f["query"] == query]
+        return flips[-limit:]
+
+    def format_recent_attributions(self, limit: int = 5) -> str | None:
+        """Format recent positive flips (miss→hit) for injection into critique."""
+        positive = [f for f in self._query_flips if f["new_hit"] and not f["old_hit"]]
+        if not positive:
+            return None
+        recent = positive[-limit:]
+        parts = []
+        for f in recent:
+            parts.append(
+                f"  Round {f['round']}: {f['query'][:50]} started hitting "
+                f"after: {f['changes_description']}"
+            )
+        return f"{len(positive)} queries improved (last {len(recent)}):\n" + "\n".join(parts)
+
+    def recompute_failure_group_correlations(self) -> bool:
+        """Recompute failure group × axis correlations from internal data.
+
+        Uses ``_query_failure_modes`` to build failure groups and
+        ``_query_hits`` + ``_axis_values`` to estimate which axes
+        correlate with improvements for each group.
+
+        Returns True if correlations were updated.
+        """
+        # Build failure groups from query_failure_modes
+        from collections import Counter
+
+        clusters = self.failure_clusters(5)
+        if not clusters:
+            return False
+
+        # Build group membership: {failure_mode: set of queries}
+        groups: dict[str, set[str]] = {}
+        for cluster in clusters:
+            # Include ALL queries with this dominant failure mode, not just examples
+            mode = cluster.failure_mode
+            group_queries: set[str] = set()
+            for query, modes in self._query_failure_modes.items():
+                if modes:
+                    dominant = Counter(modes).most_common(1)[0][0]
+                    if dominant == mode:
+                        group_queries.add(query)
+            if group_queries:
+                groups[mode] = group_queries
+
+        if not groups:
+            return False
+
+        # For each axis, compare mean hit rate across values for each group
+        new_deltas: dict[str, dict[str, float]] = {}
+        new_sensitivity: dict[str, list[str]] = {}
+
+        for axis, values in self._axis_values.items():
+            if len(values) < 2:
+                continue
+
+            for group_name, group_queries in groups.items():
+                # Correlate axis effect with failure group membership
+                group_hit_rate = 0.0
+                for q in group_queries:
+                    hits = self._query_hits.get(q, [])
+                    if hits:
+                        group_hit_rate += sum(hits) / len(hits)
+                if group_queries:
+                    group_hit_rate /= len(group_queries)
+
+                # Check if the axis has meaningful variation
+                impact = self._compute_axis_impact(axis, values)
+                if impact and impact.effect_size > NOISE_THRESHOLD:
+                    # Store the correlation as effect_size × (1 - group_hit_rate)
+                    # Higher correlation for axes with large effect on hard groups
+                    correlation = impact.effect_size * (1 - group_hit_rate)
+                    if correlation > 0.005:
+                        new_deltas.setdefault(axis, {})[group_name] = round(correlation, 4)
+                        for q in group_queries:
+                            if q not in new_sensitivity:
+                                new_sensitivity[q] = []
+                            if axis not in new_sensitivity[q]:
+                                new_sensitivity[q].append(axis)
+
+        if new_deltas:
+            self._axis_failure_group_deltas = new_deltas
+            self._query_axis_sensitivity = new_sensitivity
+            return True
+        return False
 
     # --- Lifecycle ---
 
@@ -311,6 +549,9 @@ class SearchMemory:
             "bottleneck_counts": dict(self._bottleneck_counts),
             "total_failures": self._total_failures,
             "query_degradation_counts": dict(self._query_degradation_counts),
+            "query_axis_sensitivity": self._query_axis_sensitivity,
+            "axis_failure_group_deltas": self._axis_failure_group_deltas,
+            "query_flips": self._query_flips,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -338,6 +579,9 @@ class SearchMemory:
         mem._bottleneck_counts = defaultdict(int, data.get("bottleneck_counts", {}))
         mem._total_failures = data.get("total_failures", 0)
         mem._query_degradation_counts = defaultdict(int, data.get("query_degradation_counts", {}))
+        mem._query_axis_sensitivity = data.get("query_axis_sensitivity", {})
+        mem._axis_failure_group_deltas = data.get("axis_failure_group_deltas", {})
+        mem._query_flips = data.get("query_flips", [])
         return mem
 
     # --- Internals ---

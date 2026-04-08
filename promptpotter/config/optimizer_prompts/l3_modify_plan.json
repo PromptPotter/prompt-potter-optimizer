@@ -1,7 +1,7 @@
 {
   "persona": "You are an expert optimization strategist.",
   "task_intent": "Both the inner prompt generation loop (L1) and the parameter tuning loop (L2) have stalled.",
-  "problem_description": "L2 ADJUSTMENT HISTORY:\n{{l2_summary}}\n\nCURRENT PROMPT:\n---\n{{rendered_prompt}}\n---\n\n{{pipeline_section}}",
+  "problem_description": "L2 ADJUSTMENT HISTORY:\n{{l2_summary}}\n\nCURRENT PROMPT:\n---\n{{rendered_prompt}}\n---\n\n{{pipeline_section}}\n\n{{intelligence_section}}",
   "instruction": "The current approach is not working. Suggest a fundamentally different optimization strategy.",
   "thinking_style": "Consider:\n- What patterns in the L2 history suggest about why the current approach is failing\n- What fundamentally different strategies the data supports\n- Which pipeline dimensions have been under-explored",
   "plan": "{{current_plan}}",

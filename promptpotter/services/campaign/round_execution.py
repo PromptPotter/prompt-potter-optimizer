@@ -209,8 +209,68 @@ async def _run_critique(
             _crit_sm_ctx["failure_clusters"] = "; ".join(
                 f"{c.failure_mode} ({c.fraction:.0%})" for c in _fc
             )
+        # Tractability profiles — help critique distinguish intractable vs chronic
+        _persistent = _sm.persistent_failures(min_streak=3)
+        if _persistent:
+            intractable = [q for q in _persistent if q.hit_rate == 0]
+            chronic = [q for q in _persistent if q.hit_rate > 0]
+            parts = []
+            if intractable:
+                parts.append(f"{len(intractable)} intractable (never hit in any config)")
+            if chronic:
+                parts.append(f"{len(chronic)} chronic (recently failing but hit_rate > 0)")
+            _crit_sm_ctx["tractability"] = "; ".join(parts)
+        # Axis exhaustion — inform suggested_axes to avoid exhausted axes
+        _exhausted = _sm.exhausted_axes()
+        if _exhausted:
+            _crit_sm_ctx["exhausted_axes"] = "; ".join(
+                f"{a.axis} ({len(_sm._axis_values.get(a.axis, {}))} values tested, "
+                f"effect={a.effect_size:.3f})"
+                for a in _exhausted[:5]
+            )
+        # Value trends — directional guidance for numeric axes
+        _rankings = _sm.axis_rankings()[:3]
+        trend_parts = []
+        for a in _rankings:
+            trend = _sm.axis_value_trend(a.axis)
+            if trend not in ("flat", "non_numeric"):
+                trend_parts.append(f"{a.axis}: {trend}")
+        if trend_parts:
+            _crit_sm_ctx["value_trends"] = "; ".join(trend_parts)
         if not _crit_sm_ctx:
             _crit_sm_ctx = None
+
+    # Query improvement attribution — what changes caused query flips
+    if _sm:
+        _attributions = _sm.format_recent_attributions(limit=3)
+        if _attributions:
+            if _crit_sm_ctx is None:
+                _crit_sm_ctx = {}
+            _crit_sm_ctx["improvement_attribution"] = _attributions
+
+    # Cross-candidate failure diff — missed opportunities
+    from promptpotter.services.campaign.formatting import build_cross_candidate_diff
+
+    _diff = build_cross_candidate_diff(
+        eval_out.winner_results,
+        eval_out.all_candidate_results,
+        eval_out.candidate_scores,
+    )
+    if _diff:
+        if _crit_sm_ctx is None:
+            _crit_sm_ctx = {}
+        _crit_sm_ctx["cross_candidate_diff"] = _diff
+
+    # Trajectory classification — deterministic anomaly flag
+    from promptpotter.services.campaign.formatting import classify_trajectory
+
+    _trajectory = classify_trajectory(state.rounds)
+    if _trajectory and _trajectory["classification"] != "healthy":
+        if _crit_sm_ctx is None:
+            _crit_sm_ctx = {}
+        _crit_sm_ctx["trajectory"] = (
+            f"{_trajectory['classification']}: {_trajectory['description']}"
+        )
 
     cctx = CritiqueContext(
         results=eval_out.winner_results,

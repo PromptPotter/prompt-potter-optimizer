@@ -24,9 +24,11 @@
 │    └────────────────────────────────────────────────────────────────┘  │
 │    Winner selection: best accuracy >= baseline + threshold             │
 │         ↓                                                              │
-│    ┌─ CRITIQUE (LLM) — sole intelligence bridge ───────────────────┐  │
+│    ┌─ CRITIQUE (LLM) — every-round intelligence hub ───────────────┐  │
 │    │  in:  pipeline_health, rank_analysis, round_evolution,        │  │
-│    │       query_categories, failure_details, successes            │  │
+│    │       query_categories, failure_details, successes,           │  │
+│    │       search_memory (failure clusters, discriminating queries, │  │
+│    │         tractability profiles, axis exhaustion, value trends)  │  │
 │    │                                                                │  │
 │    │  out: { summary, priority_fix, suggested_axes,                │  │
 │    │         failure_highlights, positive/negative_critique }       │  │
@@ -38,29 +40,32 @@
 │                                                                        │
 │  ── ESCALATION (if degradation detected) ──────────────────────────── │
 │                                                                        │
-│  L2 REFINE CONTEXT (LLM) — meta-controller                            │
+│  L2 REFINE CONTEXT (LLM) — escalation-only meta-controller             │
 │    in:  critique, prev l2_directive, escalation report                 │
 │         (OR warning_inventory when no report), task_context,           │
 │         pipeline schema param keys,                                    │
-│         [PLANNED] round trajectory, failure group × axis insights,    │
+│         round trajectory, failure group × axis insights,              │
 │         candidate comparison summary                                   │
 │    out: updated task_context + meta-settings (creativity,              │
-│         n_variants, eval_sample_size)                                       │
+│         n_variants, eval_sample_size)                                  │
 │    L2 does NOT set pipeline_params — that's L1's job.                  │
 │                                                                        │
 │  L3 MODIFY PLAN (LLM) — if L2 stalls                                  │
+│    in:  current plan, L2 history, rendered prompt, pipeline section,   │
+│         search_memory (axis rankings, bottleneck dist, failure         │
+│         clusters, persistent failures)                                 │
 │    out: new strategic plan                                             │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Responsibility Matrix
 
-| Agent | Decides | Does NOT decide |
-|-------|---------|-----------------|
-| **L1 Generate** | pipeline_params (query_prefix, max_sites, schema, temperature, ...) | `task_context`, meta-settings |
-| **Critique** | what to focus on (suggested_axes, priority_fix) | pipeline_params values |
-| **L2 Refine** | `task_context`, meta-settings (creativity, n_variants, eval_sample_size), `l2_directive` | pipeline_params |
-| **L3 Plan** | strategic plan | pipeline_params, `task_context` |
+| Agent | Fires when | Decides | Does NOT decide |
+|-------|-----------|---------|-----------------|
+| **L1 Generate** | Every round | pipeline_params (query_prefix, max_sites, schema, temperature, ...) | `task_context`, meta-settings |
+| **Critique** | Every round | what to focus on (suggested_axes, priority_fix) | pipeline_params values |
+| **L2 Refine** | Escalation only (stall, degradation) | `task_context`, meta-settings (creativity, n_variants, eval_sample_size), `l2_directive` | pipeline_params |
+| **L3 Plan** | L2 stalls | strategic plan | pipeline_params, `task_context` |
 
 ---
 
@@ -154,7 +159,7 @@ Each round:
 
 ## Critique Agent
 
-Failure analysis is **separated from candidate generation** (PromptWizard pattern). Critique and thinking styles are tools of `l1_evaluate`, not separate pipeline nodes — critique runs **inside L1 Evaluate** after backend evaluation and winner selection. Its output feeds forward to **L1 Generate** (next round) and **L2 Refine** (on escalation).
+Failure analysis is **separated from candidate generation** (PromptWizard pattern). Critique is the **every-round intelligence hub** — it runs every round inside L1 Evaluate after backend evaluation and winner selection. It is the **sole reader** of raw eval results AND receives SearchMemory intelligence (failure clusters, discriminating queries, tractability profiles, axis exhaustion, value trends) to frame its analysis. Its output feeds forward to **L1 Generate** (next round) and **L2 Refine** (on escalation). L2 only fires on escalation — critique is the normal-flow intelligence bridge.
 
 ### Critique Output
 
@@ -189,7 +194,7 @@ Formatted by `format_critique_for_prompt()` (emits only actionable fields: summa
 | **Query categories** | `winner_results.terminated_at` |
 | **Failure details** | `winner_results` (8 max, deduped) |
 | **Successes** | `winner_results` (2 examples) |
-| **Search memory** *(M8 — live)* | `SearchMemory` atomic accessors |
+| **Search memory** *(M8)* | `SearchMemory` atomic accessors: failure clusters, discriminating queries, tractability profiles, axis exhaustion, value trends |
 
 ### Anomaly Flags
 
