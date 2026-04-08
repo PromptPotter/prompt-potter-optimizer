@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,12 +29,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["CampaignControlReader", "CampaignPersistenceEmitter", "RoundRecorder"]
-
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _strip_ansi(text: str) -> str:
-    return _ANSI_RE.sub("", text)
 
 
 class CampaignPersistenceEmitter:

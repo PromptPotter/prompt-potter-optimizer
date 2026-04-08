@@ -451,9 +451,6 @@ def update_round_state(
 # Never drop more than this fraction of the eval set per adaptation
 _MAX_DROP_FRACTION = 0.25
 
-# Minimum rounds of history before adaptation kicks in
-MIN_ROUNDS_FOR_ADAPTATION = 3
-
 
 def adapt_eval_set(
     current_dataset: list[dict],

@@ -102,7 +102,7 @@ Each method gets the same maximum eval budget. Optimization efficiency = accurac
 ### Statistical Rigor
 
 - **Multiple seeds:** Each method runs 3 times with different random seeds. Report mean and standard deviation.
-- **Confidence intervals:** 95% Wilson score CI on accuracy (via `wilson_ci()` from `services/search/cohort_analysis.py`).
+- **Confidence intervals:** 95% Wilson score CI on accuracy (via `wilson_ci()` from `services/search/failure_group_analysis.py`).
 - **Significance testing:** McNemar's test (paired, per-query) for primary comparisons. Two-proportion z-test (via `proportion_test()`) for unpaired comparisons.
 - **Significance threshold:** p < 0.05 with Bonferroni correction for multiple comparisons.
 

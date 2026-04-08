@@ -284,7 +284,7 @@ L1 stays clean — it generates candidates. Deeper intelligence feeds L2 (the me
 |------|------|--------|----------------|
 | Failure streak triage | Deterministic | Code — exclude/deprioritize | `_query_hits` raw data exists |
 | Round trajectory | Strategic | L2 | `state.rounds` data exists |
-| Failure group × axis | Strategic | L2 | `ingest_cohort_analysis()` accessor exists, producer not wired |
+| Failure group × axis | Strategic | L2 | `ingest_failure_group_analysis()` — wired, producer runs after scan |
 | Candidate comparison | Strategic | L2 | `candidate_scores` data exists |
 
 See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design.

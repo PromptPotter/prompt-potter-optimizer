@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -47,16 +48,14 @@ from promptpotter.services.project_store import ProjectStore
 logger = logging.getLogger(__name__)
 
 
+@dataclass
 class _SessionCtx:
     """Loaded session state — eliminates repeated store/state/id boilerplate."""
 
-    __slots__ = ("backend_id", "session_id", "state", "store")
-
-    def __init__(self, store: ProjectStore, state: dict, backend_id: str, session_id: str):
-        self.store = store
-        self.state = state
-        self.backend_id = backend_id
-        self.session_id = session_id
+    store: ProjectStore
+    state: dict
+    backend_id: str
+    session_id: str
 
 
 def _load_session(args: argparse.Namespace) -> _SessionCtx:

@@ -399,24 +399,6 @@ class PipelineSchema(BaseModel):
         return ""
 
 
-def is_result_step_compatible(
-    result: dict,
-    target_nodes: set[str] | list[str],
-) -> bool:
-    """Tag whether a historical result's prediction matches what target config would produce.
-
-    True when terminated_at is in target_nodes (the result never reached
-    a step absent from the target config). False when terminated_at is
-    missing or outside target_nodes. Used for annotation, not filtering.
-    """
-    pd = result.get("pipeline_data") or {}
-    terminated_at = pd.get("terminated_at")
-    if terminated_at is None:
-        return False
-    target = target_nodes if isinstance(target_nodes, set) else set(target_nodes)
-    return terminated_at in target
-
-
 def load_pipeline_from_dict(data: dict) -> PipelineSchema:
     """Load a PipelineSchema from a raw dict (e.g., optimizer_pipeline.json).
 

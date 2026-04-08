@@ -78,7 +78,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-
 def show_feedback_preflight(
     campaign_rounds: list,
     dataset: list,
@@ -132,8 +131,12 @@ def show_feedback_preflight(
     )
 
     _bl = _extract_campaign_baseline(campaign_rounds)
-    bl = {"baseline_ps": _bl.baseline_ps, "baseline_acc": _bl.baseline_acc,
-          "baseline_results": _bl.baseline_results, "instruction": _bl.instruction}
+    bl = {
+        "baseline_ps": _bl.baseline_ps,
+        "baseline_acc": _bl.baseline_acc,
+        "baseline_results": _bl.baseline_results,
+        "instruction": _bl.instruction,
+    }
 
     _print_preflight_sections(
         config,

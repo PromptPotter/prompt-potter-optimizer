@@ -56,18 +56,6 @@ class BackendClient:
             self._http = httpx.AsyncClient(timeout=self.timeout)
         return self._http
 
-    @staticmethod
-    def split_query_parts(query: str) -> tuple[str, str]:
-        """Split a query string into (primary, secondary) parts.
-
-        Delegates to the connector config. Currently uses the TermNorm
-        format (``bom_material / process``). Will become connector-specific
-        in M9 (ConnectorProtocol).
-        """
-        from promptpotter.config.connectors.termnorm import split_query
-
-        return split_query(query)
-
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         """GET ``{base_url}{path}`` and return parsed JSON."""
         kwargs: dict[str, Any] = {"params": params} if params else {}

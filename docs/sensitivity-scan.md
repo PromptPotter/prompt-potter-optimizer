@@ -72,5 +72,5 @@ SearchMemory enriches the scan workflow when historical data exists: the scan ad
 
 ### Per-Query Failure Group Sensitivity (Planned)
 
-Standard sensitivity scan measures per-axis accuracy deltas over the full query set. Failure group sensitivity would slice those results by failure mode to answer: "Which axes matter most for which failure types?" SearchMemory has the accessor methods (`query_sensitive_axes()`, `parameter_failure_correlation()`, `ingest_cohort_analysis()`) but the producer pipeline is not yet wired. See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design and gap analysis.
+Standard sensitivity scan measures per-axis accuracy deltas over the full query set. Failure group sensitivity slices those results by failure mode to answer: "Which axes matter most for which failure types?" The producer (`failure_group_sensitivity()` in `failure_group_analysis.py`) runs automatically after scan completes and ingests results via `ingest_failure_group_analysis()`. Accessor methods (`query_sensitive_axes()`, `parameter_failure_correlation()`) feed into L2's strategic intelligence. See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design.
 

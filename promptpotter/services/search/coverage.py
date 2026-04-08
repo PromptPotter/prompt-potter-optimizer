@@ -13,10 +13,9 @@ import hashlib
 import json
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.pipeline_schema import is_result_step_compatible
 from promptpotter.services.project_store import ProjectStore
 from promptpotter.services.search.failure_group_analysis import preview
 from promptpotter.services.search.smart_search import deserialize_smart_search_plan
@@ -29,35 +28,6 @@ if TYPE_CHECKING:
     from promptpotter.models.search_point import JobSearchPoint
 
 logger = logging.getLogger(__name__)
-
-
-def _steps_match(entry: dict, target_steps: frozenset[str]) -> bool:
-    """Match by step sequence — which nodes ran."""
-    entry_steps = frozenset((entry.get("pipeline_params") or {}).get("steps", []))
-    # Both empty → match; otherwise exact set equality
-    return entry_steps == target_steps
-
-
-def _extract_param(
-    pp: dict,
-    param_name: str,
-    node_name: str | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-) -> Any:
-    """Extract a parameter value from pipeline_params.
-
-    When *node_name* is provided, looks directly at ``pp[node_name][param_name]``.
-    Otherwise falls back to brute-force scan of all node dicts (for historical data).
-    """
-    if node_name:
-        node_cfg = pp.get(node_name)
-        if isinstance(node_cfg, dict) and param_name in node_cfg:
-            return node_cfg[param_name]
-    # Brute-force: scan all node dicts (historical data compatibility)
-    for _k, v in pp.items():
-        if isinstance(v, dict) and param_name in v:
-            return v[param_name]
-    return None
 
 
 def diagnose_scan_variants(
@@ -84,7 +54,11 @@ def diagnose_scan_variants(
     baseline_steps = frozenset(
         (baseline_sp.pipeline_params or {}).get("steps", []),
     )
-    step_matches = [e for e in summaries if _steps_match(e, baseline_steps)]
+    step_matches = [
+        e
+        for e in summaries
+        if frozenset((e.get("pipeline_params") or {}).get("steps", [])) == baseline_steps
+    ]
 
     # Step 2: index step-matching runs by rendered_prompt_hash
     rp_index: dict[str, list[dict]] = defaultdict(list)
@@ -331,7 +305,12 @@ def assess_scan_coverage(
         baseline_opt.render().encode(),
     ).hexdigest()[:HASH_TRUNCATE]
     for axis_name, values in pipeline_param_defs.items():
-        current_val = _extract_param(base_params, axis_name)
+        # Extract param by brute-force scan of all node dicts
+        current_val = None
+        for _node_cfg in base_params.values():
+            if isinstance(_node_cfg, dict) and axis_name in _node_cfg:
+                current_val = _node_cfg[axis_name]
+                break
         non_baseline = [v for v in values if v != current_val]
         if not non_baseline:
             continue
@@ -345,10 +324,9 @@ def assess_scan_coverage(
             for q in diag_query_strings:
                 if q in cached:
                     n_cached_total += 1
-                    if target_steps and is_result_step_compatible(
-                        cached[q],
-                        target_steps,
-                    ):
+                    _pd = cached[q].get("pipeline_data") or {}
+                    _term = _pd.get("terminated_at")
+                    if target_steps and _term and _term in target_steps:
                         n_step_compatible += 1
 
         pp_calls_needed += n_calls

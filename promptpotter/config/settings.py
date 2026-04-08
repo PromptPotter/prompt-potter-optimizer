@@ -60,15 +60,14 @@ def _load_variant_library_raw() -> dict:
         return json.load(f)
 
 
-def _extract_text(variants: list) -> list[str]:
-    return [v["text"] if isinstance(v, dict) else v for v in variants]
-
-
 def load_variant_library() -> dict:
     """Load the prompt variant library, returning flat ``{field: [str]}`` shape."""
     raw = _load_variant_library_raw()
     return {
-        section: {field: _extract_text(vals) for field, vals in axes.items()}
+        section: {
+            field: [v["text"] if isinstance(v, dict) else v for v in vals]
+            for field, vals in axes.items()
+        }
         for section, axes in raw.items()
     }
 

@@ -312,9 +312,13 @@ def build_l2_search_memory_context(search_memory: Any) -> dict | None:
         for a in rankings[:3]:
             corr = search_memory.parameter_failure_correlation(a.axis)
             if corr:
-                parts = [f"{mode}: {delta:+.0%}" for mode, delta in sorted(
-                    corr.items(), key=lambda x: -abs(x[1]),
-                )[:3]]
+                parts = [
+                    f"{mode}: {delta:+.0%}"
+                    for mode, delta in sorted(
+                        corr.items(),
+                        key=lambda x: -abs(x[1]),
+                    )[:3]
+                ]
                 fg_lines.append(f"{a.axis} → {', '.join(parts)}")
         if fg_lines:
             ctx["failure_group_insights"] = "; ".join(fg_lines)

@@ -15,6 +15,7 @@ import contextvars
 import functools
 import json
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -92,8 +93,6 @@ async def llm_call(
     if config is None:
         config = get_node_config(node) if node else {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
-
-    import time
 
     _t0 = time.monotonic()
 

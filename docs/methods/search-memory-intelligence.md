@@ -177,10 +177,11 @@ independently.
 which axes produce the largest accuracy lift?" Injected into L2 so it
 can direct L1 toward high-impact axes for the dominant failure group.
 
-**Building blocks:** `ingest_cohort_analysis()`,
+**Building blocks:** `ingest_failure_group_analysis()`,
 `query_sensitive_axes()`, `parameter_failure_correlation()` on
-SearchMemory. Producer (`cohort_sensitivity()` in `cohort_analysis.py`)
-was implemented then removed. Needs to be rewired from scan results.
+SearchMemory. Producer (`failure_group_sensitivity()` in
+`failure_group_analysis.py`) runs automatically after scan completes
+via `run_scan_and_persist()` in orchestration.
 
 #### D: Candidate comparison
 

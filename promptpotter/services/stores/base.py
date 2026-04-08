@@ -109,22 +109,6 @@ def append_jsonl(path: Path, item: dict) -> Path:
     return path
 
 
-def read_jsonl(path: Path) -> list[dict]:
-    """Read all JSON objects from a JSONL file.
-
-    Returns an empty list if *path* does not exist.
-    """
-    if not path.exists():
-        return []
-    items: list[dict] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                items.append(json.loads(line))
-    return items
-
-
 class EntityStore:
     """Generic JSON entity store: ``{backend_id}/{subdir}/{entity_id}.json``.
 

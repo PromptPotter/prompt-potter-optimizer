@@ -67,7 +67,7 @@ By design, L1 stays clean — it generates candidates. Deeper sample intelligenc
 |------|------|--------|-------------|--------|
 | **Failure streak triage** | Deterministic | Code — exclude/deprioritize | `SearchMemory._query_hits` | Planned |
 | **Round trajectory** | Strategic | L2 Refine | `state.rounds` | Planned |
-| **Failure group × axis** | Strategic | L2 Refine | `SearchMemory.ingest_cohort_analysis()` | Accessor exists, producer not wired |
+| **Failure group × axis** | Strategic | L2 Refine | `SearchMemory.ingest_failure_group_analysis()` | Wired — producer runs after scan |
 | **Candidate comparison** | Strategic | L2 Refine | `L1EvalResult.candidate_scores` | Planned |
 
 See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design.

@@ -90,15 +90,6 @@ def count_degraded_queries(results: Sequence[Mapping[str, Any]]) -> int:
     )
 
 
-def _step_executed(step_name: str, result: QueryResult) -> bool:
-    """Check if a pipeline step executed for a result (via step_timings or terminated_at)."""
-    pd = result.get("pipeline_data") or {}
-    if pd.get("terminated_at") == step_name:
-        return True
-    timings = pd.get("step_timings") or {}
-    return timings.get(step_name) is not None
-
-
 def _extract_candidate_label(c) -> str:
     """Extract the display name from a candidate (dict, tuple, or string)."""
     if isinstance(c, dict):
@@ -112,7 +103,14 @@ def _compute_recall(
     candidate_key: str = "candidate_ranking",
 ) -> float:
     """Fraction of queries where GT appears in the candidate list for *step*."""
-    scoped = [r for r in results if _step_executed(step.name, r) and not is_error_result(r)]
+
+    def _step_ran(r: QueryResult) -> bool:
+        pd = r.get("pipeline_data") or {}
+        if pd.get("terminated_at") == step.name:
+            return True
+        return (pd.get("step_timings") or {}).get(step.name) is not None
+
+    scoped = [r for r in results if _step_ran(r) and not is_error_result(r)]
     if not scoped:
         return 0.0
     found = 0
@@ -539,5 +537,3 @@ def compile_temporal_trends(
         )
 
     return TrendAnalysis(snapshots=snapshots)
-
-

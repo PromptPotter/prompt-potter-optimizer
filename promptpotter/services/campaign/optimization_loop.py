@@ -51,7 +51,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["run_optimization"]
 
 
-
 async def _handle_post_probe(
     state: LoopState,
     config: RunConfig,
@@ -330,7 +329,9 @@ async def run_optimization(
                 _round_checks = None  # no escalation checks during probe
                 logger.debug(
                     "PROBE round %d: %d warned queries (from %d tracked)",
-                    round_num, len(round_eval_data), len(warned),
+                    round_num,
+                    len(round_eval_data),
+                    len(warned),
                 )
             else:
                 round_eval_data = eval_dataset

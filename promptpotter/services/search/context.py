@@ -31,8 +31,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-TASK_CONTEXT_FIELDS = TaskContext.FIELDS
-
 
 @dataclass
 class TaskContextResult:

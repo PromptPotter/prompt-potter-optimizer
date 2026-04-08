@@ -359,9 +359,7 @@ async def l1_evaluate(
                 {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
             )
         )
-        merged_pp.append(
-            _merge_pipeline_params(pipeline_params, override, ctx.pipeline_schema)
-        )
+        merged_pp.append(_merge_pipeline_params(pipeline_params, override, ctx.pipeline_schema))
 
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []

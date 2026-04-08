@@ -109,7 +109,7 @@ The feedback cycle should pick queries that maximise information about which pro
 
 ### 2a. Statistically grounded sample sizing
 
-- `build_diagnostic_set()` uses `min_detectable_effect(n)` (in `promptpotter/services/search/cohort_analysis.py`) to compute minimum n for a target MDE
+- `build_diagnostic_set()` uses `min_detectable_effect(n)` (in `promptpotter/services/search/failure_group_analysis.py`) to compute minimum n for a target MDE
 - If user-specified `scan_sample_size` is below minimum for detecting a 15% effect, auto-adjust upward with a warning
 - This alone would have prevented the "3 queries = no signal" problem
 
@@ -208,7 +208,7 @@ class SearchMemory:
 
 **Causal scan ordering** — order axes by pipeline depth (from `PipelineSchema.nodes`). After upstream improvement in adaptive search, re-check downstream sensitivity. In `adaptive_search.py`.
 
-**Query cohort sensitivity** — persist per-query scan results (minor `sensitivity_scan.py` change), slice by failure mode cohort for free cohort-level sensitivity. New `cohort_analysis.py`.
+**Query failure group sensitivity** — persist per-query scan results (minor `sensitivity_scan.py` change), slice by failure mode for free failure-group-level sensitivity. New `failure_group_analysis.py`.
 
 ---
 
@@ -355,7 +355,7 @@ Wave 1 ✅  Wave 2 ✅  Wave 3 ✅  Wave 4 ✅
 | `compute_pipeline_metrics()` | Aggregate metrics from node types | `promptpotter/services/metrics.py:99` |
 | `_parse_backend_response()` | Assembles per-query pipeline_data from schema | `promptpotter/services/eval_query.py` |
 | `obs_extraction_map()` | Schema -> observation mapping | `promptpotter/models/pipeline_schema.py` |
-| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `promptpotter/services/search/cohort_analysis.py` (re-exported by `promptpotter/display/campaign/optimize.py`) |
+| `wilson_ci()`, `proportion_test()`, `min_detectable_effect()` | Statistical tools (exist, unused in decisions) | `promptpotter/services/search/failure_group_analysis.py` (re-exported by `promptpotter/display/campaign/optimize.py`) |
 | `build_diagnostic_set()` | Current sample selection (random 75/25 stratification) | `promptpotter/services/search/smart_search.py:169` |
 | `LoopState` | Feedback cycle state (has `current_results` per round) | `promptpotter/services/campaign/state.py:38` |
 | `format_context_sections()` | Context injection point for LLM prompts | `promptpotter/services/campaign/formatting.py` |
