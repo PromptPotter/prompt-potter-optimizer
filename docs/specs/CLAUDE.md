@@ -7,7 +7,7 @@
 
 | Milestone | Spec file | Pre-reading hint |
 |-----------|-----------|-----------------|
-| M8: Campaign Intelligence | [`m8-campaign-intelligence.md`](m8-campaign-intelligence.md) | `promptpotter/services/eval_gateway.py`, `promptpotter/services/eval_query.py`, `promptpotter/services/search/smart_search.py`, `promptpotter/services/campaign/l1_optimizer.py`, `promptpotter/services/search/search_memory.py` |
-| M9: Multi-Connector | [`m9-multi-connector.md`](m9-multi-connector.md) | `promptpotter/services/backend_client.py` |
+| M8: Campaign Intelligence (Complete) | [`m8-campaign-intelligence.md`](m8-campaign-intelligence.md) | `promptpotter/services/eval_gateway.py`, `promptpotter/services/eval_query.py`, `promptpotter/services/search/smart_search.py`, `promptpotter/services/campaign/l1_optimizer.py`, `promptpotter/services/search/search_memory.py` |
+| M9: Publication, Stable Config & Webapp | [`m9-publication-config-webapp.md`](m9-publication-config-webapp.md) | `promptpotter/config/optimizer_prompts/`, `promptpotter/config/llm_client.py`, `promptpotter/shared/scoring.py`, `promptpotter/main.py`, `docs/benchmarks.md` |
 
-Archived specs (M0-M7) are in git history. Entry-point parity docs absorbed into CLAUDE.md § Three-layer I/O architecture.
+Archived specs: M0-M7 in git history, old M9 (Multi-Connector) at [`archive/m9-multi-connector.md`](archive/m9-multi-connector.md). Entry-point parity docs absorbed into CLAUDE.md § Three-layer I/O architecture.

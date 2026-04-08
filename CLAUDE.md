@@ -139,7 +139,7 @@ The notebook has no `session_id` — scan/campaign results don't persist. Root c
 
 ## Roadmap
 
-M0–M7 complete (archived). **M8 complete** — Campaign Intelligence (SearchMemory, all 17 waves). **M9 future** — Multi-Connector Architecture. Benchmarks (HotPotQA, GSM8K) planned post-M8.
+M0–M7 complete (archived). **M8 complete** — Campaign Intelligence (SearchMemory, all 17 waves). **M9 next** — Publication, Stable Config & Webapp (4 tracks: benchmarks + competitor comparison, meta-prompt stabilization, Next.js webapp, publication figures design). **M10 future** — OptSearchPoint Refinement & Ablation Studies (bells & whistles, multi-pipeline/dataset). **M11 future** — Multi-Connector Architecture.
 
 ## Testing
 
@@ -153,5 +153,5 @@ Minimal suite — only stable contracts tested. No volume tests, no O(n) complex
 4. [`docs/sensitivity-scan.md`](docs/sensitivity-scan.md) — OAT scan, coverage
 5. [`docs/cli-workflow.md`](docs/cli-workflow.md) — full CLI reference, eval output format
 6. [`docs/node-standard.md`](docs/node-standard.md) — node types, `llm_call()` primitive
-7. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M8, M9)
+7. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M9), archived (M8, old M9)
 8. [`docs/observability.md`](docs/observability.md), [`docs/setup-guide.md`](docs/setup-guide.md), [`docs/benchmarks.md`](docs/benchmarks.md), [`docs/information-flow.md`](docs/information-flow.md)

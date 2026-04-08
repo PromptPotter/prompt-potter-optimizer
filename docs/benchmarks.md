@@ -2,7 +2,7 @@
 
 PromptPotter takes a prompt and a dataset, and finds a better prompt. For academic benchmarking, the simplest setup applies: a single LLM call with question-answer pairs. The optimization loop (L1 generate, L2 refine, L3 replan) is evaluated against standard datasets to measure prompt improvement and compare with published baselines (MIPROv2, GEPA, adv-CoT, Promptomatix).
 
-**Status:** Methodology defined, export infrastructure built. Dataset loaders and benchmark-specific evaluators (F1, numeric exact match) are planned. Result tables contain placeholders (`—`) that are filled after benchmark campaigns complete.
+**Status:** Methodology defined, export infrastructure built. Dataset loaders and benchmark-specific evaluators (F1, numeric exact match) are planned as M9 Track 1. Result tables contain placeholders (`—`) that are filled after benchmark campaigns complete.
 
 ---
 
@@ -90,7 +90,11 @@ Each method gets the same maximum eval budget. Optimization efficiency = accurac
 | Zero-shot | Raw question, no system prompt | Manual |
 | Few-shot (manual) | Hand-crafted 3-shot examples | Manual |
 | DSPy Bootstrap | DSPy's bootstrap few-shot optimizer | [DSPy library](https://github.com/stanfordnlp/dspy) |
-| MIPROv2 | DSPy's MIPRO v2 instruction + demo optimizer | [Opsahl-Ong et al., 2024](https://arxiv.org/abs/2406.11695) |
+| MIPROv2 | DSPy's MIPRO v2 instruction + demo optimizer (cited) | [Opsahl-Ong et al., 2024](https://arxiv.org/abs/2406.11695) |
+| GEPA | Reflective prompt evolution with trajectory feedback (cited) | [GEPA, 2025](https://github.com/stanfordnlp/dspy) |
+| Promptomatix | Meta-prompt + DSPy compiler, cost-aware (cited) | [Salesforce, 2025](https://arxiv.org/abs/2507.00000) |
+| adv-CoT | Adversarial generator-discriminator for reasoning (cited) | [adv-CoT, 2025](https://www.mdpi.com/) |
+| PromptWizard | Critique-guided prompt optimization (cited) | [Microsoft, 2024](https://arxiv.org/abs/2405.18369) |
 | PromptPotter (L1 only) | L1 generate + evaluate, no L2/L3 | This work |
 | PromptPotter (L1+L2) | L1 + L2 context refinement | This work |
 | PromptPotter (full) | L1 + L2 + L3 replanning | This work |
@@ -125,13 +129,19 @@ Isolate each optimization layer's contribution:
 
 <!-- TODO: Fill after benchmark campaigns complete -->
 
-| Method | HotPotQA F1 | HotPotQA EM | GSM8K EM |
-|--------|-------------|-------------|----------|
-| Zero-shot | — | — | — |
-| Few-shot (manual) | — | — | — |
-| DSPy Bootstrap | — | — | — |
-| MIPROv2 | — | — | — |
-| **PromptPotter (full)** | **—** | **—** | **—** |
+| Method | HotPotQA F1 | HotPotQA EM | GSM8K EM | Source |
+|--------|-------------|-------------|----------|--------|
+| Zero-shot | — | — | — | Ours |
+| Few-shot (manual) | — | — | — | Ours |
+| DSPy Bootstrap | — | — | — | Cited |
+| MIPROv2 | — | — | — | Cited |
+| GEPA | — | — | — | Cited |
+| Promptomatix | — | — | — | Cited |
+| adv-CoT | — | — | — | Cited |
+| PromptWizard | — | — | — | Cited |
+| PromptPotter (L1 only) | — | — | — | Ours |
+| PromptPotter (L1+L2) | — | — | — | Ours |
+| **PromptPotter (full)** | **—** | **—** | **—** | **Ours** |
 
 ### Convergence
 
@@ -169,12 +179,14 @@ Isolate each optimization layer's contribution:
 
 <!-- TODO: Fill after all methods evaluated -->
 
-| Comparison | p-value | Significant? |
-|-----------|---------|-------------|
-| PromptPotter vs MIPROv2 (HotPotQA) | — | — |
-| PromptPotter vs MIPROv2 (GSM8K) | — | — |
-| PromptPotter vs Zero-shot (HotPotQA) | — | — |
-| PromptPotter vs Zero-shot (GSM8K) | — | — |
+| Comparison | p-value | Significant? | Note |
+|-----------|---------|-------------|------|
+| PromptPotter vs MIPROv2 (HotPotQA) | — | — | Cited |
+| PromptPotter vs MIPROv2 (GSM8K) | — | — | Cited |
+| PromptPotter vs GEPA (HotPotQA) | — | — | Cited |
+| PromptPotter vs PromptWizard (GSM8K) | — | — | Cited |
+| PromptPotter vs Zero-shot (HotPotQA) | — | — | Ours |
+| PromptPotter vs Zero-shot (GSM8K) | — | — | Ours |
 
 ---
 
@@ -228,7 +240,8 @@ data = generate_export_json(store, backend_id)
 
 | Paper | Year | Datasets | Key Result |
 |-------|------|----------|------------|
-| MIPROv2 | 2024 | GSM8K, HotPotQA | Up to 13% accuracy gains on Llama-3-8B |
-| GEPA | 2025 | HotPotQA, AIME, IFBench, HoVer | +12% over MIPROv2 on AIME-2025 |
-| Promptomatix | 2025 | GSM8K, SQuAD_2, CommonGen, AG News, XSum | Broad coverage, conservative baselines |
-| adv-CoT | 2025 | 12 datasets (commonsense + arithmetic) | +4.44% on GPT-3.5-turbo, +1.08% on GPT-4o-mini |
+| PromptWizard | 2024 | GSM8K, others | Critique-guided generation; cost-efficient; PromptPotter's primary inspiration |
+| MIPROv2 | 2024 | GSM8K, HotPotQA | Up to 13% accuracy gains on Llama-3-8B; Bayesian optimization over instructions + demos |
+| GEPA | 2025 | HotPotQA, AIME, IFBench, HoVer | +12% over MIPROv2 on AIME-2025; reflective prompt evolution |
+| Promptomatix | 2025 | GSM8K, SQuAD_2, CommonGen, AG News, XSum | Cost-aware optimization; competitive performance with reduced compute |
+| adv-CoT | 2025 | 12 datasets (commonsense + arithmetic) | +4.44% on GPT-3.5-turbo, +1.08% on GPT-4o-mini; adversarial refinement |

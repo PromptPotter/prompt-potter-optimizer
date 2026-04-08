@@ -1,7 +1,7 @@
 # Roadmap: PromptPotter Optimizer
 
-**Version:** 0.12.0
-**Date:** 2026-03-26
+**Version:** 0.13.0
+**Date:** 2026-04-08
 **Status:** Active
 
 ---
@@ -11,19 +11,21 @@
 | Milestone | Focus | Status |
 |-----------|-------|--------|
 | M0-M5 | Specifications, Foundation, Core Optimizer, Infrastructure, Observability | Complete |
-| M6 | PipelineSchema + Pipeline Composability | Complete (Wave 4 → M9) |
+| M6 | PipelineSchema + Pipeline Composability | Complete (Wave 4 → M11) |
 | M7 | Optimizer-as-Pipeline | Complete |
 | Parity | Entry-Point Parity (Unified Persistence) | Complete |
-| M8 | Campaign Intelligence | **Next** |
-| M9 | Multi-Connector Architecture | Future |
+| M8 | Campaign Intelligence | Complete |
+| M9 | Publication, Stable Config & Webapp | **Next** |
+| M10 | OptSearchPoint Refinement & Ablation Studies | Future |
+| M11 | Multi-Connector Architecture | Future |
 
-Archived specs (M0-M7, governance docs) are in git history.
+Archived specs (M0-M7, governance docs, old M9) are in `archive/` or git history.
 
 ---
 
 ## M6: PipelineSchema + Pipeline Composability -- Complete
 
-PipelineSchema model, `GET /pipeline` self-describing config, schema derivation (6 chokepoints resolved), unified tracing, composite scoring, node_type-driven intermediate metrics, consolidated pipeline control surfaces. Wave 4 (workflow nodes) deferred to M9. Spec: [`archive/m6-pipeline-composability.md`](archive/m6-pipeline-composability.md)
+PipelineSchema model, `GET /pipeline` self-describing config, schema derivation (6 chokepoints resolved), unified tracing, composite scoring, node_type-driven intermediate metrics, consolidated pipeline control surfaces. Wave 4 (workflow nodes) deferred to M11. Spec: [`archive/m6-pipeline-composability.md`](archive/m6-pipeline-composability.md)
 
 ---
 
@@ -39,35 +41,61 @@ Three-layer I/O architecture (persistence / display / control). `CampaignPersist
 
 ---
 
-## M8: Campaign Intelligence -- Next
+## M8: Campaign Intelligence -- Complete
 
-Make campaigns smarter and faster by using accumulated data better. Three pillars: (1) cache intermediate node outputs so prompt variants skip redundant upstream computation, (2) adaptive sensitivity scan that prunes dead axes early, (3) inject accumulated analysis (query difficulty, failure clusters, axis sensitivity) into L1/L2/scan advisor prompts.
-
-**Entry criteria:** Parity exit gate passed.
-
-**Exit gate:** Upstream caching active, scan prunes dead axes, L1 receives accumulated analysis context.
+Made campaigns smarter and faster through accumulated data. Four pillars: (1) per-node intermediate caching — prompt variants skip redundant upstream computation (~60% speedup), (2) adaptive sensitivity scan with statistical pruning (Wilson CI overlap, minimum detectable effect), (3) SearchMemory — cross-campaign materialized view over dataset_runs (parameter impact, query patterns, failure modes), (4) three-tier intelligence architecture feeding L1/L2/L3/critique/scan advisor with accumulated analysis. All 17 waves complete.
 
 Full spec: [`m8-campaign-intelligence.md`](m8-campaign-intelligence.md)
 
 ---
 
-## M9: Multi-Connector Architecture -- Future
+## M9: Publication, Stable Config & Webapp -- Next
 
-Generalize beyond TermNorm to support arbitrary LLM application backends. Resolves remaining chokepoints (4,5,7,10,11,12,13) that require ConnectorProtocol.
+Four tracks delivering publication readiness, optimizer tuning, a web application, and publication figure design. The optimization loop (L1/L2/L3) is functionally complete but unvalidated against academic benchmarks, running on proof-of-concept meta-prompts, and accessible only via notebook/CLI.
 
-- **Connector interface** — abstract `BackendClient` into a connector protocol
-- **Connector registry** — discover and configure connectors at runtime
-- **Backend-agnostic evaluation** — `eval_search_point()` works with any connector
-- **Query parser registry** — replace `split_query_parts()` with connector-specific parsers
-- **Generic eval config** — per-dataset scoring formulas now in `campaign.json["scoring"]` (partial: `shared/scoring.py`)
-- **Notebook migration + Docker** (absorbed from former M6 Wave 5)
-- **Workflow nodes** (absorbed from M6 Wave 4)
+### Track 1: Publication Readiness (Benchmarks + Competitor Comparison)
+
+Build dataset loaders (HotPotQA, GSM8K), evaluation scorers (Token F1, numeric exact match), and a local LLM eval adapter. Run benchmark campaigns and compare against published results from DSPy/MIPROv2, GEPA, Promptomatix, adv-CoT, and PromptWizard (cited numbers). Fill `docs/benchmarks.md` result tables. Generate paper-quality convergence plots and comparison figures.
+
+### Track 2: Stable Optimizer Configuration
+
+Systematically evaluate and tune the optimizer's own meta-prompts (L1 generate, critique, L2 refine, L3 replan). Define success metrics (rounds to convergence, final accuracy, escalation frequency, candidate diversity). Run benchmark campaigns with different meta-prompt variants. Document final configs with rationale for paper's "method" section. Generic prompts — adapt via `task_context` injection, not task-specific sets.
+
+### Track 3: Web Application
+
+Next.js + React + Tailwind CSS webapp in `webapp/` directory, consuming the existing FastAPI REST API. MVP: campaign list, campaign detail (convergence chart, trial timeline), trial inspector (prompt diff, per-query results), benchmark results display. Phase 2: campaign launcher, live monitoring (WebSocket/SSE), API extensions.
+
+### Track 4: Results Design (Publication Figures & Tables)
+
+Define WHAT to show before collecting data. Design main results table, convergence figures, ablation tables, analysis visualizations, cost/efficiency comparisons. Document in `docs/publication-figures.md` as the data collection checklist.
 
 **Entry criteria:** M8 exit gate passed.
 
+**Exit gate:** HotPotQA + GSM8K results with statistical rigor (3 seeds, CIs, significance tests). Meta-prompts evaluated on ≥2 benchmarks with documented rationale. Webapp showing campaign browser and benchmark results. Publication figures designed and documented.
+
+Full spec: [`m9-publication-config-webapp.md`](m9-publication-config-webapp.md)
+
+---
+
+## M10: OptSearchPoint Refinement & Ablation Studies -- Future
+
+Slim milestone focused on optimization loop refinement and ablation studies that feed the publication. Multi-pipeline/project/dataset support (same connector, already half-built). OptSearchPoint bells and whistles — advanced L1/L2/L3 strategies, detailed analysis tooling, ablation experiments (L1-only vs L1+L2 vs full, scan vs no-scan, SearchMemory on/off, critique on/off). Can contribute to paper if completed quickly enough.
+
+**Entry criteria:** M9 stable config validated.
+
+**Exit gate:** Ablation results complete. Multi-pipeline/dataset support working.
+
+---
+
+## M11: Multi-Connector Architecture -- Future
+
+Generalize beyond TermNorm to support arbitrary LLM application backends. Abstract `BackendClient` into `ConnectorProtocol`, connector registry, backend-agnostic evaluation, query parser registry. Resolves remaining chokepoints (4,5,7,10,11,12,13). Workflow nodes (from M6 Wave 4).
+
+**Entry criteria:** M10 exit gate passed.
+
 **Exit gate:** A second backend connector exists and runs through the same optimization workflow.
 
-Full spec: [`m9-multi-connector.md`](m9-multi-connector.md)
+Preserved spec: [`archive/m9-multi-connector.md`](archive/m9-multi-connector.md)
 
 ---
 
@@ -76,14 +104,15 @@ Full spec: [`m9-multi-connector.md`](m9-multi-connector.md)
 | Feature | Notes |
 |---------|-------|
 | Multimodal / non-textual modalities | Extend beyond Q&A text to other input types (RNAseq, X-ray, image, audio). Requires modality-specific evaluation, dataset formats, and scoring functions. |
-| Publication-ready results export | Generate paper-ready figures, tables, and statistical summaries (confidence intervals, significance tests, effect sizes) directly from campaign data. |
-| TermNorm Variant Comparison | Needs ConnectorProtocol + pipeline comparison (post-M9) |
+| TermNorm Variant Comparison | Needs ConnectorProtocol + pipeline comparison (post-M11) |
 | Web scrape ablation | Quality vs cost/latency tradeoff |
-| Streamlit Dashboard | Campaign browser, trial comparison, dataset explorer |
 | Public service deployment | Auth, rate limiting, multi-tenancy |
 | Non-prompt targets | Scoring functions, fuzzy matchers, retrieval queries, GA settings |
 | Evolutionary operators | GA/DE population-based search |
 | MCP server mode | Expose tools to Claude Code |
+| Self-optimization | PromptPotter optimizes its own meta-prompts recursively |
+| Cost tracking | Token usage and cost per campaign/round/variant |
+| Model comparison matrix | Same benchmark across multiple target LLMs |
 
 ---
 
@@ -96,7 +125,7 @@ Full spec: [`m9-multi-connector.md`](m9-multi-connector.md)
 | Project store per campaign | < 10 MB |
 | LLM providers | Groq and OpenAI (any OpenAI-compatible) |
 | Python | 3.13 |
-| Evaluation mode | Backend via `/matches` (no local fallback) |
+| Evaluation mode | Backend via `/matches` + local LLM eval for benchmarks |
 | Crash recovery | Incremental `.partial.jsonl` with partial-run resume |
 
 ---
