@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.services.campaign.critique import extract_warning_types
 from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.services.metrics import count_degraded_queries
-from promptpotter.shared.errors import EscalationError
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
@@ -31,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DegradationCheck",
-    "EscalationError",
     "EscalationSignal",
     "EscalationStrategy",
     "EscalationTarget",

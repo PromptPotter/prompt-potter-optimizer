@@ -73,14 +73,15 @@ __all__ = ["EvalBatchResult", "eval_search_point"]
 class EvalBatchResult:
     """Return value from ``_run_eval_batch()``.
 
-    Replaces the former exception-as-data pattern (``_GracefulStop`` /
-    ``_ForceStop``).  Data always flows through return values; interrupts
-    are signalled via ``completed`` and ``stop_reason``.
+    Data always flows through return values; interrupts are signalled
+    via ``completed`` and ``stop_reason``; escalation via
+    ``escalation_signal``.
     """
 
     results: list
     completed: bool = True
-    stop_reason: str | None = None  # "graceful" | "force" | None
+    stop_reason: str | None = None  # "graceful" | "force" | "escalation" | None
+    escalation_signal: EscalationSignal | None = None
     retried_degraded: int = 0
     probed_degraded: int = 0
     switched_samples: int = 0
@@ -177,6 +178,9 @@ async def _run_eval_batch(
     *,
     on_result: Callable[[QueryResult, int, int], None] | None = None,
     ctx: EvalContext | None = None,
+    degradation_checks: list | None = None,
+    candidate_idx: int = 0,
+    n_total_candidates: int = 1,
 ) -> EvalBatchResult:
     """Evaluate a prompt on all dataset queries via the backend.
 
@@ -185,18 +189,11 @@ async def _run_eval_batch(
     data protocol, error tracking, and escalation checks.
 
     Returns:
-        EvalBatchResult with results, completion status, and stop reason.
-
-    Raises:
-        EscalationError: If an escalation check triggers mid-batch.
+        EvalBatchResult with results, completion status, stop reason,
+        and escalation_signal if an escalation check triggered.
     """
-    from promptpotter.shared.errors import EscalationError
-
     # Unpack ctx with defaults for test compatibility
     pipeline_schema = ctx.pipeline_schema if ctx else None
-    degradation_checks = ctx.degradation_checks if ctx else None
-    candidate_idx = ctx.candidate_idx if ctx else 0
-    n_total_candidates = ctx.n_total_candidates if ctx else 1
     max_consecutive_errors = ctx.max_consecutive_errors if ctx else 3
 
     _stale_protocol = ctx.stale_data_load_protocol if ctx else None
@@ -288,7 +285,15 @@ async def _run_eval_batch(
                     n_total_candidates,
                 )
                 if esc_signal:
-                    raise EscalationError(esc_signal, results)
+                    return EvalBatchResult(
+                        results,
+                        completed=False,
+                        stop_reason="escalation",
+                        escalation_signal=esc_signal,
+                        retried_degraded=n_retried,
+                        probed_degraded=n_probed,
+                        switched_samples=n_switched,
+                    )
         except (KeyboardInterrupt, asyncio.CancelledError):
             logger.warning(
                 "Eval batch force-interrupted at query %d/%d.", len(results), len(dataset)
@@ -330,6 +335,9 @@ async def eval_search_point(
     label: str = "Eval",
     on_result: Callable[[QueryResult, int, int], None] | None = None,
     source: str = "",
+    degradation_checks: list | None = None,
+    candidate_idx: int = 0,
+    n_total_candidates: int = 1,
 ) -> tuple[list, dict, bool]:
     """Evaluate a prompt via backend with per-node caching and finalization.
 
@@ -339,7 +347,7 @@ async def eval_search_point(
 
     The ``search_point`` bundles the search-space dimensions
     (pipeline_params).  Infrastructure params (backend_client,
-    store, obs, …) live on ``ctx``.
+    store, obs, ...) live on ``ctx``.
 
     Returns:
         Tuple of (results, scores_dict, was_cached).
@@ -361,8 +369,6 @@ async def eval_search_point(
     # Prefix display name with experiment_id for discoverability
     display_name = f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id else safe_label
 
-    from promptpotter.shared.errors import EscalationError as _EscalationError
-
     def _save_run(results: list, scores: dict, *, partial: bool = False) -> None:
         """Persist a dataset run (complete or partial) to the store."""
         if not (store and backend_id):
@@ -382,31 +388,32 @@ async def eval_search_point(
             run_data["partial"] = True
         store.dataset_runs.save(backend_id, run_id, run_data)
 
-    escalation_signal = None
-    try:
-        batch = await _run_eval_batch(
-            search_point,
-            dataset,
-            backend_client,
-            on_result=on_result,
-            ctx=ctx,
-        )
-        results = batch.results
-        if not batch.completed:
-            # Graceful or force stop — save partial results then re-raise
-            if results:
-                assert pipeline_schema is not None, "pipeline_schema required for scoring"
-                _save_run(results, compute_composite_score(results, pipeline_schema), partial=True)
-                logger.info(
-                    "Saved partial run (%d/%d queries) for SP %s",
-                    len(results),
-                    len(dataset),
-                    content_hash[:8],
-                )
-            raise KeyboardInterrupt()
-    except _EscalationError as e:
-        results = e.partial_results
-        escalation_signal = e.signal
+    batch = await _run_eval_batch(
+        search_point,
+        dataset,
+        backend_client,
+        on_result=on_result,
+        ctx=ctx,
+        degradation_checks=degradation_checks,
+        candidate_idx=candidate_idx,
+        n_total_candidates=n_total_candidates,
+    )
+    results = batch.results
+    escalation_signal = batch.escalation_signal
+
+    if not batch.completed and not escalation_signal:
+        # Graceful or force stop — save partial results then re-raise
+        if results:
+            assert pipeline_schema is not None, "pipeline_schema required for scoring"
+            _save_run(results, compute_composite_score(results, pipeline_schema), partial=True)
+            logger.info(
+                "Saved partial run (%d/%d queries) for SP %s",
+                len(results),
+                len(dataset),
+                content_hash[:8],
+            )
+        raise KeyboardInterrupt()
+
     assert pipeline_schema is not None, "pipeline_schema required for scoring"
     scores = compute_composite_score(results, pipeline_schema)
     if escalation_signal:

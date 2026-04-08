@@ -273,7 +273,7 @@ def _select_round_winner(
     # Find best candidate
     best_composite = current_composite
     best_acc = current_acc
-    best_ps: dict | OptSearchPoint = current_best["prompt_fields"]
+    best_ps: OptSearchPoint = current_best["prompt_fields"]
     best_results = current_best["results"]
     best_label = current_best["label"]
     winner_idx: int | None = None
@@ -302,6 +302,32 @@ def _select_round_winner(
     }
 
 
+def _merge_pipeline_params(
+    base: dict | None,
+    overrides: dict | None,
+    schema: PipelineSchema | None,
+) -> dict | None:
+    """Deep-merge candidate pipeline_params overrides into the base params.
+
+    Drops overrides for nodes not in the active pipeline steps.
+    """
+    if not overrides:
+        return base
+    merged: dict = copy.deepcopy(base or {})
+    for k, v in overrides.items():
+        if isinstance(v, dict) and isinstance(merged.get(k), dict):
+            merged[k] = {**merged[k], **v}
+        else:
+            merged[k] = v
+    if schema:
+        _active = set(schema.active_steps)
+        for k in list(merged):
+            if k != "steps" and isinstance(merged[k], dict) and k not in _active:
+                logger.warning("Dropping LLM override for excluded node %r", k)
+                del merged[k]
+    return merged
+
+
 async def l1_evaluate(
     candidates: list[dict],
     dataset: list,
@@ -316,71 +342,53 @@ async def l1_evaluate(
     """Evaluate candidates and select the round winner."""
     from promptpotter.services.eval_gateway import eval_search_point
 
-    _sp_pipeline_params = pipeline_params
+    # Normalize current_best prompt_fields to OptSearchPoint once at entry
+    cb = dict(current_best)
+    if isinstance(cb.get("prompt_fields"), dict):
+        cb["prompt_fields"] = OptSearchPoint.from_prompt_fields(cb["prompt_fields"])
 
-    candidate_pp: list[dict | None] = []
+    # Parse candidates: extract pipeline param overrides, build OptSearchPoints
+    candidate_overrides: list[dict | None] = []
     osp_candidates: list[OptSearchPoint] = []
+    merged_pp: list[dict | None] = []
     for c in candidates:
-        if isinstance(c, dict):
-            candidate_pp.append(c.get("__pipeline_params_override__"))
-            osp_candidates.append(
-                OptSearchPoint.from_prompt_fields(
-                    {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
-                )
+        override = c.get("__pipeline_params_override__")
+        candidate_overrides.append(override)
+        osp_candidates.append(
+            OptSearchPoint.from_prompt_fields(
+                {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
             )
-        else:
-            candidate_pp.append(None)
-            osp_candidates.append(
-                c
-                if isinstance(c, OptSearchPoint)
-                else OptSearchPoint.from_prompt_fields(c.model_dump()),
-            )
+        )
+        merged_pp.append(
+            _merge_pipeline_params(pipeline_params, override, ctx.pipeline_schema)
+        )
+
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []
 
     escalation_signal = None
-    ctx.degradation_checks = degradation_checks
-    ctx.n_total_candidates = len(osp_candidates)
+    n_candidates = len(osp_candidates)
 
     for idx, osp_c in enumerate(osp_candidates):
         _on_result = None
         if callbacks and callbacks.on_query_eval:
-            _n_cand = len(osp_candidates)
 
-            def _on_result(result, qi, qt, _ci=idx, _ct=_n_cand):
+            def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
                 callbacks.on_query_eval(_ci, _ct, qi, qt, result)
 
-        _cpp = candidate_pp[idx]
-        if _cpp:
-            # Deep merge: preserve existing node dicts while applying overrides
-            merged: dict = copy.deepcopy(_sp_pipeline_params or {})
-            for k, v in _cpp.items():
-                if isinstance(v, dict) and isinstance(merged.get(k), dict):
-                    merged[k] = {**merged[k], **v}
-                else:
-                    merged[k] = v
-            # Safety net: drop overrides for nodes not in active steps
-            _schema = ctx.pipeline_schema
-            if _schema:
-                _active = set(_schema.active_steps)
-                for k in list(merged):
-                    if k != "steps" and isinstance(merged[k], dict) and k not in _active:
-                        logger.warning("Dropping LLM override for excluded node %r", k)
-                        del merged[k]
-            pp: dict | None = merged
-        else:
-            pp = _sp_pipeline_params
         sp = osp_c.to_job_search_point(
-            base_pipeline_params=pp,
+            base_pipeline_params=merged_pp[idx],
             schema=ctx.pipeline_schema,
         )
-        ctx.candidate_idx = idx
-        results, scores, cached = await eval_search_point(
+        results, scores, _cached = await eval_search_point(
             sp,
             dataset,
             ctx,
             label=f"candidate_{idx}",
             on_result=_on_result,
+            degradation_checks=degradation_checks,
+            candidate_idx=idx,
+            n_total_candidates=n_candidates,
         )
 
         escalation_signal = scores.pop("escalation_signal", None)
@@ -391,12 +399,11 @@ async def l1_evaluate(
             {
                 "candidate_id": osp_c.id,
                 "changes_description": osp_c.changes_description or "",
-                "pipeline_params_override": _cpp,
+                "pipeline_params_override": candidate_overrides[idx],
                 "accuracy": scores["accuracy"],
                 "composite": scores.get("composite", scores["accuracy"]),
                 "hits": scores["hits"],
                 "total": scores["total"],
-                "cached": cached,
                 "escalation_aborted": aborted,
                 "eval_queries": len(results),
                 "expected_queries": len(dataset),
@@ -406,14 +413,10 @@ async def l1_evaluate(
             scores["escalation_aborted"] = aborted
             scores["eval_queries"] = len(results)
             scores["expected_queries"] = len(dataset)
-            callbacks.on_candidate_eval(idx, len(osp_candidates), scores)
+            callbacks.on_candidate_eval(idx, n_candidates, scores)
 
         if escalation_signal:
             break
-
-    cb = dict(current_best)
-    if isinstance(cb.get("prompt_fields"), dict):
-        cb["prompt_fields"] = OptSearchPoint.from_prompt_fields(cb["prompt_fields"])
 
     evaluated_candidates = [
         c
@@ -431,30 +434,15 @@ async def l1_evaluate(
         pipeline_schema=ctx.pipeline_schema,
     )
 
+    # Reuse pre-computed merged params for winner (no re-merge needed)
     w_idx = winner_entry["winner_idx"]
-    _w_cpp = candidate_pp[w_idx] if w_idx is not None else None
-    winner_pp: dict | None
-    if w_idx is not None and _w_cpp:
-        winner_pp = copy.deepcopy(_sp_pipeline_params or {})
-        for k, v in _w_cpp.items():
-            if isinstance(v, dict) and isinstance(winner_pp.get(k), dict):
-                winner_pp[k] = {**winner_pp[k], **v}
-            else:
-                winner_pp[k] = v
-    else:
-        winner_pp = _sp_pipeline_params
+    winner_pp = merged_pp[w_idx] if w_idx is not None else pipeline_params
 
-    winner_osp = winner_entry["prompt_fields"]
-    # Serialize winner as prompt field dict (compatible with RoundResult.prompt_fields)
-    if isinstance(winner_osp, OptSearchPoint):
-        winner_dict = winner_osp.prompt_field_dict()
-        winner_dict["id"] = winner_osp.id
-        winner_dict["parent_id"] = winner_osp.parent_id
-        winner_dict["changes_description"] = winner_osp.changes_description
-    elif isinstance(winner_osp, dict):
-        winner_dict = winner_osp
-    else:
-        raise TypeError(f"Unexpected winner type: {type(winner_osp)}")
+    winner_osp: OptSearchPoint = winner_entry["prompt_fields"]
+    winner_dict = winner_osp.prompt_field_dict()
+    winner_dict["id"] = winner_osp.id
+    winner_dict["parent_id"] = winner_osp.parent_id
+    winner_dict["changes_description"] = winner_osp.changes_description
     return L1EvalResult(
         label=winner_entry["label"],
         winner_prompt_fields=winner_dict,

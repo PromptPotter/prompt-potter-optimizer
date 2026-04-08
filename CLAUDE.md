@@ -114,7 +114,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 ### Key Patterns
 
 - **Store**: `ProjectStore` facade over focused stores in `services/stores/`.
-- **Error handling**: `graceful()` context manager in `shared/errors.py`. `EscalationError` carries structured `partial_results`.
+- **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation signals flow via `EvalBatchResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. No completed work discarded.
 - **HITL mode**: `RunConfig.pause_before_eval` raises `PauseForReviewError` between L1 generate and evaluate. Candidates persisted to `round_NNNN_candidates.json` before pause.
 - **Optimizer LLM calls**: All go through `llm_call()` in `config/optimizer_pipeline.py`, not `chat()` directly.

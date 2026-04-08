@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -10,12 +9,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.backend_client import BackendClient
-    from promptpotter.services.campaign.escalation import DegradationCheck
     from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.search_memory import SearchMemory
     from promptpotter.services.tracing.observability_logger import ObsLogger
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -24,6 +20,8 @@ class EvalContext:
 
     Pure infrastructure — does NOT carry search-space dimensions
     (pipeline_params).  Those live on the SearchPoint passed alongside.
+    Per-candidate state (candidate_idx, degradation_checks) is passed
+    explicitly to eval_search_point(), not stored here.
     """
 
     backend_client: BackendClient
@@ -33,11 +31,6 @@ class EvalContext:
     obs: ObsLogger | None = None
     source: str = ""
     experiment_id: str = ""
-    # Escalation checks (passed through to _run_eval_batch)
-    degradation_checks: list[DegradationCheck] | None = None
-    # Mutated per-candidate in l1_evaluate loop
-    candidate_idx: int = 0
-    n_total_candidates: int = 1
     max_consecutive_errors: int = 3
     # Stale data load protocol — optimizer pipeline node sequence
     stale_data_load_protocol: list[str] | None = None

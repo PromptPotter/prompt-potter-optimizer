@@ -11,10 +11,7 @@ import logging
 from collections import Counter
 from collections.abc import Mapping
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from promptpotter.services.campaign.escalation import EscalationSignal
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +35,6 @@ def is_error_result(result: Mapping[str, Any]) -> bool:
       or legacy cached data with ``error=""`` / ``error=None``)
     """
     return bool(result.get("error")) or result.get("predicted") == "ERROR"
-
-
-class EscalationError(Exception):
-    """Raised inside _run_eval_batch when an escalation check fires.
-
-    Carries ``partial_results`` so the campaign loop can use the data
-    collected before the escalation triggered.
-    """
-
-    def __init__(self, signal: EscalationSignal, partial_results: list):
-        self.signal = signal
-        self.partial_results = partial_results
-        super().__init__(f"EscalationCheck '{signal.check_name}' triggered")
 
 
 @contextmanager
