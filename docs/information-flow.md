@@ -59,6 +59,19 @@ Each consumer queries a **tailored subset** via a dedicated builder. L3 receives
 | `discriminating_queries()` | — | via inline dict in `round_execution.py` | — |
 | `bottleneck_distribution()` | — | — | via `build_l2_search_memory_context()` |
 
+### Planned Intelligence Extensions
+
+By design, L1 stays clean — it generates candidates. Deeper sample intelligence is handled in two tiers: deterministic code triage (no LLM) and L2 strategic intelligence.
+
+| Item | Tier | Target | Data exists | Status |
+|------|------|--------|-------------|--------|
+| **Failure streak triage** | Deterministic | Code — exclude/deprioritize | `SearchMemory._query_hits` | Planned |
+| **Round trajectory** | Strategic | L2 Refine | `state.rounds` | Planned |
+| **Failure group × axis** | Strategic | L2 Refine | `SearchMemory.ingest_cohort_analysis()` | Accessor exists, producer not wired |
+| **Candidate comparison** | Strategic | L2 Refine | `L1EvalResult.candidate_scores` | Planned |
+
+See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design.
+
 ### Internal (not a prompt injection)
 
 **Stale data observations** — accumulated during eval → `opt_sp` → aggregated cross-campaign by SearchMemory. Consumed by `l1_evaluate`'s stale data protocol (`sampleswitch` queries SearchMemory's per-query degradation rate). Never enters an LLM prompt.
@@ -84,6 +97,6 @@ eval results ──► Critique (LLM) ──► critique_text ──► L2 (LLM)
                  1st hop                               2nd hop
 ```
 
-When L2 fires, L1 is 2 LLM hops from eval data. Each hop is lossy compression. The directive/critique mutual exclusion ensures L1 gets the most processed form available.
+When L2 fires, L1 is 2 LLM hops from eval data. Each hop is lossy compression. The directive/critique mutual exclusion ensures L1 gets the most processed form available. Round trajectory and failure group insights will feed L2 directly (bypassing this chain), so L2 can produce better-informed directives for L1.
 
 L3 sees only `l2_summary` (last 3 L2 outcomes: what changed, whether accuracy moved) — never L2's directive or reasoning. Strategy from outcomes, not tactics.

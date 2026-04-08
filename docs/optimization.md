@@ -7,6 +7,7 @@
 │    in:  critique OR l2_directive (mutual exclusion),                   │
 │         task_context, thinking_styles, scan_context, plan,            │
 │         escalation_journal + warning_inventory (probe rounds only),   │
+│         failure_analysis (clustered failure patterns + signals),      │
 │         search_memory (failure clusters, top axes, dead queries)      │
 │    out: N candidate OptSearchPoints (prompt + pipeline_params)         │
 │         ↓                                                              │
@@ -40,7 +41,9 @@
 │  L2 REFINE CONTEXT (LLM) — meta-controller                            │
 │    in:  critique, prev l2_directive, escalation report                 │
 │         (OR warning_inventory when no report), task_context,           │
-│         pipeline schema param keys                                     │
+│         pipeline schema param keys,                                    │
+│         [PLANNED] round trajectory, failure group × axis insights,    │
+│         candidate comparison summary                                   │
 │    out: updated task_context + meta-settings (creativity,              │
 │         n_variants, eval_sample_size)                                       │
 │    L2 does NOT set pipeline_params — that's L1's job.                  │
@@ -260,9 +263,31 @@ Each round samples 2-3 styles from the variant library (`promptpotter/config/pro
 
 When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate exploration. Keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields), all other keys stay as node-level pipeline overrides. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
 
-### SearchMemory Integration (M8)
+### SearchMemory Intelligence Feed (M8)
 
-Cross-campaign intelligence feeding the optimization loop. Loaded at cycle init from historical runs, each consumer receives a tailored subset via atomic data accessors. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3) for the full data model, consumer matrix, and accessor methods.
+Cross-campaign intelligence feeding the optimization loop. Loaded at cycle init from `{backend_id}/search_memory.json`, refreshed incrementally before each round. Each consumer receives a tailored subset via dedicated builder functions — SearchMemory exposes atomic data accessors only, never LLM text.
+
+**What each consumer receives today:**
+
+| Consumer | Signals | Builder |
+|----------|---------|---------|
+| L1 Generate | failure clusters, dead queries, top axes, best values | `build_l1_search_memory_context()` |
+| L2 Refine | axis rankings, bottleneck distribution | `build_l2_search_memory_context()` |
+| Critique | discriminating queries, failure clusters | inline in `round_execution.py` |
+| Scan advisor | axis rankings, top values, bottleneck distribution | direct accessors |
+
+**Two-tier sample intelligence (planned):**
+
+L1 stays clean — it generates candidates. Deeper intelligence feeds L2 (the meta-controller) or is handled deterministically in code.
+
+| Item | Tier | Target | Building blocks |
+|------|------|--------|----------------|
+| Failure streak triage | Deterministic | Code — exclude/deprioritize | `_query_hits` raw data exists |
+| Round trajectory | Strategic | L2 | `state.rounds` data exists |
+| Failure group × axis | Strategic | L2 | `ingest_cohort_analysis()` accessor exists, producer not wired |
+| Candidate comparison | Strategic | L2 | `candidate_scores` data exists |
+
+See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design.
 
 ### Stale Data Load Protocol
 
@@ -301,27 +326,28 @@ Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestam
 
 ```python
 campaign_config = {
-    "eval_eval_sample_size": 35,             # queries per eval (0 = all)
-    "exclude_nodes": ["llm_ranking"],  # target pipeline nodes to skip
+    "eval_sample_size": 35,                    # queries per eval (0 = all)
+    "exclude_nodes": ["llm_ranking"],          # target pipeline nodes to skip
     "optimization": {
         "n_variants": 5,
         "creativity": 0.7,
         "improvement_threshold": 0.01,
         "l1_patience": 3,
         "max_rounds": 10,
+        "hard_cap": 100,                       # absolute round limit (safety)
+        "max_consecutive_errors": 3,           # abort eval after N backend errors
         "enable_critique": True,               # critique-guided generation
         "degradation_threshold": 0.4,          # 0 = disabled
-        "enable_l2": True,             # refine task_context on L1 stall
-        "l2_patience": 2,             # None = unlimited during degradation
-        "enable_l3": True,             # modify plan on L2 stall
-        "l3_patience": 1,             # None = unlimited during degradation
-        "degradation_checks": [         # pluggable mid-eval checks
-            {"name": "degradation", "threshold": 0.3, "target": "l3"},
-        ],
-        "stale_data_load_protocol": ["rerun", "samplescan", "sampleswitch"],  # 3-step ladder for cached degraded queries
-        "plan": None,                 # override optimizer strategy (str)
-        "context": None,              # override domain task_context (str)
-        "critique": None,             # override bootstrap critique (str)
+        "critique_degradation_threshold": 0.4, # critique anomaly flag threshold
+        "critique_near_miss_ratio": 0.3,       # GT-in-candidates ratio for near-miss flag
+        "enable_l2": True,                     # refine task_context on L1 stall
+        "l2_patience": 2,                      # None = unlimited during degradation
+        "enable_l3": True,                     # modify plan on L2 stall
+        "l3_patience": 1,                      # None = unlimited during degradation
+        "stale_data_load_protocol": ["rerun", "samplescan", "sampleswitch"],
+        "plan": None,                          # override optimizer strategy (str)
+        "context": None,                       # override domain task_context (str)
+        "critique": None,                      # override bootstrap critique (str)
     },
     "eval_llm": { ... },
 }

@@ -192,7 +192,7 @@ Degradation tracking feeds the stale data protocol's `sampleswitch` step: querie
 | L2 Refine | `axis_rankings()`, `bottleneck_distribution()` | Inform context refinement with parameter landscape |
 | Critique | `discriminating_queries()`, `failure_clusters()` | Enrich failure analysis with cross-campaign patterns |
 
-Cohort-level analysis (per-query axis sensitivity, failure-mode correlation) has accessor methods on SearchMemory but the producer pipeline is not yet wired. See `docs/methods/search-memory-intelligence.md` for the design.
+Per-query failure group analysis (axis sensitivity per failure group, failure-mode correlation) has accessor methods on SearchMemory but the producer pipeline is not yet wired. See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full intelligence feed design and gap analysis.
 
 Implementation: `promptpotter/services/search/search_memory.py`.
 

@@ -72,7 +72,7 @@ Three entry points (notebook, CLI, web API), one service core in `promptpotter/s
 - **Display** (per-entry-point) — caller passes `RunCallbacks`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
-**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data archived to `dataset_runs/` store. SearchMemory (M8) aggregates historical data into a materialized view that feeds both loops.
+**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data archived to `dataset_runs/` store. SearchMemory (M8) aggregates historical data into a materialized view that feeds both loops. Intelligence feed has planned extensions: deterministic sample triage (code) + strategic insights to L2 (round trajectory, failure group × axis, candidate comparison). L1 stays clean. See [`docs/methods/search-memory-intelligence.md`](docs/methods/search-memory-intelligence.md).
 
 ### SearchPoint Hierarchy
 
@@ -124,7 +124,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 
 - **Prompt decomposition & variant library** — Backends have monolithic prompts. PromptPotter decomposes into 8 independent fields via LLM restructure, perturbs each independently. See `docs/prompt-scheme.md`.
 - **Prompt alias groups** — `register_alias`/`resolve_aliases` link equivalent prompt hashes so historical data is discoverable across forms. Transitive resolution.
-- **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic accessors only.
+- **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic accessors only. Two-tier intelligence feed (deterministic triage + L2 strategic insights) documented in [`docs/methods/search-memory-intelligence.md`](docs/methods/search-memory-intelligence.md).
 
 ## Known Issues
 
