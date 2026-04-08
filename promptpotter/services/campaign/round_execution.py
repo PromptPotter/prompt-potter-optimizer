@@ -351,6 +351,8 @@ async def _evaluate_candidates(
             improvement_threshold=config.improvement_threshold,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
+            elimination_n_min=config.elimination_n_min,
+            elimination_alpha=config.elimination_alpha,
         )
 
         eval_out.critique_text = await _run_critique(eval_out, round_num, state, config)

@@ -361,17 +361,26 @@ async def _run_candidate_evals(
     *,
     degradation_checks: list | None = None,
     callbacks: RunCallbacks | None = None,
+    elimination_n_min: int = 20,
+    elimination_alpha: float = 0.05,
 ) -> tuple[dict[str, list[dict]], list[dict], dict | None]:
     """Evaluate each candidate against the dataset.
 
     Returns (all_candidate_results, candidate_scores, escalation_signal).
     """
     from promptpotter.services.eval_gateway import eval_search_point
+    from promptpotter.services.search.sequential_elimination import EliminationCheck
 
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []
     escalation_signal = None
     n_candidates = len(osp_candidates)
+
+    elim_check = EliminationCheck(
+        n_min=elimination_n_min,
+        alpha=elimination_alpha,
+        n_queries=len(dataset),
+    )
 
     for idx, osp_c in enumerate(osp_candidates):
         _on_result = None
@@ -384,21 +393,36 @@ async def _run_candidate_evals(
             base_pipeline_params=merged_pp[idx],
             schema=ctx.pipeline_schema,
         )
+
+        # Merge degradation + elimination checks for this candidate
+        all_checks = list(degradation_checks or [])
+        if elim_check.enabled:
+            all_checks.append(elim_check)
+
         results, scores, _cached = await eval_search_point(
             sp,
             dataset,
             ctx,
             label=f"candidate_{idx}",
             on_result=_on_result,
-            degradation_checks=degradation_checks,
+            degradation_checks=all_checks or None,
             candidate_idx=idx,
             n_total_candidates=n_candidates,
         )
 
         escalation_signal = scores.pop("escalation_signal", None)
+        elimination_stopped = (
+            bool(escalation_signal)
+            and getattr(escalation_signal, "check_name", "") == "elimination"
+        )
 
         aborted = bool(escalation_signal) and len(results) < len(dataset)
         all_candidate_results[osp_c.id] = results
+
+        # Register fully-completed candidates as priors for future elimination
+        if len(results) == len(dataset) and not aborted:
+            elim_check.register_completed([r["score"] for r in results])
+
         candidate_scores.append(
             {
                 "candidate_id": osp_c.id,
@@ -409,18 +433,23 @@ async def _run_candidate_evals(
                 "hits": scores["hits"],
                 "total": scores["total"],
                 "escalation_aborted": aborted,
+                "elimination_stopped": elimination_stopped,
                 "eval_queries": len(results),
                 "expected_queries": len(dataset),
             }
         )
         if callbacks and callbacks.on_candidate_eval:
             scores["escalation_aborted"] = aborted
+            scores["elimination_stopped"] = elimination_stopped
             scores["eval_queries"] = len(results)
             scores["expected_queries"] = len(dataset)
             callbacks.on_candidate_eval(idx, n_candidates, scores)
 
         if escalation_signal:
-            break
+            if elimination_stopped:
+                escalation_signal = None  # consumed — continue to next candidate
+            else:
+                break  # true degradation escalation — abort remaining candidates
 
     return all_candidate_results, candidate_scores, escalation_signal
 
@@ -435,6 +464,8 @@ async def l1_evaluate(
     improvement_threshold: float = 0.01,
     callbacks: RunCallbacks | None = None,
     degradation_checks: list | None = None,
+    elimination_n_min: int = 20,
+    elimination_alpha: float = 0.05,
 ) -> L1EvalResult:
     """Evaluate candidates and select the round winner."""
     # Normalize current_best prompt_fields to OptSearchPoint once at entry
@@ -456,6 +487,8 @@ async def l1_evaluate(
         ctx,
         degradation_checks=degradation_checks,
         callbacks=callbacks,
+        elimination_n_min=elimination_n_min,
+        elimination_alpha=elimination_alpha,
     )
 
     evaluated_candidates = [
@@ -463,7 +496,10 @@ async def l1_evaluate(
         for c in osp_candidates
         if c.id in all_candidate_results
         and not any(
-            cs.get("escalation_aborted") and cs["candidate_id"] == c.id for cs in candidate_scores
+            cs.get("escalation_aborted")
+            and not cs.get("elimination_stopped")
+            and cs["candidate_id"] == c.id
+            for cs in candidate_scores
         )
     ]
     winner_entry = _select_round_winner(

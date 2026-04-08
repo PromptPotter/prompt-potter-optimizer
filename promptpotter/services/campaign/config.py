@@ -53,6 +53,8 @@ class OptimizationConfig(TypedDict, total=False):
     enable_critique: bool
     pause_before_eval: bool
     stale_data_load_protocol: list[str]
+    elimination_n_min: int
+    elimination_alpha: float
 
 
 class EvalLLMConfig(TypedDict, total=False):
@@ -167,6 +169,14 @@ class RunConfig(BaseModel):
         description="Max failure examples fed to LLM candidate generation",
     )
 
+    # Sequential candidate elimination
+    elimination_n_min: int = Field(
+        20, description="Min queries before elimination t-test activates"
+    )
+    elimination_alpha: float = Field(
+        0.05, description="Significance level for candidate elimination"
+    )
+
     # Eval robustness
     max_consecutive_errors: int = Field(
         3,
@@ -251,6 +261,8 @@ class RunConfig(BaseModel):
             degradation_threshold=opt.get("degradation_threshold", 0.4),
             backend_warning_threshold=opt.get("backend_warning_threshold", 2),
             max_failures=opt.get("max_failures", 15),
+            elimination_n_min=opt.get("elimination_n_min", 20),
+            elimination_alpha=opt.get("elimination_alpha", 0.05),
             max_consecutive_errors=opt.get("max_consecutive_errors", 3),
             hard_cap=opt.get("hard_cap", 100),
             critique_degradation_threshold=opt.get("critique_degradation_threshold", 0.4),
