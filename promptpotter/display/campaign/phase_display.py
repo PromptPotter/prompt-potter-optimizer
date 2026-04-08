@@ -17,7 +17,7 @@ from promptpotter.services.campaign.state import PhaseEvent
 if TYPE_CHECKING:
     from promptpotter.services.search.scan_results import ScanContext
 
-from promptpotter.services.search.cohort_analysis import (
+from promptpotter.services.search.failure_group_analysis import (
     min_detectable_effect,
     proportion_test,
 )

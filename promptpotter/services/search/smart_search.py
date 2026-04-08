@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.services.eval_gateway import eval_search_point
-from promptpotter.services.search.cohort_analysis import preview as _preview
+from promptpotter.services.search.failure_group_analysis import preview as _preview
 from promptpotter.shared.constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,
     DIAGNOSTIC_HIT_RATIO,
@@ -206,7 +206,7 @@ def build_diagnostic_set(
 
     # Auto-adjust sample size for statistical power (Wave 2a)
     try:
-        from promptpotter.services.search.cohort_analysis import min_sample_size
+        from promptpotter.services.search.failure_group_analysis import min_sample_size
 
         min_n = min_sample_size(SCAN_TARGET_MDE)
         if n_queries < min_n:

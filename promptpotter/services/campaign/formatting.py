@@ -233,7 +233,7 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
     if ctx.l2_directive:
         sections.append("PREVIOUS DIRECTIVE:\n" + ctx.l2_directive)
 
-    # Historical intelligence from SearchMemory (Wave 3c)
+    # Historical intelligence from SearchMemory
     smc = ctx.search_memory_context
     if smc:
         hi_lines = ["HISTORICAL INTELLIGENCE:"]
@@ -241,6 +241,10 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
             hi_lines.append(f"  Axis impact rankings: {smc['axis_rankings']}")
         if smc.get("bottleneck_distribution"):
             hi_lines.append(f"  Bottleneck distribution: {smc['bottleneck_distribution']}")
+        if smc.get("failure_group_insights"):
+            hi_lines.append(f"  Failure group x axis: {smc['failure_group_insights']}")
+        if smc.get("persistent_failures"):
+            hi_lines.append(f"  Persistent failures: {smc['persistent_failures']}")
         if len(hi_lines) > 1:
             sections.append("\n".join(hi_lines))
 
@@ -280,7 +284,11 @@ def build_l1_search_memory_context(search_memory: Any) -> dict | None:
 
 
 def build_l2_search_memory_context(search_memory: Any) -> dict | None:
-    """Build SearchMemory context dict for L2 refine prompt."""
+    """Build SearchMemory context dict for L2 refine prompt.
+
+    L2 receives the full strategic intelligence: axis rankings, bottleneck
+    distribution, failure group × axis correlations, and persistent failures.
+    """
     if search_memory is None:
         return None
 
@@ -297,6 +305,31 @@ def build_l2_search_memory_context(search_memory: Any) -> dict | None:
         ctx["bottleneck_distribution"] = "; ".join(
             f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
         )
+
+    # Failure group × axis correlations (which axes help which failure modes)
+    if rankings:
+        fg_lines = []
+        for a in rankings[:3]:
+            corr = search_memory.parameter_failure_correlation(a.axis)
+            if corr:
+                parts = [f"{mode}: {delta:+.0%}" for mode, delta in sorted(
+                    corr.items(), key=lambda x: -abs(x[1]),
+                )[:3]]
+                fg_lines.append(f"{a.axis} → {', '.join(parts)}")
+        if fg_lines:
+            ctx["failure_group_insights"] = "; ".join(fg_lines)
+
+    # Persistent failures — queries failing across multiple configs
+    persistent = search_memory.persistent_failures(min_streak=3)
+    if persistent:
+        intractable = [q for q in persistent if q.hit_rate == 0]
+        chronic = [q for q in persistent if q.hit_rate > 0]
+        parts = []
+        if intractable:
+            parts.append(f"{len(intractable)} intractable (never hit)")
+        if chronic:
+            parts.append(f"{len(chronic)} chronic failures")
+        ctx["persistent_failures"] = "; ".join(parts)
 
     return ctx if ctx else None
 

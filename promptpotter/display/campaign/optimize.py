@@ -13,7 +13,7 @@ from promptpotter.services.campaign.campaign_data import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
 from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, RunResult
-from promptpotter.services.search.cohort_analysis import (
+from promptpotter.services.search.failure_group_analysis import (
     min_detectable_effect,
     proportion_test,
     wilson_ci,

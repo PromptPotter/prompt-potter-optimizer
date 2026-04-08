@@ -17,7 +17,7 @@ from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.search_point import JobSearchPoint
 from promptpotter.services.eval_gateway import eval_search_point
-from promptpotter.services.search.cohort_analysis import preview as _preview
+from promptpotter.services.search.failure_group_analysis import preview as _preview
 from promptpotter.services.search.smart_search import (
     ScanEvent,
     build_axis_profiles,
@@ -214,7 +214,7 @@ async def sensitivity_scan(
     _baseline_ci: tuple[float, float] | None = None
     if pruning_enabled:
         try:
-            from promptpotter.services.search.cohort_analysis import wilson_ci
+            from promptpotter.services.search.failure_group_analysis import wilson_ci
 
             _baseline_ci = wilson_ci(baseline_scores["hits"], baseline_scores["total"])
         except ImportError:
@@ -349,7 +349,7 @@ async def sensitivity_scan(
 
             # Per-axis early pruning (Wave 2b)
             if _baseline_ci is not None and not _axis_pruned:
-                from promptpotter.services.search.cohort_analysis import wilson_ci
+                from promptpotter.services.search.failure_group_analysis import wilson_ci
 
                 var_ci = wilson_ci(scores["hits"], scores["total"])
                 _axis_variant_cis.append(var_ci)

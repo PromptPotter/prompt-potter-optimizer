@@ -1,6 +1,9 @@
 """Tests for Wave 2a: min_sample_size() and build_diagnostic_set() auto-adjustment."""
 
-from promptpotter.services.search.cohort_analysis import min_detectable_effect, min_sample_size
+from promptpotter.services.search.failure_group_analysis import (
+    min_detectable_effect,
+    min_sample_size,
+)
 from promptpotter.services.search.smart_search import build_diagnostic_set
 
 

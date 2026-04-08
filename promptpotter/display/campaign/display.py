@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from promptpotter.services.search.cohort_analysis import wilson_ci
+from promptpotter.services.search.failure_group_analysis import wilson_ci
 from promptpotter.shared.errors import is_error_result
 
 

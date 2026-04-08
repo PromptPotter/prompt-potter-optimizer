@@ -14,7 +14,7 @@ import sys
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.services.search.cohort_analysis import proportion_test, wilson_ci
+from promptpotter.services.search.failure_group_analysis import proportion_test, wilson_ci
 
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis, QueryDifficulty, TrendAnalysis

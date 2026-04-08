@@ -339,6 +339,30 @@ async def run_scan_and_persist(
 
     log(f"Sensitivity scan complete: {len(df)} variants evaluated")
 
+    # Failure group sensitivity — cross-tabulate scan results with failure groups
+    if session.store and session.backend_id:
+        from pathlib import Path
+
+        from promptpotter.services.search.failure_group_analysis import (
+            failure_group_sensitivity,
+        )
+        from promptpotter.services.search.search_memory import SearchMemory
+
+        _sm_path = Path(session.store.base_dir) / session.backend_id / "search_memory.json"
+        _sm = SearchMemory.load(_sm_path)
+        _sm.refresh(session.store, session.backend_id)
+        clusters = _sm.failure_clusters()
+        if clusters:
+            scan_rows = df.to_dict(orient="records")
+            fg_result = failure_group_sensitivity(scan_rows, clusters)
+            if fg_result.sensitivities:
+                _sm.ingest_failure_group_analysis(fg_result)
+                _sm.save(_sm_path)
+                log(
+                    f"Failure group analysis: {len(fg_result.sensitivities)} "
+                    f"axis x group correlations ingested into SearchMemory"
+                )
+
     # Persist results
     if session_id and session.store and session.backend_id:
         session.store.sessions.save_scan_results(

@@ -157,12 +157,47 @@ class SearchMemory:
     def query_sensitive_axes(self, query: str) -> list[str]:
         """Return axes that most affect this query's outcome.
 
-        Uses cohort analysis results if available. Falls back to empty list
-        when no per-query scan data has been ingested.
+        Uses failure group analysis results if available. Falls back to empty
+        list when no per-query scan data has been ingested.
         """
         if not hasattr(self, "_query_axis_sensitivity"):
             return []
         return self._query_axis_sensitivity.get(query, [])
+
+    def persistent_failures(self, min_streak: int = 3) -> list[QueryRecord]:
+        """Return queries that have failed in the last N consecutive evaluations.
+
+        Classifies queries by failure severity:
+        - Intractable: never hit across all evaluations (hit_rate == 0)
+        - Chronic: failed last min_streak evaluations but not always
+        - Intermittent: variable (not returned)
+
+        Only returns intractable + chronic queries.
+        """
+        records = []
+        for query, hits in self._query_hits.items():
+            if len(hits) < min_streak:
+                continue
+            recent = hits[-min_streak:]
+            if not any(recent):  # all False in recent window
+                hit_rate = sum(hits) / len(hits)
+                modes = self._query_failure_modes.get(query, [])
+                dominant = ""
+                if modes:
+                    from collections import Counter
+
+                    dominant = Counter(modes).most_common(1)[0][0]
+                records.append(
+                    QueryRecord(
+                        query=query,
+                        hit_rate=round(hit_rate, 4),
+                        n_evaluations=len(hits),
+                        variance=round(hit_rate * (1 - hit_rate), 4),
+                        dominant_failure_mode=dominant,
+                    )
+                )
+        records.sort(key=lambda r: r.hit_rate)  # intractable first
+        return records
 
     # --- Degradation ---
 
@@ -213,32 +248,32 @@ class SearchMemory:
         return clusters
 
     def parameter_failure_correlation(self, axis: str) -> dict[str, float]:
-        """Return failure-mode correlation for an axis (Wave 3e).
+        """Return failure-mode correlation for an axis.
 
-        Returns {failure_mode: delta} from cohort analysis if available.
+        Returns {failure_mode: delta} from failure group analysis if available.
         """
-        if not hasattr(self, "_axis_cohort_deltas"):
+        if not hasattr(self, "_axis_failure_group_deltas"):
             return {}
-        return self._axis_cohort_deltas.get(axis, {})
+        return self._axis_failure_group_deltas.get(axis, {})
 
-    def ingest_cohort_analysis(self, cohort_result: Any) -> None:
-        """Ingest cohort sensitivity analysis results (Wave 3e).
+    def ingest_failure_group_analysis(self, result: Any) -> None:
+        """Ingest failure group sensitivity results.
 
         Populates per-query sensitive axes and per-axis failure correlations
-        from ``CohortAnalysisResult``.
+        from ``FailureGroupResult``.
         """
         self._query_axis_sensitivity: dict[str, list[str]] = {}
-        self._axis_cohort_deltas: dict[str, dict[str, float]] = {}
+        self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
 
-        for cs in cohort_result.cohort_sensitivities:
+        for s in result.sensitivities:
             # Per-axis → failure mode deltas
-            self._axis_cohort_deltas.setdefault(cs.axis, {})[cs.cohort] = cs.delta
-            # Per-query → sensitive axes (for queries in this cohort)
-            for query in cohort_result.cohorts.get(cs.cohort, []):
+            self._axis_failure_group_deltas.setdefault(s.axis, {})[s.failure_group] = s.delta
+            # Per-query → sensitive axes (for queries in this failure group)
+            for query in result.groups.get(s.failure_group, []):
                 if query not in self._query_axis_sensitivity:
                     self._query_axis_sensitivity[query] = []
-                if cs.axis not in self._query_axis_sensitivity[query]:
-                    self._query_axis_sensitivity[query].append(cs.axis)
+                if s.axis not in self._query_axis_sensitivity[query]:
+                    self._query_axis_sensitivity[query].append(s.axis)
 
     # --- Lifecycle ---
 
