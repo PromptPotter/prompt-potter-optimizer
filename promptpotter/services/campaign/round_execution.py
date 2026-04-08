@@ -183,6 +183,66 @@ async def _generate_or_load_candidates(
     return candidates
 
 
+async def _run_critique(
+    eval_out: L1EvalResult,
+    round_num: int,
+    state: LoopState,
+    config: RunConfig,
+) -> str:
+    """Run critique analysis on evaluation results. Returns formatted critique text."""
+    if not config.enable_critique or not eval_out.winner_results:
+        return ""
+
+    crit_llm = _llm_client.get_llm_client()
+    agent = CritiqueAgent(crit_llm, model=config.model)
+
+    # Build critique-specific SearchMemory context
+    _crit_sm_ctx: dict[str, str] | None = None
+    _sm = state.search_memory
+    if _sm:
+        _crit_sm_ctx = {}
+        _disc = _sm.discriminating_queries()
+        if _disc:
+            _crit_sm_ctx["discriminating_queries"] = f"{len(_disc)} queries vary across configs"
+        _fc = _sm.failure_clusters(3)
+        if _fc:
+            _crit_sm_ctx["failure_clusters"] = "; ".join(
+                f"{c.failure_mode} ({c.fraction:.0%})" for c in _fc
+            )
+        if not _crit_sm_ctx:
+            _crit_sm_ctx = None
+
+    cctx = CritiqueContext(
+        results=eval_out.winner_results,
+        accuracy=eval_out.winner_accuracy,
+        composite=eval_out.winner_composite,
+        degraded_queries=eval_out.degraded_queries,
+        round_history=[
+            {
+                "round": r.round,
+                "accuracy": r.accuracy,
+                "composite": r.composite,
+                "pipeline_params": r.pipeline_params,
+                "degraded": getattr(r, "degraded_queries", 0),
+                "n_candidates": len(r.candidate_scores),
+            }
+            for r in state.rounds
+        ],
+        current_round=round_num,
+        stall_count=state.stall_count,
+        best_accuracy=state.best_accuracy,
+        best_round=state.best_round,
+        pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),
+        candidate_keys=_candidate_keys_from_schema(config.pipeline_schema),
+        pipeline_schema=config.pipeline_schema,
+        degradation_threshold=config.critique_degradation_threshold,
+        near_miss_ratio=config.critique_near_miss_ratio,
+        search_memory_context=_crit_sm_ctx,
+    )
+    result = await agent.run(cctx)
+    return format_critique_for_prompt(result)
+
+
 async def _evaluate_candidates(
     candidates: list[dict],
     round_num: int,
@@ -194,7 +254,7 @@ async def _evaluate_candidates(
     trace_id: str | None = None,
     degradation_checks: list[DegradationCheck] | None = None,
 ) -> L1EvalResult:
-    """Evaluate candidates and run critique analysis."""
+    """Evaluate candidates, run critique, select winner."""
     from promptpotter.services.campaign.l1_optimizer import l1_evaluate
 
     emit_phase(
@@ -209,13 +269,12 @@ async def _evaluate_candidates(
         current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None,
     )
 
-    current_best_label = f"round_{round_num}" if round_num > 0 else "baseline"
     current_best = {
         "accuracy": state.current_accuracy,
         "composite": state.current_composite,
         "prompt_fields": state.opt_sp.prompt_field_dict(),
         "results": state.current_results,
-        "label": current_best_label,
+        "label": f"round_{round_num}" if round_num > 0 else "baseline",
     }
 
     async with observed_node(
@@ -234,65 +293,8 @@ async def _evaluate_candidates(
             degradation_checks=degradation_checks,
         )
 
-        # Critique analysis
-        critique_result: dict = {}
-        critique_text = ""
-        if config.enable_critique and eval_out.winner_results:
-            crit_llm = _llm_client.get_llm_client()
-            agent = CritiqueAgent(crit_llm, model=config.model)
-            # Build critique-specific SearchMemory context
-            _crit_sm_ctx: dict[str, str] | None = None
-            _sm = state.search_memory
-            if _sm:
-                _crit_sm_ctx = {}
-                _disc = _sm.discriminating_queries()
-                if _disc:
-                    _crit_sm_ctx["discriminating_queries"] = (
-                        f"{len(_disc)} queries vary across configs"
-                    )
-                _fc = _sm.failure_clusters(3)
-                if _fc:
-                    _crit_sm_ctx["failure_clusters"] = "; ".join(
-                        f"{c.failure_mode} ({c.fraction:.0%})" for c in _fc
-                    )
-                if not _crit_sm_ctx:
-                    _crit_sm_ctx = None
-            cctx = CritiqueContext(
-                results=eval_out.winner_results,
-                accuracy=eval_out.winner_accuracy,
-                composite=eval_out.winner_composite,
-                degraded_queries=eval_out.degraded_queries,
-                round_history=[
-                    {
-                        "round": r.round,
-                        "accuracy": r.accuracy,
-                        "composite": r.composite,
-                        "pipeline_params": r.pipeline_params,
-                        "degraded": getattr(r, "degraded_queries", 0),
-                        "n_candidates": len(r.candidate_scores),
-                    }
-                    for r in state.rounds
-                ],
-                current_round=round_num,
-                stall_count=state.stall_count,
-                best_accuracy=state.best_accuracy,
-                best_round=state.best_round,
-                pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),
-                candidate_keys=_candidate_keys_from_schema(config.pipeline_schema),
-                pipeline_schema=config.pipeline_schema,
-                degradation_threshold=config.critique_degradation_threshold,
-                near_miss_ratio=config.critique_near_miss_ratio,
-                search_memory_context=_crit_sm_ctx,
-            )
-            critique_result = await agent.run(cctx)
-            critique_text = format_critique_for_prompt(critique_result)
-
-        thinking_styles = sample_thinking_styles(
-            n=3,
-            seed=config.seed + round_num + 1,
-        )
-        eval_out.critique_text = critique_text
-        eval_out.thinking_styles = thinking_styles
+        eval_out.critique_text = await _run_critique(eval_out, round_num, state, config)
+        eval_out.thinking_styles = sample_thinking_styles(n=3, seed=config.seed + round_num + 1)
 
     emit_phase(
         callbacks.on_phase,

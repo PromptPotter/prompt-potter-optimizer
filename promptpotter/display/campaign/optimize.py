@@ -78,16 +78,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def _campaign_baseline_as_dict(campaign_rounds: list) -> dict:
-    """Thin wrapper: delegate to service, return as dict for local callers."""
-    bl = _extract_campaign_baseline(campaign_rounds)
-    return {
-        "baseline_ps": bl.baseline_ps,
-        "baseline_acc": bl.baseline_acc,
-        "baseline_results": bl.baseline_results,
-        "instruction": bl.instruction,
-    }
-
 
 def show_feedback_preflight(
     campaign_rounds: list,
@@ -141,7 +131,9 @@ def show_feedback_preflight(
         pipeline_schema=pipeline_schema,
     )
 
-    bl = _campaign_baseline_as_dict(campaign_rounds)
+    _bl = _extract_campaign_baseline(campaign_rounds)
+    bl = {"baseline_ps": _bl.baseline_ps, "baseline_acc": _bl.baseline_acc,
+          "baseline_results": _bl.baseline_results, "instruction": _bl.instruction}
 
     _print_preflight_sections(
         config,
@@ -372,8 +364,8 @@ async def run_optimization_notebook(
         else None
     )
 
-    bl = _campaign_baseline_as_dict(campaign_rounds)
-    baseline_acc = bl["baseline_acc"]
+    _bl = _extract_campaign_baseline(campaign_rounds)
+    baseline_acc = _bl.baseline_acc
 
     # --- Warn if scan context was lost (kernel restart) ---
     if scan_context is None and any(r.get("round") == "search" for r in campaign_rounds):

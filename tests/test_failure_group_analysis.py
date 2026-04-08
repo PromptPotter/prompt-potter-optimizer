@@ -2,7 +2,6 @@
 
 from promptpotter.services.search.failure_group_analysis import (
     FailureGroupResult,
-    FailureGroupSensitivity,
     failure_group_sensitivity,
 )
 from promptpotter.services.search.search_memory import SearchMemory
@@ -144,6 +143,6 @@ def test_persistent_failures():
     assert persistent[0].dominant_failure_mode == "web_search"
 
     # q2 chronic — hit_rate > 0
-    q2 = [r for r in persistent if r.query == "q2"][0]
+    q2 = next(r for r in persistent if r.query == "q2")
     assert q2.hit_rate > 0
     assert q2.dominant_failure_mode == "token_matching"
