@@ -51,22 +51,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["run_optimization"]
 
 
-def _prepare_probe_data(
-    state: LoopState,
-    dataset: list[dict],
-    round_num: int,
-) -> tuple[list[dict], list | None]:
-    """Build eval data for a probe round (warned queries only, no escalation)."""
-    warned_queries = {q for q, e in state.opt_sp.warning_inventory.items() if e.get("warnings")}
-    round_data = [d for d in dataset if d.get("query") in warned_queries]
-    logger.debug(
-        "PROBE round %d: %d warned queries (from %d tracked)",
-        round_num,
-        len(round_data),
-        len(warned_queries),
-    )
-    return round_data, None  # no escalation checks during probe
-
 
 async def _handle_post_probe(
     state: LoopState,
@@ -341,10 +325,12 @@ async def run_optimization(
             # --- Probe vs normal round data ---
             is_probe = state.probe_next_round
             if is_probe:
-                round_eval_data, _round_checks = _prepare_probe_data(
-                    state,
-                    dataset,
-                    round_num,
+                warned = {q for q, e in state.opt_sp.warning_inventory.items() if e.get("warnings")}
+                round_eval_data = [d for d in dataset if d.get("query") in warned]
+                _round_checks = None  # no escalation checks during probe
+                logger.debug(
+                    "PROBE round %d: %d warned queries (from %d tracked)",
+                    round_num, len(round_eval_data), len(warned),
                 )
             else:
                 round_eval_data = eval_dataset

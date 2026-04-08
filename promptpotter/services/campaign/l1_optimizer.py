@@ -52,7 +52,7 @@ class L1EvalResult(BaseModel):
     candidates_evaluated: int
     candidate_scores: list[dict[str, Any]]
     winner_results: list[QueryResult]
-    all_eval_results: list[QueryResult] = Field(default_factory=list)
+    all_candidate_results: dict[str, list[dict]] = Field(default_factory=dict)
     escalation_signal: dict[str, Any] | None = None
     degraded_queries: int = 0
 
@@ -455,7 +455,7 @@ async def l1_evaluate(
         candidates_evaluated=winner_entry["candidates_evaluated"],
         candidate_scores=candidate_scores,
         winner_results=winner_entry.get("results", []),
-        all_eval_results=[r for results in all_candidate_results.values() for r in results],
+        all_candidate_results=dict(all_candidate_results),
         escalation_signal=escalation_signal,
         degraded_queries=count_degraded_queries(winner_entry.get("results", [])),
     )

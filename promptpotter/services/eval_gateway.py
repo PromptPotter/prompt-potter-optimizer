@@ -82,9 +82,6 @@ class EvalBatchResult:
     completed: bool = True
     stop_reason: str | None = None  # "graceful" | "force" | "escalation" | None
     escalation_signal: EscalationSignal | None = None
-    retried_degraded: int = 0
-    probed_degraded: int = 0
-    switched_samples: int = 0
 
 
 def _fill_remaining_errors(
@@ -290,41 +287,18 @@ async def _run_eval_batch(
                         completed=False,
                         stop_reason="escalation",
                         escalation_signal=esc_signal,
-                        retried_degraded=n_retried,
-                        probed_degraded=n_probed,
-                        switched_samples=n_switched,
                     )
         except (KeyboardInterrupt, asyncio.CancelledError):
             logger.warning(
                 "Eval batch force-interrupted at query %d/%d.", len(results), len(dataset)
             )
-            return EvalBatchResult(
-                results,
-                completed=False,
-                stop_reason="force",
-                retried_degraded=n_retried,
-                probed_degraded=n_probed,
-                switched_samples=n_switched,
-            )
+            return EvalBatchResult(results, completed=False, stop_reason="force")
 
     _log_batch_summary(n_reused, len(dataset), n_retried, n_probed, n_switched)
 
     if interrupt.stop_requested:
-        return EvalBatchResult(
-            results,
-            completed=False,
-            stop_reason="graceful",
-            retried_degraded=n_retried,
-            probed_degraded=n_probed,
-            switched_samples=n_switched,
-        )
-    return EvalBatchResult(
-        results,
-        completed=True,
-        retried_degraded=n_retried,
-        probed_degraded=n_probed,
-        switched_samples=n_switched,
-    )
+        return EvalBatchResult(results, completed=False, stop_reason="graceful")
+    return EvalBatchResult(results)
 
 
 async def eval_search_point(

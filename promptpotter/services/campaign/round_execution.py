@@ -54,7 +54,7 @@ class PauseForReviewError(Exception):
         self,
         candidates: list[dict],
         round_num: int,
-        pause_point: str = CampaignPhase.L1_GENERATE,
+        pause_point: str,
     ) -> None:
         self.candidates = candidates
         self.round_num = round_num
@@ -343,7 +343,7 @@ async def execute_round(
     )
 
     if config.pause_before_eval:
-        raise PauseForReviewError(candidates, round_num)
+        raise PauseForReviewError(candidates, round_num, pause_point="before_eval")
 
     eval_out = await _evaluate_candidates(
         candidates,
@@ -391,7 +391,7 @@ async def execute_round(
 
     # Update per-query warning inventory from ALL candidate results
     # (not just winner — aborted candidates carry the pipeline warnings)
-    _all_results = eval_out.all_eval_results
+    _all_results: list = [r for rs in eval_out.all_candidate_results.values() for r in rs]
     if _all_results:
         update_query_tracker(state.opt_sp.warning_inventory, _all_results)
 

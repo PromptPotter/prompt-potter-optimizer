@@ -70,23 +70,7 @@ If the backend restarts mid-scan, `BackendClient` auto-reinitializes the session
 
 SearchMemory enriches the scan workflow when historical data exists: the scan advisor receives axis rankings, historically-best values, and bottleneck distribution to prioritize impactful axes and skip dead ones. Diagnostic sets can be stratified using query tractability data. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3) for the full data model and accessor methods.
 
-**Bottleneck attribution** (`attribute_bottleneck()` in `metrics.py`) maps each `terminated_at` step to the `param_keys` of that node plus all upstream nodes. The scan advisor uses this to order axes by causal pipeline depth — parameters that feed into the dominant bottleneck are scanned first.
+### Cohort Sensitivity (Planned)
 
-### Cohort Sensitivity
-
-Standard sensitivity scan measures per-axis accuracy deltas over the full query set. Cohort sensitivity (`cohort_analysis.py`) slices those results by failure mode to answer: "Which axes matter most for which failure types?"
-
-**How it works:**
-
-1. Failure clusters from SearchMemory group queries by `terminated_at` step (e.g., `web_search`, `token_matching`).
-2. Per-query hit/miss results from scan rows are aggregated per cohort.
-3. For each (axis, cohort) pair, the delta between baseline accuracy and best-value accuracy is computed. When `campaign.json` declares a `"scoring"` formula (e.g. `"rr(ground_truth_rank)"`), that formula drives accuracy; otherwise binary hit/miss is used.
-4. Results are ranked by absolute delta and ingested into SearchMemory via `ingest_cohort_analysis()`.
-
-**What it enables:**
-- The scan advisor can recommend different axes for different failure modes (e.g., `query_prefix` matters for `web_search` failures but not `token_matching` failures).
-- `query_sensitive_axes(query)` returns the axes most relevant to a specific query based on its cohort membership.
-- `parameter_failure_correlation(axis)` returns per-failure-mode deltas for an axis.
-
-Implementation: `promptpotter/services/search/cohort_analysis.py`. Data models: `CohortSensitivity`, `CohortAnalysisResult`.
+Standard sensitivity scan measures per-axis accuracy deltas over the full query set. Cohort sensitivity would slice those results by failure mode to answer: "Which axes matter most for which failure types?" SearchMemory has the accessor methods (`query_sensitive_axes()`, `parameter_failure_correlation()`, `ingest_cohort_analysis()`) but the producer pipeline is not yet wired. See `docs/methods/search-memory-intelligence.md` for the design.
 

@@ -251,6 +251,10 @@ class RunConfig(BaseModel):
             degradation_threshold=opt.get("degradation_threshold", 0.4),
             backend_warning_threshold=opt.get("backend_warning_threshold", 2),
             max_failures=opt.get("max_failures", 15),
+            max_consecutive_errors=opt.get("max_consecutive_errors", 3),
+            hard_cap=opt.get("hard_cap", 100),
+            critique_degradation_threshold=opt.get("critique_degradation_threshold", 0.4),
+            critique_near_miss_ratio=opt.get("critique_near_miss_ratio", 0.3),
             stale_data_load_protocol=opt.get(
                 "stale_data_load_protocol", ["rerun", "samplescan", "sampleswitch"]
             ),
