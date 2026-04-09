@@ -11,7 +11,7 @@
 
 PromptPotter's core optimization loop (L1 generate → L1 evaluate → critique → L2 refine → L3 replan) is functionally complete through M8 with SearchMemory cross-campaign intelligence. Three critical gaps prevent the project from reaching publication and production use:
 
-1. **No benchmark results** — The methodology exists (`docs/benchmarks.md`), the export pipeline is built (`cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py`), but result tables are all placeholders. HotPotQA and GSM8K dataset configs exist in `datasets/`. Dataset loaders, scorers, and two evaluation paths (backend-routed via TermNorm `llm_only` step + gated local `LLMOnlyAdapter`) are implemented — see `TermNorm-excel/docs/spec/proper-step-loop.md`. Benchmark campaigns have not been run yet.
+1. **No benchmark results** — The methodology exists (`docs/benchmarks.md`), the export pipeline is built (`cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py`), but result tables are all placeholders. HotPotQA and GSM8K dataset configs exist in `datasets/`. Dataset loaders, scorers, and the backend evaluation path (TermNorm `llm_only` step) are implemented. Benchmark campaigns have not been run yet.
 
 2. **Proof-of-concept meta-prompts** — The optimizer's own prompts (L1 generate, critique, L2 refine, L3 replan) in `promptpotter/config/optimizer_prompts/` are functional but untuned. They were developed against TermNorm (a multi-node retrieval pipeline) and need systematic evaluation on benchmark tasks to find stable, high-performing configurations.
 
@@ -49,7 +49,7 @@ Registry + config architecture — adding a dataset = two registry entries + con
 
 - **`DATASET_LOADERS`** registry in `dataset_builder.py` — dispatches `load_dataset(name)` to the right loader
 - **`SCORING_FUNCTIONS`** registry in `scoring.py` — all scorer functions available in formulas
-- **`LLMOnlyAdapter`** — generic `BackendClient` replacement, reads prompts from `pipeline_params` like any backend. Gated behind `LOCAL_EVAL_SECRET` + `local_eval_token` for multi-tenant safety. See `TermNorm-excel/docs/spec/proper-step-loop.md`.
+- **`LLMOnlyAdapter`** — optional `BackendClient` replacement for local LLM eval (opt-in, not default path).
 - **Backend `llm_only` step** — TermNorm's `/matches` endpoint supports `steps=["llm_only"]` for backend-routed benchmark eval (default path, no local keys needed)
 - **`prompt_variants.json`** — shared prompt variant library (persona, thinking_style, etc.)
 
@@ -364,7 +364,7 @@ Wave 6: Track 2c + Track 3d + Track 3e
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Bootstrap cost for meta-prompt eval | High compute cost (15K+ LLM calls per variant) | Use 50-100 eval samples for tuning; full samples for final numbers |
-| Local LLM eval = mini-connector | Technical debt, future refactor for M11 | Interface compatible with BackendClient (duck typing). Auth-gated via `LOCAL_EVAL_SECRET`. See `TermNorm-excel/docs/spec/proper-step-loop.md` |
+| Local LLM eval = mini-connector | Technical debt, future refactor for M11 | Interface compatible with BackendClient (duck typing). Opt-in via `LOCAL_EVAL_SECRET`. |
 | Webapp scope creep | Unbounded frontend work | MVP scope (3a-3c) before Phase 2 (3d-3e) |
 | Cited competitor numbers | Weak comparison (different models/hardware) | Label "cited" clearly; MIPROv2 is easiest to reproduce if challenged |
 | TermNorm meta-prompts on LLM-only tasks | Pipeline references irrelevant for benchmarks | Generic prompts via task_context injection; no pipeline-specific language in base prompts |

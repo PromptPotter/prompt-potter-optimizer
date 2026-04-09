@@ -6,7 +6,7 @@
 
 ## Problem
 
-`optimize --auto` with `eval_sample_size: 200` and `n_variants: 5` fires 1000+ backend calls in rapid succession. Each call costs money (LLM inference). The user had no way to stop it:
+`optimize --auto` with `eval_sample_size: 200` and `n_variants: 5` can fire hundreds of backend calls in rapid succession (sequential elimination reduces the naive `n_variants × eval_size` upper bound, but the volume is still significant). Each call costs money (LLM inference). The user had no way to stop it:
 
 - **Ctrl+C didn't work fast enough** — the graceful shutdown waits for in-flight calls
 - **Closing the terminal window** was required
@@ -22,7 +22,7 @@
 ## Observed Behavior
 
 1. User runs `optimize --auto` expecting a quick test
-2. Campaign runner immediately starts evaluating 200 queries × 5 candidates = 1000 backend calls
+2. Campaign runner starts evaluating candidates across 200 queries (first runs all 200, others may be eliminated early via t-test, but volume is still significant)
 3. Each call prints output, flooding the terminal
 4. Ctrl+C is caught by graceful shutdown handler, which tries to finish the current batch
 5. User closes terminal — but orphan async tasks may continue briefly
@@ -30,7 +30,7 @@
 
 ## Expected Behavior
 
-- Before starting evaluation, print the cost estimate: `"About to evaluate {n_variants} candidates × {eval_sample_size} queries = {total} backend calls. Proceed? [Y/n]"`
+- Before starting evaluation, print the cost estimate: `"About to evaluate {n_variants} candidates on {eval_sample_size} queries (sequential elimination will early-stop inferior candidates). Proceed? [Y/n]"`
 - First Ctrl+C should abort within 1-2 seconds, not wait for batch completion
 - A running campaign should be stoppable via `control --stop` from another terminal (this exists but is too slow)
 - Consider a hard timeout on eval batches (e.g., abort after N seconds of continuous eval)

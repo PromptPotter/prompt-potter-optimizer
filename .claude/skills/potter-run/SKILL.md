@@ -37,35 +37,23 @@ Gather context silently — the dashboard in Phase 0.7 is the first thing the us
 
 1. `ls datasets/` — list available datasets
 2. Read `dataset.md`, `task_description.md`, `campaign.json` for the target dataset
-3. **Classify dataset type** from `dataset.md`: `backend` (needs running server) or `llm-only` (needs loader in `dataset_builder.py` + scorer in `SCORING_FUNCTIONS`)
-4. **Readiness check** (type-dependent):
-   - `backend`: `curl -s {backend_url}/status` — is the server running?
-   - `llm-only`: check `dataset.md` Status section — is the infrastructure implemented? If "Not yet implemented", note what's missing.
-5. **LLM-only auth gate check** (only when dataset type is `llm-only`):
-   The `LLMOnlyAdapter` requires `LOCAL_EVAL_SECRET` in `.env` and a matching `local_eval_token` in `campaign.json`. Without both, `init_services` **silently falls through to `BackendClient`** and sends queries to whatever backend is at `--backend-url` — meaning math problems go to TermNorm, producing garbage results. This is the #1 cause of 0% accuracy on llm-only datasets.
-   - Check if `"local_eval_token"` exists in the dataset's `campaign.json` `campaign_config` object
-   - If missing: **STOP before init**. Print a clear error explaining:
-     1. What: LLM-only datasets need an auth gate configured — `LOCAL_EVAL_SECRET` in `.env` and matching `local_eval_token` in `campaign.json`
-     2. Why: Without it, queries silently route to the backend server instead of the LLM, producing wrong results
-     3. How: The user must set `LOCAL_EVAL_SECRET=<any-secret>` in `.env` and add `"local_eval_token": "<same-secret>"` to their `campaign.json`
-   - Do NOT read `.env`, do NOT write tokens, do NOT auto-configure auth. The user manages their own secrets.
-   - If `local_eval_token` is present in `campaign.json`: proceed (the code validates it against `.env` at runtime)
-6. Read `promptpotter/config/settings.py` → `APP_VERSION`
+3. **Readiness check**: `curl -s {backend_url}/status` — is the backend running? If `dataset.md` Status says "Not yet implemented", note what's missing (loader + scorer).
+4. Read `promptpotter/config/settings.py` → `APP_VERSION`
 
-**Only print if**: no dataset argument (list available datasets with readiness status — read `reference/benchmark-datasets.md` for prioritization guidance if user asks which to run first), dataset not implemented (explain what's missing per `dataset.md` — and offer to build it, starting with the scorer; see implementation order below), or backend is down (say to start it). Otherwise stay silent — findings go into the dashboard.
+**Only print if**: no dataset argument (list available datasets with readiness status — read `reference/benchmark-datasets.md` for prioritization guidance if user asks which to run first), dataset not implemented (explain what's missing per `dataset.md` — and offer to build it, starting with the scorer; see implementation order below), or backend is down (say to start it). Otherwise stay silent — all findings go into the dashboard.
 
 ### Prompt variant defaults for new datasets
 
 The shared variant library (`promptpotter/config/prompt_variants.json`) has task-agnostic defaults at **index 1** in each field array. These are the simplest starting configuration for any new campaign — they work for math, QA, ranking, or any other task type. TermNorm-specific variants live at index 2+. For a new dataset, index 1 is the right starting point; dataset-specific variant tuning comes later.
 
-### Implementation order for unimplemented `llm-only` datasets
+### Implementation order for unimplemented datasets
 
-When a `llm-only` dataset's Status says "Not yet implemented", offer to build the missing infrastructure. Two registry entries are needed (see `reference/benchmark-datasets.md`):
+When a dataset's Status says "Not yet implemented", offer to build the missing infrastructure. Two registry entries are needed (see `reference/benchmark-datasets.md`):
 
 1. **Scorer** — add to `SCORING_FUNCTIONS` in `shared/scoring.py`. Self-contained, testable in isolation.
 2. **Loader** — add to `DATASET_LOADERS` in `services/dataset_builder.py`. Returns `[{"query": str, "ground_truth": str}]`.
 
-Everything else (`LLMOnlyAdapter`, `compile_scorer`, prompt variant library) is shared.
+Everything else (`compile_scorer`, prompt variant library, backend pipeline) is shared.
 
 ---
 
@@ -145,7 +133,7 @@ DATA ASSESSMENT (from Phase 0.5)
   {if minimal: "Minimal data — starting from config defaults"}
 
 WARNINGS (only if any — omit section if clean)
-  ⚠ {e.g. "backend unreachable", "llm_ranking in active nodes", "llm-only auth gate not configured — see below"}
+  ⚠ {e.g. "backend unreachable", "llm_ranking in active nodes"}
 
 SESSION FILES
   {full_path_to_session_dir}/
@@ -179,24 +167,7 @@ python -m promptpotter.cli.campaign_runner init \
     {init flags from dataset.md} --skip-baseline
 ```
 
-**`backend` example** (lca-termnorm):
-```bash
-python -m promptpotter.cli.campaign_runner init \
-    --backend-url http://127.0.0.1:8000 \
-    --backend-id local \
-    --config datasets/lca-termnorm/campaign.json \
-    --skip-baseline
-```
-
-**`llm-only` example** (gsm8k):
-```bash
-python -m promptpotter.cli.campaign_runner init \
-    --backend-id gsm8k \
-    --config datasets/gsm8k/campaign.json \
-    --skip-baseline
-```
-
-For `llm-only`: no `--backend-url` needed. `init_services` auto-creates `LLMOnlyAdapter`, loads the pipeline schema from static `pipeline.json`, and auto-loads the dataset from `DATASET_LOADERS` into the DatasetStore on first run.
+All datasets use `--backend-url` to route through the backend. The backend's `llm_only` step handles benchmark datasets (GSM8K, HotPotQA) the same way it handles TermNorm — just with a different pipeline config.
 
 - **Always `--skip-baseline`** — baseline eval is deferred. The optimizer runs it automatically before the first round. Explicit baseline eval is only useful when Phase 0.5 data assessment found substantial historical data AND the user explicitly requests a fresh baseline.
 - Timeout: 30 seconds
@@ -243,22 +214,14 @@ Report which axes showed sensitivity and the recommended starting point.
 
 ## Phase 4: Optimize
 
-### SAFETY: Cost Confirmation Required Before --auto
+### How Evaluation Works
 
-**BEFORE running `optimize --auto`, you MUST:**
+Each round generates a few candidates (default: `n_variants=3`) and evaluates them via **sequential elimination**:
+- The first candidate evaluates the full eval set (e.g., 30 queries).
+- Subsequent candidates are tested query-by-query. After 20 queries (`elimination_n_min`), a Welch's t-test runs after each query. Inferior candidates are eliminated early.
+- Typical round cost is well below `n_variants × eval_size` — most candidates don't run to completion.
 
-1. Read `campaign.json` and report to the user:
-   - `eval_sample_size` (queries per candidate evaluation)
-   - `n_variants` (candidates per round)
-   - Total calls per round: `eval_sample_size × n_variants`
-   - If `eval_sample_size: 0`, it means ALL queries — report the full dataset count
-2. **Ask for explicit confirmation**: "This will send ~{total} backend calls per round (each is a paid LLM call). Proceed?"
-3. **For first-time datasets, recommend `--round` instead** — it generates candidates then pauses before evaluation, letting the user review before spending money.
-
-**There is currently no quick kill mechanism.** If `--auto` runs away:
-- Ctrl+C may not stop it fast enough (graceful shutdown waits for in-flight calls)
-- Emergency stop: `taskkill //F //IM python.exe` (Windows) — WARNING: kills ALL Python processes including the backend
-- See `docs/specs/issue-runaway-eval.md` for the full issue
+No pre-run cost confirmation is needed. The protocol is inherently bounded.
 
 Ask: **"Full auto-optimization, or one round at a time?"**
 
@@ -274,13 +237,9 @@ python -m promptpotter.cli.campaign_runner optimize --round
 - **Timeout**: 30s default. NEVER exceed 60s without explicit user permission. For long runs, use `--round` repeatedly.
 - Graceful stop: first Ctrl+C saves state, second force-quits.
 
-### Benchmark vs Backend Optimization
+### Benchmark Datasets (GSM8K, HotPotQA, etc.)
 
-For `llm-only` benchmark datasets, optimization behaves differently:
-- **No per-node caching** — every eval is a fresh LLM call (no round-over-round speedup from IntermediateCache)
-- **Prompt-only surface** — no pipeline params to tune, all improvement comes from prompt quality
-- **Different convergence profile** — no short-circuit nodes to exploit; accuracy gains are purely from better prompting
-- Read `reference/benchmark-datasets.md` for the full cost model and readiness checklist
+Benchmark datasets use only the backend's `llm_only` step — optimization surface is prompt quality only (no pipeline params to tune). See `reference/benchmark-datasets.md` for readiness checklist and cost model.
 
 ### Understanding the Optimization Loop
 

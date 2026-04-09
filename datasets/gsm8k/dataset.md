@@ -2,19 +2,17 @@
 
 ## Type
 
-`llm-only` — pure LLM prompt optimization, no backend pipeline needed.
+`backend` — uses TermNorm's `llm_only` step for LLM-based evaluation.
 
-## Status
+## Prerequisites
 
-**Ready.** Registry entries:
-- `DATASET_LOADERS["gsm8k"]` — fetches from HuggingFace `openai/gsm8k`
-- `SCORING_FUNCTIONS["gsm8k_match"]` — numeric extraction from `#### N` format
-
-**Prerequisites:** `pip install datasets`, LLM API access configured.
+- TermNorm backend must be running: `curl -s http://127.0.0.1:8000/status`
+- If backend is down, tell the user: "Start the TermNorm backend first, then re-run `/potter-run`"
 
 ## Init Flags
 
 ```
+--backend-url http://127.0.0.1:8000
 --backend-id gsm8k
 --config datasets/gsm8k/campaign.json
 --skip-baseline
@@ -24,10 +22,9 @@
 
 - Source: OpenAI GSM8K (grade school math, ~8.5K train / 1,319 test)
 - Format: word problem -> numeric answer in `#### N` format
-- campaign.json uses `eval_sample_size: 200`
+- campaign.json uses `eval_sample_size: 30`
 
 ## Pipeline Notes
 
-- Prompt flows through `pipeline_params` via PromptTemplate — same path as any backend
+- Pipeline: `llm_only` step only — prompt flows through `pipeline_params` via PromptTemplate
 - Optimization target: prompt template (chain-of-thought, few-shot examples, etc.)
-- No per-node caching — every eval is a fresh LLM call

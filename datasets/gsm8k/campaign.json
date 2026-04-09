@@ -1,16 +1,15 @@
 {
   "campaign_config": {
     "dataset_name": "gsm8k",
-    "dataset_type": "llm-only",
     "scoring": "gsm8k_match(predicted, ground_truth)",
-    "eval_sample_size": 200,
+    "eval_sample_size": 30,
     "scan_sample_size": 50,
     "exclude_nodes": [],
     "pipeline_overrides": {},
     "optimization": {
       "l1_patience": 3,
       "max_rounds": 15,
-      "n_variants": 5,
+      "n_variants": 3,
       "creativity": 0.7,
       "improvement_threshold": 0.01,
       "seed": 42,
