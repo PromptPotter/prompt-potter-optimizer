@@ -223,15 +223,40 @@ Each round generates a few candidates (default: `n_variants=3`) and evaluates th
 
 No pre-run cost confirmation is needed. The protocol is inherently bounded.
 
-Ask: **"Full auto-optimization, or one round at a time?"**
+### Default: Round-by-Round with Critique Reporting
+
+**Always default to `--round` mode** — run one round at a time, report critique + results after each round, then ask to continue. Only switch to `--auto` if the user explicitly requests it (e.g., "go auto", "run all rounds", "full auto").
 
 ```bash
-# Full autonomous loop (L1→L2→L3 until convergence) — this is the default
-python -m promptpotter.cli.campaign_runner optimize --auto
-
-# One round, pause after L1 generate for human review of candidates
+# Default — one round, then report back
 python -m promptpotter.cli.campaign_runner optimize --round
+
+# Only if user explicitly asks for autonomous mode
+python -m promptpotter.cli.campaign_runner optimize --auto
 ```
+
+**After each round completes**, read and present:
+
+1. **Read `campaign_log.md`** — find the latest round section (last `## Round N` block). Extract:
+   - Winner candidate and its accuracy
+   - Critique text (the `CRITIQUE:` section — what failed, patterns, recommendations)
+   - L2 directive if present
+2. **Read `campaign_state.json`** — extract: round number, layer, patience counters, best accuracy, stop_reason
+3. **Present a round summary** to the user:
+
+```
+ROUND {N} COMPLETE
+  Winner:   C{x}/{total} — {accuracy}% ({delta} vs previous best)
+  Layer:    {L1/L2/L3}    Patience: {x}/{max}
+  Queries:  {evaluated}   Cache: {hit_rate}%
+
+CRITIQUE
+  {2-4 key lines from the critique — what failed, what to try next}
+
+NEXT: {what the optimizer plans to do — continue L1 / escalate to L2 / etc.}
+```
+
+4. **Ask**: "Continue next round?" — user can say "continue", "go auto" (switch to `--auto`), or "stop"
 
 - **Foreground only**, never background — these make API calls that cost money.
 - **Timeout**: 30s default. NEVER exceed 60s without explicit user permission. For long runs, use `--round` repeatedly.
@@ -326,6 +351,7 @@ python -m promptpotter.cli.export_results supplemental \
 - **Resume by default** — only create new sessions when explicitly asked
 - **Skip baseline by default** — always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists AND the user requests it.
 - **Data-driven start** — Phase 0.5 assesses existing data. Minimal data (< 50 queries, < 5 runs) → go straight to optimize from config defaults. Substantial data → show leaderboard via existing CLI commands (`results`, `scan-results`), propose best-known config as starting point.
+- **Round-by-round critique is the default** — always use `--round`, read `campaign_log.md` + `campaign_state.json` after each round, present the critique summary, and ask before continuing. Only use `--auto` when the user explicitly requests it.
 - **Be the data scientist**: interpret results, explain what the optimizer is doing, suggest next steps
 - **If something fails**: read the error category (`[CLIENT]`, `[SERVER]`, `[CONNECTION]`, `[PIPELINE]`), then check `campaign_log.md` at `.promptpotter/projects/{backend_id}/sessions/{session_id}/campaign_log.md`
 - **After interrupts**: check for orphan processes — `tasklist | findstr python` (Windows) or `ps aux | grep python` (Linux/Mac)

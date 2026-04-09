@@ -2,7 +2,7 @@
   "campaign_config": {
     "dataset_name": "gsm8k",
     "scoring": "gsm8k_match(predicted, ground_truth)",
-    "sp_budget_ttest": 30,
+    "sp_budget_ttest": 20,
     "scan_sample_size": 50,
     "exclude_nodes": [],
     "pipeline_overrides": {},
@@ -12,6 +12,7 @@
       "n_variants": 6,
       "creativity": 0.7,
       "improvement_threshold": 0.01,
+      "elimination_n_min": 6,
       "seed": 42,
       "max_failures": 15,
       "degradation_threshold": 0.4,
