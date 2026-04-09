@@ -311,13 +311,16 @@ async def init_services(
         _status("WARNING: No experiment data available")
         return base
 
-    from promptpotter.config.connectors.termnorm import (
-        extract_index_terms,
-        extract_queries,
-    )
+    from promptpotter.config.connectors import EXPERIMENT_EXTRACTORS, ensure_connectors_loaded
 
-    queries = extract_queries(exp_data)
-    index_terms = extract_index_terms(exp_data)
+    ensure_connectors_loaded()
+    schema_key = pipeline_schema.name.lower() if pipeline_schema else ""
+    extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
+    if extractor:
+        queries, index_terms = extractor(exp_data)
+    else:
+        # Generic fallback: extract from evaluation_results
+        queries, index_terms = _generic_extract_experiment(exp_data)
     exp_name = exp_data.get("experiment", {}).get("name", experiment_id)
     _status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
 
@@ -327,28 +330,30 @@ async def init_services(
     return base
 
 
+def _generic_extract_experiment(exp_data: dict) -> tuple[list[dict], list[str]]:
+    """Generic fallback: extract queries from evaluation_results."""
+    runs = exp_data.get("runs", [])
+    if not runs:
+        return [], []
+    queries: list[dict] = []
+    gt_set: set[str] = set()
+    for er in runs[0].get("evaluation_results", []):
+        q = er.get("query", "")
+        gt = er.get("ground_truth", "")
+        if q and gt:
+            queries.append({"query": q, "ground_truth": gt})
+            gt_set.add(gt)
+    return queries, sorted(gt_set)
+
+
 def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
     """Convert DatasetStore items to the query format used by replay/eval.
 
-    Items that already carry ``query`` + ``ground_truth`` pass through as-is.
-    TermNorm items (with ``source_sheet`` or ``bom_material``) are enriched
-    via the termnorm connector's ``build_query_item``.
+    Passes through all fields from each item — any connector-specific
+    enrichment (e.g. bom_material, query_fields) is expected to already
+    be present from dataset load time.
     """
-    queries = []
-    for item in items:
-        query = item.get("query", "")
-        gt = item.get("ground_truth", "")
-        if not query or not gt:
-            continue
-
-        # TermNorm-specific enrichment (adds bom_material, process, query_fields)
-        if "source_sheet" in item or "bom_material" in item:
-            from promptpotter.config.connectors.termnorm import build_query_item
-
-            queries.append(build_query_item(query, ground_truth=gt))
-        else:
-            queries.append({"query": query, "ground_truth": gt})
-    return queries
+    return [item for item in items if item.get("query") and item.get("ground_truth")]
 
 
 def resolve_experiment_id(

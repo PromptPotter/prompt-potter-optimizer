@@ -259,24 +259,43 @@ async def decompose_task_context(
     )
 
 
+def _generic_resolve_gt(exp_data: dict) -> dict[str, str]:
+    """Build ``{query: ground_truth}`` from evaluation_results (generic fallback)."""
+    gt_map: dict[str, str] = {}
+    runs = exp_data.get("runs", [])
+    if not runs:
+        return gt_map
+    for er in runs[0].get("evaluation_results", []):
+        q = er.get("query", "")
+        gt = er.get("ground_truth", "")
+        if q and gt:
+            gt_map[q] = gt
+    return gt_map
+
+
 def _extract_eval_from_traces(
     exp_data: dict,
     schema: PipelineSchema,
+    backend_name: str | None = None,
 ) -> list:
     """Build eval data from Langfuse-style traces in synced experiment data.
 
     Each trace in ``runs[0].traces[]`` carries named observations with
-    pipeline step outputs.  Ground truth is joined from experiment
-    mappings via the connector config's query parsing.
+    pipeline step outputs.  Ground truth is resolved via a registered
+    connector resolver (or generic query-string matching as fallback).
 
     Observation extraction is driven by the schema's ``obs_extraction_map()``.
 
     Returns:
         List of eval-data dicts (may be empty).
     """
-    from promptpotter.config.connectors.termnorm import extract_ground_truth_map
+    from promptpotter.config.connectors import TRACE_GT_RESOLVERS, ensure_connectors_loaded
 
-    bom_to_gt = extract_ground_truth_map(exp_data)
+    ensure_connectors_loaded()
+    resolver = TRACE_GT_RESOLVERS.get((backend_name or "").lower())
+
+    # Pre-build generic fallback map if no connector resolver
+    generic_gt = _generic_resolve_gt(exp_data) if not resolver else {}
 
     runs = exp_data.get("runs", [])
     if not runs:
@@ -292,10 +311,7 @@ def _extract_eval_from_traces(
         if not query:
             continue
 
-        from promptpotter.config.connectors.termnorm import split_query
-
-        bom_material, _ = split_query(query)
-        ground_truth = bom_to_gt.get(bom_material)
+        ground_truth = resolver(exp_data, query) if resolver else generic_gt.get(query)
         if not ground_truth:
             continue
 
@@ -371,7 +387,9 @@ def load_eval_dataset(
             from promptpotter.models.pipeline_schema import PipelineSchema
 
             schema = PipelineSchema()
-        dataset = _extract_eval_from_traces(exp_data, schema=schema)
+        backend = store.backends.get(backend_id)
+        backend_name = backend.name if backend else None
+        dataset = _extract_eval_from_traces(exp_data, schema=schema, backend_name=backend_name)
         if dataset:
             if sample_size > 0 and len(dataset) > sample_size:
                 rng = random.Random(42)

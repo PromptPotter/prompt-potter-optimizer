@@ -98,3 +98,27 @@ def extract_queries(experiment_data: dict) -> list[dict[str, Any]]:
         )
 
     return queries
+
+
+# -- Registry self-registration -----------------------------------------------
+
+
+def _extract_experiment(exp_data: dict) -> tuple[list[dict[str, Any]], list[str]]:
+    """Registered extractor: experiment data → (queries, index_terms)."""
+    return extract_queries(exp_data), extract_index_terms(exp_data)
+
+
+def _resolve_trace_gt(exp_data: dict, query_str: str) -> str | None:
+    """Registered resolver: experiment data + query → ground truth."""
+    gt_map = extract_ground_truth_map(exp_data)
+    bom, _ = split_query(query_str)
+    return gt_map.get(bom)
+
+
+from promptpotter.config.connectors import (  # noqa: E402
+    EXPERIMENT_EXTRACTORS,
+    TRACE_GT_RESOLVERS,
+)
+
+EXPERIMENT_EXTRACTORS["termnorm"] = _extract_experiment
+TRACE_GT_RESOLVERS["termnorm"] = _resolve_trace_gt
