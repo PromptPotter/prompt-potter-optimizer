@@ -25,6 +25,7 @@ __all__ = [
     "DATASET_LOADERS",
     "SHEET_COLUMN_MAP",
     "build_dataset_run_data",
+    "load_aime_2025",
     "load_dataset",
     "load_excel_ground_truth",
     "load_gsm8k",
@@ -218,12 +219,44 @@ def load_gsm8k(
     return items
 
 
+def load_aime_2025(
+    sample_size: int = 0,
+    seed: int = 42,
+) -> list[dict]:
+    """Load AIME 2025 from HuggingFace and return DatasetStore-format items.
+
+    Returns:
+        List of ``{"query": str, "ground_truth": str}`` dicts.
+        ``ground_truth`` is the integer answer as a string.
+
+    Requires the ``datasets`` library: ``pip install datasets``.
+    """
+    try:
+        from datasets import load_dataset  # type: ignore[import-untyped]
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(
+            "The 'datasets' library is required for AIME 2025. Install it: pip install datasets"
+        ) from None
+
+    ds = load_dataset("MathArena/aime_2025", split="train")
+    items: list[dict] = []
+    for row in ds:
+        items.append({"query": row["problem"], "ground_truth": str(row["answer"])})
+
+    if sample_size > 0 and len(items) > sample_size:
+        items = random.Random(seed).sample(items, sample_size)
+
+    logger.info("Loaded AIME 2025: %d items", len(items))
+    return items
+
+
 # ---------------------------------------------------------------------------
 # Dataset loader registry — add new loaders here
 # ---------------------------------------------------------------------------
 
 DATASET_LOADERS: dict[str, Callable[..., list[dict]]] = {
     "gsm8k": load_gsm8k,
+    "aime_2025": load_aime_2025,
 }
 """Map dataset name → loader function. Register new datasets here."""
 

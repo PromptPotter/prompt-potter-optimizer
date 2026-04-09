@@ -38,11 +38,25 @@ Grade school math word problems requiring multi-step arithmetic reasoning. Clean
 
 Used in: MIPROv2, Promptomatix, adv-CoT.
 
+### AIME 2025
+
+Competition-level math from the American Invitational Mathematics Examination. Frontier models still struggle here — GEPA reported +12% over MIPROv2. All answers are integers in [0, 999].
+
+| Property | Value |
+|----------|-------|
+| Task | Competition math |
+| Split | Full (single split) |
+| Size | 30 problems |
+| Source | [MathArena/aime_2025](https://huggingface.co/datasets/MathArena/aime_2025) |
+| Metrics | Exact Match (integer) |
+| Format | `{"problem": str, "answer": int}` |
+
+Used in: GEPA.
+
 ### Phase 2 (planned)
 
 | Dataset | Task | Why |
 |---------|------|-----|
-| AIME 2025 | Competition math | New frontier benchmark (GEPA: +12% over MIPROv2) |
 | IFBench | Instruction following | Multi-criteria scoring, 2025 credibility signal |
 
 ---
@@ -67,7 +81,8 @@ All methods evaluated under identical conditions:
 | Dataset | Primary Metric | Secondary | Scorer |
 |---------|---------------|-----------|--------|
 | HotPotQA | Token F1 | Exact Match | Token-level precision/recall (planned: `F1Evaluator`) |
-| GSM8K | Exact Match | — | Extract `#### N`, compare numeric value (planned: `NumericExactMatchEvaluator`) |
+| GSM8K | Exact Match | — | Extract `#### N`, compare numeric value (`gsm8k_match`) |
+| AIME 2025 | Exact Match | — | Extract last integer, compare to ground truth (`aime_match`) |
 
 ### Budget Control
 
@@ -129,43 +144,43 @@ Isolate each optimization layer's contribution:
 
 <!-- TODO: Fill after benchmark campaigns complete -->
 
-| Method | HotPotQA F1 | HotPotQA EM | GSM8K EM | Source |
-|--------|-------------|-------------|----------|--------|
-| Zero-shot | — | — | — | Ours |
-| Few-shot (manual) | — | — | — | Ours |
-| DSPy Bootstrap | — | — | — | Cited |
-| MIPROv2 | — | — | — | Cited |
-| GEPA | — | — | — | Cited |
-| Promptomatix | — | — | — | Cited |
-| adv-CoT | — | — | — | Cited |
-| PromptWizard | — | — | — | Cited |
-| PromptPotter (L1 only) | — | — | — | Ours |
-| PromptPotter (L1+L2) | — | — | — | Ours |
-| **PromptPotter (full)** | **—** | **—** | **—** | **Ours** |
+| Method | HotPotQA F1 | HotPotQA EM | GSM8K EM | AIME 2025 EM | Source |
+|--------|-------------|-------------|----------|--------------|--------|
+| Zero-shot | — | — | — | — | Ours |
+| Few-shot (manual) | — | — | — | — | Ours |
+| DSPy Bootstrap | — | — | — | — | Cited |
+| MIPROv2 | — | — | — | — | Cited |
+| GEPA | — | — | — | — | Cited |
+| Promptomatix | — | — | — | — | Cited |
+| adv-CoT | — | — | — | — | Cited |
+| PromptWizard | — | — | — | — | Cited |
+| PromptPotter (L1 only) | — | — | — | — | Ours |
+| PromptPotter (L1+L2) | — | — | — | — | Ours |
+| **PromptPotter (full)** | **—** | **—** | **—** | **—** | **Ours** |
 
 ### Convergence
 
 <!-- TODO: Fill after benchmark campaigns complete -->
 
-| Round | HotPotQA F1 | GSM8K EM |
-|-------|-------------|----------|
-| 0 (baseline) | — | — |
-| 1 | — | — |
-| 2 | — | — |
-| 3 | — | — |
-| 5 | — | — |
-| 10 | — | — |
+| Round | HotPotQA F1 | GSM8K EM | AIME 2025 EM |
+|-------|-------------|----------|--------------|
+| 0 (baseline) | — | — | — |
+| 1 | — | — | — |
+| 2 | — | — | — |
+| 3 | — | — | — |
+| 5 | — | — | — |
+| 10 | — | — | — |
 
 ### Ablation
 
 <!-- TODO: Fill after benchmark campaigns complete -->
 
-| Configuration | HotPotQA F1 | GSM8K EM | Rounds to best |
-|--------------|-------------|----------|----------------|
-| L1 only | — | — | — |
-| L1 + L2 | — | — | — |
-| L1 + L2 + L3 (full) | — | — | — |
-| Full, no scan | — | — | — |
+| Configuration | HotPotQA F1 | GSM8K EM | AIME 2025 EM | Rounds to best |
+|--------------|-------------|----------|--------------|----------------|
+| L1 only | — | — | — | — |
+| L1 + L2 | — | — | — | — |
+| L1 + L2 + L3 (full) | — | — | — | — |
+| Full, no scan | — | — | — | — |
 
 ### Parameter Impact
 
@@ -184,9 +199,11 @@ Isolate each optimization layer's contribution:
 | PromptPotter vs MIPROv2 (HotPotQA) | — | — | Cited |
 | PromptPotter vs MIPROv2 (GSM8K) | — | — | Cited |
 | PromptPotter vs GEPA (HotPotQA) | — | — | Cited |
+| PromptPotter vs GEPA (AIME 2025) | — | — | Cited |
 | PromptPotter vs PromptWizard (GSM8K) | — | — | Cited |
 | PromptPotter vs Zero-shot (HotPotQA) | — | — | Ours |
 | PromptPotter vs Zero-shot (GSM8K) | — | — | Ours |
+| PromptPotter vs Zero-shot (AIME 2025) | — | — | Ours |
 
 ---
 

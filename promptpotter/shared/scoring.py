@@ -15,6 +15,7 @@ query result with these names in scope:
 Scoring functions (add new ones here):
     rr(k)                              — reciprocal rank: 1/k if k else 0
     gsm8k_match(predicted, ground_truth) — numeric extraction + comparison
+    aime_match(predicted, ground_truth)  — integer extraction + comparison (AIME 0-999)
 
 No ``scoring`` key → defaults to ``float(hit)`` (exact-match, legacy).
 """
@@ -65,9 +66,30 @@ def _rr(k: int | None) -> float:
     return 1.0 / k if k else 0.0
 
 
+def _aime_match(predicted: str, ground_truth: str) -> float:
+    """Return 1.0 if predicted contains the same integer as ground_truth.
+
+    AIME answers are integers in [0, 999]. Extracts the last number from
+    predicted text and compares to ground_truth.
+    """
+    try:
+        gt = int(ground_truth.strip())
+    except (ValueError, AttributeError):
+        return 0.0
+    matches = _NUMBER_RE.findall(predicted or "")
+    if not matches:
+        return 0.0
+    try:
+        pred = int(float(matches[-1].replace(",", "")))
+    except (ValueError, OverflowError):
+        return 0.0
+    return 1.0 if pred == gt else 0.0
+
+
 SCORING_FUNCTIONS: dict[str, Callable] = {
     "rr": _rr,
     "gsm8k_match": _gsm8k_match,
+    "aime_match": _aime_match,
 }
 """All scoring helpers available in formulas. Add new ones here."""
 

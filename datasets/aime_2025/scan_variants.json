@@ -1,0 +1,17 @@
+{
+  "thinking_style": [
+    "Think step-by-step: break the problem into smaller sub-problems.",
+    "Work backwards from the answer constraints (integer in 0-999) to guide your approach.",
+    "After solving, verify your answer by substituting it back into the problem.",
+    "Consider multiple cases and check each systematically."
+  ],
+  "instruction": [
+    "Solve the problem step by step. State your final integer answer clearly at the end.",
+    "Show all work. Verify your answer before stating it. The answer is an integer between 0 and 999.",
+    "Consider edge cases and alternative approaches. Double-check arithmetic at each step."
+  ],
+  "persona": [
+    "You are an expert competition math solver who methodically works through AIME-level problems.",
+    "You are a meticulous mathematician who verifies every step and considers multiple solution paths."
+  ]
+}
