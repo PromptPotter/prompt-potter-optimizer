@@ -7,11 +7,14 @@ query result with these names in scope:
     hit                 — bool (1/0), exact match at rank 1
     ground_truth_rank   — int or None, 1-based position in ranking
     n_candidates        — int, total candidates returned
+    predicted           — str, model output
+    ground_truth        — str, expected answer
     error               — str or None
     <node_name>         — SimpleNamespace of that node's pipeline_data
 
-Built-in helpers:
-    rr(k)  — reciprocal rank: 1/k if k else 0
+Scoring functions (add new ones here):
+    rr(k)                              — reciprocal rank: 1/k if k else 0
+    gsm8k_match(predicted, ground_truth) — numeric extraction + comparison
 
 No ``scoring`` key → defaults to ``float(hit)`` (exact-match, legacy).
 """
@@ -20,10 +23,55 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections.abc import Callable
 from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Scoring functions — one registry, add new helpers here
+# ---------------------------------------------------------------------------
+
+_GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
+_NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
+
+
+def _extract_gsm8k_number(text: str) -> float | None:
+    """Extract numeric answer from a GSM8K-style string.
+
+    Tries ``#### N`` first, falls back to the last number in the text.
+    """
+    m = _GSM8K_ANSWER_RE.search(text)
+    if m:
+        return float(m.group(1).replace(",", ""))
+    matches = _NUMBER_RE.findall(text)
+    if matches:
+        return float(matches[-1].replace(",", ""))
+    return None
+
+
+def _gsm8k_match(predicted: str, ground_truth: str) -> float:
+    """Return 1.0 if predicted and ground_truth contain the same number."""
+    gt = _extract_gsm8k_number(ground_truth or "")
+    pred = _extract_gsm8k_number(predicted or "")
+    if gt is None or pred is None:
+        return 0.0
+    return 1.0 if gt == pred else 0.0
+
+
+def _rr(k: int | None) -> float:
+    """Reciprocal rank: 1/k if k else 0."""
+    return 1.0 / k if k else 0.0
+
+
+SCORING_FUNCTIONS: dict[str, Callable] = {
+    "rr": _rr,
+    "gsm8k_match": _gsm8k_match,
+}
+"""All scoring helpers available in formulas. Add new ones here."""
+
+# ---------------------------------------------------------------------------
 
 _SAFE_BUILTINS = {
     "__builtins__": {
@@ -40,11 +88,6 @@ _SAFE_BUILTINS = {
 }
 
 
-def _rr(k: int | None) -> float:
-    """Reciprocal rank: 1/k if k else 0."""
-    return 1.0 / k if k else 0.0
-
-
 def _build_namespace(result: dict) -> dict:
     """Build eval namespace from a QueryResult dict."""
     ns: dict = {
@@ -52,7 +95,9 @@ def _build_namespace(result: dict) -> dict:
         "ground_truth_rank": result.get("ground_truth_rank"),
         "n_candidates": result.get("n_candidates", 0),
         "error": result.get("error"),
-        "rr": _rr,
+        "predicted": result.get("predicted", ""),
+        "ground_truth": result.get("ground_truth", ""),
+        **SCORING_FUNCTIONS,
     }
 
     # Flatten pipeline_data nodes into SimpleNamespace objects

@@ -43,7 +43,15 @@ Gather context silently — the dashboard in Phase 0.7 is the first thing the us
    - `llm-only`: check `dataset.md` Status section — is the infrastructure implemented? If "Not yet implemented", note what's missing.
 5. Read `promptpotter/config/settings.py` → `APP_VERSION`
 
-**Only print if**: no dataset argument (list available datasets with readiness status — read `reference/benchmark-datasets.md` for prioritization guidance if user asks which to run first), dataset not implemented (explain what's missing per `dataset.md`), or backend is down (say to start it). Otherwise stay silent — findings go into the dashboard.
+**Only print if**: no dataset argument (list available datasets with readiness status — read `reference/benchmark-datasets.md` for prioritization guidance if user asks which to run first), dataset not implemented (explain what's missing per `dataset.md` — and offer to build it, starting with the scorer; see implementation order below), or backend is down (say to start it). Otherwise stay silent — findings go into the dashboard.
+
+### Implementation order for unimplemented `llm-only` datasets
+
+When a `llm-only` dataset's Status says "Not yet implemented", offer to build the missing infrastructure. **Always start with the scoring function** — it's self-contained, testable in isolation, and required by everything downstream. Then build the remaining pieces in dependency order:
+
+1. **Scorer first** — the dataset-specific answer extractor + comparator (e.g., GSM8K's `#### N` numeric parser). Add to `promptpotter/models/evaluator.py` and wire into `shared/scoring.py`.
+2. **Dataset loader** — fetch/cache the dataset, produce `[{query, ground_truth}]` pairs.
+3. **LLM-only evaluation endpoint** — direct prompt → LLM → answer adapter (no pipeline nodes).
 
 ---
 
