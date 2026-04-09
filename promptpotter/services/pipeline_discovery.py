@@ -156,6 +156,10 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         if "prompt_meta" in rm:
             step_kwargs["prompt_meta"] = rm["prompt_meta"]
 
+        # Inline prompt_meta (for static pipeline.json without resolved_prompts)
+        if "prompt_meta" not in step_kwargs and "prompt_meta" in node:
+            step_kwargs["prompt_meta"] = NodePromptMeta(**node["prompt_meta"])
+
         steps.append(PipelineNode(**step_kwargs))
 
     logger.info(

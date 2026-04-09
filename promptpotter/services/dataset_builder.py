@@ -1,7 +1,6 @@
-"""Excel ground-truth loader and train/test splitter.
+"""Ground-truth loaders (Excel, HuggingFace) and train/test splitter.
 
-Loads BOM-example.xlsx sheets, extracts query/ground_truth pairs,
-and splits into train + per-domain test sets.
+Each loader returns ``[{"query": str, "ground_truth": str, ...}]``.
 """
 
 from __future__ import annotations
@@ -9,9 +8,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import random
+import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
@@ -21,9 +22,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "DATASET_LOADERS",
     "SHEET_COLUMN_MAP",
     "build_dataset_run_data",
+    "load_dataset",
     "load_excel_ground_truth",
+    "load_gsm8k",
     "subsample_dataset",
     "train_test_split",
 ]
@@ -174,6 +178,65 @@ def subsample_dataset(
     if sample_size > 0 and len(dataset) > sample_size:
         return random.Random(seed).sample(dataset, sample_size)
     return dataset
+
+
+_GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
+
+
+def load_gsm8k(
+    split: str = "train",
+    sample_size: int = 0,
+    seed: int = 42,
+) -> list[dict]:
+    """Load GSM8K from HuggingFace and return DatasetStore-format items.
+
+    Returns:
+        List of ``{"query": str, "ground_truth": str}`` dicts.
+        ``ground_truth`` is the ``#### N`` answer line only.
+
+    Requires the ``datasets`` library: ``pip install datasets``.
+    """
+    try:
+        from datasets import load_dataset  # type: ignore[import-untyped]
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(
+            "The 'datasets' library is required for GSM8K. Install it: pip install datasets"
+        ) from None
+
+    ds = load_dataset("openai/gsm8k", "main", split=split)
+    items: list[dict] = []
+    for row in ds:
+        # Extract just the "#### N" answer line from the full solution
+        m = _GSM8K_ANSWER_RE.search(row["answer"])
+        gt = f"#### {m.group(1)}" if m else row["answer"].strip()
+        items.append({"query": row["question"], "ground_truth": gt})
+
+    if sample_size > 0 and len(items) > sample_size:
+        items = random.Random(seed).sample(items, sample_size)
+
+    logger.info("Loaded GSM8K %s: %d items", split, len(items))
+    return items
+
+
+# ---------------------------------------------------------------------------
+# Dataset loader registry — add new loaders here
+# ---------------------------------------------------------------------------
+
+DATASET_LOADERS: dict[str, Callable[..., list[dict]]] = {
+    "gsm8k": load_gsm8k,
+}
+"""Map dataset name → loader function. Register new datasets here."""
+
+
+def load_dataset(name: str, **kwargs: Any) -> list[dict]:
+    """Load a dataset by name from the registry.
+
+    Raises :class:`KeyError` for unknown dataset names.
+    """
+    loader = DATASET_LOADERS.get(name)
+    if loader is None:
+        raise KeyError(f"Unknown dataset {name!r}. Available: {sorted(DATASET_LOADERS)}")
+    return loader(**kwargs)
 
 
 def build_dataset_run_data(

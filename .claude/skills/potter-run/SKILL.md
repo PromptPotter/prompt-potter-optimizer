@@ -37,7 +37,7 @@ Gather context silently — the dashboard in Phase 0.7 is the first thing the us
 
 1. `ls configs/datasets/` — list available datasets
 2. Read `dataset.md`, `task_description.md`, `campaign.json` for the target dataset
-3. **Classify dataset type** from `dataset.md`: `backend` (needs running server) or `llm-only` (needs DatasetLoader + local eval adapter + scorer)
+3. **Classify dataset type** from `dataset.md`: `backend` (needs running server) or `llm-only` (needs loader in `dataset_builder.py` + scorer in `SCORING_FUNCTIONS`)
 4. **Readiness check** (type-dependent):
    - `backend`: `curl -s {backend_url}/status` — is the server running?
    - `llm-only`: check `dataset.md` Status section — is the infrastructure implemented? If "Not yet implemented", note what's missing.
@@ -47,11 +47,12 @@ Gather context silently — the dashboard in Phase 0.7 is the first thing the us
 
 ### Implementation order for unimplemented `llm-only` datasets
 
-When a `llm-only` dataset's Status says "Not yet implemented", offer to build the missing infrastructure. **Always start with the scoring function** — it's self-contained, testable in isolation, and required by everything downstream. Then build the remaining pieces in dependency order:
+When a `llm-only` dataset's Status says "Not yet implemented", offer to build the missing infrastructure. Two registry entries are needed (see `reference/benchmark-datasets.md`):
 
-1. **Scorer first** — the dataset-specific answer extractor + comparator (e.g., GSM8K's `#### N` numeric parser). Add to `promptpotter/models/evaluator.py` and wire into `shared/scoring.py`.
-2. **Dataset loader** — fetch/cache the dataset, produce `[{query, ground_truth}]` pairs.
-3. **LLM-only evaluation endpoint** — direct prompt → LLM → answer adapter (no pipeline nodes).
+1. **Scorer** — add to `SCORING_FUNCTIONS` in `shared/scoring.py`. Self-contained, testable in isolation.
+2. **Loader** — add to `DATASET_LOADERS` in `services/dataset_builder.py`. Returns `[{"query": str, "ground_truth": str}]`.
+
+Everything else (`LLMOnlyAdapter`, `compile_scorer`, prompt variant library) is shared.
 
 ---
 
@@ -158,8 +159,6 @@ After the dashboard, state your recommendation (resume / fresh start) and ask th
 
 ## Phase 1: Initialize Campaign
 
-**Only for `backend` type datasets. Skip for `llm-only`.**
-
 Read the init flags from the dataset's `dataset.md` and construct the command:
 
 ```bash
@@ -167,7 +166,7 @@ python -m promptpotter.cli.campaign_runner init \
     {init flags from dataset.md} --skip-baseline
 ```
 
-For example, lca-termnorm's `dataset.md` specifies:
+**`backend` example** (lca-termnorm):
 ```bash
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
@@ -175,6 +174,16 @@ python -m promptpotter.cli.campaign_runner init \
     --config configs/datasets/lca-termnorm/campaign.json \
     --skip-baseline
 ```
+
+**`llm-only` example** (gsm8k):
+```bash
+python -m promptpotter.cli.campaign_runner init \
+    --backend-id gsm8k \
+    --config configs/datasets/gsm8k/campaign.json \
+    --skip-baseline
+```
+
+For `llm-only`: no `--backend-url` needed. `init_services` auto-creates `LLMOnlyAdapter`, loads the pipeline schema from static `pipeline.json`, and auto-loads the dataset from `DATASET_LOADERS` into the DatasetStore on first run.
 
 - **Always `--skip-baseline`** — baseline eval is deferred. The optimizer runs it automatically before the first round. Explicit baseline eval is only useful when Phase 0.5 data assessment found substantial historical data AND the user explicitly requests a fresh baseline.
 - Timeout: 30 seconds

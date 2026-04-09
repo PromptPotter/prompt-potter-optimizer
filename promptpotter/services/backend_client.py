@@ -273,27 +273,3 @@ class BackendClient:
             detail,
         )
         return detail
-
-    # -- replay helpers ---------------------------------------------------
-
-    @staticmethod
-    def extract_index_terms(experiment_data: dict) -> list[str]:
-        """Extract index terms from experiment data.
-
-        Delegates to the connector config.
-        """
-        from promptpotter.config.connectors.termnorm import extract_index_terms
-
-        return extract_index_terms(experiment_data)
-
-    @staticmethod
-    def extract_replay_queries(
-        experiment_data: dict,
-    ) -> list[dict[str, Any]]:
-        """Extract queries with valid ground truth from experiment data.
-
-        Delegates to the connector config.
-        """
-        from promptpotter.config.connectors.termnorm import extract_queries
-
-        return extract_queries(experiment_data)

@@ -99,17 +99,84 @@ def load_baseline_prompt(
     )
 
 
+def _create_llm_only_client(project_root: Path, dataset_name: str | None) -> Any:
+    """Build an :class:`LLMOnlyAdapter` from the dataset's pipeline.json config."""
+    import json
+
+    from promptpotter.services.llm_eval_adapter import LLMOnlyAdapter
+
+    config: dict[str, Any] = {}
+    if dataset_name:
+        cfg_path = project_root / "configs" / "datasets" / dataset_name / "pipeline.json"
+        if cfg_path.exists():
+            config = json.loads(cfg_path.read_text(encoding="utf-8"))
+
+    # Extract LLM defaults from pipeline config
+    llm_defaults = config.get("llm_defaults", {})
+    node_config: dict[str, Any] = {}
+    nodes = config.get("nodes", {})
+    if nodes:
+        first_node = next(iter(nodes.values()))
+        node_config = first_node.get("config", {})
+
+    from promptpotter.services.campaign.config import create_llm_client
+
+    llm_client, _ = create_llm_client(
+        {
+            "optimizer_llm": {
+                "provider": llm_defaults.get("provider", "groq"),
+                "model": node_config.get("model", llm_defaults.get("model", "")),
+            }
+        }
+    )
+
+    return LLMOnlyAdapter(
+        llm_client,
+        model=node_config.get("model", llm_defaults.get("model")),
+        temperature=node_config.get("temperature", 0.0),
+        max_tokens=node_config.get("max_tokens", 1024),
+    )
+
+
+def _load_static_pipeline_schema(
+    project_root: Path, dataset_name: str | None
+) -> PipelineSchema | None:
+    """Load PipelineSchema from a static ``configs/datasets/{name}/pipeline.json``."""
+    if not dataset_name:
+        return None
+    import json
+
+    cfg_path = project_root / "configs" / "datasets" / dataset_name / "pipeline.json"
+    if not cfg_path.exists():
+        logger.info("No static pipeline.json at %s", cfg_path)
+        return None
+
+    from promptpotter.services.pipeline_discovery import parse_pipeline_response
+
+    data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    try:
+        schema = parse_pipeline_response(data)
+        logger.info("Static pipeline schema loaded: %s v%s", schema.name, schema.version)
+        return schema
+    except Exception as exc:
+        logger.warning("Failed to parse static pipeline.json: %s", exc)
+        return None
+
+
 async def init_services(
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = "",
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     project_root: Path | None = None,
     dataset_name: str | None = None,
+    dataset_type: str | None = None,
     on_status: Callable[[str], None] | None = None,
 ) -> BackendContext:
     """Initialize store, client, pipeline schema, and load eval data.
 
     Priority: dataset_name (from DatasetStore) > experiment sync (from backend).
+    When ``dataset_type="llm-only"``, uses :class:`LLMOnlyAdapter` instead of
+    :class:`BackendClient` and loads the pipeline schema from a static config file.
     """
 
     def _status(msg: str) -> None:
@@ -121,28 +188,40 @@ async def init_services(
         project_root = Path(__file__).resolve().parent.parent.parent.parent
 
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
-    client = BackendClient(backend_url)
-    _status(f"Backend: {backend_url}")
 
-    # Fetch pipeline schema (best-effort — non-fatal)
     pipeline_schema = None
-    try:
-        from promptpotter.services.pipeline_discovery import parse_pipeline_response
+    if dataset_type == "llm-only":
+        client = _create_llm_only_client(project_root, dataset_name)
+        _status("Backend: llm-only (no HTTP backend)")
 
-        pipeline_resp = await client.fetch_pipeline()
-        pipeline_schema = parse_pipeline_response(pipeline_resp)
-        logger.info("Pipeline schema loaded: %s v%s", pipeline_schema.name, pipeline_schema.version)
-        _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception as exc:
-        logger.info("Could not fetch pipeline schema: %s", exc)
-        _status("Pipeline: unavailable")
+        # Load pipeline schema from static config
+        pipeline_schema = _load_static_pipeline_schema(project_root, dataset_name)
+        if pipeline_schema:
+            _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
+    else:
+        client = BackendClient(backend_url)
+        _status(f"Backend: {backend_url}")
+
+        # Fetch pipeline schema (best-effort — non-fatal)
+        try:
+            from promptpotter.services.pipeline_discovery import parse_pipeline_response
+
+            pipeline_resp = await client.fetch_pipeline()
+            pipeline_schema = parse_pipeline_response(pipeline_resp)
+            logger.info(
+                "Pipeline schema loaded: %s v%s", pipeline_schema.name, pipeline_schema.version
+            )
+            _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
+        except Exception as exc:
+            logger.info("Could not fetch pipeline schema: %s", exc)
+            _status("Pipeline: unavailable")
 
     # Register backend connection
     if not store.backends.get(backend_id):
         backend_name = pipeline_schema.name if pipeline_schema else "Unknown"
-        backend_type = "backend" if pipeline_schema else "unknown"
+        backend_type = dataset_type or ("backend" if pipeline_schema else "unknown")
 
         store.backends.register(
             BackendConnection(
@@ -165,6 +244,18 @@ async def init_services(
     # --- Dataset store path (preferred when available) ---
     if dataset_name:
         ds = store.backends.load_dataset(backend_id, dataset_name)
+
+        # Auto-load from DATASET_LOADERS registry when store is empty
+        if not (ds and ds.get("items")):
+            from promptpotter.services.dataset_builder import DATASET_LOADERS
+
+            if dataset_name in DATASET_LOADERS:
+                _status(f"Loading dataset '{dataset_name}' from registry ...")
+                loader_items = DATASET_LOADERS[dataset_name]()
+                store.backends.save_dataset(backend_id, dataset_name, loader_items)
+                ds = {"items": loader_items}
+                logger.info("Auto-loaded dataset %r: %d items", dataset_name, len(loader_items))
+
         if ds and ds.get("items"):
             items = ds["items"]
             index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
@@ -178,10 +269,13 @@ async def init_services(
             base.queries = _dataset_items_to_queries(items)
             base.index_terms = index_terms
             return base
-        logger.info("Dataset %r not found in store, falling back to experiment sync", dataset_name)
-        _status(f"Dataset '{dataset_name}' not found, falling back to experiment sync")
+        _status(f"Dataset '{dataset_name}' not available")
+        raise ValueError(
+            f"Dataset {dataset_name!r} not found in DatasetStore or DATASET_LOADERS. "
+            f"Add a loader to DATASET_LOADERS in dataset_builder.py."
+        )
 
-    # --- Experiment sync path (original) ---
+    # --- Experiment sync path (when no dataset_name — e.g. TermNorm via experiment traces) ---
     exp_data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
 
     # Detect stale sync data: data exists but has no traces
@@ -217,8 +311,13 @@ async def init_services(
         _status("WARNING: No experiment data available")
         return base
 
-    queries = client.extract_replay_queries(exp_data)
-    index_terms = client.extract_index_terms(exp_data)
+    from promptpotter.config.connectors.termnorm import (
+        extract_index_terms,
+        extract_queries,
+    )
+
+    queries = extract_queries(exp_data)
+    index_terms = extract_index_terms(exp_data)
     exp_name = exp_data.get("experiment", {}).get("name", experiment_id)
     _status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
 
@@ -229,16 +328,26 @@ async def init_services(
 
 
 def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
-    """Convert DatasetStore items to the query format used by replay/eval."""
+    """Convert DatasetStore items to the query format used by replay/eval.
+
+    Items that already carry ``query`` + ``ground_truth`` pass through as-is.
+    TermNorm items (with ``source_sheet`` or ``bom_material``) are enriched
+    via the termnorm connector's ``build_query_item``.
+    """
     queries = []
     for item in items:
         query = item.get("query", "")
         gt = item.get("ground_truth", "")
         if not query or not gt:
             continue
-        from promptpotter.config.connectors.termnorm import build_query_item
 
-        queries.append(build_query_item(query, ground_truth=gt))
+        # TermNorm-specific enrichment (adds bom_material, process, query_fields)
+        if "source_sheet" in item or "bom_material" in item:
+            from promptpotter.config.connectors.termnorm import build_query_item
+
+            queries.append(build_query_item(query, ground_truth=gt))
+        else:
+            queries.append({"query": query, "ground_truth": gt})
     return queries
 
 

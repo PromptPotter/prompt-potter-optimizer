@@ -39,43 +39,30 @@ Additionally, the publication needs its figures and tables designed upfront so d
 
 ### Problem
 
-The benchmark methodology is fully designed and the export pipeline is production-ready, but zero benchmark results exist. The system has only been tested against TermNorm (terminology normalization via multi-node retrieval pipeline). Academic benchmarks require LLM-only evaluation paths that don't exist yet.
+The benchmark methodology is fully designed and the export pipeline is production-ready, but zero benchmark results exist. The system has only been tested against TermNorm (terminology normalization via multi-node retrieval pipeline).
 
 ### Deliverables
 
-#### 1a. Dataset Loaders
+#### 1a. Shared infrastructure (done)
 
-A `DatasetLoader` protocol with implementations for HotPotQA and GSM8K.
+Registry + config architecture — adding a dataset = two registry entries + config directory, no new code files. See `reference/benchmark-datasets.md`.
 
-```python
-class DatasetLoader(Protocol):
-    def load(self) -> list[dict[str, str]]:
-        """Return list of {"query": str, "ground_truth": str} dicts."""
-        ...
-```
+- **`DATASET_LOADERS`** registry in `dataset_builder.py` — dispatches `load_dataset(name)` to the right loader
+- **`SCORING_FUNCTIONS`** registry in `scoring.py` — all scorer functions available in formulas
+- **`LLMOnlyAdapter`** — generic `BackendClient` replacement, reads prompts from `pipeline_params` like any backend
+- **`prompt_variants.json`** — shared prompt variant library (persona, thinking_style, etc.)
 
-- **HotPotQA loader** — Load from HuggingFace `datasets` or local JSON. Validation (distractor) split. 7,405 questions.
-- **GSM8K loader** — Load from local JSON (OpenAI format). Test split. 1,319 questions. Extract `#### N` answer format.
-- Integration via `campaign.json["dataset_source"]` field — loader name + optional config.
+#### 1b. GSM8K (done)
 
-**Key existing code:** `promptpotter/services/dataset_builder.py` (Excel-only), `promptpotter/services/stores/dataset_store.py`.
+- `DATASET_LOADERS["gsm8k"]` — fetches from HuggingFace `openai/gsm8k`, 1,319 test questions
+- `SCORING_FUNCTIONS["gsm8k_match"]` — numeric extraction from `#### N` format + comparison
+- Config: `configs/datasets/gsm8k/` (campaign.json, pipeline.json, dataset.md, task_description.md)
 
-#### 1b. Evaluation Scorers
+#### 1c. HotPotQA (TODO)
 
-- **Token F1 scorer** — Token-level precision/recall/F1 for HotPotQA. Normalize whitespace, lowercase, remove articles/punctuation (standard SQuAD preprocessing).
-- **Numeric exact match scorer** — Extract `#### N` from model output, compare numeric value for GSM8K.
-- Integration with `shared/scoring.py`'s `compile_scorer()` system via `campaign.json["scoring"]`.
-
-#### 1c. Local LLM Eval Adapter
-
-`eval_query_local()` — calls the target LLM directly via `llm_client.py` instead of routing through `BackendClient.run_query()`. For benchmark tasks where the "pipeline" is a single LLM call.
-
-- Renders the prompt (system + user message) from `JobSearchPoint.pipeline_params`
-- Calls the LLM via existing `llm_client.py`
-- Returns result in the same format as `eval_query_via_backend()` for downstream compatibility
-- **NOT** the full `ConnectorProtocol` from old M9 — minimal, shaped compatibly for future M11 wrapping
-
-**Key existing code:** `promptpotter/services/eval_query.py`, `promptpotter/config/llm_client.py`.
+- `DATASET_LOADERS["hotpotqa"]` — fetch from HuggingFace, 7,405 validation questions
+- `SCORING_FUNCTIONS["hotpotqa_f1"]` — token-level F1 with SQuAD-style normalization
+- Config: `configs/datasets/hotpotqa/`
 
 #### 1d. Benchmark Campaigns
 

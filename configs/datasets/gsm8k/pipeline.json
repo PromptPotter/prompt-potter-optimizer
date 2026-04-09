@@ -8,13 +8,18 @@
   "nodes": {
     "direct_llm": {
       "type": "generation",
-      "runtime": "local",
+      "runtime": "frontend",
       "node_role": "ranker",
       "description": "Direct LLM call: prompt + question -> chain-of-thought -> numeric answer. No retrieval or enrichment nodes.",
       "config": {
         "model": "openai/gpt-oss-120b",
         "temperature": 0.0,
         "max_tokens": 2000
+      },
+      "prompt_meta": {
+        "family": "direct_llm",
+        "template_variables": ["query"],
+        "description": "System prompt for LLM-only evaluation"
       },
       "optimizer": {
         "param_keys": ["temperature", "max_tokens", "model", "prompt"],

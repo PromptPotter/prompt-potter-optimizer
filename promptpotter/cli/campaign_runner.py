@@ -74,6 +74,7 @@ async def _init_services(
     backend_id: str = DEFAULT_BACKEND_ID,
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
+    dataset_type: str | None = None,
 ) -> BackendContext:
     """Initialize services (logging + service init)."""
     from promptpotter.config.logging import setup_logging
@@ -87,6 +88,7 @@ async def _init_services(
         experiment_id=experiment_id,
         project_root=project_root,
         dataset_name=dataset_name,
+        dataset_type=dataset_type,
         on_status=logger.info,
     )
 
@@ -137,12 +139,14 @@ async def cmd_init(args: argparse.Namespace) -> None:
     file_config = config_data.get("campaign_config", config_data) or {}
 
     dataset_name = args.dataset_name or file_config.get("dataset_name")
+    dataset_type = file_config.get("dataset_type")
 
     session = await _init_services(
         backend_url=args.backend_url,
         backend_id=args.backend_id,
         experiment_id=args.experiment_id,
         dataset_name=dataset_name,
+        dataset_type=dataset_type,
     )
 
     # Priority: --config file > connector profile > empty dict
@@ -168,6 +172,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
             "backend_id": args.backend_id,
             "experiment_id": args.experiment_id,
             "dataset_name": dataset_name,
+            "dataset_type": dataset_type,
         },
         "campaign_config": campaign_config,
         "pipeline_params": pipeline_params,

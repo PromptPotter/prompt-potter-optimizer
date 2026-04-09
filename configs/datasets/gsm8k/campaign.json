@@ -1,5 +1,7 @@
 {
   "campaign_config": {
+    "dataset_name": "gsm8k",
+    "dataset_type": "llm-only",
     "scoring": "gsm8k_match(predicted, ground_truth)",
     "eval_sample_size": 200,
     "scan_sample_size": 50,
