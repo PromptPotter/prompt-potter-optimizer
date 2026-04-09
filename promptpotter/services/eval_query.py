@@ -18,6 +18,7 @@ from promptpotter.models.evaluator import EvalResult, ExactMatchEvaluator
 from promptpotter.models.query_result import QueryResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
+from promptpotter.shared.prompt_interpolation import interpolate_pipeline_params
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
@@ -203,9 +204,12 @@ async def evaluate_query(
                 scorer=scorer,
             )
 
+        # Interpolate {{variable}} placeholders in prompt templates from query_data
+        wire_params = interpolate_pipeline_params(pipeline_params or {}, query_data)
+
         resp = await backend_client.run_query(
             query,
-            pipeline_params=pipeline_params,
+            pipeline_params=wire_params,
             precomputed=precomputed,
         )
         data = resp.get("data", {})

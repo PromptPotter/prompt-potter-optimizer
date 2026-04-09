@@ -6,6 +6,11 @@
         "source": "PromptPotter"
       },
       {
+        "text": "You are a helpful assistant that solves problems carefully and accurately.",
+        "source": "PromptPotter",
+        "note": "task-agnostic default"
+      },
+      {
         "text": "You are a domain expert with deep knowledge of this field.",
         "source": "PromptPotter"
       },
@@ -34,6 +39,11 @@
         "source": "PromptPotter"
       },
       {
+        "text": "Answer the question accurately and completely.",
+        "source": "PromptPotter",
+        "note": "task-agnostic default"
+      },
+      {
         "text": "Your task is to identify the single best match from the candidates.",
         "source": "PromptPotter"
       },
@@ -50,6 +60,11 @@
       {
         "text": "",
         "source": "PromptPotter"
+      },
+      {
+        "text": "Think step by step. Break the problem into smaller parts, solve each, then combine.",
+        "source": "PromptPotter",
+        "note": "task-agnostic default"
       },
       {
         "text": "Think step by step.",
@@ -258,6 +273,11 @@
       {
         "text": "",
         "source": "PromptPotter"
+      },
+      {
+        "text": "Show your reasoning, then state the final answer clearly on its own line.",
+        "source": "PromptPotter",
+        "note": "task-agnostic default"
       },
       {
         "text": "Rank all candidates from most to least relevant.",

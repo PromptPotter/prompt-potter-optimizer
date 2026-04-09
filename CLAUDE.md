@@ -57,6 +57,9 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest --cov`. A
 - **No backward compatibility** — freely break signatures, rename, restructure. No shims.
 - Pipeline components are called **nodes**, not "building blocks" or "services".
 - **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
+- **No fallbacks** in service code. Sanctioned exceptions (keep this list short):
+  1. `init_services()`: local `LLMOnlyAdapter` → `BackendClient` when `LOCAL_EVAL_SECRET` auth fails (security gate, not hidden default).
+  Any doc or code introducing a new fallback must add it to this list.
 - **Two-tier eval sampling**: `eval_sample_size` (0 = all) controls the optimization loop eval set. `scan_sample_size` controls sensitivity scan queries. Round cost ≈ `n_variants × effective_eval_size`.
 - **Skip baseline by default**: Always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists (≥ 50 unique queries, ≥ 5 dataset runs) and the user requests comparison.
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".

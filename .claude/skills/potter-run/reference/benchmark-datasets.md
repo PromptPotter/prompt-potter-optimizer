@@ -29,7 +29,7 @@ Both are plain dicts. The loader fetches from any source (HuggingFace, file, API
 
 - **`LLMOnlyAdapter`** — generic drop-in for `BackendClient`. Reads prompts from `pipeline_params` the same way as any backend pipeline. Gated behind `LOCAL_EVAL_SECRET` + `local_eval_token` — see `TermNorm-excel/docs/spec/proper-step-loop.md`.
 - **Backend `llm_only` step** — TermNorm's `/matches` endpoint accepts `steps=["llm_only"]` with `node_config` for the system prompt. Default evaluation path (no local LLM keys needed).
-- **`prompt_variants.json`** — shared prompt variant library (persona, thinking_style, etc.). Dataset-agnostic.
+- **`prompt_variants.json`** — shared prompt variant library (persona, thinking_style, etc.). Index 1 entries are task-agnostic defaults suitable for any dataset; index 2+ are TermNorm-specific/PromptWizard variants.
 - **`compile_scorer()`** — compiles any formula from `campaign.json` into a callable, auto-injects all `SCORING_FUNCTIONS`.
 - **`load_dataset(name)`** — dispatches to the right loader from `DATASET_LOADERS`.
 

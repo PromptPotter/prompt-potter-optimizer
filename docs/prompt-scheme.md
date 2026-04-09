@@ -102,6 +102,13 @@ Three transformations bridge optimizer state to the wire:
 
 `promptpotter/config/prompt_variants.json` provides pre-built alternatives per field for the sensitivity scan (OAT).
 
+**Index convention (provisional):**
+- **Index 0** — empty string (always present; lets the optimizer start from scratch)
+- **Index 1** — task-agnostic defaults that work for any dataset out of the box
+- **Index 2+** — TermNorm-specific and PromptWizard variants from the original library
+
+Index 1 variants are a provisional starting point for new campaigns. For production, per-dataset variant libraries (`datasets/{name}/prompt_variants.json`) are the long-term plan.
+
 | Field | Variant count | Source |
 |-------|--------------|--------|
 | `persona` | 6 | Hand-crafted role framings |

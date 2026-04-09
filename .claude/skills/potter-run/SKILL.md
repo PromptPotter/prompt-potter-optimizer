@@ -54,6 +54,10 @@ Gather context silently — the dashboard in Phase 0.7 is the first thing the us
 
 **Only print if**: no dataset argument (list available datasets with readiness status — read `reference/benchmark-datasets.md` for prioritization guidance if user asks which to run first), dataset not implemented (explain what's missing per `dataset.md` — and offer to build it, starting with the scorer; see implementation order below), or backend is down (say to start it). Otherwise stay silent — findings go into the dashboard.
 
+### Prompt variant defaults for new datasets
+
+The shared variant library (`promptpotter/config/prompt_variants.json`) has task-agnostic defaults at **index 1** in each field array. These are the simplest starting configuration for any new campaign — they work for math, QA, ranking, or any other task type. TermNorm-specific variants live at index 2+. For a new dataset, index 1 is the right starting point; dataset-specific variant tuning comes later.
+
 ### Implementation order for unimplemented `llm-only` datasets
 
 When a `llm-only` dataset's Status says "Not yet implemented", offer to build the missing infrastructure. Two registry entries are needed (see `reference/benchmark-datasets.md`):
