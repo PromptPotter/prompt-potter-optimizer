@@ -2,7 +2,7 @@
   "persona": "You are a prompt optimization expert.",
   "task_intent": "The L1 inner optimization loop has stalled — candidates are no longer improving.",
   "problem_description": "CURRENT OPTIMIZER PARAMS: {{current_params}}\n{{task_context_section}}{{intelligence_sections}}",
-  "instruction": "Analyze the failure patterns from the critique and recommend changes. You can adjust:\n- optimizer_params (creativity, n_variants, eval_sample_size, variant_strategy)\n- task_context (refine domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges)\nYour \"directive\" field will be injected into the next candidate generation prompt as primary guidance — make it specific and actionable.\nFocus on what will have the biggest impact on accuracy.",
+  "instruction": "Analyze the failure patterns from the critique and recommend changes. You can adjust:\n- optimizer_params (creativity, n_variants, sp_budget_ttest, variant_strategy)\n- task_context (refine domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges)\nYour \"directive\" field will be injected into the next candidate generation prompt as primary guidance — make it specific and actionable.\nFocus on what will have the biggest impact on accuracy.",
   "thinking_style": "",
   "answer_format": "{{response_schema_suffix}}"
 }

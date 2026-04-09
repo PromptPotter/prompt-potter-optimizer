@@ -113,7 +113,7 @@ def _build_l2_prompt(
     response_schema_suffix = (
         "\nReturn a JSON object with:\n"
         '  "optimizer_params": dict of meta-setting changes '
-        "(creativity, n_variants, eval_sample_size — or {} to keep current)\n"
+        "(creativity, n_variants, sp_budget_ttest — or {} to keep current)\n"
         '  "task_context": dict of refined domain fields (or {} to keep current)\n'
         '  "action": "continue" (normal L1 cycle) or "probe" '
         "(test warned queries with new settings first)\n"

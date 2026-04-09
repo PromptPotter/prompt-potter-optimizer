@@ -82,7 +82,7 @@ def _format_campaign_summary(
         model = str(cfg.get("model", "?"))[:30]
         patience = cfg.get("l1_patience", "?")
         max_r = cfg.get("max_rounds", "?")
-        sample = cfg.get("eval_sample_size", "?")
+        sample = cfg.get("sp_budget_ttest", "?")
         indent = "      " if active_id is not None else "    "
         print(f"{indent}patience={patience}  rounds={max_r}  sample={sample}  model={model}")
 
@@ -132,7 +132,7 @@ def list_campaigns(
                 "creativity",
                 "improvement_threshold",
                 "model",
-                "eval_sample_size",
+                "sp_budget_ttest",
                 "seed",
             ]:
                 if k in cfg:
@@ -315,7 +315,7 @@ def show_experiment_dashboard(
                 "creativity",
                 "improvement_threshold",
                 "model",
-                "eval_sample_size",
+                "sp_budget_ttest",
                 "seed",
             ]:
                 if k in cfg:

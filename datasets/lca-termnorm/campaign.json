@@ -2,7 +2,7 @@
   "campaign_config": {
     "dataset_name": "train",
     "scoring": "rr(ground_truth_rank)",
-    "eval_sample_size": 0,
+    "sp_budget_ttest": 0,
     "scan_sample_size": 10,
     "exclude_nodes": ["llm_ranking"],
     "pipeline_overrides": {

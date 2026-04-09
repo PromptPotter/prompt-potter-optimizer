@@ -30,7 +30,7 @@ Everything else (prompt variants, scoring framework) is shared.
 
 - Source: HotPotQA distractor setting (~113K questions, 10 passages each)
 - Format: question + 10 context passages -> short answer
-- campaign.json uses `eval_sample_size: 200` (subset for optimization)
+- campaign.json uses `sp_budget_ttest: 200` (subset for optimization)
 
 ## Pipeline Notes
 

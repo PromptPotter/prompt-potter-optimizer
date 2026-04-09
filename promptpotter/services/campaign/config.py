@@ -88,7 +88,7 @@ class CampaignConfig(TypedDict, total=False):
     dataset_name: str
     dataset_type: str
     local_eval_token: str
-    eval_sample_size: int
+    sp_budget_ttest: int
     scan_sample_size: int
     exclude_nodes: list[str]
     pipeline_overrides: dict
@@ -113,7 +113,7 @@ class RunConfig(BaseModel):
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
     session_id: str = Field("", description="Session ID for persistence emitter")
-    eval_sample_size: int = Field(0, description="Eval subsample size (0 = use all)")
+    sp_budget_ttest: int = Field(0, description="Eval subsample size (0 = use all)")
     seed: int = Field(42, description="Random seed for subsampling")
 
     pipeline_schema: PipelineSchema | None = Field(
@@ -248,7 +248,7 @@ class RunConfig(BaseModel):
             backend_id=backend_id,
             project_root=project_root,
             session_id=session_id,
-            eval_sample_size=campaign_config.get("eval_sample_size", 0),
+            sp_budget_ttest=campaign_config.get("sp_budget_ttest", 0),
             seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
             scan_context=scan_context,
@@ -377,9 +377,9 @@ def compute_preflight_metrics(
     has_scan_context: bool = False,
 ) -> PreflightMetrics:
     """Derive display-ready metrics from RunConfig and dataset size."""
-    eff_queries = config.eval_sample_size if config.eval_sample_size else dataset_size
-    if config.eval_sample_size:
-        queries_label = f"{config.eval_sample_size} of {dataset_size}"
+    eff_queries = config.sp_budget_ttest if config.sp_budget_ttest else dataset_size
+    if config.sp_budget_ttest:
+        queries_label = f"{config.sp_budget_ttest} of {dataset_size}"
     else:
         queries_label = f"all {dataset_size}"
 
@@ -394,11 +394,9 @@ def compute_preflight_metrics(
         pipeline_label = "(default pipeline)"
         nodes_detail = None
 
-    est_calls = (
-        config.max_rounds * config.n_variants * eff_queries
-        if config.max_rounds is not None
-        else None
-    )
+    # Sequential elimination: first candidate = full eval, others ~60% on average
+    per_round = eff_queries + (config.n_variants - 1) * int(eff_queries * 0.6)
+    est_calls = config.max_rounds * per_round if config.max_rounds is not None else None
 
     return PreflightMetrics(
         eff_queries=eff_queries,

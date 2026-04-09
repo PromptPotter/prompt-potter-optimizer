@@ -45,7 +45,7 @@ def cycle_config_identity(
             "creativity": config.creativity,
             "improvement_threshold": config.improvement_threshold,
             "model": config.model,
-            "eval_sample_size": config.eval_sample_size,
+            "sp_budget_ttest": config.sp_budget_ttest,
             "seed": config.seed,
             "active_steps": list(config.pipeline_schema.active_steps)
             if config.pipeline_schema
@@ -224,7 +224,7 @@ def _validate_config_match(
         "creativity",
         "improvement_threshold",
         "model",
-        "eval_sample_size",
+        "sp_budget_ttest",
     ]
     mismatches = []
     for k in check_keys:

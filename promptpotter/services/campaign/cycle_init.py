@@ -242,7 +242,7 @@ async def init_cycle_state(
         patience=config.l1_patience,
         n_variants=config.n_variants,
         model=config.model or "(default)",
-        sample_size=config.eval_sample_size,
+        sample_size=config.sp_budget_ttest,
         enable_l2=config.enable_l2,
         enable_l3=config.enable_l3,
         dataset_count=len(dataset),
@@ -266,7 +266,7 @@ async def init_cycle_state(
     if _index_terms:
         await _bc.init_session(_index_terms)
 
-    eval_dataset = sample_dataset(dataset, config.eval_sample_size, config.seed)
+    eval_dataset = sample_dataset(dataset, config.sp_budget_ttest, config.seed)
 
     # 1. Build baseline state
     state, baseline_osp = _build_baseline_state(

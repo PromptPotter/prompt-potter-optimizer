@@ -264,15 +264,16 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     print("  " + "-" * 66)
     if m.est_calls is not None:
         print(
-            f"  Est. backend calls     : {m.est_calls}"
-            f"  ({config.max_rounds}r x {config.n_variants}c"
-            f" x {m.eff_queries}q)"
+            f"  Est. backend calls     : ~{m.est_calls}"
+            f"  ({config.max_rounds}r, {config.n_variants} candidates,"
+            f" {m.eff_queries}q, sequential elimination)"
         )
     else:
+        per_round = m.eff_queries + (config.n_variants - 1) * int(m.eff_queries * 0.6)
         print(
-            f"  Est. backend calls     : unlimited"
-            f"  (no max_rounds x {config.n_variants}c"
-            f" x {m.eff_queries}q)"
+            f"  Est. backend calls/round: ~{per_round}"
+            f"  ({config.n_variants} candidates,"
+            f" {m.eff_queries}q, sequential elimination)"
         )
 
     # ── Section 3: Scan Context Preview ──

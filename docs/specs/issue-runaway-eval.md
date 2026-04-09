@@ -6,7 +6,7 @@
 
 ## Problem
 
-`optimize --auto` with `eval_sample_size: 200` and `n_variants: 5` can fire hundreds of backend calls in rapid succession (sequential elimination reduces the naive `n_variants × eval_size` upper bound, but the volume is still significant). Each call costs money (LLM inference). The user had no way to stop it:
+`optimize --auto` with `sp_budget_ttest: 200` and `n_variants: 5` can fire hundreds of backend calls in rapid succession (sequential elimination reduces the naive `n_variants × eval_size` upper bound, but the volume is still significant). Each call costs money (LLM inference). The user had no way to stop it:
 
 - **Ctrl+C didn't work fast enough** — the graceful shutdown waits for in-flight calls
 - **Closing the terminal window** was required
@@ -30,7 +30,7 @@
 
 ## Expected Behavior
 
-- Before starting evaluation, print the cost estimate: `"About to evaluate {n_variants} candidates on {eval_sample_size} queries (sequential elimination will early-stop inferior candidates). Proceed? [Y/n]"`
+- Before starting evaluation, print the cost estimate: `"About to evaluate {n_variants} candidates on {sp_budget_ttest} queries (sequential elimination will early-stop inferior candidates). Proceed? [Y/n]"`
 - First Ctrl+C should abort within 1-2 seconds, not wait for batch completion
 - A running campaign should be stoppable via `control --stop` from another terminal (this exists but is too slow)
 - Consider a hard timeout on eval batches (e.g., abort after N seconds of continuous eval)

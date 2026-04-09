@@ -423,7 +423,7 @@ def apply_stored_overrides(
         "n_variants": ("optimization",),
         "creativity": ("optimization",),
         "model": ("optimizer_llm",),
-        "eval_sample_size": (),
+        "sp_budget_ttest": (),
     }
     for key, path in _OVERRIDE_KEYS.items():
         val = stored_cfg.get(key)
@@ -516,7 +516,7 @@ def diff_campaign_config(
         "creativity",
         "improvement_threshold",
         "model",
-        "eval_sample_size",
+        "sp_budget_ttest",
         "seed",
     ]
 

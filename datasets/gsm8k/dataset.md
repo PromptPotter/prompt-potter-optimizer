@@ -22,7 +22,7 @@
 
 - Source: OpenAI GSM8K (grade school math, ~8.5K train / 1,319 test)
 - Format: word problem -> numeric answer in `#### N` format
-- campaign.json uses `eval_sample_size: 30`
+- campaign.json uses `sp_budget_ttest: 30`
 
 ## Pipeline Notes
 
