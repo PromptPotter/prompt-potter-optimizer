@@ -337,7 +337,6 @@ python -m promptpotter.cli.export_results supplemental \
 - **Resume by default** — only create new sessions when explicitly asked
 - **Skip baseline by default** — always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists AND the user requests it.
 - **Data-driven start** — Phase 0.5 assesses existing data. Minimal data (< 50 queries, < 5 runs) → go straight to optimize from config defaults. Substantial data → show leaderboard via existing CLI commands (`results`, `scan-results`), propose best-known config as starting point.
-- **Report costs before optimize**: Read `eval_sample_size`, `n_variants`, and dataset count from the session. Each round evaluates all candidates against the same `eval_dataset` (subsampled once at init from `eval_sample_size`; 0 = full dataset). Cost/round = `n_variants x effective_dataset_size`. `scan_sample_size` is only used for the sensitivity scan (Phase 3), not optimization.
 - **Be the data scientist**: interpret results, explain what the optimizer is doing, suggest next steps
 - **If something fails**: read the error category (`[CLIENT]`, `[SERVER]`, `[CONNECTION]`, `[PIPELINE]`), then check `campaign_log.md` at `.promptpotter/projects/{backend_id}/sessions/{session_id}/campaign_log.md`
 - **After interrupts**: check for orphan processes — `tasklist | findstr python` (Windows) or `ps aux | grep python` (Linux/Mac)
