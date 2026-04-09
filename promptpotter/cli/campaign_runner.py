@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.campaign_setup import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
@@ -78,11 +78,11 @@ async def _init_services(
 ) -> BackendContext:
     """Initialize services (logging + service init)."""
     from promptpotter.config.logging import setup_logging
-    from promptpotter.services.campaign.bootstrap import init_services as _bootstrap_init
+    from promptpotter.services.campaign.campaign_setup import init_services
 
     setup_logging()
     project_root = Path(__file__).resolve().parent.parent.parent
-    return await _bootstrap_init(
+    return await init_services(
         backend_url=backend_url,
         backend_id=backend_id,
         experiment_id=experiment_id,
@@ -291,7 +291,7 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
 
 async def cmd_scan(args: argparse.Namespace) -> None:
     """Run sensitivity scan with provided variants."""
-    from promptpotter.services.campaign.bootstrap import load_baseline_prompt
+    from promptpotter.services.campaign.campaign_setup import load_baseline_prompt
     from promptpotter.services.search.scan_advisor import resolve_schema_axes
     from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
@@ -356,7 +356,7 @@ async def cmd_scan(args: argparse.Namespace) -> None:
 
 async def cmd_scan_results(args: argparse.Namespace) -> None:
     """Show scan analytics and seed campaign from scan winner."""
-    from promptpotter.services.campaign.bootstrap import load_baseline_prompt
+    from promptpotter.services.campaign.campaign_setup import load_baseline_prompt
     from promptpotter.services.search.scan_results import (
         seed_campaign_from_scan as _seed_campaign_from_scan,
     )
@@ -452,8 +452,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     control_cb = RunCallbacks(on_checkpoint=control.check)
 
     # Round recorder — write rounds/round_NNN.json with full action traces
-    from promptpotter.config.optimizer_pipeline import set_round_recorder
     from promptpotter.services.campaign.persistence_emitter import RoundRecorder
+    from promptpotter.services.optimizer.pipeline import set_round_recorder
 
     recorder = RoundRecorder(session_dir / "rounds")
     set_round_recorder(recorder)
@@ -575,7 +575,7 @@ async def cmd_profile(args: argparse.Namespace) -> None:
 
 async def cmd_results(args: argparse.Namespace) -> None:
     """Show campaign results, optionally save winner."""
-    from promptpotter.services.campaign.bootstrap import save_campaign_winner
+    from promptpotter.services.campaign.campaign_setup import save_campaign_winner
 
     ctx = _load_session(args)
     session = await _init_services(**ctx.state["init_params"])
@@ -680,7 +680,7 @@ async def cmd_results(args: argparse.Namespace) -> None:
             ctx.state["campaign_config"],
             session.store,
             ctx.backend_id,
-            experiment_id=ctx.state.get("experiment_id", ""),
+            campaign_id=ctx.state.get("experiment_id", ""),
         )
         if not getattr(args, "json_output", False):
             print("Winner saved.")
@@ -793,7 +793,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--config", default=None, help="Campaign config JSON file")
     p_init.add_argument("--skip-baseline", action="store_true")
 
-    p_tc = sub.add_parser("task-context", help="Decompose task description")
+    p_tc = sub.add_parser("set-task", help="Decompose and set task description")
     p_tc.add_argument("--task-file", default=None)
     p_tc.add_argument("--task-text", default=None)
 
@@ -801,7 +801,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--variants-file", required=True, help="Scan variants JSON")
     p_scan.add_argument("--sample-size", type=int, default=None)
 
-    sub.add_parser("scan-results", help="Show scan analytics and seed campaign")
+    sub.add_parser("show-scan", help="Show scan analytics and seed campaign")
 
     p_opt = sub.add_parser("optimize", help="Run optimization loop")
     p_opt.add_argument("--round", action="store_true", help="Pause after L1 generate for review")
@@ -817,7 +817,7 @@ def build_parser() -> argparse.ArgumentParser:
     ctl_mode.add_argument("--pause-before-l2", action="store_true", help="Enable L2 pause")
     ctl_mode.add_argument("--no-pause-l2", action="store_true", help="Disable L2 pause")
 
-    p_prof = sub.add_parser("profile", help="Manage connector profile (per-backend defaults)")
+    p_prof = sub.add_parser("profile", help="Manage backend profile (per-backend defaults)")
     p_prof.add_argument("--backend-id", default="local")
     prof_mode = p_prof.add_mutually_exclusive_group()
     prof_mode.add_argument(
@@ -828,24 +828,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prof_mode.add_argument("--set", nargs=2, metavar=("KEY", "VALUE"), help="Set a profile field")
 
-    p_res = sub.add_parser("results", help="Show results and optionally save")
+    p_res = sub.add_parser("show-results", help="Show results and optionally save")
     p_res.add_argument("--save", action="store_true")
 
-    sub.add_parser("status", help="Print live dashboard + session state")
+    sub.add_parser("show-status", help="Print live dashboard + session state")
 
     return parser
 
 
 COMMANDS = {
     "init": cmd_init,
-    "task-context": cmd_task_context,
+    "set-task": cmd_task_context,
     "scan": cmd_scan,
-    "scan-results": cmd_scan_results,
+    "show-scan": cmd_scan_results,
     "optimize": cmd_optimize,
     "control": cmd_control,
     "profile": cmd_profile,
-    "results": cmd_results,
-    "status": cmd_status,
+    "show-results": cmd_results,
+    "show-status": cmd_status,
 }
 
 

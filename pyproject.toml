@@ -74,6 +74,8 @@ python_version = "3.13"
 warn_unused_configs = true
 warn_redundant_casts = true
 plugins = ["pydantic.mypy"]
+exclude = ["^datasets/"]
+namespace_packages = false
 
 [[tool.mypy.overrides]]
 module = "tests.*"

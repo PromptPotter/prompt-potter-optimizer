@@ -21,7 +21,7 @@ from .display import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.campaign_setup import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)

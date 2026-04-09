@@ -6,7 +6,7 @@ consumers (metrics, critique, stale-data protocol) can declare and
 validate the fields they access.
 
 Construction sites: ``eval_query._build_local_result()``,
-``eval_query._error_result()``, ``eval_query.eval_query_via_backend()``.
+``eval_query._build_error_result()``, ``eval_query.evaluate_query()``.
 """
 
 from __future__ import annotations

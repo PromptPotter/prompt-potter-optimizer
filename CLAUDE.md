@@ -30,17 +30,17 @@ uvicorn promptpotter.main:app --port 8001 --reload
 # CLI campaign runner (HITL optimization from terminal)
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
-    --config configs/datasets/lca-termnorm/campaign.json \
+    --config datasets/lca-termnorm/campaign.json \
     --skip-baseline
-python -m promptpotter.cli.campaign_runner task-context \
-    --task-file configs/datasets/lca-termnorm/task_description.md
+python -m promptpotter.cli.campaign_runner set-task \
+    --task-file datasets/lca-termnorm/task_description.md
 python -m promptpotter.cli.campaign_runner scan \
-    --variants-file configs/datasets/lca-termnorm/scan_variants.json
-python -m promptpotter.cli.campaign_runner scan-results
+    --variants-file datasets/lca-termnorm/scan_variants.json
+python -m promptpotter.cli.campaign_runner show-scan
 python -m promptpotter.cli.campaign_runner optimize --auto     # full loop
 python -m promptpotter.cli.campaign_runner optimize --round    # generate → pause for review
-python -m promptpotter.cli.campaign_runner results
-python -m promptpotter.cli.campaign_runner status              # live dashboard
+python -m promptpotter.cli.campaign_runner show-results
+python -m promptpotter.cli.campaign_runner show-status         # live dashboard
 
 # Export results
 python -m promptpotter.cli.export_results supplemental --backend-id local -o supplemental.md
@@ -107,8 +107,8 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 
 ### Three Entry Points
 
-1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/display/campaign/` is pure display, delegates to services
-2. **CLI**: `promptpotter/cli/campaign_runner.py` — `init → [task-context] → [scan] → [scan-results] → optimize → results`
+1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/ui/campaign/` is pure UI, delegates to services
+2. **CLI**: `promptpotter/cli/campaign_runner.py` — `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
 3. **FastAPI API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`
 
 **CLI session directory** (`{backend_id}/sessions/{session_id}/`): `session.json`, `campaign_state.json` (live state, `control.requested_state` for pause/resume/stop), `campaign_output.log`, `campaign_log.md`.
@@ -119,7 +119,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation signals flow via `EvalBatchResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. No completed work discarded.
 - **HITL mode**: `RunConfig.pause_before_eval` raises `PauseForReviewError` between L1 generate and evaluate. Candidates persisted to `round_NNNN_candidates.json` before pause.
-- **Optimizer LLM calls**: All go through `llm_call()` in `config/optimizer_pipeline.py`, not `chat()` directly.
+- **Optimizer LLM calls**: All go through `llm_call()` in `services/optimizer/pipeline.py`, not `chat()` directly.
 - **`shared/`**: Leaf-level utilities only — no domain model or service dependencies allowed.
 
 ## Design Principles
@@ -132,7 +132,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 
 ### Notebook ↔ CLI Session Parity
 
-The notebook has no `session_id` — scan/campaign results don't persist. Root cause: display layer wrappers accept `session_id` but notebook never passes one. Both entry points must eventually produce identical artifacts (whitelabel prerequisite).
+The notebook has no `session_id` — scan/campaign results don't persist. Root cause: UI layer wrappers accept `session_id` but notebook never passes one. Both entry points must eventually produce identical artifacts (whitelabel prerequisite).
 
 ### TermNorm Backend
 
@@ -141,7 +141,7 @@ The notebook has no `session_id` — scan/campaign results don't persist. Root c
 
 ## Roadmap
 
-M0–M7 complete (archived). **M8 complete** — Campaign Intelligence (SearchMemory, all 17 waves). **M9 next** — Publication, Stable Config & Webapp (4 tracks: benchmarks + competitor comparison, meta-prompt stabilization, Next.js webapp, publication figures design). **M10 future** — OptSearchPoint Refinement & Ablation Studies (bells & whistles, multi-pipeline/dataset). **M11 future** — Multi-Connector Architecture.
+M0–M7 complete (archived). **M8 complete** — Campaign Intelligence (SearchMemory, all 17 waves). **M9 next** — Publication, Stable Config & Webapp (4 tracks: benchmarks + competitor comparison, meta-prompt stabilization, Next.js webapp, publication figures design). **M10 future** — OptSearchPoint Refinement & Ablation Studies (bells & whistles, multi-pipeline/dataset). **M11 future** — Multi-Backend Architecture.
 
 ## Testing
 

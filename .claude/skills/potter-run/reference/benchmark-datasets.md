@@ -15,7 +15,7 @@ The architecture is **registry + config** — no new code files. Two registries 
 
 Both are plain dicts. The loader fetches from any source (HuggingFace, file, API). The scorer is called from the formula in `campaign.json["scoring"]`.
 
-### Config directory: `configs/datasets/<name>/`
+### Config directory: `datasets/<name>/`
 
 | File | Purpose |
 |------|---------|

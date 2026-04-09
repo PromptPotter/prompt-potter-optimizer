@@ -6,6 +6,8 @@ from the round loop itself.
 
 from __future__ import annotations
 
+__all__ = ["CycleInit", "init_cycle_state"]
+
 import hashlib
 import logging
 from collections.abc import Callable
@@ -14,7 +16,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_context import TaskContext
-from promptpotter.services.campaign.bootstrap import BackendContext
+from promptpotter.services.campaign.campaign_setup import BackendContext
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import sample_thinking_styles
 from promptpotter.services.campaign.lifecycle import init_campaign
@@ -24,7 +26,7 @@ from promptpotter.services.campaign.state import (
     PhaseEvent,
     emit_phase,
 )
-from promptpotter.services.dataset_builder import subsample_dataset
+from promptpotter.services.dataset_builder import sample_dataset
 from promptpotter.services.metrics import compute_composite_score
 from promptpotter.services.search.search_memory import SearchMemory
 from promptpotter.shared.hashing import HASH_TRUNCATE
@@ -264,7 +266,7 @@ async def init_cycle_state(
     if _index_terms:
         await _bc.init_session(_index_terms)
 
-    eval_dataset = subsample_dataset(dataset, config.eval_sample_size, config.seed)
+    eval_dataset = sample_dataset(dataset, config.eval_sample_size, config.seed)
 
     # 1. Build baseline state
     state, baseline_osp = _build_baseline_state(

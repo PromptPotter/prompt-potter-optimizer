@@ -35,7 +35,7 @@ Export (separate entrypoint): `python -m promptpotter.cli.export_results <format
 
 Gather context silently — the dashboard in Phase 0.7 is the first thing the user sees.
 
-1. `ls configs/datasets/` — list available datasets
+1. `ls datasets/` — list available datasets
 2. Read `dataset.md`, `task_description.md`, `campaign.json` for the target dataset
 3. **Classify dataset type** from `dataset.md`: `backend` (needs running server) or `llm-only` (needs loader in `dataset_builder.py` + scorer in `SCORING_FUNCTIONS`)
 4. **Readiness check** (type-dependent):
@@ -150,7 +150,7 @@ WHERE THINGS LIVE
   Traces & scores:  .promptpotter/projects/{bid}/obs/langfuse/
   Prompt versions:  .promptpotter/projects/{bid}/obs/prompts/
   Ground truth:     .promptpotter/projects/{bid}/datasets/{dataset}.json
-  Dataset config:   configs/datasets/{dataset}/
+  Dataset config:   datasets/{dataset}/
 ```
 
 After the dashboard, state your recommendation (resume / fresh start) and ask the user how to proceed. Keep it to 1-2 sentences.
@@ -171,7 +171,7 @@ python -m promptpotter.cli.campaign_runner init \
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
     --backend-id local \
-    --config configs/datasets/lca-termnorm/campaign.json \
+    --config datasets/lca-termnorm/campaign.json \
     --skip-baseline
 ```
 
@@ -179,7 +179,7 @@ python -m promptpotter.cli.campaign_runner init \
 ```bash
 python -m promptpotter.cli.campaign_runner init \
     --backend-id gsm8k \
-    --config configs/datasets/gsm8k/campaign.json \
+    --config datasets/gsm8k/campaign.json \
     --skip-baseline
 ```
 
@@ -207,7 +207,7 @@ Report: session ID, active pipeline, query count.
 
 ```bash
 python -m promptpotter.cli.campaign_runner task-context \
-    --task-file configs/datasets/{dataset}/task_description.md
+    --task-file datasets/{dataset}/task_description.md
 ```
 
 - Decomposes the task description into structured fields the optimizer uses for L2 refinement
@@ -217,10 +217,10 @@ python -m promptpotter.cli.campaign_runner task-context \
 
 ## Phase 3: Sensitivity Scan (optional)
 
-Only if `configs/datasets/{dataset}/scan_variants.json` exists AND user wants exploration:
+Only if `datasets/{dataset}/scan_variants.json` exists AND user wants exploration:
 
 ```bash
-python -m promptpotter.cli.campaign_runner scan --variants-file configs/datasets/{dataset}/scan_variants.json
+python -m promptpotter.cli.campaign_runner scan --variants-file datasets/{dataset}/scan_variants.json
 python -m promptpotter.cli.campaign_runner scan-results
 ```
 

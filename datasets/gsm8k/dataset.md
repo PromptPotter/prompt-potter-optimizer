@@ -16,7 +16,7 @@
 
 ```
 --backend-id gsm8k
---config configs/datasets/gsm8k/campaign.json
+--config datasets/gsm8k/campaign.json
 --skip-baseline
 ```
 

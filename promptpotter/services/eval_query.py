@@ -31,7 +31,7 @@ Scorer = Callable[[dict], float]
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["eval_query_via_backend"]
+__all__ = ["evaluate_query"]
 
 
 def _parse_backend_response(
@@ -134,7 +134,7 @@ def _build_local_result(
     return result  # type: ignore[return-value]
 
 
-def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
+def _build_error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
     """Build a standard error result dict."""
     return {
         "query": query,
@@ -155,7 +155,7 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
     return f"[{ErrorCategory.SERVER}] HTTP {code}: {exc} — Backend may be experiencing issues."
 
 
-async def eval_query_via_backend(
+async def evaluate_query(
     query_data: dict,
     backend_client: BackendClient,
     pipeline_params: dict | None = None,
@@ -227,7 +227,7 @@ async def eval_query_via_backend(
         ranked = data.get("final_ranking", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
         if predicted == "ERROR":
-            return _error_result(
+            return _build_error_result(
                 query,
                 ground_truth,
                 f"[{ErrorCategory.PIPELINE}] Backend returned ERROR as candidate"
@@ -256,14 +256,14 @@ async def eval_query_via_backend(
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)
-        logger.warning("eval_query_via_backend for %s: %s", query[:60], error_msg)
-        return _error_result(query, ground_truth, error_msg)
+        logger.warning("evaluate_query for %s: %s", query[:60], error_msg)
+        return _build_error_result(query, ground_truth, error_msg)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         error_msg = f"[{ErrorCategory.CONNECTION}] {exc} — Backend may be down or unreachable."
-        logger.warning("eval_query_via_backend CONNECTION for %s: %s", query[:60], error_msg)
-        return _error_result(query, ground_truth, error_msg)
+        logger.warning("evaluate_query CONNECTION for %s: %s", query[:60], error_msg)
+        return _build_error_result(query, ground_truth, error_msg)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception as exc:
-        logger.warning("eval_query_via_backend failed for %s: %s", query[:60], exc)
-        return _error_result(query, ground_truth, str(exc))
+        logger.warning("evaluate_query failed for %s: %s", query[:60], exc)
+        return _build_error_result(query, ground_truth, str(exc))

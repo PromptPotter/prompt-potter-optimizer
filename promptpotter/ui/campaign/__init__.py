@@ -22,11 +22,11 @@ from promptpotter.services.search import (
 
 # -- Campaigns (list, load, diff, overrides) ----------------------------------
 from .campaigns import (
-    apply_experiment_overrides,
+    apply_stored_overrides,
     diff_campaign_config,
     list_campaigns,
     load_and_apply_experiment,
-    load_experiment_config,
+    load_stored_campaign_config,
     show_experiment_dashboard,
 )
 
@@ -117,7 +117,7 @@ __all__ = [
     # Search: Scan
     "adaptive_search",
     # Campaigns
-    "apply_experiment_overrides",
+    "apply_stored_overrides",
     # Search: Results & Coverage
     "audit_historical_data",
     # Setup
@@ -146,7 +146,7 @@ __all__ = [
     "list_campaigns",
     "load_and_apply_experiment",
     "load_baseline_prompt",
-    "load_experiment_config",
+    "load_stored_campaign_config",
     # Search: Advisor
     "load_task_description",
     "load_variant_library",

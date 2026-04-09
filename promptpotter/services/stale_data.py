@@ -11,7 +11,7 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.services.eval_query import eval_query_via_backend
+from promptpotter.services.eval_query import evaluate_query
 from promptpotter.services.metrics import find_rank
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ async def execute_stale_data_protocol(
     Returns ``(result_dict, step_taken)`` where *step_taken* is the step
     that resolved the query, or ``"exhausted"``.
     """
-    from promptpotter.config.optimizer_pipeline import get_optimizer_schema
+    from promptpotter.services.optimizer.pipeline import get_optimizer_schema
 
     node = get_optimizer_schema().get_node("l1_evaluate")
     assert node is not None, "l1_evaluate node missing from optimizer schema"
@@ -117,7 +117,7 @@ async def execute_stale_data_protocol(
                 }, "below_threshold"
 
             result = dict(
-                await eval_query_via_backend(
+                await evaluate_query(
                     query_data,
                     backend_client,
                     pipeline_params=pipeline_params,
@@ -145,7 +145,7 @@ async def execute_stale_data_protocol(
             resolved_threshold = cfg.get("samplescan_threshold", 0.5)
 
             result = dict(
-                await eval_query_via_backend(
+                await evaluate_query(
                     query_data,
                     backend_client,
                     pipeline_params=None,

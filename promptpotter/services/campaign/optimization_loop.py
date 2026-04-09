@@ -17,7 +17,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.services.campaign.bootstrap import BackendContext
+from promptpotter.services.campaign.campaign_setup import BackendContext
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.cycle_init import init_cycle_state
 from promptpotter.services.campaign.escalation import escalate_l2
@@ -367,7 +367,7 @@ async def run_optimization(
             )
 
             # Round recorder: begin new round
-            from promptpotter.config.optimizer_pipeline import get_round_recorder
+            from promptpotter.services.optimizer.pipeline import get_round_recorder
 
             _rr = get_round_recorder()
             if _rr:
@@ -573,7 +573,7 @@ async def run_optimization(
         )
 
     # -- Cleanup round recorder --
-    from promptpotter.config.optimizer_pipeline import set_round_recorder
+    from promptpotter.services.optimizer.pipeline import set_round_recorder
 
     set_round_recorder(None)
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.bootstrap import BackendContext, load_baseline_prompt
+from promptpotter.services.campaign.campaign_setup import BackendContext, load_baseline_prompt
 from promptpotter.services.campaign.config import CampaignConfig
 from promptpotter.shared.constants import DATASET_NAME
 
@@ -242,7 +242,7 @@ def prepare_datasets(
     from promptpotter.services.dataset_builder import (
         SHEET_COLUMN_MAP,
         load_excel_ground_truth,
-        train_test_split,
+        split_train_test,
     )
 
     if excel_path:
@@ -252,7 +252,7 @@ def prepare_datasets(
 
         if needs_create:
             all_rows = load_excel_ground_truth(excel_path, SHEET_COLUMN_MAP)
-            train, test_sets = train_test_split(all_rows)
+            train, test_sets = split_train_test(all_rows)
             store.backends.save_dataset(backend_id, "train", train, source_file=excel_path.name)
             for name, items in test_sets.items():
                 store.backends.save_dataset(backend_id, name, items, source_file=excel_path.name)

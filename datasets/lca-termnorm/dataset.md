@@ -14,7 +14,7 @@
 ```
 --backend-url http://127.0.0.1:8000
 --backend-id local
---config configs/datasets/lca-termnorm/campaign.json
+--config datasets/lca-termnorm/campaign.json
 --skip-baseline
 ```
 

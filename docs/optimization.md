@@ -381,6 +381,6 @@ campaign_config = {
 | `campaign/optimization_loop.py` | Orchestration, escalation journal, critique threading |
 | `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
 | `eval_gateway.py` | `_run_eval_batch` (per-query checks), batch orchestration |
-| `eval_query.py` | `eval_query_via_backend`, `_parse_backend_response` |
+| `eval_query.py` | `evaluate_query`, `_parse_backend_response` |
 | `l1_optimizer.py` | L1 generation (sole pipeline_params decider) |
 | `search/search_memory.py` | Cross-campaign intelligence (M8 Wave 3): parameter impact, query patterns, failure modes |

@@ -13,10 +13,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.config.optimizer_pipeline import llm_call
-from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
 from promptpotter.models.task_context import TaskContext
 from promptpotter.services.llm_client import LLMClientBase
+from promptpotter.services.optimizer.pipeline import llm_call
+from promptpotter.services.optimizer.prompt_loader import load_optimizer_prompt
 from promptpotter.services.project_store import ProjectStore
 from promptpotter.services.stores.base import (
     read_json_optional,
@@ -289,9 +289,9 @@ def _extract_eval_from_traces(
     Returns:
         List of eval-data dicts (may be empty).
     """
-    from promptpotter.config.connectors import TRACE_GT_RESOLVERS, ensure_connectors_loaded
+    from promptpotter.config.extractors import TRACE_GT_RESOLVERS, ensure_extractors_loaded
 
-    ensure_connectors_loaded()
+    ensure_extractors_loaded()
     resolver = TRACE_GT_RESOLVERS.get((backend_name or "").lower())
 
     # Pre-build generic fallback map if no connector resolver

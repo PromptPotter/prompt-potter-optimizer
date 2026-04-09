@@ -15,10 +15,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.config.optimizer_pipeline import llm_call
-from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
-from promptpotter.config.settings import load_variant_library
+from promptpotter.config.variant_library import load_variant_library
 from promptpotter.services.metrics import find_rank
+from promptpotter.services.optimizer.pipeline import llm_call
+from promptpotter.services.optimizer.prompt_loader import load_optimizer_prompt
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:

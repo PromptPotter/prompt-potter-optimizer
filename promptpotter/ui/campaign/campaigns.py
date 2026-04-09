@@ -5,31 +5,31 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.services.campaign.bootstrap import (
-    apply_experiment_overrides,
+from promptpotter.services.campaign.campaign_setup import (
+    apply_stored_overrides,
 )
-from promptpotter.services.campaign.bootstrap import (
+from promptpotter.services.campaign.campaign_setup import (
     diff_campaign_config as _diff_campaign_config,
 )
-from promptpotter.services.campaign.bootstrap import (
-    resolve_experiment_id as _resolve_experiment_id,
+from promptpotter.services.campaign.campaign_setup import (
+    resolve_campaign_id as _resolve_campaign_id,
 )
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.campaign_setup import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.project_store import ProjectStore
 
 
 __all__ = [
-    "apply_experiment_overrides",
+    "apply_stored_overrides",
     "diff_campaign_config",
     "list_campaigns",
     "load_and_apply_experiment",
-    "load_experiment_config",
+    "load_stored_campaign_config",
     "show_experiment_dashboard",
 ]
 
@@ -194,7 +194,7 @@ def diff_campaign_config(
     return diffs
 
 
-def load_experiment_config(
+def load_stored_campaign_config(
     store: ProjectStore,
     backend_id: str,
     experiment_id: str,
@@ -203,7 +203,7 @@ def load_experiment_config(
 
     Returns the stored config dict, or None if not found.
     """
-    full_id = _resolve_experiment_id(store, backend_id, experiment_id)
+    full_id = _resolve_campaign_id(store, backend_id, experiment_id)
     if not full_id:
         return None
     campaign = store.campaigns.load(backend_id, full_id)
@@ -223,13 +223,13 @@ def load_and_apply_experiment(
     Convenience wrapper used by the notebook's experiment dashboard cell.
     Returns updated *pipeline_params* (or the original if nothing changed).
     """
-    stored_cfg = load_experiment_config(
+    stored_cfg = load_stored_campaign_config(
         session.store,
         session.backend_id,
         experiment_id,
     )
     if stored_cfg:
-        pp_override = apply_experiment_overrides(campaign_config, stored_cfg)
+        pp_override = apply_stored_overrides(campaign_config, stored_cfg)
         if pp_override:
             pipeline_params = pp_override
         print(f"  Loaded config from experiment {experiment_id}")
@@ -270,7 +270,7 @@ def show_experiment_dashboard(
     full_id = None
     if experiment_id is not None:
         assert store is not None
-        full_id = _resolve_experiment_id(store, backend_id, experiment_id)
+        full_id = _resolve_campaign_id(store, backend_id, experiment_id)
         if full_id is None:
             return pipeline_params or {}
 

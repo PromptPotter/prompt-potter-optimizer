@@ -33,12 +33,12 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "BackendContext",
-    "apply_experiment_overrides",
+    "apply_stored_overrides",
     "diff_campaign_config",
     "init_services",
     "load_baseline_prompt",
-    "load_experiment_config",
-    "resolve_experiment_id",
+    "load_stored_campaign_config",
+    "resolve_campaign_id",
     "save_campaign_winner",
 ]
 
@@ -107,7 +107,7 @@ def _create_llm_only_client(project_root: Path, dataset_name: str | None) -> Any
 
     config: dict[str, Any] = {}
     if dataset_name:
-        cfg_path = project_root / "configs" / "datasets" / dataset_name / "pipeline.json"
+        cfg_path = project_root / "datasets" / dataset_name / "pipeline.json"
         if cfg_path.exists():
             config = json.loads(cfg_path.read_text(encoding="utf-8"))
 
@@ -141,12 +141,12 @@ def _create_llm_only_client(project_root: Path, dataset_name: str | None) -> Any
 def _load_static_pipeline_schema(
     project_root: Path, dataset_name: str | None
 ) -> PipelineSchema | None:
-    """Load PipelineSchema from a static ``configs/datasets/{name}/pipeline.json``."""
+    """Load PipelineSchema from a static ``datasets/{name}/pipeline.json``."""
     if not dataset_name:
         return None
     import json
 
-    cfg_path = project_root / "configs" / "datasets" / dataset_name / "pipeline.json"
+    cfg_path = project_root / "datasets" / dataset_name / "pipeline.json"
     if not cfg_path.exists():
         logger.info("No static pipeline.json at %s", cfg_path)
         return None
@@ -184,7 +184,7 @@ async def init_services(
             on_status(msg)
 
     if project_root is None:
-        # campaign/bootstrap.py → services → promptpotter → repo_root
+        # campaign/campaign_setup.py → services → promptpotter → repo_root
         project_root = Path(__file__).resolve().parent.parent.parent.parent
 
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
@@ -311,9 +311,9 @@ async def init_services(
         _status("WARNING: No experiment data available")
         return base
 
-    from promptpotter.config.connectors import EXPERIMENT_EXTRACTORS, ensure_connectors_loaded
+    from promptpotter.config.extractors import EXPERIMENT_EXTRACTORS, ensure_extractors_loaded
 
-    ensure_connectors_loaded()
+    ensure_extractors_loaded()
     schema_key = pipeline_schema.name.lower() if pipeline_schema else ""
     extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
     if extractor:
@@ -356,7 +356,7 @@ def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
     return [item for item in items if item.get("query") and item.get("ground_truth")]
 
 
-def resolve_experiment_id(
+def resolve_campaign_id(
     store: ProjectStore,
     backend_id: str,
     short_id: str,
@@ -378,7 +378,7 @@ def resolve_experiment_id(
     return None
 
 
-def apply_experiment_overrides(
+def apply_stored_overrides(
     campaign_config: CampaignConfig,
     stored_cfg: dict,
 ) -> dict | None:
@@ -415,7 +415,7 @@ def save_campaign_winner(
     store: ProjectStore,
     backend_id: str,
     *,
-    experiment_id: str | None = None,
+    campaign_id: str | None = None,
 ) -> dict:
     """Find best round, save to store + link to campaign. Returns save_data dict."""
     from datetime import UTC, datetime
@@ -442,8 +442,8 @@ def save_campaign_winner(
     filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
     store.backends.save_sync(backend_id, filename, save_data)
 
-    if experiment_id:
-        full_id = resolve_experiment_id(store, backend_id, experiment_id)
+    if campaign_id:
+        full_id = resolve_campaign_id(store, backend_id, campaign_id)
         if full_id:
             with graceful("Campaign metadata update skipped", level=logging.DEBUG):
                 store.campaigns.update(
@@ -509,13 +509,13 @@ def diff_campaign_config(
     return diffs
 
 
-def load_experiment_config(
+def load_stored_campaign_config(
     store: ProjectStore,
     backend_id: str,
     experiment_id: str,
 ) -> dict | None:
     """Load stored experiment config for a campaign. Returns config dict or None."""
-    full_id = resolve_experiment_id(store, backend_id, experiment_id)
+    full_id = resolve_campaign_id(store, backend_id, experiment_id)
     if not full_id:
         return None
     campaign = store.campaigns.load(backend_id, full_id)

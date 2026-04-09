@@ -13,8 +13,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
 
-from promptpotter.config.optimizer_pipeline import llm_call
-from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.pipeline_schema import PipelineSchema
 from promptpotter.models.query_result import QueryResult
@@ -24,6 +22,8 @@ from promptpotter.services.campaign.formatting import (
 )
 from promptpotter.services.llm_client import LLMClientBase
 from promptpotter.services.metrics import compute_composite_score, count_degraded_queries
+from promptpotter.services.optimizer.pipeline import llm_call
+from promptpotter.services.optimizer.prompt_loader import load_optimizer_prompt
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.llm_parsing import extract_parsed_json
 

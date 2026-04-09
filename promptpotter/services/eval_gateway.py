@@ -1,6 +1,6 @@
 """Eval gateway — batch orchestration, archival, and scoring.
 
-Drives the query loop over ``eval_query_via_backend()``, handles stale
+Drives the query loop over ``evaluate_query()``, handles stale
 data protocol, error tracking, escalation checks, dataset run archival,
 and observability logging.  Single-query evaluation lives in
 ``eval_query``.
@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.models.query_result import QueryResult
 from promptpotter.services.dataset_builder import build_dataset_run_data
 from promptpotter.services.eval_query import (
-    _error_result,
-    eval_query_via_backend,
+    _build_error_result,
+    evaluate_query,
 )
 from promptpotter.services.metrics import compute_composite_score
 from promptpotter.services.stale_data import (
@@ -93,7 +93,7 @@ def _fill_remaining_errors(
     """Append error results for all eval queries from start_idx onward."""
     for remaining_qd in dataset[start_idx:]:
         results.append(
-            _error_result(
+            _build_error_result(
                 remaining_qd["query"],
                 remaining_qd.get("ground_truth", ""),
                 reason,
@@ -181,7 +181,7 @@ async def _run_eval_batch(
 ) -> EvalBatchResult:
     """Evaluate a prompt on all dataset queries via the backend.
 
-    Per-node caching is handled inside ``eval_query_via_backend()`` via
+    Per-node caching is handled inside ``evaluate_query()`` via
     the intermediate cache.  This function drives the query loop, stale
     data protocol, error tracking, and escalation checks.
 
@@ -215,7 +215,7 @@ async def _run_eval_batch(
                     logger.debug("Graceful stop after query %d/%d.", len(results), len(dataset))
                     break
 
-                result = await eval_query_via_backend(
+                result = await evaluate_query(
                     qd,
                     backend_client,
                     pipeline_params=search_point.pipeline_params,
@@ -316,7 +316,7 @@ async def eval_search_point(
     """Evaluate a prompt via backend with per-node caching and finalization.
 
     All cache reuse is handled by the per-node intermediate cache inside
-    ``eval_query_via_backend()``.  This function handles run archival
+    ``evaluate_query()``.  This function handles run archival
     (dataset_run_store) and observability logging.
 
     The ``search_point`` bundles the search-space dimensions

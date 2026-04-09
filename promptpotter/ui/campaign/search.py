@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.config.settings import load_variant_library_rich
+from promptpotter.config.variant_library import load_variant_library_rich
 from promptpotter.models.pipeline_schema import PipelineSchema
 from promptpotter.services.search import (
     advise_scan_config as _advise_scan_config,
@@ -59,7 +59,7 @@ from .display import (
 from .setup import setup_llm
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.campaign_setup import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)

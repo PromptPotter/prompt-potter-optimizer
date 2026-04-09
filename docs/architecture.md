@@ -4,8 +4,8 @@
 
 Three entry points, shared service core:
 
-1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `promptpotter/display/campaign/` (display layer wrapping services). No business logic in the notebook layer.
-2. **CLI** — `promptpotter/cli/campaign_runner.py` — terminal-based HITL workflow: `init → [task-context] → [scan] → [scan-results] → optimize → results`
+1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `promptpotter/ui/campaign/` (display layer wrapping services). No business logic in the notebook layer.
+2. **CLI** — `promptpotter/cli/campaign_runner.py` — terminal-based HITL workflow: `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
 3. **FastAPI API** (`promptpotter/main.py`) — REST at `/api/v1/`. Routers: `backends`, `campaigns`.
 
 All core logic lives in `promptpotter/services/`.
@@ -75,7 +75,7 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`.
 
 All paths converge on `eval_search_point()` — single gateway for eval persistence and archival. Prompt alias groups link semantically equivalent prompts so historical data is discoverable across forms (transitive resolution).
 
-**Per-node cache:** All eval reuse is handled by the per-node intermediate cache inside `eval_query_via_backend()`. Each node's output is cached independently with chained upstream dependency — changing one node's config invalidates only that node and downstream, while upstream nodes stay cached. See [Node-Level Cache](#node-level-cache) below.
+**Per-node cache:** All eval reuse is handled by the per-node intermediate cache inside `evaluate_query()`. Each node's output is cached independently with chained upstream dependency — changing one node's config invalidates only that node and downstream, while upstream nodes stay cached. See [Node-Level Cache](#node-level-cache) below.
 
 ## Caching & Crash Recovery
 
@@ -102,7 +102,7 @@ eval_search_point()
 
 ## Pipeline Discovery
 
-`GET /pipeline` returns the target pipeline config with resolved registry metadata. `parse_pipeline_response()` builds `PipelineSchema` from the response. Each node carries an `optimizer` sub-object (`param_keys`, `observation_mappings`). Per-dataset `pipeline.json` files in `configs/datasets/{name}/` provide static pipeline declarations (used for reference and future local-only datasets). Backend registration derives `backend_name`/`backend_type` from `pipeline_schema.name`. No backend-specific constants in PromptPotter service code.
+`GET /pipeline` returns the target pipeline config with resolved registry metadata. `parse_pipeline_response()` builds `PipelineSchema` from the response. Each node carries an `optimizer` sub-object (`param_keys`, `observation_mappings`). Per-dataset `pipeline.json` files in `datasets/{name}/` provide static pipeline declarations (used for reference and future local-only datasets). Backend registration derives `backend_name`/`backend_type` from `pipeline_schema.name`. No backend-specific constants in PromptPotter service code.
 
 ### Per-Dataset Scoring
 
@@ -212,7 +212,7 @@ intermediate_cache/
   {node_name}_{cache_key}.json    ← {query: node_output}
 ```
 
-**Implementation:** `compute_prefix_keys()` and `node_cache_key()` in `intermediate_cache.py`. Wired through `eval_query_via_backend()` in `eval_query.py`.
+**Implementation:** `compute_prefix_keys()` and `node_cache_key()` in `intermediate_cache.py`. Wired through `evaluate_query()` in `eval_query.py`.
 
 Gracefully no-ops until the target backend supports `node_outputs` in responses and `precomputed` in requests.
 
@@ -227,7 +227,7 @@ CampaignStore.load()          ← disk (campaign + trial JSON)
 campaign/export.py            ← pure transforms (flatten, compare, manifest)
         │                        No I/O, no display. Returns dicts/lists.
         ▼
-display/campaign/             ← markdown rendering (tables, supplemental doc)
+ui/campaign/             ← markdown rendering (tables, supplemental doc)
         │                        Formatting only, no persistence.
         ▼
 cli/export_results.py         ← CLI file I/O (write .md or .json)
@@ -293,7 +293,7 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
 |--------|-----------|------------|----------|----------|---------------|
 | **CampaignConfig** | `campaign/config.py` | User (notebook/CLI) | Session | Yes (`configure_pipeline` sets `pipeline_params`) | No (stored in campaign metadata) |
 | **RunConfig** | `campaign/config.py` | `from_campaign_config()` | Campaign | No (immutable Pydantic model) | No |
-| **BackendContext** | `campaign/bootstrap.py` | `init_services()` | Session | Rarely (`pipeline_schema` filtered) | No |
+| **BackendContext** | `campaign/campaign_setup.py` | `init_services()` | Session | Rarely (`pipeline_schema` filtered) | No |
 | **EvalContext** | `models/eval_context.py` | `cycle_init._setup_eval_context()` | Cycle | `candidate_idx`, `stale_data_observations` per eval | No |
 | **LoopState** | `campaign/state.py` | `cycle_init._build_baseline_state()` | Cycle | Intensely (every round) | Yes (`opt_sp` + escalation) |
 | **CritiqueContext** | `campaign/critique.py` | `execute_round()` | Per-round | No (read-only stats) | No |

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.campaign_setup import BackendContext
 
 logger = logging.getLogger(__name__)
 
@@ -449,7 +449,7 @@ def load_filtered_variant_library(
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Load variant library, filtering to active pipeline steps when possible."""
-    from promptpotter.config.settings import load_variant_library
+    from promptpotter.config.variant_library import load_variant_library
 
     lib = load_variant_library()
     if pipeline_params and pipeline_schema:

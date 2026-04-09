@@ -22,9 +22,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from promptpotter.config.optimizer_pipeline import llm_call
 from promptpotter.models.pipeline_schema import NodeOutputSchema, PipelineNode, PipelineSchema
 from promptpotter.models.task_context import TaskContext
+from promptpotter.services.optimizer.pipeline import llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -506,7 +506,7 @@ def preview_advisor_prompt(
     back to representative placeholders so all conditional sections are visible.
     """
     if pipeline_schema is not None:
-        from promptpotter.config.settings import load_variant_library as _load_vl
+        from promptpotter.config.variant_library import load_variant_library as _load_vl
 
         if variant_library is None:
             variant_library = _load_vl()

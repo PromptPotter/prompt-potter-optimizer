@@ -13,7 +13,7 @@ python -m promptpotter.cli.campaign_runner <subcommand> [options]
 ### Subcommand Sequence
 
 ```
-init ──→ [task-context] ──→ [scan] ──→ [scan-results] ──→ optimize ──→ results ──→ export
+init ──→ [set-task] ──→ [scan] ──→ [show-scan] ──→ optimize ──→ show-results ──→ export
 ```
 
 Steps in brackets are optional. Minimum viable workflow: `init` then `optimize --auto`.
@@ -21,11 +21,11 @@ Steps in brackets are optional. Minimum viable workflow: `init` then `optimize -
 | Step | Command | What it does | Reads from |
 |------|---------|-------------|------------|
 | 1 | `init` | Connect to backend, configure pipeline (baseline deferred) | Config file |
-| 2 | `task-context` | Decompose a task description into structured domain context | init_params |
+| 2 | `set-task` | Decompose a task description into structured domain context | init_params |
 | 3 | `scan` | Run sensitivity scan over parameter variants | init_params, config |
-| 4 | `scan-results` | Seed campaign from scan winner | scan_results |
+| 4 | `show-scan` | Seed campaign from scan winner | scan_results |
 | 5 | `optimize` | Run L1/L2/L3 optimization cycle | All above |
-| 6 | `results` | Show summary, optionally save winner to backend | Campaign cycles |
+| 6 | `show-results` | Show summary, optionally save winner to backend | Campaign cycles |
 | 7 | `export` | Generate supplemental materials or JSON | Campaign data |
 
 ### init
@@ -33,17 +33,17 @@ Steps in brackets are optional. Minimum viable workflow: `init` then `optimize -
 ```bash
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
-    --config configs/datasets/lca-termnorm/campaign.json
+    --config datasets/lca-termnorm/campaign.json
 ```
 
 Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config. Baseline is skipped by default (`--skip-baseline`) — the optimizer evaluates it automatically before the first round. Omit `--skip-baseline` only when you have substantial historical data and want an explicit baseline comparison before starting.
 
 Produces: `session.json` with `pipeline_params`, `init_params`, `phase: "init"`.
 
-### task-context
+### set-task
 
 ```bash
-python -m promptpotter.cli.campaign_runner task-context \
+python -m promptpotter.cli.campaign_runner set-task \
     --task-file description.txt
 ```
 
@@ -58,10 +58,10 @@ python -m promptpotter.cli.campaign_runner scan \
 
 Runs a one-axis-at-a-time (OAT) sensitivity scan. Each parameter axis is varied independently while others stay at baseline. Identifies which axes have the most impact on accuracy.
 
-### scan-results
+### show-scan
 
 ```bash
-python -m promptpotter.cli.campaign_runner scan-results
+python -m promptpotter.cli.campaign_runner show-scan
 ```
 
 Displays scan results leaderboard and seeds the optimization campaign with the best-performing variant as starting point.
@@ -83,11 +83,11 @@ python -m promptpotter.cli.campaign_runner optimize --auto
 
 The `--round` / `--evaluate` split enables HITL: after `--round`, candidates are persisted to `round_NNNN_candidates.json`. You can inspect, edit, or approve them before running `--evaluate`.
 
-### results
+### show-results
 
 ```bash
-python -m promptpotter.cli.campaign_runner results
-python -m promptpotter.cli.campaign_runner results --save  # save winner to backend
+python -m promptpotter.cli.campaign_runner show-results
+python -m promptpotter.cli.campaign_runner show-results --save  # save winner to backend
 ```
 
 ### control
@@ -139,10 +139,10 @@ A complete workflow from initialization to export:
 # 1. Initialize session against a running backend
 python -m promptpotter.cli.campaign_runner init \
     --backend-url http://127.0.0.1:8000 \
-    --config configs/datasets/lca-termnorm/campaign.json
+    --config datasets/lca-termnorm/campaign.json
 
 # 2. (Optional) Add domain context
-python -m promptpotter.cli.campaign_runner task-context \
+python -m promptpotter.cli.campaign_runner set-task \
     --task-file my_task_description.txt
 
 # 3. (Optional) Run sensitivity scan to find impactful axes
@@ -150,13 +150,13 @@ python -m promptpotter.cli.campaign_runner scan \
     --variants-file configs/variants.json
 
 # 4. (Optional) Seed campaign from scan winner
-python -m promptpotter.cli.campaign_runner scan-results
+python -m promptpotter.cli.campaign_runner show-scan
 
 # 5. Run optimization (autonomous mode)
 python -m promptpotter.cli.campaign_runner optimize --auto
 
 # 6. View results
-python -m promptpotter.cli.campaign_runner results
+python -m promptpotter.cli.campaign_runner show-results
 
 # 7. Export for paper
 python -m promptpotter.cli.export_results supplemental \

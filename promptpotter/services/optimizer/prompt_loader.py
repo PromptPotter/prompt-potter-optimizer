@@ -7,7 +7,7 @@ local JSON defaults in ``optimizer_prompts/``.
 
 Usage::
 
-    from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
+    from promptpotter.services.optimizer.prompt_loader import load_optimizer_prompt
 
     tpl = load_optimizer_prompt("critique_negative")
     prompt = tpl.compile_prompt(accuracy_pct="85.0%", n_failures="5", ...)
@@ -22,7 +22,7 @@ from promptpotter.models.opt_search_point import PromptTemplate
 
 logger = logging.getLogger(__name__)
 
-_PROMPT_DIR = Path(__file__).parent / "optimizer_prompts"
+_PROMPT_DIR = Path(__file__).parent / "prompts"
 
 
 @functools.lru_cache(maxsize=32)

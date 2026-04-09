@@ -6,6 +6,12 @@ produces markdown tables and documents.  Display-only, no persistence.
 
 from __future__ import annotations
 
+__all__ = [
+    "generate_export_json",
+    "generate_supplemental",
+    "render_table",
+]
+
 import json
 import logging
 from typing import TYPE_CHECKING, Any

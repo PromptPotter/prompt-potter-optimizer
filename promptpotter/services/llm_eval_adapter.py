@@ -2,7 +2,7 @@
 
 For ``llm-only`` datasets (GSM8K, HotPotQA, etc.) there is no backend
 server.  This adapter implements the same ``run_query()`` interface as
-:class:`BackendClient` so the eval pipeline (``eval_query_via_backend``)
+:class:`BackendClient` so the eval pipeline (``evaluate_query``)
 works unchanged.
 
 The system prompt flows through ``pipeline_params`` via the standard
@@ -26,7 +26,7 @@ class LLMOnlyAdapter:
     """Adapter that sends queries directly to an LLM instead of a backend.
 
     Implements the subset of :class:`BackendClient` used by
-    ``eval_query_via_backend``: ``run_query()``, ``check_status()``,
+    ``evaluate_query``: ``run_query()``, ``check_status()``,
     ``fetch_pipeline()``, ``init_session()``, ``aclose()``.
 
     The system prompt is NOT set here — it flows through

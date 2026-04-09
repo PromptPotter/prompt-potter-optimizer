@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_context import TaskContext
-from promptpotter.services.campaign.bootstrap import (
-    resolve_experiment_id as _resolve_experiment_id,
-)
 from promptpotter.services.campaign.campaign_data import (
     extract_campaign_baseline as _extract_campaign_baseline,
+)
+from promptpotter.services.campaign.campaign_setup import (
+    resolve_campaign_id as _resolve_campaign_id,
 )
 from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, RunResult
 from promptpotter.services.search.failure_group_analysis import (
@@ -52,7 +52,7 @@ from .phase_display import (
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.campaign_setup import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.state import RunCallbacks
     from promptpotter.services.search.scan_results import ScanContext
@@ -610,7 +610,7 @@ async def run_optimization_notebook(
     # Resolve explicit experiment_id to full cycle_id
     resolved_cycle_id = None
     if experiment_id and store:
-        resolved_cycle_id = _resolve_experiment_id(store, backend_id, experiment_id)
+        resolved_cycle_id = _resolve_campaign_id(store, backend_id, experiment_id)
         if resolved_cycle_id is None:
             print(f"  No campaign matching '{experiment_id}' — starting fresh")
         else:
@@ -710,11 +710,11 @@ async def run_optimization_notebook(
 # ---------------------------------------------------------------------------
 # Baseline eval wrapper (from eval.py)
 # ---------------------------------------------------------------------------
-from promptpotter.services.campaign.bootstrap import (  # noqa: E402
-    load_baseline_prompt,
-)
 from promptpotter.services.campaign.campaign_data import (  # noqa: E402
     run_baseline_eval as _run_baseline_eval,
+)
+from promptpotter.services.campaign.campaign_setup import (  # noqa: E402
+    load_baseline_prompt,
 )
 
 from .display import fmt_ci, fmt_pvalue  # noqa: E402

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.campaign_setup import BackendContext
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.llm_client import LLMClientBase
     from promptpotter.services.project_store import ProjectStore
@@ -198,7 +198,7 @@ async def resume_or_build_diagnostic(
     import hashlib as _hashlib
     import json as _json
 
-    from promptpotter.config.settings import load_variant_library
+    from promptpotter.config.variant_library import load_variant_library
     from promptpotter.services.search.context import decompose_prompt_fields
     from promptpotter.services.search.smart_search import (
         build_axis_profiles,

@@ -1,7 +1,7 @@
-"""Connector configs — per-backend/dataset query parsing, ground truth extraction, and defaults.
+"""Backend extractors — per-backend query parsing and ground truth extraction.
 
-Each connector module self-registers into the dictionaries below at import time.
-Core services dispatch through these registries — they never import a connector directly.
+Each extractor module self-registers into the dictionaries below at import time.
+Core services dispatch through these registries — they never import an extractor directly.
 """
 
 from __future__ import annotations
@@ -23,13 +23,13 @@ Signature: ``(exp_data, query_str) -> ground_truth | None``.
 Keyed by ``pipeline_schema.name.lower()``.
 """
 
-_connectors_loaded = False
+_extractors_loaded = False
 
 
-def ensure_connectors_loaded() -> None:
-    """Lazily import all connector modules so they self-register."""
-    global _connectors_loaded
-    if _connectors_loaded:
+def ensure_extractors_loaded() -> None:
+    """Lazily import all extractor modules so they self-register."""
+    global _extractors_loaded
+    if _extractors_loaded:
         return
-    _connectors_loaded = True
-    import promptpotter.config.connectors.termnorm as _  # noqa: F401
+    _extractors_loaded = True
+    import promptpotter.config.extractors.termnorm as _  # noqa: F401

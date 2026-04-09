@@ -1,4 +1,4 @@
-"""TermNorm connector config — LCA terminology normalization.
+"""TermNorm extractor — LCA terminology normalization.
 
 Query format: ``bom_material / process`` (slash-delimited)
 Ground truth: ``dataset_entry`` from experiment mappings
@@ -115,7 +115,7 @@ def _resolve_trace_gt(exp_data: dict, query_str: str) -> str | None:
     return gt_map.get(bom)
 
 
-from promptpotter.config.connectors import (  # noqa: E402
+from promptpotter.config.extractors import (  # noqa: E402
     EXPERIMENT_EXTRACTORS,
     TRACE_GT_RESOLVERS,
 )

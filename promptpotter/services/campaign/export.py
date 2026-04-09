@@ -9,6 +9,16 @@ No I/O — takes already-loaded data, returns dicts/lists.
 
 from __future__ import annotations
 
+__all__ = [
+    "build_reproducibility_manifest",
+    "compare_campaigns",
+    "export_failure_analysis",
+    "export_query_difficulty",
+    "export_search_memory_summary",
+    "export_trend_analysis",
+    "flatten_campaign_trials",
+]
+
 import platform
 import sys
 from dataclasses import asdict

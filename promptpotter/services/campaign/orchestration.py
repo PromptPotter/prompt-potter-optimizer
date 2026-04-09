@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_context import TaskContext
-from promptpotter.services.campaign.bootstrap import BackendContext
 from promptpotter.services.campaign.campaign_data import extract_campaign_baseline
+from promptpotter.services.campaign.campaign_setup import BackendContext
 from promptpotter.services.campaign.config import (
     RunConfig,
 )

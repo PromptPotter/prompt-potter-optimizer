@@ -15,8 +15,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.config.optimizer_pipeline import llm_call
-from promptpotter.config.optimizer_prompt_loader import load_optimizer_prompt
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_context import TaskContext
 from promptpotter.services.campaign.formatting import (
@@ -29,6 +27,8 @@ from promptpotter.services.campaign.formatting import (
     classify_trajectory,
     format_l2_intelligence,
 )
+from promptpotter.services.optimizer.pipeline import llm_call
+from promptpotter.services.optimizer.prompt_loader import load_optimizer_prompt
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:

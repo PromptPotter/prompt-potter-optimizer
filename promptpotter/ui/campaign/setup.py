@@ -5,18 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.config.settings import load_variant_library
+from promptpotter.config.variant_library import load_variant_library
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_context import TaskContext
-from promptpotter.services.campaign.bootstrap import (
+from promptpotter.services.campaign.campaign_data import (
+    build_all_index_terms,
+)
+from promptpotter.services.campaign.campaign_setup import (
     BackendContext,
     save_campaign_winner,
 )
-from promptpotter.services.campaign.bootstrap import (
+from promptpotter.services.campaign.campaign_setup import (
     init_services as _init_services,
-)
-from promptpotter.services.campaign.campaign_data import (
-    build_all_index_terms,
 )
 from promptpotter.services.campaign.config import (
     create_llm_client as setup_llm,
@@ -136,13 +136,13 @@ def dev_reload() -> None:
         "promptpotter.services.search.scan_baseline",
         "promptpotter.services.campaign.orchestration",
         # Display layer — safe to reload (no model classes)
-        "promptpotter.display.campaign.display",
-        "promptpotter.display.campaign.phase_display",
-        "promptpotter.display.campaign.optimize",
-        "promptpotter.display.campaign.setup",
-        "promptpotter.display.campaign.campaigns",
-        "promptpotter.display.campaign.search",
-        "promptpotter.display.campaign.search_scan",
+        "promptpotter.ui.campaign.display",
+        "promptpotter.ui.campaign.phase_display",
+        "promptpotter.ui.campaign.optimize",
+        "promptpotter.ui.campaign.setup",
+        "promptpotter.ui.campaign.campaigns",
+        "promptpotter.ui.campaign.search",
+        "promptpotter.ui.campaign.search_scan",
         # NOTE: Do NOT reload promptpotter.models.* or dataclass modules —
         # Pydantic/dataclass classes break when reloaded (existing
         # instances fail type checks).  scan_results.py has ScanContext

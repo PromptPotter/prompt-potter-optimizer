@@ -28,8 +28,8 @@ __all__ = [
     "load_dataset",
     "load_excel_ground_truth",
     "load_gsm8k",
-    "subsample_dataset",
-    "train_test_split",
+    "sample_dataset",
+    "split_train_test",
 ]
 
 # Column mapping per Excel sheet type.
@@ -113,7 +113,7 @@ def load_excel_ground_truth(
     return rows
 
 
-def train_test_split(
+def split_train_test(
     data: list[dict],
     test_fraction: float = 0.2,
     seed: int = 42,
@@ -165,7 +165,7 @@ def train_test_split(
     return train, {"test_processes": test_proc, "test_material": test_mat}
 
 
-def subsample_dataset(
+def sample_dataset(
     dataset: list[dict],
     sample_size: int,
     seed: int = 42,

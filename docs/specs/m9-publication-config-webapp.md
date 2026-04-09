@@ -11,7 +11,7 @@
 
 PromptPotter's core optimization loop (L1 generate → L1 evaluate → critique → L2 refine → L3 replan) is functionally complete through M8 with SearchMemory cross-campaign intelligence. Three critical gaps prevent the project from reaching publication and production use:
 
-1. **No benchmark results** — The methodology exists (`docs/benchmarks.md`), the export pipeline is built (`cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py`), but result tables are all placeholders. HotPotQA and GSM8K dataset configs exist in `configs/datasets/` but no dataset loaders or LLM-only evaluation paths are implemented.
+1. **No benchmark results** — The methodology exists (`docs/benchmarks.md`), the export pipeline is built (`cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py`), but result tables are all placeholders. HotPotQA and GSM8K dataset configs exist in `datasets/` but no dataset loaders or LLM-only evaluation paths are implemented.
 
 2. **Proof-of-concept meta-prompts** — The optimizer's own prompts (L1 generate, critique, L2 refine, L3 replan) in `promptpotter/config/optimizer_prompts/` are functional but untuned. They were developed against TermNorm (a multi-node retrieval pipeline) and need systematic evaluation on benchmark tasks to find stable, high-performing configurations.
 
@@ -56,17 +56,17 @@ Registry + config architecture — adding a dataset = two registry entries + con
 
 - `DATASET_LOADERS["gsm8k"]` — fetches from HuggingFace `openai/gsm8k`, 1,319 test questions
 - `SCORING_FUNCTIONS["gsm8k_match"]` — numeric extraction from `#### N` format + comparison
-- Config: `configs/datasets/gsm8k/` (campaign.json, pipeline.json, dataset.md, task_description.md)
+- Config: `datasets/gsm8k/` (campaign.json, pipeline.json, dataset.md, task_description.md)
 
 #### 1c. HotPotQA (TODO)
 
 - `DATASET_LOADERS["hotpotqa"]` — fetch from HuggingFace, 7,405 validation questions
 - `SCORING_FUNCTIONS["hotpotqa_f1"]` — token-level F1 with SQuAD-style normalization
-- Config: `configs/datasets/hotpotqa/`
+- Config: `datasets/hotpotqa/`
 
 #### 1d. Benchmark Campaigns
 
-- Finalize `campaign.json` configs for HotPotQA and GSM8K in `configs/datasets/`
+- Finalize `campaign.json` configs for HotPotQA and GSM8K in `datasets/`
 - Run campaigns with full optimization loop (L1+L2+L3)
 - Fill result tables in `docs/benchmarks.md`
 - 3 seeds per configuration, 95% Wilson CIs, McNemar's test for significance
@@ -102,7 +102,7 @@ Generation integrated into `cli/export_results.py` or standalone script.
 - `promptpotter/cli/export_results.py` — Supplemental markdown + JSON export
 - `promptpotter/services/campaign/reporting.py` — CI formatting, significance markers, convergence tables
 - `promptpotter/services/campaign/export.py` — Pairwise significance, query difficulty, failure clusters
-- `configs/datasets/hotpotqa/`, `configs/datasets/gsm8k/` — Pipeline configs, campaign configs, task descriptions
+- `datasets/hotpotqa/`, `datasets/gsm8k/` — Pipeline configs, campaign configs, task descriptions
 
 ---
 
@@ -344,7 +344,7 @@ Wave 6: Track 2c + Track 3d + Track 3e
 | Area | Files |
 |------|-------|
 | Meta-prompts | `promptpotter/config/optimizer_prompts/*.json` |
-| Optimizer pipeline config | `promptpotter/config/optimizer_pipeline.py`, `optimizer_pipeline.json` |
+| Optimizer pipeline config | `promptpotter/services/optimizer/pipeline.py`, `optimizer_pipeline.json` |
 | LLM client | `promptpotter/config/llm_client.py` |
 | Eval gateway | `promptpotter/services/eval_gateway.py` |
 | Eval query | `promptpotter/services/eval_query.py` |
@@ -354,7 +354,7 @@ Wave 6: Track 2c + Track 3d + Track 3e
 | Export pipeline | `promptpotter/cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py` |
 | FastAPI API | `promptpotter/main.py` |
 | Benchmark methodology | `docs/benchmarks.md` |
-| Dataset configs | `configs/datasets/hotpotqa/`, `configs/datasets/gsm8k/`, `configs/datasets/lca-termnorm/` |
+| Dataset configs | `datasets/hotpotqa/`, `datasets/gsm8k/`, `datasets/lca-termnorm/` |
 
 ---
 

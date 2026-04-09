@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.bootstrap import BackendContext
+    from promptpotter.services.campaign.campaign_setup import BackendContext
 
 logger = logging.getLogger(__name__)
 
