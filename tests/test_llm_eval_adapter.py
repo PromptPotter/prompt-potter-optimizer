@@ -1,7 +1,10 @@
-"""Tests for LLM-only evaluation adapter."""
+"""Tests for LLM-only evaluation adapter and auth gate."""
 
 import asyncio
 
+import pytest
+
+from promptpotter.services.campaign.campaign_setup import _validate_local_eval_access
 from promptpotter.services.llm_client import LLMClientBase, LLMResponse
 from promptpotter.services.llm_eval_adapter import LLMOnlyAdapter
 
@@ -48,7 +51,7 @@ class TestLLMOnlyAdapter:
             adapter.run_query(
                 "What is 6 * 7?",
                 pipeline_params={
-                    "direct_llm": {"prompt": "You are a math tutor.", "temperature": 0.5}
+                    "llm_only": {"prompt": "You are a math tutor.", "temperature": 0.5}
                 },
             )
         )
@@ -62,9 +65,7 @@ class TestLLMOnlyAdapter:
         stub = _StubLLMClient()
         adapter = LLMOnlyAdapter(stub)
         _run(
-            adapter.run_query(
-                "What is 6 * 7?", pipeline_params={"direct_llm": {"temperature": 0.0}}
-            )
+            adapter.run_query("What is 6 * 7?", pipeline_params={"llm_only": {"temperature": 0.0}})
         )
         # Only user message, no system
         assert len(stub.last_messages) == 1
@@ -84,3 +85,34 @@ class TestLLMOnlyAdapter:
     def test_aclose(self):
         adapter = LLMOnlyAdapter(_StubLLMClient())
         _run(adapter.aclose())  # should not raise
+
+
+class TestLocalEvalAuthGate:
+    """Tests for _validate_local_eval_access() security gate.
+
+    Returns True (authorized for local eval) or False (fall back to backend).
+    """
+
+    def test_denies_when_no_secret_configured(self, monkeypatch):
+        """Empty LOCAL_EVAL_SECRET -> False (route to backend)."""
+        monkeypatch.setattr("promptpotter.config.settings.settings.LOCAL_EVAL_SECRET", "")
+        assert _validate_local_eval_access("any-token") is False
+
+    def test_denies_missing_token(self, monkeypatch):
+        """Secret set but no token provided -> False (route to backend)."""
+        monkeypatch.setattr(
+            "promptpotter.config.settings.settings.LOCAL_EVAL_SECRET", "correct-secret"
+        )
+        assert _validate_local_eval_access(None) is False
+
+    def test_denies_wrong_token(self, monkeypatch):
+        """Token doesn't match secret -> False (route to backend)."""
+        monkeypatch.setattr(
+            "promptpotter.config.settings.settings.LOCAL_EVAL_SECRET", "correct-secret"
+        )
+        assert _validate_local_eval_access("wrong-token") is False
+
+    def test_accepts_correct_token(self, monkeypatch):
+        """Matching token -> True (local eval authorized)."""
+        monkeypatch.setattr("promptpotter.config.settings.settings.LOCAL_EVAL_SECRET", "my-secret")
+        assert _validate_local_eval_access("my-secret") is True

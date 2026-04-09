@@ -55,7 +55,7 @@ Four tracks delivering publication readiness, optimizer tuning, a web applicatio
 
 ### Track 1: Publication Readiness (Benchmarks + Competitor Comparison)
 
-Build dataset loaders (HotPotQA, GSM8K), evaluation scorers (Token F1, numeric exact match), and two evaluation paths: backend-routed via TermNorm `llm_only` step (default) and auth-gated local `LLMOnlyAdapter` (see [`security-foundations.md`](security-foundations.md)). Run benchmark campaigns and compare against published results from DSPy/MIPROv2, GEPA, Promptomatix, adv-CoT, and PromptWizard (cited numbers). Fill `docs/benchmarks.md` result tables. Generate paper-quality convergence plots and comparison figures.
+Build dataset loaders (HotPotQA, GSM8K), evaluation scorers (Token F1, numeric exact match), and two evaluation paths: backend-routed via TermNorm `llm_only` step (default) and auth-gated local `LLMOnlyAdapter` (see `TermNorm-excel/docs/spec/proper-step-loop.md`). Run benchmark campaigns and compare against published results from DSPy/MIPROv2, GEPA, Promptomatix, adv-CoT, and PromptWizard (cited numbers). Fill `docs/benchmarks.md` result tables. Generate paper-quality convergence plots and comparison figures.
 
 ### Track 2: Stable Optimizer Configuration
 

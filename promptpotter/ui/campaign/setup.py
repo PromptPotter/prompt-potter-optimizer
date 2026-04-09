@@ -215,13 +215,13 @@ async def init_services(
     experiment_id: str = "1_production_historical",
     dataset_name: str | None = None,
     dataset_type: str | None = None,
+    local_eval_token: str | None = None,
 ) -> BackendContext:
     """Initialize store, client, and load experiment data.
 
-    When *dataset_name* is provided, loads ground-truth data from the
-    DatasetStore instead of requiring experiment traces.
-    When *dataset_type* is ``"llm-only"``, uses an LLM adapter instead of
-    an HTTP backend client.
+    All evaluation goes through :class:`BackendClient` by default.
+    When *dataset_type* is ``"llm-only"``, uses :class:`LLMOnlyAdapter` —
+    gated behind ``LOCAL_EVAL_SECRET`` + *local_eval_token*.
     """
     from promptpotter.config.logging import setup_logging
 
@@ -237,6 +237,7 @@ async def init_services(
         project_root=project_root,
         dataset_name=dataset_name,
         dataset_type=dataset_type,
+        local_eval_token=local_eval_token,
         on_status=print,
     )
 

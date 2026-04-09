@@ -41,7 +41,16 @@ Gather context silently — the dashboard in Phase 0.7 is the first thing the us
 4. **Readiness check** (type-dependent):
    - `backend`: `curl -s {backend_url}/status` — is the server running?
    - `llm-only`: check `dataset.md` Status section — is the infrastructure implemented? If "Not yet implemented", note what's missing.
-5. Read `promptpotter/config/settings.py` → `APP_VERSION`
+5. **LLM-only auth gate check** (only when dataset type is `llm-only`):
+   The `LLMOnlyAdapter` requires `LOCAL_EVAL_SECRET` in `.env` and a matching `local_eval_token` in `campaign.json`. Without both, `init_services` **silently falls through to `BackendClient`** and sends queries to whatever backend is at `--backend-url` — meaning math problems go to TermNorm, producing garbage results. This is the #1 cause of 0% accuracy on llm-only datasets.
+   - Check if `"local_eval_token"` exists in the dataset's `campaign.json` `campaign_config` object
+   - If missing: **STOP before init**. Print a clear error explaining:
+     1. What: LLM-only datasets need an auth gate configured — `LOCAL_EVAL_SECRET` in `.env` and matching `local_eval_token` in `campaign.json`
+     2. Why: Without it, queries silently route to the backend server instead of the LLM, producing wrong results
+     3. How: The user must set `LOCAL_EVAL_SECRET=<any-secret>` in `.env` and add `"local_eval_token": "<same-secret>"` to their `campaign.json`
+   - Do NOT read `.env`, do NOT write tokens, do NOT auto-configure auth. The user manages their own secrets.
+   - If `local_eval_token` is present in `campaign.json`: proceed (the code validates it against `.env` at runtime)
+6. Read `promptpotter/config/settings.py` → `APP_VERSION`
 
 **Only print if**: no dataset argument (list available datasets with readiness status — read `reference/benchmark-datasets.md` for prioritization guidance if user asks which to run first), dataset not implemented (explain what's missing per `dataset.md` — and offer to build it, starting with the scorer; see implementation order below), or backend is down (say to start it). Otherwise stay silent — findings go into the dashboard.
 
@@ -132,7 +141,7 @@ DATA ASSESSMENT (from Phase 0.5)
   {if minimal: "Minimal data — starting from config defaults"}
 
 WARNINGS (only if any — omit section if clean)
-  ⚠ {e.g. "backend unreachable", "llm_ranking in active nodes"}
+  ⚠ {e.g. "backend unreachable", "llm_ranking in active nodes", "llm-only auth gate not configured — see below"}
 
 SESSION FILES
   {full_path_to_session_dir}/
@@ -229,6 +238,23 @@ Report which axes showed sensitivity and the recommended starting point.
 ---
 
 ## Phase 4: Optimize
+
+### SAFETY: Cost Confirmation Required Before --auto
+
+**BEFORE running `optimize --auto`, you MUST:**
+
+1. Read `campaign.json` and report to the user:
+   - `eval_sample_size` (queries per candidate evaluation)
+   - `n_variants` (candidates per round)
+   - Total calls per round: `eval_sample_size × n_variants`
+   - If `eval_sample_size: 0`, it means ALL queries — report the full dataset count
+2. **Ask for explicit confirmation**: "This will send ~{total} backend calls per round (each is a paid LLM call). Proceed?"
+3. **For first-time datasets, recommend `--round` instead** — it generates candidates then pauses before evaluation, letting the user review before spending money.
+
+**There is currently no quick kill mechanism.** If `--auto` runs away:
+- Ctrl+C may not stop it fast enough (graceful shutdown waits for in-flight calls)
+- Emergency stop: `taskkill //F //IM python.exe` (Windows) — WARNING: kills ALL Python processes including the backend
+- See `docs/specs/issue-runaway-eval.md` for the full issue
 
 Ask: **"Full auto-optimization, or one round at a time?"**
 

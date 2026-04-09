@@ -6,7 +6,7 @@
   "backend_type": "benchmark",
   "type": "llm-only",
   "nodes": {
-    "direct_llm": {
+    "llm_only": {
       "type": "generation",
       "runtime": "local",
       "node_role": "ranker",
@@ -23,7 +23,7 @@
     }
   },
   "pipelines": {
-    "default": ["direct_llm"]
+    "default": ["llm_only"]
   },
   "llm_defaults": {
     "provider": "groq",

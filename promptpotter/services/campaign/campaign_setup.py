@@ -8,6 +8,7 @@ sync from backend when no dataset_name is provided.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -99,6 +100,28 @@ def load_baseline_prompt(
     )
 
 
+def _validate_local_eval_access(token: str | None) -> bool:
+    """Check if the caller is authorized for local LLM evaluation.
+
+    Uses ``hmac.compare_digest`` for constant-time comparison.
+    Returns ``True`` if authorized, ``False`` otherwise (caller falls
+    back to backend-routed evaluation).
+    """
+    from promptpotter.config.settings import settings
+
+    secret = settings.LOCAL_EVAL_SECRET
+    if not secret:
+        logger.info("Local eval not enabled (LOCAL_EVAL_SECRET empty) — routing to backend")
+        return False
+    if not token:
+        logger.info("No local_eval_token provided — routing to backend")
+        return False
+    if not hmac.compare_digest(token, secret):
+        logger.warning("Invalid local_eval_token — routing to backend")
+        return False
+    return True
+
+
 def _create_llm_only_client(project_root: Path, dataset_name: str | None) -> Any:
     """Build an :class:`LLMOnlyAdapter` from the dataset's pipeline.json config."""
     import json
@@ -170,13 +193,15 @@ async def init_services(
     project_root: Path | None = None,
     dataset_name: str | None = None,
     dataset_type: str | None = None,
+    local_eval_token: str | None = None,
     on_status: Callable[[str], None] | None = None,
 ) -> BackendContext:
     """Initialize store, client, pipeline schema, and load eval data.
 
-    Priority: dataset_name (from DatasetStore) > experiment sync (from backend).
-    When ``dataset_type="llm-only"``, uses :class:`LLMOnlyAdapter` instead of
-    :class:`BackendClient` and loads the pipeline schema from a static config file.
+    All evaluation goes through :class:`BackendClient` by default.
+    When ``dataset_type="llm-only"``, uses :class:`LLMOnlyAdapter` instead —
+    gated behind ``LOCAL_EVAL_SECRET`` + ``local_eval_token`` for multi-tenant
+    safety.  See ``TermNorm-excel/docs/spec/proper-step-loop.md``.
     """
 
     def _status(msg: str) -> None:
@@ -189,34 +214,40 @@ async def init_services(
 
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
 
-    pipeline_schema = None
-    if dataset_type == "llm-only":
-        client = _create_llm_only_client(project_root, dataset_name)
-        _status("Backend: llm-only (no HTTP backend)")
+    # Decide eval client: local LLM-only (if authorized) or backend (default)
+    use_local = dataset_type == "llm-only" and _validate_local_eval_access(local_eval_token)
 
-        # Load pipeline schema from static config
-        pipeline_schema = _load_static_pipeline_schema(project_root, dataset_name)
-        if pipeline_schema:
-            _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
+    pipeline_schema = _load_static_pipeline_schema(project_root, dataset_name)
+    if pipeline_schema:
+        _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
+
+    if use_local:
+        client = _create_llm_only_client(project_root, dataset_name)
+        _status("Backend: llm-only (authorized)")
     else:
         client = BackendClient(backend_url)
         _status(f"Backend: {backend_url}")
 
-        # Fetch pipeline schema (best-effort — non-fatal)
-        try:
-            from promptpotter.services.pipeline_discovery import parse_pipeline_response
+        # Fetch pipeline schema from backend if no static config
+        if not pipeline_schema:
+            try:
+                from promptpotter.services.pipeline_discovery import parse_pipeline_response
 
-            pipeline_resp = await client.fetch_pipeline()
-            pipeline_schema = parse_pipeline_response(pipeline_resp)
-            logger.info(
-                "Pipeline schema loaded: %s v%s", pipeline_schema.name, pipeline_schema.version
-            )
-            _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception as exc:
-            logger.info("Could not fetch pipeline schema: %s", exc)
-            _status("Pipeline: unavailable")
+                pipeline_resp = await client.fetch_pipeline()
+                pipeline_schema = parse_pipeline_response(pipeline_resp)
+                logger.info(
+                    "Pipeline schema loaded: %s v%s",
+                    pipeline_schema.name,
+                    pipeline_schema.version,
+                )
+                _status(
+                    f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)"
+                )
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise
+            except Exception as exc:
+                logger.info("Could not fetch pipeline schema: %s", exc)
+                _status("Pipeline: unavailable")
 
     # Register backend connection
     if not store.backends.get(backend_id):

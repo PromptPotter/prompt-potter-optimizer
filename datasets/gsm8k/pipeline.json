@@ -6,7 +6,7 @@
   "backend_type": "benchmark",
   "type": "llm-only",
   "nodes": {
-    "direct_llm": {
+    "llm_only": {
       "type": "generation",
       "runtime": "frontend",
       "node_role": "ranker",
@@ -17,7 +17,7 @@
         "max_tokens": 2000
       },
       "prompt_meta": {
-        "family": "direct_llm",
+        "family": "llm_only",
         "template_variables": ["query"],
         "description": "System prompt for LLM-only evaluation"
       },
@@ -28,7 +28,7 @@
     }
   },
   "pipelines": {
-    "default": ["direct_llm"]
+    "default": ["llm_only"]
   },
   "llm_defaults": {
     "provider": "groq",
