@@ -38,7 +38,7 @@ python -m promptpotter.cli.campaign_runner scan \
     --variants-file datasets/lca-termnorm/scan_variants.json
 python -m promptpotter.cli.campaign_runner show-scan
 python -m promptpotter.cli.campaign_runner optimize --auto     # full loop
-python -m promptpotter.cli.campaign_runner optimize --round    # generate → pause for review
+python -m promptpotter.cli.campaign_runner optimize --round    # one complete round → stop
 python -m promptpotter.cli.campaign_runner show-results
 python -m promptpotter.cli.campaign_runner show-status         # live dashboard
 
@@ -60,6 +60,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest --cov`. A
 - **No fallbacks** in service code. Sanctioned exceptions (keep this list short):
   1. `init_services()`: local `LLMOnlyAdapter` → `BackendClient` when `LOCAL_EVAL_SECRET` auth fails (security gate, not hidden default).
   Any doc or code introducing a new fallback must add it to this list.
+- **Cycle identity**: Two-tier system. Experiment mode (default) hashes only the *problem* (dataset, baseline, pipeline steps) — everything else (optimizer model, seed, n_variants, creativity, patience, thresholds) is tweakable without breaking the cycle. Strict mode (`strict_cycle_identity: true`) hashes everything — for publication reproducibility only. See `TUNING_KEYS` in `lifecycle.py` and `docs/benchmarks.md` "Reproducibility: Cycle Identity Modes".
 - **Two-tier eval sampling**: `sp_budget_ttest` (0 = all) controls the optimization loop eval set. `scan_sample_size` controls sensitivity scan queries. Sequential elimination early-stops inferior candidates via Welch's t-test after 20 queries, so actual round cost is well below `n_variants × eval_size`.
 - **Skip baseline by default**: Always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists (≥ 50 unique queries, ≥ 5 dataset runs) and the user requests comparison.
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".

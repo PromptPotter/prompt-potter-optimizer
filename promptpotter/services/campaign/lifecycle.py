@@ -23,40 +23,94 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["cycle_config_identity", "finalize_campaign", "init_campaign"]
+__all__ = [
+    "TUNING_KEYS",
+    "cycle_config_identity",
+    "finalize_campaign",
+    "init_campaign",
+]
+
+# Tuning keys — excluded from cycle identity in experiment mode.
+#
+# These control *how* the optimizer runs, not *what problem* it solves.
+# In experiment mode (default), changing any of these between runs does NOT
+# create a new cycle — cached candidates and dataset_run results carry over.
+#
+# In strict mode (for publication), all params are included in the hash so
+# any deviation creates a distinct experiment for reproducibility.
+#
+# Also used by resume logic to hot-update stored configs on existing cycles.
+TUNING_KEYS = frozenset(
+    {
+        # Loop control — how long/aggressively the loop runs
+        "max_rounds",
+        "l1_patience",
+        "l2_patience",
+        "l3_patience",
+        "degradation_threshold",
+        # Optimization strategy — tweakable between runs
+        "model",
+        "n_variants",
+        "creativity",
+        "improvement_threshold",
+        "sp_budget_ttest",
+        "seed",
+    }
+)
 
 
 def cycle_config_identity(
     config: RunConfig,
     baseline_rendered: str,
     dataset: list[dict],
+    *,
+    strict: bool = False,
 ) -> str:
     """Compute a stable identity hash for a feedback cycle configuration.
 
-    Covers optimization-relevant fields only so the same config produces the
-    same cycle_id across kernel restarts.  Infrastructure fields (backend_url,
-    project_root, etc.) are excluded.
+    Two-tier system:
+
+    **Experiment mode** (``strict=False``, default):
+        Cycle identity is based only on what defines the *problem*:
+        active pipeline steps, baseline prompt, and dataset.  Everything
+        else — optimizer model, seed, n_variants, creativity, patience,
+        thresholds — is excluded (see ``TUNING_KEYS``).  This means you
+        can freely tweak optimization strategy, switch between ``--round``
+        and ``--auto``, change the optimizer model, or interrupt and resume
+        without creating a new cycle.  Cached candidates and dataset_run
+        results carry over across invocations.
+
+    **Strict mode** (``strict=True``):
+        Every parameter is included in the identity hash.  Changing
+        anything — even ``max_rounds`` — creates a new cycle with fresh
+        candidates.  Use this only for publication experiments where exact
+        reproducibility is required — the same config must always produce the
+        same cycle, and any deviation must be flagged as a distinct experiment.
+        Enable via ``"strict_cycle_identity": true`` in campaign.json.
+
+    Infrastructure fields (backend_url, project_root, etc.) are always
+    excluded in both modes.
     """
-    payload = json.dumps(
-        {
-            "max_rounds": config.max_rounds,
-            "l1_patience": config.l1_patience,
-            "n_variants": config.n_variants,
-            "creativity": config.creativity,
-            "improvement_threshold": config.improvement_threshold,
-            "model": config.model,
-            "sp_budget_ttest": config.sp_budget_ttest,
-            "seed": config.seed,
-            "active_steps": list(config.pipeline_schema.active_steps)
-            if config.pipeline_schema
-            else [],
-            "baseline_rendered": baseline_rendered,
-            "dataset_pairs": sorted(
-                (d.get("query", ""), d.get("ground_truth", "")) for d in dataset
-            ),
-        },
-        sort_keys=True,
-    )
+    payload_dict: dict[str, Any] = {
+        "max_rounds": config.max_rounds,
+        "l1_patience": config.l1_patience,
+        "n_variants": config.n_variants,
+        "creativity": config.creativity,
+        "improvement_threshold": config.improvement_threshold,
+        "model": config.model,
+        "sp_budget_ttest": config.sp_budget_ttest,
+        "seed": config.seed,
+        "l2_patience": config.l2_patience,
+        "l3_patience": config.l3_patience,
+        "degradation_threshold": config.degradation_threshold,
+        "active_steps": list(config.pipeline_schema.active_steps) if config.pipeline_schema else [],
+        "baseline_rendered": baseline_rendered,
+        "dataset_pairs": sorted((d.get("query", ""), d.get("ground_truth", "")) for d in dataset),
+    }
+    if not strict:
+        for k in TUNING_KEYS:
+            payload_dict.pop(k, None)
+    payload = json.dumps(payload_dict, sort_keys=True)
     digest = hashlib.sha256(payload.encode()).hexdigest()[:12]
     return f"cycle_{digest}"
 
@@ -80,7 +134,9 @@ def resolve_active_campaign_id(
         bl_rendered = ""
         if baseline_prompt_fields:
             bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
-        return cycle_config_identity(config, bl_rendered, dataset)
+        return cycle_config_identity(
+            config, bl_rendered, dataset, strict=config.strict_cycle_identity
+        )
     except Exception:
         logger.debug("Could not compute active campaign ID", exc_info=True)
         return None
@@ -123,7 +179,9 @@ def init_campaign(
                 bl_osp = (
                     OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
                 )
-                cycle_id = cycle_config_identity(config, bl_osp.render(), dataset)
+                cycle_id = cycle_config_identity(
+                    config, bl_osp.render(), dataset, strict=config.strict_cycle_identity
+                )
             logger.debug("Cycle identity: %s", cycle_id)
 
             existing = campaign_store.load(config.backend_id, cycle_id)
@@ -132,16 +190,9 @@ def init_campaign(
                     stored_cfg = existing.get("config", {})
                     if stored_cfg:
                         _validate_config_match(config, stored_cfg, cycle_id)
-                        _LOOP_CONTROL_KEYS = [
-                            "max_rounds",
-                            "l1_patience",
-                            "l2_patience",
-                            "l3_patience",
-                            "degradation_threshold",
-                        ]
                         current_cfg = config.model_dump(mode="json")
                         cfg_updated = False
-                        for k in _LOOP_CONTROL_KEYS:
+                        for k in TUNING_KEYS:
                             if stored_cfg.get(k) != current_cfg.get(k):
                                 stored_cfg[k] = current_cfg.get(k)
                                 cfg_updated = True

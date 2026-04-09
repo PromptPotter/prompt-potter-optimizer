@@ -24,6 +24,10 @@
 - Format: word problem -> numeric answer in `#### N` format
 - campaign.json uses `sp_budget_ttest: 30`
 
+## Cycle Identity
+
+Default campaign.json uses experiment mode (no `strict_cycle_identity`). You can freely switch between `--round` and `--auto`, adjust patience, and interrupt/resume without losing campaign history. For publication runs, add `"strict_cycle_identity": true` to `campaign.json` to lock all parameters into the cycle identity.
+
 ## Pipeline Notes
 
 - Pipeline: `llm_only` step only — prompt flows through `pipeline_params` via PromptTemplate

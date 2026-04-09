@@ -340,6 +340,37 @@ async def eval_search_point(
     # --- evaluate via backend (per-node cache handles all reuse) ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
+
+    # --- Full-run cache: skip eval if a complete run with same sp_hash exists ---
+    if store and backend_id:
+        sp_h = search_point.sp_hash(prompt_nodes)
+        needed = {d["query"] for d in dataset}
+        for entry in store.dataset_runs.list_all(backend_id):
+            if entry.get("sp_hash") != sp_h:
+                continue
+            if entry.get("item_count", 0) < len(needed):
+                continue
+            detail = store.dataset_runs.load_by_id(backend_id, entry["run_id"])
+            if not detail or detail.get("partial"):
+                continue
+            stored_queries = {r["query"] for r in detail["dataset_run_items"]}
+            if not needed <= stored_queries:
+                continue
+            # Filter to requested dataset queries (stored run may be a superset)
+            results = [r for r in detail["dataset_run_items"] if r["query"] in needed]
+            scores = detail["scores"]
+            logger.info(
+                "Full-run cache hit for %s via %s (%d items, acc=%.1f%%)",
+                run_id,
+                entry["run_id"],
+                len(results),
+                scores.get("accuracy", 0) * 100,
+            )
+            if on_result:
+                for i, r in enumerate(results):
+                    on_result(r, i, len(results))
+            return results, scores, True
+
     # Prefix display name with experiment_id for discoverability
     display_name = f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id else safe_label
 

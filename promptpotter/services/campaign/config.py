@@ -217,6 +217,15 @@ class RunConfig(BaseModel):
         description="Stop after L1 generate (before eval) for human/AI review",
     )
 
+    # Cycle identity mode
+    strict_cycle_identity: bool = Field(
+        False,
+        description="Include loop-control params (max_rounds, patience, "
+        "degradation_threshold) in cycle identity hash. Default False = experiment "
+        "mode where these can be tweaked freely between runs. Set True for "
+        "publication experiments requiring exact reproducibility.",
+    )
+
     @classmethod
     def from_campaign_config(
         cls,

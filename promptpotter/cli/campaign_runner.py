@@ -439,11 +439,10 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         baseline_acc,
     )
 
-    # HITL: --round sets pause_before_eval via the control surface
+    # --round: complete one full round then stop. --auto: full loop.
+    campaign_config.setdefault("optimization", {}).pop("pause_before_eval", None)
     if args.round:
-        campaign_config.setdefault("optimization", {})["pause_before_eval"] = True
-    else:
-        campaign_config.setdefault("optimization", {}).pop("pause_before_eval", None)
+        campaign_config.setdefault("optimization", {})["max_rounds"] = 1
 
     ctx.state["phase"] = "optimizing"
     session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)

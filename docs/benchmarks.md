@@ -207,6 +207,54 @@ Isolate each optimization layer's contribution:
 
 ---
 
+## Reproducibility: Cycle Identity Modes
+
+PromptPotter uses a **cycle identity hash** to track optimization campaigns. The same cycle_id means the same experiment — candidates, results, and checkpoints are shared. Two modes control what goes into the hash:
+
+### Experiment mode (default)
+
+The cycle identity hashes only the **problem definition**:
+- `active_steps` — which pipeline nodes are active
+- `baseline_rendered` — the starting prompt
+- `dataset_pairs` — the evaluation questions
+
+Everything else is excluded (`TUNING_KEYS` in `lifecycle.py`):
+- **Loop control:** `max_rounds`, `l1_patience`, `l2_patience`, `l3_patience`, `degradation_threshold`
+- **Optimization strategy:** `model` (optimizer LLM), `seed`, `n_variants`, `creativity`, `improvement_threshold`, `sp_budget_ttest`
+
+This means you can freely:
+- Switch between `--round` (one round) and `--auto` (full loop) without losing history
+- Change the optimizer model, adjust patience, tweak creativity or n_variants
+- Interrupt and resume — cached candidates and dataset_run results carry over
+
+Only changing the dataset, baseline prompt, or active pipeline steps starts a new experiment.
+
+### Strict mode (for publication)
+
+Enable by adding `"strict_cycle_identity": true` to `campaign.json`:
+
+```json
+{
+  "campaign_config": {
+    "strict_cycle_identity": true,
+    ...
+  }
+}
+```
+
+Every parameter, including loop-control knobs, becomes part of the cycle identity. Changing `max_rounds` from 15 to 10 creates a distinct experiment. Use this when:
+- Running definitive experiments for benchmark tables
+- Generating ablation studies or statistical significance claims
+- Anyone re-running with the same config must get the exact same cycle_id
+
+### Recommended workflow
+
+1. **Explore** in experiment mode (default) — iterate freely, adjust patience, interrupt and resume
+2. **Lock down** — once you have a good config, set `"strict_cycle_identity": true` and run from scratch
+3. **Publish** — the strict cycle_id guarantees exact reproducibility
+
+---
+
 ## Reproducing Results
 
 ### Generate supplemental materials from completed campaigns
