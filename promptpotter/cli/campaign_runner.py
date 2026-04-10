@@ -12,7 +12,7 @@ Usage:
     python -m promptpotter.cli.campaign_runner task-context --task-file PATH
     python -m promptpotter.cli.campaign_runner scan --variants-file PATH
     python -m promptpotter.cli.campaign_runner scan-results
-    python -m promptpotter.cli.campaign_runner optimize [--round | --auto]
+    python -m promptpotter.cli.campaign_runner optimize [--round]
     python -m promptpotter.cli.campaign_runner control --pause | --resume | --stop
     python -m promptpotter.cli.campaign_runner results [--save]
     python -m promptpotter.cli.campaign_runner status
@@ -439,7 +439,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         baseline_acc,
     )
 
-    # --round: complete one full round then stop. --auto: full loop.
+    # --round: complete one full round then stop (default: full loop).
     campaign_config.setdefault("optimization", {}).pop("pause_before_eval", None)
     if args.round:
         campaign_config.setdefault("optimization", {})["max_rounds"] = 1
@@ -481,7 +481,16 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     finally:
         set_round_recorder(None)
 
-    _state_path = session_dir / "campaign_state.json"
+        # Persist cycle_id to session.json even on interrupt — read from
+        # campaign_state.json which gets it from the emitter at init time.
+        _state_path = session_dir / "campaign_state.json"
+        if _state_path.exists() and not ctx.state.get("cycle_id"):
+            try:
+                _live = json.loads(_state_path.read_text(encoding="utf-8"))
+                if _live.get("cycle_id"):
+                    ctx.state["cycle_id"] = _live["cycle_id"]
+            except (json.JSONDecodeError, OSError):
+                pass
 
     ctx.state["phase"] = "optimize"
     if cycle_result:
@@ -808,10 +817,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("show-scan", help="Show scan analytics and seed campaign")
 
     p_opt = sub.add_parser("optimize", help="Run optimization loop")
-    p_opt.add_argument("--round", action="store_true", help="Pause after L1 generate for review")
-    p_opt.add_argument(
-        "--auto", action="store_true", help="Full loop (default — use dashboard to control)"
-    )
+    p_opt.add_argument("--round", action="store_true", help="Complete one round then stop")
 
     p_ctl = sub.add_parser("control", help="Write control signals to dashboard")
     ctl_mode = p_ctl.add_mutually_exclusive_group(required=True)

@@ -145,21 +145,89 @@ L1 Generate is the sole `pipeline_params` decider. L2 refines context and meta-s
 - **Writing**: all `dataset_runs`, campaign data, Langfuse traces tagged with `experiment_id`
 - **Reading**: results found by step-sequence matching + prompt hash + parameter value extraction, not `experiment_id`
 
-## ProjectStore Disk Layout
+## Persistence Architecture
+
+Two independent persistence tiers with different lifecycles:
+
+### Tier 1 — Session State (ephemeral per-run)
 
 ```
-.promptpotter/projects/{backend_id}/
+{backend_id}/sessions/{session_id}/
+  session.json              # init config, phase tracking, task_context
+  campaign_state.json       # live UI dashboard + HITL control surface
+  campaign_output.log       # append-only query eval trace
+  campaign_log.md           # human-readable round-by-round summary
+  rounds/
+    round_NNN.json          # action trace (LLM calls, decisions)
+    round_NNN_l2.json       # L2 escalation trace (if triggered)
+```
+
+Session state tracks a single optimization run. Survives interrupts for display continuity but is **not** the source of truth for optimizer resume.
+
+### Tier 2 — Campaign Store (source of truth for resume)
+
+```
+{backend_id}/campaigns/
+  {cycle_id}.json                   # campaign registry: config, trial index, status
+  {cycle_id}/
+    trial_NNNN.json                 # round checkpoint: full opt_sp, results, escalation
+    round_NNNN_candidates.json      # pre-eval candidate checkpoint (saved BEFORE eval)
+```
+
+The campaign store is keyed by `cycle_id` (content hash of baseline + dataset + pipeline). Resume flow:
+
+1. `lifecycle.py` counts completed `trials` in `{cycle_id}.json` → `resumed_from_round`
+2. `cycle_init.py:_restore_from_checkpoint()` loads `trial_{N-1}.json` → hydrates `opt_sp`, escalation counters
+3. `round_execution.py:_generate_or_load_candidates()` loads `round_NNNN_candidates.json` → skips L1 generation
+
+Trial files are written on round completion. Candidate files are written before evaluation starts. This means a mid-round interrupt preserves generated candidates but not partial evaluation progress.
+
+### `campaign_state.json` — UI & Control Surface
+
+This file is the **live dashboard** for `show-status`, the webapp, and HITL checkpoints. It is **not** an optimizer checkpoint — optimizer resume uses trial files in the campaign store.
+
+**Written by:** `CampaignPersistenceEmitter` (updated on every callback event via read-merge-write).
+
+**Read by:** `show-status` CLI, webapp, `CampaignControlReader` (control signals).
+
+**Bidirectional control protocol:** The `control` section is a shared surface. The emitter writes execution state; the user/webapp writes control signals. The merge logic preserves user-edited `control` fields on every flush.
+
+```json
+{
+  "control": {
+    "requested_state": "running",       // user sets: "pause", "resume", "stop"
+    "pause_before_l2_eval": false       // user sets: true to pause before L2
+  }
+}
+```
+
+**Schema sections:**
+
+| Section | Fields | Purpose |
+|---------|--------|---------|
+| Execution | `phase`, `round`, `candidate`, `query`, `patience`, `layer`, `cycle_id` | Current position in the optimization loop |
+| Timing | `elapsed_s`, `round_elapsed_s`, `avg_query_time_s`, `eta_s` | Performance tracking |
+| Pipeline | `active_nodes`, `excluded_nodes`, `terminated_at`, `cache_hit_rate` | Pipeline health |
+| Quality | `hit_rate`, `degraded_count`, `error_count` | Eval quality metrics |
+| Best | `best`, `best_round`, `improvement_streak` | Optimization progress |
+| Historical | `rounds_completed`, `total_queries_evaluated`, `total_backend_calls` | Cumulative counters (carried across resumes for display continuity) |
+| Config | `model`, `n_variants`, `sp_budget_ttest` | Snapshot of active config |
+| Accumulators | `current_queries`, `round_candidates`, `last_round` | Ephemeral per-round/candidate data (reset on transitions) |
+| Control | `requested_state`, `pause_before_l2_eval` | Bidirectional HITL surface |
+
+### Shared Data Stores
+
+```
+{backend_id}/
   backend.json
   sync/experiments/{id}.json
   datasets/{name}.json
-  dataset_runs/{run_id}.json
+  dataset_runs/{run_id}.json          # content-addressed eval archive (shared across all paths)
   dataset_runs.json
   smart_search_plans/{plan_id}.json
-  campaigns/{campaign_id}.json
-  campaigns/{campaign_id}/trial_NNNN.json
   obs/langfuse/events.jsonl
-  search_memory.json                          # (M8) materialized view index
-  intermediate_cache/{node}_{key}.json          # per-node output cache
+  search_memory.json                  # (M8) materialized view index
+  intermediate_cache/{node}_{key}.json  # per-node output cache
 ```
 
 `dataset_runs/` is shared across all eval paths (content-addressed). `campaigns/` holds optimizer-layer trial checkpoints per round.

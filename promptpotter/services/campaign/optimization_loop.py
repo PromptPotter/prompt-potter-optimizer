@@ -316,8 +316,8 @@ async def run_optimization(
     hard_cap = config.hard_cap
 
     try:
-        round_num = 0
-        clean_rounds = 0
+        round_num = resumed_from_round
+        clean_rounds = resumed_from_round
         max_rounds = config.max_rounds or 999
 
         while clean_rounds < max_rounds and round_num < hard_cap:

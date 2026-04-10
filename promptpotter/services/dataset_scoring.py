@@ -231,9 +231,13 @@ async def _run_query_loop(
                 # Prior-result cache: reuse from previous dataset_runs
                 if query in _prior:
                     n_prior += 1
-                    results.append(_prior[query])
+                    cached_r = {**_prior[query], "cached": True}
+                    pd = cached_r.get("pipeline_data")
+                    if isinstance(pd, dict):
+                        cached_r["pipeline_data"] = {**pd, "total_time": 0.0}
+                    results.append(cached_r)
                     if on_result is not None:
-                        on_result(_prior[query], i, len(dataset))
+                        on_result(cached_r, i, len(dataset))
                     continue
 
                 result = await measure_sample(

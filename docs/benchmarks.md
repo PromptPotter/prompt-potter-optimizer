@@ -223,7 +223,7 @@ Everything else is excluded (`TUNING_KEYS` in `lifecycle.py`):
 - **Optimization strategy:** `model` (optimizer LLM), `seed`, `n_variants`, `creativity`, `improvement_threshold`, `sp_budget_ttest`
 
 This means you can freely:
-- Switch between `--round` (one round) and `--auto` (full loop) without losing history
+- Switch between `--round` (one round) and full loop (default, no flag) without losing history
 - Change the optimizer model, adjust patience, tweak creativity or n_variants
 - Interrupt and resume — cached candidates and dataset_run results carry over
 

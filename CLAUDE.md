@@ -37,7 +37,7 @@ python -m promptpotter.cli.campaign_runner set-task \
 python -m promptpotter.cli.campaign_runner scan \
     --variants-file datasets/lca-termnorm/scan_variants.json
 python -m promptpotter.cli.campaign_runner show-scan
-python -m promptpotter.cli.campaign_runner optimize --auto     # full loop
+python -m promptpotter.cli.campaign_runner optimize             # full loop (default)
 python -m promptpotter.cli.campaign_runner optimize --round    # one complete round → stop
 python -m promptpotter.cli.campaign_runner show-results
 python -m promptpotter.cli.campaign_runner show-status         # live dashboard
@@ -115,7 +115,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 2. **CLI**: `promptpotter/cli/campaign_runner.py` — `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
 3. **FastAPI API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`
 
-**CLI session directory** (`{backend_id}/sessions/{session_id}/`): `session.json`, `campaign_state.json` (live state, `control.requested_state` for pause/resume/stop), `campaign_output.log`, `campaign_log.md`.
+**Persistence: two tiers.** Session state (`sessions/{session_id}/`) is the live UI dashboard + HITL control surface. Campaign store (`campaigns/{cycle_id}/`) is the source of truth for optimizer resume (trial checkpoints, pre-eval candidates). See `docs/architecture.md § Persistence Architecture` for the full layout, `campaign_state.json` schema, and resume flow.
 
 ### Key Patterns
 

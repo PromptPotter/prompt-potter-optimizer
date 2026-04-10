@@ -369,6 +369,7 @@ async def init_cycle_state(
             config,
             session_store=_session_store,
             resume_from=resume_from,
+            cycle_id=cycle_id,
         )
 
     return CycleInit(

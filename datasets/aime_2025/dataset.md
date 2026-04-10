@@ -26,7 +26,7 @@
 
 ## Cycle Identity
 
-Default campaign.json uses experiment mode (no `strict_cycle_identity`). You can freely switch between `--round` and `--auto`, adjust patience, and interrupt/resume without losing campaign history. For publication runs, add `"strict_cycle_identity": true` to `campaign.json` to lock all parameters into the cycle identity.
+Default campaign.json uses experiment mode (no `strict_cycle_identity`). You can freely switch between `--round` and full loop, adjust patience, and interrupt/resume without losing campaign history. For publication runs, add `"strict_cycle_identity": true` to `campaign.json` to lock all parameters into the cycle identity.
 
 ## Pipeline Notes
 
@@ -70,8 +70,8 @@ python -m promptpotter.cli.campaign_runner optimize --round
 # 8. Resume: completed candidates should cache-hit (0.0s), rest continue fresh
 python -m promptpotter.cli.campaign_runner optimize --round
 
-# 9. Switch to full auto — same cycle, no data loss, continues from round 3+
-python -m promptpotter.cli.campaign_runner optimize --auto
+# 9. Switch to full loop — same cycle, no data loss, continues from round 3+
+python -m promptpotter.cli.campaign_runner optimize
 ```
 
 ### What to verify

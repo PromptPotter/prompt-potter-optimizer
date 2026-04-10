@@ -32,10 +32,37 @@ __all__ = ["CampaignControlReader", "CampaignPersistenceEmitter", "RoundRecorder
 
 
 class CampaignPersistenceEmitter:
-    """Writes campaign_state.json + campaign_output.log during optimization.
+    """Writes ``campaign_state.json`` + ``campaign_output.log`` during optimization.
 
     Instantiated by the optimization loop — entry points never create this
     directly.  All persistent campaign artifacts flow through here.
+
+    ``campaign_state.json`` is the **live UI dashboard + bidirectional HITL
+    control surface**.  It is exposed directly to the webapp and to
+    ``show-status``.  Users may edit the ``control`` section at checkpoints
+    (pause / resume / stop).
+
+    **This file is NOT an optimizer checkpoint.**  Optimizer resume uses trial
+    files in the campaign store (``campaigns/{cycle_id}/trial_NNNN.json``)
+    via ``_restore_from_checkpoint()`` in ``cycle_init.py``.  The counters
+    here (``rounds_completed``, ``best``, etc.) are for display continuity
+    only — see ``load_resume_state()``.
+
+    Schema sections::
+
+        execution   — phase, round, candidate, query, patience, layer, cycle_id
+        timing      — elapsed_s, round_elapsed_s, avg_query_time_s, eta_s
+        pipeline    — active_nodes, excluded_nodes, terminated_at, cache_hit_rate
+        quality     — hit_rate, degraded_count, error_count
+        best        — best, best_round, improvement_streak
+        historical  — rounds_completed, total_queries_evaluated, total_backend_calls
+        config      — model, n_variants, sp_budget_ttest
+        accumulators— current_queries (reset per candidate), round_candidates
+                      (reset per round), last_round
+        control     — bidirectional: requested_state, pause_before_l2_eval
+
+    See ``docs/architecture.md § Persistence Architecture`` for the full
+    two-tier layout and resume flow.
     """
 
     def __init__(
@@ -45,6 +72,7 @@ class CampaignPersistenceEmitter:
         *,
         session_store: SessionStore | None = None,
         resume_from: dict[str, Any] | None = None,
+        cycle_id: str | None = None,
     ) -> None:
         self.state_path = session_dir / "campaign_state.json"
         self.log_path = session_dir / "campaign_output.log"
@@ -69,7 +97,7 @@ class CampaignPersistenceEmitter:
             "baseline": r.get("baseline", 0.0),
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
-            "cycle_id": None,
+            "cycle_id": cycle_id,
             "stop_reason": None,
             "pause_point": None,
             "log_tail": "",
@@ -99,10 +127,10 @@ class CampaignPersistenceEmitter:
             "model": config.model or "",
             "n_variants": config.n_variants,
             "sp_budget_ttest": config.sp_budget_ttest,
-            # Accumulators (reset on transitions)
+            # Accumulators (carried over on resume, reset on transitions)
             "current_queries": [],
-            "round_candidates": [],
-            "last_round": None,
+            "round_candidates": r.get("round_candidates", []),
+            "last_round": r.get("last_round"),
             # Bidirectional control surface (defaults — CampaignControlReader reads back)
             "control": {
                 "requested_state": "running",
@@ -138,7 +166,13 @@ class CampaignPersistenceEmitter:
         session_dir: Path,
         baseline: float = 0.0,
     ) -> dict[str, Any] | None:
-        """Load prior campaign_state.json to build resume_from dict."""
+        """Load UI counter state from prior ``campaign_state.json`` for display continuity.
+
+        This is NOT optimizer resume — optimizer state is restored from trial
+        checkpoint files in ``_restore_from_checkpoint()`` (``cycle_init.py``).
+        These fields are purely cosmetic counters so the dashboard doesn't
+        reset to zero on resume.
+        """
         state_path = session_dir / "campaign_state.json"
         if not state_path.exists():
             return None
@@ -153,6 +187,8 @@ class CampaignPersistenceEmitter:
             "rounds_completed": prior.get("rounds_completed", 0),
             "total_queries_evaluated": prior.get("total_queries_evaluated", 0),
             "total_backend_calls": prior.get("total_backend_calls", 0),
+            "round_candidates": prior.get("round_candidates", []),
+            "last_round": prior.get("last_round"),
         }
 
     # -- Callbacks -------------------------------------------------------------

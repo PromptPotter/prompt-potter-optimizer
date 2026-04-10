@@ -26,7 +26,7 @@
 
 ## Cycle Identity
 
-Default campaign.json uses experiment mode (no `strict_cycle_identity`). You can freely switch between `--round` and `--auto`, adjust patience, and interrupt/resume without losing campaign history. For publication runs, add `"strict_cycle_identity": true` to `campaign.json` to lock all parameters into the cycle identity.
+Default campaign.json uses experiment mode (no `strict_cycle_identity`). You can freely switch between `--round` and full loop, adjust patience, and interrupt/resume without losing campaign history. For publication runs, add `"strict_cycle_identity": true` to `campaign.json` to lock all parameters into the cycle identity.
 
 ## Pipeline Notes
 

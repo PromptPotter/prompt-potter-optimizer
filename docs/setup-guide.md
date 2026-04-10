@@ -75,8 +75,8 @@ python -m promptpotter.cli.campaign_runner init \
     --config datasets/lca-termnorm/campaign.json \
     --skip-baseline
 
-# Run optimization (autonomous — L1/L2/L3 until convergence)
-python -m promptpotter.cli.campaign_runner optimize --auto
+# Run optimization (L1/L2/L3 until convergence)
+python -m promptpotter.cli.campaign_runner optimize
 
 # View results
 python -m promptpotter.cli.campaign_runner results

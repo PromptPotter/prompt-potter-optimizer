@@ -76,7 +76,7 @@ def cycle_config_identity(
         else — optimizer model, seed, n_variants, creativity, patience,
         thresholds — is excluded (see ``TUNING_KEYS``).  This means you
         can freely tweak optimization strategy, switch between ``--round``
-        and ``--auto``, change the optimizer model, or interrupt and resume
+        and full loop, change the optimizer model, or interrupt and resume
         without creating a new cycle.  Cached candidates and dataset_run
         results carry over across invocations.
 

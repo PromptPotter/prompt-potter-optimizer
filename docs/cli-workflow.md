@@ -16,7 +16,7 @@ python -m promptpotter.cli.campaign_runner <subcommand> [options]
 init ──→ [set-task] ──→ [scan] ──→ [show-scan] ──→ optimize ──→ show-results ──→ export
 ```
 
-Steps in brackets are optional. Minimum viable workflow: `init` then `optimize --auto`.
+Steps in brackets are optional. Minimum viable workflow: `init` then `optimize`.
 
 | Step | Command | What it does | Reads from |
 |------|---------|-------------|------------|
@@ -77,8 +77,8 @@ python -m promptpotter.cli.campaign_runner optimize --round
 # Resume evaluation of reviewed candidates
 python -m promptpotter.cli.campaign_runner optimize --evaluate
 
-# Full autonomous loop (L1→L2→L3 until convergence)
-python -m promptpotter.cli.campaign_runner optimize --auto
+# Full autonomous loop (L1→L2→L3 until convergence — default)
+python -m promptpotter.cli.campaign_runner optimize
 ```
 
 The `--round` / `--evaluate` split enables HITL: after `--round`, candidates are persisted to `round_NNNN_candidates.json`. You can inspect, edit, or approve them before running `--evaluate`.
@@ -152,8 +152,8 @@ python -m promptpotter.cli.campaign_runner scan \
 # 4. (Optional) Seed campaign from scan winner
 python -m promptpotter.cli.campaign_runner show-scan
 
-# 5. Run optimization (autonomous mode)
-python -m promptpotter.cli.campaign_runner optimize --auto
+# 5. Run optimization (full loop — default)
+python -m promptpotter.cli.campaign_runner optimize
 
 # 6. View results
 python -m promptpotter.cli.campaign_runner show-results
