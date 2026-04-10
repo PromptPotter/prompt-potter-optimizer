@@ -21,9 +21,8 @@ from promptpotter.services.campaign.formatting import (
     L2IntelligenceData,
     assess_candidate_diversity,
     build_candidate_comparison,
-    build_l2_search_memory_context,
-    build_l3_search_memory_context,
     build_round_trajectory,
+    build_strategic_search_memory_context,
     classify_trajectory,
     format_l2_intelligence,
 )
@@ -100,7 +99,10 @@ def _build_l2_prompt(
             warning_inventory=opt_sp.warning_inventory or None,
             critique_text=opt_sp.critique_text,
             l2_directive=opt_sp.l2_directive,
-            search_memory_context=build_l2_search_memory_context(search_memory),
+            search_memory_context=build_strategic_search_memory_context(
+                search_memory,
+                include_correlations=True,
+            ),
             round_trajectory=build_round_trajectory(rounds) if rounds else None,
             trajectory_classification=classify_trajectory(rounds) if rounds else None,
             candidate_comparison=(
@@ -268,7 +270,7 @@ async def modify_plan(
 
     # SearchMemory intelligence — aggregate strategic picture for L3
     sm_section = ""
-    sm_ctx = build_l3_search_memory_context(search_memory)
+    sm_ctx = build_strategic_search_memory_context(search_memory, include_clusters=True)
     if sm_ctx:
         sm_lines = ["HISTORICAL INTELLIGENCE:"]
         if sm_ctx.get("axis_rankings"):

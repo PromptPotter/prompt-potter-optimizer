@@ -136,6 +136,56 @@ class EscalationCounters:
     best_composite_at_l2_entry: float = 0.0
     best_composite_at_l3_entry: float = 0.0
 
+    def record_l2_outcome(self, best_composite: float) -> bool:
+        """Update L2 stall count. Returns True if L2 is stalled."""
+        improved = best_composite > self.best_composite_at_l2_entry
+        self.l2_stall_count = 0 if improved or self.l2_round == 0 else self.l2_stall_count + 1
+        return not improved and self.l2_round > 0
+
+    def record_l3_outcome(self, best_composite: float) -> bool:
+        """Update L3 stall count. Returns True if L3 is stalled."""
+        improved = best_composite > self.best_composite_at_l3_entry
+        self.l3_stall_count = 0 if improved or self.l3_round == 0 else self.l3_stall_count + 1
+        return not improved and self.l3_round > 0
+
+    def reset_for_l3(self, best_accuracy: float, best_composite: float) -> None:
+        """Reset L2 counters when L3 takes over."""
+        self.l2_stall_count = 0
+        self.l2_round = 0
+        self.best_accuracy_at_l2_entry = best_accuracy
+        self.best_composite_at_l2_entry = best_composite
+
+    def record_l2_entry(self, best_accuracy: float, best_composite: float) -> None:
+        """Record baseline at L2 transition."""
+        self.l2_round += 1
+        self.best_accuracy_at_l2_entry = best_accuracy
+        self.best_composite_at_l2_entry = best_composite
+
+    def record_l3_entry(self, best_accuracy: float, best_composite: float) -> None:
+        """Record baseline at L3 transition."""
+        self.l3_round += 1
+        self.best_accuracy_at_l3_entry = best_accuracy
+        self.best_composite_at_l3_entry = best_composite
+
+    def to_checkpoint_dict(self) -> dict[str, int | float]:
+        """Serialize for checkpoint persistence."""
+        return {
+            "l2_round": self.l2_round,
+            "l3_round": self.l3_round,
+            "l2_stall_count": self.l2_stall_count,
+            "l3_stall_count": self.l3_stall_count,
+        }
+
+    @classmethod
+    def from_checkpoint_dict(cls, d: dict) -> EscalationCounters:
+        """Deserialize from checkpoint."""
+        return cls(
+            l2_round=d.get("l2_round", 0),
+            l3_round=d.get("l3_round", 0),
+            l2_stall_count=d.get("l2_stall_count", 0),
+            l3_stall_count=d.get("l3_stall_count", 0),
+        )
+
 
 @dataclass
 class LoopState:

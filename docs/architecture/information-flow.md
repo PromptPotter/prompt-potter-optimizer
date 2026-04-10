@@ -52,17 +52,17 @@ Each consumer queries a **tailored subset** via a dedicated builder. Critique is
 
 | Method | L1 Generate | Critique | L2 Refine | L3 Plan |
 |--------|-------------|----------|-----------|---------|
-| `failure_clusters()` | `build_l1_search_memory_context()` | inline `round_execution.py` | — | `build_l3_search_memory_context()` |
+| `failure_clusters()` | `build_l1_search_memory_context()` | `build_critique_search_memory_context()` | — | `build_strategic_search_memory_context(..., include_clusters=True)` |
 | `dead_queries()` | `build_l1_search_memory_context()` | — | — | — |
-| `axis_rankings()` | `build_l1_search_memory_context()` (top 3) | — | `build_l2_search_memory_context()` (top 5) | `build_l3_search_memory_context()` (top 5) |
+| `axis_rankings()` | `build_l1_search_memory_context()` (top 3) | `build_critique_search_memory_context()` (top 3) | `build_strategic_search_memory_context()` (top 5) | `build_strategic_search_memory_context()` (top 5) |
 | `top_k_values()` | `build_l1_search_memory_context()` | — | — | — |
-| `discriminating_queries()` | — | inline `round_execution.py` | — | — |
-| `bottleneck_distribution()` | — | — | `build_l2_search_memory_context()` | `build_l3_search_memory_context()` |
-| `persistent_failures()` | — | inline (tractability profiles) | `build_l2_search_memory_context()` | `build_l3_search_memory_context()` |
-| `exhausted_axes()` | — | inline (axis exhaustion) | — | — |
-| `axis_value_trend()` | — | inline (value trends) | — | — |
+| `discriminating_queries()` | — | `build_critique_search_memory_context()` | — | — |
+| `bottleneck_distribution()` | — | — | `build_strategic_search_memory_context()` | `build_strategic_search_memory_context()` |
+| `persistent_failures()` | — | `build_critique_search_memory_context()` (tractability) | `build_strategic_search_memory_context()` | `build_strategic_search_memory_context()` |
+| `exhausted_axes()` | — | `build_critique_search_memory_context()` | — | — |
+| `axis_value_trend()` | — | `build_critique_search_memory_context()` | — | — |
 | `intractable_queries_ci()` | — | — | — | — |
-| `parameter_failure_correlation()` | — | — | `build_l2_search_memory_context()` | — |
+| `parameter_failure_correlation()` | — | — | `build_strategic_search_memory_context(..., include_correlations=True)` | — |
 
 ### Planned Intelligence Extensions
 
@@ -75,7 +75,7 @@ By design, L1 stays clean — it generates candidates. Deeper sample intelligenc
 | **Round trajectory** | Strategic | L2 Refine — `build_round_trajectory()` | Done |
 | **Candidate comparison** | Strategic | L2 Refine — `build_candidate_comparison()` | Done |
 | **Failure group × axis** | Strategic | L2 Refine — `parameter_failure_correlation()` | Done (scan-only producer; periodic refresh planned) |
-| **L3 SearchMemory intelligence** | Strategic | L3 Plan — `build_l3_search_memory_context()` | Done |
+| **L3 SearchMemory intelligence** | Strategic | L3 Plan — `build_strategic_search_memory_context(..., include_clusters=True)` | Done |
 | **Critique tractability profiles** | Every-round | Critique — intractable/chronic/intermittent classification | Done |
 | **Axis exhaustion detection** | Every-round | Critique — `exhausted_axes()` | Done |
 | **Value momentum/direction** | Every-round | Critique — `axis_value_trend()` | Done |

@@ -280,6 +280,10 @@ class SearchMemory:
         exhausted.sort(key=lambda a: a.effect_size)
         return exhausted
 
+    def values_tested_count(self, axis: str) -> int:
+        """Return how many distinct values have been tested for *axis*."""
+        return len(self._axis_values.get(axis, {}))
+
     def axis_value_trend(self, axis: str) -> str:
         """Analyze accuracy trend across numeric values for an axis.
 

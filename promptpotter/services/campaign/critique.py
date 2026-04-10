@@ -24,7 +24,11 @@ from promptpotter.shared.errors import is_error_result
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.models.query_result import QueryResult
+    from promptpotter.services.campaign.config import RunConfig
+    from promptpotter.services.campaign.state import LoopState
     from promptpotter.services.llm_client import LLMClientBase
+
+    from .l1_optimizer import L1ScoringResult
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +36,7 @@ __all__ = [
     "CritiqueAgent",
     "CritiqueContext",
     "assemble_critique_sections",
+    "candidate_keys_from_schema",
     "extract_warning_types",
     "format_critique_for_prompt",
     "get_candidates",
@@ -73,6 +78,86 @@ class CritiqueContext:
 
     # SearchMemory context (M8 Wave 3c)
     search_memory_context: dict | None = None
+
+    @classmethod
+    def from_round_state(
+        cls,
+        state: LoopState,
+        scoring_result: L1ScoringResult,
+        config: RunConfig,
+        *,
+        round_num: int,
+        search_memory_context: dict | None = None,
+    ) -> CritiqueContext:
+        """Build from loop state, scoring result, and config.
+
+        Computes cross-candidate diff and trajectory classification,
+        enriching the search_memory_context dict in-place.
+        """
+        from promptpotter.services.campaign.formatting import (
+            build_cross_candidate_diff,
+            classify_trajectory,
+        )
+
+        # Enrich SM context with cross-candidate diff + trajectory
+        sm_ctx = search_memory_context
+        diff = build_cross_candidate_diff(
+            scoring_result.winner_results,
+            scoring_result.all_candidate_results,
+            scoring_result.candidate_scores,
+        )
+        trajectory = classify_trajectory(state.rounds)
+        traj_str = (
+            f"{trajectory['classification']}: {trajectory['description']}"
+            if trajectory and trajectory["classification"] != "healthy"
+            else None
+        )
+        if diff or traj_str:
+            if sm_ctx is None:
+                sm_ctx = {}
+            if diff:
+                sm_ctx["cross_candidate_diff"] = diff
+            if traj_str:
+                sm_ctx["trajectory"] = traj_str
+
+        return cls(
+            results=scoring_result.winner_results,
+            accuracy=scoring_result.winner_accuracy,
+            composite=scoring_result.winner_composite,
+            degraded_queries=scoring_result.degraded_queries,
+            round_history=[
+                {
+                    "round": r.round,
+                    "accuracy": r.accuracy,
+                    "composite": r.composite,
+                    "pipeline_params": r.pipeline_params,
+                    "degraded": getattr(r, "degraded_queries", 0),
+                    "n_candidates": len(r.candidate_scores),
+                }
+                for r in state.rounds
+            ],
+            current_round=round_num,
+            stall_count=state.stall_count,
+            best_accuracy=state.best_accuracy,
+            best_round=state.best_round,
+            pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),
+            candidate_keys=candidate_keys_from_schema(config.pipeline_schema),
+            pipeline_schema=config.pipeline_schema,
+            degradation_threshold=config.critique_degradation_threshold,
+            near_miss_ratio=config.critique_near_miss_ratio,
+            search_memory_context=sm_ctx,
+        )
+
+
+def candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
+    """Derive pipeline_data candidate keys from schema's ranker/candidate_source nodes."""
+    if not schema:
+        return []
+    keys: list[str] = []
+    for node in schema.nodes:
+        if node.node_type in ("ranker", "candidate_source"):
+            keys.extend(node.output_keys)
+    return keys
 
 
 def get_candidates(r: Mapping[str, Any], candidate_keys: list[str] | None = None) -> list:

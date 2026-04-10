@@ -479,6 +479,24 @@ _DEFAULT_SECTIONS = [
 ]
 
 
+def _load_campaigns(
+    store: ProjectStore,
+    backend_id: str,
+    campaign_ids: list[str] | None = None,
+) -> list[dict]:
+    """Load campaigns from store, filtering by IDs if provided."""
+    if campaign_ids:
+        return [
+            c for cid in campaign_ids if (c := store.campaigns.load(backend_id, cid)) is not None
+        ]
+    summaries = store.campaigns.list_all(backend_id)
+    return [
+        c
+        for s in summaries
+        if (c := store.campaigns.load(backend_id, s["campaign_id"])) is not None
+    ]
+
+
 def generate_supplemental(
     store: ProjectStore,
     backend_id: str,
@@ -509,19 +527,7 @@ def generate_supplemental(
         Complete markdown string.
     """
     active_sections = sections or _DEFAULT_SECTIONS
-
-    # Load campaigns
-    if campaign_ids:
-        campaigns = [
-            c for cid in campaign_ids if (c := store.campaigns.load(backend_id, cid)) is not None
-        ]
-    else:
-        summaries = store.campaigns.list_all(backend_id)
-        campaigns = [
-            c
-            for s in summaries
-            if (c := store.campaigns.load(backend_id, s["campaign_id"])) is not None
-        ]
+    campaigns = _load_campaigns(store, backend_id, campaign_ids)
 
     if not campaigns:
         return "# Supplemental Materials\n\nNo campaigns found.\n"
@@ -600,17 +606,7 @@ def generate_export_json(
 
     Suitable for inclusion in a paper repository or supplemental data package.
     """
-    if campaign_ids:
-        campaigns = [
-            c for cid in campaign_ids if (c := store.campaigns.load(backend_id, cid)) is not None
-        ]
-    else:
-        summaries = store.campaigns.list_all(backend_id)
-        campaigns = [
-            c
-            for s in summaries
-            if (c := store.campaigns.load(backend_id, s["campaign_id"])) is not None
-        ]
+    campaigns = _load_campaigns(store, backend_id, campaign_ids)
 
     result: dict[str, Any] = {
         "comparison": compare_campaigns(campaigns) if campaigns else {},

@@ -202,10 +202,7 @@ def _checkpoint_round(
                 "candidates_scored": round_result.candidates_scored,
                 "candidate_scores": list(round_result.candidate_scores),
                 "stall_count": state.stall_count,
-                "l2_stall_count": state.escalation.l2_stall_count,
-                "l3_stall_count": state.escalation.l3_stall_count,
-                "l2_round": state.escalation.l2_round,
-                "l3_round": state.escalation.l3_round,
+                **state.escalation.to_checkpoint_dict(),
                 "opt_search_point": state.opt_sp.model_dump(),
             },
         )

@@ -22,7 +22,10 @@ from promptpotter.services.campaign.critique import (
     sample_thinking_styles,
     update_query_tracker,
 )
-from promptpotter.services.campaign.formatting import candidate_summaries
+from promptpotter.services.campaign.formatting import (
+    build_critique_search_memory_context,
+    candidate_summaries,
+)
 from promptpotter.services.campaign.state import (
     CampaignPhase,
     LoopState,
@@ -62,17 +65,6 @@ class PauseForReviewError(Exception):
         super().__init__(
             f"Paused at {pause_point}: {len(candidates)} candidates (round {round_num})"
         )
-
-
-def _candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
-    """Derive pipeline_data candidate keys from schema's ranker/candidate_source nodes."""
-    if not schema:
-        return []
-    keys: list[str] = []
-    for node in schema.nodes:
-        if node.node_type in ("ranker", "candidate_source"):
-            keys.extend(node.output_keys)
-    return keys
 
 
 async def _generate_or_load_candidates(
@@ -196,108 +188,12 @@ async def _run_critique(
     crit_llm = _llm_client.get_llm_client()
     agent = CritiqueAgent(crit_llm, model=config.model)
 
-    # Build critique-specific SearchMemory context
-    _crit_sm_ctx: dict[str, str] | None = None
-    _sm = state.search_memory
-    if _sm:
-        _crit_sm_ctx = {}
-        _disc = _sm.discriminating_queries()
-        if _disc:
-            _crit_sm_ctx["discriminating_queries"] = f"{len(_disc)} queries vary across configs"
-        _fc = _sm.failure_clusters(3)
-        if _fc:
-            _crit_sm_ctx["failure_clusters"] = "; ".join(
-                f"{c.failure_mode} ({c.fraction:.0%})" for c in _fc
-            )
-        # Tractability profiles — help critique distinguish intractable vs chronic
-        _persistent = _sm.persistent_failures(min_streak=3)
-        if _persistent:
-            intractable = [q for q in _persistent if q.hit_rate == 0]
-            chronic = [q for q in _persistent if q.hit_rate > 0]
-            parts = []
-            if intractable:
-                parts.append(f"{len(intractable)} intractable (never hit in any config)")
-            if chronic:
-                parts.append(f"{len(chronic)} chronic (recently failing but hit_rate > 0)")
-            _crit_sm_ctx["tractability"] = "; ".join(parts)
-        # Axis exhaustion — inform suggested_axes to avoid exhausted axes
-        _exhausted = _sm.exhausted_axes()
-        if _exhausted:
-            _crit_sm_ctx["exhausted_axes"] = "; ".join(
-                f"{a.axis} ({len(_sm._axis_values.get(a.axis, {}))} values tested, "
-                f"effect={a.effect_size:.3f})"
-                for a in _exhausted[:5]
-            )
-        # Value trends — directional guidance for numeric axes
-        _rankings = _sm.axis_rankings()[:3]
-        trend_parts = []
-        for a in _rankings:
-            trend = _sm.axis_value_trend(a.axis)
-            if trend not in ("flat", "non_numeric"):
-                trend_parts.append(f"{a.axis}: {trend}")
-        if trend_parts:
-            _crit_sm_ctx["value_trends"] = "; ".join(trend_parts)
-        if not _crit_sm_ctx:
-            _crit_sm_ctx = None
-
-    # Query improvement attribution — what changes caused query flips
-    if _sm:
-        _attributions = _sm.format_recent_attributions(limit=3)
-        if _attributions:
-            if _crit_sm_ctx is None:
-                _crit_sm_ctx = {}
-            _crit_sm_ctx["improvement_attribution"] = _attributions
-
-    # Cross-candidate failure diff — missed opportunities
-    from promptpotter.services.campaign.formatting import build_cross_candidate_diff
-
-    _diff = build_cross_candidate_diff(
-        scoring_result.winner_results,
-        scoring_result.all_candidate_results,
-        scoring_result.candidate_scores,
-    )
-    if _diff:
-        if _crit_sm_ctx is None:
-            _crit_sm_ctx = {}
-        _crit_sm_ctx["cross_candidate_diff"] = _diff
-
-    # Trajectory classification — deterministic anomaly flag
-    from promptpotter.services.campaign.formatting import classify_trajectory
-
-    _trajectory = classify_trajectory(state.rounds)
-    if _trajectory and _trajectory["classification"] != "healthy":
-        if _crit_sm_ctx is None:
-            _crit_sm_ctx = {}
-        _crit_sm_ctx["trajectory"] = (
-            f"{_trajectory['classification']}: {_trajectory['description']}"
-        )
-
-    cctx = CritiqueContext(
-        results=scoring_result.winner_results,
-        accuracy=scoring_result.winner_accuracy,
-        composite=scoring_result.winner_composite,
-        degraded_queries=scoring_result.degraded_queries,
-        round_history=[
-            {
-                "round": r.round,
-                "accuracy": r.accuracy,
-                "composite": r.composite,
-                "pipeline_params": r.pipeline_params,
-                "degraded": getattr(r, "degraded_queries", 0),
-                "n_candidates": len(r.candidate_scores),
-            }
-            for r in state.rounds
-        ],
-        current_round=round_num,
-        stall_count=state.stall_count,
-        best_accuracy=state.best_accuracy,
-        best_round=state.best_round,
-        pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),
-        candidate_keys=_candidate_keys_from_schema(config.pipeline_schema),
-        pipeline_schema=config.pipeline_schema,
-        degradation_threshold=config.critique_degradation_threshold,
-        near_miss_ratio=config.critique_near_miss_ratio,
-        search_memory_context=_crit_sm_ctx,
+    cctx = CritiqueContext.from_round_state(
+        state,
+        scoring_result,
+        config,
+        round_num=round_num,
+        search_memory_context=build_critique_search_memory_context(state.search_memory),
     )
     result = await agent.run(cctx)
     return format_critique_for_prompt(result)

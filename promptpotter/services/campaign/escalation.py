@@ -224,6 +224,36 @@ def _degradation_reset(
     _maybe_emit_backend_warning(state, config, round_num, on_phase)
 
 
+async def _degradation_reset_and_l2(
+    state: LoopState,
+    config: RunConfig,
+    round_num: int,
+    on_phase: Callable[[PhaseEvent], None] | None,
+    *,
+    obs: ObsLogger | None = None,
+    trace_id: str | None = None,
+    escalation_context: dict | None = None,
+    reset_l3: bool = False,
+) -> None:
+    """Reset degradation counters and trigger a fresh L2 transition."""
+    layer = "L2/L3" if reset_l3 else "L2"
+    logger.debug(
+        "%s patience exhausted during degradation — resetting at round %d",
+        layer,
+        round_num,
+    )
+    _degradation_reset(state, config, round_num, on_phase, reset_l3=reset_l3)
+    await _do_l2_transition(
+        state,
+        config,
+        round_num,
+        on_phase,
+        obs=obs,
+        trace_id=trace_id,
+        escalation_context=escalation_context,
+    )
+
+
 async def _do_l2_transition(
     state: LoopState,
     config: RunConfig,
@@ -276,9 +306,7 @@ async def _do_l2_transition(
     if tr.task_context:
         state.opt_sp.task_context = tr.task_context
     state.opt_sp.l2_directive = tr.l2_directive
-    state.escalation.l2_round += 1
-    state.escalation.best_accuracy_at_l2_entry = state.best_accuracy
-    state.escalation.best_composite_at_l2_entry = state.best_composite
+    state.escalation.record_l2_entry(state.best_accuracy, state.best_composite)
     # Build warning inventory one-liner for display
     _warned_count, _top_warning = warning_summary(state.opt_sp.warning_inventory)
 
@@ -362,13 +390,8 @@ async def _do_l3_transition(
             search_memory=state.search_memory,
         )
     _rebuild_current_sp(state, tr, schema=config.pipeline_schema)
-    state.escalation.l3_round += 1
-    state.escalation.best_accuracy_at_l3_entry = state.best_accuracy
-    state.escalation.best_composite_at_l3_entry = state.best_composite
-    state.escalation.l2_stall_count = 0
-    state.escalation.l2_round = 0
-    state.escalation.best_accuracy_at_l2_entry = state.best_accuracy
-    state.escalation.best_composite_at_l2_entry = state.best_composite
+    state.escalation.record_l3_entry(state.best_accuracy, state.best_composite)
+    state.escalation.reset_for_l3(state.best_accuracy, state.best_composite)
     emit_phase(
         on_phase,
         CampaignPhase.MODIFY_PLAN,
@@ -408,12 +431,8 @@ async def escalate_l2(
     from promptpotter.services.campaign.state import StopReason
 
     esc = state.escalation
+    esc.record_l2_outcome(state.best_composite)
 
-    # Track L2 stall
-    l2_improved = state.best_composite > esc.best_composite_at_l2_entry
-    esc.l2_stall_count = 0 if l2_improved or esc.l2_round == 0 else esc.l2_stall_count + 1
-
-    # Not stalled → plain L2 transition
     l2_stalled = config.l2_patience is not None and esc.l2_stall_count >= config.l2_patience
     if not l2_stalled:
         await _do_l2_transition(
@@ -434,28 +453,18 @@ async def escalate_l2(
                 return StopReason.USER_STOPPED
         return None
 
-    async def _reset_and_do_l2(*, reset_l3: bool = False) -> None:
-        layer = "L2/L3" if reset_l3 else "L2"
-        logger.debug(
-            "%s patience exhausted during degradation — resetting at round %d",
-            layer,
-            round_num,
-        )
-        _degradation_reset(state, config, round_num, on_phase, reset_l3=reset_l3)
-        await _do_l2_transition(
-            state,
-            config,
-            round_num,
-            on_phase,
-            obs=obs,
-            trace_id=trace_id,
-            escalation_context=escalation_context,
-        )
-
     # L2 stalled, L3 disabled → exhaust or reset
     if not config.enable_l3:
         if from_degradation:
-            await _reset_and_do_l2()
+            await _degradation_reset_and_l2(
+                state,
+                config,
+                round_num,
+                on_phase,
+                obs=obs,
+                trace_id=trace_id,
+                escalation_context=escalation_context,
+            )
             return None
         logger.debug(
             "L2 patience exhausted (%d stalls) at round %d",
@@ -465,9 +474,7 @@ async def escalate_l2(
         return StopReason.L2_PATIENCE
 
     # L2 stalled, L3 enabled — track L3 stall
-    l3_improved = state.best_composite > esc.best_composite_at_l3_entry
-    esc.l3_stall_count = 0 if l3_improved or esc.l3_round == 0 else esc.l3_stall_count + 1
-
+    esc.record_l3_outcome(state.best_composite)
     l3_exhausted = config.l3_patience is not None and esc.l3_stall_count >= config.l3_patience
     if not l3_exhausted:
         await _do_l3_transition(
@@ -482,7 +489,16 @@ async def escalate_l2(
 
     # L3 exhausted → exhaust or reset
     if from_degradation:
-        await _reset_and_do_l2(reset_l3=True)
+        await _degradation_reset_and_l2(
+            state,
+            config,
+            round_num,
+            on_phase,
+            obs=obs,
+            trace_id=trace_id,
+            escalation_context=escalation_context,
+            reset_l3=True,
+        )
         return None
     logger.debug(
         "L3 patience exhausted (%d stalls) at round %d",

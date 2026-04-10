@@ -21,10 +21,10 @@ __all__ = [
     "L2IntelligenceData",
     "assess_candidate_diversity",
     "build_candidate_comparison",
+    "build_critique_search_memory_context",
     "build_l1_search_memory_context",
-    "build_l2_search_memory_context",
-    "build_l3_search_memory_context",
     "build_round_trajectory",
+    "build_strategic_search_memory_context",
     "candidate_summaries",
     "classify_trajectory",
     "format_context_sections",
@@ -49,6 +49,18 @@ class ContextData:
     failure_analysis: FailureAnalysis | None = None
     search_memory_context: dict | None = None
     pipeline_schema_text: str = ""
+
+
+def _format_search_memory_block(smc: dict | None, key_labels: dict[str, str]) -> str:
+    """Build HISTORICAL INTELLIGENCE block from search memory context dict."""
+    if not smc:
+        return ""
+    lines = ["HISTORICAL INTELLIGENCE:"]
+    for key, label in key_labels.items():
+        val = smc.get(key)
+        if val:
+            lines.append(f"  {label}: {val}")
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def format_context_sections(ctx: ContextData) -> str:
@@ -100,19 +112,17 @@ def format_context_sections(ctx: ContextData) -> str:
         sections.append("\n".join(fa_lines))
 
     # Historical intelligence from SearchMemory (Wave 3c)
-    smc = ctx.search_memory_context
-    if smc:
-        hi_lines = ["HISTORICAL INTELLIGENCE:"]
-        if smc.get("failure_clusters"):
-            hi_lines.append(f"  Common failure patterns: {smc['failure_clusters']}")
-        if smc.get("dead_queries"):
-            hi_lines.append(f"  Dead queries (never hit): {smc['dead_queries']}")
-        if smc.get("top_axes"):
-            hi_lines.append(f"  High-impact axes: {smc['top_axes']}")
-        if smc.get("top_values"):
-            hi_lines.append(f"  Best-performing values: {smc['top_values']}")
-        if len(hi_lines) > 1:
-            sections.append("\n".join(hi_lines))
+    hi = _format_search_memory_block(
+        ctx.search_memory_context,
+        {
+            "failure_clusters": "Common failure patterns",
+            "dead_queries": "Dead queries (never hit)",
+            "top_axes": "High-impact axes",
+            "top_values": "Best-performing values",
+        },
+    )
+    if hi:
+        sections.append(hi)
 
     # Task context
     if ctx.task_context:
@@ -263,21 +273,18 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
         sections.append(f"DIVERSITY ALERT:\n  {ctx.diversity_alert}")
 
     # Historical intelligence from SearchMemory
-    smc = ctx.search_memory_context
-    if smc:
-        hi_lines = ["HISTORICAL INTELLIGENCE:"]
-        if smc.get("axis_rankings"):
-            hi_lines.append(f"  Axis impact rankings: {smc['axis_rankings']}")
-        if smc.get("bottleneck_distribution"):
-            hi_lines.append(f"  Bottleneck distribution: {smc['bottleneck_distribution']}")
-        if smc.get("failure_group_insights"):
-            hi_lines.append(f"  Failure group x axis: {smc['failure_group_insights']}")
-        if smc.get("persistent_failures"):
-            hi_lines.append(f"  Persistent failures: {smc['persistent_failures']}")
-        if smc.get("volatile_queries"):
-            hi_lines.append(f"  Volatile queries (oscillating): {smc['volatile_queries']}")
-        if len(hi_lines) > 1:
-            sections.append("\n".join(hi_lines))
+    hi = _format_search_memory_block(
+        ctx.search_memory_context,
+        {
+            "axis_rankings": "Axis impact rankings",
+            "bottleneck_distribution": "Bottleneck distribution",
+            "failure_group_insights": "Failure group x axis",
+            "persistent_failures": "Persistent failures",
+            "volatile_queries": "Volatile queries (oscillating)",
+        },
+    )
+    if hi:
+        sections.append(hi)
 
     return "\n\n".join(sections)
 
@@ -314,8 +321,75 @@ def build_l1_search_memory_context(search_memory: Any) -> dict | None:
     return ctx if ctx else None
 
 
-def _base_search_memory_sections(search_memory: Any) -> dict[str, str]:
-    """Shared sections for L2/L3 search memory context: rankings, bottleneck, persistent."""
+def build_critique_search_memory_context(search_memory: Any) -> dict[str, str] | None:
+    """Build SearchMemory context dict for the critique agent.
+
+    Surfaces discriminating queries, failure clusters, tractability profiles,
+    exhausted axes, value trends, and improvement attribution.
+    """
+    if search_memory is None:
+        return None
+
+    ctx: dict[str, str] = {}
+
+    disc = search_memory.discriminating_queries()
+    if disc:
+        ctx["discriminating_queries"] = f"{len(disc)} queries vary across configs"
+
+    fc = search_memory.failure_clusters(3)
+    if fc:
+        ctx["failure_clusters"] = "; ".join(f"{c.failure_mode} ({c.fraction:.0%})" for c in fc)
+
+    persistent = search_memory.persistent_failures(min_streak=3)
+    if persistent:
+        intractable = [q for q in persistent if q.hit_rate == 0]
+        chronic = [q for q in persistent if q.hit_rate > 0]
+        parts = []
+        if intractable:
+            parts.append(f"{len(intractable)} intractable (never hit in any config)")
+        if chronic:
+            parts.append(f"{len(chronic)} chronic (recently failing but hit_rate > 0)")
+        ctx["tractability"] = "; ".join(parts)
+
+    exhausted = search_memory.exhausted_axes()
+    if exhausted:
+        ctx["exhausted_axes"] = "; ".join(
+            f"{a.axis} ({search_memory.values_tested_count(a.axis)} values tested, "
+            f"effect={a.effect_size:.3f})"
+            for a in exhausted[:5]
+        )
+
+    rankings = search_memory.axis_rankings()[:3]
+    trend_parts = []
+    for a in rankings:
+        trend = search_memory.axis_value_trend(a.axis)
+        if trend not in ("flat", "non_numeric"):
+            trend_parts.append(f"{a.axis}: {trend}")
+    if trend_parts:
+        ctx["value_trends"] = "; ".join(trend_parts)
+
+    attributions = search_memory.format_recent_attributions(limit=3)
+    if attributions:
+        ctx["improvement_attribution"] = attributions
+
+    return ctx if ctx else None
+
+
+def build_strategic_search_memory_context(
+    search_memory: Any,
+    *,
+    include_correlations: bool = False,
+    include_clusters: bool = False,
+) -> dict | None:
+    """Build SearchMemory context dict for L2/L3 strategic prompts.
+
+    Base: axis rankings, bottleneck distribution, persistent failures.
+    L2 adds: failure group × axis correlations, volatile queries.
+    L3 adds: failure clusters.
+    """
+    if search_memory is None:
+        return None
+
     ctx: dict[str, str] = {}
 
     rankings = search_memory.axis_rankings()[:5]
@@ -341,23 +415,14 @@ def _base_search_memory_sections(search_memory: Any) -> dict[str, str]:
             parts.append(f"{len(chronic)} chronic failures")
         ctx["persistent_failures"] = "; ".join(parts)
 
-    return ctx
+    if include_clusters:
+        clusters = search_memory.failure_clusters(3)
+        if clusters:
+            ctx["failure_clusters"] = "; ".join(
+                f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)" for c in clusters
+            )
 
-
-def build_l2_search_memory_context(search_memory: Any) -> dict | None:
-    """Build SearchMemory context dict for L2 refine prompt.
-
-    L2 receives the full strategic intelligence: axis rankings, bottleneck
-    distribution, failure group × axis correlations, and persistent failures.
-    """
-    if search_memory is None:
-        return None
-
-    ctx = _base_search_memory_sections(search_memory)
-
-    # Failure group × axis correlations (which axes help which failure modes)
-    rankings = search_memory.axis_rankings()[:5]
-    if rankings:
+    if include_correlations and rankings:
         fg_lines = []
         for a in rankings[:3]:
             corr = search_memory.parameter_failure_correlation(a.axis)
@@ -373,15 +438,15 @@ def build_l2_search_memory_context(search_memory: Any) -> dict | None:
         if fg_lines:
             ctx["failure_group_insights"] = "; ".join(fg_lines)
 
-    # Volatile queries — frequent hit/miss flips signal optimizer oscillation
-    flips = search_memory.query_flip_history(limit=50)
-    if flips:
-        from collections import Counter
+        # Volatile queries — frequent hit/miss flips signal optimizer oscillation
+        flips = search_memory.query_flip_history(limit=50)
+        if flips:
+            from collections import Counter
 
-        flip_counts = Counter(f["query"] for f in flips)
-        volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
-        if volatile:
-            ctx["volatile_queries"] = "; ".join(f"{q[:50]} ({n} flips)" for q, n in volatile)
+            flip_counts = Counter(f["query"] for f in flips)
+            volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
+            if volatile:
+                ctx["volatile_queries"] = "; ".join(f"{q[:50]} ({n} flips)" for q, n in volatile)
 
     return ctx if ctx else None
 
@@ -605,27 +670,6 @@ def build_candidate_comparison(candidate_scores: list[dict]) -> str | None:
         parts.append(f"{acc:.1%}{delta_str}: {desc}")
 
     return " | ".join(parts)
-
-
-def build_l3_search_memory_context(search_memory: Any) -> dict | None:
-    """Build SearchMemory context dict for L3 modify_plan prompt.
-
-    L3 receives the aggregate strategic picture: axis rankings, bottleneck
-    distribution, failure clusters, and persistent failures — so it can
-    make informed strategic pivots.
-    """
-    if search_memory is None:
-        return None
-
-    ctx = _base_search_memory_sections(search_memory)
-
-    clusters = search_memory.failure_clusters(3)
-    if clusters:
-        ctx["failure_clusters"] = "; ".join(
-            f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)" for c in clusters
-        )
-
-    return ctx if ctx else None
 
 
 def build_cross_candidate_diff(

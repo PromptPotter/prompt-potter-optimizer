@@ -76,7 +76,7 @@ Built by `build_l1_search_memory_context()`.[^l1fmt] Injected as a
 
 ### L2 Refine (intelligence bundle)
 
-Built by `build_l2_search_memory_context()`.[^l2fmt] Injected via
+Built by `build_strategic_search_memory_context()`.[^l2fmt] Injected via
 `format_l2_intelligence()`.
 
 | Signal | Source accessor | Prompt text |
@@ -84,7 +84,7 @@ Built by `build_l2_search_memory_context()`.[^l2fmt] Injected via
 | Axis rankings | `axis_rankings()[:5]` | "Axis impact rankings: ..." |
 | Bottleneck distribution | `bottleneck_distribution()` | "Bottleneck distribution: web_search: 45%, token_matching: 30%" |
 
-[^l2fmt]: `services/campaign/formatting.py:build_l2_search_memory_context()`.
+[^l2fmt]: `services/campaign/formatting.py:build_strategic_search_memory_context()`.
 
 ### Critique Agent (Every-Round Intelligence Hub)
 

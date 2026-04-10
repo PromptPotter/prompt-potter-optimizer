@@ -245,13 +245,21 @@ class OptSearchPoint(PromptTemplate):
         if not upstream and not downstream:
             return super().render()
 
-        # Compose problem_description from parts, render, restore
-        original_pd = self.problem_description
-        pd_parts = [p for p in (upstream, original_pd, downstream) if p]
-        self.problem_description = "\n\n".join(pd_parts)
-        result = super().render()
-        self.problem_description = original_pd
-        return result
+        # Build parts without mutating self — compose problem_description inline
+        parts: list[str] = []
+        for f in PROMPT_STRING_FIELDS:
+            v = getattr(self, f)
+            if not v:
+                continue
+            if f == "problem_description":
+                v = "\n\n".join(p for p in (upstream, v, downstream) if p)
+            parts.append(v)
+        block = self._render_few_shot_block()
+        if block:
+            parts.append(block)
+        if self.plan:
+            parts.append(self.plan)
+        return "\n\n".join(parts)
 
     # -- Projection to target layer ----------------------------------------
 

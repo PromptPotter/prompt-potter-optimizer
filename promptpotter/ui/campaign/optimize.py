@@ -537,13 +537,13 @@ async def run_optimization_notebook(
             try:
                 from collections import Counter
 
-                from promptpotter.services.campaign.critique import get_candidates
-                from promptpotter.services.campaign.round_execution import (
-                    _candidate_keys_from_schema,
+                from promptpotter.services.campaign.critique import (
+                    candidate_keys_from_schema,
+                    get_candidates,
                 )
                 from promptpotter.services.metrics import find_rank
 
-                _ck = _candidate_keys_from_schema(config.pipeline_schema)
+                _ck = candidate_keys_from_schema(config.pipeline_schema)
 
                 _results = round_result.results
                 _total = len(_results)

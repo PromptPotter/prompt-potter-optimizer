@@ -22,6 +22,7 @@ from promptpotter.services.campaign.critique import sample_thinking_styles
 from promptpotter.services.campaign.lifecycle import init_campaign
 from promptpotter.services.campaign.state import (
     CampaignPhase,
+    EscalationCounters,
     LoopState,
     PhaseEvent,
     emit_phase,
@@ -146,10 +147,7 @@ def _restore_from_checkpoint(
                     ", ".join(sorted(missing)),
                 )
             state.opt_sp = OptSearchPoint(**known)
-        state.escalation.l2_round = _latest_trial.get("l2_round", 0)
-        state.escalation.l3_round = _latest_trial.get("l3_round", 0)
-        state.escalation.l2_stall_count = _latest_trial.get("l2_stall_count", 0)
-        state.escalation.l3_stall_count = _latest_trial.get("l3_stall_count", 0)
+        state.escalation = EscalationCounters.from_checkpoint_dict(_latest_trial)
         state.stall_count = _latest_trial.get("stall_count", 0)
         logger.debug(
             "Restored optimizer state from round %d "
