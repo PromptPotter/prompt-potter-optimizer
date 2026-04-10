@@ -187,6 +187,7 @@ async def _run_query_loop(
     degradation_checks: list | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
+    save_run: Callable[..., None] | None = None,
 ) -> QueryLoopResult:
     """Evaluate dataset queries, reusing prior results where available.
 
@@ -299,6 +300,17 @@ async def _run_query_loop(
                 if on_result is not None:
                     on_result(result, i, len(dataset))
 
+                # Incremental persistence — save after each new result
+                if save_run and pipeline_schema:
+                    try:
+                        save_run(
+                            results,
+                            compute_composite_score(results, pipeline_schema),
+                            partial=True,
+                        )
+                    except Exception:
+                        logger.debug("Incremental save failed", exc_info=True)
+
                 # Escalation checks — run after display
                 esc_signal = _run_degradation_checks(
                     degradation_checks,
@@ -348,6 +360,47 @@ def _load_prior_results(
             if q and item.get("predicted") != "ERROR":
                 cache[q] = item
     return cache
+
+
+def check_candidate_fully_cached(
+    search_point: JobSearchPoint,
+    dataset: list,
+    ctx: ScoringContext,
+) -> tuple[list, dict, bool]:
+    """Check if a candidate has a complete cached evaluation in dataset_runs.
+
+    Returns (results, scores, is_cached).  When *is_cached* is ``False``,
+    *results* and *scores* are empty — caller should fall through to
+    ``score_search_point()``.
+    """
+    store = ctx.store
+    backend_id = ctx.backend_id
+    pipeline_schema = ctx.pipeline_schema
+
+    if not (store and backend_id and pipeline_schema):
+        return [], {}, False
+
+    prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else None
+    sp_h = search_point.sp_hash(prompt_nodes)
+    prior_results = _load_prior_results(store, backend_id, sp_h)
+
+    if len(prior_results) < len(dataset):
+        return [], {}, False
+
+    if not all(qd["query"] in prior_results for qd in dataset):
+        return [], {}, False
+
+    # Reconstruct results in dataset order
+    results = []
+    for qd in dataset:
+        cached_r = {**prior_results[qd["query"]], "cached": True}
+        pd = cached_r.get("pipeline_data")
+        if isinstance(pd, dict):
+            cached_r["pipeline_data"] = {**pd, "total_time": 0.0}
+        results.append(cached_r)
+
+    scores = compute_composite_score(results, pipeline_schema)
+    return results, scores, True
 
 
 async def score_search_point(
@@ -429,6 +482,7 @@ async def score_search_point(
         degradation_checks=degradation_checks,
         candidate_idx=candidate_idx,
         n_total_candidates=n_total_candidates,
+        save_run=_save_run,
     )
     results = batch.results
     escalation_signal = batch.escalation_signal
@@ -445,16 +499,7 @@ async def score_search_point(
         return results, scores, True
 
     if not batch.completed and not escalation_signal:
-        # Graceful or force stop — save partial results then re-raise
-        if results:
-            assert pipeline_schema is not None, "pipeline_schema required for scoring"
-            _save_run(results, compute_composite_score(results, pipeline_schema), partial=True)
-            logger.info(
-                "Saved partial run (%d/%d queries) for SP %s",
-                len(results),
-                len(dataset),
-                content_hash[:8],
-            )
+        # Graceful or force stop — results already saved incrementally
         raise KeyboardInterrupt()
 
     assert pipeline_schema is not None, "pipeline_schema required for scoring"

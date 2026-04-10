@@ -17,17 +17,25 @@ All commands: `python -m promptpotter.cli.campaign_runner <cmd> [flags]`
 | Command | Purpose | Key Flags |
 |---------|---------|-----------|
 | `init` | Connect to backend, configure pipeline | `--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--skip-baseline` |
-| `task-context` | Decompose task description into structured context | `--task-file`, `--task-text` |
+| `set-task` | Decompose task description into structured context | `--task-file`, `--task-text` |
 | `scan` | Run sensitivity scan over parameter variants | `--variants-file` (required), `--sample-size` |
-| `scan-results` | Show scan analytics, seed campaign from winner | — |
+| `show-scan` | Show scan analytics, seed campaign from winner | — |
 | `optimize` | Run L1/L2/L3 optimization cycle | `--round` (one round then stop); default: full loop |
 | `control` | Pause/resume/stop a running campaign | `--pause`, `--resume`, `--stop`, `--pause-before-l2` |
-| `status` | Print live dashboard + session state | — |
-| `results` | Show campaign summary | `--save` (persist winner to backend) |
+| `show-status` | Print live dashboard + session state | — |
+| `show-results` | Show campaign summary | `--save` (persist winner to backend) |
 
 Export (separate entrypoint): `python -m promptpotter.cli.export_results <format> --backend-id <id> -o <file>`
 
 **Global flags on all commands**: `--session <id>` (target specific session).
+
+### CRITICAL: `--round` flag behavior
+
+`--round` sets `max_rounds=1` **absolute** (not relative). This means:
+- First run: `--round` → runs round 0, then stops (`max_rounds=1`, `resumed_from_round=0`, loop runs once)
+- **Resume after round 0 completed**: `--round` → does NOTHING (`resumed_from_round=1 >= max_rounds=1`, loop never enters)
+- **To continue after `--round` completed a round**: use `optimize` without `--round` (uses `max_rounds=15` from config)
+- `--round` is only useful for the FIRST round of a fresh campaign. After that, use `optimize` (full loop) and interrupt with `control --stop` or timeout when you want to stop.
 
 ---
 
@@ -61,12 +69,12 @@ Everything else (`compile_scorer`, prompt variant library, backend pipeline) is 
 
 ### Session check
 
-1. Run `python -m promptpotter.cli.campaign_runner status` (timeout 10s, ignore errors)
+1. Run `python -m promptpotter.cli.campaign_runner show-status` (timeout 10s, ignore errors)
 2. If an active session exists — read `session.json` and `campaign_state.json`, decide how to proceed:
    - **User said "new campaign" / "start fresh"** → Phase 1
    - **`stop_reason` is set** (optimization completed/stopped) → read `optimize_result.json`, recommend reviewing results or starting fresh
    - **`control.requested_state` is `"pause"` or `"stop"`** → offer to resume (`control --resume`) or review results
-   - **Otherwise** → resume from current phase (`init`→Ph2, `task-context`→Ph3/4, `scan`/`scan-results`→Ph4, `optimizing`→`optimize`, `optimize`→Ph5)
+   - **Otherwise** → resume from current phase (`init`→Ph2, `set-task`→Ph3/4, `scan`/`scan-results`→Ph4, `optimizing`→`optimize`, `optimize`→Ph5)
 3. No active session → Phase 1
 
 ### Data assessment
@@ -92,7 +100,7 @@ for f in runs:
 
 **Decision thresholds:**
 - **Minimal data** (< 50 unique queries OR < 5 dataset runs) → skip baseline, go straight to `init --skip-baseline` + optimize from config defaults. This is the common case.
-- **Substantial data** (≥ 50 unique queries AND ≥ 5 dataset runs) → show existing leaderboard using CLI commands (`results`, `scan-results`) and/or `show_experiment_dashboard()`. Propose using the best-performing config as starting point rather than config defaults.
+- **Substantial data** (≥ 50 unique queries AND ≥ 5 dataset runs) → show existing leaderboard using CLI commands (`show-results`, `show-scan`) and/or `show_experiment_dashboard()`. Propose using the best-performing config as starting point rather than config defaults.
 
 Do NOT print anything here. All session info (including any issues) appears in the dashboard.
 
@@ -179,7 +187,7 @@ All datasets use `--backend-url` to route through the backend. The backend's `ll
 
 If the data assessment found ≥ 50 unique queries and ≥ 5 dataset runs, show the leaderboard before init:
 
-1. Run `python -m promptpotter.cli.campaign_runner results` (if a prior campaign exists) or `scan-results` (if scan data exists) — these are the existing leaderboard/dashboard displays
+1. Run `python -m promptpotter.cli.campaign_runner show-results` (if a prior campaign exists) or `show-scan` (if scan data exists) — these are the existing leaderboard/dashboard displays
 2. Present the best-performing configuration and accuracy to the user
 3. Ask: "Start from the best known config, or fresh from defaults?"
 
@@ -190,7 +198,7 @@ Report: session ID, active pipeline, query count.
 ## Phase 2: Task Context (recommended)
 
 ```bash
-python -m promptpotter.cli.campaign_runner task-context \
+python -m promptpotter.cli.campaign_runner set-task \
     --task-file datasets/{dataset}/task_description.md
 ```
 
@@ -280,7 +288,7 @@ Read `reference/optimization-layers.md` for the full escalation model, configura
 
 While `optimize` runs, you can monitor progress:
 
-- **`status` command** (from another terminal): `python -m promptpotter.cli.campaign_runner status` — shows live dashboard with round, accuracy, layer, ETA.
+- **`show-status` command** (from another terminal): `python -m promptpotter.cli.campaign_runner show-status` — shows live dashboard with round, accuracy, layer, ETA.
 - **`campaign_state.json`** — updated on every event. Key fields to watch: `round`, `best`, `phase` (l1_generate/l1_evaluate/refine_context/modify_plan), `cache_hit_rate`, `eta_s`, `stop_reason`.
 - **`campaign_log.md`** — structured round-by-round markdown report. Best diagnostic tool when something looks wrong.
 
@@ -301,10 +309,10 @@ You can also edit `campaign_state.json` directly: set `control.requested_state` 
 ## Phase 5: Results
 
 ```bash
-python -m promptpotter.cli.campaign_runner results
+python -m promptpotter.cli.campaign_runner show-results
 ```
 
-Report: best vs baseline accuracy, rounds run, L1/L2/L3 activations, winner config. Offer `results --save` to persist the winner to the backend.
+Report: best vs baseline accuracy, rounds run, L1/L2/L3 activations, winner config. Offer `show-results --save` to persist the winner to the backend.
 
 ### Interpreting stop_reason
 
@@ -350,12 +358,22 @@ python -m promptpotter.cli.export_results supplemental \
 - **Always read dataset.md before anything** — it's the source of truth for how to operate each dataset
 - **Resume by default** — only create new sessions when explicitly asked
 - **Skip baseline by default** — always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists AND the user requests it.
-- **Data-driven start** — Phase 0.5 assesses existing data. Minimal data (< 50 queries, < 5 runs) → go straight to optimize from config defaults. Substantial data → show leaderboard via existing CLI commands (`results`, `scan-results`), propose best-known config as starting point.
+- **Data-driven start** — Phase 0.5 assesses existing data. Minimal data (< 50 queries, < 5 runs) → go straight to optimize from config defaults. Substantial data → show leaderboard via existing CLI commands (`show-results`, `show-scan`), propose best-known config as starting point.
 - **Round-by-round critique is the default** — always use `--round`, read `campaign_log.md` + `campaign_state.json` after each round, present the critique summary, and ask before continuing. Only use full loop (`optimize` without `--round`) when the user explicitly requests it.
+- **Incremental persistence**: Every backend query result is saved to `dataset_runs/` immediately (not batched at end). This means:
+  - Hard kills (timeout, taskkill, crash) lose zero completed query results
+  - Resume automatically cache-hits all prior query results (shows `0.0s MISS CACHED` in output)
+  - Fully-completed candidates are skipped entirely on resume ("full-run cache hit — skipped")
+  - Partial candidates resume from where they left off (cached queries skip, remaining re-evaluate)
+- **`control --stop` is not instant**: It sets a flag that's checked between queries. The in-flight query finishes first (~5-10s). Don't expect immediate stop. For faster stop, use hard kill (`taskkill //F //PID <pid>`).
+- **Timeout auto-backgrounds**: Commands that exceed the bash timeout silently continue in background. After a timeout, ALWAYS check for and kill orphan processes: `tasklist | findstr python` → `taskkill //F //PID <pid>` (kill the largest Python process).
 - **Be the data scientist**: interpret results, explain what the optimizer is doing, suggest next steps
 - **If something fails**: read the error category (`[CLIENT]`, `[SERVER]`, `[CONNECTION]`, `[PIPELINE]`), then check `campaign_log.md` at `.promptpotter/projects/{backend_id}/sessions/{session_id}/campaign_log.md`
-- **After interrupts**: check for orphan processes — `tasklist | findstr python` (Windows) or `ps aux | grep python` (Linux/Mac)
+- **After interrupts**: check for orphan processes — `tasklist | findstr python` (Windows) or `ps aux | grep python` (Linux/Mac). Kill orphans before resuming.
 - **Between phases**: summarize what happened and what comes next. Don't just dump CLI output.
+- **Never wipe project data without asking**: `rm -rf .promptpotter/projects/{backend_id}` destroys all cached results, campaign history, and dataset runs. Always spell out the full path and ask for explicit approval before running any destructive command. Example: "I'm about to run `rm -rf .promptpotter/projects/aime_2025` — this deletes all cached results. OK?"
+- **Stop on 502 errors — always requires human**: If you see `502 Bad Gateway` in CLI output or logs, STOP immediately. Do not retry, do not continue. Tell the user: "Backend is returning 502s — likely the LLM provider (Groq) is down or rate-limiting. Please check and restart the backend." The user must confirm the backend is healthy before you resume any campaign commands.
+- **User controls the timeout and stop method**: When the user says "run for 15s" or "25s timeout", respect that exactly. When the user says "different stop method", ask what they prefer (hard kill via `taskkill`, graceful `control --stop`, or let it timeout). Never assume — the user may be testing specific interrupt/resume behavior.
 
 ## References
 

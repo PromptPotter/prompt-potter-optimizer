@@ -368,7 +368,10 @@ async def _run_candidate_evals(
 
     Returns (all_candidate_results, candidate_scores, escalation_signal).
     """
-    from promptpotter.services.dataset_scoring import score_search_point
+    from promptpotter.services.dataset_scoring import (
+        check_candidate_fully_cached,
+        score_search_point,
+    )
     from promptpotter.services.search.sequential_elimination import EliminationCheck
 
     all_candidate_results: dict[str, list[dict]] = {}
@@ -393,6 +396,50 @@ async def _run_candidate_evals(
             base_pipeline_params=merged_pp[idx],
             schema=ctx.pipeline_schema,
         )
+
+        # --- Candidate-level resume skip ---
+        cached_results, cached_scores, was_fully_cached = check_candidate_fully_cached(
+            sp,
+            dataset,
+            ctx,
+        )
+        if was_fully_cached:
+            logger.info(
+                "Candidate %d/%d: full-run cache hit (%d queries) — skipped",
+                idx + 1,
+                n_candidates,
+                len(cached_results),
+            )
+            all_candidate_results[osp_c.id] = cached_results
+
+            if len(cached_results) == len(dataset):
+                elim_check.register_completed([r["score"] for r in cached_results])
+
+            candidate_scores.append(
+                {
+                    "candidate_id": osp_c.id,
+                    "changes_description": osp_c.changes_description or "",
+                    "pipeline_params_override": candidate_overrides[idx],
+                    "accuracy": cached_scores["accuracy"],
+                    "composite": cached_scores.get("composite", cached_scores["accuracy"]),
+                    "hits": cached_scores["hits"],
+                    "total": cached_scores["total"],
+                    "escalation_aborted": False,
+                    "elimination_stopped": False,
+                    "eval_queries": len(cached_results),
+                    "expected_queries": len(dataset),
+                    "resumed_from_cache": True,
+                }
+            )
+            if callbacks and callbacks.on_candidate_eval:
+                report = dict(cached_scores)
+                report["escalation_aborted"] = False
+                report["elimination_stopped"] = False
+                report["eval_queries"] = len(cached_results)
+                report["expected_queries"] = len(dataset)
+                report["resumed_from_cache"] = True
+                callbacks.on_candidate_eval(idx, n_candidates, report)
+            continue
 
         # Merge degradation + elimination checks for this candidate
         all_checks = list(degradation_checks or [])
