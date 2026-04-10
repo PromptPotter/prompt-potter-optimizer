@@ -397,7 +397,6 @@ async def _run_candidate_evals(
             schema=ctx.pipeline_schema,
         )
 
-        # --- Candidate-level resume skip ---
         cached_results, cached_scores, was_fully_cached = check_candidate_fully_cached(
             sp,
             dataset,
@@ -411,9 +410,7 @@ async def _run_candidate_evals(
                 len(cached_results),
             )
             all_candidate_results[osp_c.id] = cached_results
-
-            if len(cached_results) == len(dataset):
-                elim_check.register_completed([r["score"] for r in cached_results])
+            elim_check.register_completed([r["score"] for r in cached_results])
 
             candidate_scores.append(
                 {

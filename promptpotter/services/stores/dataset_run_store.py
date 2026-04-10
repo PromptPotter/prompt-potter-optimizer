@@ -103,11 +103,6 @@ class DatasetRunStore:
         self._index_cache.pop(backend_id, None)
         self._alias_cache.pop(backend_id, None)
 
-    def clear_caches(self) -> None:
-        """Drop all in-memory caches across all backends."""
-        self._index_cache.clear()
-        self._alias_cache.clear()
-
     # -- path helpers ---------------------------------------------------------
 
     def _runs_dir(self, backend_id: str) -> Path:

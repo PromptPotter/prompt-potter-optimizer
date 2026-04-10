@@ -8,7 +8,6 @@ Stores campaign metadata and per-trial results to disk:
 """
 
 import logging
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -23,19 +22,6 @@ from promptpotter.services.stores.base import (
 from promptpotter.shared.constants import DEFAULT_CONNECTOR_TYPE
 
 logger = logging.getLogger(__name__)
-
-
-def generate_campaign_id() -> str:
-    """Generate a unique campaign identifier."""
-    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    short = uuid.uuid4().hex[:8]
-    return f"campaign_{ts}_{short}"
-
-
-def generate_trial_id(round_num: int) -> str:
-    """Generate a unique trial identifier for a round."""
-    short = uuid.uuid4().hex[:8]
-    return f"trial_{round_num:04d}_{short}"
 
 
 class CampaignStore(EntityStore):
@@ -173,96 +159,6 @@ class CampaignStore(EntityStore):
         return read_json_optional(
             self._trial_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json",
         )
-
-    def delete(self, backend_id: str, campaign_id: str) -> bool:
-        """Delete a campaign and its trial directory.  Returns True if deleted."""
-        import shutil
-
-        campaign_path = self._entity_path(backend_id, campaign_id)
-        trial_dir = self._trial_dir(backend_id, campaign_id)
-
-        deleted = False
-        if trial_dir.exists():
-            shutil.rmtree(trial_dir)
-            deleted = True
-        if campaign_path.exists():
-            campaign_path.unlink()
-            deleted = True
-        return deleted
-
-    # -- High-level convenience methods --
-
-    def create_campaign(
-        self,
-        backend_id: str,
-        *,
-        name: str = "",
-        config: dict[str, Any] | None = None,
-        campaign_id: str | None = None,
-        langfuse_trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Create a new campaign and persist to disk.  Returns campaign metadata."""
-        cid = campaign_id or generate_campaign_id()
-        metadata = {
-            "name": name or cid,
-            "backend_id": backend_id,
-            "config": config or {},
-            "langfuse_trace_id": langfuse_trace_id,
-        }
-        self.create(backend_id, cid, metadata)
-        logger.info("Created campaign %s for backend %s", cid, backend_id)
-        result = self.load(backend_id, cid)
-        assert result is not None, f"Campaign {cid} not found after create"
-        return result
-
-    def record_trial(
-        self,
-        backend_id: str,
-        campaign_id: str,
-        *,
-        round_num: int,
-        prompt_fields: dict[str, Any],
-        accuracy: float,
-        hits: int,
-        total: int,
-        results: list[dict[str, Any]] | None = None,
-        label: str = "",
-        improved: bool = False,
-        candidates_evaluated: int = 0,
-        langfuse_trace_id: str | None = None,
-        mlflow_run_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Record a single optimization trial.  Returns the trial detail dict."""
-        trial_id = generate_trial_id(round_num)
-        now = datetime.now(UTC).isoformat()
-
-        trial = {
-            "trial_id": trial_id,
-            "round": round_num,
-            "label": label,
-            "prompt_fields": prompt_fields,
-            "prompt_fields_id": prompt_fields.get("id", ""),
-            "parent_prompt_fields_id": prompt_fields.get("parent_id"),
-            "accuracy": accuracy,
-            "hits": hits,
-            "total": total,
-            "improved": improved,
-            "candidates_evaluated": candidates_evaluated,
-            "results": results or [],
-            "langfuse_trace_id": langfuse_trace_id,
-            "mlflow_run_id": mlflow_run_id,
-            "created_at": now,
-        }
-
-        self.add_trial(backend_id, campaign_id, trial)
-        logger.info(
-            "Recorded trial %s (round %d, acc=%.3f) in campaign %s",
-            trial_id,
-            round_num,
-            accuracy,
-            campaign_id,
-        )
-        return trial
 
     def complete(self, backend_id: str, campaign_id: str) -> None:
         """Mark a campaign as completed."""

@@ -102,6 +102,15 @@ def _fill_remaining_errors(
         )
 
 
+def _materialize_cached_result(item: QueryResult) -> dict:
+    """Stamp a prior-cache item as cached with zeroed timing."""
+    r: dict = {**item, "cached": True}
+    pd = r.get("pipeline_data")
+    if isinstance(pd, dict):
+        r["pipeline_data"] = {**pd, "total_time": 0.0}
+    return r
+
+
 def _check_error_abort(
     result: QueryResult,
     was_cached: bool,
@@ -232,10 +241,7 @@ async def _run_query_loop(
                 # Prior-result cache: reuse from previous dataset_runs
                 if query in _prior:
                     n_prior += 1
-                    cached_r = {**_prior[query], "cached": True}
-                    pd = cached_r.get("pipeline_data")
-                    if isinstance(pd, dict):
-                        cached_r["pipeline_data"] = {**pd, "total_time": 0.0}
+                    cached_r = _materialize_cached_result(_prior[query])
                     results.append(cached_r)
                     if on_result is not None:
                         on_result(cached_r, i, len(dataset))
@@ -380,7 +386,7 @@ def check_candidate_fully_cached(
     if not (store and backend_id and pipeline_schema):
         return [], {}, False
 
-    prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else None
+    prompt_nodes = pipeline_schema.prompt_node_names()
     sp_h = search_point.sp_hash(prompt_nodes)
     prior_results = _load_prior_results(store, backend_id, sp_h)
 
@@ -390,14 +396,7 @@ def check_candidate_fully_cached(
     if not all(qd["query"] in prior_results for qd in dataset):
         return [], {}, False
 
-    # Reconstruct results in dataset order
-    results = []
-    for qd in dataset:
-        cached_r = {**prior_results[qd["query"]], "cached": True}
-        pd = cached_r.get("pipeline_data")
-        if isinstance(pd, dict):
-            cached_r["pipeline_data"] = {**pd, "total_time": 0.0}
-        results.append(cached_r)
+    results = [_materialize_cached_result(prior_results[qd["query"]]) for qd in dataset]
 
     scores = compute_composite_score(results, pipeline_schema)
     return results, scores, True

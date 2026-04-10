@@ -256,11 +256,6 @@ class SessionStore:
             d.name for d in sessions_dir.iterdir() if d.is_dir() and (d / "session.json").exists()
         )
 
-    def latest_session_id(self, backend_id: str) -> str | None:
-        """Return the most recent session ID, or None."""
-        ids = self.list_sessions(backend_id)
-        return ids[-1] if ids else None
-
     # -- Scan results ----------------------------------------------------------
 
     def save_scan_results(

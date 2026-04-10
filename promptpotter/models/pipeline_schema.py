@@ -327,65 +327,6 @@ class PipelineSchema(BaseModel):
         """
         return [node.name for node in self.nodes if node.prompt_meta is not None]
 
-    def resolve_active_prompt_node(self, active_steps: set[str] | list[str]) -> str:
-        """Return the first prompt-bearing node present in *active_steps*, or ``""``."""
-        steps = active_steps if isinstance(active_steps, set) else set(active_steps)
-        for name in self.prompt_node_names():
-            if name in steps:
-                return name
-        return ""
-
-    def upstream_of(self, node_name: str) -> list[str]:
-        """Node names strictly before *node_name* in pipeline order.
-
-        Used by partial pipeline caching to determine which node outputs
-        are stable when *node_name*'s config changes.
-        """
-        result: list[str] = []
-        for node in self.nodes:
-            if node.name == node_name:
-                break
-            result.append(node.name)
-        return result
-
-    def split_at_ranker(self) -> tuple[list[str], list[str]]:
-        """Split node names into (upstream, ranker_and_downstream).
-
-        The first node with ``node_type == "ranker"`` marks the split point.
-        Used by partial pipeline caching (Wave 4) to compute upstream config
-        hashes.  When no ranker exists, all nodes are upstream.
-        """
-        upstream: list[str] = []
-        downstream: list[str] = []
-        found_ranker = False
-        for node in self.nodes:
-            if not found_ranker and node.node_type == NodeType.RANKER:
-                found_ranker = True
-            if found_ranker:
-                downstream.append(node.name)
-            else:
-                upstream.append(node.name)
-        return upstream, downstream
-
-    def candidate_output_key(self, steps: list[str] | None = None) -> str | None:
-        """Pipeline_data key for the last candidate-producing node in *steps*.
-
-        Walks nodes in pipeline order, filters to *steps* (all if None),
-        finds the last node with node_type candidate_source or ranker,
-        and returns its first output_keys entry.  Returns None if no
-        candidate-producing node exists.
-        """
-        active = set(steps) if steps else None
-        last_key: str | None = None
-        for node in self.nodes:
-            if active is not None and node.name not in active:
-                continue
-            if node.node_type in (NodeType.CANDIDATE_SOURCE, NodeType.RANKER):
-                keys = node.output_keys
-                if keys:
-                    last_key = keys[0]
-        return last_key
-
     def required_pipeline_key(self) -> str:
         """The pipeline_data key that gates trace validity.
 
