@@ -64,21 +64,3 @@ class QueryDifficulty:
     @property
     def dead(self) -> list[QueryProfile]:
         return [p for p in self.profiles if p.classification == "dead"]
-
-
-@dataclass
-class RoundSnapshot:
-    """Comparison between two consecutive rounds."""
-
-    from_round: int
-    to_round: int
-    improved_queries: list[str] = field(default_factory=list)
-    regressed_queries: list[str] = field(default_factory=list)
-    unchanged_queries: int = 0
-
-
-@dataclass
-class TrendAnalysis:
-    """Tracks query-level changes across optimization rounds."""
-
-    snapshots: list[RoundSnapshot] = field(default_factory=list)

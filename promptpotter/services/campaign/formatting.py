@@ -314,15 +314,8 @@ def build_l1_search_memory_context(search_memory: Any) -> dict | None:
     return ctx if ctx else None
 
 
-def build_l2_search_memory_context(search_memory: Any) -> dict | None:
-    """Build SearchMemory context dict for L2 refine prompt.
-
-    L2 receives the full strategic intelligence: axis rankings, bottleneck
-    distribution, failure group × axis correlations, and persistent failures.
-    """
-    if search_memory is None:
-        return None
-
+def _base_search_memory_sections(search_memory: Any) -> dict[str, str]:
+    """Shared sections for L2/L3 search memory context: rankings, bottleneck, persistent."""
     ctx: dict[str, str] = {}
 
     rankings = search_memory.axis_rankings()[:5]
@@ -337,7 +330,33 @@ def build_l2_search_memory_context(search_memory: Any) -> dict | None:
             f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
         )
 
+    persistent = search_memory.persistent_failures(min_streak=3)
+    if persistent:
+        intractable = [q for q in persistent if q.hit_rate == 0]
+        chronic = [q for q in persistent if q.hit_rate > 0]
+        parts = []
+        if intractable:
+            parts.append(f"{len(intractable)} intractable (never hit)")
+        if chronic:
+            parts.append(f"{len(chronic)} chronic failures")
+        ctx["persistent_failures"] = "; ".join(parts)
+
+    return ctx
+
+
+def build_l2_search_memory_context(search_memory: Any) -> dict | None:
+    """Build SearchMemory context dict for L2 refine prompt.
+
+    L2 receives the full strategic intelligence: axis rankings, bottleneck
+    distribution, failure group × axis correlations, and persistent failures.
+    """
+    if search_memory is None:
+        return None
+
+    ctx = _base_search_memory_sections(search_memory)
+
     # Failure group × axis correlations (which axes help which failure modes)
+    rankings = search_memory.axis_rankings()[:5]
     if rankings:
         fg_lines = []
         for a in rankings[:3]:
@@ -353,18 +372,6 @@ def build_l2_search_memory_context(search_memory: Any) -> dict | None:
                 fg_lines.append(f"{a.axis} → {', '.join(parts)}")
         if fg_lines:
             ctx["failure_group_insights"] = "; ".join(fg_lines)
-
-    # Persistent failures — queries failing across multiple configs
-    persistent = search_memory.persistent_failures(min_streak=3)
-    if persistent:
-        intractable = [q for q in persistent if q.hit_rate == 0]
-        chronic = [q for q in persistent if q.hit_rate > 0]
-        parts = []
-        if intractable:
-            parts.append(f"{len(intractable)} intractable (never hit)")
-        if chronic:
-            parts.append(f"{len(chronic)} chronic failures")
-        ctx["persistent_failures"] = "; ".join(parts)
 
     # Volatile queries — frequent hit/miss flips signal optimizer oscillation
     flips = search_memory.query_flip_history(limit=50)
@@ -610,36 +617,13 @@ def build_l3_search_memory_context(search_memory: Any) -> dict | None:
     if search_memory is None:
         return None
 
-    ctx: dict[str, str] = {}
-
-    rankings = search_memory.axis_rankings()[:5]
-    if rankings:
-        ctx["axis_rankings"] = "; ".join(
-            f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})" for a in rankings
-        )
-
-    bottleneck = search_memory.bottleneck_distribution()
-    if bottleneck:
-        ctx["bottleneck_distribution"] = "; ".join(
-            f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
-        )
+    ctx = _base_search_memory_sections(search_memory)
 
     clusters = search_memory.failure_clusters(3)
     if clusters:
         ctx["failure_clusters"] = "; ".join(
             f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)" for c in clusters
         )
-
-    persistent = search_memory.persistent_failures(min_streak=3)
-    if persistent:
-        intractable = [q for q in persistent if q.hit_rate == 0]
-        chronic = [q for q in persistent if q.hit_rate > 0]
-        parts = []
-        if intractable:
-            parts.append(f"{len(intractable)} intractable (never hit)")
-        if chronic:
-            parts.append(f"{len(chronic)} chronic failures")
-        ctx["persistent_failures"] = "; ".join(parts)
 
     return ctx if ctx else None
 

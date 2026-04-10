@@ -26,7 +26,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.models.opt_search_point import PromptTemplate
 from promptpotter.models.task_decomposition import TaskDecomposition
@@ -39,9 +39,6 @@ from promptpotter.services.store.base import (
 )
 from promptpotter.shared.hashing import HASH_TRUNCATE
 from promptpotter.shared.llm_parsing import extract_parsed_json
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

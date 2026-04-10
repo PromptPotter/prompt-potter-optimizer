@@ -15,7 +15,6 @@ __all__ = [
     "export_failure_analysis",
     "export_query_difficulty",
     "export_search_memory_summary",
-    "export_trend_analysis",
     "flatten_campaign_trials",
     "generate_export_json",
     "generate_supplemental",
@@ -32,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.services.search.failure_group_analysis import proportion_test, wilson_ci
 
 if TYPE_CHECKING:
-    from promptpotter.models.analysis import FailureAnalysis, QueryDifficulty, TrendAnalysis
+    from promptpotter.models.analysis import FailureAnalysis, QueryDifficulty
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.search_memory import SearchMemory
@@ -240,22 +239,6 @@ def export_query_difficulty(difficulty: QueryDifficulty) -> dict[str, Any]:
     }
 
 
-def export_trend_analysis(trends: TrendAnalysis) -> list[dict[str, Any]]:
-    """Flatten TrendAnalysis snapshots for export."""
-    return [
-        {
-            "from_round": s.from_round,
-            "to_round": s.to_round,
-            "n_improved": len(s.improved_queries),
-            "n_regressed": len(s.regressed_queries),
-            "n_unchanged": s.unchanged_queries,
-            "improved_queries": s.improved_queries,
-            "regressed_queries": s.regressed_queries,
-        }
-        for s in trends.snapshots
-    ]
-
-
 def build_reproducibility_manifest(
     campaigns: list[dict[str, Any]],
     backend_id: str,
@@ -423,18 +406,6 @@ def _difficulty_rows(data: dict[str, Any]) -> list[list[str]]:
     ]
 
 
-def _trend_rows(data: list[dict[str, Any]]) -> list[list[str]]:
-    return [
-        [
-            f"R{t['from_round']}->R{t['to_round']}",
-            str(t["n_improved"]),
-            str(t["n_regressed"]),
-            str(t["n_unchanged"]),
-        ]
-        for t in data
-    ]
-
-
 _TableConfig = dict[str, Any]
 
 _TABLE_CONFIGS: dict[str, _TableConfig] = {
@@ -467,11 +438,6 @@ _TABLE_CONFIGS: dict[str, _TableConfig] = {
         "headers": ["Class", "Count", "Fraction"],
         "rows": _difficulty_rows,
         "guard": "summary",
-    },
-    "trends": {
-        "headers": ["Transition", "Improved", "Regressed", "Unchanged"],
-        "rows": _trend_rows,
-        "guard": None,  # guard is the data itself (list)
     },
 }
 
@@ -522,7 +488,6 @@ def generate_supplemental(
     pipeline_schema: PipelineSchema | None = None,
     failure_analysis: FailureAnalysis | None = None,
     query_difficulty: QueryDifficulty | None = None,
-    trend_analysis: TrendAnalysis | None = None,
     sections: list[str] | None = None,
 ) -> str:
     """Assemble full supplemental materials document.
@@ -538,7 +503,6 @@ def generate_supplemental(
         pipeline_schema: Pipeline schema for reproducibility manifest.
         failure_analysis: Pre-computed FailureAnalysis.
         query_difficulty: Pre-computed QueryDifficulty.
-        trend_analysis: Pre-computed TrendAnalysis.
         sections: Which sections to include (default: all).
 
     Returns:
@@ -611,14 +575,6 @@ def generate_supplemental(
         table = render_table(diff, "query_difficulty")
         if table:
             parts.append("## Query Difficulty\n")
-            parts.append(table)
-            parts.append("")
-
-    if "trends" in active_sections and trend_analysis is not None:
-        trends = export_trend_analysis(trend_analysis)
-        table = render_table(trends, "trends")
-        if table:
-            parts.append("## Round Stability\n")
             parts.append(table)
             parts.append("")
 

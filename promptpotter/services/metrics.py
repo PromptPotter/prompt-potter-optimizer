@@ -17,7 +17,6 @@ if TYPE_CHECKING:
         FailureAnalysis,
         FailurePattern,
         QueryDifficulty,
-        TrendAnalysis,
     )
     from promptpotter.models.pipeline_schema import (
         IntermediateMetric,
@@ -30,7 +29,6 @@ if TYPE_CHECKING:
 __all__ = [
     "compile_failure_analysis",
     "compile_query_difficulty",
-    "compile_temporal_trends",
     "compute_composite_score",
     "compute_pipeline_metrics",
     "count_degraded_queries",
@@ -494,46 +492,3 @@ def compile_query_difficulty(
         )
 
     return QueryDifficulty(profiles=profiles)
-
-
-def compile_temporal_trends(
-    round_results: list[tuple[int, list[QueryResult]]],
-) -> TrendAnalysis:
-    """Track query-level changes across consecutive rounds.
-
-    Args:
-        round_results: List of ``(round_number, results)`` tuples, ordered
-            by round number.
-
-    Returns:
-        TrendAnalysis with per-pair snapshots showing improved/regressed queries.
-    """
-    from promptpotter.models.analysis import RoundSnapshot, TrendAnalysis
-
-    if len(round_results) < 2:
-        return TrendAnalysis()
-
-    snapshots = []
-    for i in range(len(round_results) - 1):
-        from_round, from_results = round_results[i]
-        to_round, to_results = round_results[i + 1]
-
-        from_hits = {r.get("query", ""): bool(r.get("hit")) for r in from_results}
-        to_hits = {r.get("query", ""): bool(r.get("hit")) for r in to_results}
-
-        common = set(from_hits) & set(to_hits)
-        improved = [q for q in sorted(common) if not from_hits[q] and to_hits[q]]
-        regressed = [q for q in sorted(common) if from_hits[q] and not to_hits[q]]
-        unchanged = len(common) - len(improved) - len(regressed)
-
-        snapshots.append(
-            RoundSnapshot(
-                from_round=from_round,
-                to_round=to_round,
-                improved_queries=improved,
-                regressed_queries=regressed,
-                unchanged_queries=unchanged,
-            )
-        )
-
-    return TrendAnalysis(snapshots=snapshots)
