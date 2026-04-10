@@ -113,8 +113,10 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 ### Three Entry Points
 
 1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/ui/campaign/` is pure UI, delegates to services
-2. **CLI**: `promptpotter/cli/campaign_runner.py` — `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
+2. **CLI**: `python -m promptpotter` (unified entry point) — `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
 3. **FastAPI API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`
+
+**Active session pointer** (`.promptpotter/active_session.json`): Stores `{backend_id, session_id}` of the current campaign. Written by `init`, read by every other command. Works like a browser's active tab — `optimize`, `show-status`, `show-results` etc. all operate on the active session automatically. `--session <id>` overrides it. `init` always creates a new session and overwrites the pointer. When `--backend-id` is not passed, `init` derives it from `dataset_name` in the config.
 
 **Persistence: two tiers.** Session state (`sessions/{session_id}/`) is the live UI dashboard + HITL control surface. Campaign store (`campaigns/{cycle_id}/`) is the source of truth for optimizer resume (trial checkpoints, pre-scoring candidates). See `docs/architecture/overview.md § Persistence Architecture` for the full layout, `campaign_state.json` schema, and resume flow.
 

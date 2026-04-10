@@ -137,7 +137,7 @@ cd docker && docker-compose up --build
 ### Three entry points
 
 - **Notebook** (recommended): open `notebooks/optimization_campaign.ipynb`
-- **CLI**: `python -m promptpotter.cli.campaign_runner init --backend-url http://127.0.0.1:8000`
+- **CLI**: `python -m promptpotter init --backend-url http://127.0.0.1:8000`
 - **API**: `uvicorn promptpotter.main:app --port 8001 --reload`
 
 See the [Setup Guide](docs/setup-guide.md) for prerequisites, configuration, and first run.

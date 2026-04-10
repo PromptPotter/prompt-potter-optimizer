@@ -3,15 +3,15 @@
 Usage::
 
     # Export supplemental materials markdown
-    python -m promptpotter.cli.export_results supplemental \\
+    python -m promptpotter export supplemental \\
         --backend-id local --output supplemental.md
 
     # Export all campaign data as JSON
-    python -m promptpotter.cli.export_results json \\
+    python -m promptpotter export json \\
         --backend-id local --output paper_results.json
 
     # Export specific campaigns
-    python -m promptpotter.cli.export_results supplemental \\
+    python -m promptpotter export supplemental \\
         --backend-id local --campaigns campaign_abc,campaign_def \\
         --output supplemental.md
 """

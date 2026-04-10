@@ -8,14 +8,14 @@ during optimization and accepts control signals (pause/resume/stop)
 written by the user or a webapp.
 
 Usage:
-    python -m promptpotter.cli.campaign_runner init [options]
-    python -m promptpotter.cli.campaign_runner task-context --task-file PATH
-    python -m promptpotter.cli.campaign_runner scan --variants-file PATH
-    python -m promptpotter.cli.campaign_runner scan-results
-    python -m promptpotter.cli.campaign_runner optimize [--round]
-    python -m promptpotter.cli.campaign_runner control --pause | --resume | --stop
-    python -m promptpotter.cli.campaign_runner results [--save]
-    python -m promptpotter.cli.campaign_runner status
+    python -m promptpotter init [options]
+    python -m promptpotter task-context --task-file PATH
+    python -m promptpotter scan --variants-file PATH
+    python -m promptpotter scan-results
+    python -m promptpotter optimize [--round]
+    python -m promptpotter control --pause | --resume | --stop
+    python -m promptpotter results [--save]
+    python -m promptpotter status
 """
 
 from __future__ import annotations
@@ -144,9 +144,14 @@ async def cmd_init(args: argparse.Namespace) -> None:
     dataset_type = file_config.get("dataset_type")
     local_eval_token = file_config.get("local_eval_token")
 
+    # Derive backend_id from dataset_name when not explicitly passed
+    backend_id = args.backend_id
+    if backend_id == DEFAULT_BACKEND_ID and dataset_name:
+        backend_id = dataset_name
+
     session = await _init_services(
         backend_url=args.backend_url,
-        backend_id=args.backend_id,
+        backend_id=backend_id,
         experiment_id=args.experiment_id,
         dataset_name=dataset_name,
         dataset_type=dataset_type,
@@ -154,7 +159,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
     )
 
     # Priority: --config file > connector profile > empty dict
-    profile = session.store.backends.load_connector_profile(args.backend_id) or {}
+    profile = session.store.backends.load_connector_profile(backend_id) or {}
     campaign_config = {**profile, **file_config}
 
     # Log pipeline snapshot from session (already loaded in init_services)
@@ -173,7 +178,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
         "phase": "init",
         "init_params": {
             "backend_url": args.backend_url,
-            "backend_id": args.backend_id,
+            "backend_id": backend_id,
             "experiment_id": args.experiment_id,
             "dataset_name": dataset_name,
             "dataset_type": dataset_type,
@@ -225,7 +230,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
         f"""# Campaign Report — {session_id}
 
 ## Setup
-- Backend: {args.backend_id} @ {args.backend_url}
+- Backend: {backend_id} @ {args.backend_url}
 - Active steps: {", ".join(active)} ({excl_str})
 - Eval data: {len(dataset)} queries
 - Baseline: {baseline_acc:.1%}""",

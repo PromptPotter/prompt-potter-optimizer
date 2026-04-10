@@ -68,16 +68,16 @@ The CLI campaign runner supports both interactive (round-by-round) and autonomou
 
 ```bash
 # Initialize against your backend (baseline deferred — optimizer runs it automatically)
-python -m promptpotter.cli.campaign_runner init \
+python -m promptpotter init \
     --backend-url http://127.0.0.1:8000 \
     --config datasets/lca-termnorm/campaign.json \
     --skip-baseline
 
 # Run optimization (L1/L2/L3 until convergence)
-python -m promptpotter.cli.campaign_runner optimize
+python -m promptpotter optimize
 
 # View results
-python -m promptpotter.cli.campaign_runner results
+python -m promptpotter results
 ```
 
 See [`cli-workflow.md`](cli-workflow.md) for the full subcommand reference and worked examples.
@@ -102,8 +102,8 @@ cd docker && docker-compose up --build
 ## Export Results
 
 ```bash
-python -m promptpotter.cli.export_results supplemental --backend-id local -o supplemental.md
-python -m promptpotter.cli.export_results json --backend-id local -o paper_results.json
+python -m promptpotter export supplemental --backend-id local -o supplemental.md
+python -m promptpotter export json --backend-id local -o paper_results.json
 ```
 
 See [`benchmarks.md`](../research/benchmarks.md) for methodology and result table format.

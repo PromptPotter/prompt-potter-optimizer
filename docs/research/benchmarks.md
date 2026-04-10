@@ -212,8 +212,8 @@ Every parameter, including loop-control knobs, becomes part of the cycle identit
 ### Export commands
 
 ```bash
-python -m promptpotter.cli.export_results supplemental --backend-id <id> -o supplemental.md
-python -m promptpotter.cli.export_results json --backend-id <id> -o paper_results.json
+python -m promptpotter export supplemental --backend-id <id> -o supplemental.md
+python -m promptpotter export json --backend-id <id> -o paper_results.json
 ```
 
 The supplemental includes: campaign comparison, convergence, pairwise significance, parameter impact, failure analysis, query difficulty, and a reproducibility manifest. See CLAUDE.md for full CLI reference.

@@ -62,6 +62,21 @@ ps aux | grep python
 
 Kill any stale `campaign_runner` processes to avoid wasting API credits.
 
+## Active Session Issues
+
+PromptPotter uses `.promptpotter/active_session.json` to remember the current campaign (like a browser's active tab). Every command except `init` reads from it.
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| `No active session. Run 'init' first.` | No `.promptpotter/active_session.json` exists | Run `init` with the correct `--config` for your dataset |
+| `Session '{id}' not found for backend '{bid}'` | Pointer references a deleted/moved session | Re-run `init` to create a fresh session |
+| `optimize` creates a new campaign instead of resuming | You ran `init` again (it always creates new) | Don't re-init — just run `optimize` directly to resume |
+| Wrong `backend_id` after init | `--backend-id` not passed, defaulted to `local` | Pass `--backend-id` explicitly or let it auto-derive from `dataset_name` in the config. Fix: edit `active_session.json` to point to the correct `backend_id` and `session_id`. |
+
+**Key rule:** `init` = new campaign. To resume, just run `optimize` (or any other command) — the active pointer handles it.
+
+To inspect: `cat .promptpotter/active_session.json`
+
 ## Backend Connectivity
 
 If `init` or `optimize` fails with connection errors:

@@ -12,7 +12,7 @@ User may also say "new campaign" or "start fresh" to force a new session instead
 
 ## Quick Reference: CLI Commands
 
-All commands: `python -m promptpotter.cli.campaign_runner <cmd> [flags]`
+All commands: `python -m promptpotter <cmd> [flags]`
 
 | Command | Purpose | Key Flags |
 |---------|---------|-----------|
@@ -25,7 +25,7 @@ All commands: `python -m promptpotter.cli.campaign_runner <cmd> [flags]`
 | `show-status` | Print live dashboard + session state | — |
 | `show-results` | Show campaign summary | `--save` (persist winner to backend) |
 
-Export (separate entrypoint): `python -m promptpotter.cli.export_results <format> --backend-id <id> -o <file>`
+Export: `python -m promptpotter export <format> --backend-id <id> -o <file>`
 
 **Global flags on all commands**: `--session <id>` (target specific session).
 
@@ -67,15 +67,25 @@ Everything else (`compile_scorer`, prompt variant library, backend pipeline) is 
 
 ## Phase 0.5: Session Check & Data Assessment (silent — findings go into dashboard)
 
-### Session check
+### Session check — RESUME IS THE DEFAULT
 
-1. Run `python -m promptpotter.cli.campaign_runner show-status` (timeout 10s, ignore errors)
-2. If an active session exists — read `session.json` and `campaign_state.json`, decide how to proceed:
-   - **User said "new campaign" / "start fresh"** → Phase 1
-   - **`stop_reason` is set** (optimization completed/stopped) → read `optimize_result.json`, recommend reviewing results or starting fresh
-   - **`control.requested_state` is `"pause"` or `"stop"`** → offer to resume (`control --resume`) or review results
-   - **Otherwise** → resume from current phase (`init`→Ph2, `set-task`→Ph3/4, `scan`/`scan-results`→Ph4, `optimizing`→`optimize`, `optimize`→Ph5)
-3. No active session → Phase 1
+**The active session pointer** (`.promptpotter/active_session.json`) stores `{backend_id, session_id}` of the current campaign — like a browser's active tab. `init` writes it; every other command reads it. If it exists and points to a valid session, **resume that session — do NOT run `init`**. Running `init` always creates a new session and overwrites the pointer.
+
+`init` is only needed when:
+- No active session exists (first run, or pointer file missing)
+- User explicitly says "new campaign" / "start fresh" / names a different dataset
+- The active session's `dataset_name` doesn't match the user's request
+
+**Decision flow:**
+
+1. Read `.promptpotter/active_session.json` → get `backend_id` + `session_id`
+2. Read the session's `session.json` → get `dataset_name`, `phase`, `campaign_config`
+3. **Dataset matches (or user didn't specify one)** → resume:
+   - `phase: "init"` or `"set-task"` → pick up from Phase 2/3
+   - `phase: "optimizing"` or `"optimize"` with no `stop_reason` → go straight to Phase 4 (`optimize`)
+   - `stop_reason` is set → read `optimize_result.json`, recommend reviewing results or starting fresh
+   - `control.requested_state` is `"pause"` or `"stop"` → offer to resume (`control --resume`) or review
+4. **Dataset mismatch or no active session** → Phase 1 (new `init`)
 
 ### Data assessment
 
@@ -166,16 +176,17 @@ After the dashboard, state your recommendation (resume / fresh start) and ask th
 
 ---
 
-## Phase 1: Initialize Campaign
+## Phase 1: Initialize NEW Campaign
 
-Read the init flags from the dataset's `dataset.md` and construct the command:
+**Only reach this phase when Phase 0.5 determined a new session is needed** (no active session, dataset mismatch, or user explicitly requested fresh start). If resuming, skip to Phase 2/4.
+
+`init` creates a new session and overwrites the active session pointer. Always read `datasets/{name}/dataset.md` § "Init Flags" first — it has the exact flags including `--backend-id`. The `--backend-id` auto-derives from `dataset_name` when omitted, but being explicit is safer.
 
 ```bash
-python -m promptpotter.cli.campaign_runner init \
+# Copy init flags from dataset.md:
+python -m promptpotter init \
     {init flags from dataset.md} --skip-baseline
 ```
-
-All datasets use `--backend-url` to route through the backend. The backend's `llm_only` step handles benchmark datasets (GSM8K, HotPotQA) the same way it handles TermNorm — just with a different pipeline config.
 
 - **Always `--skip-baseline`** — baseline eval is deferred. The optimizer runs it automatically before the first round. Explicit baseline eval is only useful when Phase 0.5 data assessment found substantial historical data AND the user explicitly requests a fresh baseline.
 - Timeout: 30 seconds
@@ -187,7 +198,7 @@ All datasets use `--backend-url` to route through the backend. The backend's `ll
 
 If the data assessment found ≥ 50 unique queries and ≥ 5 dataset runs, show the leaderboard before init:
 
-1. Run `python -m promptpotter.cli.campaign_runner show-results` (if a prior campaign exists) or `show-scan` (if scan data exists) — these are the existing leaderboard/dashboard displays
+1. Run `python -m promptpotter show-results` (if a prior campaign exists) or `show-scan` (if scan data exists) — these are the existing leaderboard/dashboard displays
 2. Present the best-performing configuration and accuracy to the user
 3. Ask: "Start from the best known config, or fresh from defaults?"
 
@@ -198,7 +209,7 @@ Report: session ID, active pipeline, query count.
 ## Phase 2: Task Context (recommended)
 
 ```bash
-python -m promptpotter.cli.campaign_runner set-task \
+python -m promptpotter set-task \
     --task-file datasets/{dataset}/task_description.md
 ```
 
@@ -212,8 +223,8 @@ python -m promptpotter.cli.campaign_runner set-task \
 Only if `datasets/{dataset}/scan_variants.json` exists AND user wants exploration:
 
 ```bash
-python -m promptpotter.cli.campaign_runner scan --variants-file datasets/{dataset}/scan_variants.json
-python -m promptpotter.cli.campaign_runner scan-results
+python -m promptpotter scan --variants-file datasets/{dataset}/scan_variants.json
+python -m promptpotter scan-results
 ```
 
 Report which axes showed sensitivity and the recommended starting point.
@@ -237,10 +248,10 @@ No pre-run cost confirmation is needed. The protocol is inherently bounded.
 
 ```bash
 # Default — one round, then report back
-python -m promptpotter.cli.campaign_runner optimize --round
+python -m promptpotter optimize --round
 
 # Only if user explicitly asks for autonomous mode (no flag = full loop)
-python -m promptpotter.cli.campaign_runner optimize
+python -m promptpotter optimize
 ```
 
 **After each round completes**, read and present:
@@ -288,7 +299,7 @@ Read `reference/optimization-layers.md` for the full escalation model, configura
 
 While `optimize` runs, you can monitor progress:
 
-- **`show-status` command** (from another terminal): `python -m promptpotter.cli.campaign_runner show-status` — shows live dashboard with round, accuracy, layer, ETA.
+- **`show-status` command** (from another terminal): `python -m promptpotter show-status` — shows live dashboard with round, accuracy, layer, ETA.
 - **`campaign_state.json`** — updated on every event. Key fields to watch: `round`, `best`, `phase` (l1_generate/l1_evaluate/refine_context/modify_plan), `cache_hit_rate`, `eta_s`, `stop_reason`.
 - **`campaign_log.md`** — structured round-by-round markdown report. Best diagnostic tool when something looks wrong.
 
@@ -297,9 +308,9 @@ While `optimize` runs, you can monitor progress:
 From another terminal (or after Ctrl+C):
 
 ```bash
-python -m promptpotter.cli.campaign_runner control --pause     # pause at next checkpoint
-python -m promptpotter.cli.campaign_runner control --resume    # resume paused campaign
-python -m promptpotter.cli.campaign_runner control --stop      # stop gracefully
+python -m promptpotter control --pause     # pause at next checkpoint
+python -m promptpotter control --resume    # resume paused campaign
+python -m promptpotter control --stop      # stop gracefully
 ```
 
 You can also edit `campaign_state.json` directly: set `control.requested_state` to `"pause"`, `"resume"`, or `"stop"`.
@@ -309,7 +320,7 @@ You can also edit `campaign_state.json` directly: set `control.requested_state` 
 ## Phase 5: Results
 
 ```bash
-python -m promptpotter.cli.campaign_runner show-results
+python -m promptpotter show-results
 ```
 
 Report: best vs baseline accuracy, rounds run, L1/L2/L3 activations, winner config. Offer `show-results --save` to persist the winner to the backend.
@@ -339,13 +350,13 @@ After a successful campaign, export results for documentation or papers:
 
 ```bash
 # Supplemental materials as markdown (tables, CI, significance, reproducibility)
-python -m promptpotter.cli.export_results supplemental --backend-id local -o supplemental.md
+python -m promptpotter export supplemental --backend-id local -o supplemental.md
 
 # Structured JSON for paper repositories
-python -m promptpotter.cli.export_results json --backend-id local -o paper_results.json
+python -m promptpotter export json --backend-id local -o paper_results.json
 
 # Export specific campaigns only
-python -m promptpotter.cli.export_results supplemental \
+python -m promptpotter export supplemental \
     --backend-id local --campaigns campaign_001,campaign_002 -o supplemental.md
 ```
 
@@ -355,8 +366,8 @@ python -m promptpotter.cli.export_results supplemental \
 
 - **Timeout ceiling: 30s default, 60s hard max** — NEVER exceed 60s without explicit user approval. If a command will take longer than 60s, STOP and ask the user: "This will take ~Xmin. OK to proceed?" Do NOT let commands auto-background by exceeding timeout — that is the same as running in background.
 - **Never run CLI commands in background** — stale processes leak and waste API credits. This includes letting foreground commands auto-background by hitting timeout limits.
-- **Always read dataset.md before anything** — it's the source of truth for how to operate each dataset
-- **Resume by default** — only create new sessions when explicitly asked
+- **Resume by default** — check `.promptpotter/active_session.json` first. If it points to a valid session for the same dataset, skip `init` and go straight to `optimize` (or whatever phase is next). Only run `init` when there's no active session, the dataset changed, or the user says "new"/"fresh". Running `init` unnecessarily creates orphan sessions.
+- **Always read `dataset.md` before `init`** — it has the exact init flags including `--backend-id`. Never guess or omit flags.
 - **Skip baseline by default** — always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists AND the user requests it.
 - **Data-driven start** — Phase 0.5 assesses existing data. Minimal data (< 50 queries, < 5 runs) → go straight to optimize from config defaults. Substantial data → show leaderboard via existing CLI commands (`show-results`, `show-scan`), propose best-known config as starting point.
 - **Round-by-round critique is the default** — always use `--round`, read `campaign_log.md` + `campaign_state.json` after each round, present the critique summary, and ask before continuing. Only use full loop (`optimize` without `--round`) when the user explicitly requests it.
