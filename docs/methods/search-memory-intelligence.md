@@ -111,14 +111,7 @@ count, and candidate count.[^rh]
 
 ## 3. Design Principle: L1 Stays Clean
 
-L1 generate is a candidate generator — it should focus on producing
-diverse, high-quality configurations, not reasoning about sample-level
-diagnostics. **Critique is the every-round intelligence hub** — it
-receives raw eval results AND SearchMemory signals to produce
-well-informed `critique_text`. L2 fires only on escalation and receives
-strategic meta-intelligence (trajectory, candidate comparison, failure
-group × axis) for redirection decisions. Deterministic code handles
-per-query triage (no LLM needed).
+L1 focuses on generating diverse candidates. Critique is the every-round hub (raw eval + SearchMemory). L2 fires on escalation only (trajectory, candidate comparison, failure group × axis). Deterministic code handles per-query triage.
 
 **Three-tier intelligence architecture:**
 
@@ -139,93 +132,24 @@ plan pivots.
 
 ### Tier 1 — Deterministic Sample Triage (Code)
 
-Problematic samples detected statistically, classified by severity,
-handled without LLM involvement.
+Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three severity levels:
 
-#### B: Per-query failure streak detection
+- **Intractable** (never hit) → `intractable_queries_ci()` excludes via Wilson CI. No optimizer signal.
+- **Chronically failing** (recent streak) → `persistent_failures(min_streak)` deprioritizes. Flagged to L2.
+- **Intermittent** (variable) → kept in eval set. High discrimination value.
 
-**Current:** `_query_hits` stores full Bernoulli sequence per query.
-`dead_queries()` returns never-hit queries.
-`persistent_failures(min_streak)` returns queries failing in N
-consecutive recent evaluations. `intractable_queries_ci()` uses
-Wilson CI for confidence-bounded exclusion.
-These are classified into:
-
-- **Intractable** (failed with every config ever tried) → exclude from
-  eval set automatically. No signal for the optimizer.
-- **Chronically failing** (failed in last N rounds but not always) →
-  deprioritize in eval sampling. Flag to L2 for strategic review.
-- **Intermittent** (variable hit/miss) → keep in eval set. High
-  discrimination value for candidate comparison.
-
-**Building blocks:** `_query_hits[query]` has the raw data.
-`_query_failure_modes[query]` has the `terminated_at` sequence.
-
-#### Eval set refinement
-
-The existing `adapt_eval_set()` (Wave 3d) already swaps dead queries for
-discriminating ones. Tier 1 extends this with severity-aware triage:
-intractable queries are excluded before evaluation begins, saving budget
-for informative samples.
+`adapt_eval_set()` swaps dead queries for discriminating ones. Intractable queries excluded before evaluation begins.
 
 ### Tier 2 — L2 Strategic Intelligence (LLM)
 
-Insights that require meta-reasoning about optimization direction. Injected
-into L2 Refine only.
+Meta-reasoning injected into L2 Refine only:
 
-#### A: Round trajectory
-
-**Current:** Critique sees `round_history`. L2 sees critique text.
-**Target:** L2 receives a compact structured summary: accuracy trend,
-stall count, best-ever vs current, direction (improving / oscillating /
-degrading). Built from `state.rounds` — no new data collection needed.
-
-#### C: Failure group → axis cross-tabulation
-
-**Current:** Sensitivity scan produces per-axis deltas (overall).
-Failure clusters group queries by bottleneck step. Both exist
-independently.
-**Target:** Cross-tabulate — "for queries that fail at web_search,
-which axes produce the largest accuracy lift?" Injected into L2 so it
-can direct L1 toward high-impact axes for the dominant failure group.
-
-**Building blocks:** `ingest_failure_group_analysis()`,
-`query_sensitive_axes()`, `parameter_failure_correlation()` on
-SearchMemory. Producer (`failure_group_sensitivity()` in
-`failure_group_analysis.py`) runs automatically after scan completes
-via `run_scan_and_persist()` in orchestration.
-
-#### D: Candidate comparison
-
-**Current:** L2 only sees the winner's critique.
-**Target:** L2 receives a compact summary of how all candidates
-performed — which were close, what approaches they tried. Prevents L2
-from directing L1 toward approaches already tested and found wanting.
-
-**Building blocks:** `L1EvalResult.candidate_scores` and
-`L1EvalResult.all_candidate_results` carry this data.
+- **Round trajectory** — `build_round_trajectory()`: accuracy trend, stall count, direction. Built from `state.rounds`.
+- **Failure group × axis** — `parameter_failure_correlation()`: cross-tabulates failure clusters with per-axis deltas. Producer runs after scan via `failure_group_sensitivity()`.
+- **Candidate comparison** — `build_candidate_comparison()`: how all candidates performed, preventing L2 from repeating tested approaches.
 
 ## 5. Status
 
-All four originally planned items are implemented:
+All core items implemented: failure streak triage + CI gating, round trajectory, failure group × axis, candidate comparison, critique tractability/exhaustion/trends, L3 intelligence.
 
-| Item | Tier | Target | Status |
-|------|------|--------|--------|
-| B — Failure streak triage + CI gating | Deterministic | Code | **Done** — `persistent_failures()` + `intractable_queries_ci()` pre-filter eval set |
-| A — Round trajectory | Strategic | L2 | **Done** — `build_round_trajectory()` in L2 intelligence bundle |
-| C — Failure group × axis | Strategic | L2 | **Done** — `parameter_failure_correlation()` in L2 context (scan-only producer) |
-| D — Candidate comparison | Strategic | L2 | **Done** — `build_candidate_comparison()` in L2 intelligence bundle |
-
-Additional intelligence items added during M8 completion:
-
-| Item | Tier | Target | Status |
-|------|------|--------|--------|
-| Critique tractability profiles | Every-round | Critique | **Done** |
-| Axis exhaustion detection | Every-round | Critique | **Done** — `exhausted_axes()` |
-| Value momentum/direction | Every-round | Critique | **Done** — `axis_value_trend()` |
-| L3 SearchMemory intelligence | Strategic | L3 | **Done** — `build_l3_search_memory_context()` |
-| Diminishing returns detector | Both | Critique + L2 | Planned |
-| Candidate diversity monitor | Strategic | L2 | Planned |
-| Query improvement attribution | Both | Critique + L2 | Planned |
-| Cross-candidate failure diff | Every-round | Critique | Planned |
-| Failure group refresh in optimization loop | Strategic | L2 | Planned |
+**Planned:** Diminishing returns detector, candidate diversity monitor, query improvement attribution, cross-candidate failure diff, failure group refresh during optimization.

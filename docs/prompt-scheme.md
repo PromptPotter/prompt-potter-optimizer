@@ -32,19 +32,24 @@ Dynamic field mutation (L2-driven add/remove) is a future optimization direction
 ## Rendering Pipeline
 
 ```
-┌─ PROMPT SCHEME ──────────────────────────┐
+┌─ PROMPT_STRING_FIELDS (6) ───────────────┐
 │  1. persona                              │
 │  2. task_intent                          │
 │  3. problem_description                  │
 │  4. instruction                          │
 │  5. thinking_style                       │
 │  6. answer_format                        │
-│  7. few_shot_examples                    │
-│  8. plan                                 │
+│                                          │
+│  +/- [???]                               │
 └──────────────────────────────────────────┘
-         │ render()
-         ▼
-   skip empties → join("\n\n") → prompt string
+
+┌─ few_shot_examples ──────────────────────┐
+│  7. Input/Output pairs (rendered inline) │
+└──────────────────────────────────────────┘
+
+┌─ plan ───────────────────────────────────┐
+│  8. L3 strategic framework (appended)    │
+└──────────────────────────────────────────┘
 ```
 
 **Example:** Given `persona = "You are a domain expert."`, `instruction = "Match the query to the best candidate."`, `thinking_style = "Think step by step."`, and all other fields empty, `render()` produces:

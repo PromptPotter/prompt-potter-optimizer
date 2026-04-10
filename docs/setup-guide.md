@@ -1,8 +1,6 @@
 # Setup Guide — PromptPotter Optimizer
 
-You have a prompt and a dataset of input/output pairs. PromptPotter finds a better prompt — automatically. It tries variations, measures accuracy, and iterates using a critique-guided 3-layer optimization loop (generate candidates, refine context, replan strategy).
-
-The simplest backend is a single LLM call with a question-answer dataset (like HotPotQA or GSM8K). The same tool scales to multi-step pipelines with retrieval, web search, and ranking nodes. PromptPotter evaluates your pipeline via the backend's `/matches` HTTP endpoint. Separately, the optimizer uses its own LLM (configured via `LLM_PROVIDER`/`LLM_MODEL`) to generate candidates and critique results.
+Automatic prompt optimization — from single LLM calls to multi-step pipelines. Evaluates via the backend's `/matches` endpoint; uses a separate optimizer LLM (`LLM_PROVIDER`/`LLM_MODEL`) for candidate generation and critique.
 
 ---
 
@@ -103,26 +101,12 @@ cd docker && docker-compose up --build
 
 ## Export Results
 
-After optimization campaigns complete, generate paper-ready supplemental materials:
-
 ```bash
-# Markdown: comparison tables, convergence, significance tests, reproducibility manifest
-python -m promptpotter.cli.export_results supplemental \
-    --backend-id local --output supplemental.md
-
-# JSON: structured data for paper repositories or further analysis
-python -m promptpotter.cli.export_results json \
-    --backend-id local --output paper_results.json
+python -m promptpotter.cli.export_results supplemental --backend-id local -o supplemental.md
+python -m promptpotter.cli.export_results json --backend-id local -o paper_results.json
 ```
 
-Or from the notebook:
-
-```python
-from promptpotter.display.campaign import generate_supplemental
-md = generate_supplemental(session.store, session.backend_id)
-```
-
-See [`benchmarks.md`](benchmarks.md) for the full benchmark methodology, head-to-head comparison protocol, and result table format.
+See [`benchmarks.md`](benchmarks.md) for methodology and result table format.
 
 ---
 

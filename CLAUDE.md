@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-PromptPotter Optimizer finds better prompts automatically. Give it a dataset (question + expected answer pairs) and point it at your LLM pipeline's evaluation endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer optimization loop. The backend can be anything from a single LLM call to a multi-step pipeline with retrieval, enrichment, and ranking. Currently tested with TermNorm (AI terminology normalization).
+PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer optimization loop (L1 generate → L2 refine → L3 replan). Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm and AIME 2025.
 
 ## Commands
 

@@ -35,11 +35,11 @@ All core logic lives in `promptpotter/services/`.
          and failure modes to both loops.
 ```
 
-**Human Loop** — OAT perturbation scan measures which axes matter. You pick the best starting point.
+**Human Loop** — OAT scan measures which axes matter. You pick the best starting point.
 
-**AI Loop** — Critique-guided feedback cycle. Each round produces a critique (structured failure analysis) feeding the next round's candidate generation alongside sampled thinking styles. `scan_context` provides leaderboard and difficulty analytics when available. L1→L2→L3 escalation on diminishing returns.
+**AI Loop** — Critique-guided feedback cycle. Each round: generate candidates, evaluate, critique failures, feed forward. L1→L2→L3 escalation on diminishing returns.
 
-**SearchMemory** *(M8 — live)* — cross-campaign intelligence layer. A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Feeds both loops via atomic data accessors: parameter impact rankings, top-5 historically-best values per axis, query tractability, bottleneck distribution, and failure clusters. Refreshed lazily on watermark staleness.
+**SearchMemory** — Materialized view over `dataset_runs/` feeding both loops. See [SearchMemory design](methods/search-memory-intelligence.md).
 
 ## Two-Layer Tracing
 
@@ -65,9 +65,9 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **PipelineSchema** / **PipelineNode** — describes a pipeline (target or optimizer). Both TermNorm and the optimizer pipeline parse into PipelineSchema.
 
-**EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, etc.). Also carries stale data protocol config (`stale_data_load_protocol`, `search_memory`, `stale_data_observations`).
+**EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, stale data protocol config).
 
-**SearchMemory** *(M8 — live)* — materialized view over all historical search points and results. Three pillars: parameter impact (effect size + top-5 values per axis), query patterns (tractability, discriminative power), failure modes (bottleneck distribution, failure clusters). Also tracks per-query degradation counts (`query_degradation_rate()`), consumed by the stale data protocol's sampleswitch step. Atomic data accessors, no formatting — each consumer composes what it needs. Incrementally updated via watermark. See [SearchMemory section](#searchmemory-m8-wave-3) below.
+**SearchMemory** — Materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic accessors, no formatting. See [design doc](methods/search-memory-intelligence.md).
 
 Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`.
 
@@ -81,11 +81,11 @@ All paths converge on `eval_search_point()` — single gateway for eval persiste
 
 | Strategy | Mechanism | Detail |
 |----------|-----------|--------|
-| **Per-node cache** | `node_cache_key(node, config, upstream_hash)` with chained dependency | See [Node-Level Cache](#node-level-cache) below |
-| **Shared store** | Scan + cycle both write to `dataset_runs/` | Coverage discovers all archived results regardless of source |
-| **Stale data protocol** | 3-step ladder for degraded queries: rerun → samplescan → sampleswitch | See [optimization.md § Stale Data Load Protocol](optimization.md#stale-data-load-protocol) |
-| **SearchMemory** *(M8 — live)* | Materialized statistical index over `dataset_runs/` | See [SearchMemory section](#searchmemory-m8-wave-3) |
-| **Graceful interrupt** | First Ctrl+C finishes in-flight call and saves (`"partial": True`) | Partial results archived for SearchMemory |
+| **Per-node cache** | `node_cache_key(node, config, upstream_hash)` with chained dependency | See [Node-Level Cache](#node-level-cache) |
+| **Shared store** | Scan + cycle both write to `dataset_runs/` | All archived results discoverable |
+| **Stale data protocol** | 3-step ladder: rerun → samplescan → sampleswitch | See [optimization.md](optimization.md#stale-data-load-protocol) |
+| **SearchMemory** | Materialized index over `dataset_runs/` | See [SearchMemory](#searchmemory) |
+| **Graceful interrupt** | First Ctrl+C saves in-flight; partial results archived | — |
 
 **Eval flow:**
 
@@ -162,7 +162,7 @@ Two independent persistence tiers with different lifecycles:
     round_NNN_l2.json       # L2 escalation trace (if triggered)
 ```
 
-Session state tracks a single optimization run. Survives interrupts for display continuity but is **not** the source of truth for optimizer resume.
+Session state survives interrupts for display continuity but is **not** the source of truth for resume.
 
 ### Tier 2 — Campaign Store (source of truth for resume)
 
@@ -174,23 +174,11 @@ Session state tracks a single optimization run. Survives interrupts for display 
     round_NNNN_candidates.json      # pre-eval candidate checkpoint (saved BEFORE eval)
 ```
 
-The campaign store is keyed by `cycle_id` (content hash of baseline + dataset + pipeline). Resume flow:
-
-1. `lifecycle.py` counts completed `trials` in `{cycle_id}.json` → `resumed_from_round`
-2. `cycle_init.py:_restore_from_checkpoint()` loads `trial_{N-1}.json` → hydrates `opt_sp`, escalation counters
-3. `round_execution.py:_generate_or_load_candidates()` loads `round_NNNN_candidates.json` → skips L1 generation
-
-Trial files are written on round completion. Candidate files are written before evaluation starts. This means a mid-round interrupt preserves generated candidates but not partial evaluation progress.
+Keyed by `cycle_id` (content hash of baseline + dataset + pipeline). Resume: `lifecycle.py` counts trials → `resumed_from_round`, `cycle_init.py` restores from last trial, `round_execution.py` loads persisted candidates. Trial files written on round completion; candidate files written before eval starts.
 
 ### `campaign_state.json` — UI & Control Surface
 
-This file is the **live dashboard** for `show-status`, the webapp, and HITL checkpoints. It is **not** an optimizer checkpoint — optimizer resume uses trial files in the campaign store.
-
-**Written by:** `CampaignPersistenceEmitter` (updated on every callback event via read-merge-write).
-
-**Read by:** `show-status` CLI, webapp, `CampaignControlReader` (control signals).
-
-**Bidirectional control protocol:** The `control` section is a shared surface. The emitter writes execution state; the user/webapp writes control signals. The merge logic preserves user-edited `control` fields on every flush.
+Live dashboard for `show-status` and HITL checkpoints — **not** an optimizer checkpoint. Written by `CampaignPersistenceEmitter` (read-merge-write on every event). The `control` section is bidirectional: emitter writes execution state, user/webapp writes control signals (`pause`, `resume`, `stop`).
 
 ```json
 {
@@ -232,39 +220,11 @@ This file is the **live dashboard** for `show-status`, the webapp, and HITL chec
 
 `dataset_runs/` is shared across all eval paths (content-addressed). `campaigns/` holds optimizer-layer trial checkpoints per round.
 
-### SearchMemory (M8 Wave 3)
+### SearchMemory
 
-> **M8 — live.** Degradation tracking and cross-campaign intelligence operational; incremental refresh via watermark planned.
+Cross-campaign intelligence layer. Materialized view over `dataset_runs/`, persisted at `{backend_id}/search_memory.json`, refreshed incrementally via watermark. Three pillars: parameter impact, query patterns, failure modes. Atomic data accessors only — each consumer composes its own prompt section.
 
-A materialized view over all historical `dataset_runs/` that compounds evaluation data across campaigns. Persisted at `{backend_id}/search_memory.json` and updated incrementally via watermark (only new dataset runs since last refresh are processed).
-
-**Three analysis pillars + degradation tracking:**
-
-| Pillar | What it tracks | Key accessors |
-|--------|---------------|---------------|
-| Parameter Impact | Effect size + consistency per axis, top-5 historically-best values, axis exhaustion, value trends | `axis_rankings()`, `top_k_values(axis)`, `axis_impact(axis)`, `exhausted_axes()`, `axis_value_trend()` |
-| Query Patterns | Hit rate, variance (discriminative power), dominant failure mode per query, CI-gated intractable detection | `query_tractability()`, `discriminating_queries()`, `dead_queries()`, `persistent_failures()`, `intractable_queries_ci()` |
-| Failure Modes | Bottleneck distribution by terminated_at step, failure clusters, failure group × axis correlation | `bottleneck_distribution()`, `failure_clusters()`, `parameter_failure_correlation()` |
-| Degradation | Per-query degradation count (warnings in `pipeline_data.diagnostics`) | `query_degradation_rate(query)` |
-
-Degradation tracking feeds the stale data protocol's `sampleswitch` step: queries with historically high degradation rates are candidates for exclusion from the eval set.
-
-**Design:** Atomic data accessors only -- no LLM text formatting. Each consumer (scan_advisor, L1, L2, critique) queries the subset it needs and composes its own prompt section. This avoids coupling SearchMemory to any particular prompt format.
-
-**Consumer matrix** (critique = every-round hub, L2 = escalation-only, L3 = L2-stall):
-
-| Consumer | What it reads | Purpose |
-|----------|--------------|---------|
-| Scan advisor | `axis_rankings()`, `top_k_values()`, `bottleneck_distribution()` | Prioritize impactful axes, suggest historically-best values |
-| L1 Generate | `failure_clusters()`, `dead_queries()`, `top_k_values()` | Focus candidates on failure modes, avoid dead-end values |
-| Critique | `discriminating_queries()`, `failure_clusters()`, `persistent_failures()`, `exhausted_axes()`, `axis_value_trend()` | Every-round intelligence hub — frames analysis with tractability, axis exhaustion, value trends |
-| L2 Refine | `axis_rankings()`, `bottleneck_distribution()`, `parameter_failure_correlation()`, `persistent_failures()` + round trajectory + candidate comparison | Escalation-only strategic intelligence for meta-reasoning |
-| L3 Plan | `axis_rankings()`, `bottleneck_distribution()`, `failure_clusters()`, `persistent_failures()` | Aggregate strategic picture for plan pivots |
-| Code (deterministic) | `intractable_queries_ci()`, `persistent_failures()` | CI-gated query exclusion from eval set — no LLM |
-
-Failure group × axis correlation producer runs after sensitivity scan; periodic refresh during optimization rounds is planned. See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full intelligence feed design.
-
-Implementation: `promptpotter/services/search/search_memory.py`.
+Full design, accessors, and consumer matrix: [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md). Implementation: `services/search/search_memory.py`.
 
 ### Node-Level Cache
 
@@ -353,8 +313,6 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
        injected into RunConfig.scan_context
 ```
 
-`BackendContext` is threaded alongside `RunConfig` into `init_cycle_state()` so that `EvalContext` reuses `session.store` directly instead of creating a duplicate `ProjectStore`. Infrastructure fields (`backend_url`, `index_terms`) live only on `BackendContext`, not duplicated on `RunConfig`.
-
 ### Lifecycle table
 
 | Object | Defined in | Created by | Lifetime | Mutated? | Checkpointed? |
@@ -368,12 +326,4 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
 | **ContextData** | `campaign/formatting.py` | `l1_generate()` | Per-generation | No (formatting input) | No |
 | **ScanContext** | `search/scan_results.py` | `prepare_scan_context()` | Campaign | No (read-only) | No |
 
-`init_cycle_state()` returns a `CycleInit` NamedTuple (defined in `cycle_init.py`) bundling LoopState + cycle infrastructure. It is immediately destructured by its single consumer.
-
-### Key invariants
-
-- **Single source of truth**: All optimizer state (critique, plan, task_context, escalation_journal, warning_inventory) lives on `LoopState.opt_sp` (`OptSearchPoint`). Only `opt_sp` is checkpointed between rounds.
-- **Infrastructure vs. state**: `BackendContext` and `EvalContext` carry infrastructure references (clients, stores). `LoopState` carries mutable optimization state. Don't conflate them.
-- **No store duplication**: `EvalContext.store` is `BackendContext.store` — not a separately constructed `ProjectStore`.
-- **Ephemeral bundles**: `CritiqueContext` and `ContextData` exist only during a single function call. They're formatting/diagnostic snapshots, not persistent state.
-- **Config pipeline**: `CampaignConfig` (user dict, flexible) → `RunConfig` (validated, immutable) is a one-way transformation. Services read `RunConfig`, never `CampaignConfig` directly.
+**Key invariants:** All optimizer state lives on `LoopState.opt_sp` (only `opt_sp` is checkpointed). `EvalContext.store` is `BackendContext.store` (no duplication). `CampaignConfig` → `RunConfig` is a one-way transformation; services read `RunConfig` only.

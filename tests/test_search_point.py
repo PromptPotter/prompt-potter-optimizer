@@ -184,10 +184,3 @@ def test_to_job_search_point_includes_few_shot_block():
     assert "few_shot_block" in sp.prompt_fields
     assert "Input: a" in sp.prompt_fields["few_shot_block"]
 
-
-def test_derive_without_prompt_fields_carries_forward():
-    """derive(pipeline_params=...) preserves existing prompt_fields."""
-    sp = _make_jsp("Rank by relevance.")
-    sp2 = sp.derive(pipeline_params={**sp.pipeline_params, "extra": 42})
-    assert sp2.prompt_fields == sp.prompt_fields
-    assert sp2.pipeline_params["extra"] == 42

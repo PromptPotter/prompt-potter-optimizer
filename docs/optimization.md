@@ -107,7 +107,7 @@ Optimization strategy -- rarely changed:
 
 ### Dynamic Field Set (Design Vision)
 
-The field set is currently fixed (8 fields in `PROMPT_STRING_FIELDS` + `few_shot_examples` + `plan`). The vision is to make it **open**: L2 should be able to add fields (e.g., `domain_constraints`, `negative_examples`) or remove zero-impact fields.
+Currently fixed (8 fields in `PROMPT_STRING_FIELDS` + `few_shot_examples` + `plan`). Vision: make it open — L2 adds/removes fields to widen or narrow the search space.
 
 ```
 L2 REFINE ──► add_field("domain_constraints")
@@ -126,11 +126,7 @@ L2 REFINE ──► add_field("domain_constraints")
 └──────────────────────────────────────────┘
 ```
 
-**Why it works architecturally:** `render()` already skips empty fields (removal = set to `""`). `derive_candidate()` and `prompt_field_dict()` iterate a field list — making it dynamic is the key change. An overflow `dict[str, str]` handles additions without new Pydantic attributes.
-
-**Benefit:** L2 field mutations widen or narrow the search space. A prompt with 4 fields searches a fundamentally different space than one with 8 fields.
-
-**Open questions:** How does the variant library adapt? Should scan test dynamic fields? Field ordering for new fields? Persistence through `OptSearchPoint` → `JobSearchPoint` → disk?
+Architecturally feasible: `render()` already skips empty fields, `derive_candidate()` iterates a field list. An overflow `dict[str, str]` handles additions without new Pydantic attributes.
 
 ---
 
@@ -268,45 +264,21 @@ Each round samples 2-3 styles from the variant library (`promptpotter/config/pro
 
 When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate exploration. Keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields), all other keys stay as node-level pipeline overrides. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
 
-### SearchMemory Intelligence Feed (M8)
+### SearchMemory Intelligence Feed
 
-Cross-campaign intelligence feeding the optimization loop. Loaded at cycle init from `{backend_id}/search_memory.json`, refreshed incrementally before each round. Each consumer receives a tailored subset via dedicated builder functions — SearchMemory exposes atomic data accessors only, never LLM text.
-
-**What each consumer receives today:**
-
-| Consumer | Signals | Builder |
-|----------|---------|---------|
-| L1 Generate | failure clusters, dead queries, top axes, best values | `build_l1_search_memory_context()` |
-| L2 Refine | axis rankings, bottleneck distribution | `build_l2_search_memory_context()` |
-| Critique | discriminating queries, failure clusters | inline in `round_execution.py` |
-| Scan advisor | axis rankings, top values, bottleneck distribution | direct accessors |
-
-**Two-tier sample intelligence (planned):**
-
-L1 stays clean — it generates candidates. Deeper intelligence feeds L2 (the meta-controller) or is handled deterministically in code.
-
-| Item | Tier | Target | Building blocks |
-|------|------|--------|----------------|
-| Failure streak triage | Deterministic | Code — exclude/deprioritize | `_query_hits` raw data exists |
-| Round trajectory | Strategic | L2 | `state.rounds` data exists |
-| Failure group × axis | Strategic | L2 | `ingest_failure_group_analysis()` — wired, producer runs after scan |
-| Candidate comparison | Strategic | L2 | `candidate_scores` data exists |
-
-See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design.
+Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
 
 ### Stale Data Load Protocol
 
-When a cached eval result is degraded (non-empty `diagnostics.warnings`), the protocol walks a 3-step ladder before accepting the stale data:
+When a cached eval result is degraded (non-empty `diagnostics.warnings`), the protocol walks a 3-step ladder:
 
-| Step | What it does | Resolves when |
-|------|-------------|---------------|
-| **rerun** | Count observations per query. Once `rerun_trigger_count` is reached, re-evaluate against the live backend. | Fresh result is not degraded |
-| **samplescan** | Re-evaluate with default pipeline params (no overrides) to test whether degradation is config-dependent. | Default-config result is not degraded |
-| **sampleswitch** | Query SearchMemory for historical degradation rate. If `>= sampleswitch_min_degradation_rate`, mark the query as switched out — it's chronically degraded and should not block optimization. | Degradation rate exceeds threshold |
+| Step | Action | Resolves when |
+|------|--------|---------------|
+| **rerun** | Re-evaluate after `rerun_trigger_count` observations | Fresh result not degraded |
+| **samplescan** | Re-evaluate with default params | Default-config not degraded |
+| **sampleswitch** | Check SearchMemory degradation rate | Rate exceeds threshold → exclude |
 
-If all steps fail, the result is marked `persistently_degraded` and passed through as-is.
-
-Observation counts are persisted on `OptSearchPoint.stale_data_observations` (surviving across rounds) and aggregated cross-campaign by SearchMemory.
+If all steps fail, result is marked `persistently_degraded` and passed through. Observation counts persisted on `OptSearchPoint.stale_data_observations`.
 
 ---
 
@@ -362,13 +334,10 @@ campaign_config = {
 
 ## Troubleshooting
 
-**Feedback cycle stalls at low accuracy** -- Lower `improvement_threshold`, increase `n_variants`, or manually escalate to Layer 2/3.
-
-**Critique produces generic advice** -- The eval LLM may struggle with domain-specific failure analysis. Try a more capable model for `eval_llm.model`, or set `enable_critique: False` to fall back to direct generation with failure examples only.
-
-**Candidates lack diversity** -- Thinking styles provide structured mutation guidance but the eval LLM may ignore them at low temperatures. Increase `creativity` (meta-prompt temperature) or increase `n_variants`.
-
-**Sensitivity scan aborted early** -- Circuit breaker triggered. See [Sensitivity Scan: Circuit Breaker](sensitivity-scan.md#circuit-breaker).
+- **Stalls at low accuracy** — Lower `improvement_threshold`, increase `n_variants`, or manually escalate to L2/L3.
+- **Generic critique** — Try a more capable `eval_llm.model`, or `enable_critique: False` for direct generation.
+- **Low diversity** — Increase `creativity` or `n_variants`.
+- **Scan aborted early** — Circuit breaker. See [sensitivity-scan.md](sensitivity-scan.md#circuit-breaker).
 
 ---
 

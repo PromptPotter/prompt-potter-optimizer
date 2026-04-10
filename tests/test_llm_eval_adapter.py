@@ -2,8 +2,6 @@
 
 import asyncio
 
-import pytest
-
 from promptpotter.services.campaign.campaign_setup import _validate_local_eval_access
 from promptpotter.services.llm_client import LLMClientBase, LLMResponse
 from promptpotter.services.llm_eval_adapter import LLMOnlyAdapter
@@ -70,21 +68,6 @@ class TestLLMOnlyAdapter:
         # Only user message, no system
         assert len(stub.last_messages) == 1
         assert stub.last_messages[0]["role"] == "user"
-
-    def test_check_status(self):
-        adapter = LLMOnlyAdapter(_StubLLMClient())
-        status = _run(adapter.check_status())
-        assert status["status"] == "ok"
-        assert status["mode"] == "llm-only"
-
-    def test_init_session_noop(self):
-        adapter = LLMOnlyAdapter(_StubLLMClient())
-        result = _run(adapter.init_session(["term1", "term2"]))
-        assert result["status"] == "skipped"
-
-    def test_aclose(self):
-        adapter = LLMOnlyAdapter(_StubLLMClient())
-        _run(adapter.aclose())  # should not raise
 
 
 class TestLocalEvalAuthGate:

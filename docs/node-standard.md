@@ -169,20 +169,9 @@ Excluding `llm_ranking` makes `token_matching` the last exit point. Cached full-
 
 ---
 
-## Current State vs Future
+## Current State
 
-### Now (M7)
-
-- **`llm_call()`** (`promptpotter/services/optimizer/pipeline.py`) — shared primitive that reads defaults from a node config dict and allows runtime overrides. All optimizer pipeline nodes use it.
-- **`get_node_config()`** — loads node configs from `optimizer_pipeline.json` (cached)
-- **`optimizer_pipeline.json`** declares optimizer nodes with the same config shape as TermNorm's pipeline
-- **`observed_node()`** (`promptpotter/services/tracing/node_tracer.py`) — traces node execution with timing + Langfuse observations. Callers use node type names as `node_type` (e.g., `"llm/meta"`, `"evaluation"`).
-- Optimizer nodes — `l1_generate` (`llm/meta`), `l1_evaluate` (`evaluation`), `critique` (`agent`), `l2_refine_context` (`llm/meta`), `l3_modify_plan` (`llm/meta`) — use `llm_call()` with their declared config from `optimizer_pipeline.json`
-
-### Future (milestone TBD, post-ConnectorProtocol)
-
-- Extract node types into a shared package importable by both repos
-- Shared `PipelineContext`, config resolution, and runner
+Shared primitives: `llm_call()` (config + runtime overrides), `get_node_config()` (cached from `optimizer_pipeline.json`), `observed_node()` (tracing). All optimizer nodes (`l1_generate`, `l1_evaluate`, `critique`, `l2_refine_context`, `l3_modify_plan`) use these. Future: extract node types into a shared package (post-ConnectorProtocol).
 
 ---
 
