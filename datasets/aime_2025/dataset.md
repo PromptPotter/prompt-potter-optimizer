@@ -24,6 +24,10 @@
 - Format: competition math problem -> integer answer in [0, 999]
 - campaign.json uses `sp_budget_ttest: 20` (20 of 30 problems per eval round)
 
+## Scoring
+
+`aime_match(predicted, ground_truth)` — extracts answer from `\boxed{N}` (primary, standard math benchmark convention) or last number in text (fallback), then compares as integer. Binary 1.0/0.0. Matches MathArena evaluation methodology.
+
 ## Cycle Identity
 
 Default campaign.json uses experiment mode (no `strict_cycle_identity`). You can freely switch between `--round` and full loop, adjust patience, and interrupt/resume without losing campaign history. For publication runs, add `"strict_cycle_identity": true` to `campaign.json` to lock all parameters into the cycle identity.
@@ -31,8 +35,9 @@ Default campaign.json uses experiment mode (no `strict_cycle_identity`). You can
 ## Pipeline Notes
 
 - Pipeline: `llm_only` step only — prompt flows through `pipeline_params` via PromptTemplate
-- Optimization target: prompt template (reasoning strategy, verification steps, etc.)
+- Optimization target: prompt template (reasoning strategy, verification steps, answer formatting)
 - max_tokens: 4000 (competition math needs longer reasoning chains)
+- Prompts should instruct the model to put the final answer in `\boxed{N}` format
 
 ## End-to-End Test
 
@@ -46,32 +51,32 @@ rm -rf .promptpotter/projects/aime_2025
 curl -s http://127.0.0.1:8000/status
 
 # 3. Init campaign
-python -m promptpotter.cli.campaign_runner init \
+python -m promptpotter init \
     --backend-url http://127.0.0.1:8000 \
     --backend-id aime_2025 \
     --config datasets/aime_2025/campaign.json \
     --skip-baseline
 
 # 4. Set task description
-python -m promptpotter.cli.campaign_runner set-task \
+python -m promptpotter set-task \
     --task-file datasets/aime_2025/task_description.md
 
-# 5. Run one complete round (~10 min: 6 candidates × 30 queries)
-#    Should: generate candidates → evaluate all → critique → checkpoint → stop
-python -m promptpotter.cli.campaign_runner optimize --round
+# 5. Run one complete round (~10 min: 6 candidates x 30 queries)
+#    Should: generate candidates -> evaluate all -> critique -> checkpoint -> stop
+python -m promptpotter optimize --round
 
 # 6. Verify round completed with critique
-python -m promptpotter.cli.campaign_runner show-results
+python -m promptpotter show-results
 
 # 7. Interrupt test: start round 2, Ctrl+C after a few candidates finish
-python -m promptpotter.cli.campaign_runner optimize --round
+python -m promptpotter optimize --round
 # (Ctrl+C after ~2 min)
 
 # 8. Resume: completed candidates should cache-hit (0.0s), rest continue fresh
-python -m promptpotter.cli.campaign_runner optimize --round
+python -m promptpotter optimize --round
 
 # 9. Switch to full loop — same cycle, no data loss, continues from round 3+
-python -m promptpotter.cli.campaign_runner optimize
+python -m promptpotter optimize
 ```
 
 ### What to verify

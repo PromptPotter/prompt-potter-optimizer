@@ -12,6 +12,7 @@ Solve competition-level math problems from the American Invitational Mathematics
 
 - Exact Match: predicted integer equals gold integer
 - All AIME answers are integers between 0 and 999 inclusive
+- Standard answer format: `\boxed{N}` (scorer extracts from `\boxed{}` first, falls back to last number)
 
 ## Key failure modes
 

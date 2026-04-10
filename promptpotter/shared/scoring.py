@@ -15,7 +15,7 @@ query result with these names in scope:
 Scoring functions (add new ones here):
     rr(k)                              — reciprocal rank: 1/k if k else 0
     gsm8k_match(predicted, ground_truth) — numeric extraction + comparison
-    aime_match(predicted, ground_truth)  — integer extraction + comparison (AIME 0-999)
+    aime_match(predicted, ground_truth)  — \\boxed{} extraction + integer comparison (AIME 0-999)
 
 No ``scoring`` key → defaults to ``float(hit)`` (exact-match, legacy).
 """
@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 _GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
 _NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
+_BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")
 
 
 def _extract_gsm8k_number(text: str) -> float | None:
@@ -69,14 +70,29 @@ def _rr(k: int | None) -> float:
 def _aime_match(predicted: str, ground_truth: str) -> float:
     """Return 1.0 if predicted contains the same integer as ground_truth.
 
-    AIME answers are integers in [0, 999]. Extracts the last number from
-    predicted text and compares to ground_truth.
+    AIME answers are integers in [0, 999]. Extraction priority:
+    1. Last ``\\boxed{N}`` value (standard math benchmark convention)
+    2. Last number in text (fallback)
     """
     try:
         gt = int(ground_truth.strip())
     except (ValueError, AttributeError):
         return 0.0
-    matches = _NUMBER_RE.findall(predicted or "")
+
+    text = predicted or ""
+
+    # Primary: extract from \boxed{N} (MathArena / standard benchmark convention)
+    boxed = _BOXED_RE.findall(text)
+    if boxed:
+        raw = boxed[-1].strip()
+        try:
+            pred = int(float(raw.replace(",", "")))
+            return 1.0 if pred == gt else 0.0
+        except (ValueError, OverflowError):
+            pass  # non-numeric boxed content, fall through
+
+    # Fallback: last number in text
+    matches = _NUMBER_RE.findall(text)
     if not matches:
         return 0.0
     try:

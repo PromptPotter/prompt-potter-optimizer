@@ -82,7 +82,7 @@ All methods evaluated under identical conditions:
 |---------|---------------|-----------|--------|
 | HotPotQA | Token F1 | Exact Match | Token-level precision/recall (planned: `F1Evaluator`) |
 | GSM8K | Exact Match | — | Extract `#### N`, compare numeric value (`gsm8k_match`) |
-| AIME 2025 | Exact Match | — | Extract last integer, compare to ground truth (`aime_match`) |
+| AIME 2025 | Exact Match | — | Extract `\boxed{N}` (primary) or last integer (fallback), compare to ground truth (`aime_match`) |
 
 ### Budget Control
 
