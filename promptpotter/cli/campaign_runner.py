@@ -440,12 +440,24 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     )
 
     # --round: complete one full round then stop (default: full loop).
+    # Restore max_rounds from config file — prior --round may have persisted max_rounds=1.
     campaign_config.setdefault("optimization", {}).pop("pause_before_eval", None)
-    if args.round:
-        campaign_config.setdefault("optimization", {})["max_rounds"] = 1
+    if not args.round:
+        _cfg_path = Path(f"datasets/{campaign_config.get('dataset_name', '')}/campaign.json")
+        if _cfg_path.exists():
+            _orig = json.loads(_cfg_path.read_text(encoding="utf-8"))
+            _orig_max = (
+                _orig.get("campaign_config", {}).get("optimization", {}).get("max_rounds")
+            )
+            if _orig_max is not None:
+                campaign_config.setdefault("optimization", {})["max_rounds"] = _orig_max
 
     ctx.state["phase"] = "optimizing"
     session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
+
+    # --round is ephemeral — apply AFTER save so it doesn't pollute session.json.
+    if args.round:
+        campaign_config.setdefault("optimization", {})["max_rounds"] = 1
 
     # Bidirectional control — CLI provides CampaignControlReader as on_checkpoint
     from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
@@ -785,7 +797,7 @@ async def cmd_status(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="campaign_runner",
+        prog="python -m promptpotter",
         description="CLI campaign runner for PromptPotter optimization",
     )
     parser.add_argument("--session", default=None, help="Session ID (default: active)")

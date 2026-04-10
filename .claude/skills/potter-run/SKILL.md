@@ -369,6 +369,11 @@ python -m promptpotter.cli.export_results supplemental \
 - **Timeout auto-backgrounds**: Commands that exceed the bash timeout silently continue in background. After a timeout, ALWAYS check for and kill orphan processes: `tasklist | findstr python` → `taskkill //F //PID <pid>` (kill the largest Python process).
 - **Be the data scientist**: interpret results, explain what the optimizer is doing, suggest next steps
 - **If something fails**: read the error category (`[CLIENT]`, `[SERVER]`, `[CONNECTION]`, `[PIPELINE]`), then check `campaign_log.md` at `.promptpotter/projects/{backend_id}/sessions/{session_id}/campaign_log.md`
+- **Always show kill command**: Whenever the optimizer is running (or was just running), end your reply with the kill command block so the user can copy-paste it immediately if needed:
+  ```
+  Kill if stuck: tasklist | findstr python → taskkill //F //PID <pid>
+  ```
+  Show the actual PIDs if you know them from a recent `tasklist`. This is critical because killing doesn't always work on the first try.
 - **After interrupts**: check for orphan processes — `tasklist | findstr python` (Windows) or `ps aux | grep python` (Linux/Mac). Kill orphans before resuming.
 - **Between phases**: summarize what happened and what comes next. Don't just dump CLI output.
 - **Never wipe project data without asking**: `rm -rf .promptpotter/projects/{backend_id}` destroys all cached results, campaign history, and dataset runs. Always spell out the full path and ask for explicit approval before running any destructive command. Example: "I'm about to run `rm -rf .promptpotter/projects/aime_2025` — this deletes all cached results. OK?"

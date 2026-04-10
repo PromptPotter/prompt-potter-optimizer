@@ -27,24 +27,24 @@ pytest tests/ -k "test_name"           # single test by name
 # Run API server
 uvicorn promptpotter.main:app --port 8001 --reload
 
-# CLI campaign runner (HITL optimization from terminal)
-python -m promptpotter.cli.campaign_runner init \
+# CLI (HITL optimization from terminal)
+python -m promptpotter init \
     --backend-url http://127.0.0.1:8000 \
     --config datasets/lca-termnorm/campaign.json \
     --skip-baseline
-python -m promptpotter.cli.campaign_runner set-task \
+python -m promptpotter set-task \
     --task-file datasets/lca-termnorm/task_description.md
-python -m promptpotter.cli.campaign_runner scan \
+python -m promptpotter scan \
     --variants-file datasets/lca-termnorm/scan_variants.json
-python -m promptpotter.cli.campaign_runner show-scan
-python -m promptpotter.cli.campaign_runner optimize             # full loop (default)
-python -m promptpotter.cli.campaign_runner optimize --round    # one complete round → stop
-python -m promptpotter.cli.campaign_runner show-results
-python -m promptpotter.cli.campaign_runner show-status         # live dashboard
+python -m promptpotter show-scan
+python -m promptpotter optimize             # full loop (default)
+python -m promptpotter optimize --round    # one complete round → stop
+python -m promptpotter show-results
+python -m promptpotter show-status         # live dashboard
 
 # Export results
-python -m promptpotter.cli.export_results supplemental --backend-id local -o supplemental.md
-python -m promptpotter.cli.export_results json --backend-id local -o paper_results.json
+python -m promptpotter export supplemental --backend-id local -o supplemental.md
+python -m promptpotter export json --backend-id local -o paper_results.json
 ```
 
 CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest --cov`. All must pass.

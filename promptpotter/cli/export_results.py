@@ -27,7 +27,7 @@ from promptpotter.services.project_store import ProjectStore
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m promptpotter.cli.export_results",
+        prog="python -m promptpotter export",
         description="Export campaign results for paper supplemental materials.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
