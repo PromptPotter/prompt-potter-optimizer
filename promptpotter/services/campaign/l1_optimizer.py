@@ -61,6 +61,62 @@ class L1ScoringResult(BaseModel):
     thinking_styles: list[str] = Field(default_factory=list)
 
 
+def _render_schema_text(pipeline_schema: PipelineSchema) -> str:
+    """Build pipeline schema description for L1 LLM context."""
+    lines: list[str] = []
+    npk = pipeline_schema.node_param_keys()
+    if npk:
+        lines.append(
+            "VALID PIPELINE NODES AND PARAMETERS (only use these — do not invent nodes or params):"
+        )
+        for node_name, params in npk.items():
+            node = pipeline_schema.get_node(node_name)
+            descs = node.param_descriptions if node else {}
+            if params:
+                param_parts = []
+                for p in sorted(params):
+                    desc = descs.get(p)
+                    param_parts.append(f"{p} ({desc})" if desc else p)
+                lines.append(f"  {node_name}: {', '.join(param_parts)}")
+            else:
+                lines.append(f"  {node_name}: (no tunable params)")
+
+        for node in pipeline_schema.nodes:
+            if node.output_schema and node.output_schema.fields:
+                os = node.output_schema
+                lines.append(f"\n  CURRENT OUTPUT SCHEMA for {node.name}:")
+                lines.append(f"    Fields: {', '.join(os.fields)}")
+                for fname, fdesc in os.field_descriptions.items():
+                    lines.append(f"      {fname}: {fdesc}")
+                lines.append("    MUTATION SYNTAX (use as output_schema param):")
+                lines.append('      Add:     ["+", "field_name", "array", true, "description"]')
+                lines.append('      Remove:  ["-", "field_name"]')
+                lines.append(
+                    '      Replace: ["~", "old_name", "new_name", "array", true, "description"]'
+                )
+                lines.append(
+                    f'    Example: {{"{node.name}": {{"output_schema": '
+                    f'[["+", "domain_terms", "array", true, '
+                    f'"Domain-specific database entry names"]]}}}}'
+                )
+
+        if pipeline_schema.get_node("token_matching"):
+            lines.append("\n  HOW TOKEN MATCHING USES ENTITY PROFILES:")
+            lines.append("    ALL entity profile field values are tokenized ([a-zA-Z0-9]+)")
+            lines.append("    and matched against database entry tokens.")
+            lines.append("    Score = shared_tokens / term_tokens.")
+            lines.append("    Adding fields that produce tokens matching database entries")
+            lines.append(
+                "    DIRECTLY improves retrieval. Removing noisy fields reduces false matches."
+            )
+
+    text = "\n".join(lines)
+    if pipeline_schema.available_models:
+        text += "\n\nAVAILABLE MODELS (only use these for model overrides):\n"
+        text += "\n".join(f"  {m}" for m in pipeline_schema.available_models)
+    return text
+
+
 async def l1_generate(
     opt_sp: OptSearchPoint,
     current_accuracy: float,
@@ -89,59 +145,7 @@ async def l1_generate(
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
-    # Build pipeline schema text so the LLM knows valid nodes/params
-    schema_text = ""
-    if pipeline_schema:
-        npk = pipeline_schema.node_param_keys()
-        if npk:
-            lines = [
-                "VALID PIPELINE NODES AND PARAMETERS (only use these — do not invent nodes or params):",
-            ]
-            for node_name, params in npk.items():
-                node = pipeline_schema.get_node(node_name)
-                descs = node.param_descriptions if node else {}
-                if params:
-                    param_parts = []
-                    for p in sorted(params):
-                        desc = descs.get(p)
-                        param_parts.append(f"{p} ({desc})" if desc else p)
-                    lines.append(f"  {node_name}: {', '.join(param_parts)}")
-                else:
-                    lines.append(f"  {node_name}: (no tunable params)")
-
-            # Output schema context — teaches LLM the mutation language
-            for node in pipeline_schema.nodes:
-                if node.output_schema and node.output_schema.fields:
-                    os = node.output_schema
-                    lines.append(f"\n  CURRENT OUTPUT SCHEMA for {node.name}:")
-                    lines.append(f"    Fields: {', '.join(os.fields)}")
-                    for fname, fdesc in os.field_descriptions.items():
-                        lines.append(f"      {fname}: {fdesc}")
-                    lines.append("    MUTATION SYNTAX (use as output_schema param):")
-                    lines.append('      Add:     ["+", "field_name", "array", true, "description"]')
-                    lines.append('      Remove:  ["-", "field_name"]')
-                    lines.append(
-                        '      Replace: ["~", "old_name", "new_name", "array", true, "description"]'
-                    )
-                    lines.append(
-                        f'    Example: {{"{node.name}": {{"output_schema": [["+", "domain_terms", "array", true, "Domain-specific database entry names"]]}}}}'
-                    )
-
-            # Token matching mechanics — so LLM understands the causal chain
-            if pipeline_schema.get_node("token_matching"):
-                lines.append("\n  HOW TOKEN MATCHING USES ENTITY PROFILES:")
-                lines.append("    ALL entity profile field values are tokenized ([a-zA-Z0-9]+)")
-                lines.append("    and matched against database entry tokens.")
-                lines.append("    Score = shared_tokens / term_tokens.")
-                lines.append("    Adding fields that produce tokens matching database entries")
-                lines.append(
-                    "    DIRECTLY improves retrieval. Removing noisy fields reduces false matches."
-                )
-
-            schema_text = "\n".join(lines)
-        if pipeline_schema.available_models:
-            schema_text += "\n\nAVAILABLE MODELS (only use these for model overrides):\n"
-            schema_text += "\n".join(f"  {m}" for m in pipeline_schema.available_models)
+    schema_text = _render_schema_text(pipeline_schema) if pipeline_schema else ""
 
     _compile_vars = {
         "n_variants": str(n_variants),
@@ -352,6 +356,34 @@ def _parse_candidates(
     return osp_list, merged, overrides
 
 
+def _build_score_report(
+    osp: OptSearchPoint,
+    override: dict | None,
+    scores: dict,
+    results: list,
+    dataset: list,
+    *,
+    aborted: bool = False,
+    elimination_stopped: bool = False,
+    resumed_from_cache: bool = False,
+) -> dict:
+    """Build unified candidate score report dict."""
+    return {
+        "candidate_id": osp.id,
+        "changes_description": osp.changes_description or "",
+        "pipeline_params_override": override,
+        "accuracy": scores["accuracy"],
+        "composite": scores.get("composite", scores["accuracy"]),
+        "hits": scores["hits"],
+        "total": scores["total"],
+        "escalation_aborted": aborted,
+        "elimination_stopped": elimination_stopped,
+        "scored_queries": len(results),
+        "expected_queries": len(dataset),
+        **({"resumed_from_cache": True} if resumed_from_cache else {}),
+    }
+
+
 async def _score_candidates(
     osp_candidates: list[OptSearchPoint],
     merged_pp: list[dict | None],
@@ -412,29 +444,16 @@ async def _score_candidates(
             all_candidate_results[osp_c.id] = cached_results
             elim_check.register_completed([r["score"] for r in cached_results])
 
-            candidate_scores.append(
-                {
-                    "candidate_id": osp_c.id,
-                    "changes_description": osp_c.changes_description or "",
-                    "pipeline_params_override": candidate_overrides[idx],
-                    "accuracy": cached_scores["accuracy"],
-                    "composite": cached_scores.get("composite", cached_scores["accuracy"]),
-                    "hits": cached_scores["hits"],
-                    "total": cached_scores["total"],
-                    "escalation_aborted": False,
-                    "elimination_stopped": False,
-                    "scored_queries": len(cached_results),
-                    "expected_queries": len(dataset),
-                    "resumed_from_cache": True,
-                }
+            report = _build_score_report(
+                osp_c,
+                candidate_overrides[idx],
+                cached_scores,
+                cached_results,
+                dataset,
+                resumed_from_cache=True,
             )
+            candidate_scores.append(report)
             if callbacks and callbacks.on_candidate_scored:
-                report = dict(cached_scores)
-                report["escalation_aborted"] = False
-                report["elimination_stopped"] = False
-                report["scored_queries"] = len(cached_results)
-                report["expected_queries"] = len(dataset)
-                report["resumed_from_cache"] = True
                 callbacks.on_candidate_scored(idx, n_candidates, report)
             continue
 
@@ -467,27 +486,18 @@ async def _score_candidates(
         if len(results) == len(dataset) and not aborted:
             elim_check.register_completed([r["score"] for r in results])
 
-        candidate_scores.append(
-            {
-                "candidate_id": osp_c.id,
-                "changes_description": osp_c.changes_description or "",
-                "pipeline_params_override": candidate_overrides[idx],
-                "accuracy": scores["accuracy"],
-                "composite": scores.get("composite", scores["accuracy"]),
-                "hits": scores["hits"],
-                "total": scores["total"],
-                "escalation_aborted": aborted,
-                "elimination_stopped": elimination_stopped,
-                "scored_queries": len(results),
-                "expected_queries": len(dataset),
-            }
+        report = _build_score_report(
+            osp_c,
+            candidate_overrides[idx],
+            scores,
+            results,
+            dataset,
+            aborted=aborted,
+            elimination_stopped=elimination_stopped,
         )
+        candidate_scores.append(report)
         if callbacks and callbacks.on_candidate_scored:
-            scores["escalation_aborted"] = aborted
-            scores["elimination_stopped"] = elimination_stopped
-            scores["scored_queries"] = len(results)
-            scores["expected_queries"] = len(dataset)
-            callbacks.on_candidate_scored(idx, n_candidates, scores)
+            callbacks.on_candidate_scored(idx, n_candidates, report)
 
         if escalation_signal:
             if elimination_stopped:

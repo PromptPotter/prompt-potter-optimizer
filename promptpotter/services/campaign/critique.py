@@ -13,7 +13,7 @@ import random
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.config.variant_library import load_variant_library
 from promptpotter.services.metrics import find_rank
@@ -102,7 +102,7 @@ class CritiqueContext:
         # Enrich SM context with cross-candidate diff + trajectory
         sm_ctx = search_memory_context
         diff = build_cross_candidate_diff(
-            scoring_result.winner_results,
+            cast(list[dict], scoring_result.winner_results),
             scoring_result.all_candidate_results,
             scoring_result.candidate_scores,
         )
@@ -570,8 +570,6 @@ def assemble_critique_sections(ctx: CritiqueContext) -> str:
         rank_text,
         _round_evolution_section(ctx.round_history, anomalies),
         _query_category_section(results),
-    ]
-    sections += [
         _failure_details_section(
             results,
             candidate_keys=ctx.candidate_keys or None,

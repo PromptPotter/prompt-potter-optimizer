@@ -57,6 +57,13 @@ class _SessionCtx:
     backend_id: str
     session_id: str
 
+    def save_phase(self, phase: str, *, log: str = "") -> None:
+        """Set phase, persist state, optionally append log entry."""
+        self.state["phase"] = phase
+        self.store.sessions.save(self.backend_id, self.session_id, self.state)
+        if log:
+            self.store.sessions.append_log(self.backend_id, self.session_id, log)
+
 
 def _load_session(args: argparse.Namespace) -> _SessionCtx:
     """Load active session from disk."""
@@ -290,12 +297,9 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
     task_context = result.task_context
 
     ctx.state["task_context"] = task_context.to_dict()
-    ctx.state["phase"] = "task-context"
-    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
-    session.store.sessions.append_log(
-        ctx.backend_id,
-        ctx.session_id,
-        f"## Task Context\n{json.dumps(task_context.to_dict(), indent=2)}",
+    ctx.save_phase(
+        "task-context",
+        log=f"## Task Context\n{json.dumps(task_context.to_dict(), indent=2)}",
     )
 
 
@@ -350,17 +354,13 @@ async def cmd_scan(args: argparse.Namespace) -> None:
     )
 
     ctx.state["scan_variants"] = scan_variants
-    ctx.state["phase"] = "scan"
-    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
-
     records = scan_df.to_dict(orient="records") if scan_df is not None else []
     best = max(records, key=lambda r: r.get("accuracy", 0)) if records else {}
-    session.store.sessions.append_log(
-        ctx.backend_id,
-        ctx.session_id,
-        f"""## Scan
-- Axes: {len(scan_variants)}, variants: {len(records)}
-- Best: {best.get("axis", "?")}={best.get("value_preview", "?")} \u2192 {best.get("accuracy", 0):.1%} (delta: {best.get("delta", 0):+.1%})""",
+    ctx.save_phase(
+        "scan",
+        log=f"## Scan\n- Axes: {len(scan_variants)}, variants: {len(records)}\n"
+        f"- Best: {best.get('axis', '?')}={best.get('value_preview', '?')} "
+        f"\u2192 {best.get('accuracy', 0):.1%} (delta: {best.get('delta', 0):+.1%})",
     )
 
 
@@ -410,8 +410,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
         ctx.state["baseline_accuracy"] = campaign_rounds[-1].get("accuracy", 0.0)
         ctx.state["baseline_prompt_fields"] = campaign_rounds[-1].get("prompt_fields", {})
 
-    ctx.state["phase"] = "scan-results"
-    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
+    ctx.save_phase("scan-results")
 
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
@@ -455,8 +454,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             if _orig_max is not None:
                 campaign_config.setdefault("optimization", {})["max_rounds"] = _orig_max
 
-    ctx.state["phase"] = "optimizing"
-    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
+    ctx.save_phase("optimizing")
 
     # --round is ephemeral — apply AFTER save so it doesn't pollute session.json.
     if args.round:
@@ -507,11 +505,10 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             except (json.JSONDecodeError, OSError):
                 pass
 
-    ctx.state["phase"] = "optimize"
     if cycle_result:
         ctx.state["cycle_id"] = cycle_result.cycle_id
         ctx.state["best_accuracy"] = cycle_result.best_accuracy
-    session.store.sessions.save(ctx.backend_id, ctx.session_id, ctx.state)
+    ctx.save_phase("optimize")
 
     # Write structured result for AI/machine consumption
     result_path = session_dir / "optimize_result.json"
@@ -542,22 +539,19 @@ async def cmd_control(args: argparse.Namespace) -> None:
     data = json.loads(state_path.read_text(encoding="utf-8"))
     control = data.get("control", {})
 
+    _SIGNALS: dict[str, tuple[str, str | bool, str]] = {
+        "pause": ("requested_state", "pause", "pause"),
+        "resume": ("requested_state", "resume", "resume"),
+        "stop": ("requested_state", "stop", "stop"),
+        "pause_before_l2": ("pause_before_l2_scoring", True, "pause_before_l2_enabled"),
+        "no_pause_l2": ("pause_before_l2_scoring", False, "pause_before_l2_disabled"),
+    }
     action = ""
-    if args.pause:
-        control["requested_state"] = "pause"
-        action = "pause"
-    elif args.resume:
-        control["requested_state"] = "resume"
-        action = "resume"
-    elif args.stop:
-        control["requested_state"] = "stop"
-        action = "stop"
-    elif args.pause_before_l2:
-        control["pause_before_l2_scoring"] = True
-        action = "pause_before_l2_enabled"
-    elif args.no_pause_l2:
-        control["pause_before_l2_scoring"] = False
-        action = "pause_before_l2_disabled"
+    for flag, (key, value, label) in _SIGNALS.items():
+        if getattr(args, flag, False):
+            control[key] = value
+            action = label
+            break
 
     data["control"] = control
     state_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")

@@ -125,15 +125,14 @@ def _compute_cache_hit_rate(step: PipelineNode, results: list[QueryResult]) -> f
     """Fraction of queries resolved by cache (non-null cache timing)."""
     if not results:
         return 0.0
-    cache_hits = 0
+    cache_hits = non_error = 0
     for r in results:
         if is_error_result(r):
             continue
+        non_error += 1
         pd = r.get("pipeline_data") or {}
-        timings = pd.get("step_timings") or {}
-        if timings.get(step.name) is not None:
+        if (pd.get("step_timings") or {}).get(step.name) is not None:
             cache_hits += 1
-    non_error = sum(1 for r in results if not is_error_result(r))
     return cache_hits / non_error if non_error else 0.0
 
 

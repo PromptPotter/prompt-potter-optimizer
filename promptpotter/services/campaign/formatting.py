@@ -600,13 +600,9 @@ def assess_candidate_diversity(rounds: list[Any], window: int = 5) -> str | None
     for r in recent:
         for cs in r.candidate_scores:
             override = cs.get("pipeline_params_override") or {}
-            if not override:
-                desc = cs.get("changes_description", "")
-                if not desc:
-                    continue
-                total_candidates += 1
-                continue
             total_candidates += 1
+            if not override:
+                continue
             # Count which axes are being varied
             for node_name, node_params in override.items():
                 if isinstance(node_params, dict):

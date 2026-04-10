@@ -94,13 +94,13 @@ def _fill_remaining_errors(
         )
 
 
-def _materialize_cached_result(item: QueryResult) -> dict:
+def _materialize_cached_result(item: QueryResult) -> QueryResult:
     """Stamp a prior-cache item as cached with zeroed timing."""
     r: dict = {**item, "cached": True}
     pd = r.get("pipeline_data")
     if isinstance(pd, dict):
         r["pipeline_data"] = {**pd, "total_time": 0.0}
-    return r
+    return cast(QueryResult, r)
 
 
 def _check_error_abort(
