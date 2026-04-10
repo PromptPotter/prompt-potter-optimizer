@@ -9,7 +9,7 @@
 
 ## Context
 
-**Current state:** All evaluation paths take `BackendClient` (a concrete TermNorm HTTP client) directly. The class is instantiated in `optimization_loop.py` with a `base_url`. The connector contract is already documented in `docs/connectors/termnorm.md`, but no abstraction exists — every service that evaluates prompts is hardcoded to TermNorm's `/matches` endpoint.
+**Current state:** All evaluation paths take `BackendClient` (a concrete TermNorm HTTP client) directly. The class is instantiated in `optimization_loop.py` with a `base_url`. No abstraction exists — every service that evaluates prompts is hardcoded to TermNorm's `/matches` endpoint.
 
 **Goal:** Abstract `BackendClient` into a `ConnectorProtocol` (structural subtyping via `typing.Protocol`). The existing `BackendClient` satisfies the protocol without code changes. A `MockConnector` provides a test double and serves as a reference for future connectors.
 
@@ -70,7 +70,7 @@ The protocol defines 6 methods. Two tiers: **core** (required for eval) and **sy
 | 4b | `promptpotter/services/eval_gateway.py` | MODIFY | Change `backend_client: BackendClient` → `backend_client: ConnectorProtocol` |
 | 5 | `promptpotter/services/campaign/optimization_loop.py` | MODIFY | Change `BackendClient` import → `ConnectorProtocol` type annotation |
 | 6 | `promptpotter/services/campaign/optimization_loop.py` | MODIFY | Change `BackendClient` instantiation to use `ConnectorRegistry` or accept connector |
-| 7 | `docs/connectors/connector-protocol.md` | CREATE | Developer guide: how to implement a new connector |
+| 7 | `docs/architecture/connector-protocol.md` | CREATE | Developer guide: how to implement a new connector |
 | 8 | `tests/test_connector_protocol.py` | CREATE | Protocol conformance tests, MockConnector tests, registry tests |
 
 ---
@@ -228,17 +228,17 @@ async def eval_query_via_backend(
 | 9.1 | ConnectorProtocol + MockConnector | 1 | 9.0 | Create `connector_protocol.py` and `mock_connector.py`. Protocol conformance tests verifying BackendClient satisfies protocol. MockConnector unit tests. |
 | 9.2 | ConnectorRegistry | 1 | 9.1 | Create `connector_registry.py`. Register/get/list connectors. Integration with `runtime_config` from M6. |
 | 9.3 | Service migration | 1 | 9.1 | Change type annotations in `eval_query.py`, `eval_gateway.py`, `optimization_loop.py`. Update connector instantiation to use registry. |
-| 9.4 | Docs + integration test | 1 | 9.2, 9.3 | Write `docs/connectors/connector-protocol.md`. Integration test: run feedback cycle with MockConnector. |
+| 9.4 | Docs + integration test | 1 | 9.2, 9.3 | Write connector protocol docs. Integration test: run feedback cycle with MockConnector. |
 | 9.5 | OPTIMIZER_PIPELINE_SCHEMA | 1 | 9.1 | Describe the optimizer's own 4-step pipeline as a `PipelineSchema` instance (moved from M7 Wave E2). Enables `GET /optimizer/pipeline` for L4 self-optimization. |
 
 ### Reading list per work package
 
 | WP | Read first |
 |----|-----------|
-| 9.1 | `promptpotter/services/backend_client.py` (full class), `docs/connectors/termnorm.md` (contract), `typing.Protocol` docs |
+| 9.1 | `promptpotter/services/backend_client.py` (full class), `typing.Protocol` docs |
 | 9.2 | `promptpotter/services/llm_client.py` (singleton pattern reference: `get_llm_client()`) |
 | 9.3 | `promptpotter/services/eval_query.py` (eval_query_via_backend), `promptpotter/services/eval_gateway.py` (eval_search_point), `promptpotter/services/campaign/optimization_loop.py` (BackendClient usage) |
-| 9.4 | `docs/connectors/termnorm.md` (existing connector doc), `tests/test_campaign_registry.py` (E2E test pattern) |
+| 9.4 | `tests/test_campaign_registry.py` (E2E test pattern) |
 
 ---
 
@@ -255,7 +255,7 @@ async def eval_query_via_backend(
 - `eval_query.py`, `eval_gateway.py`, and `optimization_loop.py` use `ConnectorProtocol` type annotations
 - `ConnectorRegistry` can register and retrieve connectors
 - Feedback cycle runs successfully with `MockConnector` (no live backend needed)
-- `docs/connectors/connector-protocol.md` documents how to implement a new connector
+- Connector protocol docs written
 - All existing tests still pass
 
 ## Test Strategy

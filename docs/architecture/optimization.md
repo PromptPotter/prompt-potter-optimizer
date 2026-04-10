@@ -262,11 +262,11 @@ Each round samples 2-3 styles from the variant library (`promptpotter/config/pro
 
 ## Scan-Aware Generation
 
-When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate exploration. Keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields), all other keys stay as node-level pipeline overrides. See [Sensitivity Scan](sensitivity-scan.md) for scan workflow details.
+When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate exploration. Keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields), all other keys stay as node-level pipeline overrides. See [Sensitivity Scan](../specs/archive/sensitivity-scan.md) for scan workflow details.
 
 ### SearchMemory Intelligence Feed
 
-Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
+Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`docs/methods/search-memory-intelligence.md`](../research/search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
 
 ### Stale Data Load Protocol
 
@@ -337,7 +337,7 @@ campaign_config = {
 - **Stalls at low accuracy** — Lower `improvement_threshold`, increase `n_variants`, or manually escalate to L2/L3.
 - **Generic critique** — Try a more capable `eval_llm.model`, or `enable_critique: False` for direct generation.
 - **Low diversity** — Increase `creativity` or `n_variants`.
-- **Scan aborted early** — Circuit breaker. See [sensitivity-scan.md](sensitivity-scan.md#circuit-breaker).
+- **Scan aborted early** — Circuit breaker. See [sensitivity-scan.md](../specs/archive/sensitivity-scan.md#circuit-breaker).
 
 ---
 

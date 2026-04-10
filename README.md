@@ -9,7 +9,7 @@
 
 ## TL;DR
 
-Give it a labeled dataset and an LLM. PromptPotter systematically searches for a better prompt — measuring accuracy, critiquing failures, and iterating through a 3-layer optimization loop. Same setup as academic benchmarks (HotPotQA, GSM8K), same loop for complex pipelines. Exports paper-ready results with confidence intervals and significance tests. See [`docs/benchmarks.md`](docs/benchmarks.md) for the comparison protocol.
+Give it a labeled dataset and an LLM. PromptPotter systematically searches for a better prompt — measuring accuracy, critiquing failures, and iterating through a 3-layer optimization loop. Same setup as academic benchmarks (HotPotQA, GSM8K), same loop for complex pipelines. Exports paper-ready results with confidence intervals and significance tests. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for the comparison protocol.
 
 At its core, PromptPotter just collects a lot of datapoints. Every evaluation is stored, every parameter combination is tracked, and the optimizer uses this accumulated evidence to make better decisions each round.
 
@@ -157,12 +157,22 @@ The notebook uses `promptpotter/display/campaign/` wrapping services with progre
 
 ## Documentation
 
-- [Setup Guide](docs/setup-guide.md) — Prerequisites, installation, configuration, environment variables
-- [Architecture](docs/architecture.md) — System overview, two-loop design, data model, export layer
-- [CLI Workflow](docs/cli-workflow.md) — Full subcommand reference, worked example, export commands
-- [Benchmarks](docs/benchmarks.md) — HotPotQA/GSM8K methodology, head-to-head protocol, result placeholders
-- [Sensitivity Scan](docs/sensitivity-scan.md) — OAT scanning, coverage diagnostic
-- [Optimization](docs/optimization.md) — Feedback cycle, 3-layer optimization model, config reference
-- [Prompt Scheme](docs/prompt-scheme.md) — 8-field prompt decomposition, variant library, rendering
+**Architecture** (how it works):
+- [Overview](docs/architecture/overview.md) — System design, two-loop diagram, data model, export layer
+- [Optimization](docs/architecture/optimization.md) — Feedback cycle, 3-layer model, config reference
+- [Prompt Scheme](docs/architecture/prompt-scheme.md) — 8-field decomposition, variant library, rendering
+- [Information Flow](docs/architecture/information-flow.md) — Prompt injection map
+- [Node Standard](docs/architecture/node-standard.md) — Node types, `llm_call()` primitive
+
+**Operations** (how to use it):
+- [Setup Guide](docs/setup-guide.md) — Prerequisites, installation, configuration
+- [CLI Workflow](docs/cli-workflow.md) — Full subcommand reference, worked example
+- [Sensitivity Scan](docs/specs/archive/sensitivity-scan.md) — OAT scanning, coverage diagnostic
 - [Observability](docs/observability.md) — Langfuse integration, MLflow, data exploration
-- [Specs](docs/specs/) — Roadmap, active milestone specs (M8, M9), archived specs
+
+**Research** (methodology & analysis):
+- [Benchmarks](docs/research/benchmarks.md) — HotPotQA/GSM8K methodology, head-to-head protocol
+- [SearchMemory Intelligence](docs/research/search-memory-intelligence.md) — Cross-campaign intelligence design
+- [Candidate Comparison](docs/research/candidate-comparison.md) — Sequential elimination methodology
+
+**Specs**: [docs/specs/](docs/specs/) — Roadmap, active milestone (M9), archived specs

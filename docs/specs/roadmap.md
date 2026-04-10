@@ -55,7 +55,7 @@ Four tracks delivering publication readiness, optimizer tuning, a web applicatio
 
 ### Track 1: Publication Readiness (Benchmarks + Competitor Comparison)
 
-Build dataset loaders (HotPotQA, GSM8K), evaluation scorers (Token F1, numeric exact match), and run benchmark campaigns via the backend's `llm_only` step. Compare against published results from DSPy/MIPROv2, GEPA, Promptomatix, adv-CoT, and PromptWizard (cited numbers). Fill `docs/benchmarks.md` result tables. Generate paper-quality convergence plots and comparison figures.
+Build dataset loaders (HotPotQA, GSM8K), evaluation scorers (Token F1, numeric exact match), and run benchmark campaigns via the backend's `llm_only` step. Compare against published results from DSPy/MIPROv2, GEPA, Promptomatix, adv-CoT, and PromptWizard (cited numbers). Fill `docs/research/benchmarks.md` result tables. Generate paper-quality convergence plots and comparison figures.
 
 ### Track 2: Stable Optimizer Configuration
 

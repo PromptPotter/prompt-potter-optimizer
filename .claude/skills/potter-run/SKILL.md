@@ -382,6 +382,6 @@ For deeper context on optimization mechanics, dataset types, and troubleshooting
 - `reference/benchmark-datasets.md` — dataset types, readiness checklist, prioritization criteria, scoring system, cost model
 - `reference/optimization-layers.md` — L1/L2/L3 escalation model, configuration, what to tell the user
 - `reference/troubleshooting.md` — error diagnosis, stop reason recovery, stall strategies
-- `docs/optimization.md` — full 3-layer model, critique agent, escalation chain, configuration reference
+- `docs/architecture/optimization.md` — full 3-layer model, critique agent, escalation chain, configuration reference
 - `docs/cli-workflow.md` — complete CLI subcommand reference with all flags, session directory structure
-- `docs/sensitivity-scan.md` — OAT scan methodology, SearchMemory integration
+- `docs/specs/archive/sensitivity-scan.md` — OAT scan methodology, SearchMemory integration

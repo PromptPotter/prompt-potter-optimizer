@@ -106,7 +106,7 @@ Subtype of `llm`. LLM call + analysis loop + tool use. The CritiqueAgent is an e
 
 ## Composability
 
-Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx, writes to ctx. Self-contained — handles its own prompt assembly, LLM call, and parsing. A pipeline is a list of nodes; the runner loops through them. Node execution is traced via `observed_node()` — see [observability.md](observability.md).
+Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx, writes to ctx. Self-contained — handles its own prompt assembly, LLM call, and parsing. A pipeline is a list of nodes; the runner loops through them. Node execution is traced via `observed_node()` — see [observability.md](../observability.md).
 
 **Key insight:** `llm/meta` inherits from `llm/structured` which inherits from `llm`. Subtypes add prompt assembly and response parsing around the same core LLM call. A new node = configure which subtype + prompt_family + parser.
 
@@ -179,4 +179,4 @@ Shared primitives: `llm_call()` (config + runtime overrides), `get_node_config()
 
 - **TermNorm pipeline config:** `GET /pipeline` endpoint (see TermNorm repo)
 - **Optimizer pipeline config:** [`promptpotter/services/optimizer/optimizer_pipeline.json`](../promptpotter/services/optimizer/optimizer_pipeline.json)
-- **Observability:** [`docs/observability.md`](observability.md) — node tracing via `observed_node`
+- **Observability:** [`observability.md`](../observability.md) — node tracing via `observed_node`

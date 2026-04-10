@@ -11,7 +11,7 @@
 
 PromptPotter's core optimization loop (L1 generate → L1 evaluate → critique → L2 refine → L3 replan) is functionally complete through M8 with SearchMemory cross-campaign intelligence. Three critical gaps prevent the project from reaching publication and production use:
 
-1. **No benchmark results** — The methodology exists (`docs/benchmarks.md`), the export pipeline is built (`cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py`), but result tables are all placeholders. HotPotQA and GSM8K dataset configs exist in `datasets/`. Dataset loaders, scorers, and the backend evaluation path (TermNorm `llm_only` step) are implemented. Benchmark campaigns have not been run yet.
+1. **No benchmark results** — The methodology exists (`docs/research/benchmarks.md`), the export pipeline is built (`cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py`), but result tables are all placeholders. HotPotQA and GSM8K dataset configs exist in `datasets/`. Dataset loaders, scorers, and the backend evaluation path (TermNorm `llm_only` step) are implemented. Benchmark campaigns have not been run yet.
 
 2. **Proof-of-concept meta-prompts** — The optimizer's own prompts (L1 generate, critique, L2 refine, L3 replan) in `promptpotter/config/optimizer_prompts/` are functional but untuned. They were developed against TermNorm (a multi-node retrieval pipeline) and need systematic evaluation on benchmark tasks to find stable, high-performing configurations.
 
@@ -69,7 +69,7 @@ Registry + config architecture — adding a dataset = two registry entries + con
 
 - Finalize `campaign.json` configs for HotPotQA and GSM8K in `datasets/`
 - Run campaigns with full optimization loop (L1+L2+L3)
-- Fill result tables in `docs/benchmarks.md`
+- Fill result tables in `docs/research/benchmarks.md`
 - 3 seeds per configuration, 95% Wilson CIs, McNemar's test for significance
 
 #### 1e. Competitor Baselines
@@ -99,7 +99,7 @@ Generation integrated into `cli/export_results.py` or standalone script.
 
 ### Key Existing Infrastructure
 
-- `docs/benchmarks.md` — Full methodology, placeholder result tables
+- `docs/research/benchmarks.md` — Full methodology, placeholder result tables
 - `promptpotter/cli/export_results.py` — Supplemental markdown + JSON export
 - `promptpotter/services/campaign/reporting.py` — CI formatting, significance markers, convergence tables
 - `promptpotter/services/campaign/export.py` — Pairwise significance, query difficulty, failure clusters
@@ -204,7 +204,7 @@ CORS enabled. No frontend consumes these endpoints.
 
 #### 3c. Benchmark Results Display
 
-- Comparison tables from `docs/benchmarks.md` data
+- Comparison tables from `docs/research/benchmarks.md` data
 - Interactive convergence plots
 - Ablation results visualization
 - Competitor comparison charts
@@ -333,7 +333,7 @@ Wave 6: Track 2c + Track 3d + Track 3e
 - [ ] Publication figures and tables designed and documented (`docs/publication-figures.md`)
 - [ ] HotPotQA + GSM8K results with statistical rigor (3 seeds, CIs, significance tests)
 - [ ] At least one head-to-head comparison against MIPROv2 (cited numbers, same metrics)
-- [ ] `docs/benchmarks.md` result tables filled with real numbers
+- [ ] `docs/research/benchmarks.md` result tables filled with real numbers
 - [ ] Meta-prompts evaluated on ≥2 benchmark datasets with documented rationale for final configs
 - [ ] Webapp showing campaign list, campaign detail, trial inspector, benchmark results
 - [ ] Campaign can be launched and monitored through the webapp (Phase 2)
@@ -354,7 +354,7 @@ Wave 6: Track 2c + Track 3d + Track 3e
 | Dataset store | `promptpotter/services/stores/dataset_store.py` |
 | Export pipeline | `promptpotter/cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py` |
 | FastAPI API | `promptpotter/main.py` |
-| Benchmark methodology | `docs/benchmarks.md` |
+| Benchmark methodology | `docs/research/benchmarks.md` |
 | Dataset configs | `datasets/hotpotqa/`, `datasets/gsm8k/`, `datasets/lca-termnorm/` |
 
 ---

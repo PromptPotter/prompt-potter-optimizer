@@ -106,7 +106,7 @@ python -m promptpotter.cli.export_results supplemental --backend-id local -o sup
 python -m promptpotter.cli.export_results json --backend-id local -o paper_results.json
 ```
 
-See [`benchmarks.md`](benchmarks.md) for methodology and result table format.
+See [`benchmarks.md`](../research/benchmarks.md) for methodology and result table format.
 
 ---
 

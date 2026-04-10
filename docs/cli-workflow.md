@@ -127,7 +127,7 @@ python -m promptpotter.cli.export_results supplemental \
     --output supplemental.md
 ```
 
-See [`docs/benchmarks.md`](benchmarks.md) for the full benchmark methodology and result table format.
+See [`benchmarks.md`](../research/benchmarks.md) for the full benchmark methodology and result table format.
 
 ---
 

@@ -68,9 +68,9 @@ If the backend restarts mid-scan, `BackendClient` auto-reinitializes the session
 
 ## SearchMemory Integration (M8)
 
-SearchMemory enriches the scan workflow when historical data exists: the scan advisor receives axis rankings, historically-best values, and bottleneck distribution to prioritize impactful axes and skip dead ones. Diagnostic sets can be stratified using query tractability data. See [architecture.md § SearchMemory](architecture.md#searchmemory-m8-wave-3) for the full data model and accessor methods.
+SearchMemory enriches the scan workflow when historical data exists: the scan advisor receives axis rankings, historically-best values, and bottleneck distribution to prioritize impactful axes and skip dead ones. Diagnostic sets can be stratified using query tractability data. See [architecture.md § SearchMemory](../architecture/overview.md#searchmemory) for the full data model and accessor methods.
 
 ### Per-Query Failure Group Sensitivity (Planned)
 
-Standard sensitivity scan measures per-axis accuracy deltas over the full query set. Failure group sensitivity slices those results by failure mode to answer: "Which axes matter most for which failure types?" The producer (`failure_group_sensitivity()` in `failure_group_analysis.py`) runs automatically after scan completes and ingests results via `ingest_failure_group_analysis()`. Accessor methods (`query_sensitive_axes()`, `parameter_failure_correlation()`) feed into L2's strategic intelligence. See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design.
+Standard sensitivity scan measures per-axis accuracy deltas over the full query set. Failure group sensitivity slices those results by failure mode to answer: "Which axes matter most for which failure types?" The producer (`failure_group_sensitivity()` in `failure_group_analysis.py`) runs automatically after scan completes and ingests results via `ingest_failure_group_analysis()`. Accessor methods (`query_sensitive_axes()`, `parameter_failure_correlation()`) feed into L2's strategic intelligence. See [`docs/methods/search-memory-intelligence.md`](../research/search-memory-intelligence.md) for the full design.
 

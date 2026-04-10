@@ -68,7 +68,7 @@ Think step by step.
 
 ## Field Usage by Prompt Type
 
-See [architecture.md § Data Models](architecture.md#data-models) for the full `SearchPoint` → `PromptTemplate` → `OptSearchPoint` class hierarchy.
+See [architecture.md § Data Models](overview.md#data-models) for the full `SearchPoint` → `PromptTemplate` → `OptSearchPoint` class hierarchy.
 
 In optimizer prompts, `problem_description` carries analytical evidence (eval stats, scan data, critique, escalation). `instruction` carries task directives. `plan` carries L3's strategic framework.
 

@@ -60,7 +60,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest --cov`. A
 - **No fallbacks** in service code. Sanctioned exceptions (keep this list short):
   1. `init_services()`: local `LLMOnlyAdapter` → `BackendClient` when `LOCAL_EVAL_SECRET` auth fails (security gate, not hidden default).
   Any doc or code introducing a new fallback must add it to this list.
-- **Cycle identity**: Two-tier system. Experiment mode (default) hashes only the *problem* (dataset, baseline, pipeline steps) — everything else (optimizer model, seed, n_variants, creativity, patience, thresholds) is tweakable without breaking the cycle. Strict mode (`strict_cycle_identity: true`) hashes everything — for publication reproducibility only. See `TUNING_KEYS` in `lifecycle.py` and `docs/benchmarks.md` "Reproducibility: Cycle Identity Modes".
+- **Cycle identity**: Two-tier system. Experiment mode (default) hashes only the *problem* (dataset, baseline, pipeline steps) — everything else (optimizer model, seed, n_variants, creativity, patience, thresholds) is tweakable without breaking the cycle. Strict mode (`strict_cycle_identity: true`) hashes everything — for publication reproducibility only. See `TUNING_KEYS` in `lifecycle.py` and `docs/research/benchmarks.md` "Reproducibility: Cycle Identity Modes".
 - **Two-tier eval sampling**: `sp_budget_ttest` (0 = all) controls the optimization loop eval set. `scan_sample_size` controls sensitivity scan queries. Sequential elimination early-stops inferior candidates via Welch's t-test after 20 queries, so actual round cost is well below `n_variants × eval_size`.
 - **Skip baseline by default**: Always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists (≥ 50 unique queries, ≥ 5 dataset runs) and the user requests comparison.
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
@@ -78,7 +78,7 @@ Three entry points (notebook, CLI, web API), one service core in `promptpotter/s
 - **Display** (per-entry-point) — caller passes `RunCallbacks`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
-**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data archived to `dataset_runs/` store. SearchMemory (M8) aggregates historical data into a materialized view that feeds both loops. Three-tier intelligence: deterministic code triage (CI-gated query exclusion, no LLM), critique (every-round intelligence hub — enriched with SearchMemory tractability, axis exhaustion, value trends), L2 (escalation-only — round trajectory, candidate comparison, failure group × axis). L3 receives SearchMemory aggregate picture. L1 stays clean. See [`docs/methods/search-memory-intelligence.md`](docs/methods/search-memory-intelligence.md).
+**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data archived to `dataset_runs/` store. SearchMemory (M8) aggregates historical data into a materialized view that feeds both loops. Three-tier intelligence: deterministic code triage (CI-gated query exclusion, no LLM), critique (every-round intelligence hub — enriched with SearchMemory tractability, axis exhaustion, value trends), L2 (escalation-only — round trajectory, candidate comparison, failure group × axis). L3 receives SearchMemory aggregate picture. L1 stays clean. See [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md).
 
 ### SearchPoint Hierarchy
 
@@ -115,7 +115,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 2. **CLI**: `promptpotter/cli/campaign_runner.py` — `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
 3. **FastAPI API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`
 
-**Persistence: two tiers.** Session state (`sessions/{session_id}/`) is the live UI dashboard + HITL control surface. Campaign store (`campaigns/{cycle_id}/`) is the source of truth for optimizer resume (trial checkpoints, pre-eval candidates). See `docs/architecture.md § Persistence Architecture` for the full layout, `campaign_state.json` schema, and resume flow.
+**Persistence: two tiers.** Session state (`sessions/{session_id}/`) is the live UI dashboard + HITL control surface. Campaign store (`campaigns/{cycle_id}/`) is the source of truth for optimizer resume (trial checkpoints, pre-eval candidates). See `docs/architecture/overview.md § Persistence Architecture` for the full layout, `campaign_state.json` schema, and resume flow.
 
 ### Key Patterns
 
@@ -128,9 +128,9 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 
 ## Design Principles
 
-- **Prompt decomposition & variant library** — Backends have monolithic prompts. PromptPotter decomposes into 8 independent fields via LLM restructure, perturbs each independently. See `docs/prompt-scheme.md`.
+- **Prompt decomposition & variant library** — Backends have monolithic prompts. PromptPotter decomposes into 8 independent fields via LLM restructure, perturbs each independently. See `docs/architecture/prompt-scheme.md`.
 - **Prompt alias groups** — `register_alias`/`resolve_aliases` link equivalent prompt hashes so historical data is discoverable across forms. Transitive resolution.
-- **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/`. Three pillars: parameter impact (+ axis exhaustion, value trends), query patterns (+ CI-gated intractable detection), failure modes (+ failure group × axis correlation). Atomic accessors only. Three-tier intelligence architecture: deterministic code triage (per-query exclusion, no LLM), critique (every-round intelligence hub — frames analysis with SearchMemory), L2 (escalation-only strategic meta-intelligence). L3 receives aggregate SearchMemory picture. See [`docs/methods/search-memory-intelligence.md`](docs/methods/search-memory-intelligence.md).
+- **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/`. Three pillars: parameter impact (+ axis exhaustion, value trends), query patterns (+ CI-gated intractable detection), failure modes (+ failure group × axis correlation). Atomic accessors only. Three-tier intelligence architecture: deterministic code triage (per-query exclusion, no LLM), critique (every-round intelligence hub — frames analysis with SearchMemory), L2 (escalation-only strategic meta-intelligence). L3 receives aggregate SearchMemory picture. See [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md).
 
 ## Known Issues
 
@@ -153,11 +153,18 @@ Minimal suite — only stable contracts tested. No volume tests, no O(n) complex
 
 ## Navigation
 
-1. [`docs/architecture.md`](docs/architecture.md) — system design, two-loop diagram, caching, disk layout
-2. [`docs/optimization.md`](docs/optimization.md) — L1/L2/L3 loop, critique, escalation
-3. [`docs/prompt-scheme.md`](docs/prompt-scheme.md) — 8-field decomposition, variant library
-4. [`docs/sensitivity-scan.md`](docs/sensitivity-scan.md) — OAT scan, coverage
-5. [`docs/cli-workflow.md`](docs/cli-workflow.md) — full CLI reference, eval output format
-6. [`docs/node-standard.md`](docs/node-standard.md) — node types, `llm_call()` primitive
-7. [`docs/specs/`](docs/specs/CLAUDE.md) — active milestone specs (M9), archived (M8, old M9)
-8. [`docs/observability.md`](docs/observability.md), [`docs/setup-guide.md`](docs/setup-guide.md), [`docs/benchmarks.md`](docs/benchmarks.md), [`docs/information-flow.md`](docs/information-flow.md)
+**Architecture** (how it works):
+1. [`docs/architecture/overview.md`](docs/architecture/overview.md) — system design, two-loop diagram, caching, disk layout
+2. [`docs/architecture/optimization.md`](docs/architecture/optimization.md) — L1/L2/L3 loop, critique, escalation
+3. [`docs/architecture/prompt-scheme.md`](docs/architecture/prompt-scheme.md) — 8-field decomposition, variant library
+4. [`docs/architecture/information-flow.md`](docs/architecture/information-flow.md) — prompt injection map
+5. [`docs/architecture/node-standard.md`](docs/architecture/node-standard.md) — node types, `llm_call()` primitive
+
+**Operations** (how to use it):
+6. [`docs/cli-workflow.md`](docs/cli-workflow.md) — full CLI reference, eval output format
+7. [`docs/setup-guide.md`](docs/setup-guide.md), [`docs/observability.md`](docs/observability.md)
+
+**Research** (methodology & analysis):
+9. [`docs/research/benchmarks.md`](docs/research/benchmarks.md), [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md), [`docs/research/candidate-comparison.md`](docs/research/candidate-comparison.md)
+
+**Specs**: [`docs/specs/`](docs/specs/CLAUDE.md) — active (M9), archived (M8, old M9)

@@ -39,7 +39,7 @@ All core logic lives in `promptpotter/services/`.
 
 **AI Loop** — Critique-guided feedback cycle. Each round: generate candidates, evaluate, critique failures, feed forward. L1→L2→L3 escalation on diminishing returns.
 
-**SearchMemory** — Materialized view over `dataset_runs/` feeding both loops. See [SearchMemory design](methods/search-memory-intelligence.md).
+**SearchMemory** — Materialized view over `dataset_runs/` feeding both loops. See [SearchMemory design](../research/search-memory-intelligence.md).
 
 ## Two-Layer Tracing
 
@@ -67,7 +67,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, stale data protocol config).
 
-**SearchMemory** — Materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic accessors, no formatting. See [design doc](methods/search-memory-intelligence.md).
+**SearchMemory** — Materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic accessors, no formatting. See [design doc](../research/search-memory-intelligence.md).
 
 Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`.
 
@@ -224,7 +224,7 @@ Live dashboard for `show-status` and HITL checkpoints — **not** an optimizer c
 
 Cross-campaign intelligence layer. Materialized view over `dataset_runs/`, persisted at `{backend_id}/search_memory.json`, refreshed incrementally via watermark. Three pillars: parameter impact, query patterns, failure modes. Atomic data accessors only — each consumer composes its own prompt section.
 
-Full design, accessors, and consumer matrix: [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md). Implementation: `services/search/search_memory.py`.
+Full design, accessors, and consumer matrix: [`docs/methods/search-memory-intelligence.md`](../research/search-memory-intelligence.md). Implementation: `services/search/search_memory.py`.
 
 ### Node-Level Cache
 
@@ -265,7 +265,7 @@ cli/export_results.py         ← CLI file I/O (write .md or .json)
 
 **`reporting.py`** functions: `render_comparison_table()`, `render_convergence_table()`, `render_significance_table()`, `render_parameter_impact_table()`, `generate_supplemental()`, `generate_export_json()`.
 
-The supplemental document includes: campaign comparison, convergence, pairwise significance, parameter impact, failure analysis, query difficulty, and a reproducibility manifest. See [`docs/benchmarks.md`](benchmarks.md) for the benchmark methodology and result table format.
+The supplemental document includes: campaign comparison, convergence, pairwise significance, parameter impact, failure analysis, query difficulty, and a reproducibility manifest. See [`docs/research/benchmarks.md`](../research/benchmarks.md) for the benchmark methodology and result table format.
 
 ## Context Object Lifecycle
 

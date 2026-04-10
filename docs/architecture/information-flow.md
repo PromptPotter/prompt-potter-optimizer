@@ -85,7 +85,7 @@ By design, L1 stays clean — it generates candidates. Deeper sample intelligenc
 | **Cross-candidate failure diff** | Every-round | Critique — missed opportunities from non-winner candidates | Planned |
 | **Failure group refresh in loop** | Strategic | L2 — periodic recomputation during optimization | Planned |
 
-See [`docs/methods/search-memory-intelligence.md`](methods/search-memory-intelligence.md) for the full design.
+See [`docs/methods/search-memory-intelligence.md`](../research/search-memory-intelligence.md) for the full design.
 
 ### Internal (not a prompt injection)
 
