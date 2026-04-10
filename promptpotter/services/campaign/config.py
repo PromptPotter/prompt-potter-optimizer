@@ -113,7 +113,7 @@ class RunConfig(BaseModel):
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
     session_id: str = Field("", description="Session ID for persistence emitter")
-    sp_budget_ttest: int = Field(0, description="Eval subsample size (0 = use all)")
+    sp_budget_ttest: int = Field(20, description="Eval subsample size (must be > 0)")
     seed: int = Field(42, description="Random seed for subsampling")
 
     pipeline_schema: PipelineSchema | None = Field(
@@ -257,7 +257,7 @@ class RunConfig(BaseModel):
             backend_id=backend_id,
             project_root=project_root,
             session_id=session_id,
-            sp_budget_ttest=campaign_config.get("sp_budget_ttest", 0),
+            sp_budget_ttest=campaign_config.get("sp_budget_ttest", 20),
             seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
             scan_context=scan_context,
@@ -386,11 +386,8 @@ def compute_preflight_metrics(
     has_scan_context: bool = False,
 ) -> PreflightMetrics:
     """Derive display-ready metrics from RunConfig and dataset size."""
-    eff_queries = config.sp_budget_ttest if config.sp_budget_ttest else dataset_size
-    if config.sp_budget_ttest:
-        queries_label = f"{config.sp_budget_ttest} of {dataset_size}"
-    else:
-        queries_label = f"all {dataset_size}"
+    eff_queries = config.sp_budget_ttest
+    queries_label = f"{config.sp_budget_ttest} of {dataset_size}"
 
     schema = config.pipeline_schema
     active_nodes = list(schema.active_steps) if schema else []

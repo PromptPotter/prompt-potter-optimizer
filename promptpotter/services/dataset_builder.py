@@ -173,12 +173,14 @@ def sample_dataset(
 ) -> list[dict]:
     """Deterministic subsample of eval queries.
 
-    Returns the full list unchanged if ``sample_size <= 0`` or the dataset
-    is already small enough.
+    ``sample_size`` must be a positive integer.  Returns the full list
+    unchanged only when the dataset is already at or below that size.
     """
-    if sample_size > 0 and len(dataset) > sample_size:
-        return random.Random(seed).sample(dataset, sample_size)
-    return dataset
+    if sample_size <= 0:
+        raise ValueError(f"sp_budget_ttest must be > 0, got {sample_size}")
+    if len(dataset) <= sample_size:
+        return dataset
+    return random.Random(seed).sample(dataset, sample_size)
 
 
 _GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")

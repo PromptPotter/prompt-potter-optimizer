@@ -303,7 +303,7 @@ Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestam
 
 ```python
 campaign_config = {
-    "sp_budget_ttest": 35,                    # queries per eval (0 = all)
+    "sp_budget_ttest": 35,                    # queries per eval (must be > 0)
     "exclude_nodes": ["llm_ranking"],          # target pipeline nodes to skip
     "optimization": {
         "n_variants": 5,

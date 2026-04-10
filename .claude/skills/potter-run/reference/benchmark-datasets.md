@@ -15,6 +15,29 @@ The architecture is **registry + config** — no new code files. Two registries 
 
 Both are plain dicts. The loader fetches from any source (HuggingFace, file, API). The scorer is called from the formula in `campaign.json["scoring"]`.
 
+### Scorer pattern
+
+A scorer extracts the answer from the model's raw output and compares it to ground truth. The `predicted` variable in the formula is the full model response (may be multi-paragraph reasoning text), so the scorer must handle extraction.
+
+**Function signature**: `(predicted: str, ground_truth: str) -> float`
+- Return `1.0` for correct, `0.0` for wrong (binary scorers)
+- Continuous scorers (like `rr`) are also supported; `hit` is derived as `score >= 1.0`
+
+**Example** — AIME (integer extraction from reasoning text):
+```python
+def _aime_match(predicted: str, ground_truth: str) -> float:
+    gt = int(ground_truth.strip())
+    matches = _NUMBER_RE.findall(predicted or "")
+    if not matches:
+        return 0.0
+    pred = int(float(matches[-1].replace(",", "")))
+    return 1.0 if pred == gt else 0.0
+```
+
+**Registration**: add to `SCORING_FUNCTIONS` in `shared/scoring.py`.
+**Formula**: set `"scoring": "aime_match(predicted, ground_truth)"` in `campaign.json`.
+**`hit` derivation**: automatic — `hit = score >= 1.0` (set in `sample_measurement.py` after scorer runs).
+
 ### Config directory: `datasets/<name>/`
 
 | File | Purpose |

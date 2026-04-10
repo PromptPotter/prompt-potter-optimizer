@@ -22,7 +22,7 @@
 
 - Source: HuggingFace `MathArena/aime_2025` (30 problems from AIME I and II 2025)
 - Format: competition math problem -> integer answer in [0, 999]
-- campaign.json uses `sp_budget_ttest: 0` (all 30 — dataset is tiny)
+- campaign.json uses `sp_budget_ttest: 20` (20 of 30 problems per eval round)
 
 ## Cycle Identity
 

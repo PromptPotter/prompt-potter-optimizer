@@ -132,6 +132,7 @@ def _local_result(
     }
     if scorer:
         result["score"] = scorer(result)
+        result["hit"] = result["score"] >= 1.0
     return result  # type: ignore[return-value]
 
 
@@ -259,6 +260,7 @@ async def measure_sample(
             result["precomputed_through"] = list(precomputed.keys())
         if scorer:
             result["score"] = scorer(result)
+            result["hit"] = result["score"] >= 1.0
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)

@@ -345,12 +345,11 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
         _dbox_line(f"Max rounds     {state.max_rounds or 999!s:<15s}Patience    {state.patience}")
     )
     print(_dbox_line(f"Candidates     {d.get('n_variants', 0)}"))
-    sample = d.get("sp_budget_ttest", 0)
+    sample = d.get("sp_budget_ttest", 20)
     total = d.get("dataset_count", 0)
-    eff_n = sample if sample else total
-    state.baseline_total = eff_n
-    sample_label = f"{sample} of {total}" if sample else f"all {total}"
-    mde = min_detectable_effect(eff_n)
+    state.baseline_total = sample
+    sample_label = f"{sample} of {total}"
+    mde = min_detectable_effect(sample)
     print(_dbox_line(f"Sample size    {sample_label}"))
     print(_dbox_line(f"Min detectable {YELLOW}\u00b1{mde:.1%}{RESET} (\u03b1=0.05, 80% power)"))
     print(_dbox_line(f"Model          {model}"))
