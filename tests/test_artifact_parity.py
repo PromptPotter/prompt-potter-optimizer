@@ -95,7 +95,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     )
     emitter.on_phase(
         PhaseEvent(
-            phase="l1_evaluate",
+            phase="l1_score",
             event="enter",
             round=0,
             data={},
@@ -103,7 +103,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     )
 
     # Simulate a query evaluation
-    emitter.on_query_eval(
+    emitter.on_sample_scored(
         0,
         1,
         0,
@@ -116,7 +116,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
             "pipeline_data": {"total_time": 0.1, "terminated_at": "llm_ranking"},
         },
     )
-    emitter.on_query_eval(
+    emitter.on_sample_scored(
         0,
         1,
         1,
@@ -133,7 +133,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     )
 
     # Simulate candidate eval
-    emitter.on_candidate_eval(0, 1, {"accuracy": 0.6, "hits": 1, "total": 2})
+    emitter.on_candidate_scored(0, 1, {"accuracy": 0.6, "hits": 1, "total": 2})
 
     # Simulate round complete
     round_result = RoundResult(
@@ -144,7 +144,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
         total=2,
         improved=True,
         prompt_fields={"instruction": "test"},
-        candidates_evaluated=1,
+        candidates_scored=1,
     )
     emitter.on_round_complete(round_result, stall_count=0)
 
@@ -195,7 +195,7 @@ def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
     state_path.write_text(
         json.dumps(
             {
-                "control": {"requested_state": "pause", "pause_before_l2_eval": False},
+                "control": {"requested_state": "pause", "pause_before_l2_scoring": False},
             }
         )
     )
@@ -212,7 +212,7 @@ def test_control_surface_resumes(session_dir: Path) -> None:
     state_path.write_text(
         json.dumps(
             {
-                "control": {"requested_state": "resume", "pause_before_l2_eval": False},
+                "control": {"requested_state": "resume", "pause_before_l2_scoring": False},
             }
         )
     )
@@ -226,14 +226,14 @@ def test_control_surface_resumes(session_dir: Path) -> None:
 
 
 def test_control_surface_l2_pause(session_dir: Path) -> None:
-    """CampaignControlReader honors pause_before_l2_eval at before_l2_eval checkpoint."""
+    """CampaignControlReader honors pause_before_l2_scoring at before_l2_scoring checkpoint."""
     from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
 
     state_path = session_dir / "campaign_state.json"
     state_path.write_text(
         json.dumps(
             {
-                "control": {"requested_state": "running", "pause_before_l2_eval": True},
+                "control": {"requested_state": "running", "pause_before_l2_scoring": True},
             }
         )
     )
@@ -242,4 +242,4 @@ def test_control_surface_l2_pause(session_dir: Path) -> None:
     # At non-L2 checkpoint: no pause
     assert surface.check("after_round") is None
     # At L2 checkpoint: pause
-    assert surface.check("before_l2_eval") == "pause"
+    assert surface.check("before_l2_scoring") == "pause"

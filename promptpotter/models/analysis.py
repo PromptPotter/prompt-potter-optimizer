@@ -39,7 +39,7 @@ class QueryProfile:
 
     query: str
     hit_rate: float
-    n_evaluations: int
+    n_measurements: int
     classification: DifficultyClass
 
 

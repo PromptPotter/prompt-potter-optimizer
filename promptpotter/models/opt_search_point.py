@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 from pydantic import BaseModel, Field, field_validator
 
 from promptpotter.models.search_point import SearchPoint
-from promptpotter.models.task_context import TaskContext
+from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
@@ -168,8 +168,8 @@ class OptSearchPoint(PromptTemplate):
 
     # -- L2 state ----------------------------------------------------------
     optimizer_params: dict[str, Any] = Field(default_factory=dict)
-    task_context: TaskContext = Field(
-        default_factory=TaskContext,
+    task_context: TaskDecomposition = Field(
+        default_factory=TaskDecomposition,
         description="Structured domain context (domain, pipeline_purpose, "
         "data_characteristics, optimization_goals, key_challenges). "
         "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
@@ -177,12 +177,12 @@ class OptSearchPoint(PromptTemplate):
 
     @field_validator("task_context", mode="before")
     @classmethod
-    def _coerce_task_context(cls, v: Any) -> TaskContext:
-        if isinstance(v, TaskContext):
+    def _coerce_task_context(cls, v: Any) -> TaskDecomposition:
+        if isinstance(v, TaskDecomposition):
             return v
         if isinstance(v, dict):
-            return TaskContext.from_dict(v)
-        return TaskContext()
+            return TaskDecomposition.from_dict(v)
+        return TaskDecomposition()
 
     # -- Optimization memory -----------------------------------------------
     critique_text: str = ""

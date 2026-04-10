@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, TypedDict
 from pydantic import BaseModel, Field, field_validator
 
 from promptpotter.models.pipeline_schema import PipelineSchema
-from promptpotter.models.task_context import TaskContext
+from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.search.scan_results import ScanContext
 
 if TYPE_CHECKING:
@@ -51,13 +51,13 @@ class OptimizationConfig(TypedDict, total=False):
     l2_temperature: float
     l3_temperature: float
     enable_critique: bool
-    pause_before_eval: bool
+    pause_before_scoring: bool
     stale_data_load_protocol: list[str]
     elimination_n_min: int
     elimination_alpha: float
 
 
-class EvalLLMConfig(TypedDict, total=False):
+class OptimizerLLMConfig(TypedDict, total=False):
     """LLM provider settings (``campaign_config["optimizer_llm"]``)."""
 
     model: str
@@ -82,7 +82,7 @@ class CampaignConfig(TypedDict, total=False):
     ``exclude_nodes``) is valid input.  ``dataset_name`` specifies the
     default DatasetStore split.  The dict is mutated in place by
     ``configure_pipeline()`` (sets ``pipeline_params``) and the CLI
-    (sets ``optimization.pause_before_eval``).
+    (sets ``optimization.pause_before_scoring``).
     """
 
     dataset_name: str
@@ -94,7 +94,7 @@ class CampaignConfig(TypedDict, total=False):
     pipeline_overrides: dict
     pipeline_params: dict | None
     optimization: OptimizationConfig
-    optimizer_llm: EvalLLMConfig
+    optimizer_llm: OptimizerLLMConfig
     smart_search: SmartSearchConfig
     scoring: str
 
@@ -131,20 +131,20 @@ class RunConfig(BaseModel):
     )
 
     # Structured domain context (from TASK_DESCRIPTION decomposition)
-    task_context: TaskContext | None = Field(
+    task_context: TaskDecomposition | None = Field(
         None,
         description="Structured domain context for L1 gen and L2 refinement",
     )
 
     @field_validator("task_context", mode="before")
     @classmethod
-    def _coerce_task_context(cls, v: object) -> TaskContext | None:
+    def _coerce_task_context(cls, v: object) -> TaskDecomposition | None:
         if v is None:
             return None
-        if isinstance(v, TaskContext):
+        if isinstance(v, TaskDecomposition):
             return v
         if isinstance(v, dict):
-            return TaskContext.from_dict(v)
+            return TaskDecomposition.from_dict(v)
         return None
 
     # L2/L3 escalation
@@ -192,7 +192,7 @@ class RunConfig(BaseModel):
     # Stale data handling
     stale_data_load_protocol: list[str] = Field(
         default=["rerun", "samplescan", "sampleswitch"],
-        description="Ordered fallback ladder for degraded cached samples (l1_evaluate config)",
+        description="Ordered fallback ladder for degraded cached samples (l1_score config)",
     )
 
     # Critique thresholds
@@ -212,7 +212,7 @@ class RunConfig(BaseModel):
     )
 
     # HITL mode
-    pause_before_eval: bool = Field(
+    pause_before_scoring: bool = Field(
         False,
         description="Stop after L1 generate (before eval) for human/AI review",
     )
@@ -236,7 +236,7 @@ class RunConfig(BaseModel):
         session_id: str = "",
         pipeline_schema: PipelineSchema | None = None,
         scan_context: ScanContext | None = None,
-        task_context: TaskContext | dict | None = None,
+        task_context: TaskDecomposition | dict | None = None,
     ) -> RunConfig:
         """Build from the notebook's ``campaign_config`` dict.
 
@@ -281,7 +281,7 @@ class RunConfig(BaseModel):
             stale_data_load_protocol=opt.get(
                 "stale_data_load_protocol", ["rerun", "samplescan", "sampleswitch"]
             ),
-            pause_before_eval=opt.get("pause_before_eval", False),
+            pause_before_scoring=opt.get("pause_before_scoring", False),
             scoring_formula=campaign_config.get("scoring"),
         )
 

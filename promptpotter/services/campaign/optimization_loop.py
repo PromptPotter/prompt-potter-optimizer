@@ -1,7 +1,7 @@
 """
 Optimization loop orchestrator for iterative prompt optimization.
 
-Runs ``l1_generate()`` → ``l1_evaluate()`` in a
+Runs ``l1_generate()`` → ``l1_score()`` in a
 counter-based loop.  Each round generates Layer 1 variants and evaluates
 them against the current best.
 
@@ -44,7 +44,7 @@ from promptpotter.services.search.scan_results import ScanContext
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.services.stores.campaign_store import CampaignStore
+    from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +199,7 @@ def _checkpoint_round(
                 "improved": round_result.improved,
                 "prompt_fields": round_result.prompt_fields,
                 "results": round_result.results,
-                "candidates_evaluated": round_result.candidates_evaluated,
+                "candidates_scored": round_result.candidates_scored,
                 "candidate_scores": list(round_result.candidate_scores),
                 "stall_count": state.stall_count,
                 "l2_stall_count": state.escalation.l2_stall_count,
@@ -262,7 +262,7 @@ async def run_optimization(
 ) -> RunResult:
     """Run iterative optimization with feedback cycling.
 
-    Executes: init → round loop (l1_generate → l1_evaluate) → finalize.
+    Executes: init → round loop (l1_generate → l1_score) → finalize.
     Stops on: patience exhaustion, max_rounds, perfect score, or interrupt.
     """
     if scan_context is not None:
@@ -296,8 +296,8 @@ async def run_optimization(
     search_memory = init.search_memory
     _emitter = init.persistence_emitter
     state.search_memory = search_memory
-    if state.eval_ctx and search_memory:
-        state.eval_ctx.search_memory = search_memory
+    if state.scoring_ctx and search_memory:
+        state.scoring_ctx.search_memory = search_memory
 
     # Chain persistence callbacks (fires first) with caller display callbacks
     if _emitter:
@@ -305,8 +305,8 @@ async def run_optimization(
 
         persistence_cb = RunCallbacks(
             on_phase=_emitter.on_phase,
-            on_query_eval=_emitter.on_query_eval,
-            on_candidate_eval=_emitter.on_candidate_eval,
+            on_sample_scored=_emitter.on_sample_scored,
+            on_candidate_scored=_emitter.on_candidate_scored,
             on_round_complete=_emitter.on_round_complete,
         )
         cb = chain_callbacks(persistence_cb, cb)
@@ -466,10 +466,10 @@ async def run_optimization(
                     break
 
             # SearchMemory refresh — pick up results from this round
-            if search_memory and state.eval_ctx and state.eval_ctx.store:
+            if search_memory and state.scoring_ctx and state.scoring_ctx.store:
                 from pathlib import Path
 
-                _sm_store = state.eval_ctx.store
+                _sm_store = state.scoring_ctx.store
                 if search_memory.refresh(_sm_store, config.backend_id):
                     # Periodically recompute failure group correlations
                     if (
@@ -544,7 +544,7 @@ async def run_optimization(
 
     # -- Finalize --
     finished_at = datetime.now(UTC).isoformat()
-    obs = state.eval_ctx.obs if state.eval_ctx else None
+    obs = state.scoring_ctx.obs if state.scoring_ctx else None
     campaign_status = (
         "paused"
         if stop_reason in (StopReason.PAUSED_FOR_REVIEW, StopReason.USER_PAUSED)

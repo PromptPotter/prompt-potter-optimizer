@@ -56,12 +56,13 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest --cov`. A
 - **Logging** via `logging` module, never `print()`. Setup in `promptpotter/config/logging.py`.
 - **No backward compatibility** — freely break signatures, rename, restructure. No shims.
 - Pipeline components are called **nodes**, not "building blocks" or "services".
+- **Terminology** — "eval" is banned from identifiers. Use: **loop** (optimization loop), **round** (one iteration), **searchpoint** (configuration being tested), **sample** (one query from the dataset), **measurement** (running one sample through the pipeline + comparing to ground truth), **scoring** (aggregating measurements across a dataset for a SearchPoint), **match** (expected-vs-actual comparison).
 - **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
 - **No fallbacks** in service code. Sanctioned exceptions (keep this list short):
   1. `init_services()`: local `LLMOnlyAdapter` → `BackendClient` when `LOCAL_EVAL_SECRET` auth fails (security gate, not hidden default).
   Any doc or code introducing a new fallback must add it to this list.
 - **Cycle identity**: Two-tier system. Experiment mode (default) hashes only the *problem* (dataset, baseline, pipeline steps) — everything else (optimizer model, seed, n_variants, creativity, patience, thresholds) is tweakable without breaking the cycle. Strict mode (`strict_cycle_identity: true`) hashes everything — for publication reproducibility only. See `TUNING_KEYS` in `lifecycle.py` and `docs/research/benchmarks.md` "Reproducibility: Cycle Identity Modes".
-- **Two-tier eval sampling**: `sp_budget_ttest` (must be > 0) controls the optimization loop eval set. `scan_sample_size` controls sensitivity scan queries. Sequential elimination early-stops inferior candidates via Welch's t-test after 20 queries, so actual round cost is well below `n_variants × eval_size`.
+- **Two-tier sampling**: `sp_budget_ttest` (must be > 0) controls the optimization loop scoring set. `scan_sample_size` controls sensitivity scan queries. Sequential elimination early-stops inferior candidates via Welch's t-test after 20 queries, so actual round cost is well below `n_variants × eval_size`.
 - **Skip baseline by default**: Always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists (≥ 50 unique queries, ≥ 5 dataset runs) and the user requests comparison.
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
 - **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground so stale processes don't leak.
@@ -97,7 +98,7 @@ Every state traced at **both** layers independently:
 - **Target layer**: `JobSearchPoint` → `score_search_point()` → `dataset_runs/` (content-addressed, shared)
 - **Optimizer layer**: `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint)
 
-### Evaluation Pipeline
+### Scoring Pipeline
 
 `score_search_point()` (in `dataset_scoring.py`) is the single gateway for scoring, archival, and observability. Unified per-query caching: prior-result cache (from dataset_runs) checked first, then per-node intermediate cache (`walk_prefix()`, multi-step only), then backend call. `dataset_run_store` is archive-only. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
 
@@ -115,14 +116,14 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 2. **CLI**: `promptpotter/cli/campaign_runner.py` — `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
 3. **FastAPI API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`
 
-**Persistence: two tiers.** Session state (`sessions/{session_id}/`) is the live UI dashboard + HITL control surface. Campaign store (`campaigns/{cycle_id}/`) is the source of truth for optimizer resume (trial checkpoints, pre-eval candidates). See `docs/architecture/overview.md § Persistence Architecture` for the full layout, `campaign_state.json` schema, and resume flow.
+**Persistence: two tiers.** Session state (`sessions/{session_id}/`) is the live UI dashboard + HITL control surface. Campaign store (`campaigns/{cycle_id}/`) is the source of truth for optimizer resume (trial checkpoints, pre-scoring candidates). See `docs/architecture/overview.md § Persistence Architecture` for the full layout, `campaign_state.json` schema, and resume flow.
 
 ### Key Patterns
 
-- **Store**: `ProjectStore` facade over focused stores in `services/stores/`.
+- **Store**: `ProjectStore` facade over focused stores in `services/store/`.
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation signals flow via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. No completed work discarded.
-- **HITL mode**: `RunConfig.pause_before_eval` raises `PauseForReviewError` between L1 generate and evaluate. Candidates persisted to `round_NNNN_candidates.json` before pause.
+- **HITL mode**: `RunConfig.pause_before_scoring` raises `PauseForReviewError` between L1 generate and score. Candidates persisted to `round_NNNN_candidates.json` before pause.
 - **Optimizer LLM calls**: All go through `llm_call()` in `services/optimizer/pipeline.py`, not `chat()` directly.
 - **`shared/`**: Leaf-level utilities only — no domain model or service dependencies allowed.
 
@@ -161,7 +162,7 @@ Minimal suite — only stable contracts tested. No volume tests, no O(n) complex
 5. [`docs/architecture/node-standard.md`](docs/architecture/node-standard.md) — node types, `llm_call()` primitive
 
 **Operations** (how to use it):
-6. [`docs/cli-workflow.md`](docs/cli-workflow.md) — full CLI reference, eval output format
+6. [`docs/cli-workflow.md`](docs/cli-workflow.md) — full CLI reference, scoring output format
 7. [`docs/setup-guide.md`](docs/setup-guide.md), [`docs/observability.md`](docs/observability.md)
 
 **Research** (methodology & analysis):

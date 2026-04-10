@@ -2,7 +2,7 @@
 
 Measures one sample at a time via the backend query endpoint.
 Handles per-node intermediate cache walk, cache populate, and error
-classification.  Dataset-level scoring lives in ``dataset_scoring``.
+classification.  Dataset-level scoring lives in ``scoring_searchpoint``.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from promptpotter.models.evaluator import EvalResult, ExactMatchEvaluator
 from promptpotter.models.query_result import QueryResult
+from promptpotter.models.scoring_v_ground_truth import ExactMatchComparator, GroundTruthResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.prompt_interpolation import interpolate_pipeline_params
@@ -23,9 +23,9 @@ from promptpotter.shared.prompt_interpolation import interpolate_pipeline_params
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.models.scoring_context import QueryRunner
-    from promptpotter.services.stores.intermediate_cache import IntermediateCache
+    from promptpotter.services.store.intermediate_cache import IntermediateCache
 
-_evaluator = ExactMatchEvaluator({"strip": True})
+_comparator = ExactMatchComparator({"strip": True})
 
 # Type alias for per-dataset scoring callable (see shared/scoring.py)
 Scorer = Callable[[dict], float]
@@ -100,7 +100,7 @@ def _local_result(
             ranked.append({"candidate": str(item), "score": 0})
 
     predicted = ranked[0]["candidate"] if ranked else NO_RESULT
-    eval_output = _evaluator.evaluate(ground_truth, predicted)
+    comparison = _comparator.compare(ground_truth, predicted)
 
     pd: dict = {
         "final_ranking": ranked,
@@ -121,8 +121,8 @@ def _local_result(
         "query": query,
         "predicted": predicted,
         "ground_truth": ground_truth,
-        "hit": eval_output.result == EvalResult.PASS,
-        "score": eval_output.score,
+        "hit": comparison.result == GroundTruthResult.PASS,
+        "score": comparison.score,
         "error": None,
         "n_candidates": n_candidates,
         "ground_truth_rank": gt_rank,
@@ -184,7 +184,7 @@ async def measure_sample(
         cached_steps: list[str] = []
         prefix_keys: list[tuple[str, str]] = []
         if intermediate_cache and _target_steps:
-            from promptpotter.services.stores.intermediate_cache import compute_prefix_keys
+            from promptpotter.services.store.intermediate_cache import compute_prefix_keys
 
             prefix_keys = compute_prefix_keys(pipeline_params or {}, pipeline_schema)
             node_outputs_hit, cached_steps = intermediate_cache.walk_prefix(
@@ -240,7 +240,7 @@ async def measure_sample(
                 f"[{ErrorCategory.PIPELINE}] Backend returned ERROR as candidate"
                 " — pipeline internal failure for this query.",
             )
-        eval_output = _evaluator.evaluate(ground_truth, predicted)
+        comparison = _comparator.compare(ground_truth, predicted)
         gt_rank = next(
             (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth),
             None,
@@ -249,8 +249,8 @@ async def measure_sample(
             "query": query,
             "predicted": predicted,
             "ground_truth": ground_truth,
-            "hit": eval_output.result == EvalResult.PASS,
-            "score": eval_output.score,
+            "hit": comparison.result == GroundTruthResult.PASS,
+            "score": comparison.score,
             "error": None,
             "n_candidates": len(ranked),
             "ground_truth_rank": gt_rank,

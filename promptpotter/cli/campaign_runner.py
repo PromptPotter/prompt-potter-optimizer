@@ -255,7 +255,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
 async def cmd_task_context(args: argparse.Namespace) -> None:
     """Decompose task description into structured domain context."""
     from promptpotter.services.campaign.config import create_llm_client
-    from promptpotter.services.search.context import (
+    from promptpotter.services.optimizer.prompt_preparation import (
         decompose_task_context as _svc_decompose,
     )
 
@@ -441,14 +441,12 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     # --round: complete one full round then stop (default: full loop).
     # Restore max_rounds from config file — prior --round may have persisted max_rounds=1.
-    campaign_config.setdefault("optimization", {}).pop("pause_before_eval", None)
+    campaign_config.setdefault("optimization", {}).pop("pause_before_scoring", None)
     if not args.round:
         _cfg_path = Path(f"datasets/{campaign_config.get('dataset_name', '')}/campaign.json")
         if _cfg_path.exists():
             _orig = json.loads(_cfg_path.read_text(encoding="utf-8"))
-            _orig_max = (
-                _orig.get("campaign_config", {}).get("optimization", {}).get("max_rounds")
-            )
+            _orig_max = _orig.get("campaign_config", {}).get("optimization", {}).get("max_rounds")
             if _orig_max is not None:
                 campaign_config.setdefault("optimization", {})["max_rounds"] = _orig_max
 
@@ -550,10 +548,10 @@ async def cmd_control(args: argparse.Namespace) -> None:
         control["requested_state"] = "stop"
         action = "stop"
     elif args.pause_before_l2:
-        control["pause_before_l2_eval"] = True
+        control["pause_before_l2_scoring"] = True
         action = "pause_before_l2_enabled"
     elif args.no_pause_l2:
-        control["pause_before_l2_eval"] = False
+        control["pause_before_l2_scoring"] = False
         action = "pause_before_l2_disabled"
 
     data["control"] = control
@@ -777,8 +775,8 @@ async def cmd_status(args: argparse.Namespace) -> None:
             print(f"Elapsed: {live.get('elapsed_s', 0):.0f}s")
             control = live.get("control", {})
             print(f"Control: {control.get('requested_state', 'running')}")
-            if control.get("pause_before_l2_eval"):
-                print("  pause_before_l2_eval: enabled")
+            if control.get("pause_before_l2_scoring"):
+                print("  pause_before_l2_scoring: enabled")
             if live.get("stop_reason"):
                 print(f"Stop reason: {live['stop_reason']}")
             if live.get("pause_point"):

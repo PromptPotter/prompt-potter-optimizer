@@ -73,7 +73,7 @@ async def sensitivity_scan(
 
     n_axes = sum(1 for v in scan_variants.values() if len(v) > 1)
     n_configs = sum(len(v) for v in scan_variants.values() if len(v) > 1)
-    n_eval = sample_size if sample_size > 0 else len(dataset)
+    n_samples = sample_size if sample_size > 0 else len(dataset)
     n_cached = (
         sum(e.get("item_count", 0) for e in store.dataset_runs.list_all(backend_id))
         if store and backend_id
@@ -81,9 +81,9 @@ async def sensitivity_scan(
     )
     print(
         f"  Axes: {n_axes}, variants: {n_configs}, "
-        f"queries/variant: {n_eval}, cached results: {n_cached}"
+        f"queries/variant: {n_samples}, cached results: {n_cached}"
     )
-    print(f"  Estimated calls: ~{n_configs * n_eval}")
+    print(f"  Estimated calls: ~{n_configs * n_samples}")
 
     cb, on_result_cb = _make_scan_progress_cb()
 

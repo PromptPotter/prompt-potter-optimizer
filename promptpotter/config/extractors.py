@@ -1,18 +1,43 @@
-"""TermNorm extractor — LCA terminology normalization.
+"""Backend extractors — per-backend query parsing and ground truth extraction.
 
-Query format: ``bom_material / process`` (slash-delimited)
-Ground truth: ``dataset_entry`` from experiment mappings
-Backend: TermNorm-excel (github.com/runfish5/TermNorm-excel)
+Each extractor self-registers into the dictionaries below.
+Core services dispatch through these registries — they never import
+an extractor function directly.
 
-Pipeline: cache_lookup → fuzzy_matching → web_search → entity_profiling
-          → token_matching (llm_ranking exists but excluded due to bugs)
+Currently only TermNorm is registered.  M11 will replace this with
+``ConnectorProtocol``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
-# -- Query parsing ----------------------------------------------------------
+# -- Registries ---------------------------------------------------------------
+
+EXPERIMENT_EXTRACTORS: dict[str, Callable[[dict], tuple[list[dict], list[str]]]] = {}
+"""Backend experiment data → ``(queries, index_terms)``.
+
+Keyed by ``pipeline_schema.name.lower()``.
+"""
+
+TRACE_GT_RESOLVERS: dict[str, Callable[[dict, str], str | None]] = {}
+"""Resolve ground truth for a single query string from experiment data.
+
+Signature: ``(exp_data, query_str) -> ground_truth | None``.
+Keyed by ``pipeline_schema.name.lower()``.
+"""
+
+# ---------------------------------------------------------------------------
+# TermNorm extractor — LCA terminology normalization
+#
+# Query format: ``bom_material / process`` (slash-delimited)
+# Ground truth: ``dataset_entry`` from experiment mappings
+# Backend: TermNorm-excel (github.com/runfish5/TermNorm-excel)
+#
+# Pipeline: cache_lookup → fuzzy_matching → web_search → entity_profiling
+#           → token_matching (llm_ranking exists but excluded due to bugs)
+# ---------------------------------------------------------------------------
 
 
 def split_query(query: str) -> tuple[str, str]:
@@ -42,9 +67,6 @@ def build_query_item(query: str, ground_truth: str = "") -> dict[str, Any]:
     if ground_truth:
         item["ground_truth"] = ground_truth
     return item
-
-
-# -- Experiment data extraction ---------------------------------------------
 
 
 def extract_index_terms(experiment_data: dict) -> list[str]:
@@ -114,11 +136,6 @@ def _resolve_trace_gt(exp_data: dict, query_str: str) -> str | None:
     bom, _ = split_query(query_str)
     return gt_map.get(bom)
 
-
-from promptpotter.config.extractors import (  # noqa: E402
-    EXPERIMENT_EXTRACTORS,
-    TRACE_GT_RESOLVERS,
-)
 
 EXPERIMENT_EXTRACTORS["termnorm"] = _extract_experiment
 TRACE_GT_RESOLVERS["termnorm"] = _resolve_trace_gt

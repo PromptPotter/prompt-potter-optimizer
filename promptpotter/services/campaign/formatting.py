@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.task_context import TaskContext
+from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.campaign.critique import summarize_warning_inventory
 
 if TYPE_CHECKING:
@@ -36,7 +36,7 @@ __all__ = [
 class ContextData:
     """Data bundle for ``format_context_sections()``."""
 
-    task_context: TaskContext | None = None
+    task_context: TaskDecomposition | None = None
     critique_text: str = ""
     l2_directive: str = ""
     thinking_styles: list[str] | None = None

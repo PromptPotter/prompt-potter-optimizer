@@ -29,11 +29,11 @@ __all__ = [
     "CampaignPhase",
     "EscalationCounters",
     "LoopState",
-    "OnCandidateEval",
+    "OnCandidateScored",
     "OnCheckpoint",
     "OnPhase",
-    "OnQueryEval",
     "OnRoundComplete",
+    "OnSampleScored",
     "PhaseEvent",
     "RoundResult",
     "RunCallbacks",
@@ -50,7 +50,7 @@ class CampaignPhase(enum.StrEnum):
 
     INIT = "init"
     L1_GENERATE = "l1_generate"
-    L1_EVALUATE = "l1_evaluate"
+    L1_SCORE = "l1_score"
     REFINE_CONTEXT = "refine_context"
     MODIFY_PLAN = "modify_plan"
     ESCALATION = "escalation"
@@ -94,7 +94,7 @@ class RoundResult(BaseModel):
     prompt_fields: dict
     pipeline_params: dict | None = None
     results: list[dict] = Field(default_factory=list)
-    candidates_evaluated: int
+    candidates_scored: int
     candidate_scores: list[dict] = Field(default_factory=list)
     degraded_queries: int = 0
     escalation_signal: dict | None = None
@@ -162,7 +162,7 @@ class LoopState:
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
     stall_count: int = 0
-    eval_ctx: ScoringContext | None = None
+    scoring_ctx: ScoringContext | None = None
 
     # Optimizer state — single source of truth for all meta-level fields
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
@@ -225,7 +225,7 @@ class LoopState:
 class PhaseEvent(BaseModel):
     """Emitted at phase boundaries during the feedback cycle.
 
-    Phases: init, l1_generate, l1_evaluate, refine_context, modify_plan.
+    Phases: init, l1_generate, l1_score, refine_context, modify_plan.
     Each phase emits an "enter" and "exit" event with phase-specific data.
     """
 
@@ -243,9 +243,9 @@ class PhaseEvent(BaseModel):
 # (round_result, round_number)
 OnRoundComplete: TypeAlias = Callable[["RoundResult", int], None]
 # (candidate_index, total_candidates, scores_dict)
-OnCandidateEval: TypeAlias = Callable[[int, int, dict], None]
+OnCandidateScored: TypeAlias = Callable[[int, int, dict], None]
 # (candidate_index, total_candidates, query_index, total_queries, result_dict)
-OnQueryEval: TypeAlias = Callable[[int, int, int, int, dict], None]
+OnSampleScored: TypeAlias = Callable[[int, int, int, int, dict], None]
 # (phase_event)
 OnPhase: TypeAlias = Callable[[PhaseEvent], None]
 # (checkpoint_name) -> "pause" | "stop" | None
@@ -257,8 +257,8 @@ class RunCallbacks:
     """Optional progress callbacks for the feedback cycle."""
 
     on_round_complete: OnRoundComplete | None = None
-    on_candidate_eval: OnCandidateEval | None = None
-    on_query_eval: OnQueryEval | None = None
+    on_candidate_scored: OnCandidateScored | None = None
+    on_sample_scored: OnSampleScored | None = None
     on_phase: OnPhase | None = None
     on_checkpoint: OnCheckpoint | None = None
 
@@ -292,8 +292,8 @@ def chain_callbacks(a: RunCallbacks, b: RunCallbacks) -> RunCallbacks:
 
     return RunCallbacks(
         on_round_complete=_chain(a.on_round_complete, b.on_round_complete),
-        on_candidate_eval=_chain(a.on_candidate_eval, b.on_candidate_eval),
-        on_query_eval=_chain(a.on_query_eval, b.on_query_eval),
+        on_candidate_scored=_chain(a.on_candidate_scored, b.on_candidate_scored),
+        on_sample_scored=_chain(a.on_sample_scored, b.on_sample_scored),
         on_phase=_chain(a.on_phase, b.on_phase),
         on_checkpoint=_chain_checkpoint(a.on_checkpoint, b.on_checkpoint),
     )
@@ -319,6 +319,6 @@ def get_obs_trace(
     obs_campaign_id: str,
 ) -> tuple[Any | None, str | None]:
     """Extract obs logger and trace_id from loop state."""
-    obs = state.eval_ctx.obs if state.eval_ctx else None
+    obs = state.scoring_ctx.obs if state.scoring_ctx else None
     trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
     return obs, trace_id

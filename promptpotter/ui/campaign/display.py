@@ -543,12 +543,12 @@ def show_scan_query_difficulty(
             if q not in query_stats:
                 query_stats[q] = {
                     "ground_truth": item.get("ground_truth", ""),
-                    "n_evals": 0,
+                    "n_measurements": 0,
                     "n_hits": 0,
                     "n_errors": 0,
                 }
             qs = query_stats[q]
-            qs["n_evals"] += 1
+            qs["n_measurements"] += 1
             if item.get("hit"):
                 qs["n_hits"] += 1
             if is_error_result(item):
@@ -561,7 +561,7 @@ def show_scan_query_difficulty(
     # Build rows
     rows = []
     for query, qs in query_stats.items():
-        n = qs["n_evals"]
+        n = qs["n_measurements"]
         hit_rate = qs["n_hits"] / n if n else 0.0
         error_rate = qs["n_errors"] / n if n else 0.0
 

@@ -37,8 +37,8 @@ class NodeType(enum.StrEnum):
 class ObservationMapping(BaseModel):
     """Maps one trace observation field to a pipeline_data key.
 
-    Mirrors the semantics of ``_ObsField`` in ``eval_dataset.py``:
-    - ``pipeline_key``: key written into the eval pipeline_data dict
+    Mirrors the semantics of ``_ObsField`` in ``context.py``:
+    - ``pipeline_key``: key written into the pipeline_data dict
     - ``output_field``: sub-key to extract from observation output (None → full dict)
     - ``is_llm``: whether to also extract model info from observation metadata
     """
@@ -303,7 +303,7 @@ class PipelineSchema(BaseModel):
     def obs_extraction_map(self) -> dict[str, list[ObservationMapping]]:
         """Map observation name → extraction rules.
 
-        Used by ``_extract_eval_from_traces()`` in ``eval_dataset.py``.
+        Used by ``_extract_dataset_from_traces()`` in ``context.py``.
         """
         return {
             step.observation_name: step.observation_mappings

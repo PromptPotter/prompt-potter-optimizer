@@ -55,7 +55,7 @@ class EscalationSignal:
     target: EscalationTarget
     context: dict[str, Any]
     candidate_idx: int
-    candidates_evaluated: int
+    candidates_scored: int
     candidates_skipped: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -119,7 +119,7 @@ class DegradationCheck:
                 "dominant_warning": dominant,
             },
             candidate_idx=candidate_idx,
-            candidates_evaluated=candidate_idx + 1,
+            candidates_scored=candidate_idx + 1,
             candidates_skipped=n_total_candidates - candidate_idx - 1,
         )
 
@@ -427,9 +427,9 @@ async def escalate_l2(
         )
         # HITL checkpoint: pause after L2 generates new context, before L1 resumes
         if on_checkpoint:
-            _ctrl = on_checkpoint("before_l2_eval")
+            _ctrl = on_checkpoint("before_l2_scoring")
             if _ctrl == "pause":
-                raise PauseForReviewError([], round_num, pause_point="before_l2_eval")
+                raise PauseForReviewError([], round_num, pause_point="before_l2_scoring")
             if _ctrl == "stop":
                 return StopReason.USER_STOPPED
         return None

@@ -171,6 +171,6 @@ class EliminationCheck:
                 **ctx,
             },
             candidate_idx=candidate_idx,
-            candidates_evaluated=candidate_idx + 1,
+            candidates_scored=candidate_idx + 1,
             candidates_skipped=n_total_candidates - candidate_idx - 1,
         )

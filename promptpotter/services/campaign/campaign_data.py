@@ -26,12 +26,14 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CampaignBaseline",
+    "DatasetRunSummary",
     "DatasetSummary",
     "build_all_index_terms",
     "extract_campaign_baseline",
     "prepare_datasets",
     "prepare_scoring_context",
-    "run_baseline_eval",
+    "run_baseline_scoring",
+    "summarize_dataset_runs",
 ]
 
 
@@ -81,7 +83,7 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
     )
 
 
-async def run_baseline_eval(
+async def run_baseline_scoring(
     baseline: OptSearchPoint,
     dataset: list,
     session: BackendContext,
@@ -113,7 +115,7 @@ async def run_baseline_eval(
         RuntimeError: If no evaluation data is available.
     """
     from promptpotter.models.scoring_context import ScoringContext
-    from promptpotter.services.dataset_scoring import score_search_point
+    from promptpotter.services.scoring_searchpoint import score_search_point
     from promptpotter.shared.errors import graceful
     from promptpotter.shared.scoring import compile_scorer
 
@@ -124,9 +126,9 @@ async def run_baseline_eval(
     index_terms = session.index_terms
 
     if not dataset and store and experiment_id:
-        from promptpotter.services.search.context import load_eval_dataset
+        from promptpotter.services.dataset_builder import load_dataset_from_traces
 
-        dataset = load_eval_dataset(store, backend_id, experiment_id)
+        dataset = load_dataset_from_traces(store, backend_id, experiment_id)
 
     if not dataset:
         raise RuntimeError(
@@ -145,7 +147,7 @@ async def run_baseline_eval(
 
     # Register dataset items in obs if available
     if obs and dataset:
-        with graceful("Dataset registration in run_baseline_eval failed"):
+        with graceful("Dataset registration in run_baseline_scoring failed"):
             obs.register_dataset(DATASET_NAME, dataset)
 
     sp = baseline.to_job_search_point(
@@ -202,7 +204,7 @@ async def prepare_scoring_context(
     campaign_rounds: list = []
     baseline_results: list = []
     if run_baseline and campaign_config is not None and svc is not None:
-        campaign_rounds, baseline_results = await run_baseline_eval(
+        campaign_rounds, baseline_results = await run_baseline_scoring(
             baseline,
             dataset,
             svc,

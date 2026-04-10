@@ -36,7 +36,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.services.stores.base import (
+from promptpotter.services.store.base import (
     append_jsonl,
     append_text,
     write_json,
@@ -369,7 +369,7 @@ class ObsLogger:
             assert self._cloud_active_trace_id is not None
             self._cloud_lf.create_span(  # type: ignore[union-attr]
                 trace_id=self._cloud_active_trace_id,
-                name=f"eval_{run_id[:8]}",
+                name=f"run_{run_id[:8]}",
                 input={
                     "run_id": run_id,
                     "content_hash": content_hash,
@@ -487,7 +487,7 @@ class ObsLogger:
                 if self._cloud_active_round_obs_id:
                     round_meta: dict = {
                         "round": round_num,
-                        "candidates_evaluated": len(candidate_scores),
+                        "candidates_scored": len(candidate_scores),
                     }
                     if optimizer_templates:
                         round_meta["optimizer_templates"] = optimizer_templates
@@ -497,7 +497,7 @@ class ObsLogger:
                             "winner_accuracy": accuracy,
                             "improved": improved,
                             "next_action": next_action,
-                            "candidates_evaluated": len(candidate_scores),
+                            "candidates_scored": len(candidate_scores),
                         },
                         metadata=round_meta,
                     )
@@ -846,7 +846,7 @@ class ObsLogger:
                     name=f"round_{round_num}",
                     input_data={
                         "round": round_num,
-                        "candidates_evaluated": len(candidate_scores),
+                        "candidates_scored": len(candidate_scores),
                     },
                     output_data={
                         "accuracy": accuracy,

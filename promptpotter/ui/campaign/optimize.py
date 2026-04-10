@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.task_context import TaskContext
+from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.campaign.campaign_data import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
@@ -65,7 +65,7 @@ __all__ = [
     "load_baseline_prompt",
     "min_detectable_effect",
     "proportion_test",
-    "run_baseline_eval",
+    "run_baseline_scoring",
     "run_optimization_notebook",
     "show_feedback_preflight",
     "show_progress",
@@ -338,7 +338,7 @@ async def run_optimization_notebook(
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
     session: BackendContext | None = None,
-    task_context: TaskContext | dict | None = None,
+    task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
     display_callbacks: RunCallbacks | None = None,
 ) -> tuple[list, RunResult | None]:
@@ -432,9 +432,9 @@ async def run_optimization_notebook(
                     parts.append(f"{node}: {_pp_val(val)}")
         mutations = f"{CYAN}{'  '.join(parts)}{RESET}  " if parts else ""
         if scores.get("escalation_aborted"):
-            eval_q = scores.get("eval_queries", n)
+            scored_q = scores.get("scored_queries", n)
             expected_q = scores.get("expected_queries", n)
-            hit_str = f"{hits}/{eval_q} hits {YELLOW}⚠ aborted {eval_q}/{expected_q}{RESET}"
+            hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
         else:
             hit_str = f"{hits}/{n} hits"
         content = f"{mutations}{hit_str}  vs baseline: {_fmt_delta(delta)}"
@@ -528,7 +528,7 @@ async def run_optimization_notebook(
         print(
             _node_line(
                 f"hits: {_rr_hits}/{_rr_total}"
-                f"  |  evaluated: {round_result.candidates_evaluated} candidates"
+                f"  |  evaluated: {round_result.candidates_scored} candidates"
             )
         )
 
@@ -637,8 +637,8 @@ async def run_optimization_notebook(
 
     notebook_display_cb = RunCallbacks(
         on_round_complete=_on_round,
-        on_candidate_eval=_on_candidate,
-        on_query_eval=_on_query,
+        on_candidate_scored=_on_candidate,
+        on_sample_scored=_on_query,
         on_phase=_on_phase,
     )
     callbacks = (
@@ -712,7 +712,7 @@ async def run_optimization_notebook(
 # Baseline eval wrapper (from eval.py)
 # ---------------------------------------------------------------------------
 from promptpotter.services.campaign.campaign_data import (  # noqa: E402
-    run_baseline_eval as _run_baseline_eval,
+    run_baseline_scoring as _run_baseline_scoring,
 )
 from promptpotter.services.campaign.campaign_setup import (  # noqa: E402
     load_baseline_prompt,
@@ -721,7 +721,7 @@ from promptpotter.services.campaign.campaign_setup import (  # noqa: E402
 from .display import fmt_ci, fmt_pvalue  # noqa: E402
 
 
-async def run_baseline_eval(
+async def run_baseline_scoring(
     baseline: OptSearchPoint,
     dataset: list,
     campaign_config: CampaignConfig,
@@ -750,7 +750,7 @@ async def run_baseline_eval(
     _obs = ObsLogger(session.store.base_dir, session.backend_id, langfuse=None)
 
     try:
-        campaign_rounds, baseline_results = await _run_baseline_eval(
+        campaign_rounds, baseline_results = await _run_baseline_scoring(
             baseline,
             dataset,
             session,

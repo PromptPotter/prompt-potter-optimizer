@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.services.project_store import ProjectStore
-from promptpotter.services.stores.base import read_json_optional, write_json
+from promptpotter.services.store.base import read_json_optional, write_json
 from promptpotter.shared.constants import DATASET_NAME as _DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:

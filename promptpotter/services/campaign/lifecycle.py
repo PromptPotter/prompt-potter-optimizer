@@ -167,7 +167,7 @@ def init_campaign(
 
     if config.project_root and config.backend_id:
         try:
-            from promptpotter.services.stores.campaign_store import CampaignStore
+            from promptpotter.services.store.campaign_store import CampaignStore
 
             store_base = Path(config.project_root)
             campaign_store = CampaignStore(store_base)

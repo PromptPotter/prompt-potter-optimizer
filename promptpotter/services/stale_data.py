@@ -2,7 +2,7 @@
 
 Walks a configurable ladder of steps (rerun → samplescan → sampleswitch)
 to resolve pipeline-degraded cached results.  Hyperparameters are read
-from the ``l1_evaluate`` optimizer node config.
+from the ``l1_score`` optimizer node config.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.models.scoring_context import QueryRunner
     from promptpotter.services.search.search_memory import SearchMemory
-    from promptpotter.services.stores.intermediate_cache import IntermediateCache
+    from promptpotter.services.store.intermediate_cache import IntermediateCache
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ async def execute_stale_data_protocol(
 ) -> tuple[dict[str, Any], str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
-    Hyperparameters are read from the ``l1_evaluate`` node config in
+    Hyperparameters are read from the ``l1_score`` node config in
     ``optimizer_pipeline.json``.  The protocol step list and all thresholds
     live on that single node — tunable via ``param_keys`` when PromptPotter
     self-optimizes.
@@ -87,8 +87,8 @@ async def execute_stale_data_protocol(
     """
     from promptpotter.services.optimizer.pipeline import get_optimizer_schema
 
-    node = get_optimizer_schema().get_node("l1_evaluate")
-    assert node is not None, "l1_evaluate node missing from optimizer schema"
+    node = get_optimizer_schema().get_node("l1_score")
+    assert node is not None, "l1_score node missing from optimizer schema"
     cfg = node.current_config
     query = query_data["query"]
     result = cached_result

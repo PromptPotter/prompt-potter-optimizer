@@ -18,7 +18,7 @@ from typing import Any
 
 from filelock import FileLock
 
-from promptpotter.services.stores.base import (
+from promptpotter.services.store.base import (
     read_json,
     read_json_optional,
     validate_path_component,

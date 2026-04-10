@@ -1,8 +1,10 @@
 """
-Exact match evaluator.
+Ground truth comparison — compares pipeline output to expected answer.
 
-Compares expected and actual values for exact equality,
-with optional whitespace stripping.
+Leaf of the scoring chain:
+  scoring_searchpoint (scores a SearchPoint across a dataset)
+    └── sample_measurement (runs one sample through the pipeline)
+          └── ground_truth (compares output to expected answer)
 """
 
 from enum import StrEnum
@@ -11,28 +13,28 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class EvalResult(StrEnum):
-    """Evaluation result status."""
+class GroundTruthResult(StrEnum):
+    """Single-sample comparison outcome."""
 
     PASS = "pass"
     FAIL = "fail"
     ERROR = "error"
 
 
-class EvaluationOutput(BaseModel):
-    """Result of a single evaluation."""
+class GroundTruthOutput(BaseModel):
+    """Result of comparing pipeline output to ground truth."""
 
-    result: EvalResult = Field(..., description="pass, fail, or error")
+    result: GroundTruthResult = Field(..., description="pass, fail, or error")
     score: float = Field(
-        ..., ge=0.0, le=1.0, description="Evaluation score (0.0 = failure, 1.0 = match)"
+        ..., ge=0.0, le=1.0, description="Comparison score (0.0 = mismatch, 1.0 = match)"
     )
-    expected: Any = Field(..., description="Expected value")
-    actual: Any = Field(..., description="Actual value from workflow")
+    expected: Any = Field(..., description="Expected value (ground truth)")
+    actual: Any = Field(..., description="Actual value from pipeline")
 
 
-class ExactMatchEvaluator:
+class ExactMatchComparator:
     """
-    Evaluator that checks for exact equality.
+    Compares expected and actual for exact equality.
 
     Config options:
         strip: Strip leading/trailing whitespace (default: True)
@@ -48,19 +50,19 @@ class ExactMatchEvaluator:
             return value.strip()
         return value
 
-    def evaluate(self, expected: Any, actual: Any) -> EvaluationOutput:
+    def compare(self, expected: Any, actual: Any) -> GroundTruthOutput:
         """Compare expected and actual for exact match."""
         if expected is None and actual is None:
-            return EvaluationOutput(
-                result=EvalResult.PASS,
+            return GroundTruthOutput(
+                result=GroundTruthResult.PASS,
                 score=1.0,
                 expected=expected,
                 actual=actual,
             )
 
         if expected is None or actual is None:
-            return EvaluationOutput(
-                result=EvalResult.FAIL,
+            return GroundTruthOutput(
+                result=GroundTruthResult.FAIL,
                 score=0.0,
                 expected=expected,
                 actual=actual,
@@ -70,14 +72,14 @@ class ExactMatchEvaluator:
         norm_actual = self._normalize(actual)
 
         if norm_expected == norm_actual:
-            return EvaluationOutput(
-                result=EvalResult.PASS,
+            return GroundTruthOutput(
+                result=GroundTruthResult.PASS,
                 score=1.0,
                 expected=expected,
                 actual=actual,
             )
-        return EvaluationOutput(
-            result=EvalResult.FAIL,
+        return GroundTruthOutput(
+            result=GroundTruthResult.FAIL,
             score=0.0,
             expected=expected,
             actual=actual,

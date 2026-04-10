@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import (
     HASH_TRUNCATE,
-    eval_content_hash,
+    content_hash,
     sp_identity_hash,
 )
 
@@ -82,7 +82,7 @@ class JobSearchPoint(SearchPoint):
 
     def content_hash(self, dataset: list) -> str:
         """Content-addressed hash for evaluation deduplication."""
-        return eval_content_hash(
+        return content_hash(
             self.render(),
             dataset,
             self.pipeline_params,

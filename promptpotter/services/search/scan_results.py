@@ -62,7 +62,7 @@ async def decompose_scan_baseline(
         for display/prompt fields, scan variant diagnosis, cache flag,
         and restructured field values.
     """
-    from promptpotter.services.search.context import decompose_prompt_fields_cached
+    from promptpotter.services.optimizer.prompt_preparation import decompose_prompt_fields_cached
 
     # Unpack session
     store = session.store if session else None
@@ -199,7 +199,7 @@ async def resume_or_build_diagnostic(
     import json as _json
 
     from promptpotter.config.variant_library import load_variant_library
-    from promptpotter.services.search.context import decompose_prompt_fields
+    from promptpotter.services.optimizer.prompt_preparation import decompose_prompt_fields
     from promptpotter.services.search.smart_search import (
         build_axis_profiles,
         build_diagnostic_set,

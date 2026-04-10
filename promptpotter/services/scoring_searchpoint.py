@@ -43,12 +43,12 @@ def _graceful_interrupt():
     import signal
 
     state = InterruptState()
-    batch_task: asyncio.Task | None = asyncio.current_task()
+    scoring_task: asyncio.Task | None = asyncio.current_task()
 
     def _handler(_signum: int, _frame: object) -> None:
         if state.stop_requested:
-            if batch_task is not None and not batch_task.done():
-                batch_task.cancel()
+            if scoring_task is not None and not scoring_task.done():
+                scoring_task.cancel()
             return
         state.stop_requested = True
 
@@ -137,7 +137,7 @@ def _check_error_abort(
     return consecutive_errors, None
 
 
-def _log_batch_summary(
+def _log_scoring_summary(
     n_prior: int,
     n_reused: int,
     n_total: int,
@@ -337,7 +337,7 @@ async def _run_query_loop(
             )
             return QueryLoopResult(results, completed=False, stop_reason="force")
 
-    _log_batch_summary(n_prior, n_reused, len(dataset), n_retried, n_probed, n_switched)
+    _log_scoring_summary(n_prior, n_reused, len(dataset), n_retried, n_probed, n_switched)
 
     if interrupt.stop_requested:
         return QueryLoopResult(results, completed=False, stop_reason="graceful")

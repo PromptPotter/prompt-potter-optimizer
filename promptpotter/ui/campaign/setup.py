@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.config.variant_library import load_variant_library
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.task_context import TaskContext
+from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.campaign.campaign_data import (
     build_all_index_terms,
 )
@@ -66,19 +66,19 @@ async def decompose_task_context(
     *,
     llm_client: LLMClientBase | None = None,
     model: str | None = None,
-) -> TaskContext:
+) -> TaskDecomposition:
     """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
 
-    Delegates to ``promptpotter.services.search.context.decompose_task_context()``
+    Delegates to ``promptpotter.services.optimizer.prompt_preparation.decompose_task_context()``
     and prints the decomposed fields for visibility.
     """
-    from promptpotter.services.search.context import (
+    from promptpotter.services.optimizer.prompt_preparation import (
         decompose_task_context as _decompose_task_context,
     )
 
     if not task_description:
         print("  (no task description provided)")
-        return TaskContext()
+        return TaskDecomposition()
 
     if llm_client is None or model is None:
         _client, _model = setup_llm(campaign_config)
@@ -126,7 +126,7 @@ def dev_reload() -> None:
         "promptpotter.services.campaign.critique",
         "promptpotter.services.campaign.round_execution",
         "promptpotter.services.campaign.optimization_loop",
-        "promptpotter.services.stores.dataset_run_store",
+        "promptpotter.services.store.dataset_run_store",
         "promptpotter.services.stale_data",
         "promptpotter.services.sample_measurement",
         "promptpotter.services.dataset_scoring",

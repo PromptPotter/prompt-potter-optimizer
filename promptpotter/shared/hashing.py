@@ -14,7 +14,7 @@ import json
 # negligible up to ~280 billion items.
 HASH_TRUNCATE = 24
 
-__all__ = ["HASH_TRUNCATE", "eval_content_hash", "sp_identity_hash"]
+__all__ = ["HASH_TRUNCATE", "content_hash", "sp_identity_hash"]
 
 
 def _hash_dict(blob_dict: dict) -> str:
@@ -57,7 +57,7 @@ def sp_identity_hash(
     return _hash_dict(blob_dict)
 
 
-def eval_content_hash(
+def content_hash(
     rendered_prompt: str,
     dataset: list,
     pipeline_params: dict | None = None,

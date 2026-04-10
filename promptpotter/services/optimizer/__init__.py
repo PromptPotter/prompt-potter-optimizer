@@ -7,7 +7,7 @@ from promptpotter.services.optimizer.pipeline import (
     llm_call,
     set_round_recorder,
 )
-from promptpotter.services.optimizer.prompt_loader import load_optimizer_prompt
+from promptpotter.services.optimizer.prompt_preparation import load_optimizer_prompt
 
 __all__ = [
     "get_node_config",

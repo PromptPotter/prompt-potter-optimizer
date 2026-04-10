@@ -24,7 +24,7 @@ from promptpotter.services.campaign.state import CampaignPhase
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import RunConfig
     from promptpotter.services.campaign.state import PhaseEvent, RoundResult
-    from promptpotter.services.stores.stores import SessionStore
+    from promptpotter.services.store.stores import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class CampaignPersistenceEmitter:
         config      — model, n_variants, sp_budget_ttest
         accumulators— current_queries (reset per candidate), round_candidates
                       (reset per round), last_round
-        control     — bidirectional: requested_state, pause_before_l2_eval
+        control     — bidirectional: requested_state, pause_before_l2_scoring
 
     See ``docs/architecture.md § Persistence Architecture`` for the full
     two-tier layout and resume flow.
@@ -134,7 +134,7 @@ class CampaignPersistenceEmitter:
             # Bidirectional control surface (defaults — CampaignControlReader reads back)
             "control": {
                 "requested_state": "running",
-                "pause_before_l2_eval": config.pause_before_eval,
+                "pause_before_l2_scoring": config.pause_before_scoring,
             },
         }
 
@@ -198,7 +198,7 @@ class CampaignPersistenceEmitter:
         (CampaignPhase.INIT, "exit"): "_on_init_exit",
         (CampaignPhase.L1_GENERATE, "enter"): "_on_generate_enter",
         (CampaignPhase.L1_GENERATE, "exit"): "_on_generate_exit",
-        (CampaignPhase.L1_EVALUATE, "enter"): "_on_evaluate_enter",
+        (CampaignPhase.L1_SCORE, "enter"): "_on_evaluate_enter",
     }
 
     def on_phase(self, event: PhaseEvent) -> None:
@@ -243,7 +243,7 @@ class CampaignPersistenceEmitter:
     def _on_evaluate_enter(self, data: dict) -> None:
         self._state["phase"] = "evaluating"
 
-    def on_query_eval(
+    def on_sample_scored(
         self,
         ci: int,
         ct: int,
@@ -336,7 +336,7 @@ class CampaignPersistenceEmitter:
         self._log(line.rstrip())
         self._flush()
 
-    def on_candidate_eval(self, idx: int, total: int, scores: dict) -> None:
+    def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         s = self._state
         acc = scores.get("accuracy", 0.0)
         hits = scores.get("hits", 0)
@@ -466,7 +466,7 @@ class CampaignPersistenceEmitter:
             try:
                 on_disk = json.loads(self.state_path.read_text(encoding="utf-8"))
                 disk_control = on_disk.get("control", {})
-                # User may have changed requested_state or pause_before_l2_eval
+                # User may have changed requested_state or pause_before_l2_scoring
                 # Merge: disk wins for control fields (user intent), we win for everything else
                 merged_control = {**self._state["control"], **disk_control}
                 self._state["control"] = merged_control
@@ -530,8 +530,8 @@ class CampaignControlReader:
             return "stop"
 
         # Check L2-specific pause
-        if checkpoint_name == "before_l2_eval" and control.get("pause_before_l2_eval"):
-            logger.info("Control: pause_before_l2_eval active at %s", checkpoint_name)
+        if checkpoint_name == "before_l2_scoring" and control.get("pause_before_l2_scoring"):
+            logger.info("Control: pause_before_l2_scoring active at %s", checkpoint_name)
             return "pause"
 
         return None
@@ -622,8 +622,8 @@ class RoundRecorder:
         """
         self.add_action(
             {
-                "type": "l1_evaluate",
-                "n_candidates": round_result.candidates_evaluated,
+                "type": "l1_score",
+                "n_candidates": round_result.candidates_scored,
                 "n_queries": round_result.total,
                 "candidates": round_result.candidate_scores,
             }

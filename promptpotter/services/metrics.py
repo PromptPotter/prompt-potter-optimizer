@@ -488,7 +488,7 @@ def compile_query_difficulty(
             QueryProfile(
                 query=query,
                 hit_rate=hit_rate,
-                n_evaluations=len(hits),
+                n_measurements=len(hits),
                 classification=_classify_difficulty(hit_rate),
             )
         )

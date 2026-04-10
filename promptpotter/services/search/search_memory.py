@@ -54,7 +54,7 @@ class QueryRecord:
 
     query: str
     hit_rate: float
-    n_evaluations: int
+    n_measurements: int
     variance: float  # hit/miss variance across configs
     dominant_failure_mode: str = ""  # most common terminated_at
 
@@ -201,7 +201,7 @@ class SearchMemory:
                     QueryRecord(
                         query=query,
                         hit_rate=round(hit_rate, 4),
-                        n_evaluations=len(hits),
+                        n_measurements=len(hits),
                         variance=round(hit_rate * (1 - hit_rate), 4),
                         dominant_failure_mode=dominant,
                     )
@@ -210,12 +210,12 @@ class SearchMemory:
         return records
 
     def intractable_queries_ci(
-        self, max_upper_ci: float = 0.05, min_evals: int = 8
+        self, max_upper_ci: float = 0.05, min_measurements: int = 8
     ) -> list[QueryRecord]:
         """Return queries confidently identified as intractable via Wilson CI.
 
         A query is intractable when the upper bound of its Wilson confidence
-        interval is below ``max_upper_ci`` with at least ``min_evals``
+        interval is below ``max_upper_ci`` with at least ``min_measurements``
         evaluations.  More principled than streak-based ``persistent_failures``.
         """
         from promptpotter.services.search.failure_group_analysis import wilson_ci
@@ -223,7 +223,7 @@ class SearchMemory:
         records = []
         for query, hits_list in self._query_hits.items():
             n = len(hits_list)
-            if n < min_evals:
+            if n < min_measurements:
                 continue
             n_hits = sum(hits_list)
             _lower, upper = wilson_ci(n_hits, n)
@@ -239,7 +239,7 @@ class SearchMemory:
                     QueryRecord(
                         query=query,
                         hit_rate=round(hit_rate, 4),
-                        n_evaluations=n,
+                        n_measurements=n,
                         variance=round(hit_rate * (1 - hit_rate), 4),
                         dominant_failure_mode=dominant,
                     )
@@ -251,10 +251,10 @@ class SearchMemory:
 
     def query_degradation_rate(self, query: str) -> float:
         """Return fraction of evaluations where *query* was degraded."""
-        n_evals = len(self._query_hits.get(query, []))
-        if n_evals == 0:
+        n_measurements = len(self._query_hits.get(query, []))
+        if n_measurements == 0:
             return 0.0
-        return self._query_degradation_counts.get(query, 0) / n_evals
+        return self._query_degradation_counts.get(query, 0) / n_measurements
 
     # --- Failure Modes ---
 
@@ -696,7 +696,7 @@ class SearchMemory:
                 QueryRecord(
                     query=query,
                     hit_rate=round(hit_rate, 4),
-                    n_evaluations=len(hits),
+                    n_measurements=len(hits),
                     variance=round(variance, 4),
                     dominant_failure_mode=dominant,
                 )

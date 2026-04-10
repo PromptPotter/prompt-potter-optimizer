@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.scoring_context import ScoringContext
-from promptpotter.services.dataset_scoring import score_search_point
+from promptpotter.services.scoring_searchpoint import score_search_point
 from promptpotter.services.search.failure_group_analysis import preview as _preview
 from promptpotter.shared.constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,
@@ -111,14 +111,14 @@ class ScanEvent(TypedDict, total=False):
 def build_axis_profiles(
     rows: list[dict],
     axes: list[tuple],
-    n_eval: int,
+    n_samples: int,
 ) -> list[dict]:
     """Build axis profiles from scan rows.
 
     Args:
         rows: Per-variant result dicts with ``axis``, ``delta`` keys.
         axes: List of axis tuples (3 or 4 elements; extra elements ignored).
-        n_eval: Number of diagnostic queries (for noise threshold).
+        n_samples: Number of diagnostic queries (for noise threshold).
 
     Returns:
         Axis profiles sorted by sensitivity_range (descending).
@@ -133,7 +133,7 @@ def build_axis_profiles(
         deltas = axis_deltas.get(axis_name, [0.0])
         sens_range = max(deltas) - min(deltas) if deltas else 0.0
         card = len(values)
-        budget = classify_axis(card, sens_range, n_eval)
+        budget = classify_axis(card, sens_range, n_samples)
         profiles.append(
             {
                 "axis": axis_name,
@@ -143,7 +143,7 @@ def build_axis_profiles(
                 "best_delta": round(max(deltas), 4) if deltas else 0.0,
                 "worst_delta": round(min(deltas), 4) if deltas else 0.0,
                 "exploration_budget": budget,
-                "estimated_eval_cost": card * n_eval,
+                "estimated_scoring_cost": card * n_samples,
             }
         )
 
@@ -151,15 +151,15 @@ def build_axis_profiles(
     return profiles
 
 
-def make_eval_fn(
+def make_scoring_fn(
     dataset: list,
     ctx: ScoringContext,
     get_params: Callable[[], dict],
     on_result: Callable | None = None,
 ) -> Callable:
-    """Factory for the ``_eval_opt`` closure used by scan and adaptive search."""
+    """Factory for the ``_score_opt`` closure used by scan and adaptive search."""
 
-    async def _eval_opt(opt: OptSearchPoint, pp: dict | None = None) -> dict:
+    async def _score_opt(opt: OptSearchPoint, pp: dict | None = None) -> dict:
         _base_pp = pp or get_params()
         sp = opt.to_job_search_point(
             base_pipeline_params=_base_pp,
@@ -174,7 +174,7 @@ def make_eval_fn(
         )
         return {**scores, "results": results, "cached": cached}
 
-    return _eval_opt
+    return _score_opt
 
 
 def build_diagnostic_set(
@@ -225,18 +225,18 @@ def build_diagnostic_set(
         pass  # scipy not installed — skip auto-adjustment
 
     # Map queries to dataset items
-    query_to_eval = {d["query"]: d for d in dataset}
+    query_to_score = {d["query"]: d for d in dataset}
 
     hits = []
     misses = []
     for r in baseline_results:
         q = r.get("query", "")
-        if q not in query_to_eval:
+        if q not in query_to_score:
             continue
         if r.get("hit"):
-            hits.append(query_to_eval[q])
+            hits.append(query_to_score[q])
         else:
-            misses.append(query_to_eval[q])
+            misses.append(query_to_score[q])
 
     rng = random.Random(seed)
 
@@ -605,14 +605,14 @@ async def adaptive_search(
         experiment_id=experiment_id,
         scorer=compile_scorer(scoring_formula),
     )
-    _eval_opt = make_eval_fn(
+    _score_opt = make_scoring_fn(
         dataset,
         _scan_ctx,
         get_params=lambda: current_params,
     )
 
     # Get baseline accuracy
-    baseline_scores = await _eval_opt(current_opt)
+    baseline_scores = await _score_opt(current_opt)
     current_acc = baseline_scores["accuracy"]
     current_composite = baseline_scores.get("composite", current_acc)
 
@@ -679,7 +679,7 @@ async def adaptive_search(
                     test_opt = current_opt
                     test_params = {**current_params, axis_name: value}
 
-                scores = await _eval_opt(test_opt, test_params)
+                scores = await _score_opt(test_opt, test_params)
 
                 composite = scores.get("composite", scores["accuracy"])
                 delta = composite - current_composite

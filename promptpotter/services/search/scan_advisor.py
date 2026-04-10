@@ -23,7 +23,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from promptpotter.models.pipeline_schema import NodeOutputSchema, PipelineNode, PipelineSchema
-from promptpotter.models.task_context import TaskContext
+from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.optimizer.pipeline import llm_call
 
 logger = logging.getLogger(__name__)
@@ -361,9 +361,9 @@ def _advisor_system_section(pipeline_description: str) -> str:
     )
 
 
-def _advisor_task_context_section(task_description: str | dict | TaskContext) -> str:
-    """Optional task context from user description or structured TaskContext."""
-    if isinstance(task_description, TaskContext):
+def _advisor_task_context_section(task_description: str | dict | TaskDecomposition) -> str:
+    """Optional task context from user description or structured TaskDecomposition."""
+    if isinstance(task_description, TaskDecomposition):
         tc_lines = "\n".join(f"- **{k}**: {v}" for k, v in task_description.items() if v)
         if tc_lines:
             return f"\n## Task Context\n{tc_lines}\n"

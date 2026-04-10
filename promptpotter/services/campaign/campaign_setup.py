@@ -100,7 +100,7 @@ def load_baseline_prompt(
     )
 
 
-def _validate_local_eval_access(token: str | None) -> bool:
+def _validate_local_access(token: str | None) -> bool:
     """Check if the caller is authorized for local LLM evaluation.
 
     Uses ``hmac.compare_digest`` for constant-time comparison.
@@ -126,7 +126,7 @@ def _create_llm_only_client(project_root: Path, dataset_name: str | None) -> Any
     """Build an :class:`LLMOnlyAdapter` from the dataset's pipeline.json config."""
     import json
 
-    from promptpotter.services.llm_eval_adapter import LLMOnlyAdapter
+    from promptpotter.services.llm_backend_adapter import LLMOnlyAdapter
 
     config: dict[str, Any] = {}
     if dataset_name:
@@ -215,7 +215,7 @@ async def init_services(
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
 
     # Decide eval client: local LLM-only (if authorized) or backend (default)
-    use_local = dataset_type == "llm-only" and _validate_local_eval_access(local_eval_token)
+    use_local = dataset_type == "llm-only" and _validate_local_access(local_eval_token)
 
     pipeline_schema = _load_static_pipeline_schema(project_root, dataset_name)
     if pipeline_schema:
@@ -340,9 +340,8 @@ async def init_services(
         _status("WARNING: No experiment data available")
         return base
 
-    from promptpotter.config.extractors import EXPERIMENT_EXTRACTORS, ensure_extractors_loaded
+    from promptpotter.config.extractors import EXPERIMENT_EXTRACTORS
 
-    ensure_extractors_loaded()
     schema_key = pipeline_schema.name.lower() if pipeline_schema else ""
     extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
     if extractor:

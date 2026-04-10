@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
 
-from promptpotter.services.stores.base import (
+from promptpotter.services.store.base import (
     read_json_optional,
     write_json,
 )

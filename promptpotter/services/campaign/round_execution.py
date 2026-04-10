@@ -38,8 +38,8 @@ if TYPE_CHECKING:
     from promptpotter.models.analysis import QueryDifficulty
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.escalation import DegradationCheck
-    from promptpotter.services.campaign.l1_optimizer import L1EvalResult
-    from promptpotter.services.stores.campaign_store import CampaignStore
+    from promptpotter.services.campaign.l1_optimizer import L1ScoringResult
+    from promptpotter.services.store.campaign_store import CampaignStore
     from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
@@ -184,13 +184,13 @@ async def _generate_or_load_candidates(
 
 
 async def _run_critique(
-    eval_out: L1EvalResult,
+    scoring_result: L1ScoringResult,
     round_num: int,
     state: LoopState,
     config: RunConfig,
 ) -> str:
     """Run critique analysis on evaluation results. Returns formatted critique text."""
-    if not config.enable_critique or not eval_out.winner_results:
+    if not config.enable_critique or not scoring_result.winner_results:
         return ""
 
     crit_llm = _llm_client.get_llm_client()
@@ -252,9 +252,9 @@ async def _run_critique(
     from promptpotter.services.campaign.formatting import build_cross_candidate_diff
 
     _diff = build_cross_candidate_diff(
-        eval_out.winner_results,
-        eval_out.all_candidate_results,
-        eval_out.candidate_scores,
+        scoring_result.winner_results,
+        scoring_result.all_candidate_results,
+        scoring_result.candidate_scores,
     )
     if _diff:
         if _crit_sm_ctx is None:
@@ -273,10 +273,10 @@ async def _run_critique(
         )
 
     cctx = CritiqueContext(
-        results=eval_out.winner_results,
-        accuracy=eval_out.winner_accuracy,
-        composite=eval_out.winner_composite,
-        degraded_queries=eval_out.degraded_queries,
+        results=scoring_result.winner_results,
+        accuracy=scoring_result.winner_accuracy,
+        composite=scoring_result.winner_composite,
+        degraded_queries=scoring_result.degraded_queries,
         round_history=[
             {
                 "round": r.round,
@@ -303,7 +303,7 @@ async def _run_critique(
     return format_critique_for_prompt(result)
 
 
-async def _evaluate_candidates(
+async def _score_and_select(
     candidates: list[dict],
     round_num: int,
     state: LoopState,
@@ -313,13 +313,13 @@ async def _evaluate_candidates(
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
     degradation_checks: list[DegradationCheck] | None = None,
-) -> L1EvalResult:
+) -> L1ScoringResult:
     """Evaluate candidates, run critique, select winner."""
-    from promptpotter.services.campaign.l1_optimizer import l1_evaluate
+    from promptpotter.services.campaign.l1_optimizer import l1_score
 
     emit_phase(
         callbacks.on_phase,
-        CampaignPhase.L1_EVALUATE,
+        CampaignPhase.L1_SCORE,
         "enter",
         round=round_num,
         n_candidates=len(candidates),
@@ -338,15 +338,15 @@ async def _evaluate_candidates(
     }
 
     async with observed_node(
-        f"l1_evaluate_r{round_num}", "evaluation", obs=obs, trace_id=trace_id, obs_type="span"
+        f"l1_score_r{round_num}", "evaluation", obs=obs, trace_id=trace_id, obs_type="span"
     ):
-        assert state.eval_ctx is not None
+        assert state.scoring_ctx is not None
         assert state.current_sp is not None
-        eval_out = await l1_evaluate(
+        scoring_result = await l1_score(
             candidates,
             eval_dataset,
             current_best,
-            state.eval_ctx,
+            state.scoring_ctx,
             pipeline_params=state.current_sp.pipeline_params,
             improvement_threshold=config.improvement_threshold,
             callbacks=callbacks,
@@ -355,23 +355,25 @@ async def _evaluate_candidates(
             elimination_alpha=config.elimination_alpha,
         )
 
-        eval_out.critique_text = await _run_critique(eval_out, round_num, state, config)
-        eval_out.thinking_styles = sample_thinking_styles(n=3, seed=config.seed + round_num + 1)
+        scoring_result.critique_text = await _run_critique(scoring_result, round_num, state, config)
+        scoring_result.thinking_styles = sample_thinking_styles(
+            n=3, seed=config.seed + round_num + 1
+        )
 
     emit_phase(
         callbacks.on_phase,
-        CampaignPhase.L1_EVALUATE,
+        CampaignPhase.L1_SCORE,
         "exit",
         round=round_num,
-        winner_label=eval_out.label,
-        winner_accuracy=eval_out.winner_accuracy,
-        winner_composite=eval_out.winner_composite,
-        improved=eval_out.improved,
-        candidate_scores=eval_out.candidate_scores,
-        critique_text=eval_out.critique_text,
+        winner_label=scoring_result.label,
+        winner_accuracy=scoring_result.winner_accuracy,
+        winner_composite=scoring_result.winner_composite,
+        improved=scoring_result.improved,
+        candidate_scores=scoring_result.candidate_scores,
+        critique_text=scoring_result.critique_text,
     )
 
-    return eval_out
+    return scoring_result
 
 
 async def execute_round(
@@ -387,7 +389,7 @@ async def execute_round(
     search_memory: Any = None,
 ) -> RoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
-    obs = state.eval_ctx.obs if state.eval_ctx else None
+    obs = state.scoring_ctx.obs if state.scoring_ctx else None
     trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
     if obs:
         with graceful("ObsLogger.log_round_start failed"):
@@ -406,10 +408,10 @@ async def execute_round(
         search_memory=search_memory,
     )
 
-    if config.pause_before_eval:
-        raise PauseForReviewError(candidates, round_num, pause_point="before_eval")
+    if config.pause_before_scoring:
+        raise PauseForReviewError(candidates, round_num, pause_point="before_scoring")
 
-    eval_out = await _evaluate_candidates(
+    scoring_result = await _score_and_select(
         candidates,
         round_num,
         state,
@@ -422,15 +424,15 @@ async def execute_round(
     )
 
     # Update state with critique + thinking styles from eval output
-    state.opt_sp.critique_text = eval_out.critique_text
-    state.opt_sp.thinking_styles = eval_out.thinking_styles
+    state.opt_sp.critique_text = scoring_result.critique_text
+    state.opt_sp.thinking_styles = scoring_result.thinking_styles
 
     # Compute failure analysis for next round's L1 context (Wave 1c)
-    if eval_out.winner_results and config.pipeline_schema:
+    if scoring_result.winner_results and config.pipeline_schema:
         from promptpotter.services.metrics import compile_failure_analysis
 
         state.failure_analysis = compile_failure_analysis(
-            eval_out.winner_results,
+            scoring_result.winner_results,
             config.pipeline_schema,
         )
     else:
@@ -438,24 +440,24 @@ async def execute_round(
 
     round_result = RoundResult(
         round=round_num,
-        label=eval_out.label,
-        accuracy=eval_out.winner_accuracy,
-        composite=eval_out.winner_composite,
-        hits=eval_out.hits,
-        total=eval_out.total,
-        improved=eval_out.improved,
-        prompt_fields=eval_out.winner_prompt_fields,
-        pipeline_params=eval_out.winner_pipeline_params,
-        results=eval_out.winner_results,
-        candidates_evaluated=eval_out.candidates_evaluated,
-        candidate_scores=eval_out.candidate_scores,
-        degraded_queries=eval_out.degraded_queries,
-        escalation_signal=eval_out.escalation_signal,
+        label=scoring_result.label,
+        accuracy=scoring_result.winner_accuracy,
+        composite=scoring_result.winner_composite,
+        hits=scoring_result.hits,
+        total=scoring_result.total,
+        improved=scoring_result.improved,
+        prompt_fields=scoring_result.winner_prompt_fields,
+        pipeline_params=scoring_result.winner_pipeline_params,
+        results=scoring_result.winner_results,
+        candidates_scored=scoring_result.candidates_scored,
+        candidate_scores=scoring_result.candidate_scores,
+        degraded_queries=scoring_result.degraded_queries,
+        escalation_signal=scoring_result.escalation_signal,
     )
 
     # Update per-query warning inventory from ALL candidate results
     # (not just winner — aborted candidates carry the pipeline warnings)
-    _all_results: list = [r for rs in eval_out.all_candidate_results.values() for r in rs]
+    _all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
     if _all_results:
         update_query_tracker(state.opt_sp.warning_inventory, _all_results)
 
@@ -464,18 +466,18 @@ async def execute_round(
             obs.log_round_end(
                 campaign_id=obs_campaign_id,
                 round_num=round_num,
-                accuracy=eval_out.winner_accuracy,
-                hits=eval_out.hits,
-                total=eval_out.total,
-                improved=eval_out.improved,
-                winner_prompt_fields_id=eval_out.winner_prompt_fields.get("id", ""),
-                candidate_scores=eval_out.candidate_scores,
+                accuracy=scoring_result.winner_accuracy,
+                hits=scoring_result.hits,
+                total=scoring_result.total,
+                improved=scoring_result.improved,
+                winner_prompt_fields_id=scoring_result.winner_prompt_fields.get("id", ""),
+                candidate_scores=scoring_result.candidate_scores,
                 model=config.model or "",
                 n_variants=config.n_variants,
                 optimizer_templates=["meta_scan_aware", "critique_negative"],
             )
         with graceful("ObsLogger.log_prompt_version failed"):
-            winner_fields = eval_out.winner_prompt_fields
+            winner_fields = scoring_result.winner_prompt_fields
             winner_osp = OptSearchPoint.from_prompt_fields(winner_fields)
             obs.log_prompt_version(
                 prompt_fields_id=winner_osp.id,

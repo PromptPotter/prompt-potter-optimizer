@@ -60,7 +60,7 @@ class _CycleDisplayState:
     baseline_total: int = 0  # sample count for significance tests
     scan_context: ScanContext | None = None  # cached for scan reasoning display
     candidates_meta: list = field(default_factory=list)  # from l1_generate exit
-    n_eval_queries: int = 0  # from generate:exit, used in evaluate:enter banner
+    n_scoring_queries: int = 0  # from generate:exit, used in evaluate:enter banner
     current_pipeline_params: dict | None = None  # raw pp for candidate eval callback
     # 3-column SP diff tracking (flattened dot-notation dicts)
     original_sp_flat: dict[str, str] = field(default_factory=dict)
@@ -448,7 +448,7 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
 def _print_l1_generate_exit(d: dict, state: _CycleDisplayState) -> None:
     n = d.get("n_candidates", 0)
     source = "loaded from disk" if d.get("loaded_from_disk") else "from LLM"
-    state.n_eval_queries = d.get("n_eval_queries", 0)
+    state.n_scoring_queries = d.get("n_scoring_queries", 0)
     state.candidates_meta = d.get("candidates", [])
 
     print(f"  {GREEN}✓{RESET} {n} candidates generated ({source})")
@@ -469,22 +469,22 @@ def _print_l1_generate_exit(d: dict, state: _CycleDisplayState) -> None:
     )
 
 
-def _print_l1_evaluate_enter(d: dict, state: _CycleDisplayState) -> None:
+def _print_l1_score_enter(d: dict, state: _CycleDisplayState) -> None:
     n_cand = d.get("n_candidates", 0)
     n_q = d.get("n_queries", 0)
     n_calls = n_cand * n_q
     calls_label = f"{n_cand} \u00d7 {n_q} = {n_calls} calls"
 
     # Raw pp for candidate eval callback (don't touch sp_flat — GENERATE owns it)
-    eval_pp = d.get("current_pipeline_params")
-    if eval_pp is not None:
-        state.current_pipeline_params = eval_pp
+    scoring_pp = d.get("current_pipeline_params")
+    if scoring_pp is not None:
+        state.current_pipeline_params = scoring_pp
 
     print()
     print(_node_top("EVALUATE", calls_label))
 
 
-def _print_l1_evaluate_exit(d: dict, state: _CycleDisplayState) -> None:
+def _print_l1_score_exit(d: dict, state: _CycleDisplayState) -> None:
     w_acc = d.get("winner_accuracy", 0.0)
     w_comp = d.get("winner_composite")
     improved = d.get("improved", False)
@@ -716,8 +716,8 @@ _PHASE_HANDLERS: dict[str, Callable] = {
     "init:exit": _print_init_exit,
     "l1_generate:enter": _print_l1_generate_enter,
     "l1_generate:exit": _print_l1_generate_exit,
-    "l1_evaluate:enter": _print_l1_evaluate_enter,
-    "l1_evaluate:exit": _print_l1_evaluate_exit,
+    "l1_score:enter": _print_l1_score_enter,
+    "l1_score:exit": _print_l1_score_exit,
     "refine_context:enter": _print_refine_enter,
     "refine_context:exit": _print_refine_exit,
     "modify_plan:enter": _print_plan_enter,

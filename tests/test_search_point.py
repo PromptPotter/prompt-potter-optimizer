@@ -6,7 +6,7 @@ import pytest
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.pipeline_schema import NodePromptMeta, PipelineNode, PipelineSchema
 from promptpotter.models.search_point import JobSearchPoint
-from promptpotter.shared.hashing import eval_content_hash
+from promptpotter.shared.hashing import content_hash
 
 
 def _schema_with_prompt_node(name: str = "llm_ranking") -> PipelineSchema:
@@ -34,21 +34,21 @@ def test_construct_and_frozen():
         sp.pipeline_params = {"new": "val"}
 
 
-def test_content_hash_matches_eval_content_hash():
+def test_content_hash_matches_content_hash():
     # Without extra pipeline params
     sp = _make_jsp("Rank by relevance.")
     dataset = [
         {"query": "aspirin", "ground_truth": "Aspirin"},
         {"query": "ibuprofen", "ground_truth": "Ibuprofen"},
     ]
-    assert sp.content_hash(dataset) == eval_content_hash(sp.render(), dataset, sp.pipeline_params)
+    assert sp.content_hash(dataset) == content_hash(sp.render(), dataset, sp.pipeline_params)
 
     # With extra pipeline params
     osp = OptSearchPoint(instruction="Rank by relevance.")
     pp = {"llm_ranking": {"prompt": osp.render()}, "ranking_temperature": 0.5}
     sp2 = JobSearchPoint(pipeline_params=pp)
     data2 = [{"query": "aspirin", "ground_truth": "Aspirin"}]
-    assert sp2.content_hash(data2) == eval_content_hash(sp2.render(), data2, pp)
+    assert sp2.content_hash(data2) == content_hash(sp2.render(), data2, pp)
 
 
 def test_content_hash_differs_with_pipeline_params():
@@ -183,4 +183,3 @@ def test_to_job_search_point_includes_few_shot_block():
     sp = osp.to_job_search_point(schema=_schema_with_prompt_node())
     assert "few_shot_block" in sp.prompt_fields
     assert "Input: a" in sp.prompt_fields["few_shot_block"]
-

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.scoring_context import ScoringContext
-from promptpotter.models.task_context import TaskContext
+from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.campaign.campaign_setup import BackendContext
 from promptpotter.services.campaign.config import RunConfig
 from promptpotter.services.campaign.critique import sample_thinking_styles
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from promptpotter.services.backend_client import BackendClient
     from promptpotter.services.campaign.escalation import DegradationCheck
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
-    from promptpotter.services.stores.campaign_store import CampaignStore
+    from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ def _build_baseline_state(
         _bl_composite = baseline_accuracy
 
     opt_sp = OptSearchPoint(
-        task_context=config.task_context or TaskContext(),
+        task_context=config.task_context or TaskDecomposition(),
         persona=baseline_osp.persona,
         task_intent=baseline_osp.task_intent,
         problem_description=baseline_osp.problem_description,
@@ -182,7 +182,7 @@ def _setup_scoring_context(
     from promptpotter.shared.scoring import compile_scorer
 
     _store = session.store if session else None
-    state.eval_ctx = ScoringContext(
+    state.scoring_ctx = ScoringContext(
         backend_client=backend_client,
         store=_store,
         backend_id=config.backend_id,
@@ -312,7 +312,7 @@ async def init_cycle_state(
 
     # 4. SearchMemory — load + refresh from historical data
     search_memory: SearchMemory | None = None
-    _store = state.eval_ctx.store if state.eval_ctx else None
+    _store = state.scoring_ctx.store if state.scoring_ctx else None
     if _store and config.backend_id:
         from pathlib import Path
 
@@ -356,7 +356,7 @@ async def init_cycle_state(
         )
         _session_store = None
         if _store:
-            from promptpotter.services.stores.stores import SessionStore
+            from promptpotter.services.store.stores import SessionStore
 
             _session_store = SessionStore(Path(config.project_root))
 

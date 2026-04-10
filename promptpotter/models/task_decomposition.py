@@ -12,7 +12,7 @@ from typing import Any, ClassVar
 
 
 @dataclass
-class TaskContext:
+class TaskDecomposition:
     """Typed domain context produced by task-description decomposition.
 
     All fields default to ``""`` so the object is always safe to read
@@ -46,7 +46,7 @@ class TaskContext:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any] | None) -> TaskContext:
+    def from_dict(cls, d: dict[str, Any] | None) -> TaskDecomposition:
         """Construct from dict, ignoring unknown keys."""
         if not d:
             return cls()
@@ -55,8 +55,8 @@ class TaskContext:
 
     # ── Merge / copy ────────────────────────────────────────────────
 
-    def merge(self, overrides: dict[str, Any]) -> TaskContext:
-        """Return a new TaskContext with *overrides* applied on top."""
+    def merge(self, overrides: dict[str, Any]) -> TaskDecomposition:
+        """Return a new TaskDecomposition with *overrides* applied on top."""
         base = self.to_dict()
         base.update(overrides)
         return self.from_dict(base)

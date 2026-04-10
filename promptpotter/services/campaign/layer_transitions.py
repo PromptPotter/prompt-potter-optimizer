@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.task_context import TaskContext
+from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.campaign.formatting import (
     L2IntelligenceData,
     assess_candidate_diversity,
@@ -28,7 +28,7 @@ from promptpotter.services.campaign.formatting import (
     format_l2_intelligence,
 )
 from promptpotter.services.optimizer.pipeline import llm_call
-from promptpotter.services.optimizer.prompt_loader import load_optimizer_prompt
+from promptpotter.services.optimizer.prompt_preparation import load_optimizer_prompt
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
@@ -58,7 +58,7 @@ class TransitionResult:
 
     opt_search_point: OptSearchPoint
     pipeline_params: dict | None = None
-    task_context: TaskContext | None = None
+    task_context: TaskDecomposition | None = None
     l2_directive: str = ""
     action: TransitionAction = TransitionAction.CONTINUE
     debug_prompt: str = ""

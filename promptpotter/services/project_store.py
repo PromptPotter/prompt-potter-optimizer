@@ -28,10 +28,10 @@ Layout on disk::
 
 from pathlib import Path
 
-from promptpotter.services.stores.campaign_store import CampaignStore
-from promptpotter.services.stores.dataset_run_store import DatasetRunStore
-from promptpotter.services.stores.intermediate_cache import IntermediateCache
-from promptpotter.services.stores.stores import BackendStore, PlanStore, SessionStore
+from promptpotter.services.store.campaign_store import CampaignStore
+from promptpotter.services.store.dataset_run_store import DatasetRunStore
+from promptpotter.services.store.intermediate_cache import IntermediateCache
+from promptpotter.services.store.stores import BackendStore, PlanStore, SessionStore
 
 __all__ = ["ProjectStore"]
 

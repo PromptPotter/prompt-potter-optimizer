@@ -23,7 +23,7 @@ from promptpotter.services.campaign.formatting import (
 from promptpotter.services.llm_client import LLMClientBase
 from promptpotter.services.metrics import compute_composite_score, count_degraded_queries
 from promptpotter.services.optimizer.pipeline import llm_call
-from promptpotter.services.optimizer.prompt_loader import load_optimizer_prompt
+from promptpotter.services.optimizer.prompt_preparation import load_optimizer_prompt
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
@@ -35,11 +35,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["L1EvalResult", "l1_evaluate", "l1_generate"]
+__all__ = ["L1ScoringResult", "l1_generate", "l1_score"]
 
 
-class L1EvalResult(BaseModel):
-    """Structured return value from ``l1_evaluate()``."""
+class L1ScoringResult(BaseModel):
+    """Structured return value from ``l1_score()``."""
 
     label: str
     winner_prompt_fields: dict[str, Any]
@@ -49,7 +49,7 @@ class L1EvalResult(BaseModel):
     hits: int
     total: int
     improved: bool
-    candidates_evaluated: int
+    candidates_scored: int
     candidate_scores: list[dict[str, Any]]
     winner_results: list[QueryResult]
     all_candidate_results: dict[str, list[dict]] = Field(default_factory=dict)
@@ -296,7 +296,7 @@ def _select_round_winner(
         "hits": sum(1 for r in best_results if r["hit"]),
         "total": len(best_results),
         "results": best_results,
-        "candidates_evaluated": len(candidates),
+        "candidates_scored": len(candidates),
         "improved": best_composite > current_composite + improvement_threshold,
         "winner_idx": winner_idx,
     }
@@ -352,7 +352,7 @@ def _parse_candidates(
     return osp_list, merged, overrides
 
 
-async def _run_candidate_evals(
+async def _score_candidates(
     osp_candidates: list[OptSearchPoint],
     merged_pp: list[dict | None],
     candidate_overrides: list[dict | None],
@@ -368,7 +368,7 @@ async def _run_candidate_evals(
 
     Returns (all_candidate_results, candidate_scores, escalation_signal).
     """
-    from promptpotter.services.dataset_scoring import (
+    from promptpotter.services.scoring_searchpoint import (
         check_candidate_fully_cached,
         score_search_point,
     )
@@ -387,10 +387,10 @@ async def _run_candidate_evals(
 
     for idx, osp_c in enumerate(osp_candidates):
         _on_result = None
-        if callbacks and callbacks.on_query_eval:
+        if callbacks and callbacks.on_sample_scored:
 
             def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
-                callbacks.on_query_eval(_ci, _ct, qi, qt, result)
+                callbacks.on_sample_scored(_ci, _ct, qi, qt, result)
 
         sp = osp_c.to_job_search_point(
             base_pipeline_params=merged_pp[idx],
@@ -423,19 +423,19 @@ async def _run_candidate_evals(
                     "total": cached_scores["total"],
                     "escalation_aborted": False,
                     "elimination_stopped": False,
-                    "eval_queries": len(cached_results),
+                    "scored_queries": len(cached_results),
                     "expected_queries": len(dataset),
                     "resumed_from_cache": True,
                 }
             )
-            if callbacks and callbacks.on_candidate_eval:
+            if callbacks and callbacks.on_candidate_scored:
                 report = dict(cached_scores)
                 report["escalation_aborted"] = False
                 report["elimination_stopped"] = False
-                report["eval_queries"] = len(cached_results)
+                report["scored_queries"] = len(cached_results)
                 report["expected_queries"] = len(dataset)
                 report["resumed_from_cache"] = True
-                callbacks.on_candidate_eval(idx, n_candidates, report)
+                callbacks.on_candidate_scored(idx, n_candidates, report)
             continue
 
         # Merge degradation + elimination checks for this candidate
@@ -478,16 +478,16 @@ async def _run_candidate_evals(
                 "total": scores["total"],
                 "escalation_aborted": aborted,
                 "elimination_stopped": elimination_stopped,
-                "eval_queries": len(results),
+                "scored_queries": len(results),
                 "expected_queries": len(dataset),
             }
         )
-        if callbacks and callbacks.on_candidate_eval:
+        if callbacks and callbacks.on_candidate_scored:
             scores["escalation_aborted"] = aborted
             scores["elimination_stopped"] = elimination_stopped
-            scores["eval_queries"] = len(results)
+            scores["scored_queries"] = len(results)
             scores["expected_queries"] = len(dataset)
-            callbacks.on_candidate_eval(idx, n_candidates, scores)
+            callbacks.on_candidate_scored(idx, n_candidates, scores)
 
         if escalation_signal:
             if elimination_stopped:
@@ -498,7 +498,7 @@ async def _run_candidate_evals(
     return all_candidate_results, candidate_scores, escalation_signal
 
 
-async def l1_evaluate(
+async def l1_score(
     candidates: list[dict],
     dataset: list,
     current_best: dict[str, Any],
@@ -510,7 +510,7 @@ async def l1_evaluate(
     degradation_checks: list | None = None,
     elimination_n_min: int = 20,
     elimination_alpha: float = 0.05,
-) -> L1EvalResult:
+) -> L1ScoringResult:
     """Evaluate candidates and select the round winner."""
     # Normalize current_best prompt_fields to OptSearchPoint once at entry
     cb = dict(current_best)
@@ -523,7 +523,7 @@ async def l1_evaluate(
         pipeline_params,
         ctx.pipeline_schema,
     )
-    all_candidate_results, candidate_scores, escalation_signal = await _run_candidate_evals(
+    all_candidate_results, candidate_scores, escalation_signal = await _score_candidates(
         osp_candidates,
         merged_pp,
         overrides,
@@ -563,7 +563,7 @@ async def l1_evaluate(
     winner_dict["id"] = winner_osp.id
     winner_dict["parent_id"] = winner_osp.parent_id
     winner_dict["changes_description"] = winner_osp.changes_description
-    return L1EvalResult(
+    return L1ScoringResult(
         label=winner_entry["label"],
         winner_prompt_fields=winner_dict,
         winner_pipeline_params=winner_pp,
@@ -572,7 +572,7 @@ async def l1_evaluate(
         hits=winner_entry["hits"],
         total=winner_entry["total"],
         improved=winner_entry["improved"],
-        candidates_evaluated=winner_entry["candidates_evaluated"],
+        candidates_scored=winner_entry["candidates_scored"],
         candidate_scores=candidate_scores,
         winner_results=winner_entry.get("results", []),
         all_candidate_results=dict(all_candidate_results),

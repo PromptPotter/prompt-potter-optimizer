@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.task_context import TaskContext
+from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.campaign.campaign_data import extract_campaign_baseline
 from promptpotter.services.campaign.campaign_setup import BackendContext
 from promptpotter.services.campaign.config import (
@@ -117,7 +117,7 @@ def build_run_config(
     session: BackendContext,
     *,
     scan_context: ScanContext | None = None,
-    task_context: TaskContext | dict | None = None,
+    task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
 ) -> RunConfig:
     """Assemble a ``RunConfig`` from *campaign_config* and *session* context."""
@@ -162,7 +162,7 @@ async def run_optimization(
     session: BackendContext,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
-    task_context: TaskContext | dict | None = None,
+    task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
     callbacks: RunCallbacks | None = None,
     langfuse_session_id: str | None = None,
@@ -203,8 +203,8 @@ async def run_optimization(
 
     merged_cb = RunCallbacks(
         on_round_complete=_chained_on_round,
-        on_candidate_eval=caller_cb.on_candidate_eval,
-        on_query_eval=caller_cb.on_query_eval,
+        on_candidate_scored=caller_cb.on_candidate_scored,
+        on_sample_scored=caller_cb.on_sample_scored,
         on_phase=caller_cb.on_phase,
         on_checkpoint=caller_cb.on_checkpoint,
     )

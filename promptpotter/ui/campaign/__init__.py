@@ -50,14 +50,14 @@ from .display import (
     show_scan_query_difficulty,
 )
 
-# -- Optimization (feedback cycle, stats, eval) --------------------------------
+# -- Optimization (feedback cycle, stats, scoring) --------------------------------
 from .optimize import (
     fmt_ci,
     fmt_pvalue,
     load_baseline_prompt,
     min_detectable_effect,
     proportion_test,
-    run_baseline_eval,
+    run_baseline_scoring,
     run_optimization_notebook,
     show_feedback_preflight,
     wilson_ci,
@@ -158,7 +158,7 @@ __all__ = [
     "push_langfuse",
     "resolve_scan_variants",
     "resume_or_build_diagnostic",
-    "run_baseline_eval",
+    "run_baseline_scoring",
     "run_optimization_notebook",
     "run_scan_advisor",
     "run_sensitivity_scan",
