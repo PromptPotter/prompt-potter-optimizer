@@ -20,7 +20,7 @@ from promptpotter.models.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
-    from promptpotter.models.eval_context import EvalContext
+    from promptpotter.models.scoring_context import ScoringContext
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ class LoopState:
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
     stall_count: int = 0
-    eval_ctx: EvalContext | None = None
+    eval_ctx: ScoringContext | None = None
 
     # Optimizer state — single source of truth for all meta-level fields
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)

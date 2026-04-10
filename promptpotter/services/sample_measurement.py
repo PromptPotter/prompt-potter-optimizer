@@ -1,8 +1,8 @@
-"""Single-query backend evaluation engine.
+"""Sample measurement — single-query pipeline execution and scoring.
 
-Evaluates one query at a time via the backend query endpoint.
+Measures one sample at a time via the backend query endpoint.
 Handles per-node intermediate cache walk, cache populate, and error
-classification.  No batch logic — that lives in ``eval_gateway``.
+classification.  Dataset-level scoring lives in ``dataset_scoring``.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from promptpotter.shared.prompt_interpolation import interpolate_pipeline_params
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.backend_client import BackendClient
+    from promptpotter.models.scoring_context import QueryRunner
     from promptpotter.services.stores.intermediate_cache import IntermediateCache
 
 _evaluator = ExactMatchEvaluator({"strip": True})
@@ -32,7 +32,7 @@ Scorer = Callable[[dict], float]
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["evaluate_query"]
+__all__ = ["measure_sample"]
 
 
 def _parse_backend_response(
@@ -68,7 +68,7 @@ def _parse_backend_response(
     return pd
 
 
-def _build_local_result(
+def _local_result(
     query: str,
     ground_truth: str,
     node_outputs: dict,
@@ -76,7 +76,7 @@ def _build_local_result(
     pipeline_schema: PipelineSchema,
     scorer: Scorer | None = None,
 ) -> QueryResult:
-    """Construct an eval result locally from intermediate cache (no backend call).
+    """Construct a measurement result locally from intermediate cache (no backend call).
 
     Used when the intermediate cache covers ALL target steps — the backend
     would just repackage the same precomputed data, so we skip the HTTP
@@ -135,7 +135,7 @@ def _build_local_result(
     return result  # type: ignore[return-value]
 
 
-def _build_error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
+def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
     """Build a standard error result dict."""
     return {
         "query": query,
@@ -156,16 +156,16 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
     return f"[{ErrorCategory.SERVER}] HTTP {code}: {exc} — Backend may be experiencing issues."
 
 
-async def evaluate_query(
+async def measure_sample(
     query_data: dict,
-    backend_client: BackendClient,
+    backend_client: QueryRunner,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
     intermediate_cache: IntermediateCache | None = None,
     backend_id: str = "",
     scorer: Scorer | None = None,
 ) -> QueryResult:
-    """Evaluate a reranker prompt on a single query via the backend /matches endpoint."""
+    """Measure one sample: run query through pipeline, score against ground truth."""
     query = query_data["query"]
     ground_truth = query_data["ground_truth"]
 
@@ -177,7 +177,8 @@ async def evaluate_query(
     _target_steps = (pipeline_params or {}).get("steps", [])
 
     try:
-        # Per-node prefix walk: find longest cached prefix from pipeline start
+        # Per-node cache: reuse upstream pipeline nodes (multi-step only).
+        # LLM-only pipelines have no steps → this block is a clean no-op.
         precomputed = None
         cached_steps: list[str] = []
         prefix_keys: list[tuple[str, str]] = []
@@ -195,7 +196,7 @@ async def evaluate_query(
 
         # Full coverage: all target steps cached — skip backend entirely
         if precomputed and cached_steps == _target_steps:
-            return _build_local_result(
+            return _local_result(
                 query,
                 ground_truth,
                 precomputed,
@@ -214,7 +215,8 @@ async def evaluate_query(
         )
         data = resp.get("data", {})
 
-        # Cache populate: store per-node outputs
+        # Cache populate: store per-node outputs (multi-step only;
+        # LLM-only adapters return empty node_outputs so this is a no-op)
         node_outputs = data.get("node_outputs")
         if intermediate_cache and _target_steps and node_outputs and prefix_keys:
             precomputed_set = set(precomputed or {})
@@ -231,7 +233,7 @@ async def evaluate_query(
         ranked = data.get("final_ranking", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
         if predicted == "ERROR":
-            return _build_error_result(
+            return _error_result(
                 query,
                 ground_truth,
                 f"[{ErrorCategory.PIPELINE}] Backend returned ERROR as candidate"
@@ -260,14 +262,14 @@ async def evaluate_query(
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)
-        logger.warning("evaluate_query for %s: %s", query[:60], error_msg)
-        return _build_error_result(query, ground_truth, error_msg)
+        logger.warning("measure_sample for %s: %s", query[:60], error_msg)
+        return _error_result(query, ground_truth, error_msg)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         error_msg = f"[{ErrorCategory.CONNECTION}] {exc} — Backend may be down or unreachable."
-        logger.warning("evaluate_query CONNECTION for %s: %s", query[:60], error_msg)
-        return _build_error_result(query, ground_truth, error_msg)
+        logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
+        return _error_result(query, ground_truth, error_msg)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception as exc:
-        logger.warning("evaluate_query failed for %s: %s", query[:60], exc)
-        return _build_error_result(query, ground_truth, str(exc))
+        logger.warning("measure_sample failed for %s: %s", query[:60], exc)
+        return _error_result(query, ground_truth, str(exc))

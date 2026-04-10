@@ -30,7 +30,7 @@ __all__ = [
     "build_all_index_terms",
     "extract_campaign_baseline",
     "prepare_datasets",
-    "prepare_eval_context",
+    "prepare_scoring_context",
     "run_baseline_eval",
 ]
 
@@ -112,8 +112,8 @@ async def run_baseline_eval(
     Raises:
         RuntimeError: If no evaluation data is available.
     """
-    from promptpotter.models.eval_context import EvalContext
-    from promptpotter.services.eval_gateway import eval_search_point
+    from promptpotter.models.scoring_context import ScoringContext
+    from promptpotter.services.dataset_scoring import score_search_point
     from promptpotter.shared.errors import graceful
     from promptpotter.shared.scoring import compile_scorer
 
@@ -152,7 +152,7 @@ async def run_baseline_eval(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
-    ctx = EvalContext(
+    ctx = ScoringContext(
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,
@@ -161,7 +161,7 @@ async def run_baseline_eval(
         source="baseline",
         scorer=compile_scorer(scoring_formula),
     )
-    baseline_results, scores, _cached = await eval_search_point(
+    baseline_results, scores, _cached = await score_search_point(
         sp,
         dataset,
         ctx,
@@ -184,7 +184,7 @@ async def run_baseline_eval(
     return campaign_rounds, baseline_results
 
 
-async def prepare_eval_context(
+async def prepare_scoring_context(
     exp_data: dict | None,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,

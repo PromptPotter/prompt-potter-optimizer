@@ -2,8 +2,8 @@
 Dataset run storage — archive layer for eval history.
 
 Stores completed evaluation runs for SearchMemory, observability,
-and campaign lineage.  No longer used for cache lookup during eval
-(per-node IntermediateCache handles all reuse).
+campaign lineage, and full-run cache lookup (``find_by_sp_hash``).
+Per-node reuse is handled separately by ``IntermediateCache``.
 
 ``config_hash`` is still used by ``coverage.py`` for scan variant
 matching.  Prompt alias groups are used by ``scan_baseline.py`` and
@@ -191,6 +191,12 @@ class DatasetRunStore:
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return the index entries (summaries without full items)."""
         return self._load_index(backend_id).get("dataset_runs", [])
+
+    def find_by_sp_hash(self, backend_id: str, sp_hash: str) -> list[dict[str, Any]]:
+        """Return index entries matching *sp_hash*, most items first."""
+        matches = [e for e in self.list_all(backend_id) if e.get("sp_hash") == sp_hash]
+        matches.sort(key=lambda e: e.get("item_count", 0), reverse=True)
+        return matches
 
     # -- prompt alias groups ---------------------------------------------------
 

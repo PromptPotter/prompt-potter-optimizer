@@ -1,12 +1,12 @@
-"""Typed schema for per-query evaluation results.
+"""Typed schema for per-query measurement results.
 
-Every evaluation — whether via backend HTTP call or local cache — produces
+Every measurement — whether via backend HTTP call or local cache — produces
 a ``QueryResult`` dict.  This module defines the structural type so
 consumers (metrics, critique, stale-data protocol) can declare and
 validate the fields they access.
 
-Construction sites: ``eval_query._build_local_result()``,
-``eval_query._build_error_result()``, ``eval_query.evaluate_query()``.
+Construction sites: ``sample_measurement._local_result()``,
+``sample_measurement._error_result()``, ``sample_measurement.measure_sample()``.
 """
 
 from __future__ import annotations

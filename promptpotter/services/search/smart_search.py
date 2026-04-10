@@ -15,9 +15,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
-from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.eval_gateway import eval_search_point
+from promptpotter.models.scoring_context import ScoringContext
+from promptpotter.services.dataset_scoring import score_search_point
 from promptpotter.services.search.failure_group_analysis import preview as _preview
 from promptpotter.shared.constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,
@@ -153,7 +153,7 @@ def build_axis_profiles(
 
 def make_eval_fn(
     dataset: list,
-    ctx: EvalContext,
+    ctx: ScoringContext,
     get_params: Callable[[], dict],
     on_result: Callable | None = None,
 ) -> Callable:
@@ -165,7 +165,7 @@ def make_eval_fn(
             base_pipeline_params=_base_pp,
             schema=ctx.pipeline_schema,
         )
-        results, scores, cached = await eval_search_point(
+        results, scores, cached = await score_search_point(
             sp,
             dataset,
             ctx,
@@ -596,7 +596,7 @@ async def adaptive_search(
 
     from promptpotter.shared.scoring import compile_scorer
 
-    _scan_ctx = EvalContext(
+    _scan_ctx = ScoringContext(
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,

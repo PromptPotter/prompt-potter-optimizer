@@ -13,10 +13,10 @@ import random
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.scoring_context import ScoringContext
 from promptpotter.models.search_point import JobSearchPoint
-from promptpotter.services.eval_gateway import eval_search_point
+from promptpotter.services.dataset_scoring import score_search_point
 from promptpotter.services.search.failure_group_analysis import preview as _preview
 from promptpotter.services.search.smart_search import (
     ScanEvent,
@@ -87,10 +87,10 @@ async def sensitivity_scan(
     if sample_size > 0 and sample_size < len(dataset):
         dataset = random.Random(42).sample(dataset, sample_size)
 
-    # Build EvalContext once for all scan evaluations
+    # Build ScoringContext once for all scan evaluations
     from promptpotter.shared.scoring import compile_scorer
 
-    scan_ctx = EvalContext(
+    scan_ctx = ScoringContext(
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,
@@ -163,7 +163,7 @@ async def sensitivity_scan(
         axes.sort(key=_axis_sort_key)
 
     # Evaluate baseline
-    baseline_results, baseline_scores, baseline_cached = await eval_search_point(
+    baseline_results, baseline_scores, baseline_cached = await score_search_point(
         baseline,
         dataset,
         scan_ctx,
@@ -301,7 +301,7 @@ async def sensitivity_scan(
                     pp.setdefault(axis_node, {})[axis_name] = value
                 perturbed = baseline.derive(pipeline_params=pp)
 
-            results, scores, cached = await eval_search_point(
+            results, scores, cached = await score_search_point(
                 perturbed,
                 dataset,
                 scan_ctx,

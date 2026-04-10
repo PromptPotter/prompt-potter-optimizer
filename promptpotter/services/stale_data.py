@@ -11,12 +11,12 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.services.eval_query import evaluate_query
 from promptpotter.services.metrics import find_rank
+from promptpotter.services.sample_measurement import measure_sample
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.backend_client import BackendClient
+    from promptpotter.models.scoring_context import QueryRunner
     from promptpotter.services.search.search_memory import SearchMemory
     from promptpotter.services.stores.intermediate_cache import IntermediateCache
 
@@ -64,7 +64,7 @@ async def execute_stale_data_protocol(
     protocol_steps: list[str],
     query_data: dict,
     cached_result: dict[str, Any],
-    backend_client: BackendClient,
+    backend_client: QueryRunner,
     *,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
@@ -117,7 +117,7 @@ async def execute_stale_data_protocol(
                 }, "below_threshold"
 
             result = dict(
-                await evaluate_query(
+                await measure_sample(
                     query_data,
                     backend_client,
                     pipeline_params=pipeline_params,
@@ -145,7 +145,7 @@ async def execute_stale_data_protocol(
             resolved_threshold = cfg.get("samplescan_threshold", 0.5)
 
             result = dict(
-                await evaluate_query(
+                await measure_sample(
                     query_data,
                     backend_client,
                     pipeline_params=None,

@@ -112,7 +112,7 @@ async def sensitivity_scan(
     except (KeyboardInterrupt, asyncio.CancelledError):
         _print_interrupt_banner(
             "Sensitivity scan",
-            saved="completed evaluations saved via eval_search_point",
+            saved="completed evaluations saved via score_search_point",
             resume_hint="re-run this cell -- cached evals will be reused",
         )
         return None, []
@@ -281,7 +281,7 @@ async def adaptive_search(
 
         _print_interrupt_banner(
             "Adaptive search",
-            saved="completed evaluations saved via eval_search_point",
+            saved="completed evaluations saved via score_search_point",
             resume_hint="re-run this cell to restart (cached evals will be reused)",
         )
         return baseline_ps, dict(pipeline_params or {}), _pd.DataFrame()

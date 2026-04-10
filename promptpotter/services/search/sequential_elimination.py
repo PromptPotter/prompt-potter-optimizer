@@ -113,7 +113,7 @@ class EliminationCheck:
     Conforms to the ``DegradationCheck`` protocol (``.enabled``, ``.name``,
     ``.evaluate(results_so_far, candidate_idx, n_total_candidates)``), so
     it plugs directly into ``_run_degradation_checks()`` in
-    ``eval_gateway.py``.
+    ``dataset_scoring.py``.
     """
 
     name: str = "elimination"

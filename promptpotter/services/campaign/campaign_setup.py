@@ -240,9 +240,7 @@ async def init_services(
                     pipeline_schema.name,
                     pipeline_schema.version,
                 )
-                _status(
-                    f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)"
-                )
+                _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
             except (KeyboardInterrupt, asyncio.CancelledError):
                 raise
             except Exception as exc:

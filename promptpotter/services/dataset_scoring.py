@@ -1,9 +1,10 @@
-"""Eval gateway — batch orchestration, archival, and scoring.
+"""Dataset scoring — query loop orchestration, archival, and scoring.
 
-Drives the query loop over ``evaluate_query()``, handles stale
-data protocol, error tracking, escalation checks, dataset run archival,
-and observability logging.  Single-query evaluation lives in
-``eval_query``.
+Unified per-query caching: prior-result cache (from dataset_runs) is
+checked first, then per-node intermediate cache (multi-step only),
+then backend call.  Also handles stale data protocol, error tracking,
+escalation checks, dataset run archival, and observability logging.
+Single-sample measurement lives in ``sample_measurement``.
 """
 
 from __future__ import annotations
@@ -17,11 +18,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.models.query_result import QueryResult
 from promptpotter.services.dataset_builder import build_dataset_run_data
-from promptpotter.services.eval_query import (
-    _build_error_result,
-    evaluate_query,
-)
 from promptpotter.services.metrics import compute_composite_score
+from promptpotter.services.sample_measurement import (
+    _error_result,
+    measure_sample,
+)
 from promptpotter.services.stale_data import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
@@ -59,19 +60,19 @@ def _graceful_interrupt():
 
 
 if TYPE_CHECKING:
-    from promptpotter.models.eval_context import EvalContext
+    from promptpotter.models.scoring_context import QueryRunner, ScoringContext
     from promptpotter.models.search_point import JobSearchPoint
-    from promptpotter.services.backend_client import BackendClient
     from promptpotter.services.campaign.escalation import EscalationSignal
+    from promptpotter.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["EvalBatchResult", "eval_search_point"]
+__all__ = ["QueryLoopResult", "score_search_point"]
 
 
 @dataclass
-class EvalBatchResult:
-    """Return value from ``_run_eval_batch()``.
+class QueryLoopResult:
+    """Return value from ``_run_query_loop()``.
 
     Data always flows through return values; interrupts are signalled
     via ``completed`` and ``stop_reason``; escalation via
@@ -93,7 +94,7 @@ def _fill_remaining_errors(
     """Append error results for all eval queries from start_idx onward."""
     for remaining_qd in dataset[start_idx:]:
         results.append(
-            _build_error_result(
+            _error_result(
                 remaining_qd["query"],
                 remaining_qd.get("ground_truth", ""),
                 reason,
@@ -128,6 +129,7 @@ def _check_error_abort(
 
 
 def _log_batch_summary(
+    n_prior: int,
     n_reused: int,
     n_total: int,
     n_retried: int,
@@ -135,6 +137,12 @@ def _log_batch_summary(
     n_switched: int,
 ) -> None:
     """Log cache reuse and stale data protocol stats."""
+    if n_prior:
+        logger.info(
+            "Prior-result cache: %d/%d queries reused from previous runs",
+            n_prior,
+            n_total,
+        )
     if n_reused:
         logger.info(
             "Per-node cache reuse: %d/%d queries had partial/full upstream cache",
@@ -168,27 +176,30 @@ def _run_degradation_checks(
     return None
 
 
-async def _run_eval_batch(
+async def _run_query_loop(
     search_point: JobSearchPoint,
     dataset: list,
-    backend_client: BackendClient,
+    backend_client: QueryRunner,
     *,
+    prior_results: dict[str, QueryResult] | None = None,
     on_result: Callable[[QueryResult, int, int], None] | None = None,
-    ctx: EvalContext | None = None,
+    ctx: ScoringContext | None = None,
     degradation_checks: list | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
-) -> EvalBatchResult:
-    """Evaluate a prompt on all dataset queries via the backend.
+) -> QueryLoopResult:
+    """Evaluate dataset queries, reusing prior results where available.
 
-    Per-node caching is handled inside ``evaluate_query()`` via
-    the intermediate cache.  This function drives the query loop, stale
-    data protocol, error tracking, and escalation checks.
+    For each query, checks ``prior_results`` first (from prior dataset_runs
+    with matching sp_hash), then falls back to ``measure_sample()`` which
+    handles per-node intermediate cache internally.
 
     Returns:
-        EvalBatchResult with results, completion status, stop reason,
+        QueryLoopResult with results, completion status, stop reason,
         and escalation_signal if an escalation check triggered.
     """
+    _prior = prior_results or {}
+
     # Unpack ctx with defaults for test compatibility
     pipeline_schema = ctx.pipeline_schema if ctx else None
     max_consecutive_errors = ctx.max_consecutive_errors if ctx else 3
@@ -206,7 +217,7 @@ async def _run_eval_batch(
 
     results: list[QueryResult] = []
     consecutive_errors = 0
-    n_reused = n_retried = n_probed = n_switched = 0
+    n_prior = n_reused = n_retried = n_probed = n_switched = 0
 
     with _graceful_interrupt() as interrupt:
         try:
@@ -215,7 +226,17 @@ async def _run_eval_batch(
                     logger.debug("Graceful stop after query %d/%d.", len(results), len(dataset))
                     break
 
-                result = await evaluate_query(
+                query = qd["query"]
+
+                # Prior-result cache: reuse from previous dataset_runs
+                if query in _prior:
+                    n_prior += 1
+                    results.append(_prior[query])
+                    if on_result is not None:
+                        on_result(_prior[query], i, len(dataset))
+                    continue
+
+                result = await measure_sample(
                     qd,
                     backend_client,
                     pipeline_params=search_point.pipeline_params,
@@ -282,7 +303,7 @@ async def _run_eval_batch(
                     n_total_candidates,
                 )
                 if esc_signal:
-                    return EvalBatchResult(
+                    return QueryLoopResult(
                         results,
                         completed=False,
                         stop_reason="escalation",
@@ -290,21 +311,45 @@ async def _run_eval_batch(
                     )
         except (KeyboardInterrupt, asyncio.CancelledError):
             logger.warning(
-                "Eval batch force-interrupted at query %d/%d.", len(results), len(dataset)
+                "Query loop force-interrupted at query %d/%d.", len(results), len(dataset)
             )
-            return EvalBatchResult(results, completed=False, stop_reason="force")
+            return QueryLoopResult(results, completed=False, stop_reason="force")
 
-    _log_batch_summary(n_reused, len(dataset), n_retried, n_probed, n_switched)
+    _log_batch_summary(n_prior, n_reused, len(dataset), n_retried, n_probed, n_switched)
 
     if interrupt.stop_requested:
-        return EvalBatchResult(results, completed=False, stop_reason="graceful")
-    return EvalBatchResult(results)
+        return QueryLoopResult(results, completed=False, stop_reason="graceful")
+    return QueryLoopResult(results)
 
 
-async def eval_search_point(
+def _load_prior_results(
+    store: ProjectStore,
+    backend_id: str,
+    sp_hash: str,
+) -> dict[str, QueryResult]:
+    """Build per-query result cache from prior dataset_runs with matching sp_hash.
+
+    Loads ALL matching runs (including partial).  Individual items from
+    partial runs are valid — only the run was incomplete, not the results.
+    Error results are excluded — errors are transient (backend down, etc.).
+    Later runs overwrite earlier ones for the same query.
+    """
+    cache: dict[str, QueryResult] = {}
+    for entry in store.dataset_runs.find_by_sp_hash(backend_id, sp_hash):
+        detail = store.dataset_runs.load_by_id(backend_id, entry["run_id"])
+        if not detail:
+            continue
+        for item in detail.get("dataset_run_items", []):
+            q = item.get("query", "")
+            if q and item.get("predicted") != "ERROR":
+                cache[q] = item
+    return cache
+
+
+async def score_search_point(
     search_point: JobSearchPoint,
     dataset: list,
-    ctx: EvalContext,
+    ctx: ScoringContext,
     *,
     label: str = "Eval",
     on_result: Callable[[QueryResult, int, int], None] | None = None,
@@ -313,11 +358,14 @@ async def eval_search_point(
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
 ) -> tuple[list, dict, bool]:
-    """Evaluate a prompt via backend with per-node caching and finalization.
+    """Evaluate a prompt via backend with unified per-query caching.
 
-    All cache reuse is handled by the per-node intermediate cache inside
-    ``evaluate_query()``.  This function handles run archival
-    (dataset_run_store) and observability logging.
+    Cache hierarchy (single per-query decision inside the loop):
+    1. Prior-result cache — reuse items from previous dataset_runs
+       with the same sp_hash (including partial runs).
+    2. Per-node intermediate cache — reuse upstream pipeline nodes
+       (multi-step pipelines only; no-op for LLM-only).
+    3. Backend call — evaluate via backend if no cache hit.
 
     The ``search_point`` bundles the search-space dimensions
     (pipeline_params).  Infrastructure params (backend_client,
@@ -336,40 +384,14 @@ async def eval_search_point(
     source = source or ctx.source
 
     content_hash = search_point.content_hash(dataset)
-
-    # --- evaluate via backend (per-node cache handles all reuse) ---
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    # --- Full-run cache: skip eval if a complete run with same sp_hash exists ---
+    # Build per-query cache from prior dataset_runs with same sp_hash
+    prior_results: dict[str, QueryResult] = {}
     if store and backend_id:
         sp_h = search_point.sp_hash(prompt_nodes)
-        needed = {d["query"] for d in dataset}
-        for entry in store.dataset_runs.list_all(backend_id):
-            if entry.get("sp_hash") != sp_h:
-                continue
-            if entry.get("item_count", 0) < len(needed):
-                continue
-            detail = store.dataset_runs.load_by_id(backend_id, entry["run_id"])
-            if not detail or detail.get("partial"):
-                continue
-            stored_queries = {r["query"] for r in detail["dataset_run_items"]}
-            if not needed <= stored_queries:
-                continue
-            # Filter to requested dataset queries (stored run may be a superset)
-            results = [r for r in detail["dataset_run_items"] if r["query"] in needed]
-            scores = detail["scores"]
-            logger.info(
-                "Full-run cache hit for %s via %s (%d items, acc=%.1f%%)",
-                run_id,
-                entry["run_id"],
-                len(results),
-                scores.get("accuracy", 0) * 100,
-            )
-            if on_result:
-                for i, r in enumerate(results):
-                    on_result(r, i, len(results))
-            return results, scores, True
+        prior_results = _load_prior_results(store, backend_id, sp_h)
 
     # Prefix display name with experiment_id for discoverability
     display_name = f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id else safe_label
@@ -393,10 +415,11 @@ async def eval_search_point(
             run_data["partial"] = True
         store.dataset_runs.save(backend_id, run_id, run_data)
 
-    batch = await _run_eval_batch(
+    batch = await _run_query_loop(
         search_point,
         dataset,
         backend_client,
+        prior_results=prior_results,
         on_result=on_result,
         ctx=ctx,
         degradation_checks=degradation_checks,
@@ -405,6 +428,17 @@ async def eval_search_point(
     )
     results = batch.results
     escalation_signal = batch.escalation_signal
+
+    # All results from prior cache — no new work done
+    all_cached = (
+        batch.completed
+        and len(prior_results) >= len(dataset)
+        and all(qd["query"] in prior_results for qd in dataset)
+    )
+    if all_cached:
+        assert pipeline_schema is not None, "pipeline_schema required for scoring"
+        scores = compute_composite_score(results, pipeline_schema)
+        return results, scores, True
 
     if not batch.completed and not escalation_signal:
         # Graceful or force stop — save partial results then re-raise

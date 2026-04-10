@@ -34,7 +34,7 @@ __all__ = [
     "build_run_config",
     "configure_and_apply_pipeline",
     "load_scan_context",
-    "prepare_eval_context",
+    "prepare_scoring_context",
     "run_optimization",
     "run_scan_and_persist",
 ]
@@ -76,7 +76,7 @@ def configure_and_apply_pipeline(
 # ---------------------------------------------------------------------------
 
 
-async def prepare_eval_context(
+async def prepare_scoring_context(
     session: BackendContext,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
@@ -90,7 +90,7 @@ async def prepare_eval_context(
     Returns ``(baseline, dataset, campaign_rounds, baseline_results)``.
     """
     from promptpotter.services.campaign.campaign_data import (
-        prepare_eval_context as _svc_prepare,
+        prepare_scoring_context as _svc_prepare,
     )
 
     baseline, dataset, campaign_rounds, baseline_results = await _svc_prepare(

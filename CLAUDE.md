@@ -89,17 +89,17 @@ SearchPoint (abstract — render())
       └── OptSearchPoint   — optimizer state (lineage, L2/L3, memory, escalation)
 ```
 
-All services follow: `f(SearchPoint, PipelineSchema, dataset) → scores`. `JobSearchPoint` is the first positional arg to `eval_search_point()`. `OptSearchPoint` is the source of truth for all optimizer state; projected to `JobSearchPoint` via `to_job_search_point()`.
+All services follow: `f(SearchPoint, PipelineSchema, dataset) → scores`. `JobSearchPoint` is the first positional arg to `score_search_point()`. `OptSearchPoint` is the source of truth for all optimizer state; projected to `JobSearchPoint` via `to_job_search_point()`.
 
 ### Two-Layer Tracing
 
 Every state traced at **both** layers independently:
-- **Target layer**: `JobSearchPoint` → `eval_search_point()` → `dataset_runs/` (content-addressed, shared)
+- **Target layer**: `JobSearchPoint` → `score_search_point()` → `dataset_runs/` (content-addressed, shared)
 - **Optimizer layer**: `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint)
 
 ### Evaluation Pipeline
 
-`eval_search_point()` (in `eval_gateway.py`) is the single gateway for evaluation archival + observability. Per-node cache reuse via `IntermediateCache` — `walk_prefix()` finds longest cached prefix; when ALL target nodes cached, short-circuits via `_build_local_result()` (no backend call). `dataset_run_store` is archive-only. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
+`score_search_point()` (in `dataset_scoring.py`) is the single gateway for scoring, archival, and observability. Unified per-query caching: prior-result cache (from dataset_runs) checked first, then per-node intermediate cache (`walk_prefix()`, multi-step only), then backend call. `dataset_run_store` is archive-only. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
 
 ### Pipeline Params — Two Namespaces
 
@@ -120,7 +120,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 ### Key Patterns
 
 - **Store**: `ProjectStore` facade over focused stores in `services/stores/`.
-- **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation signals flow via `EvalBatchResult.escalation_signal` (return value, not exception).
+- **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation signals flow via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. No completed work discarded.
 - **HITL mode**: `RunConfig.pause_before_eval` raises `PauseForReviewError` between L1 generate and evaluate. Candidates persisted to `round_NNNN_candidates.json` before pause.
 - **Optimizer LLM calls**: All go through `llm_call()` in `services/optimizer/pipeline.py`, not `chat()` directly.

@@ -13,8 +13,8 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.models.eval_context import EvalContext
 from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.scoring_context import ScoringContext
 from promptpotter.models.task_context import TaskContext
 from promptpotter.services.campaign.campaign_setup import BackendContext
 from promptpotter.services.campaign.config import RunConfig
@@ -163,7 +163,7 @@ def _restore_from_checkpoint(
         )
 
 
-def _setup_eval_context(
+def _setup_scoring_context(
     state: LoopState,
     config: RunConfig,
     instruction: str,
@@ -174,7 +174,7 @@ def _setup_eval_context(
     cycle_id: str | None,
     session: BackendContext | None = None,
 ) -> list:
-    """Wire up EvalContext on state and build escalation checks.
+    """Wire up ScoringContext on state and build escalation checks.
 
     Returns:
         degradation_checks list.
@@ -182,7 +182,7 @@ def _setup_eval_context(
     from promptpotter.shared.scoring import compile_scorer
 
     _store = session.store if session else None
-    state.eval_ctx = EvalContext(
+    state.eval_ctx = ScoringContext(
         backend_client=backend_client,
         store=_store,
         backend_id=config.backend_id,
@@ -298,7 +298,7 @@ async def init_cycle_state(
     state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
     # 3. Eval context + escalation checks
-    degradation_checks = _setup_eval_context(
+    degradation_checks = _setup_scoring_context(
         state,
         config,
         instruction,

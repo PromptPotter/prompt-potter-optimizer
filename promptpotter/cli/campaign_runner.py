@@ -105,7 +105,7 @@ def _configure_pipeline(
     return configure_and_apply_pipeline(session, campaign_config, log=logger.info)
 
 
-async def _prepare_eval_context(
+async def _prepare_scoring_context(
     session: BackendContext,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
@@ -114,7 +114,7 @@ async def _prepare_eval_context(
 ):
     """Load baseline + dataset, optionally run baseline eval."""
     from promptpotter.services.campaign.orchestration import (
-        prepare_eval_context as _orch_prepare,
+        prepare_scoring_context as _orch_prepare,
     )
 
     return await _orch_prepare(
@@ -203,7 +203,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
     elif session.queries:
         train_data = session.queries
 
-    baseline, dataset, campaign_rounds, _br = await _prepare_eval_context(
+    baseline, dataset, campaign_rounds, _br = await _prepare_scoring_context(
         session,
         train_data,
         cast("CampaignConfig", campaign_config),
@@ -422,7 +422,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     # Re-run baseline (fast — cached) to populate baseline_results for critique
     _has_baseline = ctx.state.get("baseline_accuracy", 0) > 0
-    _baseline, dataset, campaign_rounds, _baseline_results = await _prepare_eval_context(
+    _baseline, dataset, campaign_rounds, _baseline_results = await _prepare_scoring_context(
         session,
         train_data,
         campaign_config,

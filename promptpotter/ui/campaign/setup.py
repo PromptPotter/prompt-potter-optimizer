@@ -41,7 +41,7 @@ __all__ = [
     "init_services",
     "load_variant_library",
     "prepare_datasets",
-    "prepare_eval_context",
+    "prepare_scoring_context",
     "push_langfuse",
     # Re-exports
     "save_campaign_winner",
@@ -128,8 +128,8 @@ def dev_reload() -> None:
         "promptpotter.services.campaign.optimization_loop",
         "promptpotter.services.stores.dataset_run_store",
         "promptpotter.services.stale_data",
-        "promptpotter.services.eval_query",
-        "promptpotter.services.eval_gateway",
+        "promptpotter.services.sample_measurement",
+        "promptpotter.services.dataset_scoring",
         "promptpotter.services.campaign.l1_optimizer",
         "promptpotter.services.search.smart_search",
         "promptpotter.services.search.sensitivity_scanner",
@@ -312,7 +312,7 @@ async def show_backend_status(client) -> dict:
     return status
 
 
-async def prepare_eval_context(
+async def prepare_scoring_context(
     session: BackendContext,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
@@ -324,7 +324,7 @@ async def prepare_eval_context(
     Delegates to shared orchestration with notebook display.
     """
     from promptpotter.services.campaign.orchestration import (
-        prepare_eval_context as _orch_prepare,
+        prepare_scoring_context as _orch_prepare,
     )
 
     return await _orch_prepare(

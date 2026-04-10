@@ -29,7 +29,7 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
-    from promptpotter.models.eval_context import EvalContext
+    from promptpotter.models.scoring_context import ScoringContext
     from promptpotter.services.campaign.state import RunCallbacks
     from promptpotter.services.search.scan_results import ScanContext
 
@@ -357,7 +357,7 @@ async def _run_candidate_evals(
     merged_pp: list[dict | None],
     candidate_overrides: list[dict | None],
     dataset: list,
-    ctx: EvalContext,
+    ctx: ScoringContext,
     *,
     degradation_checks: list | None = None,
     callbacks: RunCallbacks | None = None,
@@ -368,7 +368,7 @@ async def _run_candidate_evals(
 
     Returns (all_candidate_results, candidate_scores, escalation_signal).
     """
-    from promptpotter.services.eval_gateway import eval_search_point
+    from promptpotter.services.dataset_scoring import score_search_point
     from promptpotter.services.search.sequential_elimination import EliminationCheck
 
     all_candidate_results: dict[str, list[dict]] = {}
@@ -399,7 +399,7 @@ async def _run_candidate_evals(
         if elim_check.enabled:
             all_checks.append(elim_check)
 
-        results, scores, _cached = await eval_search_point(
+        results, scores, _cached = await score_search_point(
             sp,
             dataset,
             ctx,
@@ -458,7 +458,7 @@ async def l1_evaluate(
     candidates: list[dict],
     dataset: list,
     current_best: dict[str, Any],
-    ctx: EvalContext,
+    ctx: ScoringContext,
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
