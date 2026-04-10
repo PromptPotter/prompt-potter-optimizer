@@ -184,28 +184,12 @@ class SearchMemory:
 
         Only returns intractable + chronic queries.
         """
-        records = []
-        for query, hits in self._query_hits.items():
-            if len(hits) < min_streak:
-                continue
-            recent = hits[-min_streak:]
-            if not any(recent):  # all False in recent window
-                hit_rate = sum(hits) / len(hits)
-                modes = self._query_failure_modes.get(query, [])
-                dominant = ""
-                if modes:
-                    from collections import Counter
-
-                    dominant = Counter(modes).most_common(1)[0][0]
-                records.append(
-                    QueryRecord(
-                        query=query,
-                        hit_rate=round(hit_rate, 4),
-                        n_measurements=len(hits),
-                        variance=round(hit_rate * (1 - hit_rate), 4),
-                        dominant_failure_mode=dominant,
-                    )
-                )
+        records = [
+            r
+            for r in self._build_query_records()
+            if len(self._query_hits.get(r.query, [])) >= min_streak
+            and not any(self._query_hits[r.query][-min_streak:])
+        ]
         records.sort(key=lambda r: r.hit_rate)  # intractable first
         return records
 
@@ -221,29 +205,13 @@ class SearchMemory:
         from promptpotter.services.search.failure_group_analysis import wilson_ci
 
         records = []
-        for query, hits_list in self._query_hits.items():
-            n = len(hits_list)
-            if n < min_measurements:
+        for r in self._build_query_records():
+            if r.n_measurements < min_measurements:
                 continue
-            n_hits = sum(hits_list)
-            _lower, upper = wilson_ci(n_hits, n)
+            n_hits = sum(self._query_hits[r.query])
+            _lower, upper = wilson_ci(n_hits, r.n_measurements)
             if upper <= max_upper_ci:
-                hit_rate = n_hits / n
-                modes = self._query_failure_modes.get(query, [])
-                dominant = ""
-                if modes:
-                    from collections import Counter
-
-                    dominant = Counter(modes).most_common(1)[0][0]
-                records.append(
-                    QueryRecord(
-                        query=query,
-                        hit_rate=round(hit_rate, 4),
-                        n_measurements=n,
-                        variance=round(hit_rate * (1 - hit_rate), 4),
-                        dominant_failure_mode=dominant,
-                    )
-                )
+                records.append(r)
         records.sort(key=lambda r: r.hit_rate)
         return records
 
@@ -677,6 +645,15 @@ class SearchMemory:
             sample_count=total_samples,
         )
 
+    def _dominant_failure_mode(self, query: str) -> str:
+        """Most common terminated_at value for a query, or empty string."""
+        modes = self._query_failure_modes.get(query, [])
+        if not modes:
+            return ""
+        from collections import Counter
+
+        return Counter(modes).most_common(1)[0][0]
+
     def _build_query_records(self) -> list[QueryRecord]:
         """Build QueryRecord list from internal stats."""
         records = []
@@ -684,21 +661,14 @@ class SearchMemory:
             if not hits:
                 continue
             hit_rate = sum(hits) / len(hits)
-            # Variance of Bernoulli: p(1-p)
             variance = hit_rate * (1 - hit_rate)
-            modes = self._query_failure_modes.get(query, [])
-            dominant = ""
-            if modes:
-                from collections import Counter
-
-                dominant = Counter(modes).most_common(1)[0][0]
             records.append(
                 QueryRecord(
                     query=query,
                     hit_rate=round(hit_rate, 4),
                     n_measurements=len(hits),
                     variance=round(variance, 4),
-                    dominant_failure_mode=dominant,
+                    dominant_failure_mode=self._dominant_failure_mode(query),
                 )
             )
         return records

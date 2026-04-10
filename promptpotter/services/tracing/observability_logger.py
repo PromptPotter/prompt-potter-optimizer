@@ -327,9 +327,7 @@ class ObsLogger:
         dataset: list[dict],
         query_to_item_id: dict[str, str],
     ) -> None:
-        if not self._cloud_lf:
-            return
-        with graceful("Cloud Langfuse register_dataset failed", level=logging.DEBUG):
+        def _op() -> None:
             if len(dataset) > 100:
                 logger.warning(
                     "Skipping Langfuse cloud dataset registration for %d items "
@@ -337,7 +335,7 @@ class ObsLogger:
                     len(dataset),
                 )
                 return
-            self._cloud_lf.create_dataset(
+            self._cloud_lf.create_dataset(  # type: ignore[union-attr]
                 name=dataset_name,
                 description="Ground truth queries for prompt evaluation",
                 metadata={"n_items": len(dataset)},
@@ -347,7 +345,7 @@ class ObsLogger:
                 ground_truth = entry.get("ground_truth", "")
                 if not query:
                     continue
-                cloud_id = self._cloud_lf.create_dataset_item(
+                cloud_id = self._cloud_lf.create_dataset_item(  # type: ignore[union-attr]
                     dataset_name=dataset_name,
                     input={"query": query},
                     expected_output=ground_truth,
@@ -355,6 +353,8 @@ class ObsLogger:
                 )
                 if cloud_id:
                     query_to_item_id[query] = cloud_id
+
+        self._cloud("register_dataset", _op)
 
     def _cloud_dataset_run(
         self,

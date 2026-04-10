@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -30,33 +31,24 @@ from promptpotter.services.stale_data import is_degraded as _is_degraded
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
 
-@dataclass
-class InterruptState:
-    """Mutable flag for graceful interrupt tracking."""
-
-    stop_requested: bool = False
-
-
 @contextmanager
 def _graceful_interrupt():
-    """1st Ctrl+C sets flag, 2nd cancels current asyncio task."""
-    import signal
+    """Yield a mutable ``[stop_requested]`` flag. 1st Ctrl+C sets it; 2nd cancels the task."""
+    flag = [False]
+    task = asyncio.current_task()
 
-    state = InterruptState()
-    scoring_task: asyncio.Task | None = asyncio.current_task()
+    def _handler(_sig: int, _frame: object) -> None:
+        if flag[0]:
+            if task and not task.done():
+                task.cancel()
+        else:
+            flag[0] = True
 
-    def _handler(_signum: int, _frame: object) -> None:
-        if state.stop_requested:
-            if scoring_task is not None and not scoring_task.done():
-                scoring_task.cancel()
-            return
-        state.stop_requested = True
-
-    old_handler = signal.signal(signal.SIGINT, _handler)
+    prev = signal.signal(signal.SIGINT, _handler)
     try:
-        yield state
+        yield flag
     finally:
-        signal.signal(signal.SIGINT, old_handler)
+        signal.signal(signal.SIGINT, prev)
 
 
 if TYPE_CHECKING:
@@ -232,7 +224,7 @@ async def _run_query_loop(
     with _graceful_interrupt() as interrupt:
         try:
             for i, qd in enumerate(dataset):
-                if interrupt.stop_requested:
+                if interrupt[0]:
                     logger.debug("Graceful stop after query %d/%d.", len(results), len(dataset))
                     break
 
@@ -272,7 +264,7 @@ async def _run_query_loop(
                         search_memory=_search_memory,
                         stale_data_observations=_stale_observations,
                         scorer=_scorer,
-                        stop_check=lambda: interrupt.stop_requested,
+                        stop_check=lambda: interrupt[0],
                     )
                     if step_taken == "rerun":
                         n_retried += 1
@@ -339,7 +331,7 @@ async def _run_query_loop(
 
     _log_scoring_summary(n_prior, n_reused, len(dataset), n_retried, n_probed, n_switched)
 
-    if interrupt.stop_requested:
+    if interrupt[0]:
         return QueryLoopResult(results, completed=False, stop_reason="graceful")
     return QueryLoopResult(results)
 
