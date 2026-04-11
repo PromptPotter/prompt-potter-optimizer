@@ -36,7 +36,34 @@ For academic optimization methods (DSPy/MIPROv2, GEPA, PromptWizard, adv-CoT, Pr
 | **Provider ecosystem** | 🟡 | 🟡 | 🟢 | Backend-agnostic (single BackendClient endpoint) | OpenAI-compatible API, HuggingFace local, vLLM | 50+ built-in (OpenAI, Anthropic, Groq, Bedrock, etc.) |
 | **CI/CD** | 🔴 | 🔴 | 🟢 | — | — | GitHub Actions, GitLab, Jenkins, Azure Pipelines, etc. |
 
+### Experiment mode (default)
+
+The cycle identity hashes only the **problem definition**:
+- `active_steps` — which pipeline nodes are active
+- `baseline_rendered` — the starting prompt
+- `dataset_pairs` — the evaluation questions
+
+Everything else is excluded (`TUNING_KEYS` in `lifecycle.py`):
+
+### Strict mode (for publication)
+
+Enable by adding `"strict_cycle_identity": true` to `campaign.json`:
+
+```json
+{
+  "campaign_config": {
+    "strict_cycle_identity": true,
+    ...
+  }
+}
+```
+
+
 ---
+
+
+
+
 
 ## Hyperparameter Reference
 
