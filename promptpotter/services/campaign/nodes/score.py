@@ -14,7 +14,7 @@ from promptpotter.models.query_result import QueryResult
 from promptpotter.services.metrics import compute_composite_score, count_degraded_queries
 
 if TYPE_CHECKING:
-    from promptpotter.models.scoring_env import ScoringEnv
+    from promptpotter.models.scoring import ScoringEnv
     from promptpotter.services.campaign.state import RunCallbacks
 
 logger = logging.getLogger(__name__)

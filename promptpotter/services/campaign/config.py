@@ -28,9 +28,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "CampaignConfig",
     "LoopConfig",
-    "PipelineConfigResult",
     "configure_and_apply_pipeline",
-    "configure_pipeline",
     "create_llm_client",
 ]
 
@@ -290,85 +288,6 @@ class LoopConfig(BaseModel):
 
 
 @dataclass
-class PipelineConfigResult:
-    """Result from ``configure_pipeline()``."""
-
-    pipeline_params: dict
-    active_nodes: list[str]
-    excluded_nodes: list[str]
-    filtered_schema: PipelineSchema | None = None
-
-
-def configure_pipeline(
-    pipeline_schema: PipelineSchema | None,
-    campaign_config: CampaignConfig,
-    experiment_extract: dict | None = None,
-) -> PipelineConfigResult:
-    """Build pipeline identity from live pipeline schema and campaign_config.
-
-    Uses *pipeline_schema* (from ``GET /pipeline``) as the source of
-    truth for node names, falling back to *experiment_extract* only when the schema
-    is unavailable.  Reads ``exclude_nodes`` and ``pipeline_overrides`` from
-    *campaign_config*.
-
-    The returned ``filtered_schema`` is the single source of truth for
-    pipeline identity: filtered to active nodes, with user overrides baked
-    into ``PipelineNode.current_config``.  ``pipeline_params`` is derived
-    from it via ``to_pipeline_params()`` and stored back into
-    *campaign_config* for downstream consumers.
-    """
-    from promptpotter.services.backend_client import extract_pipeline_config
-
-    exclude = campaign_config.get("exclude_nodes", [])
-    overrides = campaign_config.get("pipeline_overrides")
-
-    if pipeline_schema:
-        all_names = list(pipeline_schema.active_steps)
-    elif experiment_extract:
-        pipeline_config = extract_pipeline_config(experiment_extract)
-        all_names = [s["name"] for s in pipeline_config["steps"]]
-    else:
-        all_names = []
-
-    active = [n for n in all_names if n not in (exclude or [])]
-
-    # Filter schema to active nodes only
-    filtered = pipeline_schema
-    if pipeline_schema and exclude:
-        filtered = pipeline_schema.filter_to_steps(active)
-
-    # Validate and apply overrides — bake into schema's current_config
-    valid_overrides: dict[str, dict] = {}
-    if overrides:
-        for key, value in overrides.items():
-            if isinstance(value, dict) and key in active:
-                valid_overrides[key] = value
-            elif isinstance(value, dict):
-                logger.debug("configure_pipeline: skipping override for inactive node %r", key)
-            else:
-                logger.warning(
-                    "configure_pipeline: ignoring non-nested override %r=%r "
-                    '(use {"node_name": {"param": value}} format)',
-                    key,
-                    value,
-                )
-    if filtered and valid_overrides:
-        filtered = filtered.with_overrides(valid_overrides)
-
-    # Derive pipeline_params from the fully resolved schema
-    pipeline_params = filtered.to_pipeline_params() if filtered else {"steps": active}
-
-    campaign_config["pipeline_params"] = pipeline_params
-
-    return PipelineConfigResult(
-        pipeline_params=pipeline_params,
-        active_nodes=active,
-        excluded_nodes=list(exclude) if exclude else [],
-        filtered_schema=filtered,
-    )
-
-
-@dataclass
 class PreflightMetrics:
     """Computed display metrics for the preflight walkthrough."""
 
@@ -425,24 +344,68 @@ def configure_and_apply_pipeline(
     *,
     log: Callable[[str], None] = logger.info,
 ) -> dict:
-    """Configure pipeline, apply filtered schema to *session*, log summary.
+    """Build pipeline identity, apply filtered schema to *session*, log summary.
+
+    Uses *pipeline_schema* (from ``GET /pipeline``) as the source of
+    truth for node names, falling back to *experiment_extract* only when the
+    schema is unavailable.  Reads ``exclude_nodes`` and ``pipeline_overrides``
+    from *campaign_config*.
 
     Returns ``pipeline_params`` dict ready for evaluation.
     """
-    result = configure_pipeline(
-        session.pipeline_schema,
-        campaign_config,
-        experiment_extract=getattr(session, "experiment_extract", None),
-    )
+    from promptpotter.services.backend_client import extract_pipeline_config
 
-    if result.filtered_schema is not None:
-        session.pipeline_schema = result.filtered_schema
+    pipeline_schema = session.pipeline_schema
+    experiment_extract: dict | None = getattr(session, "experiment_extract", None)
+    exclude = campaign_config.get("exclude_nodes", [])
+    overrides = campaign_config.get("pipeline_overrides")
 
-    nodes_str = ", ".join(result.active_nodes)
-    excl_str = f"  Excluded: {', '.join(result.excluded_nodes)}" if result.excluded_nodes else ""
+    if pipeline_schema:
+        all_names = list(pipeline_schema.active_steps)
+    elif experiment_extract:
+        pipeline_config = extract_pipeline_config(experiment_extract)
+        all_names = [s["name"] for s in pipeline_config["steps"]]
+    else:
+        all_names = []
+
+    active = [n for n in all_names if n not in (exclude or [])]
+
+    # Filter schema to active nodes only
+    filtered = pipeline_schema
+    if pipeline_schema and exclude:
+        filtered = pipeline_schema.filter_to_steps(active)
+
+    # Validate and apply overrides — bake into schema's current_config
+    valid_overrides: dict[str, dict] = {}
+    if overrides:
+        for key, value in overrides.items():
+            if isinstance(value, dict) and key in active:
+                valid_overrides[key] = value
+            elif isinstance(value, dict):
+                logger.debug("configure_pipeline: skipping override for inactive node %r", key)
+            else:
+                logger.warning(
+                    "configure_pipeline: ignoring non-nested override %r=%r "
+                    '(use {"node_name": {"param": value}} format)',
+                    key,
+                    value,
+                )
+    if filtered and valid_overrides:
+        filtered = filtered.with_overrides(valid_overrides)
+
+    # Derive pipeline_params from the fully resolved schema
+    pipeline_params = filtered.to_pipeline_params() if filtered else {"steps": active}
+    campaign_config["pipeline_params"] = pipeline_params
+
+    if filtered is not None:
+        session.pipeline_schema = filtered
+
+    excluded_nodes = list(exclude) if exclude else []
+    nodes_str = ", ".join(active)
+    excl_str = f"  Excluded: {', '.join(excluded_nodes)}" if excluded_nodes else ""
     log(f"Active nodes: {nodes_str}{excl_str}")
 
-    return result.pipeline_params
+    return pipeline_params
 
 
 def create_llm_client(

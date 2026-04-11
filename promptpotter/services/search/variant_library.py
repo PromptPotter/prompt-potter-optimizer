@@ -15,7 +15,7 @@ __all__ = ["load_variant_library", "load_variant_library_rich"]
 
 @functools.lru_cache(maxsize=1)
 def _load_variant_library_raw() -> dict:
-    path = Path(__file__).parent / "prompt_variants.json"
+    path = Path(__file__).parents[2] / "config" / "prompt_variants.json"
     with open(path) as f:
         return json.load(f)
 

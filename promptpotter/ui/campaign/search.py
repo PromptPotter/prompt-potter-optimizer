@@ -8,7 +8,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.config.variant_library import load_variant_library_rich
 from promptpotter.models.pipeline_schema import PipelineSchema
 from promptpotter.services.search import (
     advise_scan_config as _advise_scan_config,
@@ -44,6 +43,7 @@ from promptpotter.services.search.scan_results import (
 from promptpotter.services.search.scan_results import (
     seed_campaign_from_scan as _seed_campaign_from_scan,
 )
+from promptpotter.services.search.variant_library import load_variant_library_rich
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
 from .display import (

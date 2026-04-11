@@ -23,21 +23,22 @@ class BackendConnection(BaseModel):
 
 
 class ExecutionResultItem(BaseModel):
-    """One query's result from a pipeline execution replay."""
+    """One query's result from a pipeline execution replay.
+
+    Connector-specific metadata belongs in ``query_fields`` (query context)
+    or ``pipeline_data`` (per-node outputs).
+    """
 
     query: str
-    bom_material: str | None = None
-    process: str | None = None
     query_fields: dict[str, Any] = Field(
         default_factory=dict,
-        description="Generic query metadata. Connector-specific fields ( populated per connector).",
+        description="Generic query metadata (populated per connector).",
     )
     ground_truth: str
     predicted: str
     confidence: float = 0.0
     ranked_candidates: list[dict[str, Any]] = Field(default_factory=list)
     latency_ms: float = 0.0
-    web_search_status: str | None = None
     pipeline_data: dict[str, Any] = Field(default_factory=dict)
     status: str = "success"
     error: str | None = None

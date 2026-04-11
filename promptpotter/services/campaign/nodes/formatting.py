@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.task_decomposition import TaskDecomposition
-from promptpotter.services.campaign.nodes.critique import summarize_warning_inventory
 
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
@@ -29,6 +28,8 @@ __all__ = [
     "classify_trajectory",
     "format_context_sections",
     "format_l2_intelligence",
+    "summarize_warning_inventory",
+    "warning_summary",
 ]
 
 
@@ -742,3 +743,62 @@ def candidate_summaries(candidates: list[dict]) -> list[dict]:
             summary["pipeline_params_override"] = pp_override
         summaries.append(summary)
     return summaries
+
+
+# ---------------------------------------------------------------------------
+# Warning inventory helpers (moved from critique.py to break circular dep)
+# ---------------------------------------------------------------------------
+
+
+def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
+    """Build a text summary of recurring warnings across rounds.
+
+    Groups queries by warning type and shows per-query hit/miss stats.
+    Returns empty string when no warnings are tracked.
+    """
+    # Collect queries that have any warnings
+    by_warning: dict[str, list[tuple[str, dict]]] = {}
+    for query, entry in tracker.items():
+        for wtype, _count in entry.get("warnings", {}).items():
+            by_warning.setdefault(wtype, []).append((query, entry))
+
+    if not by_warning:
+        return ""
+
+    max_rounds = max(
+        (e.get("rounds_seen", 0) for e in tracker.values()),
+        default=0,
+    )
+    lines = [f"## RECURRING PIPELINE WARNINGS (across {max_rounds} rounds)"]
+    for wtype, entries in sorted(
+        by_warning.items(),
+        key=lambda x: -len(x[1]),
+    ):
+        lines.append(f"  {wtype} — {len(entries)} queries affected:")
+        # Sort by warning frequency descending
+        for query, entry in sorted(
+            entries,
+            key=lambda x: -x[1]["warnings"].get(wtype, 0),
+        )[:10]:
+            wcount = entry["warnings"].get(wtype, 0)
+            seen = entry["rounds_seen"]
+            hits = entry["hits"]
+            lines.append(f"    {query[:70]}  ({wcount}/{seen} rounds, {hits} hits)")
+    return "\n".join(lines)
+
+
+def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
+    """Return ``(warned_count, top_warning_type)`` from the warning inventory.
+
+    ``warned_count`` is the number of queries with at least one warning.
+    ``top_warning_type`` is the most frequent warning type, or ``""`` if none.
+    """
+    if not tracker:
+        return 0, ""
+    warned_count = sum(1 for e in tracker.values() if e.get("warnings"))
+    all_wtypes: dict[str, int] = {}
+    for e in tracker.values():
+        for wt, c in e.get("warnings", {}).items():
+            all_wtypes[wt] = all_wtypes.get(wt, 0) + c
+    top_warning = max(all_wtypes, key=all_wtypes.get) if all_wtypes else ""  # type: ignore[arg-type]
+    return warned_count, top_warning

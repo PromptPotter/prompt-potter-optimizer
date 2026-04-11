@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.config.variant_library import load_variant_library
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.campaign.campaign_setup import (
@@ -24,6 +23,7 @@ from promptpotter.services.campaign.mgmt import (
     save_campaign_winner,
 )
 from promptpotter.services.project_store import ProjectStore
+from promptpotter.services.search.variant_library import load_variant_library
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig

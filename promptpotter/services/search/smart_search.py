@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.scoring_env import ScoringEnv
+from promptpotter.models.scoring import ScoringEnv
 from promptpotter.services.scoring.search_point_scorer import score_search_point
 from promptpotter.services.search.failure_group_analysis import preview as _preview
 from promptpotter.shared.constants import (
@@ -440,7 +440,7 @@ def load_filtered_variant_library(
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Load variant library, filtering to active pipeline steps when possible."""
-    from promptpotter.config.variant_library import load_variant_library
+    from promptpotter.services.search.variant_library import load_variant_library
 
     lib = load_variant_library()
     if pipeline_params and pipeline_schema:

@@ -114,7 +114,7 @@ async def run_baseline_scoring(
     Raises:
         RuntimeError: If no evaluation data is available.
     """
-    from promptpotter.models.scoring_env import ScoringEnv
+    from promptpotter.models.scoring import ScoringEnv
     from promptpotter.services.scoring.search_point_scorer import score_search_point
     from promptpotter.shared.errors import graceful
     from promptpotter.shared.scoring import compile_scorer

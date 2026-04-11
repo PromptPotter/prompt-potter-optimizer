@@ -54,7 +54,7 @@ def _graceful_interrupt():
 
 if TYPE_CHECKING:
     from promptpotter.models.escalation import EscalationSignal
-    from promptpotter.models.scoring_env import QueryRunner, ScoringEnv
+    from promptpotter.models.scoring import QueryRunner, ScoringEnv
     from promptpotter.models.search_point import JobSearchPoint
     from promptpotter.services.project_store import ProjectStore
 

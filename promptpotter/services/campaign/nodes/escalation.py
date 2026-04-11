@@ -239,7 +239,7 @@ async def _do_l2_transition(
     """Perform L2 refine_strategy transition. Updates state in-place."""
     from promptpotter.services import llm_client as _llm_client
     from promptpotter.services.campaign.nodes import layer_transitions
-    from promptpotter.services.campaign.nodes.critique import warning_summary
+    from promptpotter.services.campaign.nodes.formatting import warning_summary
     from promptpotter.services.tracing.observability_logger import observed_node
 
     assert state.current_sp is not None

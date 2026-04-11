@@ -1,6 +1,6 @@
 """Tests for prompt template variable interpolation."""
 
-from promptpotter.shared.prompt_interpolation import (
+from promptpotter.services.scoring.sample_measurement import (
     extract_template_variables,
     interpolate_pipeline_params,
     interpolate_prompt,
