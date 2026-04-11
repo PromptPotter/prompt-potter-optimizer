@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.campaign.campaign_data import extract_campaign_baseline
-from promptpotter.services.campaign.campaign_setup import BackendContext
+from promptpotter.services.campaign.campaign_setup import SessionEnv
 from promptpotter.services.campaign.config import (
-    RunConfig,
+    LoopConfig,
 )
 from promptpotter.services.campaign.config import (
     configure_pipeline as _svc_configure_pipeline,
@@ -46,7 +46,7 @@ __all__ = [
 
 
 def configure_and_apply_pipeline(
-    session: BackendContext,
+    session: SessionEnv,
     campaign_config: CampaignConfig,
     *,
     log: Callable[[str], None] = logger.info,
@@ -77,7 +77,7 @@ def configure_and_apply_pipeline(
 
 
 async def prepare_scoring_context(
-    session: BackendContext,
+    session: SessionEnv,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
     *,
@@ -108,20 +108,20 @@ async def prepare_scoring_context(
 
 
 # ---------------------------------------------------------------------------
-# 3. Build RunConfig from session
+# 3. Build LoopConfig from session
 # ---------------------------------------------------------------------------
 
 
 def build_run_config(
     campaign_config: CampaignConfig,
-    session: BackendContext,
+    session: SessionEnv,
     *,
     scan_context: ScanContext | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
-) -> RunConfig:
-    """Assemble a ``RunConfig`` from *campaign_config* and *session* context."""
-    return RunConfig.from_campaign_config(
+) -> LoopConfig:
+    """Assemble a ``LoopConfig`` from *campaign_config* and *session* context."""
+    return LoopConfig.from_campaign_config(
         campaign_config,
         backend_id=session.backend_id,
         project_root=str(session.store.base_dir),
@@ -159,7 +159,7 @@ async def run_optimization(
     dataset: list,
     campaign_config: CampaignConfig,
     *,
-    session: BackendContext,
+    session: SessionEnv,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
@@ -231,7 +231,7 @@ async def run_optimization(
 
 
 def load_scan_context(
-    session: BackendContext,
+    session: SessionEnv,
     session_id: str,
     scan_variants: dict,
     baseline_acc: float,
@@ -267,7 +267,7 @@ async def run_scan_and_persist(
     scan_variants: dict,
     dataset: list,
     *,
-    session: BackendContext,
+    session: SessionEnv,
     scan_sample_size: int = 0,
     experiment_id: str = "",
     session_id: str = "",

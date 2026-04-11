@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from promptpotter.services.search.scan_results import ScanContext
 
 __all__ = [
-    "ContextData",
+    "L1PromptData",
     "L2IntelligenceData",
     "assess_candidate_diversity",
     "build_candidate_comparison",
@@ -33,7 +33,7 @@ __all__ = [
 
 
 @dataclass
-class ContextData:
+class L1PromptData:
     """Data bundle for ``format_context_sections()``."""
 
     task_context: TaskDecomposition | None = None
@@ -63,7 +63,7 @@ def _format_search_memory_block(smc: dict | None, key_labels: dict[str, str]) ->
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
-def format_context_sections(ctx: ContextData) -> str:
+def format_context_sections(ctx: L1PromptData) -> str:
     """Build all optional context sections as a single string.
 
     Each non-empty section is a titled block. Returned string is empty

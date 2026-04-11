@@ -51,13 +51,13 @@ def _make_mock_session_store(tmp_path: Path):
 def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Path) -> None:
     """Emitter lifecycle (init + on_phase + on_query + on_candidate + on_round + finalize)
     must produce all CAMPAIGN_SESSION_ARTIFACTS."""
-    from promptpotter.services.campaign.config import RunConfig
+    from promptpotter.services.campaign.config import LoopConfig
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
     from promptpotter.services.campaign.state import PhaseEvent, RoundResult
 
     store = _make_mock_session_store(tmp_path)
 
-    config = RunConfig(
+    config = LoopConfig(
         backend_id="test_backend",
         session_id="test_session",
         max_rounds=5,

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.scoring_context import ScoringContext
+from promptpotter.models.scoring_env import ScoringEnv
 from promptpotter.services.scoring_searchpoint import score_search_point
 from promptpotter.services.search.failure_group_analysis import preview as _preview
 from promptpotter.shared.constants import (
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.campaign_setup import BackendContext
+    from promptpotter.services.campaign.campaign_setup import SessionEnv
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ def build_axis_profiles(
 
 def make_scoring_fn(
     dataset: list,
-    ctx: ScoringContext,
+    ctx: ScoringEnv,
     get_params: Callable[[], dict],
     on_result: Callable | None = None,
 ) -> Callable:
@@ -528,7 +528,7 @@ async def adaptive_search(
     baseline_opt: OptSearchPoint,
     variant_library: dict,
     dataset: list,
-    session: BackendContext,
+    session: SessionEnv,
     axis_profiles: list[dict],
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
@@ -596,7 +596,7 @@ async def adaptive_search(
 
     from promptpotter.shared.scoring import compile_scorer
 
-    _scan_ctx = ScoringContext(
+    _scan_ctx = ScoringEnv(
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,

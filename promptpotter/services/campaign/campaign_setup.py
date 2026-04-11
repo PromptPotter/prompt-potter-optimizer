@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "BackendContext",
+    "SessionEnv",
     "apply_stored_overrides",
     "diff_campaign_config",
     "init_services",
@@ -45,7 +45,7 @@ __all__ = [
 
 
 @dataclass
-class BackendContext:
+class SessionEnv:
     """Return value from ``init_services()``."""
 
     store: ProjectStore
@@ -195,7 +195,7 @@ async def init_services(
     dataset_type: str | None = None,
     local_eval_token: str | None = None,
     on_status: Callable[[str], None] | None = None,
-) -> BackendContext:
+) -> SessionEnv:
     """Initialize store, client, pipeline schema, and load eval data.
 
     All evaluation goes through :class:`BackendClient` by default.
@@ -261,7 +261,7 @@ async def init_services(
             )
         )
 
-    base = BackendContext(
+    base = SessionEnv(
         store=store,
         backend_id=backend_id,
         experiment_id=experiment_id,
@@ -499,9 +499,9 @@ def diff_campaign_config(
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, dict]:
     """Compute parameter differences between stored and current campaign config."""
-    from promptpotter.services.campaign.config import RunConfig
+    from promptpotter.services.campaign.config import LoopConfig
 
-    current = RunConfig.from_campaign_config(
+    current = LoopConfig.from_campaign_config(
         campaign_config,
         pipeline_schema=pipeline_schema,
     ).model_dump()

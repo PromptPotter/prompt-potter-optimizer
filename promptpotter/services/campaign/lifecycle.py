@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.config import CampaignConfig, RunConfig
+from promptpotter.services.campaign.config import CampaignConfig, LoopConfig
 from promptpotter.shared.constants import DATASET_NAME
 from promptpotter.shared.errors import graceful
 
@@ -60,7 +60,7 @@ TUNING_KEYS = frozenset(
 
 
 def cycle_config_identity(
-    config: RunConfig,
+    config: LoopConfig,
     baseline_rendered: str,
     dataset: list[dict],
     *,
@@ -127,7 +127,7 @@ def resolve_active_campaign_id(
     notebook/CLI configuration.
     """
     try:
-        config = RunConfig.from_campaign_config(
+        config = LoopConfig.from_campaign_config(
             campaign_config,
             pipeline_schema=pipeline_schema,
         )
@@ -143,7 +143,7 @@ def resolve_active_campaign_id(
 
 
 def init_campaign(
-    config: RunConfig,
+    config: LoopConfig,
     dataset: list[dict],
     current_ps: dict,
     baseline_prompt_fields: dict | None,
@@ -258,7 +258,7 @@ def init_campaign(
 
 
 def _validate_config_match(
-    config: RunConfig,
+    config: LoopConfig,
     stored_cfg: dict,
     cycle_id: str,
 ) -> None:
@@ -294,7 +294,7 @@ def _validate_config_match(
 def finalize_campaign(
     campaign_store,
     cycle_id: str | None,
-    config: RunConfig,
+    config: LoopConfig,
     state: LoopState,
     stop_reason: str,
     finished_at: str,

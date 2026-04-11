@@ -17,8 +17,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.services.campaign.campaign_setup import BackendContext
-from promptpotter.services.campaign.config import RunConfig
+from promptpotter.services.campaign.campaign_setup import SessionEnv
+from promptpotter.services.campaign.config import LoopConfig
 from promptpotter.services.campaign.cycle_init import init_cycle_state
 from promptpotter.services.campaign.escalation import escalate_l2
 from promptpotter.services.campaign.lifecycle import finalize_campaign
@@ -53,7 +53,7 @@ __all__ = ["run_optimization"]
 
 async def _handle_post_probe(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     round_num: int,
     round_data: list[dict],
     on_phase: Callable[[PhaseEvent], None] | None,
@@ -78,7 +78,7 @@ async def _handle_post_probe(
 
 async def _handle_escalation_signal(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     round_result: RoundResult,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
@@ -178,7 +178,7 @@ async def _handle_escalation_signal(
 def _checkpoint_round(
     campaign_store: "CampaignStore",
     cycle_id: str,
-    config: RunConfig,
+    config: LoopConfig,
     state: LoopState,
     round_result: RoundResult,
     round_num: int,
@@ -210,7 +210,7 @@ def _checkpoint_round(
 
 async def _check_stopping_conditions(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     obs_campaign_id: str,
@@ -245,7 +245,7 @@ async def _check_stopping_conditions(
 async def run_optimization(
     instruction: str,
     dataset: list[dict[str, Any]],
-    config: RunConfig,
+    config: LoopConfig,
     *,
     baseline_prompt_fields: dict | None = None,
     baseline_accuracy: float = 0.0,
@@ -255,7 +255,7 @@ async def run_optimization(
     scan_context: ScanContext | None = None,
     cycle_id: str | None = None,
     experiment_id: str = "",
-    session: BackendContext | None = None,
+    session: SessionEnv | None = None,
 ) -> RunResult:
     """Run iterative optimization with feedback cycling.
 

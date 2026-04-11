@@ -14,7 +14,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.scoring_context import ScoringContext
+from promptpotter.models.scoring_env import ScoringEnv
 from promptpotter.models.search_point import JobSearchPoint
 from promptpotter.services.scoring_searchpoint import score_search_point
 from promptpotter.services.search.failure_group_analysis import preview as _preview
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.campaign_setup import BackendContext
+    from promptpotter.services.campaign.campaign_setup import SessionEnv
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ async def sensitivity_scan(
     baseline: JobSearchPoint,
     scan_variants: dict[str, list | dict],
     dataset: list,
-    session: BackendContext,
+    session: SessionEnv,
     *,
     baseline_opt: OptSearchPoint | None = None,
     sample_size: int = 0,
@@ -61,7 +61,7 @@ async def sensitivity_scan(
             - Prompt fields: ``{"thinking_style": ["a", "b"]}`` (list → prompt)
             - Pipeline params: ``{"web_search": {"max_sites": [3, 5]}}`` (dict → node)
         dataset: Full evaluation dataset.
-        session: BackendContext bundling backend_client, store, backend_id.
+        session: SessionEnv bundling backend_client, store, backend_id.
         baseline_opt: OptSearchPoint for prompt-field perturbation. Required
             when scan_variants contains prompt_field axes.
         sample_size: If >0, subsample dataset to this many queries
@@ -87,10 +87,10 @@ async def sensitivity_scan(
     if sample_size > 0 and sample_size < len(dataset):
         dataset = random.Random(42).sample(dataset, sample_size)
 
-    # Build ScoringContext once for all scan evaluations
+    # Build ScoringEnv once for all scan evaluations
     from promptpotter.shared.scoring import compile_scorer
 
-    scan_ctx = ScoringContext(
+    scan_ctx = ScoringEnv(
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,

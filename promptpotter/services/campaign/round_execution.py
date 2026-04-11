@@ -14,10 +14,10 @@ from promptpotter.models.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from promptpotter.services import llm_client as _llm_client
-from promptpotter.services.campaign.config import RunConfig
+from promptpotter.services.campaign.config import LoopConfig
 from promptpotter.services.campaign.critique import (
     CritiqueAgent,
-    CritiqueContext,
+    RoundSnapshot,
     format_critique_for_prompt,
     sample_thinking_styles,
     update_query_tracker,
@@ -70,7 +70,7 @@ class PauseForReviewError(Exception):
 async def _generate_or_load_candidates(
     round_num: int,
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     campaign_store: CampaignStore | None,
     cycle_id: str | None,
     on_phase=None,
@@ -179,7 +179,7 @@ async def _run_critique(
     scoring_result: L1ScoringResult,
     round_num: int,
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
 ) -> str:
     """Run critique analysis on evaluation results. Returns formatted critique text."""
     if not config.enable_critique or not scoring_result.winner_results:
@@ -188,7 +188,7 @@ async def _run_critique(
     crit_llm = _llm_client.get_llm_client()
     agent = CritiqueAgent(crit_llm, model=config.model)
 
-    cctx = CritiqueContext.from_round_state(
+    cctx = RoundSnapshot.from_round_state(
         state,
         scoring_result,
         config,
@@ -204,7 +204,7 @@ async def _score_and_select(
     round_num: int,
     state: LoopState,
     eval_dataset: list[dict],
-    config: RunConfig,
+    config: LoopConfig,
     callbacks: RunCallbacks,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
@@ -276,7 +276,7 @@ async def execute_round(
     round_num: int,
     state: LoopState,
     eval_dataset: list[dict],
-    config: RunConfig,
+    config: LoopConfig,
     obs_campaign_id: str,
     campaign_store: CampaignStore | None,
     cycle_id: str | None,

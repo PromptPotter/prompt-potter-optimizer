@@ -12,7 +12,7 @@ from promptpotter.services.campaign.campaign_data import (
     build_all_index_terms,
 )
 from promptpotter.services.campaign.campaign_setup import (
-    BackendContext,
+    SessionEnv,
     save_campaign_winner,
 )
 from promptpotter.services.campaign.campaign_setup import (
@@ -62,7 +62,7 @@ __all__ = [
 async def decompose_task_context(
     task_description: str,
     campaign_config: CampaignConfig,
-    session: BackendContext,
+    session: SessionEnv,
     *,
     llm_client: LLMClientBase | None = None,
     model: str | None = None,
@@ -153,7 +153,7 @@ def dev_reload() -> None:
             importlib.reload(sys.modules[mod])
 
 
-async def show_pipeline_snapshot(session: BackendContext) -> dict:
+async def show_pipeline_snapshot(session: SessionEnv) -> dict:
     """Fetch and display full pipeline config from backend.
 
     Prints: pipeline name/version, node list, resolved schemas/prompts,
@@ -190,7 +190,7 @@ async def show_pipeline_snapshot(session: BackendContext) -> dict:
     return config
 
 
-def configure_pipeline(session: BackendContext, campaign_config: CampaignConfig) -> dict:
+def configure_pipeline(session: SessionEnv, campaign_config: CampaignConfig) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
     Delegates to shared orchestration and adds display-specific tags.
@@ -216,7 +216,7 @@ async def init_services(
     dataset_name: str | None = None,
     dataset_type: str | None = None,
     local_eval_token: str | None = None,
-) -> BackendContext:
+) -> SessionEnv:
     """Initialize store, client, and load experiment data.
 
     All evaluation goes through :class:`BackendClient` by default.
@@ -313,7 +313,7 @@ async def show_backend_status(client) -> dict:
 
 
 async def prepare_scoring_context(
-    session: BackendContext,
+    session: SessionEnv,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = True,

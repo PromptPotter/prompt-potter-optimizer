@@ -52,7 +52,7 @@ def _graceful_interrupt():
 
 
 if TYPE_CHECKING:
-    from promptpotter.models.scoring_context import QueryRunner, ScoringContext
+    from promptpotter.models.scoring_env import QueryRunner, ScoringEnv
     from promptpotter.models.search_point import JobSearchPoint
     from promptpotter.services.campaign.escalation import EscalationSignal
     from promptpotter.services.project_store import ProjectStore
@@ -184,7 +184,7 @@ async def _run_query_loop(
     *,
     prior_results: dict[str, QueryResult] | None = None,
     on_result: Callable[[QueryResult, int, int], None] | None = None,
-    ctx: ScoringContext | None = None,
+    ctx: ScoringEnv | None = None,
     degradation_checks: list | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
@@ -363,7 +363,7 @@ def _load_prior_results(
 async def score_search_point(
     search_point: JobSearchPoint,
     dataset: list,
-    ctx: ScoringContext,
+    ctx: ScoringEnv,
     *,
     label: str = "Eval",
     on_result: Callable[[QueryResult, int, int], None] | None = None,

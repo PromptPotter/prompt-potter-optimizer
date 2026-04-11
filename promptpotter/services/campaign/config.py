@@ -1,7 +1,7 @@
-"""Campaign configuration — CampaignConfig, RunConfig, pipeline setup, LLM client factory.
+"""Campaign configuration — CampaignConfig, LoopConfig, pipeline setup, LLM client factory.
 
 ``CampaignConfig`` is the typed schema for the ``campaign_config`` dict
-that flows from notebooks / CLI through to services.  ``RunConfig`` is
+that flows from notebooks / CLI through to services.  ``LoopConfig`` is
 the Pydantic model for the optimization loop.  ``configure_pipeline()``
 and ``create_llm_client()`` are factory helpers.
 """
@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CampaignConfig",
+    "LoopConfig",
     "PipelineConfigResult",
-    "RunConfig",
     "configure_pipeline",
     "create_llm_client",
 ]
@@ -99,7 +99,7 @@ class CampaignConfig(TypedDict, total=False):
     scoring: str
 
 
-class RunConfig(BaseModel):
+class LoopConfig(BaseModel):
     """Configuration for feedback cycling."""
 
     model_config = {"arbitrary_types_allowed": True}
@@ -237,10 +237,10 @@ class RunConfig(BaseModel):
         pipeline_schema: PipelineSchema | None = None,
         scan_context: ScanContext | None = None,
         task_context: TaskDecomposition | dict | None = None,
-    ) -> RunConfig:
+    ) -> LoopConfig:
         """Build from the notebook's ``campaign_config`` dict.
 
-        Uses RunConfig field defaults for any missing keys — a minimal
+        Uses LoopConfig field defaults for any missing keys — a minimal
         connector profile (e.g. just ``exclude_nodes``) is valid input.
         ``pipeline_schema`` should be the filtered schema with overrides
         already baked in (from ``configure_pipeline()``).
@@ -380,12 +380,12 @@ class PreflightMetrics:
 
 
 def compute_preflight_metrics(
-    config: RunConfig,
+    config: LoopConfig,
     dataset_size: int,
     exclude_nodes: list[str] | None = None,
     has_scan_context: bool = False,
 ) -> PreflightMetrics:
-    """Derive display-ready metrics from RunConfig and dataset size."""
+    """Derive display-ready metrics from LoopConfig and dataset size."""
     eff_queries = config.sp_budget_ttest
     queries_label = f"{config.sp_budget_ttest} of {dataset_size}"
 

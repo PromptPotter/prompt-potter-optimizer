@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.services.campaign.campaign_setup import BackendContext, load_baseline_prompt
+from promptpotter.services.campaign.campaign_setup import SessionEnv, load_baseline_prompt
 from promptpotter.services.campaign.config import CampaignConfig
 from promptpotter.shared.constants import DATASET_NAME
 
@@ -86,7 +86,7 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
 async def run_baseline_scoring(
     baseline: OptSearchPoint,
     dataset: list,
-    session: BackendContext,
+    session: SessionEnv,
     pipeline_params: dict | None = None,
     experiment_id: str = "",
     on_result: Callable | None = None,
@@ -100,7 +100,7 @@ async def run_baseline_scoring(
         baseline: Baseline OptSearchPoint.
         dataset: Evaluation data. If empty and store+experiment_id are
             provided, attempts to load from store.
-        session: BackendContext bundling backend_client, store, backend_id, index_terms.
+        session: SessionEnv bundling backend_client, store, backend_id, index_terms.
         pipeline_params: Optional pipeline parameter overrides.
         experiment_id: Experiment to load eval data from if dataset is empty.
         on_result: Optional callback for progress reporting.
@@ -114,7 +114,7 @@ async def run_baseline_scoring(
     Raises:
         RuntimeError: If no evaluation data is available.
     """
-    from promptpotter.models.scoring_context import ScoringContext
+    from promptpotter.models.scoring_env import ScoringEnv
     from promptpotter.services.scoring_searchpoint import score_search_point
     from promptpotter.shared.errors import graceful
     from promptpotter.shared.scoring import compile_scorer
@@ -154,7 +154,7 @@ async def run_baseline_scoring(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
-    ctx = ScoringContext(
+    ctx = ScoringEnv(
         backend_client=backend_client,
         store=store,
         backend_id=backend_id,

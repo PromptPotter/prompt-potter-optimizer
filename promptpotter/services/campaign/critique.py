@@ -24,7 +24,7 @@ from promptpotter.shared.errors import is_error_result
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.models.query_result import QueryResult
-    from promptpotter.services.campaign.config import RunConfig
+    from promptpotter.services.campaign.config import LoopConfig
     from promptpotter.services.campaign.state import LoopState
     from promptpotter.services.llm_client import LLMClientBase
 
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CritiqueAgent",
-    "CritiqueContext",
+    "RoundSnapshot",
     "assemble_critique_sections",
     "candidate_keys_from_schema",
     "extract_warning_types",
@@ -48,7 +48,7 @@ __all__ = [
 
 
 @dataclass
-class CritiqueContext:
+class RoundSnapshot:
     """Bundles current-round results and round history for diagnostic analysis."""
 
     results: list[QueryResult]
@@ -84,11 +84,11 @@ class CritiqueContext:
         cls,
         state: LoopState,
         scoring_result: L1ScoringResult,
-        config: RunConfig,
+        config: LoopConfig,
         *,
         round_num: int,
         search_memory_context: dict | None = None,
-    ) -> CritiqueContext:
+    ) -> RoundSnapshot:
         """Build from loop state, scoring result, and config.
 
         Computes cross-candidate diff and trajectory classification,
@@ -277,7 +277,7 @@ def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
     return warned_count, top_warning
 
 
-def _summary_section(ctx: CritiqueContext) -> str:
+def _summary_section(ctx: RoundSnapshot) -> str:
     total = len(ctx.results)
     return (
         f"## EVALUATION SUMMARY\n"
@@ -543,7 +543,7 @@ def _success_details_section(results: list[QueryResult]) -> str:
     return "\n".join(lines)
 
 
-def assemble_critique_sections(ctx: CritiqueContext) -> str:
+def assemble_critique_sections(ctx: RoundSnapshot) -> str:
     """Build stat-rich sections for the critique template.
 
     Each section is computed by a dedicated helper; this function orchestrates
@@ -649,7 +649,7 @@ class CritiqueAgent:
         self.llm_client = llm_client
         self.model = model
 
-    async def run(self, ctx: CritiqueContext) -> dict:
+    async def run(self, ctx: RoundSnapshot) -> dict:
         """Build critique from pipeline stats + LLM analysis.
 
         Returns dict with keys: positive_critique, negative_critique,

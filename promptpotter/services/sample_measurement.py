@@ -22,7 +22,7 @@ from promptpotter.shared.prompt_interpolation import interpolate_pipeline_params
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.models.scoring_context import QueryRunner
+    from promptpotter.models.scoring_env import QueryRunner
     from promptpotter.services.store.intermediate_cache import IntermediateCache
 
 _comparator = ExactMatchComparator({"strip": True})

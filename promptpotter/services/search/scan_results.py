@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.campaign_setup import BackendContext
+    from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.llm_client import LLMClientBase
     from promptpotter.services.project_store import ProjectStore
@@ -47,7 +47,7 @@ async def decompose_scan_baseline(
     llm_model: str,
     *,
     pipeline_params: dict | None = None,
-    session: BackendContext | None = None,
+    session: SessionEnv | None = None,
     scan_variants: dict | None = None,
     force_restructure: bool = False,
     pipeline_schema: PipelineSchema | None = None,

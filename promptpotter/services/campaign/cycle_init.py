@@ -14,10 +14,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.scoring_context import ScoringContext
+from promptpotter.models.scoring_env import ScoringEnv
 from promptpotter.models.task_decomposition import TaskDecomposition
-from promptpotter.services.campaign.campaign_setup import BackendContext
-from promptpotter.services.campaign.config import RunConfig
+from promptpotter.services.campaign.campaign_setup import SessionEnv
+from promptpotter.services.campaign.config import LoopConfig
 from promptpotter.services.campaign.critique import sample_thinking_styles
 from promptpotter.services.campaign.lifecycle import init_campaign
 from promptpotter.services.campaign.state import (
@@ -56,7 +56,7 @@ class CycleInit(NamedTuple):
 
 
 def _build_baseline_state(
-    config: RunConfig,
+    config: LoopConfig,
     baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
     baseline_results: list | None,
@@ -120,7 +120,7 @@ def _build_baseline_state(
 
 def _restore_from_checkpoint(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     campaign_store: CampaignStore,
     cycle_id: str,
     resumed_from_round: int,
@@ -163,16 +163,16 @@ def _restore_from_checkpoint(
 
 def _setup_scoring_context(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     instruction: str,
     baseline_osp: OptSearchPoint,
     backend_client: BackendClient,
     obs: Any,
     experiment_id: str,
     cycle_id: str | None,
-    session: BackendContext | None = None,
+    session: SessionEnv | None = None,
 ) -> list:
-    """Wire up ScoringContext on state and build escalation checks.
+    """Wire up ScoringEnv on state and build escalation checks.
 
     Returns:
         degradation_checks list.
@@ -180,7 +180,7 @@ def _setup_scoring_context(
     from promptpotter.shared.scoring import compile_scorer
 
     _store = session.store if session else None
-    state.scoring_ctx = ScoringContext(
+    state.scoring_ctx = ScoringEnv(
         backend_client=backend_client,
         store=_store,
         backend_id=config.backend_id,
@@ -220,7 +220,7 @@ def _setup_scoring_context(
 async def init_cycle_state(
     instruction: str,
     dataset: list[dict[str, Any]],
-    config: RunConfig,
+    config: LoopConfig,
     baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
     baseline_results: list | None,
@@ -228,7 +228,7 @@ async def init_cycle_state(
     langfuse_session_id: str | None,
     cycle_id: str | None,
     experiment_id: str,
-    session: BackendContext | None,
+    session: SessionEnv | None,
     started_at: str,
 ) -> CycleInit:
     """Initialize all cycle state: baseline, resume, obs, eval context."""
@@ -258,7 +258,7 @@ async def init_cycle_state(
     )
 
     if session is None:
-        raise ValueError("session (BackendContext) is required for init_cycle_state")
+        raise ValueError("session (SessionEnv) is required for init_cycle_state")
     _bc = session.backend_client
     _index_terms = session.index_terms or None
     if _index_terms:

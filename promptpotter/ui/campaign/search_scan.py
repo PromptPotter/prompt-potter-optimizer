@@ -21,7 +21,7 @@ from .display import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.campaign_setup import BackendContext
+    from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ async def sensitivity_scan(
     baseline,
     scan_variants: dict[str, list | dict],
     dataset: list,
-    session: BackendContext,
+    session: SessionEnv,
     *,
     baseline_opt: OptSearchPoint | None = None,
     sample_size: int = 0,
@@ -233,7 +233,7 @@ async def adaptive_search(
     baseline_ps,
     variant_library: dict,
     dataset: list,
-    session: BackendContext,
+    session: SessionEnv,
     axis_profiles: list[dict] | None = None,
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
@@ -378,7 +378,7 @@ async def run_sensitivity_scan(
     dataset: list,
     *,
     scan_sample_size: int = 0,
-    session: BackendContext | None = None,
+    session: SessionEnv | None = None,
     experiment_id: str = "",
     session_id: str = "",
 ):

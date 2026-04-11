@@ -1,4 +1,4 @@
-"""Scoring context — infrastructure bundle for dataset scoring calls."""
+"""Scoring environment — infrastructure bundle for dataset scoring calls."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class ScoringContext:
+class ScoringEnv:
     """Infrastructure bundle shared across scoring and measurement calls.
 
     Pure infrastructure — does NOT carry search-space dimensions

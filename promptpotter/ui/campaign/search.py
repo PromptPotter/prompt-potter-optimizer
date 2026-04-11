@@ -59,7 +59,7 @@ from .display import (
 from .setup import setup_llm
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.campaign_setup import BackendContext
+    from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ async def decompose_scan_baseline(
     *,
     scan_variants: dict | None = None,
     force_restructure: bool = False,
-    session: BackendContext | None = None,
+    session: SessionEnv | None = None,
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
@@ -162,7 +162,7 @@ async def decompose_scan_baseline(
 
 
 def show_variant_library(
-    session: BackendContext | None = None,
+    session: SessionEnv | None = None,
     *,
     axes: list[str] | None = None,
     source: str | None = None,
@@ -215,7 +215,7 @@ def resolve_scan_variants(
     scan_variants: dict,
     pipeline_schema: PipelineSchema | None = None,
     *,
-    session: BackendContext | None = None,
+    session: SessionEnv | None = None,
 ) -> tuple[dict, dict[str, list[str]]]:
     """Resolve schema mutation tuples and display the resolved variants.
 
@@ -272,7 +272,7 @@ def resolve_scan_variants(
 
 def preview_advisor_prompt(
     campaign_config: CampaignConfig | None = None,
-    session: BackendContext | None = None,
+    session: SessionEnv | None = None,
     *,
     task_description: str | dict = "",
     raw: bool = False,
@@ -374,7 +374,7 @@ def _display_scan_advisory(advisory: dict) -> None:
 
 async def scan_advisor(
     campaign_config: CampaignConfig,
-    session: BackendContext,
+    session: SessionEnv,
     *,
     task_description: str | dict = "",
     model: str = "",
@@ -439,7 +439,7 @@ async def scan_advisor(
 
 async def run_scan_advisor(
     campaign_config: CampaignConfig,
-    session: BackendContext,
+    session: SessionEnv,
     *,
     task_description: str | dict = "",
     model: str = "",
@@ -779,7 +779,7 @@ async def resume_or_build_diagnostic(
     campaign_config: CampaignConfig,
     baseline,
     baseline_results: list,
-    session: BackendContext,
+    session: SessionEnv,
     dataset: list,
     scan_variants: dict | None = None,
 ) -> tuple[str, object, list, list, dict]:
@@ -928,7 +928,7 @@ def seed_campaign_from_scan(
     return result.best_sp
 
 
-def show_scan_analytics(scan_df, axis_profiles, session: BackendContext):
+def show_scan_analytics(scan_df, axis_profiles, session: SessionEnv):
     """Display scan leaderboard and query difficulty if results are available.
 
     Returns difficulty_df (or None if scan_df is empty/None).

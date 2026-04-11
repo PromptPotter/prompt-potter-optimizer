@@ -17,7 +17,7 @@ from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.pipeline_schema import PipelineSchema
 from promptpotter.models.query_result import QueryResult
 from promptpotter.services.campaign.formatting import (
-    ContextData,
+    L1PromptData,
     format_context_sections,
 )
 from promptpotter.services.llm_client import LLMClientBase
@@ -29,7 +29,7 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
-    from promptpotter.models.scoring_context import ScoringContext
+    from promptpotter.models.scoring_env import ScoringEnv
     from promptpotter.services.campaign.state import RunCallbacks
     from promptpotter.services.search.scan_results import ScanContext
 
@@ -153,7 +153,7 @@ async def l1_generate(
         "n_queries": str(len(current_results)),
         "rendered_prompt": opt_sp.render(),
         "context_sections": format_context_sections(
-            ContextData(
+            L1PromptData(
                 task_context=opt_sp.task_context or None,
                 critique_text=opt_sp.critique_text,
                 l2_directive=opt_sp.l2_directive,
@@ -389,7 +389,7 @@ async def _score_candidates(
     merged_pp: list[dict | None],
     candidate_overrides: list[dict | None],
     dataset: list,
-    ctx: ScoringContext,
+    ctx: ScoringEnv,
     *,
     degradation_checks: list | None = None,
     callbacks: RunCallbacks | None = None,
@@ -504,7 +504,7 @@ async def l1_score(
     candidates: list[dict],
     dataset: list,
     current_best: dict[str, Any],
-    ctx: ScoringContext,
+    ctx: ScoringEnv,
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,

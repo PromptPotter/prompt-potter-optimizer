@@ -52,7 +52,7 @@ from .phase_display import (
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.campaign_setup import BackendContext
+    from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.state import RunCallbacks
     from promptpotter.services.search.scan_results import ScanContext
@@ -102,7 +102,7 @@ def show_feedback_preflight(
     Returns:
         ScanContext (or None) for passing to the run cell.
     """
-    from promptpotter.services.campaign.config import RunConfig
+    from promptpotter.services.campaign.config import LoopConfig
 
     # Build scan context from scan data when available
     scan_context = None
@@ -124,7 +124,7 @@ def show_feedback_preflight(
             difficulty_summary=difficulty_summary,
         )
 
-    config = RunConfig.from_campaign_config(
+    config = LoopConfig.from_campaign_config(
         campaign_config,
         scan_context=scan_context,
         pipeline_schema=pipeline_schema,
@@ -337,7 +337,7 @@ async def run_optimization_notebook(
     langfuse_session_id: str | None = None,
     scan_context: ScanContext | None = None,
     experiment_id: str | None = None,
-    session: BackendContext | None = None,
+    session: SessionEnv | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
     display_callbacks: RunCallbacks | None = None,
@@ -647,7 +647,7 @@ async def run_optimization_notebook(
         else notebook_display_cb
     )
 
-    assert session is not None, "session (BackendContext) required for optimization"
+    assert session is not None, "session (SessionEnv) required for optimization"
     result = await _orch_run_optimization(
         campaign_rounds,
         dataset,
@@ -725,7 +725,7 @@ async def run_baseline_scoring(
     baseline: OptSearchPoint,
     dataset: list,
     campaign_config: CampaignConfig,
-    session: BackendContext,
+    session: SessionEnv,
     pipeline_params: dict | None = None,
 ) -> tuple:
     """Evaluate baseline prompt and initialize campaign_rounds.

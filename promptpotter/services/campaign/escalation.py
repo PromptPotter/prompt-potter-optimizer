@@ -22,7 +22,7 @@ from promptpotter.services.metrics import count_degraded_queries
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.config import RunConfig
+    from promptpotter.services.campaign.config import LoopConfig
     from promptpotter.services.campaign.state import LoopState, StopReason
     from promptpotter.services.tracing.observability_logger import ObsLogger
 
@@ -132,8 +132,8 @@ def collect_warning_types(results: list[dict]) -> dict[str, int]:
     return dict(counts)
 
 
-def build_degradation_checks(config: RunConfig) -> list[DegradationCheck]:
-    """Build enabled degradation checks from RunConfig."""
+def build_degradation_checks(config: LoopConfig) -> list[DegradationCheck]:
+    """Build enabled degradation checks from LoopConfig."""
     checks: list[DegradationCheck] = []
     threshold = getattr(config, "degradation_threshold", 0.0)
     if threshold > 0:
@@ -143,7 +143,7 @@ def build_degradation_checks(config: RunConfig) -> list[DegradationCheck]:
 
 def _maybe_emit_backend_warning(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
 ) -> None:
@@ -208,7 +208,7 @@ def _rebuild_current_sp(
 
 def _degradation_reset(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
@@ -226,7 +226,7 @@ def _degradation_reset(
 
 async def _degradation_reset_and_l2(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
@@ -256,7 +256,7 @@ async def _degradation_reset_and_l2(
 
 async def _do_l2_transition(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObsLogger | None = None,
@@ -344,7 +344,7 @@ async def _do_l2_transition(
 
 async def _do_l3_transition(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObsLogger | None = None,
@@ -412,7 +412,7 @@ async def _do_l3_transition(
 
 async def escalate_l2(
     state: LoopState,
-    config: RunConfig,
+    config: LoopConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     on_checkpoint: Callable[[str], str | None] | None = None,

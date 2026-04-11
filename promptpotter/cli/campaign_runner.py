@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.campaign_setup import BackendContext
+    from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
@@ -83,7 +83,7 @@ async def _init_services(
     dataset_name: str | None = None,
     dataset_type: str | None = None,
     local_eval_token: str | None = None,
-) -> BackendContext:
+) -> SessionEnv:
     """Initialize services (logging + service init)."""
     from promptpotter.config.logging import setup_logging
     from promptpotter.services.campaign.campaign_setup import init_services
@@ -103,7 +103,7 @@ async def _init_services(
 
 
 def _configure_pipeline(
-    session: BackendContext,
+    session: SessionEnv,
     campaign_config: CampaignConfig,
 ) -> dict:
     """Configure pipeline, apply filtered schema to session. Returns pipeline_params."""
@@ -113,7 +113,7 @@ def _configure_pipeline(
 
 
 async def _prepare_scoring_context(
-    session: BackendContext,
+    session: SessionEnv,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = True,

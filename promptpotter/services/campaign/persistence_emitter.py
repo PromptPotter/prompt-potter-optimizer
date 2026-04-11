@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from promptpotter.services.campaign.state import CampaignPhase
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.config import RunConfig
+    from promptpotter.services.campaign.config import LoopConfig
     from promptpotter.services.campaign.state import PhaseEvent, RoundResult
     from promptpotter.services.store.stores import SessionStore
 
@@ -68,7 +68,7 @@ class CampaignPersistenceEmitter:
     def __init__(
         self,
         session_dir: Path,
-        config: RunConfig,
+        config: LoopConfig,
         *,
         session_store: SessionStore | None = None,
         resume_from: dict[str, Any] | None = None,
