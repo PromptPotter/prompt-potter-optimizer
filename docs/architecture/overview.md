@@ -63,7 +63,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **OptSearchPoint** — inherits from PromptTemplate. Adds lineage (`id`, `parent_id`, `changes_description`) + L2 state (`optimizer_params`, `task_context`) + optimization memory (`critique_text`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`). Mutable. `to_job_search_point()` projects into JobSearchPoint for evaluation.
 
-**PipelineSchema** / **PipelineNode** — describes a pipeline (target or optimizer). Both TermNorm and the optimizer pipeline parse into PipelineSchema.
+**PipelineSchema** / **PipelineNode** — describes a pipeline (target or optimizer). Both pipeline backends and the optimizer pipeline parse into PipelineSchema.
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, stale data protocol config).
 
@@ -98,7 +98,7 @@ eval_search_point()
 
 ## Pipeline Composability
 
-`pipeline_params` format throughout — nested dicts keyed by node name (e.g. `{"llm_ranking": {"temperature": 0.5}}`). `BackendClient.run_match()` translates to the `node_config` wire-format key at the TermNorm boundary. No flat param names in service code.
+`pipeline_params` format throughout — nested dicts keyed by node name (e.g. `{"llm_ranking": {"temperature": 0.5}}`). `BackendClient.run_match()` translates to the `node_config` wire-format key at the backend boundary. No flat param names in service code.
 
 ## Pipeline Discovery
 

@@ -52,7 +52,7 @@ Gather context silently — the dashboard in Phase 0.7 is the first thing the us
 
 ### Prompt variant defaults for new datasets
 
-The shared variant library (`promptpotter/config/prompt_variants.json`) has task-agnostic defaults at **index 1** in each field array. These are the simplest starting configuration for any new campaign — they work for math, QA, ranking, or any other task type. TermNorm-specific variants live at index 2+. For a new dataset, index 1 is the right starting point; dataset-specific variant tuning comes later.
+The shared variant library (`promptpotter/config/prompt_variants.json`) has task-agnostic defaults at **index 1** in each field array. These are the simplest starting configuration for any new campaign — they work for math, QA, ranking, or any other task type. Dataset-specific variants live at index 2+. For a new dataset, index 1 is the right starting point; dataset-specific variant tuning comes later.
 
 ### Implementation order for unimplemented datasets
 
@@ -192,7 +192,7 @@ python -m promptpotter init \
 - Timeout: 30 seconds
 - Run in **foreground** (never background)
 - Check output for: session ID, query count
-- If `llm_ranking` appears in active nodes for TermNorm, STOP — the config is wrong
+- If `llm_ranking` appears in active nodes for `lca-termnorm`, STOP — the config is wrong
 
 ### When substantial data exists (from Phase 0.5)
 

@@ -2,7 +2,7 @@
 
 ## Type
 
-`backend` — uses TermNorm's `llm_only` step for LLM-based evaluation.
+`backend` — uses the `llm_only` step for LLM-based evaluation.
 
 ## Status
 
@@ -15,7 +15,7 @@ Everything else (prompt variants, scoring framework) is shared.
 
 ## Prerequisites
 
-- TermNorm backend must be running: `curl -s http://127.0.0.1:8000/status`
+- Pipeline backend must be running: `curl -s http://127.0.0.1:8000/status`
 
 ## Init Flags
 

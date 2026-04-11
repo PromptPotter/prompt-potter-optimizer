@@ -89,7 +89,7 @@ Slim milestone focused on optimization loop refinement and ablation studies that
 
 ## M11: Multi-Connector Architecture -- Future
 
-Generalize beyond TermNorm to support arbitrary LLM application backends. Abstract `BackendClient` into `ConnectorProtocol`, connector registry, backend-agnostic evaluation, query parser registry. Resolves remaining chokepoints (4,5,7,10,11,12,13). Workflow nodes (from M6 Wave 4).
+Generalize beyond the current single-backend setup to support arbitrary LLM application backends. Abstract `BackendClient` into `ConnectorProtocol`, connector registry, backend-agnostic evaluation, query parser registry. Resolves remaining chokepoints (4,5,7,10,11,12,13). Workflow nodes (from M6 Wave 4).
 
 **Entry criteria:** M10 exit gate passed.
 
@@ -104,7 +104,7 @@ Preserved spec: [`archive/m9-multi-connector.md`](archive/m9-multi-connector.md)
 | Feature | Notes |
 |---------|-------|
 | Multimodal / non-textual modalities | Extend beyond Q&A text to other input types (RNAseq, X-ray, image, audio). Requires modality-specific evaluation, dataset formats, and scoring functions. |
-| TermNorm Variant Comparison | Needs ConnectorProtocol + pipeline comparison (post-M11) |
+| Pipeline Variant Comparison | Needs ConnectorProtocol + pipeline comparison (post-M11) |
 | Web scrape ablation | Quality vs cost/latency tradeoff |
 | Public service deployment | Auth, rate limiting, multi-tenancy |
 | Non-prompt targets | Scoring functions, fuzzy matchers, retrieval queries, GA settings |

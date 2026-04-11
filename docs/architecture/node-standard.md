@@ -8,9 +8,9 @@
 
 ## Overview
 
-Both TermNorm and PromptPotter use the same primitives — LLM calls, web search, deterministic functions — but each wires them ad-hoc. The node standard defines a shared vocabulary where the LLM interaction primitive is the same everywhere.
+Both pipeline backends and PromptPotter use the same primitives — LLM calls, web search, deterministic functions — but each wires them ad-hoc. The node standard defines a shared vocabulary where the LLM interaction primitive is the same everywhere.
 
-Each node type is self-contained: prompt assembly + execution + response parsing in one plug-and-play unit. Optimizer nodes (L1/L2/L3) do extra deterministic work around their LLM calls, but the LLM part uses the same structure as TermNorm's `llm_ranking` or `entity_profiling`.
+Each node type is self-contained: prompt assembly + execution + response parsing in one plug-and-play unit. Optimizer nodes (L1/L2/L3) do extra deterministic work around their LLM calls, but the LLM part uses the same structure as any pipeline backend's `llm/structured` nodes (e.g. `entity_profiling`, `llm_ranking`).
 
 ---
 
@@ -18,7 +18,7 @@ Each node type is self-contained: prompt assembly + execution + response parsing
 
 ```
 llm                  ← raw prompt → response
-├── llm/structured   ← + prompt template + output schema (TermNorm nodes)
+├── llm/structured   ← + prompt template + output schema (pipeline backend nodes)
 │   └── llm/meta     ← + multi-source assembly + context parsing (optimizer nodes)
 └── agent            ← + multi-step loop (CritiqueAgent)
 web_search           ← external HTTP service
@@ -46,7 +46,7 @@ Raw prompt → LLM → response. Shared config shape everywhere.
 
 Subtype of `llm`. Adds prompt template compilation (`prompt_family` → rendered prompt) + output schema validation.
 
-**TermNorm examples:** `entity_profiling`, `llm_ranking` — each is an `llm/structured` node with a specific prompt template and output schema. Self-contained: give it input data, it assembles the prompt, calls the LLM, parses and validates the response.
+**Pipeline backend examples:** `entity_profiling`, `llm_ranking` — each is an `llm/structured` node with a specific prompt template and output schema. Self-contained: give it input data, it assembles the prompt, calls the LLM, parses and validates the response.
 
 ```json
 {
@@ -114,7 +114,7 @@ Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx,
 
 ## Pipeline Declaration Format
 
-Both TermNorm and PromptPotter declare their pipelines using the same JSON format. TermNorm's `GET /pipeline` returns a pipeline config; the optimizer declares its pipeline in `promptpotter/services/optimizer/optimizer_pipeline.json`.
+Both pipeline backends and PromptPotter declare their pipelines using the same JSON format. The backend's `GET /pipeline` returns a pipeline config; the optimizer declares its pipeline in `promptpotter/services/optimizer/optimizer_pipeline.json`.
 
 ```json
 {
@@ -158,7 +158,7 @@ PromptPotter auto-detects exit points from this metadata. When a pipeline termin
 - **Step-sequence cache reuse**: A cached run with more nodes serves a request for fewer nodes by re-scoring from the appropriate exit point.
 - **Partial pipeline execution**: Cached node outputs from a shorter run feed into a longer run via `precomputed`, skipping already-computed nodes.
 
-**Example** — TermNorm's two exit points:
+**Example** — a multi-node pipeline's two exit points:
 
 ```
 token_matching  (candidate_source) → "token_matched_candidates"
@@ -177,6 +177,6 @@ Shared primitives: `llm_call()` (config + runtime overrides), `get_node_config()
 
 ## Reference
 
-- **TermNorm pipeline config:** `GET /pipeline` endpoint (see TermNorm repo)
+- **Backend pipeline config:** `GET /pipeline` endpoint
 - **Optimizer pipeline config:** [`promptpotter/services/optimizer/optimizer_pipeline.json`](../promptpotter/services/optimizer/optimizer_pipeline.json)
 - **Observability:** [`observability.md`](../observability.md) — node tracing via `observed_node`

@@ -1,6 +1,6 @@
 # Benchmark Datasets — Readiness & Prioritization
 
-All datasets route through the TermNorm backend. Benchmark datasets (GSM8K, HotPotQA) use the `llm_only` step — same `/matches` endpoint, just a single-step pipeline.
+All datasets route through the pipeline backend. Benchmark datasets (GSM8K, HotPotQA) use the `llm_only` step — same `/matches` endpoint, just a single-step pipeline.
 
 ## Adding a New Dataset
 
@@ -50,14 +50,14 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 
 ### Shared infrastructure (already built, no per-dataset work)
 
-- **Backend `llm_only` step** — TermNorm's `/matches` endpoint accepts `steps=["llm_only"]` with `node_config` for the system prompt. This is the default evaluation path for all datasets.
-- **`prompt_variants.json`** — shared prompt variant library (persona, thinking_style, etc.). Index 1 entries are task-agnostic defaults suitable for any dataset; index 2+ are TermNorm-specific/PromptWizard variants.
+- **Backend `llm_only` step** — the backend's `/matches` endpoint accepts `steps=["llm_only"]` with `node_config` for the system prompt. This is the default evaluation path for all datasets.
+- **`prompt_variants.json`** — shared prompt variant library (persona, thinking_style, etc.). Index 1 entries are task-agnostic defaults suitable for any dataset; index 2+ are dataset-specific/PromptWizard variants.
 - **`compile_scorer()`** — compiles any formula from `campaign.json` into a callable, auto-injects all `SCORING_FUNCTIONS`.
 - **`load_dataset(name)`** — dispatches to the right loader from `DATASET_LOADERS`.
 
 ## Readiness Checklist
 
-1. TermNorm backend running (`curl -s http://127.0.0.1:8000/status`)
+1. Pipeline backend running (`curl -s http://127.0.0.1:8000/status`)
 2. Registry entries added (loader + scorer)
 3. Config directory created (`datasets/<name>/`)
 4. Dataset loaded into DatasetStore
@@ -72,4 +72,4 @@ Pick by: scorer simplicity (fewer edge cases first) > competitor overlap (DSPy/M
 |--------|---------|
 | Per-round cost | First candidate evaluates full eval set; others use sequential elimination (t-test early-stop after 20 queries). Typical: `eval_size + ~20-30 per eliminated candidate` |
 | Caching | IntermediateCache available for multi-step pipelines; single-step `llm_only` has no upstream to cache |
-| Round-over-round speedup | Only for multi-step pipelines (TermNorm). Benchmark datasets: none |
+| Round-over-round speedup | Only for multi-step pipelines (e.g. lca-termnorm). Benchmark datasets: none |

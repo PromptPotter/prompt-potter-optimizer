@@ -8,7 +8,7 @@ All evaluation data is stored locally first (file-based traces in `.promptpotter
 
 ## Start Here: `events.jsonl`
 
-`obs/langfuse/events.jsonl` is a flat, human-readable log where every significant action is one JSON line. This is a custom extension (not part of the Langfuse or MLflow spec), adapted from TermNorm's `langfuse_logger._log_event()`.
+`obs/langfuse/events.jsonl` is a flat, human-readable log where every significant action is one JSON line. This is a custom extension (not part of the Langfuse or MLflow spec).
 
 ### Format
 
@@ -49,7 +49,7 @@ mlflow ui --backend-store-uri file:./.promptpotter/projects/{backend_id}/obs/exp
 # Opens at http://localhost:5000
 ```
 
-This pattern is proven in production by TermNorm-excel (reference: `backend-promptpotter/docs/FILE_ORGANIZATION_STRATEGY.md` line 128).
+This pattern is proven in production.
 
 **What you'll see in mlflow ui:**
 - One experiment per optimization campaign

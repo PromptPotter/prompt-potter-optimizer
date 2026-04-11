@@ -108,7 +108,7 @@ SearchPoint (abstract — render())
 ```
 ┌─────────────────────┐         ┌─────────────────────┐
 │  Your Backend       │         │  PromptPotter        │
-│  (e.g. TermNorm)    │◄───────►│  Optimizer           │
+│  (any pipeline)     │◄───────►│  Optimizer           │
 │                     │  sync   │                      │
 │  - Experiments      │  replay │  - Sensitivity scan  │
 │  - Pipeline API     │  eval   │  - Feedback cycle    │

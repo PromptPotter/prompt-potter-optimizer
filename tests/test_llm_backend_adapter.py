@@ -42,7 +42,7 @@ class TestLLMOnlyAdapter:
         assert data["terminated_at"] == "llm_call"
 
     def test_prompt_from_pipeline_params(self):
-        """Prompt flows through pipeline_params[node]["prompt"] — same as TermNorm."""
+        """Prompt flows through pipeline_params[node]["prompt"] — same as pipeline backends."""
         stub = _StubLLMClient()
         adapter = LLMOnlyAdapter(stub)
         _run(

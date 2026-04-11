@@ -2,12 +2,12 @@
 
 ## Type
 
-`backend` — uses TermNorm's `llm_only` step for LLM-based evaluation.
+`backend` — uses the `llm_only` step for LLM-based evaluation.
 
 ## Prerequisites
 
-- TermNorm backend must be running: `curl -s http://127.0.0.1:8000/status`
-- If backend is down, tell the user: "Start the TermNorm backend first, then re-run `/potter-run`"
+- Pipeline backend must be running: `curl -s http://127.0.0.1:8000/status`
+- If backend is down, tell the user: "Start the backend first, then re-run `/potter-run`"
 
 ## Init Flags
 

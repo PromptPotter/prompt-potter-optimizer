@@ -97,7 +97,7 @@ Three transformations bridge optimizer state to the wire:
 |------|----------|----------------|
 | 1 | `render()` | 6 prompt fields → single string |
 | 2 | `to_job_search_point()` | OptSearchPoint → frozen `JobSearchPoint` with prompt in `pipeline_params[prompt_node]["prompt"]` |
-| 3 | `run_match()` | `pipeline_params` dict → TermNorm `node_config` wire payload |
+| 3 | `run_match()` | `pipeline_params` dict → backend `node_config` wire payload |
 
 `to_job_search_point()` also carries `prompt_fields` (the decomposed dict) on the `JobSearchPoint` for variant derivation without round-tripping through `OptSearchPoint`.
 
@@ -110,7 +110,7 @@ Three transformations bridge optimizer state to the wire:
 **Index convention (provisional):**
 - **Index 0** — empty string (always present; lets the optimizer start from scratch)
 - **Index 1** — task-agnostic defaults that work for any dataset out of the box
-- **Index 2+** — TermNorm-specific and PromptWizard variants from the original library
+- **Index 2+** — dataset-specific and PromptWizard variants from the original library
 
 Index 1 variants are a provisional starting point for new campaigns. For production, per-dataset variant libraries (`datasets/{name}/prompt_variants.json`) are the long-term plan.
 

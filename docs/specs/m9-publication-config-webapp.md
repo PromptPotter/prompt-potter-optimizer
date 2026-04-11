@@ -11,9 +11,9 @@
 
 PromptPotter's core optimization loop (L1 generate → L1 evaluate → critique → L2 refine → L3 replan) is functionally complete through M8 with SearchMemory cross-campaign intelligence. Three critical gaps prevent the project from reaching publication and production use:
 
-1. **No benchmark results** — The methodology exists (`docs/research/benchmarks.md`), the export pipeline is built (`cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py`), but result tables are all placeholders. HotPotQA and GSM8K dataset configs exist in `datasets/`. Dataset loaders, scorers, and the backend evaluation path (TermNorm `llm_only` step) are implemented. Benchmark campaigns have not been run yet.
+1. **No benchmark results** — The methodology exists (`docs/research/benchmarks.md`), the export pipeline is built (`cli/export_results.py`, `services/campaign/export.py`, `services/campaign/reporting.py`), but result tables are all placeholders. HotPotQA and GSM8K dataset configs exist in `datasets/`. Dataset loaders, scorers, and the backend evaluation path (`llm_only` step) are implemented. Benchmark campaigns have not been run yet.
 
-2. **Proof-of-concept meta-prompts** — The optimizer's own prompts (L1 generate, critique, L2 refine, L3 replan) in `promptpotter/config/optimizer_prompts/` are functional but untuned. They were developed against TermNorm (a multi-node retrieval pipeline) and need systematic evaluation on benchmark tasks to find stable, high-performing configurations.
+2. **Proof-of-concept meta-prompts** — The optimizer's own prompts (L1 generate, critique, L2 refine, L3 replan) in `promptpotter/config/optimizer_prompts/` are functional but untuned. They were developed against a multi-node retrieval pipeline and need systematic evaluation on benchmark tasks to find stable, high-performing configurations.
 
 3. **No web interface** — Three entry points exist (notebook, CLI, REST API) but no browser-based UI. The FastAPI API at `/api/v1/` has read-only endpoints for backends, campaigns, and trials. CORS is configured.
 
@@ -39,7 +39,7 @@ Additionally, the publication needs its figures and tables designed upfront so d
 
 ### Problem
 
-The benchmark methodology is fully designed and the export pipeline is production-ready, but zero benchmark results exist. The system has only been tested against TermNorm (terminology normalization via multi-node retrieval pipeline).
+The benchmark methodology is fully designed and the export pipeline is production-ready, but zero benchmark results exist. The system has only been tested against a multi-node retrieval pipeline (terminology normalization).
 
 ### Deliverables
 
@@ -50,7 +50,7 @@ Registry + config architecture — adding a dataset = two registry entries + con
 - **`DATASET_LOADERS`** registry in `dataset_builder.py` — dispatches `load_dataset(name)` to the right loader
 - **`SCORING_FUNCTIONS`** registry in `scoring.py` — all scorer functions available in formulas
 - **`LLMOnlyAdapter`** — optional `BackendClient` replacement for local LLM eval (opt-in, not default path).
-- **Backend `llm_only` step** — TermNorm's `/matches` endpoint supports `steps=["llm_only"]` for backend-routed benchmark eval (default path, no local keys needed)
+- **Backend `llm_only` step** — the backend's `/matches` endpoint supports `steps=["llm_only"]` for backend-routed benchmark eval (default path, no local keys needed)
 - **`prompt_variants.json`** — shared prompt variant library (persona, thinking_style, etc.)
 
 #### 1b. GSM8K (done)
@@ -115,7 +115,7 @@ The meta-prompts in `promptpotter/config/optimizer_prompts/` are functional but 
 
 | Prompt | File | Temperature | Max Tokens | State |
 |--------|------|-------------|------------|-------|
-| L1 Generate | `meta_scan_aware.json` | 0.7 | 8192 | Working, tuned for TermNorm pipeline references |
+| L1 Generate | `meta_scan_aware.json` | 0.7 | 8192 | Working, tuned for multi-node pipeline references |
 | Critique | `critique.json` | 0.3 | 4096 | Working, extensive stat assembly |
 | Critique (negative) | `critique_negative.json` | 0.3 | 4096 | Fallback for low accuracy |
 | L2 Refine | `l2_refine_context.json` | 0.3 | 2048 | Working, clean layer transition |
@@ -157,7 +157,7 @@ Run the same benchmark campaign (e.g., HotPotQA with sample_size=100) with diffe
 
 ### Dependencies
 
-Track 2 depends on Track 1b/1c — needs benchmark datasets and local LLM eval to evaluate meta-prompt quality. Cannot evaluate on TermNorm alone (retrieval pipeline ≠ LLM-only benchmark task).
+Track 2 depends on Track 1b/1c — needs benchmark datasets and local LLM eval to evaluate meta-prompt quality. Cannot evaluate on the retrieval pipeline alone (retrieval pipeline ≠ LLM-only benchmark task).
 
 ### Risk: Bootstrap Cost
 
@@ -367,5 +367,5 @@ Wave 6: Track 2c + Track 3d + Track 3e
 | Local LLM eval = mini-connector | Technical debt, future refactor for M11 | Interface compatible with BackendClient (duck typing). Opt-in via `LOCAL_EVAL_SECRET`. |
 | Webapp scope creep | Unbounded frontend work | MVP scope (3a-3c) before Phase 2 (3d-3e) |
 | Cited competitor numbers | Weak comparison (different models/hardware) | Label "cited" clearly; MIPROv2 is easiest to reproduce if challenged |
-| TermNorm meta-prompts on LLM-only tasks | Pipeline references irrelevant for benchmarks | Generic prompts via task_context injection; no pipeline-specific language in base prompts |
+| Multi-node meta-prompts on LLM-only tasks | Pipeline references irrelevant for benchmarks | Generic prompts via task_context injection; no pipeline-specific language in base prompts |
 | Model deprecation | Results unreproducible | Document exact model version in reproducibility manifest |

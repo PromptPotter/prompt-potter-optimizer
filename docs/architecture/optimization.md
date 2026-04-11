@@ -84,7 +84,7 @@ Tunable parameters discovered from the target pipeline's active nodes. Changed e
 | Output schema | LLM nodes with structured output | `output_schema` field overrides |
 | Pipeline params | Non-LLM nodes (`fuzzy_matching`, `token_matching`) | thresholds, weights, `sp_budget_ttest` |
 
-Which parameters are Layer 1 depends on the target pipeline config — not a fixed list. Prompt fields only affect nodes with a prompt template referencing them (see CLAUDE.md Known Backend Issues for TermNorm-specific constraints). The scan advisor reads the full pipeline snapshot to recommend which axes to optimize.
+Which parameters are Layer 1 depends on the target pipeline config — not a fixed list. Prompt fields only affect nodes with a prompt template referencing them (see CLAUDE.md Known Issues for backend-specific constraints). The scan advisor reads the full pipeline snapshot to recommend which axes to optimize.
 
 ### Layer 2: Refine Context
 
