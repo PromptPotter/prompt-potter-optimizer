@@ -589,7 +589,7 @@ async def cmd_profile(args: argparse.Namespace) -> None:
 
 async def cmd_results(args: argparse.Namespace) -> None:
     """Show campaign results, optionally save winner."""
-    from promptpotter.services.campaign.campaign_setup import save_campaign_winner
+    from promptpotter.services.campaign.mgmt import save_campaign_winner
 
     ctx = _load_session(args)
     session = await _init_services(**ctx.state["init_params"])

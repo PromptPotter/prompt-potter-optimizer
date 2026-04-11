@@ -21,14 +21,14 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.models.query_result import QueryResult
 from promptpotter.services.dataset_builder import build_dataset_run_data
 from promptpotter.services.metrics import compute_composite_score
-from promptpotter.services.sample_measurement import (
+from promptpotter.services.scoring.sample_measurement import (
     _error_result,
     measure_sample,
 )
-from promptpotter.services.stale_data import (
+from promptpotter.services.scoring.stale_data import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
-from promptpotter.services.stale_data import is_degraded as _is_degraded
+from promptpotter.services.scoring.stale_data import is_degraded as _is_degraded
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
 
@@ -53,9 +53,9 @@ def _graceful_interrupt():
 
 
 if TYPE_CHECKING:
+    from promptpotter.models.escalation import EscalationSignal
     from promptpotter.models.scoring_env import QueryRunner, ScoringEnv
     from promptpotter.models.search_point import JobSearchPoint
-    from promptpotter.services.campaign.escalation import EscalationSignal
     from promptpotter.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)

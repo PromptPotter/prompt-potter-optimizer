@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.scoring_env import ScoringEnv
-from promptpotter.services.scoring_searchpoint import score_search_point
+from promptpotter.services.scoring.search_point_scorer import score_search_point
 from promptpotter.services.search.failure_group_analysis import preview as _preview
 from promptpotter.shared.constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,

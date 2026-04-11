@@ -14,7 +14,7 @@ import logging
 import math
 from typing import Any
 
-from promptpotter.services.campaign.escalation import EscalationSignal, EscalationTarget
+from promptpotter.models.escalation import EscalationSignal, EscalationTarget
 
 logger = logging.getLogger(__name__)
 

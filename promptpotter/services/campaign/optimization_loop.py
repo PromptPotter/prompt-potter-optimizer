@@ -19,9 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.services.campaign.campaign_setup import SessionEnv
 from promptpotter.services.campaign.config import LoopConfig
-from promptpotter.services.campaign.cycle_init import init_cycle_state  # returns LoopState
 from promptpotter.services.campaign.escalation import escalate_l2
-from promptpotter.services.campaign.lifecycle import finalize_campaign
+from promptpotter.services.campaign.lifecycle import finalize_campaign, init_cycle_state
 from promptpotter.services.campaign.round_execution import (
     PauseForReviewError,
     adapt_eval_set,

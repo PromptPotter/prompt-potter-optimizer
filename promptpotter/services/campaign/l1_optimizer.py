@@ -399,7 +399,7 @@ async def _score_candidates(
 
     Returns (all_candidate_results, candidate_scores, escalation_signal).
     """
-    from promptpotter.services.scoring_searchpoint import score_search_point
+    from promptpotter.services.scoring.search_point_scorer import score_search_point
     from promptpotter.services.search.sequential_elimination import EliminationCheck
 
     all_candidate_results: dict[str, list[dict]] = {}

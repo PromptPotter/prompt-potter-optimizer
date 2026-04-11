@@ -5,17 +5,26 @@ Two layers:
    ``_run_eval_batch()`` that can abort evaluation early.
 2. **Escalation execution** — L1→L2→L3 layer transition orchestration
    triggered when the feedback cycle stalls.
+
+Pure data types (``EscalationTarget``, ``EscalationSignal``,
+``EscalationStrategy``) live in ``promptpotter.models.escalation``
+and are re-exported here for backward compatibility within the
+campaign package.
 """
 
 from __future__ import annotations
 
-import enum
 import logging
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.models.escalation import (
+    DEFAULT_STRATEGIES,
+    EscalationSignal,
+    EscalationStrategy,
+    EscalationTarget,
+)
 from promptpotter.services.campaign.critique import extract_warning_types
 from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.services.metrics import count_degraded_queries
@@ -36,42 +45,6 @@ __all__ = [
     "build_degradation_checks",
     "collect_warning_types",
 ]
-
-
-class EscalationTarget(enum.StrEnum):
-    """Where an escalation check directs the feedback cycle."""
-
-    RETRY = "retry"
-    L2 = "l2"
-    L3 = "l3"
-    ABORT = "abort"
-
-
-@dataclass
-class EscalationSignal:
-    """Signal emitted when an EscalationCheck triggers mid-evaluation."""
-
-    check_name: str
-    target: EscalationTarget
-    check_result: dict[str, Any]
-    candidate_idx: int
-    candidates_scored: int
-    candidates_skipped: int
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class EscalationStrategy:
-    """Configurable response to a specific warning type."""
-
-    target: EscalationTarget = EscalationTarget.L2
-
-
-DEFAULT_STRATEGIES: dict[str, EscalationStrategy] = {
-    "web_search:low_document_count": EscalationStrategy(target=EscalationTarget.L2),
-}
 
 
 class DegradationCheck:

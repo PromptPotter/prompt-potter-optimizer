@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.services.metrics import find_rank
-from promptpotter.services.sample_measurement import measure_sample
+from promptpotter.services.scoring.sample_measurement import measure_sample
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema

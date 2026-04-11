@@ -13,13 +13,15 @@ from promptpotter.services.campaign.campaign_data import (
 )
 from promptpotter.services.campaign.campaign_setup import (
     SessionEnv,
-    save_campaign_winner,
 )
 from promptpotter.services.campaign.campaign_setup import (
     init_services as _init_services,
 )
 from promptpotter.services.campaign.config import (
     create_llm_client as setup_llm,
+)
+from promptpotter.services.campaign.mgmt import (
+    save_campaign_winner,
 )
 from promptpotter.services.project_store import ProjectStore
 
@@ -127,8 +129,8 @@ def dev_reload() -> None:
         "promptpotter.services.campaign.round_execution",
         "promptpotter.services.campaign.optimization_loop",
         "promptpotter.services.store.dataset_run_store",
-        "promptpotter.services.stale_data",
-        "promptpotter.services.sample_measurement",
+        "promptpotter.services.scoring.stale_data",
+        "promptpotter.services.scoring.sample_measurement",
         "promptpotter.services.dataset_scoring",
         "promptpotter.services.campaign.l1_optimizer",
         "promptpotter.services.search.smart_search",
