@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.scoring import ScoringEnv
-from promptpotter.models.task_decomposition import TaskDecomposition
+from promptpotter.models.search_point import TaskDecomposition
 from promptpotter.services.campaign.campaign_setup import SessionEnv
 from promptpotter.services.campaign.config import LoopConfig
 from promptpotter.services.campaign.nodes.critique import sample_thinking_styles

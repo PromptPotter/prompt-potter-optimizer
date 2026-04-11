@@ -34,7 +34,7 @@ What gets injected into each LLM node's prompt, where it originates, and how it 
 
 | Injection | Origin → Retention | L1 Generate | Critique | L2 Refine | L3 Plan |
 |-----------|--------------------|-------------|----------|-----------|---------|
-| **Eval results (raw)** | `eval_search_point()` → *(ephemeral)* | — | **sole reader** (intelligence bridge) | — | — |
+| **Eval results (raw)** | `score_search_point()` → *(ephemeral)* | — | **sole reader** (intelligence bridge) | — | — |
 | **Round history** | accumulated → `LoopState.rounds` | — | full (accuracy trajectory, param changes) | — | — |
 | **L2 history** | computed from `l2_history` → *(ephemeral)* | — | — | — | last 3 rounds (`{round, params, acc_change}`) |
 | **Failure analysis** | `compile_failure_analysis()` → `LoopState.failure_analysis` | top patterns | — | — | — |
@@ -85,7 +85,7 @@ By design, L1 stays clean — it generates candidates. Deeper sample intelligenc
 | **Cross-candidate failure diff** | Every-round | Critique — missed opportunities from non-winner candidates | Planned |
 | **Failure group refresh in loop** | Strategic | L2 — periodic recomputation during optimization | Planned |
 
-See [`docs/methods/search-memory-intelligence.md`](../research/search-memory-intelligence.md) for the full design.
+See [`docs/research/search-memory-intelligence.md`](../research/search-memory-intelligence.md) for the full design.
 
 ### Internal (not a prompt injection)
 
@@ -95,11 +95,11 @@ See [`docs/methods/search-memory-intelligence.md`](../research/search-memory-int
 
 ## Conditional Rules
 
-**(a) Directive / critique mutual exclusion.** L1 sees critique text OR l2_directive, never both. When L2 fires, it reads critique and produces a directive that digests it. L1 then sees only the directive. (`formatting.py:117`)
+**(a) Directive / critique mutual exclusion.** L1 sees critique text OR l2_directive, never both. When L2 fires, it reads critique and produces a directive that digests it. L1 then sees only the directive. (`nodes/formatting.py`)
 
-**(b) Probe round exception.** Probe rounds (L2 `action="probe"`) pass warning_inventory + escalation_journal to L1 even when a directive exists. Non-probe rounds with a directive skip escalation data entirely. The per-query warning detail IS the actionable data for probe targeting. (`formatting.py:60-98`)
+**(b) Probe round exception.** Probe rounds (L2 `action="probe"`) pass warning_inventory + escalation_journal to L1 even when a directive exists. Non-probe rounds with a directive skip escalation data entirely. The per-query warning detail IS the actionable data for probe targeting. (`nodes/formatting.py`)
 
-**(c) Escalation / warning mutual exclusion in L2.** L2 receives either the full escalation stability report OR the per-query warning breakdown — never both. The stability report already contains aggregate warning counts. (`formatting.py:155-160`)
+**(c) Escalation / warning mutual exclusion in L2.** L2 receives either the full escalation stability report OR the per-query warning breakdown — never both. The stability report already contains aggregate warning counts. (`nodes/formatting.py`)
 
 **(d) L2 sees pipeline schema only via escalation.** L2 does not receive the full pipeline parameter listing — that's L1's domain. When escalation fires, the stability report surfaces the problem step's available parameters and tried configs.
 

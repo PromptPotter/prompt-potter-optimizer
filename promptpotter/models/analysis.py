@@ -1,12 +1,14 @@
-"""Data models for M8 Wave 1b evaluation analysis.
+"""Analysis and escalation data models.
 
-Pure data containers — no I/O, no service dependencies.
+Pure data containers for failure patterns, query difficulty, and escalation
+signals. No I/O, no service dependencies.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Literal
+import enum
+from dataclasses import asdict, dataclass, field
+from typing import Any, Literal
 
 
 @dataclass
@@ -64,3 +66,44 @@ class QueryDifficulty:
     @property
     def dead(self) -> list[QueryProfile]:
         return [p for p in self.profiles if p.classification == "dead"]
+
+
+# ---------------------------------------------------------------------------
+# Escalation types
+# ---------------------------------------------------------------------------
+
+
+class EscalationTarget(enum.StrEnum):
+    """Where an escalation check directs the feedback cycle."""
+
+    RETRY = "retry"
+    L2 = "l2"
+    L3 = "l3"
+    ABORT = "abort"
+
+
+@dataclass
+class EscalationSignal:
+    """Signal emitted when an EscalationCheck triggers mid-evaluation."""
+
+    check_name: str
+    target: EscalationTarget
+    check_result: dict[str, Any]
+    candidate_idx: int
+    candidates_scored: int
+    candidates_skipped: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class EscalationStrategy:
+    """Configurable response to a specific warning type."""
+
+    target: EscalationTarget = EscalationTarget.L2
+
+
+DEFAULT_STRATEGIES: dict[str, EscalationStrategy] = {
+    "web_search:low_document_count": EscalationStrategy(target=EscalationTarget.L2),
+}

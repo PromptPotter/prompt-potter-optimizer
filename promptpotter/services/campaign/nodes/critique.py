@@ -16,14 +16,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.services.metrics import find_rank
-from promptpotter.services.optimizer.pipeline import llm_call
-from promptpotter.services.optimizer.prompt_preparation import load_optimizer_prompt
-from promptpotter.services.search.variant_library import load_variant_library
+from promptpotter.services.optimizer.pipeline import llm_call, load_optimizer_prompt
+from promptpotter.services.search import load_variant_library
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.models.query_result import QueryResult
+    from promptpotter.models.scoring import QueryResult
     from promptpotter.services.campaign.config import LoopConfig
     from promptpotter.services.campaign.state import LoopState
     from promptpotter.services.llm_client import LLMClientBase

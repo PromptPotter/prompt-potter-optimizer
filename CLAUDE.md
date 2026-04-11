@@ -100,7 +100,7 @@ Every state traced at **both** layers independently:
 
 ### Scoring Pipeline
 
-`score_search_point()` (in `scoring_searchpoint.py`) is the single gateway for scoring, archival, and observability. Caching is addressed by a single node chain (`PipelineSchema.prefix_keys()` → `[(node_name, chained_hash), ...]`). `sp_hash` = terminal element of the chain (no separate hash computation). Two cache tiers use the same chain: (1) `find_by_prefix_chain()` in `dataset_run_store` matches prior runs by exact or partial prefix for result-level reuse, (2) `IntermediateCache.walk_prefix()` reuses per-node outputs for novel searchpoints. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
+`score_search_point()` (in `scoring/search_point_scorer.py`) is the single gateway for scoring, archival, and observability. Caching is addressed by a single node chain (`PipelineSchema.prefix_keys()` → `[(node_name, chained_hash), ...]`). `sp_hash` = terminal element of the chain (no separate hash computation). Two cache tiers use the same chain: (1) `find_by_prefix_chain()` in `dataset_run_store` matches prior runs by exact or partial prefix for result-level reuse, (2) `IntermediateCache.walk_prefix()` reuses per-node outputs for novel searchpoints. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
 
 ### Pipeline Params — Two Namespaces
 

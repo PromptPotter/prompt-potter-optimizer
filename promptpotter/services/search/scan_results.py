@@ -62,7 +62,7 @@ async def decompose_scan_baseline(
         for display/prompt fields, scan variant diagnosis, cache flag,
         and restructured field values.
     """
-    from promptpotter.services.optimizer.prompt_preparation import decompose_prompt_fields_cached
+    from promptpotter.services.optimizer.pipeline import decompose_prompt_fields_cached
 
     # Unpack session
     store = session.store if session else None
@@ -198,7 +198,8 @@ async def resume_or_build_diagnostic(
     import hashlib as _hashlib
     import json as _json
 
-    from promptpotter.services.optimizer.prompt_preparation import decompose_prompt_fields
+    from promptpotter.services.optimizer.pipeline import decompose_prompt_fields
+    from promptpotter.services.search import load_variant_library
     from promptpotter.services.search.smart_search import (
         build_axis_profiles,
         build_diagnostic_set,
@@ -206,7 +207,6 @@ async def resume_or_build_diagnostic(
         serialize_smart_search_plan,
         smart_search_plan_identity,
     )
-    from promptpotter.services.search.variant_library import load_variant_library
 
     ss = campaign_config.get("smart_search", {})
     if variant_library is None:

@@ -45,7 +45,7 @@ All core logic lives in `promptpotter/services/`.
 
 Every piece of state is traced at both layers, independently reconstructable from disk:
 
-- **Target layer**: `JobSearchPoint` → `eval_search_point()` → `dataset_runs/` (content-addressed, shared across all eval paths)
+- **Target layer**: `JobSearchPoint` → `score_search_point()` → `dataset_runs/` (content-addressed, shared across all eval paths)
 - **Optimizer layer**: `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint)
 
 ## Data Models
@@ -65,7 +65,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **PipelineSchema** / **PipelineNode** — the node coordinate system for each dataset's pipeline. Nodes are the topmost lookup dimension: O(1) position, membership, and param-ownership queries. `prefix_keys()` computes chained cache keys; `sp_hash()` returns the terminal element (unified identity — no separate hash scheme). `prefix_through()` / `exclude()` slice valid sub-pipelines. Both pipeline backends and the optimizer pipeline parse into PipelineSchema.
 
-**EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, stale data protocol config).
+**ScoringEnv** — infrastructure bundle for scoring calls (`backend_client`, `store`, `pipeline_schema`, `obs`, `scorer`, stale data protocol config). Defined in `models/scoring.py`.
 
 **SearchMemory** — Materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic accessors, no formatting. See [design doc](../research/search-memory-intelligence.md).
 
@@ -73,7 +73,7 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`.
 
 ## Evaluation Flow
 
-All paths converge on `eval_search_point()` — single gateway for eval persistence and archival. Prompt alias groups link semantically equivalent prompts so historical data is discoverable across forms (transitive resolution).
+All paths converge on `score_search_point()` — single gateway for eval persistence and archival. Prompt alias groups link semantically equivalent prompts so historical data is discoverable across forms (transitive resolution).
 
 **Chain-addressed caching:** All eval reuse is addressed by a single node chain (`prefix_keys()`). Two tiers use the same chained hashes: (1) `find_by_prefix_chain()` matches prior dataset_runs by exact or partial prefix for result-level reuse, (2) `IntermediateCache.walk_prefix()` reuses per-node outputs. Each node's output is cached independently with chained upstream dependency — changing one node's config invalidates only that node and downstream, while upstream nodes stay cached. See [Node-Level Cache](#node-level-cache) below.
 
@@ -90,7 +90,7 @@ All paths converge on `eval_search_point()` — single gateway for eval persiste
 **Eval flow:**
 
 ```
-eval_search_point()
+score_search_point()
   → per-node prefix walk (single cache path)
   → backend call with precomputed={cached upstream outputs}
   → dataset_run_store.save() (archive only)
@@ -224,7 +224,7 @@ Live dashboard for `show-status` and HITL checkpoints — **not** an optimizer c
 
 Cross-campaign intelligence layer. Materialized view over `dataset_runs/`, persisted at `{backend_id}/search_memory.json`, refreshed incrementally via watermark. Three pillars: parameter impact, query patterns, failure modes. Atomic data accessors only — each consumer composes its own prompt section.
 
-Full design, accessors, and consumer matrix: [`docs/methods/search-memory-intelligence.md`](../research/search-memory-intelligence.md). Implementation: `services/search/search_memory.py`.
+Full design, accessors, and consumer matrix: [`docs/research/search-memory-intelligence.md`](../research/search-memory-intelligence.md). Implementation: `services/search/search_memory.py`.
 
 ### Node-Level Cache
 
@@ -240,7 +240,7 @@ intermediate_cache/
   {node_name}_{cache_key}.json    ← {query: node_output}
 ```
 
-**Implementation:** `PipelineSchema.prefix_keys()` computes the key chain; `IntermediateCache.walk_prefix()` does the disk I/O. Wired through `evaluate_query()` in `eval_query.py`.
+**Implementation:** `PipelineSchema.prefix_keys()` computes the key chain; `IntermediateCache.walk_prefix()` does the disk I/O. Wired through `measure_sample()` in `scoring/sample_measurement.py`.
 
 Gracefully no-ops until the target backend supports `node_outputs` in responses and `precomputed` in requests.
 
@@ -269,7 +269,7 @@ The supplemental document includes: campaign comparison, convergence, pairwise s
 
 ## Context Object Lifecycle
 
-Eight context/config objects flow through the system. Understanding when each is created, who owns it, and how long it lives is essential for working in the codebase.
+Seven context/config objects flow through the system. Understanding when each is created, who owns it, and how long it lives is essential for working in the codebase.
 
 ### Data flow
 
@@ -285,7 +285,7 @@ USER INPUT (notebook / CLI)
 init_services()
   │
   ▼
-BackendContext (dataclass)                    ← session-scoped infra bundle
+SessionEnv (dataclass)                       ← session-scoped infra bundle
   │  store, backend_client, pipeline_schema, index_terms, experiment_extract
   │
   ├──► build_run_config()
@@ -297,10 +297,10 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
   │       │       │
   │       │       ├─ LoopState (mutable)      ← round-by-round optimizer state
   │       │       │    └─ opt_sp: OptSearchPoint (source of truth)
-  │       │       │    └─ eval_ctx: EvalContext (uses session.store directly)
+  │       │       │    └─ scoring_env: ScoringEnv (uses session.store directly)
   │       │       │
   │       ▼       ▼
-  │    optimization_loop.run_optimization()
+  │    runner.run_optimization()
   │       │
   │       │  PER ROUND:
   │       ├──► ContextData (ephemeral)        ← L1 prompt formatting bundle
@@ -319,11 +319,11 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
 |--------|-----------|------------|----------|----------|---------------|
 | **CampaignConfig** | `campaign/config.py` | User (notebook/CLI) | Session | Yes (`configure_pipeline` sets `pipeline_params`) | No (stored in campaign metadata) |
 | **RunConfig** | `campaign/config.py` | `from_campaign_config()` | Campaign | No (immutable Pydantic model) | No |
-| **BackendContext** | `campaign/campaign_setup.py` | `init_services()` | Session | Rarely (`pipeline_schema` filtered) | No |
-| **EvalContext** | `models/eval_context.py` | `cycle_init._setup_eval_context()` | Cycle | `candidate_idx`, `stale_data_observations` per eval | No |
+| **SessionEnv** | `campaign/campaign_setup.py` | `init_services()` | Session | Rarely (`pipeline_schema` filtered) | No |
+| **ScoringEnv** | `models/scoring.py` | `init_cycle_state()` | Cycle | `stale_data_observations` per eval | No |
 | **LoopState** | `campaign/state.py` | `cycle_init._build_baseline_state()` | Cycle | Intensely (every round) | Yes (`opt_sp` + escalation) |
-| **CritiqueContext** | `campaign/critique.py` | `execute_round()` | Per-round | No (read-only stats) | No |
-| **ContextData** | `campaign/formatting.py` | `l1_generate()` | Per-generation | No (formatting input) | No |
+| **CritiqueContext** | `campaign/nodes/critique.py` | `execute_round()` | Per-round | No (read-only stats) | No |
+| **ContextData** | `campaign/nodes/formatting.py` | `l1_generate()` | Per-generation | No (formatting input) | No |
 | **ScanBrief** | `search/scan_results.py` | `prepare_scan_brief()` | Campaign | No (read-only) | No |
 
-**Key invariants:** All optimizer state lives on `LoopState.opt_sp` (only `opt_sp` is checkpointed). `EvalContext.store` is `BackendContext.store` (no duplication). `CampaignConfig` → `RunConfig` is a one-way transformation; services read `RunConfig` only.
+**Key invariants:** All optimizer state lives on `LoopState.opt_sp` (only `opt_sp` is checkpointed). `ScoringEnv.store` is `SessionEnv.store` (no duplication). `CampaignConfig` → `RunConfig` is a one-way transformation; services read `RunConfig` only.

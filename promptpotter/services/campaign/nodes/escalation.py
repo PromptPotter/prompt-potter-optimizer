@@ -7,9 +7,7 @@ Two layers:
    triggered when the feedback cycle stalls.
 
 Pure data types (``EscalationTarget``, ``EscalationSignal``,
-``EscalationStrategy``) live in ``promptpotter.models.escalation``
-and are re-exported here for backward compatibility within the
-campaign package.
+``EscalationStrategy``) live in ``promptpotter.models.analysis``.
 """
 
 from __future__ import annotations
@@ -19,7 +17,7 @@ from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.escalation import (
+from promptpotter.models.analysis import (
     DEFAULT_STRATEGIES,
     EscalationSignal,
     EscalationStrategy,

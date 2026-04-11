@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.models.scoring import QueryRunner
     from promptpotter.services.search.search_memory import SearchMemory
-    from promptpotter.services.store.intermediate_cache import IntermediateCache
+    from promptpotter.services.store.stores import IntermediateCache
 
 logger = logging.getLogger(__name__)
 

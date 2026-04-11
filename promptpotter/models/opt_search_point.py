@@ -37,8 +37,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from pydantic import BaseModel, Field, field_validator
 
-from promptpotter.models.search_point import SearchPoint
-from promptpotter.models.task_decomposition import TaskDecomposition
+from promptpotter.models.search_point import SearchPoint, TaskDecomposition
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:

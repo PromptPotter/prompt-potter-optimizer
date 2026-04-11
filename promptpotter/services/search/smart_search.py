@@ -440,7 +440,7 @@ def load_filtered_variant_library(
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Load variant library, filtering to active pipeline steps when possible."""
-    from promptpotter.services.search.variant_library import load_variant_library
+    from promptpotter.services.search import load_variant_library
 
     lib = load_variant_library()
     if pipeline_params and pipeline_schema:

@@ -266,7 +266,7 @@ When scan data is available, `prepare_scan_brief()` enriches the meta-prompt wit
 
 ### SearchMemory Intelligence Feed
 
-Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`docs/methods/search-memory-intelligence.md`](../research/search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
+Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`docs/research/search-memory-intelligence.md`](../research/search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
 
 ### Stale Data Load Protocol
 
@@ -345,11 +345,12 @@ campaign_config = {
 
 | File | Role |
 |------|------|
-| `campaign/critique.py` | `CritiqueAgent`, `format_critique_for_prompt()`, pos/neg routing, stat computation |
-| `campaign/escalation.py` | `DegradationCheck`, `DEFAULT_STRATEGIES`, `classify_warnings` |
-| `campaign/optimization_loop.py` | Orchestration, escalation journal, critique threading |
-| `campaign/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
-| `eval_gateway.py` | `_run_eval_batch` (per-query checks), batch orchestration |
-| `eval_query.py` | `evaluate_query`, `_parse_backend_response` |
-| `l1_optimizer.py` | L1 generation (sole pipeline_params decider) |
+| `campaign/nodes/critique.py` | `CritiqueAgent`, `format_critique_for_prompt()`, pos/neg routing, stat computation |
+| `campaign/nodes/escalation.py` | `DegradationCheck`, `DEFAULT_STRATEGIES`, `classify_warnings` |
+| `campaign/runner.py` | Orchestration, escalation journal, critique threading |
+| `campaign/nodes/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
+| `campaign/nodes/generate.py` | L1 generation (sole pipeline_params decider) |
+| `campaign/nodes/score.py` | L1 scoring, winner selection, composite score |
+| `scoring/search_point_scorer.py` | `score_search_point()` gateway, batch orchestration |
+| `scoring/sample_measurement.py` | Per-query measurement, backend response parsing |
 | `search/search_memory.py` | Cross-campaign intelligence (M8 Wave 3): parameter impact, query patterns, failure modes |

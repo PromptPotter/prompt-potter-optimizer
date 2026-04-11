@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, TypedDict
 from pydantic import BaseModel, Field, field_validator
 
 from promptpotter.models.pipeline_schema import PipelineSchema
-from promptpotter.models.task_decomposition import TaskDecomposition
+from promptpotter.models.search_point import TaskDecomposition
 from promptpotter.services.search.scan_results import ScanBrief
 
 if TYPE_CHECKING:

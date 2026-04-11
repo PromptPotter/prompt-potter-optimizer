@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.task_decomposition import TaskDecomposition
+from promptpotter.models.search_point import TaskDecomposition
 from promptpotter.services.campaign.campaign_setup import (
     SessionEnv,
 )
@@ -23,7 +23,7 @@ from promptpotter.services.campaign.mgmt import (
     save_campaign_winner,
 )
 from promptpotter.services.project_store import ProjectStore
-from promptpotter.services.search.variant_library import load_variant_library
+from promptpotter.services.search import load_variant_library
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
@@ -71,10 +71,10 @@ async def decompose_task_context(
 ) -> TaskDecomposition:
     """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
 
-    Delegates to ``promptpotter.services.optimizer.prompt_preparation.decompose_task_context()``
+    Delegates to ``promptpotter.services.optimizer.pipeline.decompose_task_context()``
     and prints the decomposed fields for visibility.
     """
-    from promptpotter.services.optimizer.prompt_preparation import (
+    from promptpotter.services.optimizer.pipeline import (
         decompose_task_context as _decompose_task_context,
     )
 
@@ -138,7 +138,7 @@ def dev_reload() -> None:
         "promptpotter.services.search.smart_search",
         "promptpotter.services.search.sensitivity_scanner",
         "promptpotter.services.search.scan_baseline",
-        "promptpotter.services.campaign.scan_orchestration",
+        "promptpotter.services.campaign.campaign_setup",
         # Display layer — safe to reload (no model classes)
         "promptpotter.ui.campaign.display",
         "promptpotter.ui.campaign.phase_display",

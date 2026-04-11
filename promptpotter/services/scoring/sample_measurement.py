@@ -24,15 +24,14 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.models.query_result import QueryResult
-from promptpotter.models.scoring import ExactMatchComparator, GroundTruthResult
+from promptpotter.models.scoring import ExactMatchComparator, GroundTruthResult, QueryResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
     from promptpotter.models.scoring import QueryRunner
-    from promptpotter.services.store.intermediate_cache import IntermediateCache
+    from promptpotter.services.store.stores import IntermediateCache
 
 _comparator = ExactMatchComparator({"strip": True})
 

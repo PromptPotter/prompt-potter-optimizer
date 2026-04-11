@@ -23,7 +23,7 @@ if TYPE_CHECKING:
         PipelineNode,
         PipelineSchema,
     )
-    from promptpotter.models.query_result import QueryResult
+    from promptpotter.models.scoring import QueryResult
 
 
 __all__ = [

@@ -12,8 +12,7 @@ from promptpotter.services.campaign.nodes.formatting import (
     format_context_sections,
 )
 from promptpotter.services.llm_client import LLMClientBase
-from promptpotter.services.optimizer.pipeline import llm_call
-from promptpotter.services.optimizer.prompt_preparation import load_optimizer_prompt
+from promptpotter.services.optimizer.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.llm_parsing import extract_parsed_json
 

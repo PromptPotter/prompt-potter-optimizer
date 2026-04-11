@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.pipeline_schema import PipelineSchema
-from promptpotter.models.query_result import QueryResult
+from promptpotter.models.scoring import QueryResult
 from promptpotter.services.metrics import compute_composite_score, count_degraded_queries
 
 if TYPE_CHECKING:
@@ -193,7 +193,7 @@ async def _score_candidates(
     Returns (all_candidate_results, candidate_scores, escalation_signal).
     """
     from promptpotter.services.scoring.search_point_scorer import score_search_point
-    from promptpotter.services.search.sequential_elimination import EliminationCheck
+    from promptpotter.services.search.failure_group_analysis import EliminationCheck
 
     all_candidate_results: dict[str, list[dict]] = {}
     candidate_scores: list[dict] = []

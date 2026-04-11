@@ -3,8 +3,7 @@
 import asyncio
 
 from promptpotter.services.campaign.campaign_setup import _validate_local_access
-from promptpotter.services.llm_backend_adapter import LLMOnlyAdapter
-from promptpotter.services.llm_client import LLMClientBase, LLMResponse
+from promptpotter.services.llm_client import LLMClientBase, LLMOnlyAdapter, LLMResponse
 
 
 class _StubLLMClient(LLMClientBase):

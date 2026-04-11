@@ -24,6 +24,7 @@ from promptpotter.services.search import (
 from promptpotter.services.search import (
     load_filtered_variant_library as _load_filtered_variants,
 )
+from promptpotter.services.search import load_variant_library_rich
 from promptpotter.services.search import (
     preview_advisor_prompt as _preview_advisor_prompt,
 )
@@ -43,7 +44,6 @@ from promptpotter.services.search.scan_results import (
 from promptpotter.services.search.scan_results import (
     seed_campaign_from_scan as _seed_campaign_from_scan,
 )
-from promptpotter.services.search.variant_library import load_variant_library_rich
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
 from .display import (

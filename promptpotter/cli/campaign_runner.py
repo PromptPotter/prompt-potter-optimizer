@@ -276,7 +276,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
 async def cmd_task_context(args: argparse.Namespace) -> None:
     """Decompose task description into structured domain context."""
     from promptpotter.services.campaign.config import create_llm_client
-    from promptpotter.services.optimizer.prompt_preparation import (
+    from promptpotter.services.optimizer.pipeline import (
         decompose_task_context as _svc_decompose,
     )
 
@@ -339,7 +339,7 @@ async def cmd_scan(args: argparse.Namespace) -> None:
         len(node_axes),
     )
 
-    from promptpotter.services.campaign.scan_orchestration import run_scan_and_persist
+    from promptpotter.services.campaign.campaign_setup import run_scan_and_persist
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     baseline = load_baseline_prompt(session.experiment_extract, prompt_node_names=_pn)
@@ -424,7 +424,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
-    from promptpotter.services.campaign.scan_orchestration import load_scan_brief
+    from promptpotter.services.campaign.campaign_setup import load_scan_brief
 
     ctx = _load_session(args)
     campaign_config = ctx.state["campaign_config"]
