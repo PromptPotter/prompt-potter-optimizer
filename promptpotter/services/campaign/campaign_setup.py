@@ -201,7 +201,7 @@ async def init_services(
     All evaluation goes through :class:`BackendClient` by default.
     When ``dataset_type="llm-only"``, uses :class:`LLMOnlyAdapter` instead —
     gated behind ``LOCAL_EVAL_SECRET`` + ``local_eval_token`` for multi-tenant
-    safety.  See ``TermNorm-excel/docs/spec/proper-step-loop.md``.
+    safety.
     """
 
     def _status(msg: str) -> None:
@@ -304,7 +304,7 @@ async def init_services(
             f"Add a loader to DATASET_LOADERS in dataset_builder.py."
         )
 
-    # --- Experiment sync path (when no dataset_name — e.g. TermNorm via experiment traces) ---
+    # --- Experiment sync path (when no dataset_name — via experiment traces) ---
     exp_data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
 
     # Detect stale sync data: data exists but has no traces

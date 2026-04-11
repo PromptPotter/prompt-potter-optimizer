@@ -400,10 +400,7 @@ async def _score_candidates(
 
     Returns (all_candidate_results, candidate_scores, escalation_signal).
     """
-    from promptpotter.services.scoring_searchpoint import (
-        check_candidate_fully_cached,
-        score_search_point,
-    )
+    from promptpotter.services.scoring_searchpoint import score_search_point
     from promptpotter.services.search.sequential_elimination import EliminationCheck
 
     all_candidate_results: dict[str, list[dict]] = {}
@@ -429,40 +426,12 @@ async def _score_candidates(
             schema=ctx.pipeline_schema,
         )
 
-        cached_results, cached_scores, was_fully_cached = check_candidate_fully_cached(
-            sp,
-            dataset,
-            ctx,
-        )
-        if was_fully_cached:
-            logger.info(
-                "Candidate %d/%d: full-run cache hit (%d queries) — skipped",
-                idx + 1,
-                n_candidates,
-                len(cached_results),
-            )
-            all_candidate_results[osp_c.id] = cached_results
-            elim_check.register_completed([r["score"] for r in cached_results])
-
-            report = _build_score_report(
-                osp_c,
-                candidate_overrides[idx],
-                cached_scores,
-                cached_results,
-                dataset,
-                resumed_from_cache=True,
-            )
-            candidate_scores.append(report)
-            if callbacks and callbacks.on_candidate_scored:
-                callbacks.on_candidate_scored(idx, n_candidates, report)
-            continue
-
         # Merge degradation + elimination checks for this candidate
         all_checks = list(degradation_checks or [])
         if elim_check.enabled:
             all_checks.append(elim_check)
 
-        results, scores, _cached = await score_search_point(
+        results, scores, was_cached = await score_search_point(
             sp,
             dataset,
             ctx,
@@ -472,6 +441,29 @@ async def _score_candidates(
             candidate_idx=idx,
             n_total_candidates=n_candidates,
         )
+
+        if was_cached:
+            logger.info(
+                "Candidate %d/%d: full-run cache hit (%d queries) — skipped",
+                idx + 1,
+                n_candidates,
+                len(results),
+            )
+            all_candidate_results[osp_c.id] = results
+            elim_check.register_completed([r["score"] for r in results])
+
+            report = _build_score_report(
+                osp_c,
+                candidate_overrides[idx],
+                scores,
+                results,
+                dataset,
+                resumed_from_cache=True,
+            )
+            candidate_scores.append(report)
+            if callbacks and callbacks.on_candidate_scored:
+                callbacks.on_candidate_scored(idx, n_candidates, report)
+            continue
 
         escalation_signal = scores.pop("escalation_signal", None)
         elimination_stopped = (

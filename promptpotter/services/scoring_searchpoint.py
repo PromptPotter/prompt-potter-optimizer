@@ -360,40 +360,6 @@ def _load_prior_results(
     return cache
 
 
-def check_candidate_fully_cached(
-    search_point: JobSearchPoint,
-    dataset: list,
-    ctx: ScoringContext,
-) -> tuple[list, dict, bool]:
-    """Check if a candidate has a complete cached evaluation in dataset_runs.
-
-    Returns (results, scores, is_cached).  When *is_cached* is ``False``,
-    *results* and *scores* are empty — caller should fall through to
-    ``score_search_point()``.
-    """
-    store = ctx.store
-    backend_id = ctx.backend_id
-    pipeline_schema = ctx.pipeline_schema
-
-    if not (store and backend_id and pipeline_schema):
-        return [], {}, False
-
-    prompt_nodes = pipeline_schema.prompt_node_names()
-    sp_h = search_point.sp_hash(prompt_nodes)
-    prior_results = _load_prior_results(store, backend_id, sp_h)
-
-    if len(prior_results) < len(dataset):
-        return [], {}, False
-
-    if not all(qd["query"] in prior_results for qd in dataset):
-        return [], {}, False
-
-    results = [_materialize_cached_result(prior_results[qd["query"]]) for qd in dataset]
-
-    scores = compute_composite_score(results, pipeline_schema)
-    return results, scores, True
-
-
 async def score_search_point(
     search_point: JobSearchPoint,
     dataset: list,
@@ -441,6 +407,17 @@ async def score_search_point(
         sp_h = search_point.sp_hash(prompt_nodes)
         prior_results = _load_prior_results(store, backend_id, sp_h)
 
+    # Fast path: all queries already in prior cache — skip query loop entirely
+    if (
+        prior_results
+        and len(prior_results) >= len(dataset)
+        and all(qd["query"] in prior_results for qd in dataset)
+    ):
+        results = [_materialize_cached_result(prior_results[qd["query"]]) for qd in dataset]
+        assert pipeline_schema is not None, "pipeline_schema required for scoring"
+        scores = compute_composite_score(results, pipeline_schema)
+        return results, scores, True
+
     # Prefix display name with experiment_id for discoverability
     display_name = f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id else safe_label
 
@@ -477,17 +454,6 @@ async def score_search_point(
     )
     results = batch.results
     escalation_signal = batch.escalation_signal
-
-    # All results from prior cache — no new work done
-    all_cached = (
-        batch.completed
-        and len(prior_results) >= len(dataset)
-        and all(qd["query"] in prior_results for qd in dataset)
-    )
-    if all_cached:
-        assert pipeline_schema is not None, "pipeline_schema required for scoring"
-        scores = compute_composite_score(results, pipeline_schema)
-        return results, scores, True
 
     if not batch.completed and not escalation_signal:
         # Graceful or force stop — results already saved incrementally

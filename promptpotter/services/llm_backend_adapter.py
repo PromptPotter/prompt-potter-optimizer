@@ -61,7 +61,7 @@ class LLMOnlyAdapter:
         """
         pp = pipeline_params or {}
 
-        # Extract prompt from pipeline_params (same path as TermNorm)
+        # Extract prompt from pipeline_params (same path as pipeline backends)
         system = ""
         for node_cfg in pp.values():
             if isinstance(node_cfg, dict) and "prompt" in node_cfg:
