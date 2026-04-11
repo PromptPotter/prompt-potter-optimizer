@@ -173,7 +173,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     assert state["cycle_id"] == "cycle_test_001"
     assert "control" in state
     assert state["rounds_completed"] == 0
-    assert state["total_queries_evaluated"] == 2
+    assert state["total_queries_scored"] == 2
 
     # Verify campaign_output.log has content
     log = (session_dir / "campaign_output.log").read_text()

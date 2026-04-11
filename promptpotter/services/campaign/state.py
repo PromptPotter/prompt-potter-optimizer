@@ -236,7 +236,7 @@ class LoopState:
     campaign_store: CampaignStore | None = None
     cycle_id: str | None = None
     obs_campaign_id: str = ""
-    eval_dataset: list[dict] = field(default_factory=list)
+    scoring_dataset: list[dict] = field(default_factory=list)
     degradation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
     persistence_emitter: CampaignPersistenceEmitter | None = None

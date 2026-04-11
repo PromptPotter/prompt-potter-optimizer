@@ -40,9 +40,9 @@ class Settings(BaseSettings):
     LANGFUSE_ENABLED: bool = True
     LANGFUSE_PROMPTS_ENABLED: bool = False
 
-    # Local eval gate — admin secret for LLM-only adapter access
-    # Empty = disabled (all eval goes through backend). Set in .env to allow local eval.
-    LOCAL_EVAL_SECRET: str = ""
+    # Local scoring gate — admin secret for LLM-only adapter access
+    # Empty = disabled (all scoring goes through backend). Set in .env to allow local scoring.
+    LOCAL_SCORING_SECRET: str = ""
 
     # File-based observability (traces, experiments, events.jsonl)
     OBS_ENABLED: bool = True

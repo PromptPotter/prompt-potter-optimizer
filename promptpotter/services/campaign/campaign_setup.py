@@ -103,7 +103,7 @@ def load_baseline_prompt(
 
 
 def _validate_local_access(token: str | None) -> bool:
-    """Check if the caller is authorized for local LLM evaluation.
+    """Check if the caller is authorized for local LLM scoring.
 
     Uses ``hmac.compare_digest`` for constant-time comparison.
     Returns ``True`` if authorized, ``False`` otherwise (caller falls
@@ -111,15 +111,15 @@ def _validate_local_access(token: str | None) -> bool:
     """
     from promptpotter.config.settings import settings
 
-    secret = settings.LOCAL_EVAL_SECRET
+    secret = settings.LOCAL_SCORING_SECRET
     if not secret:
-        logger.info("Local eval not enabled (LOCAL_EVAL_SECRET empty) — routing to backend")
+        logger.info("Local scoring not enabled (LOCAL_SCORING_SECRET empty) — routing to backend")
         return False
     if not token:
-        logger.info("No local_eval_token provided — routing to backend")
+        logger.info("No local_scoring_token provided — routing to backend")
         return False
     if not hmac.compare_digest(token, secret):
-        logger.warning("Invalid local_eval_token — routing to backend")
+        logger.warning("Invalid local_scoring_token — routing to backend")
         return False
     return True
 
@@ -195,14 +195,14 @@ async def init_services(
     project_root: Path | None = None,
     dataset_name: str | None = None,
     dataset_type: str | None = None,
-    local_eval_token: str | None = None,
+    local_scoring_token: str | None = None,
     on_status: Callable[[str], None] | None = None,
 ) -> SessionEnv:
     """Initialize store, client, pipeline schema, and load eval data.
 
     All evaluation goes through :class:`BackendClient` by default.
     When ``dataset_type="llm-only"``, uses :class:`LLMOnlyAdapter` instead —
-    gated behind ``LOCAL_EVAL_SECRET`` + ``local_eval_token`` for multi-tenant
+    gated behind ``LOCAL_SCORING_SECRET`` + ``local_scoring_token`` for multi-tenant
     safety.
     """
 
@@ -220,7 +220,7 @@ async def init_services(
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
 
     # Decide eval client: local LLM-only (if authorized) or backend (default)
-    use_local = dataset_type == "llm-only" and _validate_local_access(local_eval_token)
+    use_local = dataset_type == "llm-only" and _validate_local_access(local_scoring_token)
 
     pipeline_schema = _load_static_pipeline_schema(project_root, dataset_name)
     if pipeline_schema:

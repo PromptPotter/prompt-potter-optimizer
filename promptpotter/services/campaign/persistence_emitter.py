@@ -55,7 +55,7 @@ class CampaignPersistenceEmitter:
         pipeline    — active_nodes, excluded_nodes, terminated_at, cache_hit_rate
         quality     — hit_rate, degraded_count, error_count
         best        — best, best_round, improvement_streak
-        historical  — rounds_completed, total_queries_evaluated, total_backend_calls
+        historical  — rounds_completed, total_queries_scored, total_backend_calls
         config      — model, n_variants, sp_budget_ttest
         accumulators— current_queries (reset per candidate), round_candidates
                       (reset per round), last_round
@@ -121,7 +121,7 @@ class CampaignPersistenceEmitter:
             "improvement_streak": 0,
             # Historical (carried over across cycles)
             "rounds_completed": r.get("rounds_completed", 0),
-            "total_queries_evaluated": r.get("total_queries_evaluated", 0),
+            "total_queries_scored": r.get("total_queries_scored", 0),
             "total_backend_calls": r.get("total_backend_calls", 0),
             # Config
             "model": config.model or "",
@@ -185,7 +185,7 @@ class CampaignPersistenceEmitter:
             "best_round": prior.get("best_round", 0),
             "baseline": baseline,
             "rounds_completed": prior.get("rounds_completed", 0),
-            "total_queries_evaluated": prior.get("total_queries_evaluated", 0),
+            "total_queries_scored": prior.get("total_queries_scored", 0),
             "total_backend_calls": prior.get("total_backend_calls", 0),
             "round_candidates": prior.get("round_candidates", []),
             "last_round": prior.get("last_round"),
@@ -198,7 +198,7 @@ class CampaignPersistenceEmitter:
         (CampaignPhase.INIT, "exit"): "_on_init_exit",
         (CampaignPhase.L1_GENERATE, "enter"): "_on_generate_enter",
         (CampaignPhase.L1_GENERATE, "exit"): "_on_generate_exit",
-        (CampaignPhase.L1_SCORE, "enter"): "_on_evaluate_enter",
+        (CampaignPhase.L1_SCORE, "enter"): "_on_score_enter",
     }
 
     def on_phase(self, event: PhaseEvent) -> None:
@@ -240,7 +240,7 @@ class CampaignPersistenceEmitter:
     def _on_generate_exit(self, data: dict) -> None:
         self._candidates_meta = data.get("candidates", [])
 
-    def _on_evaluate_enter(self, data: dict) -> None:
+    def _on_score_enter(self, data: dict) -> None:
         self._state["phase"] = "evaluating"
 
     def on_sample_scored(
@@ -304,7 +304,7 @@ class CampaignPersistenceEmitter:
             s["degraded_count"] = self._round_degraded
 
         # Historical
-        s["total_queries_evaluated"] += 1
+        s["total_queries_scored"] += 1
         s["total_backend_calls"] += 0 if is_cached else 1
 
         # Accumulate query
@@ -326,7 +326,7 @@ class CampaignPersistenceEmitter:
         s["current_queries"].append(q_entry)
 
         # Structured log line (no display dependency — audit trail only)
-        counter = s["total_queries_evaluated"]
+        counter = s["total_queries_scored"]
         q_text = (result.get("query") or "")[:45]
         pred = (result.get("prediction") or "")[:35]
         mark = "HIT" if hit else "MISS"

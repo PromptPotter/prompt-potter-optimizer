@@ -1022,7 +1022,7 @@ class ObsLogger:
         return self._cloud_trace_ids.get(campaign_id)
 
 
-def log_eval_to_obs(
+def log_scoring_to_obs(
     store_base_dir: Path,
     backend_id: str,
     run_id: str,
@@ -1031,7 +1031,7 @@ def log_eval_to_obs(
     prompt_fields_id: str,
     obs: ObsLogger | None,
 ) -> None:
-    """Log eval run to local obs store.
+    """Log scoring run to local obs store.
 
     Creates a temporary ObsLogger if ``obs`` is None.
     Langfuse push is handled separately via push_all_runs().

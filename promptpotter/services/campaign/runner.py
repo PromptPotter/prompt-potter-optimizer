@@ -123,8 +123,8 @@ def try_adapt_eval_set(
     from promptpotter.services.metrics import compile_query_difficulty
 
     _qd = compile_query_difficulty(_hist)
-    state.eval_dataset, _adapt = adapt_eval_set(
-        state.eval_dataset,
+    state.scoring_dataset, _adapt = adapt_eval_set(
+        state.scoring_dataset,
         _qd,
         full_dataset,
         seed=config.seed + round_num,
@@ -332,7 +332,7 @@ async def _run_round_loop(
                     len(warned),
                 )
             else:
-                round_eval_data = state.eval_dataset
+                round_eval_data = state.scoring_dataset
                 _round_checks = state.degradation_checks
 
             logger.debug(
@@ -538,7 +538,7 @@ async def _run_optimization_core(
         started_at,
     )
     # init_cycle_state populates infrastructure fields on state:
-    # campaign_store, cycle_id, obs_campaign_id, eval_dataset,
+    # campaign_store, cycle_id, obs_campaign_id, scoring_dataset,
     # degradation_checks, resumed_from_round, persistence_emitter,
     # search_memory (+ scoring_ctx.search_memory wiring).
 

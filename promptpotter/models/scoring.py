@@ -7,12 +7,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
 
 from pydantic import BaseModel, Field
+
+from promptpotter.shared.scoring import Scorer
 
 # ---------------------------------------------------------------------------
 # Per-query result types
@@ -126,7 +127,7 @@ class ScoringEnv:
     # Mutable dict extracted from opt_sp.stale_data_observations — updated during eval
     stale_data_observations: dict[str, int | dict] | None = None
     # Per-dataset scoring formula (compiled callable from shared/scoring.py)
-    scorer: Callable[[dict], float] | None = None
+    scorer: Scorer | None = None
 
 
 # ---------------------------------------------------------------------------

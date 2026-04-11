@@ -223,7 +223,7 @@ def update_query_tracker(
 def _summary_section(ctx: RoundSnapshot) -> str:
     total = len(ctx.results)
     return (
-        f"## EVALUATION SUMMARY\n"
+        f"## SCORING SUMMARY\n"
         f"Accuracy: {ctx.accuracy:.1%} | Composite: {ctx.composite:.4f} | "
         f"Degraded: {ctx.degraded_queries}/{total}\n"
         f"Round {ctx.current_round} | Stall count: {ctx.stall_count} | "

@@ -55,17 +55,6 @@ def get_optimizer_schema() -> PipelineSchema:
     return load_pipeline_from_dict(data)
 
 
-def get_node_config(node_name: str) -> dict:
-    """Get a node's config dict from the optimizer pipeline.
-
-    Returns ``PipelineNode.current_config`` for the named node.
-    """
-    node = get_optimizer_schema().get_node(node_name)
-    if node is None:
-        raise KeyError(f"Unknown optimizer node: {node_name}")
-    return node.current_config
-
-
 _LLM_DEFAULTS = {"temperature": 0.0, "max_tokens": 1000, "output_format": "text"}
 
 # -- Round recorder (per-task context, not a module global) ----------------
@@ -107,7 +96,13 @@ async def llm_call(
     ``trace_meta`` (template_name, variables) are recorded as an action.
     """
     if config is None:
-        config = get_node_config(node) if node else {}
+        if node:
+            schema_node = get_optimizer_schema().get_node(node)
+            if schema_node is None:
+                raise KeyError(f"Unknown optimizer node: {node}")
+            config = schema_node.current_config
+        else:
+            config = {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
 
     _t0 = time.monotonic()

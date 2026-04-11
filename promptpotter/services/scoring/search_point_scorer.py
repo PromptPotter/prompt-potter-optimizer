@@ -288,7 +288,7 @@ async def _run_query_loop(
                 )
                 if abort_reason:
                     logger.warning(
-                        "Aborting eval: %s on query %d. Marking remaining %d queries as errors.",
+                        "Aborting scoring: %s on query %d. Marking remaining %d queries as errors.",
                         abort_reason,
                         i + 1,
                         len(dataset) - i - 1,
@@ -490,9 +490,9 @@ async def score_search_point(
     # --- finalize: save complete run + observability ---
     _save_run(results, scores)
     if store and backend_id:
-        from promptpotter.services.tracing.observability_logger import log_eval_to_obs
+        from promptpotter.services.tracing.observability_logger import log_scoring_to_obs
 
-        log_eval_to_obs(
+        log_scoring_to_obs(
             store.base_dir,
             backend_id,
             run_id,

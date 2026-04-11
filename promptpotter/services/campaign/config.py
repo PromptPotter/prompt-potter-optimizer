@@ -88,7 +88,7 @@ class CampaignConfig(TypedDict, total=False):
 
     dataset_name: str
     dataset_type: str
-    local_eval_token: str
+    local_scoring_token: str
     sp_budget_ttest: int
     scan_sample_size: int
     exclude_nodes: list[str]

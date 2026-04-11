@@ -76,25 +76,27 @@ class TestLocalAuthGate:
     """
 
     def test_denies_when_no_secret_configured(self, monkeypatch):
-        """Empty LOCAL_EVAL_SECRET -> False (route to backend)."""
-        monkeypatch.setattr("promptpotter.config.settings.settings.LOCAL_EVAL_SECRET", "")
+        """Empty LOCAL_SCORING_SECRET -> False (route to backend)."""
+        monkeypatch.setattr("promptpotter.config.settings.settings.LOCAL_SCORING_SECRET", "")
         assert _validate_local_access("any-token") is False
 
     def test_denies_missing_token(self, monkeypatch):
         """Secret set but no token provided -> False (route to backend)."""
         monkeypatch.setattr(
-            "promptpotter.config.settings.settings.LOCAL_EVAL_SECRET", "correct-secret"
+            "promptpotter.config.settings.settings.LOCAL_SCORING_SECRET", "correct-secret"
         )
         assert _validate_local_access(None) is False
 
     def test_denies_wrong_token(self, monkeypatch):
         """Token doesn't match secret -> False (route to backend)."""
         monkeypatch.setattr(
-            "promptpotter.config.settings.settings.LOCAL_EVAL_SECRET", "correct-secret"
+            "promptpotter.config.settings.settings.LOCAL_SCORING_SECRET", "correct-secret"
         )
         assert _validate_local_access("wrong-token") is False
 
     def test_accepts_correct_token(self, monkeypatch):
         """Matching token -> True (local LLM authorized)."""
-        monkeypatch.setattr("promptpotter.config.settings.settings.LOCAL_EVAL_SECRET", "my-secret")
+        monkeypatch.setattr(
+            "promptpotter.config.settings.settings.LOCAL_SCORING_SECRET", "my-secret"
+        )
         assert _validate_local_access("my-secret") is True

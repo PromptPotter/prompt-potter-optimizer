@@ -229,7 +229,7 @@ async def init_cycle_state(
     """Initialize all cycle state: baseline, resume, obs, eval context.
 
     Returns a fully-wired ``LoopState`` with infrastructure fields
-    (campaign_store, cycle_id, eval_dataset, etc.) populated.
+    (campaign_store, cycle_id, scoring_dataset, etc.) populated.
     """
     emit_phase(
         on_phase,
@@ -263,7 +263,7 @@ async def init_cycle_state(
     if _index_terms:
         await _bc.init_session(_index_terms)
 
-    eval_dataset = sample_dataset(dataset, config.sp_budget_ttest, config.seed)
+    scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest, config.seed)
 
     # 1. Build baseline state
     state, baseline_osp = _build_baseline_state(
@@ -341,7 +341,7 @@ async def init_cycle_state(
         resumed_from_round=resumed_from_round,
         baseline_accuracy=baseline_accuracy,
         obs_enabled=obs is not None,
-        sample_count=len(eval_dataset),
+        sample_count=len(scoring_dataset),
         enable_critique=config.enable_critique,
         restored_state=_restored,
     )
@@ -378,7 +378,7 @@ async def init_cycle_state(
     state.campaign_store = campaign_store
     state.cycle_id = cycle_id
     state.obs_campaign_id = obs_campaign_id
-    state.eval_dataset = eval_dataset
+    state.scoring_dataset = scoring_dataset
     state.degradation_checks = degradation_checks
     state.resumed_from_round = resumed_from_round
     state.persistence_emitter = persistence_emitter

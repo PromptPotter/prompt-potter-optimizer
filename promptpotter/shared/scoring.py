@@ -30,6 +30,9 @@ from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
 
+# Type alias for per-dataset scoring callable
+Scorer = Callable[[dict], float]
+
 # ---------------------------------------------------------------------------
 # Scoring functions — one registry, add new helpers here
 # ---------------------------------------------------------------------------

@@ -203,7 +203,7 @@ async def _score_and_select(
     candidates: list[dict],
     round_num: int,
     state: LoopState,
-    eval_dataset: list[dict],
+    scoring_dataset: list[dict],
     config: LoopConfig,
     callbacks: RunCallbacks,
     obs: ObsLogger | None = None,
@@ -219,7 +219,7 @@ async def _score_and_select(
         "enter",
         round=round_num,
         n_candidates=len(candidates),
-        n_queries=len(eval_dataset),
+        n_queries=len(scoring_dataset),
         current_best_accuracy=state.current_accuracy,
         improvement_threshold=config.improvement_threshold,
         current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None,
@@ -234,13 +234,13 @@ async def _score_and_select(
     }
 
     async with observed_node(
-        f"l1_score_r{round_num}", "evaluation", obs=obs, trace_id=trace_id, obs_type="span"
+        f"l1_score_r{round_num}", "scoring", obs=obs, trace_id=trace_id, obs_type="span"
     ):
         assert state.scoring_ctx is not None
         assert state.current_sp is not None
         scoring_result = await l1_score(
             candidates,
-            eval_dataset,
+            scoring_dataset,
             current_best,
             state.scoring_ctx,
             pipeline_params=state.current_sp.pipeline_params,
@@ -275,7 +275,7 @@ async def _score_and_select(
 async def execute_round(
     round_num: int,
     state: LoopState,
-    eval_dataset: list[dict],
+    scoring_dataset: list[dict],
     config: LoopConfig,
     obs_campaign_id: str,
     campaign_store: CampaignStore | None,
@@ -298,7 +298,7 @@ async def execute_round(
         campaign_store,
         cycle_id,
         callbacks.on_phase,
-        n_eval_queries=len(eval_dataset),
+        n_eval_queries=len(scoring_dataset),
         obs=obs,
         trace_id=trace_id,
         search_memory=search_memory,
@@ -311,7 +311,7 @@ async def execute_round(
         candidates,
         round_num,
         state,
-        eval_dataset,
+        scoring_dataset,
         config,
         callbacks,
         obs=obs,

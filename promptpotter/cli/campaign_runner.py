@@ -82,7 +82,7 @@ async def _init_services(
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
     dataset_type: str | None = None,
-    local_eval_token: str | None = None,
+    local_scoring_token: str | None = None,
 ) -> SessionEnv:
     """Initialize services (logging + service init)."""
     from promptpotter.config.logging import setup_logging
@@ -97,7 +97,7 @@ async def _init_services(
         project_root=project_root,
         dataset_name=dataset_name,
         dataset_type=dataset_type,
-        local_eval_token=local_eval_token,
+        local_scoring_token=local_scoring_token,
         on_status=logger.info,
     )
 
@@ -153,7 +153,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
 
     dataset_name = args.dataset_name or file_config.get("dataset_name")
     dataset_type = file_config.get("dataset_type")
-    local_eval_token = file_config.get("local_eval_token")
+    local_scoring_token = file_config.get("local_scoring_token")
 
     backend_id = args.backend_id
 
@@ -163,7 +163,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
         experiment_id=args.experiment_id,
         dataset_name=dataset_name,
         dataset_type=dataset_type,
-        local_eval_token=local_eval_token,
+        local_scoring_token=local_scoring_token,
     )
 
     # Use the (possibly derived) backend_id from the session
@@ -198,7 +198,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
             "experiment_id": args.experiment_id,
             "dataset_name": dataset_name,
             "dataset_type": dataset_type,
-            "local_eval_token": local_eval_token,
+            "local_scoring_token": local_scoring_token,
         },
         "campaign_config": campaign_config,
         "pipeline_params": pipeline_params,

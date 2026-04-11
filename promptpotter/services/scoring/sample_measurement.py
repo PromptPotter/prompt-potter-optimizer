@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -27,6 +26,7 @@ import httpx
 from promptpotter.models.scoring import ExactMatchComparator, GroundTruthResult, QueryResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
+from promptpotter.shared.scoring import Scorer
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
@@ -34,9 +34,6 @@ if TYPE_CHECKING:
     from promptpotter.services.store.stores import IntermediateCache
 
 _comparator = ExactMatchComparator({"strip": True})
-
-# Type alias for per-dataset scoring callable (see shared/scoring.py)
-Scorer = Callable[[dict], float]
 
 logger = logging.getLogger(__name__)
 

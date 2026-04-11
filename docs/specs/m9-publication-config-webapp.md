@@ -364,7 +364,7 @@ Wave 6: Track 2c + Track 3d + Track 3e
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Bootstrap cost for meta-prompt eval | High compute cost (15K+ LLM calls per variant) | Use 50-100 eval samples for tuning; full samples for final numbers |
-| Local LLM eval = mini-connector | Technical debt, future refactor for M11 | Interface compatible with BackendClient (duck typing). Opt-in via `LOCAL_EVAL_SECRET`. |
+| Local LLM eval = mini-connector | Technical debt, future refactor for M11 | Interface compatible with BackendClient (duck typing). Opt-in via `LOCAL_SCORING_SECRET`. |
 | Webapp scope creep | Unbounded frontend work | MVP scope (3a-3c) before Phase 2 (3d-3e) |
 | Cited competitor numbers | Weak comparison (different models/hardware) | Label "cited" clearly; MIPROv2 is easiest to reproduce if challenged |
 | Multi-node meta-prompts on LLM-only tasks | Pipeline references irrelevant for benchmarks | Generic prompts via task_context injection; no pipeline-specific language in base prompts |
