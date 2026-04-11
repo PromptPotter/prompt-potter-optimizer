@@ -167,12 +167,17 @@ async def run_optimization(
     callbacks: RunCallbacks | None = None,
     langfuse_session_id: str | None = None,
     cycle_id: str | None = None,
+    max_rounds_override: int | None = None,
 ) -> RunResult | None:
     """Build config, extract baseline, wire round-append callback, and run loop.
 
     Callers pass display-specific callbacks via *callbacks*; the round-entry
     append is handled internally and chained before the caller's
     ``on_round_complete``.
+
+    *max_rounds_override* caps ``max_rounds`` without mutating
+    *campaign_config* — used by ``--round`` to run a single round
+    ephemerally.
 
     Returns ``RunResult`` (or ``None`` if interrupted before any rounds).
     """
@@ -187,6 +192,8 @@ async def run_optimization(
         task_context=task_context,
         session_id=session_id,
     )
+    if max_rounds_override is not None:
+        config = config.model_copy(update={"max_rounds": max_rounds_override})
 
     bl = extract_campaign_baseline(campaign_rounds)
 
@@ -218,7 +225,6 @@ async def run_optimization(
         baseline_results=bl.baseline_results,
         callbacks=merged_cb,
         langfuse_session_id=langfuse_session_id,
-        scan_brief=scan_brief,
         cycle_id=cycle_id,
         experiment_id=experiment_id or "",
         session=session,

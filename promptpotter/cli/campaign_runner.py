@@ -151,10 +151,7 @@ async def cmd_init(args: argparse.Namespace) -> None:
     dataset_type = file_config.get("dataset_type")
     local_eval_token = file_config.get("local_eval_token")
 
-    # Derive backend_id from dataset_name when not explicitly passed
     backend_id = args.backend_id
-    if backend_id == DEFAULT_BACKEND_ID and dataset_name:
-        backend_id = dataset_name
 
     session = await _init_services(
         backend_url=args.backend_url,
@@ -164,6 +161,9 @@ async def cmd_init(args: argparse.Namespace) -> None:
         dataset_type=dataset_type,
         local_eval_token=local_eval_token,
     )
+
+    # Use the (possibly derived) backend_id from the session
+    backend_id = session.backend_id
 
     # Priority: --config file > connector profile > empty dict
     profile = session.store.backends.load_connector_profile(backend_id) or {}
@@ -443,22 +443,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
         baseline_acc,
     )
 
-    # --round: complete one full round then stop (default: full loop).
-    # Restore max_rounds from config file — prior --round may have persisted max_rounds=1.
     campaign_config.setdefault("optimization", {}).pop("pause_before_scoring", None)
-    if not args.round:
-        _cfg_path = Path(f"datasets/{campaign_config.get('dataset_name', '')}/campaign.json")
-        if _cfg_path.exists():
-            _orig = json.loads(_cfg_path.read_text(encoding="utf-8"))
-            _orig_max = _orig.get("campaign_config", {}).get("optimization", {}).get("max_rounds")
-            if _orig_max is not None:
-                campaign_config.setdefault("optimization", {})["max_rounds"] = _orig_max
-
     ctx.save_phase("optimizing")
-
-    # --round is ephemeral — apply AFTER save so it doesn't pollute session.json.
-    if args.round:
-        campaign_config.setdefault("optimization", {})["max_rounds"] = 1
 
     # Bidirectional control — CLI provides CampaignControlReader as on_checkpoint
     from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
@@ -490,6 +476,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             task_context=ctx.state.get("task_context"),
             session_id=ctx.session_id,
             callbacks=control_cb,
+            max_rounds_override=1 if args.round else None,
         )
     finally:
         set_round_recorder(None)

@@ -21,6 +21,9 @@ from promptpotter.models.search_point import JobSearchPoint
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.scoring_env import ScoringEnv
+    from promptpotter.services.campaign.escalation import DegradationCheck
+    from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
+    from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +231,15 @@ class LoopState:
 
     # L2/L3 escalation counters
     escalation: EscalationCounters = field(default_factory=EscalationCounters)
+
+    # -- Infrastructure (populated by init_cycle_state, threaded through loop) --
+    campaign_store: CampaignStore | None = None
+    cycle_id: str | None = None
+    obs_campaign_id: str = ""
+    eval_dataset: list[dict] = field(default_factory=list)
+    degradation_checks: list[DegradationCheck] = field(default_factory=list)
+    resumed_from_round: int = 0
+    persistence_emitter: CampaignPersistenceEmitter | None = None
 
     # Checkpoint schema version — incremented when LoopState/OptSearchPoint
     # fields change, so resume can detect stale checkpoints.

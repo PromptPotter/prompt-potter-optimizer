@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.config.settings import (
+    DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
@@ -207,6 +208,9 @@ async def init_services(
     def _status(msg: str) -> None:
         if on_status:
             on_status(msg)
+
+    if not backend_id:
+        backend_id = dataset_name or DEFAULT_BACKEND_ID
 
     if project_root is None:
         # campaign/campaign_setup.py → services → promptpotter → repo_root

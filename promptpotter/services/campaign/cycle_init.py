@@ -6,12 +6,12 @@ from the round loop itself.
 
 from __future__ import annotations
 
-__all__ = ["CycleInit", "init_cycle_state"]
+__all__ = ["init_cycle_state"]
 
 import hashlib
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.scoring_env import ScoringEnv
@@ -34,25 +34,10 @@ from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
     from promptpotter.services.backend_client import BackendClient
-    from promptpotter.services.campaign.escalation import DegradationCheck
-    from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
     from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
 
-
-class CycleInit(NamedTuple):
-    """Return type for ``init_cycle_state()``."""
-
-    state: LoopState
-    campaign_store: CampaignStore | None
-    cycle_id: str | None
-    obs_campaign_id: str
-    eval_dataset: list[dict[str, Any]]
-    degradation_checks: list[DegradationCheck]
-    resumed_from_round: int
-    search_memory: SearchMemory | None
-    persistence_emitter: CampaignPersistenceEmitter | None
 
 
 def _build_baseline_state(
@@ -230,8 +215,12 @@ async def init_cycle_state(
     experiment_id: str,
     session: SessionEnv | None,
     started_at: str,
-) -> CycleInit:
-    """Initialize all cycle state: baseline, resume, obs, eval context."""
+) -> LoopState:
+    """Initialize all cycle state: baseline, resume, obs, eval context.
+
+    Returns a fully-wired ``LoopState`` with infrastructure fields
+    (campaign_store, cycle_id, eval_dataset, etc.) populated.
+    """
     emit_phase(
         on_phase,
         CampaignPhase.INIT,
@@ -319,6 +308,11 @@ async def init_cycle_state(
         if search_memory.refresh(_store, config.backend_id):
             search_memory.save(_sm_path)
 
+    # Wire SearchMemory onto state (single wiring point)
+    state.search_memory = search_memory
+    if state.scoring_ctx and search_memory:
+        state.scoring_ctx.search_memory = search_memory
+
     # Build restored state summary for display
     _restored = {}
     if resumed_from_round:
@@ -370,14 +364,13 @@ async def init_cycle_state(
             cycle_id=cycle_id,
         )
 
-    return CycleInit(
-        state=state,
-        campaign_store=campaign_store,
-        cycle_id=cycle_id,
-        obs_campaign_id=obs_campaign_id,
-        eval_dataset=eval_dataset,
-        degradation_checks=degradation_checks,
-        resumed_from_round=resumed_from_round,
-        search_memory=search_memory,
-        persistence_emitter=persistence_emitter,
-    )
+    # Populate infrastructure fields on state
+    state.campaign_store = campaign_store
+    state.cycle_id = cycle_id
+    state.obs_campaign_id = obs_campaign_id
+    state.eval_dataset = eval_dataset
+    state.degradation_checks = degradation_checks
+    state.resumed_from_round = resumed_from_round
+    state.persistence_emitter = persistence_emitter
+
+    return state

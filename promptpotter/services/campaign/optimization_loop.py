@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.services.campaign.campaign_setup import SessionEnv
 from promptpotter.services.campaign.config import LoopConfig
-from promptpotter.services.campaign.cycle_init import init_cycle_state
+from promptpotter.services.campaign.cycle_init import init_cycle_state  # returns LoopState
 from promptpotter.services.campaign.escalation import escalate_l2
 from promptpotter.services.campaign.lifecycle import finalize_campaign
 from promptpotter.services.campaign.round_execution import (
@@ -40,7 +40,6 @@ from promptpotter.services.campaign.state import (
     get_obs_trace,
 )
 from promptpotter.services.metrics import compile_query_difficulty
-from promptpotter.services.search.scan_results import ScanBrief
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -242,79 +241,23 @@ async def _check_stopping_conditions(
     return None
 
 
-async def run_optimization(
-    instruction: str,
+async def _run_round_loop(
+    state: LoopState,
     dataset: list[dict[str, Any]],
     config: LoopConfig,
-    *,
-    baseline_prompt_fields: dict | None = None,
-    baseline_accuracy: float = 0.0,
-    baseline_results: list | None = None,
-    callbacks: RunCallbacks | None = None,
-    langfuse_session_id: str | None = None,
-    scan_brief: ScanBrief | None = None,
-    cycle_id: str | None = None,
-    experiment_id: str = "",
-    session: SessionEnv | None = None,
-) -> RunResult:
-    """Run iterative optimization with feedback cycling.
+    cb: RunCallbacks,
+) -> StopReason:
+    """Execute the round loop: generate → score → escalate → stop.
 
-    Executes: init → round loop (l1_generate → l1_score) → finalize.
-    Stops on: patience exhaustion, max_rounds, perfect score, or interrupt.
+    Reads infrastructure from *state* (campaign_store, cycle_id, etc.).
+    Returns the ``StopReason`` that ended the loop.
     """
-    if scan_brief is not None:
-        config = config.model_copy(update={"scan_brief": scan_brief})
-    started_at = datetime.now(UTC).isoformat()
-
-    cb = callbacks or RunCallbacks()
-
-    # -- Init --
-    init = await init_cycle_state(
-        instruction,
-        dataset,
-        config,
-        baseline_prompt_fields,
-        baseline_accuracy,
-        baseline_results,
-        cb.on_phase,
-        langfuse_session_id,
-        cycle_id,
-        experiment_id,
-        session,
-        started_at,
-    )
-    state = init.state
-    campaign_store = init.campaign_store
-    cycle_id = init.cycle_id
-    obs_campaign_id = init.obs_campaign_id
-    eval_dataset = init.eval_dataset
-    degradation_checks = init.degradation_checks
-    resumed_from_round = init.resumed_from_round
-    search_memory = init.search_memory
-    _emitter = init.persistence_emitter
-    state.search_memory = search_memory
-    if state.scoring_ctx and search_memory:
-        state.scoring_ctx.search_memory = search_memory
-
-    # Chain persistence callbacks (fires first) with caller display callbacks
-    if _emitter:
-        from promptpotter.services.campaign.state import chain_callbacks
-
-        persistence_cb = RunCallbacks(
-            on_phase=_emitter.on_phase,
-            on_sample_scored=_emitter.on_sample_scored,
-            on_candidate_scored=_emitter.on_candidate_scored,
-            on_round_complete=_emitter.on_round_complete,
-        )
-        cb = chain_callbacks(persistence_cb, cb)
-
-    # -- Round loop --
     stop_reason: StopReason | None = None
     hard_cap = config.hard_cap
 
     try:
-        round_num = resumed_from_round
-        clean_rounds = resumed_from_round
+        round_num = state.resumed_from_round
+        clean_rounds = state.resumed_from_round
         max_rounds = config.max_rounds or 999
 
         while clean_rounds < max_rounds and round_num < hard_cap:
@@ -331,8 +274,8 @@ async def run_optimization(
                     len(warned),
                 )
             else:
-                round_eval_data = eval_dataset
-                _round_checks = degradation_checks
+                round_eval_data = state.eval_dataset
+                _round_checks = state.degradation_checks
 
             logger.debug(
                 "Optimization round %d (clean=%d/%d, acc=%.3f, stall=%d/%d%s)",
@@ -357,12 +300,12 @@ async def run_optimization(
                 state,
                 round_eval_data,
                 config,
-                obs_campaign_id,
-                campaign_store,
-                cycle_id,
+                state.obs_campaign_id,
+                state.campaign_store,
+                state.cycle_id,
                 cb,
                 degradation_checks=_round_checks,
-                search_memory=search_memory,
+                search_memory=state.search_memory,
             )
             update_round_state(
                 state,
@@ -372,7 +315,7 @@ async def run_optimization(
             )
 
             # Record query flips for improvement attribution
-            if search_memory and len(state.rounds) >= 2:
+            if state.search_memory and len(state.rounds) >= 2:
                 prev_round = state.rounds[-2]
                 curr_round = state.rounds[-1]
                 if prev_round.results and curr_round.results:
@@ -381,7 +324,7 @@ async def run_optimization(
                         if curr_round.candidate_scores
                         else ""
                     )
-                    _flips = search_memory.record_query_flips(
+                    _flips = state.search_memory.record_query_flips(
                         round_num,
                         desc,
                         prev_round.results,
@@ -398,7 +341,7 @@ async def run_optimization(
                     round_num,
                     round_eval_data,
                     cb.on_phase,
-                    obs_campaign_id,
+                    state.obs_campaign_id,
                     on_checkpoint=cb.on_checkpoint,
                 )
                 if probe_stop:
@@ -416,9 +359,9 @@ async def run_optimization(
                     round_result,
                     round_num,
                     cb.on_phase,
-                    obs_campaign_id,
-                    campaign_store,
-                    cycle_id,
+                    state.obs_campaign_id,
+                    state.campaign_store,
+                    state.cycle_id,
                     on_checkpoint=cb.on_checkpoint,
                 )
                 if esc_stop:
@@ -438,10 +381,10 @@ async def run_optimization(
                 cb.on_round_complete(round_result, state.stall_count)
 
             # Checkpoint round to disk
-            if campaign_store and cycle_id:
+            if state.campaign_store and state.cycle_id:
                 _checkpoint_round(
-                    campaign_store,
-                    cycle_id,
+                    state.campaign_store,
+                    state.cycle_id,
                     config,
                     state,
                     round_result,
@@ -463,31 +406,31 @@ async def run_optimization(
                     break
 
             # SearchMemory refresh — pick up results from this round
-            if search_memory and state.scoring_ctx and state.scoring_ctx.store:
+            if state.search_memory and state.scoring_ctx and state.scoring_ctx.store:
                 from pathlib import Path
 
                 _sm_store = state.scoring_ctx.store
-                if search_memory.refresh(_sm_store, config.backend_id):
+                if state.search_memory.refresh(_sm_store, config.backend_id):
                     # Periodically recompute failure group correlations
                     if (
                         round_num > 0
                         and round_num % 5 == 0
-                        and search_memory.recompute_failure_group_correlations()
+                        and state.search_memory.recompute_failure_group_correlations()
                     ):
                         logger.info(
                             "SearchMemory: recomputed failure group correlations at round %d",
                             round_num,
                         )
                     _sm_path = Path(_sm_store.base_dir) / config.backend_id / "search_memory.json"
-                    search_memory.save(_sm_path)
+                    state.search_memory.save(_sm_path)
 
             # Adaptive eval set — swap dead queries for discriminating ones
             if round_num >= 2 and not is_probe:
                 _hist = [r.results for r in state.rounds if r.results]
                 if len(_hist) >= 3:
                     _qd = compile_query_difficulty(_hist)
-                    eval_dataset, _adapt = adapt_eval_set(
-                        eval_dataset,
+                    state.eval_dataset, _adapt = adapt_eval_set(
+                        state.eval_dataset,
                         _qd,
                         dataset,
                         seed=config.seed + round_num,
@@ -501,7 +444,7 @@ async def run_optimization(
                 config,
                 round_num,
                 cb.on_phase,
-                obs_campaign_id,
+                state.obs_campaign_id,
                 on_checkpoint=cb.on_checkpoint,
             )
             if _stop:
@@ -534,10 +477,72 @@ async def run_optimization(
             len(state.rounds),
         )
 
-    # -- Cleanup round recorder --
+    # Cleanup round recorder
     from promptpotter.services.optimizer.pipeline import set_round_recorder
 
     set_round_recorder(None)
+
+    assert stop_reason is not None
+    return stop_reason
+
+
+async def run_optimization(
+    instruction: str,
+    dataset: list[dict[str, Any]],
+    config: LoopConfig,
+    *,
+    baseline_prompt_fields: dict | None = None,
+    baseline_accuracy: float = 0.0,
+    baseline_results: list | None = None,
+    callbacks: RunCallbacks | None = None,
+    langfuse_session_id: str | None = None,
+    cycle_id: str | None = None,
+    experiment_id: str = "",
+    session: SessionEnv | None = None,
+) -> RunResult:
+    """Run iterative optimization with feedback cycling.
+
+    Executes: init → round loop (l1_generate → l1_score) → finalize.
+    Stops on: patience exhaustion, max_rounds, perfect score, or interrupt.
+    """
+    started_at = datetime.now(UTC).isoformat()
+
+    cb = callbacks or RunCallbacks()
+
+    # -- Init --
+    state = await init_cycle_state(
+        instruction,
+        dataset,
+        config,
+        baseline_prompt_fields,
+        baseline_accuracy,
+        baseline_results,
+        cb.on_phase,
+        langfuse_session_id,
+        cycle_id,
+        experiment_id,
+        session,
+        started_at,
+    )
+    # init_cycle_state populates infrastructure fields on state:
+    # campaign_store, cycle_id, obs_campaign_id, eval_dataset,
+    # degradation_checks, resumed_from_round, persistence_emitter,
+    # search_memory (+ scoring_ctx.search_memory wiring).
+
+    # Chain persistence callbacks (fires first) with caller display callbacks
+    _emitter = state.persistence_emitter
+    if _emitter:
+        from promptpotter.services.campaign.state import chain_callbacks
+
+        persistence_cb = RunCallbacks(
+            on_phase=_emitter.on_phase,
+            on_sample_scored=_emitter.on_sample_scored,
+            on_candidate_scored=_emitter.on_candidate_scored,
+            on_round_complete=_emitter.on_round_complete,
+        )
+        cb = chain_callbacks(persistence_cb, cb)
+
+    stop_reason = await _run_round_loop(state, dataset, config, cb)
 
     # -- Finalize --
     finished_at = datetime.now(UTC).isoformat()
@@ -552,14 +557,14 @@ async def run_optimization(
         else "completed"
     )
     finalize_campaign(
-        campaign_store,
-        cycle_id,
+        state.campaign_store,
+        state.cycle_id,
         config,
         state,
         stop_reason,
         finished_at,
         obs,
-        obs_campaign_id,
+        state.obs_campaign_id,
         status=campaign_status,
     )
 
@@ -570,13 +575,13 @@ async def run_optimization(
             best_accuracy=state.best_accuracy,
             best_round=state.best_round,
             stop_reason=stop_reason,
-            cycle_id=cycle_id,
+            cycle_id=state.cycle_id,
         )
 
     cloud_trace_id = (
         None
         if stop_reason in (StopReason.INTERRUPTED, StopReason.PAUSED_FOR_REVIEW)
-        else (obs.get_cloud_trace_id(obs_campaign_id) if obs else None)
+        else (obs.get_cloud_trace_id(state.obs_campaign_id) if obs else None)
     )
 
     return RunResult(
@@ -591,6 +596,6 @@ async def run_optimization(
         started_at=started_at,
         finished_at=finished_at,
         langfuse_trace_id=cloud_trace_id,
-        cycle_id=cycle_id,
-        resumed_from_round=resumed_from_round,
+        cycle_id=state.cycle_id,
+        resumed_from_round=state.resumed_from_round,
     )
