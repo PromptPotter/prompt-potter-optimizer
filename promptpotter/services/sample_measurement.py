@@ -175,7 +175,7 @@ async def measure_sample(
 
         pipeline_schema = PipelineSchema()
 
-    _target_steps = (pipeline_params or {}).get("steps", [])
+    _target_steps = list(pipeline_schema.active_steps)
 
     try:
         # Per-node cache: reuse upstream pipeline nodes (multi-step only).
@@ -184,9 +184,7 @@ async def measure_sample(
         cached_steps: list[str] = []
         prefix_keys: list[tuple[str, str]] = []
         if intermediate_cache and _target_steps:
-            from promptpotter.services.store.intermediate_cache import compute_prefix_keys
-
-            prefix_keys = compute_prefix_keys(pipeline_params or {}, pipeline_schema)
+            prefix_keys = pipeline_schema.prefix_keys(pipeline_params or {})
             node_outputs_hit, cached_steps = intermediate_cache.walk_prefix(
                 backend_id,
                 query,

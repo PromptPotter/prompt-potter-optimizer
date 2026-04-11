@@ -216,8 +216,7 @@ async def l1_generate(
                     node_overrides.setdefault(owner, {})[fk] = node_overrides.pop(fk)
 
             # Filter out hallucinated nodes that don't exist in the pipeline
-            _valid_nodes = {n.name for n in pipeline_schema.nodes}
-            _bad_nodes = [k for k in node_overrides if k not in _valid_nodes]
+            _bad_nodes = [k for k in node_overrides if not pipeline_schema.has_node(k)]
             for bk in _bad_nodes:
                 logger.warning("l1_generate: dropping hallucinated node %r", bk)
                 del node_overrides[bk]

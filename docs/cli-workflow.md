@@ -178,7 +178,7 @@ python -m promptpotter export supplemental \
 
 ## Pipeline Params Threading
 
-`configure_pipeline(svc, campaign_config)` is the single source of truth for pipeline configuration. It applies `exclude_nodes`, `pipeline_overrides`, and returns `pipeline_params` with an active `steps` list.
+`configure_pipeline(svc, campaign_config)` applies `exclude_nodes` and `pipeline_overrides`, returning `pipeline_params`. Node ordering comes from `PipelineSchema` (pre-filtered to active nodes); `pipeline_params["steps"]` is only read at wire-format boundaries.
 
 This `pipeline_params` dict flows to every eval call:
 - `init` — baseline eval uses the configured pipeline (skipped by default, runs automatically before first optimize round)

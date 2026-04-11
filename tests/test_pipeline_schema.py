@@ -5,6 +5,7 @@ and registry metadata flow.
 """
 
 from promptpotter.models.pipeline_schema import (
+    NodePromptMeta,
     ObservationMapping,
     PipelineNode,
     PipelineSchema,
@@ -318,3 +319,72 @@ class TestParsePipelineResponse:
         assert step.observation_name == "llm_step"
         assert len(step.observation_mappings) == 1
         assert step.observation_mappings[0].is_llm is True
+
+
+def _three_node_schema() -> PipelineSchema:
+    """Helper: a → b → c pipeline with param_keys on a and b."""
+    return PipelineSchema(
+        name="test",
+        nodes=[
+            PipelineNode(name="a", param_keys={"max_results"}),
+            PipelineNode(
+                name="b",
+                param_keys={"temperature"},
+                prompt_meta=NodePromptMeta(family="p"),
+            ),
+            PipelineNode(name="c"),
+        ],
+    )
+
+
+class TestCoordinateLookups:
+    def test_has_node(self):
+        schema = _three_node_schema()
+        assert schema.has_node("a")
+        assert schema.has_node("b")
+        assert not schema.has_node("z")
+
+    def test_all_param_keys(self):
+        schema = _three_node_schema()
+        assert schema.all_param_keys == {"max_results", "temperature"}
+
+    def test_has_prompt_nodes(self):
+        schema = _three_node_schema()
+        assert schema.has_prompt_nodes is True
+        no_prompt = PipelineSchema(nodes=[PipelineNode(name="x")])
+        assert no_prompt.has_prompt_nodes is False
+
+    def test_exclude(self):
+        schema = _three_node_schema()
+        reduced = schema.exclude({"b"})
+        assert [n.name for n in reduced.nodes] == ["a", "c"]
+        # None / empty → identity
+        assert schema.exclude(None) is schema
+        assert schema.exclude(set()) is schema
+
+    def test_prefix_keys_stable_and_chained(self):
+        schema = _three_node_schema()
+        pp = {"a": {"max_results": 5}, "b": {"temperature": 0.7}}
+        keys = schema.prefix_keys(pp)
+        assert len(keys) == 3
+        assert all(len(k) == 16 for _, k in keys)
+        names = [name for name, _ in keys]
+        assert names == ["a", "b", "c"]
+        # Changing upstream config changes downstream keys
+        pp2 = {"a": {"max_results": 10}, "b": {"temperature": 0.7}}
+        keys2 = schema.prefix_keys(pp2)
+        assert keys2[0][1] != keys[0][1]  # a changed
+        assert keys2[1][1] != keys[1][1]  # b cascaded
+        assert keys2[2][1] != keys[2][1]  # c cascaded
+
+    def test_prefix_keys_matches_node_cache_key(self):
+        """prefix_keys produces the same hashes as node_cache_key."""
+        from promptpotter.models.pipeline_schema import node_cache_key
+
+        schema = _three_node_schema()
+        pp = {"a": {"max_results": 5}}
+        keys = schema.prefix_keys(pp)
+        # First node: upstream=""
+        assert keys[0][1] == node_cache_key("a", {"max_results": 5}, "")
+        # Second node: upstream=first key
+        assert keys[1][1] == node_cache_key("b", {}, keys[0][1])

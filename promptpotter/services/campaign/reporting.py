@@ -267,7 +267,7 @@ def build_reproducibility_manifest(
         manifest["pipeline"] = {
             "name": pipeline_schema.name,
             "version": pipeline_schema.version,
-            "nodes": [n.name for n in pipeline_schema.nodes],
+            "nodes": list(pipeline_schema.active_steps),
         }
 
     return manifest

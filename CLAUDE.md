@@ -100,7 +100,7 @@ Every state traced at **both** layers independently:
 
 ### Scoring Pipeline
 
-`score_search_point()` (in `dataset_scoring.py`) is the single gateway for scoring, archival, and observability. Unified per-query caching: prior-result cache (from dataset_runs) checked first, then per-node intermediate cache (`walk_prefix()`, multi-step only), then backend call. `dataset_run_store` is archive-only. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
+`score_search_point()` (in `dataset_scoring.py`) is the single gateway for scoring, archival, and observability. Unified per-query caching: prior-result cache (from dataset_runs) checked first, then per-node intermediate cache (`PipelineSchema.prefix_keys()` → `walk_prefix()`, multi-step only), then backend call. `dataset_run_store` is archive-only. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
 
 ### Pipeline Params — Two Namespaces
 

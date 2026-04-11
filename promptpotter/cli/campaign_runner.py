@@ -172,8 +172,13 @@ async def cmd_init(args: argparse.Namespace) -> None:
     # Log pipeline snapshot from session (already loaded in init_services)
     if session.pipeline_schema:
         ps = session.pipeline_schema
-        p_nodes = [n.name for n in ps.nodes]
-        logger.info("Pipeline: %s %s (%d nodes: %s)", ps.name, ps.version, len(p_nodes), p_nodes)
+        logger.info(
+            "Pipeline: %s %s (%d nodes: %s)",
+            ps.name,
+            ps.version,
+            len(ps.nodes),
+            list(ps.active_steps),
+        )
 
     pipeline_params = _configure_pipeline(session, cast("CampaignConfig", campaign_config))
 

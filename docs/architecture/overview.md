@@ -63,7 +63,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **OptSearchPoint** — inherits from PromptTemplate. Adds lineage (`id`, `parent_id`, `changes_description`) + L2 state (`optimizer_params`, `task_context`) + optimization memory (`critique_text`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`). Mutable. `to_job_search_point()` projects into JobSearchPoint for evaluation.
 
-**PipelineSchema** / **PipelineNode** — describes a pipeline (target or optimizer). Both pipeline backends and the optimizer pipeline parse into PipelineSchema.
+**PipelineSchema** / **PipelineNode** — the node coordinate system for each dataset's pipeline. Nodes are the topmost lookup dimension: O(1) position, membership, and param-ownership queries. `prefix_keys()` computes chained cache keys; `prefix_through()` / `exclude()` slice valid sub-pipelines. Both pipeline backends and the optimizer pipeline parse into PipelineSchema.
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, stale data protocol config).
 
@@ -81,7 +81,7 @@ All paths converge on `eval_search_point()` — single gateway for eval persiste
 
 | Strategy | Mechanism | Detail |
 |----------|-----------|--------|
-| **Per-node cache** | `node_cache_key(node, config, upstream_hash)` with chained dependency | See [Node-Level Cache](#node-level-cache) |
+| **Per-node cache** | `PipelineSchema.prefix_keys()` — chained per-node dependency keys | See [Node-Level Cache](#node-level-cache) |
 | **Shared store** | Scan + cycle both write to `dataset_runs/` | All archived results discoverable |
 | **Stale data protocol** | 3-step ladder: rerun → samplescan → sampleswitch | See [optimization.md](optimization.md#stale-data-load-protocol) |
 | **SearchMemory** | Materialized index over `dataset_runs/` | See [SearchMemory](#searchmemory) |
@@ -240,7 +240,7 @@ intermediate_cache/
   {node_name}_{cache_key}.json    ← {query: node_output}
 ```
 
-**Implementation:** `compute_prefix_keys()` and `node_cache_key()` in `intermediate_cache.py`. Wired through `evaluate_query()` in `eval_query.py`.
+**Implementation:** `PipelineSchema.prefix_keys()` computes the key chain; `IntermediateCache.walk_prefix()` does the disk I/O. Wired through `evaluate_query()` in `eval_query.py`.
 
 Gracefully no-ops until the target backend supports `node_outputs` in responses and `precomputed` in requests.
 

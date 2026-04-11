@@ -12,9 +12,29 @@ Derivation methods:
 """
 
 import enum
+import hashlib
+import json
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+def node_cache_key(
+    node_name: str,
+    node_config: dict[str, Any],
+    upstream_hash: str = "",
+) -> str:
+    """Deterministic 16-char hex key for one node's output.
+
+    Chains upstream: *upstream_hash* is the previous node's cache key.
+    Changing any upstream node's config cascades invalidation downstream.
+    """
+    blob = json.dumps(
+        {"node": node_name, "config": node_config, "upstream": upstream_hash},
+        sort_keys=True,
+        default=str,
+    ).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
 
 
 class NodeRuntime(enum.StrEnum):
@@ -103,6 +123,7 @@ class PipelineNode(BaseModel):
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
+    input_keys: list[str] = Field(default_factory=list)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"
@@ -172,6 +193,11 @@ class PipelineSchema(BaseModel):
     is the single source of truth for pipeline identity at campaign start:
     active nodes (via ``nodes``), prompt node (derivable), and initial
     per-node config (baked into ``PipelineNode.current_config``).
+
+    Nodes form the coordinate system for each dataset.  Indexed lookups
+    (``node_position``, ``get_node``, ``node_for_param``) are O(1).
+    ``prefix_through`` slices a valid pipeline prefix for cache-hit / partial-
+    execution workflows.
     """
 
     model_config = {"frozen": True}
@@ -181,6 +207,12 @@ class PipelineSchema(BaseModel):
     description: str = ""
     nodes: list[PipelineNode] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
+
+    def model_post_init(self, __context: Any) -> None:
+        object.__setattr__(self, "_node_map", {n.name: i for i, n in enumerate(self.nodes)})
+        object.__setattr__(
+            self, "_param_map", {p: n.name for n in self.nodes for p in n.param_keys}
+        )
 
     # -------------------------------------------------------------------
     # Pipeline identity — derived from nodes
@@ -228,29 +260,88 @@ class PipelineSchema(BaseModel):
     # Lookup helpers
     # -------------------------------------------------------------------
 
+    def has_node(self, name: str) -> bool:
+        """Whether *name* is a node in this schema (O(1))."""
+        return name in self._node_map  # type: ignore[attr-defined]
+
+    def node_position(self, name: str) -> int:
+        """Pipeline position of *name*.  Raises ``KeyError`` if unknown."""
+        return self._node_map[name]  # type: ignore[attr-defined]
+
     def get_node(self, name: str) -> PipelineNode | None:
-        """Find a node by name, or None if not found."""
-        for step in self.nodes:
-            if step.name == name:
-                return step
-        return None
+        """Find a node by name (O(1)), or None if not found."""
+        idx = self._node_map.get(name)  # type: ignore[attr-defined]
+        return self.nodes[idx] if idx is not None else None
+
+    @property
+    def all_param_keys(self) -> set[str]:
+        """Union of every node's ``param_keys``."""
+        return set(self._param_map)  # type: ignore[attr-defined]
+
+    @property
+    def has_prompt_nodes(self) -> bool:
+        """Whether any node has ``prompt_meta`` set."""
+        return any(n.prompt_meta is not None for n in self.nodes)
 
     def filter_to_steps(self, steps: list[str]) -> "PipelineSchema":
-        """Return a copy with only nodes present in *steps*."""
+        """Return a copy with only nodes present in *steps*, preserving schema order."""
         active = set(steps)
-        return PipelineSchema(
-            name=self.name,
-            version=self.version,
-            description=self.description,
-            nodes=[n for n in self.nodes if n.name in active],
+        return self.model_copy(
+            update={"nodes": [n for n in self.nodes if n.name in active]},
         )
 
+    def exclude(self, names: set[str] | None) -> "PipelineSchema":
+        """Return a copy without the named nodes.  ``None`` / empty → self."""
+        if not names:
+            return self
+        return self.model_copy(
+            update={"nodes": [n for n in self.nodes if n.name not in names]},
+        )
+
+    def prefix_through(self, node_name: str) -> "PipelineSchema":
+        """Schema containing ``nodes[0:position+1]`` — a valid pipeline prefix."""
+        idx = self._node_map[node_name]  # type: ignore[attr-defined]
+        return self.model_copy(update={"nodes": list(self.nodes[: idx + 1])})
+
     def node_for_param(self, param_name: str) -> str | None:
-        """Return the node name that owns *param_name*, or None."""
-        for step in self.nodes:
-            if param_name in step.param_keys:
-                return step.name
-        return None
+        """Return the node name that owns *param_name* (O(1)), or None."""
+        return self._param_map.get(param_name)  # type: ignore[attr-defined]
+
+    def prefix_keys(self, pipeline_params: dict[str, Any]) -> list[tuple[str, str]]:
+        """Chained cache keys for each node in pipeline order.
+
+        Returns ``[(node_name, cache_key), ...]``.  Each key is a 16-char
+        hex digest of ``(node_name, node_config, upstream_key)``, so changing
+        any upstream node's config cascades invalidation downstream.
+        """
+        result: list[tuple[str, str]] = []
+        upstream = ""
+        for node in self.nodes:
+            config = pipeline_params.get(node.name, {})
+            if not isinstance(config, dict):
+                config = {}
+            key = node_cache_key(node.name, config, upstream)
+            result.append((node.name, key))
+            upstream = key
+        return result
+
+    def validate_step_dependencies(self, steps: list[str]) -> list[str]:
+        """Return node names in *steps* whose ``input_keys`` aren't satisfied.
+
+        ``input_keys`` are *data* keys (e.g. ``entity_profile``), so we track
+        both node names and the data keys each node produces (from
+        ``observation_mappings``).
+        """
+        available: set[str] = set()
+        violations: list[str] = []
+        for name in steps:
+            node = self.get_node(name)
+            if node and node.input_keys and any(k not in available for k in node.input_keys):
+                violations.append(name)
+            available.add(name)
+            if node:
+                available.update(node.output_keys)
+        return violations
 
     def build_display_tags(self) -> dict[str, str]:
         """Compute display tag map ``{node_name: tag}`` with auto-enumeration.
@@ -355,6 +446,7 @@ def load_pipeline_from_dict(data: dict) -> PipelineSchema:
                 name=name,
                 current_config=node_data.get("config", {}),
                 param_keys=pk,
+                input_keys=opt.get("input_keys", []),
             )
         )
     return PipelineSchema(

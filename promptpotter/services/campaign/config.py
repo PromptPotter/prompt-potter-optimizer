@@ -320,7 +320,7 @@ def configure_pipeline(
     overrides = campaign_config.get("pipeline_overrides")
 
     if pipeline_schema:
-        all_names = [n.name for n in pipeline_schema.nodes]
+        all_names = list(pipeline_schema.active_steps)
     elif experiment_extract:
         pipeline_config = extract_pipeline_config(experiment_extract)
         all_names = [s["name"] for s in pipeline_config["steps"]]

@@ -227,9 +227,7 @@ def _active_nodes(
     excluded_nodes: set[str] | None = None,
 ) -> list[PipelineNode]:
     """Return pipeline nodes that are not excluded."""
-    if not excluded_nodes:
-        return list(schema.nodes)
-    return [s for s in schema.nodes if s.name not in excluded_nodes]
+    return list(schema.exclude(excluded_nodes).nodes)
 
 
 def build_pipeline_overview(
@@ -657,12 +655,10 @@ def _excluded_from_schema(
     schema: PipelineSchema,
     pipeline_params: dict | None,
 ) -> set[str] | None:
-    """Derive excluded nodes by diffing schema nodes vs pipeline_params["steps"]."""
+    """Derive excluded nodes by diffing schema nodes vs pipeline_params steps."""
     if not pipeline_params or "steps" not in pipeline_params:
         return None
-    all_node_names = {n.name for n in schema.nodes}
-    active = set(pipeline_params["steps"])
-    excluded = all_node_names - active
+    excluded = set(schema.active_steps) - set(pipeline_params["steps"])
     return excluded or None
 
 

@@ -1,8 +1,7 @@
 """IntermediateCache — per-node output cache for partial pipeline reuse.
 
-Each node's output is cached independently via
-``node_cache_key(node, config, upstream_hash)``.  Chained dependency
-means changing one node's config invalidates only that node + downstream.
+Chained dependency keys (via ``node_cache_key`` in ``pipeline_schema``)
+mean changing one node's config invalidates only that node + downstream.
 ``walk_prefix`` finds the longest cached prefix from pipeline start.
 
 Enables partial pipeline execution: cached upstream outputs feed a request
@@ -14,8 +13,6 @@ and ``precomputed`` in requests.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -31,51 +28,16 @@ from promptpotter.services.store.base import (
 logger = logging.getLogger(__name__)
 
 
-def node_cache_key(
-    node_name: str,
-    node_config: dict[str, Any],
-    upstream_hash: str = "",
-) -> str:
-    """Deterministic 16-char hex key for one node's output.
-
-    Chains upstream: *upstream_hash* is the previous node's cache key.
-    Changing any upstream node's config cascades invalidation downstream.
-    """
-    blob = json.dumps(
-        {"node": node_name, "config": node_config, "upstream": upstream_hash},
-        sort_keys=True,
-        default=str,
-    ).encode()
-    return hashlib.sha256(blob).hexdigest()[:16]
-
-
 def compute_prefix_keys(
     pipeline_params: dict[str, Any],
-    pipeline_schema: PipelineSchema | None = None,
+    pipeline_schema: PipelineSchema,
 ) -> list[tuple[str, str]]:
     """Compute chained cache keys for each node in pipeline order.
 
-    Returns ``[(node_name, cache_key), ...]`` in execution order.
-    Uses *pipeline_schema* node ordering when available, otherwise
-    falls back to ``pipeline_params["steps"]``.
+    Delegates to ``PipelineSchema.prefix_keys`` — the schema owns node
+    ordering.  This wrapper exists for call-sites that import from here.
     """
-    steps = pipeline_params.get("steps", [])
-    if pipeline_schema:
-        step_set = set(steps)
-        ordered = [n.name for n in pipeline_schema.nodes if n.name in step_set]
-    else:
-        ordered = list(steps)
-
-    result: list[tuple[str, str]] = []
-    upstream = ""
-    for name in ordered:
-        config = pipeline_params.get(name, {})
-        if not isinstance(config, dict):
-            config = {}
-        key = node_cache_key(name, config, upstream)
-        result.append((name, key))
-        upstream = key
-    return result
+    return pipeline_schema.prefix_keys(pipeline_params)
 
 
 class IntermediateCache:

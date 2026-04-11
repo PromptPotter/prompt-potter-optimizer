@@ -101,12 +101,11 @@ async def sensitivity_scan(
     )
 
     # Resolve active prompt node — only if the prompt node is in active steps
-    active_steps = set((baseline.pipeline_params or {}).get("steps", []))
     _prompt_node = ""
     _has_prompt_node = False
     if pipeline_schema:
         for pn in pipeline_schema.prompt_node_names():
-            if pn in active_steps:
+            if pipeline_schema.has_node(pn):
                 _prompt_node = pn
                 _has_prompt_node = True
                 break
@@ -146,19 +145,24 @@ async def sensitivity_scan(
 
     # Sort axes by pipeline node order (prompt fields under their owning node)
     if pipeline_schema:
-        _node_order = {node.name: i for i, node in enumerate(pipeline_schema.nodes)}
         _prompt_nodes = pipeline_schema.prompt_node_names()
+        _n_nodes = len(pipeline_schema.nodes)
         _prompt_pos = (
-            _node_order[_prompt_nodes[0]]
-            if _prompt_nodes and _prompt_nodes[0] in _node_order
-            else len(_node_order)
+            pipeline_schema.node_position(_prompt_nodes[0])
+            if _prompt_nodes and pipeline_schema.has_node(_prompt_nodes[0])
+            else _n_nodes
         )
 
         def _axis_sort_key(axis: tuple[str, str, list, str | None]) -> int:
             _name, axis_type, _, node_name = axis
             if axis_type == "prompt_field":
                 return _prompt_pos
-            return _node_order.get(node_name, len(_node_order)) if node_name else len(_node_order)
+            if node_name is None:
+                return _n_nodes
+            try:
+                return pipeline_schema.node_position(node_name)
+            except KeyError:
+                return _n_nodes
 
         axes.sort(key=_axis_sort_key)
 

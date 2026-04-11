@@ -41,7 +41,7 @@ def diagnose_scan_variants(
     """Check scan variant coverage using step-sequence matching.
 
     Matches historical runs by:
-    1. **Step sequence** — which nodes ran (frozenset equality)
+    1. **Step sequence** — which nodes ran (ordered tuple equality)
     2. **Rendered prompt hash** — for prompt-field variants
     3. **Parameter value extraction** — for pipeline-param variants
 
@@ -50,14 +50,14 @@ def diagnose_scan_variants(
     """
     summaries = store.dataset_runs.list_all(backend_id)
 
-    # Step 1: filter to runs with matching step sequence
-    baseline_steps = frozenset(
+    # Step 1: filter to runs with matching step sequence (ordered)
+    baseline_steps = tuple(
         (baseline_sp.pipeline_params or {}).get("steps", []),
     )
     step_matches = [
         e
         for e in summaries
-        if frozenset((e.get("pipeline_params") or {}).get("steps", [])) == baseline_steps
+        if tuple((e.get("pipeline_params") or {}).get("steps", [])) == baseline_steps
     ]
 
     # Step 2: index step-matching runs by rendered_prompt_hash
