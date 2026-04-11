@@ -21,7 +21,7 @@ from promptpotter.models.search_point import JobSearchPoint
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.scoring_env import ScoringEnv
-    from promptpotter.services.campaign.escalation import DegradationCheck
+    from promptpotter.services.campaign.nodes.escalation import DegradationCheck
     from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
     from promptpotter.services.store.campaign_store import CampaignStore
 

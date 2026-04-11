@@ -2,7 +2,7 @@
 
 Pure data types with no service-level dependencies.  Execution logic
 (L2/L3 transitions, degradation checks) stays in
-``services.campaign.escalation``.
+``services.campaign.nodes.escalation``.
 """
 
 from __future__ import annotations

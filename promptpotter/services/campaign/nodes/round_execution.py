@@ -15,14 +15,14 @@ from promptpotter.models.opt_search_point import OptSearchPoint
 # Module-level import for test monkeypatching.
 from promptpotter.services import llm_client as _llm_client
 from promptpotter.services.campaign.config import LoopConfig
-from promptpotter.services.campaign.critique import (
+from promptpotter.services.campaign.nodes.critique import (
     CritiqueAgent,
     RoundSnapshot,
     format_critique_for_prompt,
     sample_thinking_styles,
     update_query_tracker,
 )
-from promptpotter.services.campaign.formatting import (
+from promptpotter.services.campaign.nodes.formatting import (
     build_critique_search_memory_digest,
     candidate_summaries,
 )
@@ -40,8 +40,8 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.models.analysis import QueryDifficulty
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.escalation import DegradationCheck
-    from promptpotter.services.campaign.l1_optimizer import L1ScoringResult
+    from promptpotter.services.campaign.nodes.escalation import DegradationCheck
+    from promptpotter.services.campaign.nodes.score import L1ScoringResult
     from promptpotter.services.store.campaign_store import CampaignStore
     from promptpotter.services.tracing.observability_logger import ObsLogger
 
@@ -130,8 +130,8 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    from promptpotter.services.campaign.formatting import build_l1_search_memory_digest
-    from promptpotter.services.campaign.l1_optimizer import l1_generate
+    from promptpotter.services.campaign.nodes.formatting import build_l1_search_memory_digest
+    from promptpotter.services.campaign.nodes.generate import l1_generate
 
     sm_ctx = build_l1_search_memory_digest(search_memory)
 
@@ -211,7 +211,7 @@ async def _score_and_select(
     degradation_checks: list[DegradationCheck] | None = None,
 ) -> L1ScoringResult:
     """Evaluate candidates, run critique, select winner."""
-    from promptpotter.services.campaign.l1_optimizer import l1_score
+    from promptpotter.services.campaign.nodes.score import l1_score
 
     emit_phase(
         callbacks.on_phase,

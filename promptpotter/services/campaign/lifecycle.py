@@ -28,7 +28,7 @@ from promptpotter.models.scoring_env import ScoringEnv
 from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.campaign.campaign_setup import SessionEnv
 from promptpotter.services.campaign.config import LoopConfig
-from promptpotter.services.campaign.critique import sample_thinking_styles
+from promptpotter.services.campaign.nodes.critique import sample_thinking_styles
 from promptpotter.services.campaign.state import (
     CampaignPhase,
     EscalationCounters,
@@ -207,7 +207,7 @@ def _setup_scoring_context(
                 _restructured_hash[:8],
             )
 
-    from promptpotter.services.campaign.escalation import build_degradation_checks
+    from promptpotter.services.campaign.nodes.escalation import build_degradation_checks
 
     return build_degradation_checks(config)
 

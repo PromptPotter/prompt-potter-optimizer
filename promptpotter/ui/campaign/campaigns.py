@@ -352,7 +352,7 @@ def show_experiment_dashboard(
     # --- Overview mode ---
     assert store is not None
     # Dataset runs summary
-    from promptpotter.services.campaign.campaign_data import summarize_dataset_runs
+    from promptpotter.services.campaign.data import summarize_dataset_runs
 
     runs = store.dataset_runs.list_all(backend_id)
     run_summary = summarize_dataset_runs(runs)

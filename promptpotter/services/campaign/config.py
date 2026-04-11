@@ -9,6 +9,7 @@ and ``create_llm_client()`` are factory helpers.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict
 
@@ -19,6 +20,7 @@ from promptpotter.models.task_decomposition import TaskDecomposition
 from promptpotter.services.search.scan_results import ScanBrief
 
 if TYPE_CHECKING:
+    from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,7 @@ __all__ = [
     "CampaignConfig",
     "LoopConfig",
     "PipelineConfigResult",
+    "configure_and_apply_pipeline",
     "configure_pipeline",
     "create_llm_client",
 ]
@@ -414,6 +417,32 @@ def compute_preflight_metrics(
         l3_label=f"enabled, patience={config.l3_patience}" if config.enable_l3 else "disabled",
         strategy="SCAN-AWARE" if has_scan_brief else "FREEFORM",
     )
+
+
+def configure_and_apply_pipeline(
+    session: SessionEnv,
+    campaign_config: CampaignConfig,
+    *,
+    log: Callable[[str], None] = logger.info,
+) -> dict:
+    """Configure pipeline, apply filtered schema to *session*, log summary.
+
+    Returns ``pipeline_params`` dict ready for evaluation.
+    """
+    result = configure_pipeline(
+        session.pipeline_schema,
+        campaign_config,
+        experiment_extract=getattr(session, "experiment_extract", None),
+    )
+
+    if result.filtered_schema is not None:
+        session.pipeline_schema = result.filtered_schema
+
+    nodes_str = ", ".join(result.active_nodes)
+    excl_str = f"  Excluded: {', '.join(result.excluded_nodes)}" if result.excluded_nodes else ""
+    log(f"Active nodes: {nodes_str}{excl_str}")
+
+    return result.pipeline_params
 
 
 def create_llm_client(

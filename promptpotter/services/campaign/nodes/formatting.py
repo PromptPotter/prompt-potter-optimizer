@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.models.task_decomposition import TaskDecomposition
-from promptpotter.services.campaign.critique import summarize_warning_inventory
+from promptpotter.services.campaign.nodes.critique import summarize_warning_inventory
 
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis

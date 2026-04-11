@@ -408,5 +408,3 @@ def resolve_campaign_id(
         return None
     logger.warning("No campaign matching '%s'", short_id)
     return None
-
-

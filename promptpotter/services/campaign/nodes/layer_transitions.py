@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_decomposition import TaskDecomposition
-from promptpotter.services.campaign.formatting import (
+from promptpotter.services.campaign.nodes.formatting import (
     L2IntelligenceData,
     assess_candidate_diversity,
     build_candidate_comparison,

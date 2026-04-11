@@ -246,16 +246,6 @@ class SessionStore:
         path = self._session_dir(backend_id, session_id) / "session.json"
         return read_json_optional(path)
 
-    def list_sessions(self, backend_id: str) -> list[str]:
-        """List all session IDs for a backend, sorted by creation time."""
-        validate_path_component(backend_id)
-        sessions_dir = self._base_dir / backend_id / "sessions"
-        if not sessions_dir.exists():
-            return []
-        return sorted(
-            d.name for d in sessions_dir.iterdir() if d.is_dir() and (d / "session.json").exists()
-        )
-
     # -- Scan results ----------------------------------------------------------
 
     def save_scan_results(

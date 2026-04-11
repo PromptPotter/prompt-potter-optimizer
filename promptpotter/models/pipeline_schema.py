@@ -37,13 +37,6 @@ def node_cache_key(
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
-class NodeRuntime(enum.StrEnum):
-    """Where a pipeline node executes."""
-
-    BACKEND = "backend"
-    FRONTEND = "frontend"
-
-
 class NodeType(enum.StrEnum):
     """Pipeline node type classification (empty string = untyped)."""
 
@@ -118,7 +111,7 @@ class PipelineNode(BaseModel):
     name: str
     wire_type: str = ""  # Raw type from connector (e.g., "generation", "retriever")
     display_tag: str = ""  # Optional short display tag override from connector config
-    runtime: NodeRuntime = NodeRuntime.BACKEND
+    runtime: str = "backend"
     short_circuit: bool = False
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
@@ -196,8 +189,7 @@ class PipelineSchema(BaseModel):
 
     Nodes form the coordinate system for each dataset.  Indexed lookups
     (``node_position``, ``get_node``, ``node_for_param``) are O(1).
-    ``prefix_through`` slices a valid pipeline prefix for cache-hit / partial-
-    execution workflows.
+    ``exclude()`` / ``filter_to_steps()`` slice valid sub-pipelines.
     """
 
     model_config = {"frozen": True}
@@ -298,11 +290,6 @@ class PipelineSchema(BaseModel):
             update={"nodes": [n for n in self.nodes if n.name not in names]},
         )
 
-    def prefix_through(self, node_name: str) -> "PipelineSchema":
-        """Schema containing ``nodes[0:position+1]`` — a valid pipeline prefix."""
-        idx = self._node_map[node_name]  # type: ignore[attr-defined]
-        return self.model_copy(update={"nodes": list(self.nodes[: idx + 1])})
-
     def node_for_param(self, param_name: str) -> str | None:
         """Return the node name that owns *param_name* (O(1)), or None."""
         return self._param_map.get(param_name)  # type: ignore[attr-defined]
@@ -348,24 +335,6 @@ class PipelineSchema(BaseModel):
         if steps is None:
             return set()
         return set(self.active_steps) - set(steps)
-
-    def validate_step_dependencies(self, steps: list[str]) -> list[str]:
-        """Return node names in *steps* whose ``input_keys`` aren't satisfied.
-
-        ``input_keys`` are *data* keys (e.g. ``entity_profile``), so we track
-        both node names and the data keys each node produces (from
-        ``observation_mappings``).
-        """
-        available: set[str] = set()
-        violations: list[str] = []
-        for name in steps:
-            node = self.get_node(name)
-            if node and node.input_keys and any(k not in available for k in node.input_keys):
-                violations.append(name)
-            available.add(name)
-            if node:
-                available.update(node.output_keys)
-        return violations
 
     def build_display_tags(self) -> dict[str, str]:
         """Compute display tag map ``{node_name: tag}`` with auto-enumeration.

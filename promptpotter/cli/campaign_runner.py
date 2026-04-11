@@ -107,7 +107,7 @@ def _configure_pipeline(
     campaign_config: CampaignConfig,
 ) -> dict:
     """Configure pipeline, apply filtered schema to session. Returns pipeline_params."""
-    from promptpotter.services.campaign.orchestration import configure_and_apply_pipeline
+    from promptpotter.services.campaign.config import configure_and_apply_pipeline
 
     return configure_and_apply_pipeline(session, campaign_config, log=logger.info)
 
@@ -120,23 +120,27 @@ async def _prepare_scoring_context(
     pipeline_params: dict | None = None,
 ):
     """Load baseline + dataset, optionally run baseline eval."""
-    from promptpotter.services.campaign.orchestration import (
-        prepare_scoring_context as _orch_prepare,
+    from promptpotter.services.campaign.data import (
+        prepare_scoring_context as _svc_prepare,
     )
 
-    return await _orch_prepare(
-        session,
+    baseline, dataset, campaign_rounds, baseline_results = await _svc_prepare(
+        session.experiment_extract,
         train_data,
         campaign_config,
         run_baseline=run_baseline,
         pipeline_params=pipeline_params,
-        log=logger.info,
+        pipeline_schema=session.pipeline_schema,
+        svc=session,
     )
+
+    logger.info("Evaluation data: %d queries", len(dataset))
+    return baseline, dataset, campaign_rounds, baseline_results
 
 
 async def cmd_init(args: argparse.Namespace) -> None:
     """Initialize services, load datasets, configure pipeline, create session."""
-    from promptpotter.services.campaign.campaign_data import (
+    from promptpotter.services.campaign.data import (
         prepare_datasets as _prepare_datasets,
     )
 
@@ -335,7 +339,7 @@ async def cmd_scan(args: argparse.Namespace) -> None:
         len(node_axes),
     )
 
-    from promptpotter.services.campaign.orchestration import run_scan_and_persist
+    from promptpotter.services.campaign.scan_orchestration import run_scan_and_persist
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     baseline = load_baseline_prompt(session.experiment_extract, prompt_node_names=_pn)
@@ -420,7 +424,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
-    from promptpotter.services.campaign.orchestration import load_scan_brief
+    from promptpotter.services.campaign.scan_orchestration import load_scan_brief
 
     ctx = _load_session(args)
     campaign_config = ctx.state["campaign_config"]
@@ -466,7 +470,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     recorder = RoundRecorder(session_dir / "rounds")
     set_round_recorder(recorder)
 
-    from promptpotter.services.campaign.orchestration import (
+    from promptpotter.services.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
 

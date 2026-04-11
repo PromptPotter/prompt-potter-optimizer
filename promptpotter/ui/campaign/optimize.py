@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_decomposition import TaskDecomposition
-from promptpotter.services.campaign.campaign_data import (
-    extract_campaign_baseline as _extract_campaign_baseline,
-)
 from promptpotter.services.campaign.campaign_setup import (
     resolve_campaign_id as _resolve_campaign_id,
+)
+from promptpotter.services.campaign.data import (
+    extract_campaign_baseline as _extract_campaign_baseline,
 )
 from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, RunResult
 from promptpotter.services.search.failure_group_analysis import (
@@ -350,19 +350,21 @@ async def run_optimization_notebook(
     Returns:
         Tuple of (campaign_rounds, RunResult or None if interrupted).
     """
-    from promptpotter.services.campaign.orchestration import build_run_config
+    from promptpotter.services.campaign.config import LoopConfig
 
     # Session-derived locals for display closures
     store = session.store if session else None
     backend_id = session.backend_id if session else ""
     pipeline_schema = session.pipeline_schema if session else None
     config = (
-        build_run_config(
+        LoopConfig.from_campaign_config(
             campaign_config,
-            session,
-            scan_brief=scan_brief,
-            task_context=task_context,
+            backend_id=session.backend_id,
+            project_root=str(session.store.base_dir),
             session_id=session_id,
+            scan_brief=scan_brief,
+            pipeline_schema=session.pipeline_schema,
+            task_context=task_context,
         )
         if session
         else None
@@ -537,7 +539,7 @@ async def run_optimization_notebook(
             try:
                 from collections import Counter
 
-                from promptpotter.services.campaign.critique import (
+                from promptpotter.services.campaign.nodes.critique import (
                     candidate_keys_from_schema,
                     get_candidates,
                 )
@@ -630,7 +632,7 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from promptpotter.services.campaign.orchestration import (
+    from promptpotter.services.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
     from promptpotter.services.campaign.state import RunCallbacks, chain_callbacks
@@ -711,11 +713,11 @@ async def run_optimization_notebook(
 # ---------------------------------------------------------------------------
 # Baseline eval wrapper (from eval.py)
 # ---------------------------------------------------------------------------
-from promptpotter.services.campaign.campaign_data import (  # noqa: E402
-    run_baseline_scoring as _run_baseline_scoring,
-)
 from promptpotter.services.campaign.campaign_setup import (  # noqa: E402
     load_baseline_prompt,
+)
+from promptpotter.services.campaign.data import (  # noqa: E402
+    run_baseline_scoring as _run_baseline_scoring,
 )
 
 from .display import fmt_ci, fmt_pvalue  # noqa: E402

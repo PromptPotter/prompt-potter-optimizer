@@ -8,9 +8,6 @@ from typing import TYPE_CHECKING
 from promptpotter.config.variant_library import load_variant_library
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.models.task_decomposition import TaskDecomposition
-from promptpotter.services.campaign.campaign_data import (
-    build_all_index_terms,
-)
 from promptpotter.services.campaign.campaign_setup import (
     SessionEnv,
 )
@@ -19,6 +16,9 @@ from promptpotter.services.campaign.campaign_setup import (
 )
 from promptpotter.services.campaign.config import (
     create_llm_client as setup_llm,
+)
+from promptpotter.services.campaign.data import (
+    build_all_index_terms,
 )
 from promptpotter.services.campaign.mgmt import (
     save_campaign_winner,
@@ -123,20 +123,22 @@ def dev_reload() -> None:
         "promptpotter.shared.hashing",
         "promptpotter.services.campaign.config",
         "promptpotter.services.campaign.lifecycle",
-        "promptpotter.services.campaign.escalation",
-        "promptpotter.services.campaign.layer_transitions",
-        "promptpotter.services.campaign.critique",
-        "promptpotter.services.campaign.round_execution",
-        "promptpotter.services.campaign.optimization_loop",
+        "promptpotter.services.campaign.nodes.escalation",
+        "promptpotter.services.campaign.nodes.layer_transitions",
+        "promptpotter.services.campaign.nodes.critique",
+        "promptpotter.services.campaign.nodes.round_execution",
+        "promptpotter.services.campaign.runner",
         "promptpotter.services.store.dataset_run_store",
         "promptpotter.services.scoring.stale_data",
         "promptpotter.services.scoring.sample_measurement",
         "promptpotter.services.dataset_scoring",
-        "promptpotter.services.campaign.l1_optimizer",
+        "promptpotter.services.campaign.nodes.generate",
+        "promptpotter.services.campaign.nodes.score",
+        "promptpotter.services.campaign.nodes.formatting",
         "promptpotter.services.search.smart_search",
         "promptpotter.services.search.sensitivity_scanner",
         "promptpotter.services.search.scan_baseline",
-        "promptpotter.services.campaign.orchestration",
+        "promptpotter.services.campaign.scan_orchestration",
         # Display layer — safe to reload (no model classes)
         "promptpotter.ui.campaign.display",
         "promptpotter.ui.campaign.phase_display",
@@ -197,7 +199,7 @@ def configure_pipeline(session: SessionEnv, campaign_config: CampaignConfig) -> 
 
     Delegates to shared orchestration and adds display-specific tags.
     """
-    from promptpotter.services.campaign.orchestration import configure_and_apply_pipeline
+    from promptpotter.services.campaign.config import configure_and_apply_pipeline
 
     from .display import set_display_tags
 
@@ -327,18 +329,22 @@ async def prepare_scoring_context(
 
     Delegates to shared orchestration with notebook display.
     """
-    from promptpotter.services.campaign.orchestration import (
-        prepare_scoring_context as _orch_prepare,
+    from promptpotter.services.campaign.data import (
+        prepare_scoring_context as _svc_prepare,
     )
 
-    return await _orch_prepare(
-        session,
+    baseline, dataset, campaign_rounds, baseline_results = await _svc_prepare(
+        session.experiment_extract,
         train_data,
         campaign_config,
         run_baseline=run_baseline,
         pipeline_params=pipeline_params,
-        log=lambda msg: print(f"\n{msg}"),
+        pipeline_schema=session.pipeline_schema,
+        svc=session,
     )
+
+    print(f"\nEvaluation data: {len(dataset)} queries")
+    return baseline, dataset, campaign_rounds, baseline_results
 
 
 def prepare_datasets(
@@ -351,9 +357,9 @@ def prepare_datasets(
     """Load/create datasets, build session terms, and display summary.
 
     Thin display wrapper around
-    ``promptpotter.services.campaign.campaign_data.prepare_datasets()``.
+    ``promptpotter.services.campaign.data.prepare_datasets()``.
     """
-    from promptpotter.services.campaign.campaign_data import (
+    from promptpotter.services.campaign.data import (
         prepare_datasets as _prepare_datasets,
     )
 

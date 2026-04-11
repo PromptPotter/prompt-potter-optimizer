@@ -17,13 +17,20 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.models.task_decomposition import TaskDecomposition
+from promptpotter.services.campaign.bookkeeping import (
+    record_query_flips,
+    refresh_search_memory,
+    try_adapt_eval_set,
+)
 from promptpotter.services.campaign.campaign_setup import SessionEnv
 from promptpotter.services.campaign.config import LoopConfig
-from promptpotter.services.campaign.escalation import escalate_l2
+from promptpotter.services.campaign.data import extract_campaign_baseline
 from promptpotter.services.campaign.lifecycle import finalize_campaign, init_cycle_state
-from promptpotter.services.campaign.round_execution import (
+from promptpotter.services.campaign.nodes.escalation import escalate_l2
+from promptpotter.services.campaign.nodes.round_execution import (
     PauseForReviewError,
-    adapt_eval_set,
     execute_round,
     update_round_state,
 )
@@ -38,40 +45,16 @@ from promptpotter.services.campaign.state import (
     emit_phase,
     get_obs_trace,
 )
-from promptpotter.services.metrics import compile_query_difficulty
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.services.search.scan_results import ScanBrief
     from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_optimization"]
-
-
-async def _handle_post_probe(
-    state: LoopState,
-    config: LoopConfig,
-    round_num: int,
-    round_data: list[dict],
-    on_phase: Callable[[PhaseEvent], None] | None,
-    obs_campaign_id: str,
-    on_checkpoint: Callable[[str], str | None] | None = None,
-) -> StopReason | None:
-    """After a probe round: reset flag and force L2 if enabled."""
-    state.exit_probe_mode()
-    if config.enable_l2:
-        _obs, _tid = get_obs_trace(state, obs_campaign_id)
-        return await escalate_l2(
-            state,
-            config,
-            round_num,
-            on_phase,
-            on_checkpoint=on_checkpoint,
-            obs=_obs,
-            trace_id=_tid,
-        )
-    return None
 
 
 async def _handle_escalation_signal(
@@ -111,7 +94,7 @@ async def _handle_escalation_signal(
 
     esc_check_result = signal["check_result"]
 
-    from promptpotter.services.campaign.escalation import EscalationTarget
+    from promptpotter.services.campaign.nodes.escalation import EscalationTarget
 
     # Dispatch by target
     if signal["target"] in (EscalationTarget.L2, EscalationTarget.L3) and config.enable_l2:
@@ -313,36 +296,23 @@ async def _run_round_loop(
                 schema=config.pipeline_schema,
             )
 
-            # Record query flips for improvement attribution
-            if state.search_memory and len(state.rounds) >= 2:
-                prev_round = state.rounds[-2]
-                curr_round = state.rounds[-1]
-                if prev_round.results and curr_round.results:
-                    desc = (
-                        curr_round.candidate_scores[0].get("changes_description", "")
-                        if curr_round.candidate_scores
-                        else ""
-                    )
-                    _flips = state.search_memory.record_query_flips(
-                        round_num,
-                        desc,
-                        prev_round.results,
-                        curr_round.results,
-                    )
-                    if _flips:
-                        logger.debug("Round %d: %d query flips recorded", round_num, _flips)
+            record_query_flips(state, round_num)
 
             # --- After probe round: reset flag + force L2 ---
             if is_probe:
-                probe_stop = await _handle_post_probe(
-                    state,
-                    config,
-                    round_num,
-                    round_eval_data,
-                    cb.on_phase,
-                    state.obs_campaign_id,
-                    on_checkpoint=cb.on_checkpoint,
-                )
+                state.exit_probe_mode()
+                probe_stop = None
+                if config.enable_l2:
+                    _obs, _tid = get_obs_trace(state, state.obs_campaign_id)
+                    probe_stop = await escalate_l2(
+                        state,
+                        config,
+                        round_num,
+                        cb.on_phase,
+                        on_checkpoint=cb.on_checkpoint,
+                        obs=_obs,
+                        trace_id=_tid,
+                    )
                 if probe_stop:
                     stop_reason = probe_stop
                     break
@@ -404,38 +374,10 @@ async def _run_round_loop(
                     stop_reason = StopReason.USER_STOPPED
                     break
 
-            # SearchMemory refresh — pick up results from this round
-            if state.search_memory and state.scoring_ctx and state.scoring_ctx.store:
-                from pathlib import Path
+            refresh_search_memory(state, config, round_num)
 
-                _sm_store = state.scoring_ctx.store
-                if state.search_memory.refresh(_sm_store, config.backend_id):
-                    # Periodically recompute failure group correlations
-                    if (
-                        round_num > 0
-                        and round_num % 5 == 0
-                        and state.search_memory.recompute_failure_group_correlations()
-                    ):
-                        logger.info(
-                            "SearchMemory: recomputed failure group correlations at round %d",
-                            round_num,
-                        )
-                    _sm_path = Path(_sm_store.base_dir) / config.backend_id / "search_memory.json"
-                    state.search_memory.save(_sm_path)
-
-            # Adaptive eval set — swap dead queries for discriminating ones
-            if round_num >= 2 and not is_probe:
-                _hist = [r.results for r in state.rounds if r.results]
-                if len(_hist) >= 3:
-                    _qd = compile_query_difficulty(_hist)
-                    state.eval_dataset, _adapt = adapt_eval_set(
-                        state.eval_dataset,
-                        _qd,
-                        dataset,
-                        seed=config.seed + round_num,
-                    )
-                    if not _adapt.get("unchanged"):
-                        logger.info("Adaptive eval: %s", _adapt)
+            if not is_probe:
+                try_adapt_eval_set(state, dataset, config, round_num)
 
             # Stopping conditions
             _stop = await _check_stopping_conditions(
@@ -485,7 +427,7 @@ async def _run_round_loop(
     return stop_reason
 
 
-async def run_optimization(
+async def _run_optimization_core(
     instruction: str,
     dataset: list[dict[str, Any]],
     config: LoopConfig,
@@ -499,11 +441,7 @@ async def run_optimization(
     experiment_id: str = "",
     session: SessionEnv | None = None,
 ) -> RunResult:
-    """Run iterative optimization with feedback cycling.
-
-    Executes: init → round loop (l1_generate → l1_score) → finalize.
-    Stops on: patience exhaustion, max_rounds, perfect score, or interrupt.
-    """
+    """Core optimization loop: init → round loop → finalize."""
     started_at = datetime.now(UTC).isoformat()
 
     cb = callbacks or RunCallbacks()
@@ -597,4 +535,101 @@ async def run_optimization(
         langfuse_trace_id=cloud_trace_id,
         cycle_id=state.cycle_id,
         resumed_from_round=state.resumed_from_round,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Campaign-level entry point (config assembly + callback chaining)
+# ---------------------------------------------------------------------------
+
+
+def _make_round_append_callback(
+    campaign_rounds: list,
+) -> Callable:
+    """Build the round-entry append callback shared by all entry points."""
+
+    def _on_round(round_result: Any, stall_count: int) -> None:
+        round_entry = round_result.model_dump()
+        ps_raw = round_entry.get("prompt_fields", {})
+        round_entry["prompt_fields"] = (
+            OptSearchPoint.from_prompt_fields(ps_raw) if isinstance(ps_raw, dict) else ps_raw
+        )
+        round_entry["round"] = len(campaign_rounds)
+        campaign_rounds.append(round_entry)
+
+    return _on_round
+
+
+async def run_optimization(
+    campaign_rounds: list,
+    dataset: list,
+    campaign_config: CampaignConfig,
+    *,
+    session: SessionEnv,
+    scan_brief: ScanBrief | None = None,
+    experiment_id: str | None = None,
+    task_context: TaskDecomposition | dict | None = None,
+    session_id: str = "",
+    callbacks: RunCallbacks | None = None,
+    langfuse_session_id: str | None = None,
+    cycle_id: str | None = None,
+    max_rounds_override: int | None = None,
+) -> RunResult | None:
+    """Build config, extract baseline, wire round-append callback, and run loop.
+
+    Callers pass display-specific callbacks via *callbacks*; the round-entry
+    append is handled internally and chained before the caller's
+    ``on_round_complete``.
+
+    *max_rounds_override* caps ``max_rounds`` without mutating
+    *campaign_config* — used by ``--round`` to run a single round
+    ephemerally.
+
+    Returns ``RunResult`` (or ``None`` if interrupted before any rounds).
+    """
+    config = LoopConfig.from_campaign_config(
+        campaign_config,
+        backend_id=session.backend_id,
+        project_root=str(session.store.base_dir),
+        session_id=session_id,
+        scan_brief=scan_brief,
+        pipeline_schema=session.pipeline_schema,
+        task_context=task_context,
+    )
+    if max_rounds_override is not None:
+        config = config.model_copy(update={"max_rounds": max_rounds_override})
+
+    bl = extract_campaign_baseline(campaign_rounds)
+
+    # Chain: round-append fires first, then caller's display callback
+    append_cb = _make_round_append_callback(campaign_rounds)
+    caller_cb = callbacks or RunCallbacks()
+
+    original_on_round = caller_cb.on_round_complete
+
+    def _chained_on_round(round_result: Any, stall_count: int) -> None:
+        append_cb(round_result, stall_count)
+        if original_on_round:
+            original_on_round(round_result, stall_count)
+
+    merged_cb = RunCallbacks(
+        on_round_complete=_chained_on_round,
+        on_candidate_scored=caller_cb.on_candidate_scored,
+        on_sample_scored=caller_cb.on_sample_scored,
+        on_phase=caller_cb.on_phase,
+        on_checkpoint=caller_cb.on_checkpoint,
+    )
+
+    return await _run_optimization_core(
+        bl.instruction,
+        dataset,
+        config,
+        baseline_prompt_fields=bl.baseline_ps,
+        baseline_accuracy=bl.baseline_acc,
+        baseline_results=bl.baseline_results,
+        callbacks=merged_cb,
+        langfuse_session_id=langfuse_session_id,
+        cycle_id=cycle_id,
+        experiment_id=experiment_id or "",
+        session=session,
     )

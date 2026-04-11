@@ -25,7 +25,7 @@ from promptpotter.models.escalation import (
     EscalationStrategy,
     EscalationTarget,
 )
-from promptpotter.services.campaign.critique import extract_warning_types
+from promptpotter.services.campaign.nodes.critique import extract_warning_types
 from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.services.metrics import count_degraded_queries
 
@@ -238,8 +238,8 @@ async def _do_l2_transition(
 ) -> Any:
     """Perform L2 refine_strategy transition. Updates state in-place."""
     from promptpotter.services import llm_client as _llm_client
-    from promptpotter.services.campaign import layer_transitions
-    from promptpotter.services.campaign.critique import warning_summary
+    from promptpotter.services.campaign.nodes import layer_transitions
+    from promptpotter.services.campaign.nodes.critique import warning_summary
     from promptpotter.services.tracing.observability_logger import observed_node
 
     assert state.current_sp is not None
@@ -301,7 +301,7 @@ async def _do_l2_transition(
         l2_response=transition.debug_response,
     )
     # Flag next round as probe if L2 requested it
-    from promptpotter.services.campaign.layer_transitions import TransitionAction
+    from promptpotter.services.campaign.nodes.layer_transitions import TransitionAction
 
     if transition.action == TransitionAction.PROBE:
         state.enter_probe_mode()
@@ -325,7 +325,7 @@ async def _do_l3_transition(
 ) -> Any:
     """Perform L3 modify_plan transition. Updates state in-place."""
     from promptpotter.services import llm_client as _llm_client
-    from promptpotter.services.campaign import layer_transitions
+    from promptpotter.services.campaign.nodes import layer_transitions
     from promptpotter.services.tracing.observability_logger import observed_node
 
     assert state.current_sp is not None
@@ -400,7 +400,7 @@ async def escalate_l2(
     When *from_degradation* is True, L2/L3 patience exhaustion resets counters
     instead of stopping — the degradation investigation loop continues.
     """
-    from promptpotter.services.campaign.round_execution import PauseForReviewError
+    from promptpotter.services.campaign.nodes.round_execution import PauseForReviewError
     from promptpotter.services.campaign.state import StopReason
 
     esc = state.escalation

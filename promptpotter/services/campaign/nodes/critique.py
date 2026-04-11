@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from promptpotter.services.campaign.state import LoopState
     from promptpotter.services.llm_client import LLMClientBase
 
-    from .l1_optimizer import L1ScoringResult
+    from .score import L1ScoringResult
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ class RoundSnapshot:
         Computes cross-candidate diff and trajectory classification,
         enriching the search_memory_digest dict in-place.
         """
-        from promptpotter.services.campaign.formatting import (
+        from promptpotter.services.campaign.nodes.formatting import (
             build_cross_candidate_diff,
             classify_trajectory,
         )

@@ -193,28 +193,6 @@ class SearchMemory:
         records.sort(key=lambda r: r.hit_rate)  # intractable first
         return records
 
-    def intractable_queries_ci(
-        self, max_upper_ci: float = 0.05, min_measurements: int = 8
-    ) -> list[QueryRecord]:
-        """Return queries confidently identified as intractable via Wilson CI.
-
-        A query is intractable when the upper bound of its Wilson confidence
-        interval is below ``max_upper_ci`` with at least ``min_measurements``
-        evaluations.  More principled than streak-based ``persistent_failures``.
-        """
-        from promptpotter.services.search.failure_group_analysis import wilson_ci
-
-        records = []
-        for r in self._build_query_records():
-            if r.n_measurements < min_measurements:
-                continue
-            n_hits = sum(self._query_hits[r.query])
-            _lower, upper = wilson_ci(n_hits, r.n_measurements)
-            if upper <= max_upper_ci:
-                records.append(r)
-        records.sort(key=lambda r: r.hit_rate)
-        return records
-
     # --- Degradation ---
 
     def query_degradation_rate(self, query: str) -> float:
