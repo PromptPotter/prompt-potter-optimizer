@@ -47,6 +47,22 @@ Competition-level math from the American Invitational Mathematics Examination. F
 
 Used in: GEPA.
 
+### BBEH (Big-Bench Extra Hard)
+
+Successor to BBH from Google DeepMind. Replaces each of the 23 BBH tasks with a harder variant probing similar reasoning capabilities. Best general-purpose models score ~24%, reasoning-specialized ~54%.
+
+| Property | Value |
+|----------|-------|
+| Task | 23 diverse reasoning tasks |
+| Split | Single (evaluation-only); we create train/test with seed=42 |
+| Size | 4,520 full / 460 mini (20 per task) |
+| Source | [BBEH/bbeh](https://huggingface.co/datasets/BBEH/bbeh) |
+| Metrics | Exact Match (case-insensitive), macro-average across tasks |
+| Format | `{"task": str, "input": str, "target": str, "mini": int}` |
+| Paper | [arXiv:2502.19187](https://arxiv.org/abs/2502.19187) (ACL 2025) |
+
+Used in: PromptPotter vs CAPO vs DSPy head-to-head. See [`bbeh-comparison/`](bbeh-comparison/).
+
 ### Phase 2 (planned)
 
 | Dataset | Task | Why |
@@ -108,6 +124,22 @@ All methods evaluated under identical conditions:
 | GEPA | — | — | — | — | Cited |
 | **PromptPotter (full)** | **—** | **—** | **—** | **—** | **Ours** |
 
+### BBEH (Big-Bench Extra Hard) — Mini Split
+
+**Model:** gpt-oss-120b via Groq | **Split:** 10/task train, 10/task test, seed=42 | **Scoring:** Exact match, macro-average across 23 tasks
+
+<!-- Filled from results_*.json after Colab runs complete -->
+
+| Method | Overall | Source |
+|--------|---------|--------|
+| **PromptPotter (full)** | **—** | Ours (CLI) |
+| GEPA | — | `bbeh_dspy.ipynb` |
+| MIPROv2 | — | `bbeh_dspy.ipynb` |
+| BootstrapFewShot | — | `bbeh_dspy.ipynb` |
+| CAPO | — | `bbeh_capo.ipynb` |
+
+Per-task breakdown will be added once experiments complete. Reproducible notebooks: [`bbeh-comparison/`](bbeh-comparison/).
+
 ### Convergence, Ablation, Parameter Impact, Significance
 
 | Method | HotPotQA F1 | HotPotQA EM | GSM8K EM | AIME 2025 EM | Source |
@@ -119,10 +151,12 @@ All methods evaluated under identical conditions:
 
 ## Reference Papers
 
-| Paper | Year | Datasets | Key Result |
-|-------|------|----------|------------|
-| PromptWizard | 2024 | GSM8K, others | Critique-guided generation; cost-efficient; PromptPotter's primary inspiration |
-| MIPROv2 | 2024 | GSM8K, HotPotQA | Up to 13% accuracy gains on Llama-3-8B; Bayesian optimization over instructions + demos |
-| GEPA | 2025 | HotPotQA, AIME, IFBench, HoVer | +12% over MIPROv2 on AIME-2025; reflective prompt evolution |
-| Promptomatix | 2025 | GSM8K, SQuAD_2, CommonGen, AG News, XSum | Cost-aware optimization; competitive performance with reduced compute |
-| adv-CoT | 2025 | 12 datasets (commonsense + arithmetic) | +4.44% on GPT-3.5-turbo, +1.08% on GPT-4o-mini; adversarial refinement |
+| Paper | Affiliation | Year | Datasets | Key Result |
+|-------|-------------|------|----------|------------|
+| PromptWizard | Microsoft Research | 2024 | GSM8K, others | Critique-guided generation; cost-efficient; PromptPotter's primary inspiration |
+| MIPROv2 | Stanford NLP (DSPy) | 2024 | GSM8K, HotPotQA | Up to 13% accuracy gains on Llama-3-8B; Bayesian optimization over instructions + demos |
+| GEPA | Stanford NLP (DSPy) | 2025 | HotPotQA, AIME, IFBench, HoVer | +12% over MIPROv2 on AIME-2025; reflective prompt evolution |
+| CAPO | AutoML Freiburg (DSPy) | 2025 | GSM8K, others | Evolutionary prompt optimization; paired t-test racing |
+| Promptomatix | Salesforce AI Research | 2025 | GSM8K, SQuAD_2, CommonGen, AG News, XSum | Cost-aware optimization; competitive performance with reduced compute |
+| adv-CoT | — | 2025 | 12 datasets (commonsense + arithmetic) | +4.44% on GPT-3.5-turbo, +1.08% on GPT-4o-mini; adversarial refinement |
+| PromptPotter | Independent | 2025 | TermNorm, AIME 2025, BBEH | Critique-guided L1→L2→L3 loop; pipeline-aware optimization |

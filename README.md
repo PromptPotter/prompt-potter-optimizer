@@ -155,6 +155,10 @@ The notebook uses `promptpotter/display/campaign/` wrapping services with progre
 - **Requires a labeled dataset** — you need input/output pairs. No labeled data, no optimization.
 - **Langfuse dependency** — observability is currently coupled to Langfuse (v2). It works but adds operational complexity and is not optional for full tracing.
 
+## Benchmarks
+
+Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (GEPA, MIPROv2, BootstrapFewShot) and CAPO. Same model (`gpt-oss-120b`), same dataset splits, same scoring — no cross-paper number mixing. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for results and [`docs/research/bbeh-comparison/`](docs/research/bbeh-comparison/) for reproducible Colab notebooks.
+
 ## Documentation
 
 **Architecture** (how it works):
