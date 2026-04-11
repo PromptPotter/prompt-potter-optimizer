@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-
 def _build_baseline_state(
     config: LoopConfig,
     baseline_prompt_fields: dict | None,

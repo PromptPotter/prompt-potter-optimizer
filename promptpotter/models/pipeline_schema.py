@@ -313,6 +313,11 @@ class PipelineSchema(BaseModel):
         Returns ``[(node_name, cache_key), ...]``.  Each key is a 16-char
         hex digest of ``(node_name, node_config, upstream_key)``, so changing
         any upstream node's config cascades invalidation downstream.
+
+        This is the single addressing scheme for all caching: the
+        intermediate cache uses individual entries for per-node output
+        lookup; the terminal element serves as ``sp_hash`` for dataset-run
+        lookup.
         """
         result: list[tuple[str, str]] = []
         upstream = ""
@@ -324,6 +329,25 @@ class PipelineSchema(BaseModel):
             result.append((node.name, key))
             upstream = key
         return result
+
+    def sp_hash(self, pipeline_params: dict[str, Any]) -> str:
+        """SearchPoint identity hash — terminal element of the node chain.
+
+        Equivalent to ``self.prefix_keys(pipeline_params)[-1][1]``.
+        Returns ``""`` for empty schemas (no nodes).
+        """
+        chain = self.prefix_keys(pipeline_params)
+        return chain[-1][1] if chain else ""
+
+    def excluded_nodes(self, pipeline_params: dict[str, Any]) -> set[str]:
+        """Nodes in this schema but absent from ``pipeline_params["steps"]``.
+
+        Returns empty set when ``steps`` is missing (all nodes assumed active).
+        """
+        steps = pipeline_params.get("steps")
+        if steps is None:
+            return set()
+        return set(self.active_steps) - set(steps)
 
     def validate_step_dependencies(self, steps: list[str]) -> list[str]:
         """Return node names in *steps* whose ``input_keys`` aren't satisfied.

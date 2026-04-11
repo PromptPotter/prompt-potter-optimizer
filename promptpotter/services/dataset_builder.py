@@ -287,11 +287,11 @@ def build_dataset_run_data(
     *,
     source: str = "",
     experiment_id: str = "",
-    prompt_node_names: list[str] | None = None,
+    pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
     rendered_prompt = search_point.render()
-    sp_h = search_point.sp_hash(prompt_node_names)
+    sp_h = search_point.sp_hash(pipeline_schema)
     data: dict = {
         "run_id": run_id,
         "name": name,
@@ -309,6 +309,8 @@ def build_dataset_run_data(
         ],
     }
     data["sp_hash"] = sp_h
+    if pipeline_schema and search_point.pipeline_params:
+        data["prefix_chain"] = pipeline_schema.prefix_keys(search_point.pipeline_params)
     if search_point.pipeline_params:
         data["pipeline_params"] = search_point.pipeline_params
     if experiment_id:

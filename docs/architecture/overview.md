@@ -63,7 +63,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **OptSearchPoint** — inherits from PromptTemplate. Adds lineage (`id`, `parent_id`, `changes_description`) + L2 state (`optimizer_params`, `task_context`) + optimization memory (`critique_text`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `l2_directive`). Mutable. `to_job_search_point()` projects into JobSearchPoint for evaluation.
 
-**PipelineSchema** / **PipelineNode** — the node coordinate system for each dataset's pipeline. Nodes are the topmost lookup dimension: O(1) position, membership, and param-ownership queries. `prefix_keys()` computes chained cache keys; `prefix_through()` / `exclude()` slice valid sub-pipelines. Both pipeline backends and the optimizer pipeline parse into PipelineSchema.
+**PipelineSchema** / **PipelineNode** — the node coordinate system for each dataset's pipeline. Nodes are the topmost lookup dimension: O(1) position, membership, and param-ownership queries. `prefix_keys()` computes chained cache keys; `sp_hash()` returns the terminal element (unified identity — no separate hash scheme). `prefix_through()` / `exclude()` slice valid sub-pipelines. Both pipeline backends and the optimizer pipeline parse into PipelineSchema.
 
 **EvalContext** — infrastructure bundle for evaluation calls (`backend_client`, `store`, `pipeline_schema`, `obs`, stale data protocol config).
 
@@ -75,13 +75,13 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`.
 
 All paths converge on `eval_search_point()` — single gateway for eval persistence and archival. Prompt alias groups link semantically equivalent prompts so historical data is discoverable across forms (transitive resolution).
 
-**Per-node cache:** All eval reuse is handled by the per-node intermediate cache inside `evaluate_query()`. Each node's output is cached independently with chained upstream dependency — changing one node's config invalidates only that node and downstream, while upstream nodes stay cached. See [Node-Level Cache](#node-level-cache) below.
+**Chain-addressed caching:** All eval reuse is addressed by a single node chain (`prefix_keys()`). Two tiers use the same chained hashes: (1) `find_by_prefix_chain()` matches prior dataset_runs by exact or partial prefix for result-level reuse, (2) `IntermediateCache.walk_prefix()` reuses per-node outputs. Each node's output is cached independently with chained upstream dependency — changing one node's config invalidates only that node and downstream, while upstream nodes stay cached. See [Node-Level Cache](#node-level-cache) below.
 
 ## Caching & Crash Recovery
 
 | Strategy | Mechanism | Detail |
 |----------|-----------|--------|
-| **Per-node cache** | `PipelineSchema.prefix_keys()` — chained per-node dependency keys | See [Node-Level Cache](#node-level-cache) |
+| **Node chain cache** | `PipelineSchema.prefix_keys()` — chained per-node keys; `sp_hash` = terminal element | See [Node-Level Cache](#node-level-cache) |
 | **Shared store** | Scan + cycle both write to `dataset_runs/` | All archived results discoverable |
 | **Stale data protocol** | 3-step ladder: rerun → samplescan → sampleswitch | See [optimization.md](optimization.md#stale-data-load-protocol) |
 | **SearchMemory** | Materialized index over `dataset_runs/` | See [SearchMemory](#searchmemory) |
@@ -232,7 +232,7 @@ Per-node output caching with chained dependency keys. Each node's output is keye
 
 **Prefix walk:** `walk_prefix()` walks the node chain from pipeline start. At each node, checks if `{node}_{key}.json` has the query. Stops at the first miss. Sends all cached outputs as `precomputed` to the backend — it only runs the remaining nodes. When ALL nodes are cached, `_build_local_result()` constructs the result locally without any backend call.
 
-**Single cache layer:** Replaces the former 3-layer lookup (content-hash dedup → config_hash per-query → step-sequence). `dataset_run_store` is archive-only (SearchMemory/campaigns read from it, eval does not).
+**Unified chain addressing:** `sp_hash` is the terminal element of `prefix_keys()` — no separate hash computation. `find_by_prefix_chain()` in `dataset_run_store` matches prior runs by exact or partial prefix for result-level reuse (queries that terminated within the shared prefix are reusable even when downstream nodes differ). `dataset_run_store` also feeds SearchMemory and campaign lineage.
 
 **Disk layout:**
 ```

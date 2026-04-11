@@ -15,10 +15,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+from typing import Any
 
 from promptpotter.services.store.base import (
     read_json_optional,
@@ -26,18 +23,6 @@ from promptpotter.services.store.base import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def compute_prefix_keys(
-    pipeline_params: dict[str, Any],
-    pipeline_schema: PipelineSchema,
-) -> list[tuple[str, str]]:
-    """Compute chained cache keys for each node in pipeline order.
-
-    Delegates to ``PipelineSchema.prefix_keys`` — the schema owns node
-    ordering.  This wrapper exists for call-sites that import from here.
-    """
-    return pipeline_schema.prefix_keys(pipeline_params)
 
 
 class IntermediateCache:

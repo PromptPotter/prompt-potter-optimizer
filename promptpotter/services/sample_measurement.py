@@ -1,8 +1,9 @@
 """Sample measurement — single-query pipeline execution and scoring.
 
 Measures one sample at a time via the backend query endpoint.
-Handles per-node intermediate cache walk, cache populate, and error
-classification.  Dataset-level scoring lives in ``scoring_searchpoint``.
+Uses the unified node chain (``PipelineSchema.prefix_keys``) for
+per-node cache walk and populate.  Dataset-level scoring and
+prior-result matching live in ``scoring_searchpoint``.
 """
 
 from __future__ import annotations

@@ -2,16 +2,18 @@
 Dataset run storage — archive layer for eval history.
 
 Stores completed evaluation runs for SearchMemory, observability,
-campaign lineage, and full-run cache lookup (``find_by_sp_hash``).
+campaign lineage, and full-run cache lookup (``find_by_prefix_chain``).
 Per-node reuse is handled separately by ``IntermediateCache``.
 
-``config_hash`` is still used by ``coverage.py`` for scan variant
-matching.  Prompt alias groups are used by ``scan_baseline.py`` and
+Both layers use the same chained node hashes from
+``PipelineSchema.prefix_keys()``.  The terminal element of the chain
+serves as ``sp_hash``; prefix matching enables reuse of prior results
+when only downstream nodes changed.
+
+Prompt alias groups are used by ``scan_baseline.py`` and
 ``optimization_loop.py`` for SearchMemory historical linking.
 """
 
-import hashlib
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -29,44 +31,8 @@ from promptpotter.shared.constants import (
     DEFAULT_CONNECTOR_TYPE,
     LOCK_TIMEOUT,
 )
-from promptpotter.shared.hashing import HASH_TRUNCATE
 
 logger = logging.getLogger(__name__)
-
-
-# Keys in node config dicts that are tracked by rp_hash, not by
-# pipeline config.  Stripped before hashing to avoid asymmetry
-# (stored entries may include them, lookup may not).
-# output_schema is NOT stripped — schema mutations are independent
-# of rendered prompt text and must produce distinct cache keys.
-_PROMPT_KEYS = frozenset({"prompt"})
-
-
-def _normalize_pp(pipeline_params: dict | None) -> dict:
-    """Normalize pipeline_params for hashing: strip prompt/output_schema."""
-    pp = pipeline_params or {}
-    out: dict = {}
-    for k, v in pp.items():
-        if isinstance(v, dict):
-            out[k] = {pk: pv for pk, pv in v.items() if pk not in _PROMPT_KEYS}
-        else:
-            out[k] = v
-    return out
-
-
-def config_hash(pipeline_params: dict | None, rp_hash: str = "") -> str:
-    """Canonical hash of pipeline config identity.
-
-    Combines ``rp_hash`` (prompt identity) with normalized
-    ``pipeline_params`` (steps + all node configs, excluding prompt
-    and output_schema which are already captured by rp_hash).
-
-    Two configs with the same hash ran the same steps, same prompt,
-    and same node params — guaranteed identical results.
-    """
-    normalized = _normalize_pp(pipeline_params)
-    blob = json.dumps({"pp": normalized, "rp": rp_hash}, sort_keys=True, default=str).encode()
-    return hashlib.sha256(blob).hexdigest()[:HASH_TRUNCATE]
 
 
 class DatasetRunStore:
@@ -142,6 +108,7 @@ class DatasetRunStore:
             "content_hash": data["content_hash"],
             "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
             "sp_hash": data.get("sp_hash", ""),
+            "prefix_chain": data.get("prefix_chain"),
             "pipeline_params": data.get("pipeline_params"),
             "source": data.get("source", ""),
             "connector_type": data.get("connector_type", DEFAULT_CONNECTOR_TYPE),
@@ -187,11 +154,45 @@ class DatasetRunStore:
         """Return the index entries (summaries without full items)."""
         return self._load_index(backend_id).get("dataset_runs", [])
 
-    def find_by_sp_hash(self, backend_id: str, sp_hash: str) -> list[dict[str, Any]]:
-        """Return index entries matching *sp_hash*, most items first."""
-        matches = [e for e in self.list_all(backend_id) if e.get("sp_hash") == sp_hash]
-        matches.sort(key=lambda e: e.get("item_count", 0), reverse=True)
-        return matches
+    def find_by_prefix_chain(
+        self,
+        backend_id: str,
+        prefix_chain: list[tuple[str, str]],
+    ) -> list[tuple[dict[str, Any], int]]:
+        """Return index entries sharing a chain prefix, best match first.
+
+        Compares each stored entry's ``prefix_chain`` element-by-element
+        against *prefix_chain*.  Returns ``(entry, match_length)`` tuples
+        sorted by match_length desc, then item_count desc.
+
+        Entries without a stored ``prefix_chain`` fall back to ``sp_hash``
+        exact match (match_length = full chain length when terminal hash
+        matches, 0 otherwise).
+        """
+        if not prefix_chain:
+            return []
+        terminal_hash = prefix_chain[-1][1]
+        chain_len = len(prefix_chain)
+
+        scored: list[tuple[dict[str, Any], int]] = []
+        for entry in self.list_all(backend_id):
+            stored_chain = entry.get("prefix_chain")
+            if stored_chain:
+                # Element-by-element comparison
+                match_len = 0
+                for (_, h_want), (_, h_have) in zip(prefix_chain, stored_chain, strict=False):
+                    if h_want != h_have:
+                        break
+                    match_len += 1
+                if match_len > 0:
+                    scored.append((entry, match_len))
+            else:
+                # Legacy entry: fall back to sp_hash exact match
+                if entry.get("sp_hash") == terminal_hash:
+                    scored.append((entry, chain_len))
+
+        scored.sort(key=lambda t: (t[1], t[0].get("item_count", 0)), reverse=True)
+        return scored
 
     # -- prompt alias groups ---------------------------------------------------
 

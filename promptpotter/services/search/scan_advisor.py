@@ -651,17 +651,6 @@ def _validate_advisory(
     return warnings
 
 
-def _excluded_from_schema(
-    schema: PipelineSchema,
-    pipeline_params: dict | None,
-) -> set[str] | None:
-    """Derive excluded nodes by diffing schema nodes vs pipeline_params steps."""
-    if not pipeline_params or "steps" not in pipeline_params:
-        return None
-    excluded = set(schema.active_steps) - set(pipeline_params["steps"])
-    return excluded or None
-
-
 def _resolve_excluded_nodes(
     exclude_nodes: list[str] | None,
     schema: PipelineSchema,
@@ -670,7 +659,10 @@ def _resolve_excluded_nodes(
     """Resolve excluded nodes from explicit list or schema diff."""
     if exclude_nodes is not None:
         return set(exclude_nodes) if exclude_nodes else None
-    return _excluded_from_schema(schema, pipeline_params)
+    if not pipeline_params or "steps" not in pipeline_params:
+        return None
+    excluded = schema.excluded_nodes(pipeline_params)
+    return excluded or None
 
 
 def resolve_schema_axes(

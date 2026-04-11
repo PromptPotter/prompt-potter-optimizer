@@ -1,9 +1,10 @@
 """Dataset scoring — query loop orchestration, archival, and scoring.
 
-Unified per-query caching: prior-result cache (from dataset_runs) is
-checked first, then per-node intermediate cache (multi-step only),
-then backend call.  Also handles stale data protocol, error tracking,
-escalation checks, dataset run archival, and observability logging.
+Caching is addressed by a single node chain (``PipelineSchema.prefix_keys``).
+Prior dataset_runs are matched via ``find_by_prefix_chain`` (exact or
+partial prefix); per-node outputs are matched via ``IntermediateCache.walk_prefix``.
+Both use the same chained hashes. Also handles stale data protocol, error
+tracking, escalation checks, dataset run archival, and observability logging.
 Single-sample measurement lives in ``sample_measurement``.
 """
 
@@ -193,7 +194,7 @@ async def _run_query_loop(
     """Evaluate dataset queries, reusing prior results where available.
 
     For each query, checks ``prior_results`` first (from prior dataset_runs
-    with matching sp_hash), then falls back to ``measure_sample()`` which
+    matched via prefix chain), then falls back to ``measure_sample()`` which
     handles per-node intermediate cache internally.
 
     Returns:
@@ -339,24 +340,45 @@ async def _run_query_loop(
 def _load_prior_results(
     store: ProjectStore,
     backend_id: str,
-    sp_hash: str,
+    prefix_chain: list[tuple[str, str]],
 ) -> dict[str, QueryResult]:
-    """Build per-query result cache from prior dataset_runs with matching sp_hash.
+    """Build per-query result cache from prior dataset_runs with matching chain.
 
-    Loads ALL matching runs (including partial).  Individual items from
-    partial runs are valid — only the run was incomplete, not the results.
+    Uses ``find_by_prefix_chain`` for both exact and prefix matching.
+    For exact matches (match_length == chain_length), all prior results
+    are reusable.  For partial matches, only results where
+    ``terminated_at`` is within the shared prefix are reusable (the
+    query short-circuited before the diverging node).
+
     Error results are excluded — errors are transient (backend down, etc.).
     Later runs overwrite earlier ones for the same query.
     """
+    if not prefix_chain:
+        return {}
+    chain_len = len(prefix_chain)
+
     cache: dict[str, QueryResult] = {}
-    for entry in store.dataset_runs.find_by_sp_hash(backend_id, sp_hash):
+    for entry, match_length in store.dataset_runs.find_by_prefix_chain(backend_id, prefix_chain):
+        is_full_match = match_length >= chain_len
         detail = store.dataset_runs.load_by_id(backend_id, entry["run_id"])
         if not detail:
             continue
+        # For partial matches, compute the set of trusted node names
+        if not is_full_match:
+            trusted_nodes = {prefix_chain[i][0] for i in range(match_length)}
         for item in detail.get("dataset_run_items", []):
             q = item.get("query", "")
-            if q and item.get("predicted") != "ERROR":
+            if not q or item.get("predicted") == "ERROR":
+                continue
+            if is_full_match:
                 cache[q] = item
+            else:
+                # Partial match: only reuse if the query terminated within
+                # the shared prefix (short-circuited before divergence)
+                pd = item.get("pipeline_data") or {}
+                terminated_at = pd.get("terminated_at", "")
+                if terminated_at and terminated_at in trusted_nodes:
+                    cache[q] = item
     return cache
 
 
@@ -372,13 +394,14 @@ async def score_search_point(
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
 ) -> tuple[list, dict, bool]:
-    """Evaluate a prompt via backend with unified per-query caching.
+    """Evaluate a prompt via backend with chain-addressed caching.
 
-    Cache hierarchy (single per-query decision inside the loop):
-    1. Prior-result cache — reuse items from previous dataset_runs
-       with the same sp_hash (including partial runs).
-    2. Per-node intermediate cache — reuse upstream pipeline nodes
-       (multi-step pipelines only; no-op for LLM-only).
+    One chain (``prefix_keys``) addresses two cache tiers per query:
+    1. Prior-result cache — ``find_by_prefix_chain`` matches dataset_runs
+       by exact or partial prefix.  Partial matches reuse results where
+       the query terminated within the shared prefix.
+    2. Per-node intermediate cache — ``walk_prefix`` reuses upstream
+       node outputs (multi-step only; no-op for LLM-only).
     3. Backend call — evaluate via backend if no cache hit.
 
     The ``search_point`` bundles the search-space dimensions
@@ -393,7 +416,6 @@ async def score_search_point(
     store = ctx.store
     backend_id = ctx.backend_id
     pipeline_schema = ctx.pipeline_schema
-    prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else None
     obs = ctx.obs
     source = source or ctx.source
 
@@ -401,11 +423,12 @@ async def score_search_point(
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    # Build per-query cache from prior dataset_runs with same sp_hash
+    # Build per-query cache from prior dataset_runs via prefix chain matching
     prior_results: dict[str, QueryResult] = {}
-    if store and backend_id:
-        sp_h = search_point.sp_hash(prompt_nodes)
-        prior_results = _load_prior_results(store, backend_id, sp_h)
+    prefix_chain: list[tuple[str, str]] = []
+    if store and backend_id and pipeline_schema:
+        prefix_chain = pipeline_schema.prefix_keys(search_point.pipeline_params or {})
+        prior_results = _load_prior_results(store, backend_id, prefix_chain)
 
     # Fast path: all queries already in prior cache — skip query loop entirely
     if (
@@ -434,7 +457,7 @@ async def score_search_point(
             results,
             source=source,
             experiment_id=ctx.experiment_id,
-            prompt_node_names=prompt_nodes,
+            pipeline_schema=pipeline_schema,
         )
         if partial:
             run_data["partial"] = True
@@ -475,7 +498,7 @@ async def score_search_point(
             run_id,
             content_hash,
             scores,
-            search_point.sp_hash(prompt_nodes),
+            search_point.sp_hash(pipeline_schema),
             obs,
         )
 

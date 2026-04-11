@@ -388,3 +388,35 @@ class TestCoordinateLookups:
         assert keys[0][1] == node_cache_key("a", {"max_results": 5}, "")
         # Second node: upstream=first key
         assert keys[1][1] == node_cache_key("b", {}, keys[0][1])
+
+    def test_sp_hash_is_terminal_of_prefix_keys(self):
+        """sp_hash returns the terminal element of prefix_keys."""
+        schema = _three_node_schema()
+        pp = {"a": {"max_results": 5}, "b": {"temperature": 0.7}}
+        chain = schema.prefix_keys(pp)
+        assert schema.sp_hash(pp) == chain[-1][1]
+
+    def test_sp_hash_empty_schema(self):
+        schema = PipelineSchema(nodes=[])
+        assert schema.sp_hash({}) == ""
+
+    def test_sp_hash_changes_with_config(self):
+        schema = _three_node_schema()
+        h1 = schema.sp_hash({"a": {"max_results": 5}})
+        h2 = schema.sp_hash({"a": {"max_results": 10}})
+        assert h1 != h2
+
+    def test_excluded_nodes(self):
+        schema = _three_node_schema()
+        pp = {"steps": ["a", "c"]}
+        assert schema.excluded_nodes(pp) == {"b"}
+
+    def test_excluded_nodes_no_steps(self):
+        """No 'steps' key → all nodes assumed active → empty set."""
+        schema = _three_node_schema()
+        assert schema.excluded_nodes({"a": {"max_results": 5}}) == set()
+
+    def test_excluded_nodes_all_active(self):
+        schema = _three_node_schema()
+        pp = {"steps": ["a", "b", "c"]}
+        assert schema.excluded_nodes(pp) == set()

@@ -13,16 +13,15 @@ Formula: ``f(JobSearchPoint, PipelineSchema, dataset) → scores``
 
 from __future__ import annotations
 
-import hashlib
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
-from promptpotter.shared.hashing import (
-    HASH_TRUNCATE,
-    content_hash,
-    sp_identity_hash,
-)
+from promptpotter.shared.hashing import content_hash
+
+if TYPE_CHECKING:
+    from promptpotter.models.pipeline_schema import PipelineSchema
 
 
 class SearchPoint(BaseModel):
@@ -70,15 +69,20 @@ class JobSearchPoint(SearchPoint):
                 return node_config["prompt"]
         return ""
 
-    def sp_hash(self, prompt_node_names: list[str] | None = None) -> str:
-        """SearchPoint identity hash — dataset independent."""
-        rendered = self.render()
-        rp_hash = hashlib.sha256(rendered.encode()).hexdigest()[:HASH_TRUNCATE]
-        return sp_identity_hash(
-            rp_hash,
-            self.pipeline_params,
-            prompt_node_names,
-        )
+    def sp_hash(self, pipeline_schema: PipelineSchema | None = None) -> str:
+        """SearchPoint identity hash — terminal element of the node chain.
+
+        When *pipeline_schema* is provided, delegates to
+        ``pipeline_schema.sp_hash(pipeline_params)`` (the unified chain).
+        Without a schema (empty pipelines, display-only), falls back to
+        hashing ``pipeline_params`` directly.
+        """
+        if pipeline_schema is not None:
+            return pipeline_schema.sp_hash(self.pipeline_params or {})
+        # Fallback for schema-less contexts (display comparisons, tests)
+        from promptpotter.models.pipeline_schema import node_cache_key
+
+        return node_cache_key("_flat", self.pipeline_params or {}, "")
 
     def content_hash(self, dataset: list) -> str:
         """Content-addressed hash for evaluation deduplication."""

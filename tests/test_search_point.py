@@ -127,16 +127,17 @@ def test_derive_with_prompt_fields():
 def test_derive_prompt_fields_sp_hash_consistency():
     """derive(prompt_fields=...) produces the same sp_hash as a fresh projection."""
     osp = OptSearchPoint(persona="Expert", instruction="Rank items.")
-    sp = osp.to_job_search_point(schema=_schema_with_prompt_node())
+    schema = _schema_with_prompt_node()
+    sp = osp.to_job_search_point(schema=schema)
 
     # Derive with a field change
     sp_derived = sp.derive(prompt_fields={"instruction": "Sort items."})
 
     # Fresh projection with the same change
     osp2 = osp.derive_candidate(instruction="Sort items.")
-    sp_fresh = osp2.to_job_search_point(schema=_schema_with_prompt_node())
+    sp_fresh = osp2.to_job_search_point(schema=schema)
 
-    assert sp_derived.sp_hash() == sp_fresh.sp_hash()
+    assert sp_derived.sp_hash(schema) == sp_fresh.sp_hash(schema)
     assert sp_derived.render() == sp_fresh.render()
 
 
@@ -148,7 +149,26 @@ def test_prompt_fields_not_in_sp_hash():
         prompt_fields={"persona": "Expert", "instruction": "Rank items."},
     )
     sp_without = JobSearchPoint(pipeline_params=pp)
+    # With unified chain, same pipeline_params → same hash
     assert sp_with.sp_hash() == sp_without.sp_hash()
+
+
+def test_sp_hash_with_schema_uses_chain():
+    """sp_hash(schema) returns the terminal element of the node chain."""
+    schema = _schema_with_prompt_node()
+    pp = {"llm_ranking": {"prompt": "Expert\n\nRank items.", "temperature": 0.5}}
+    sp = JobSearchPoint(pipeline_params=pp)
+    # With schema: uses prefix_keys chain
+    chain = schema.prefix_keys(pp)
+    assert sp.sp_hash(schema) == chain[-1][1]
+
+
+def test_sp_hash_different_config_different_hash():
+    """Different pipeline config → different sp_hash."""
+    schema = _schema_with_prompt_node()
+    sp_a = JobSearchPoint(pipeline_params={"llm_ranking": {"prompt": "A", "temp": 0.5}})
+    sp_b = JobSearchPoint(pipeline_params={"llm_ranking": {"prompt": "B", "temp": 0.5}})
+    assert sp_a.sp_hash(schema) != sp_b.sp_hash(schema)
 
 
 def test_to_job_search_point_populates_prompt_fields():

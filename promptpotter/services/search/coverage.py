@@ -19,7 +19,6 @@ from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.services.project_store import ProjectStore
 from promptpotter.services.search.failure_group_analysis import preview
 from promptpotter.services.search.smart_search import deserialize_smart_search_plan
-from promptpotter.services.store.dataset_run_store import config_hash
 from promptpotter.shared.constants import DEFAULT_DIAGNOSTIC_QUERIES, PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
@@ -35,7 +34,6 @@ def diagnose_scan_variants(
     backend_id: str,
     scan_variants: dict[str, list | dict],
     baseline_sp: JobSearchPoint,
-    prompt_node_names: list[str] | None = None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Check scan variant coverage using step-sequence matching.
@@ -111,17 +109,15 @@ def diagnose_scan_variants(
                 ).hexdigest()[:HASH_TRUNCATE]
                 entries = rp_index.get(rp_h, [])
             else:
-                # Pipeline param variant: match by config_hash
+                # Pipeline param variant: match by sp_hash via prefix chain
                 target_pp = copy.deepcopy(baseline_sp.pipeline_params or {})
                 if axis_node:
                     target_pp.setdefault(axis_node, {})[axis_name] = v
-                target_ch = config_hash(target_pp, baseline_rp_hash)
-                entries = [
-                    e
-                    for e in step_matches
-                    if config_hash(e.get("pipeline_params"), e.get("rendered_prompt_hash", ""))
-                    == target_ch
-                ]
+                if pipeline_schema:
+                    target_sp_hash = pipeline_schema.sp_hash(target_pp)
+                    entries = [e for e in step_matches if e.get("sp_hash") == target_sp_hash]
+                else:
+                    entries = []
 
             value_counts[key] = sum(e.get("item_count", 0) for e in entries)
             for e in entries:
