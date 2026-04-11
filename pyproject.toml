@@ -66,7 +66,8 @@ promptpotter = ["py.typed"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["tests"]
-addopts = "-q --tb=short"
+addopts = "-q --tb=short --no-header"
+filterwarnings = ["ignore::RuntimeWarning"]
 markers = ["slow: orchestrator integration tests (>1s each)"]
 
 [tool.mypy]
@@ -128,6 +129,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*.ipynb" = ["F403", "F405"]  # star imports are intentional in notebooks
+"promptpotter/ui/campaign/__init__.py" = ["F401"]  # pure re-export hub for notebook
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15

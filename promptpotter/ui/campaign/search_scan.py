@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from promptpotter.models.opt_search_point import OptSearchPoint
 from promptpotter.services.search.sensitivity_scanner import sensitivity_scan as _sensitivity_scan
+from promptpotter.services.search.smart_search import ScanEvent
 from promptpotter.services.search.smart_search import adaptive_search as _adaptive_search
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
@@ -141,28 +143,28 @@ async def sensitivity_scan(
     return df, profiles
 
 
-def _make_scan_progress_cb():
-    """Build a progress callback for sensitivity_scan with flip tracking.
-
-    Returns:
-        Tuple of (progress_cb, on_result_cb).
-    """
-    baseline_results: list = []
+def _make_scan_progress_cb() -> tuple[
+    Callable[[ScanEvent], None], Callable[[dict, int, int], None]
+]:
+    """Build a progress callback for sensitivity_scan with flip tracking."""
+    baseline_results: list[dict] = []
 
     def _on_result(result: dict, index: int, total: int) -> None:
         """Print each query result as it arrives from the backend."""
         is_cached = result.get("cached", False)
         print(_fmt_query_result(result, cached=is_cached), flush=True)
 
-    def _cb(event: dict) -> None:
+    def _cb(event: ScanEvent) -> None:
         t = event["type"]
 
         if t == "baseline_done":
             baseline_results.clear()
             baseline_results.extend(event.get("results", []))
-            is_cached = event.get("cached", False)
-            cached = " [cached]" if is_cached else ""
-            print(f"  Baseline: {event['hits']}/{event['total']} ({event['accuracy']:.1%}){cached}")
+            bl_cached = event.get("cached", False)
+            cached_tag = " [cached]" if bl_cached else ""
+            print(
+                f"  Baseline: {event['hits']}/{event['total']} ({event['accuracy']:.1%}){cached_tag}"
+            )
             # Per-query lines already printed by _on_result in real-time
 
         elif t == "axis_start":
@@ -305,7 +307,7 @@ async def adaptive_search(
 def _make_search_progress_cb():
     """Build a progress callback for adaptive_search."""
 
-    def _cb(event: dict) -> None:
+    def _cb(event: ScanEvent) -> None:
         t = event["type"]
 
         if t == "round_start":

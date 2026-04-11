@@ -12,42 +12,31 @@ PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipe
 # Install (dev)
 pip install -e ".[dev,jupyter,stats]"
 
-# Lint & format
-ruff check promptpotter/ tests/
-ruff format promptpotter/ tests/
+# Verify everything (~5s, minimal output)
+python -m ruff check promptpotter/ tests/ -q && python -m ruff format --check promptpotter/ tests/ -q && python -m mypy promptpotter/ --no-error-summary && python -m pytest tests/ --tb=no -q -p no:warnings
 
-# Type check
-mypy promptpotter/
-
-# Tests
-pytest tests/                          # all tests
-pytest tests/test_search_point.py      # single file
-pytest tests/ -k "test_name"           # single test by name
+# Individual checks
+python -m ruff check promptpotter/ tests/     # lint
+python -m ruff format promptpotter/ tests/    # format (auto-fix)
+python -m mypy promptpotter/                  # type check
+python -m pytest tests/                       # all tests
+python -m pytest tests/ -k "test_name"        # single test
 
 # Run API server
 uvicorn promptpotter.main:app --port 8001 --reload
 
-# CLI (HITL optimization from terminal)
-python -m promptpotter init \
-    --backend-url http://127.0.0.1:8000 \
-    --config datasets/lca-termnorm/campaign.json \
-    --skip-baseline
-python -m promptpotter set-task \
-    --task-file datasets/lca-termnorm/task_description.md
-python -m promptpotter scan \
-    --variants-file datasets/lca-termnorm/scan_variants.json
+# CLI workflow
+python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/lca-termnorm/campaign.json --skip-baseline
+python -m promptpotter set-task --task-file datasets/lca-termnorm/task_description.md
+python -m promptpotter scan --variants-file datasets/lca-termnorm/scan_variants.json
 python -m promptpotter show-scan
 python -m promptpotter optimize             # full loop (default)
-python -m promptpotter optimize --round    # one complete round → stop
+python -m promptpotter optimize --round     # one round → stop
 python -m promptpotter show-results
-python -m promptpotter show-status         # live dashboard
-
-# Export results
-python -m promptpotter export supplemental --backend-id local -o supplemental.md
-python -m promptpotter export json --backend-id local -o paper_results.json
+python -m promptpotter show-status          # live dashboard
 ```
 
-CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest --cov`. All must pass.
+CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`. All must pass.
 
 ## Code Conventions
 

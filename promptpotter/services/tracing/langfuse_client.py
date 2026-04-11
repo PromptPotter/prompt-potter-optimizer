@@ -41,7 +41,7 @@ class LangfuseLogger:
 
     _instance: "LangfuseLogger | None" = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize Langfuse client from settings."""
         from promptpotter.config.settings import settings
 

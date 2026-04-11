@@ -15,7 +15,10 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 from pydantic import BaseModel, Field
 
@@ -108,9 +111,9 @@ class OpenAICompatibleClient(LLMClientBase):
         self._timeout = timeout
         self._default_model = default_model or settings.LLM_MODEL
         self._provider_name = provider_name
-        self._client = None
+        self._client: AsyncOpenAI | None = None
 
-    def _ensure_client(self):
+    def _ensure_client(self) -> "AsyncOpenAI":
         """Lazy-initialize the async OpenAI client."""
         if self._client is None:
             try:

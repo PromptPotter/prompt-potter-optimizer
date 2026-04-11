@@ -1,17 +1,1 @@
 """Optimizer infrastructure — LLM call primitive, prompt loader, pipeline schema."""
-
-from promptpotter.services.optimizer.pipeline import (
-    get_optimizer_schema,
-    get_round_recorder,
-    llm_call,
-    load_optimizer_prompt,
-    set_round_recorder,
-)
-
-__all__ = [
-    "get_optimizer_schema",
-    "get_round_recorder",
-    "llm_call",
-    "load_optimizer_prompt",
-    "set_round_recorder",
-]

@@ -5,8 +5,9 @@ for core logic and adds tqdm progress bars, print statements, and IPython
 display for interactive use.
 """
 
-# -- Setup (init, pipeline, LLM, langfuse, datasets) -------------------------
+import types as _types
 
+# -- Setup (init, pipeline, LLM, langfuse, datasets) -------------------------
 # -- Re-exports from promptpotter.services.search (used directly in notebook) ----------
 # -- Reporting (supplemental materials) — direct from services ----------------
 from promptpotter.services.campaign.reporting import generate_export_json, generate_supplemental
@@ -104,86 +105,10 @@ from .setup import (
     sync_langfuse,
 )
 
+# __all__ derived from the explicit imports above — no manual list to maintain.
+# Filter out submodule names (types.ModuleType) to export only functions/constants.
 __all__ = [
-    # Display
-    "BLUE",
-    "BOLD",
-    "CYAN",
-    "GREEN",
-    "MAGENTA",
-    "RED",
-    "RESET",
-    "YELLOW",
-    # Search: Scan
-    "adaptive_search",
-    # Campaigns
-    "apply_stored_overrides",
-    # Search: Results & Coverage
-    "audit_historical_data",
-    # Setup
-    "build_all_index_terms",
-    # Re-exports from promptpotter.services.search
-    "build_diagnostic_set",
-    "build_historical_index",
-    "build_llm_context",
-    "build_pipeline_overview",
-    "build_tunable_params",
-    "configure_langfuse",
-    "configure_pipeline",
-    # Search: Variants
-    "convert_advisory_to_scan_variants",
-    "decompose_scan_baseline",
-    "decompose_task_context",
-    "dev_reload",
-    "diff_campaign_config",
-    # Optimization (+ stats + eval)
-    "fmt_ci",
-    "fmt_pvalue",
-    # Reporting
-    "generate_export_json",
-    "generate_supplemental",
-    "init_services",
-    "list_campaigns",
-    "load_and_apply_experiment",
-    "load_baseline_prompt",
-    "load_stored_campaign_config",
-    # Search: Advisor
-    "load_task_description",
-    "load_variant_library",
-    "min_detectable_effect",
-    "prepare_datasets",
-    "prepare_scoring_context",
-    "preview_advisor_prompt",
-    "proportion_test",
-    "push_langfuse",
-    "resolve_scan_variants",
-    "resume_or_build_diagnostic",
-    "run_baseline_scoring",
-    "run_optimization_notebook",
-    "run_scan_advisor",
-    "run_sensitivity_scan",
-    "save_campaign_winner",
-    "scan_advisor",
-    "seed_campaign_from_scan",
-    "select_scan_winner_notebook",
-    "sensitivity_scan",
-    "set_display_tags",
-    "setup_llm",
-    "show_axis_profiles",
-    "show_backend_status",
-    "show_campaign_summary",
-    "show_data_inventory",
-    "show_experiment_dashboard",
-    "show_feedback_preflight",
-    "show_flip_tracking",
-    "show_lineage_chain",
-    "show_pipeline_snapshot",
-    "show_progress",
-    "show_scan_analytics",
-    "show_scan_coverage",
-    "show_scan_leaderboard",
-    "show_scan_query_difficulty",
-    "show_variant_library",
-    "sync_langfuse",
-    "wilson_ci",
+    name
+    for name in dir()
+    if not name.startswith("_") and not isinstance(globals()[name], _types.ModuleType)
 ]

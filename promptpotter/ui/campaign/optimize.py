@@ -12,7 +12,12 @@ from promptpotter.services.campaign.campaign_setup import (
 from promptpotter.services.campaign.data import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
-from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, RunResult
+from promptpotter.services.campaign.state import (
+    CampaignPhase,
+    PhaseEvent,
+    RoundResult,
+    RunResult,
+)
 from promptpotter.services.search.failure_group_analysis import (
     min_detectable_effect,
     proportion_test,
@@ -395,7 +400,9 @@ async def run_optimization_notebook(
             if resumed > 0:
                 del campaign_rounds[initial_len:]
 
-    def _on_query(cand_idx, n_cands, query_idx, n_queries, result):
+    def _on_query(
+        cand_idx: int, n_cands: int, query_idx: int, n_queries: int, result: dict
+    ) -> None:
         _query_counter[0] += 1
         is_cached = result.get("cached", False)
         prefix = f"  [{_query_counter[0]:>3d}] "
@@ -404,7 +411,7 @@ async def run_optimization_notebook(
             flush=True,
         )
 
-    def _on_candidate(idx, total, scores):
+    def _on_candidate(idx: int, total: int, scores: dict) -> None:
         label = f"C{idx + 1}"
         w = 66
 
@@ -454,8 +461,8 @@ async def run_optimization_notebook(
         else:
             print(f"  {_box_bottom(width=w)}")
 
-    def _on_round(round_result, stall_count):
-        # Round entry already appended by orchestration's round-append callback
+    def _on_round(round_result: RoundResult, stall_count: int) -> None:
+        assert config is not None
         _query_counter[0] = 0
         _ds.stall_count = stall_count
 
