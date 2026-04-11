@@ -1,7 +1,7 @@
 """Layer transition functions for the 3-loop feedback cycle.
 
-L2 (refine_context): Analyzes L1 failure patterns and adjusts OptSearchPoint
-    parameters and context to improve generation quality.
+L2 (refine_strategy): Analyzes L1 failure patterns and adjusts OptSearchPoint
+    parameters and strategy to improve generation quality.
 
 L3 (modify_plan): Analyzes why L2 adjustments didn't help and suggests
     a new strategic plan.
@@ -22,7 +22,7 @@ from promptpotter.services.campaign.formatting import (
     assess_candidate_diversity,
     build_candidate_comparison,
     build_round_trajectory,
-    build_strategic_search_memory_context,
+    build_strategic_search_memory_digest,
     classify_trajectory,
     format_l2_intelligence,
 )
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["TransitionAction", "TransitionResult", "modify_plan", "refine_context"]
+__all__ = ["TransitionAction", "TransitionResult", "modify_plan", "refine_strategy"]
 
 
 class TransitionAction(enum.StrEnum):
@@ -68,17 +68,17 @@ def _build_l2_prompt(
     opt_sp: OptSearchPoint,
     pipeline_params: dict | None,
     pipeline_schema: PipelineSchema | None,
-    escalation_context: dict | None,
+    escalation_check_result: dict | None,
     search_memory: object | None = None,
     rounds: list | None = None,
     candidate_scores: list[dict] | None = None,
 ) -> tuple[str, PromptTemplate, dict]:
-    """Assemble the L2 refine_context prompt from all context sources.
+    """Assemble the L2 refine_strategy prompt from all context sources.
 
     Returns (compiled_prompt, template, compile_variables).
     """
     escalation_section = _build_escalation_prompt_section(
-        escalation_context,
+        escalation_check_result,
         opt_sp.escalation_journal or None,
         pipeline_params,
         pipeline_schema=pipeline_schema,
@@ -99,7 +99,7 @@ def _build_l2_prompt(
             warning_inventory=opt_sp.warning_inventory or None,
             critique_text=opt_sp.critique_text,
             l2_directive=opt_sp.l2_directive,
-            search_memory_context=build_strategic_search_memory_context(
+            search_memory_digest=build_strategic_search_memory_digest(
                 search_memory,
                 include_correlations=True,
             ),
@@ -136,7 +136,7 @@ def _build_l2_prompt(
         "intelligence_sections": ("\n\n" + intelligence_sections) if intelligence_sections else "",
         "response_schema_suffix": response_schema_suffix,
     }
-    _template = load_optimizer_prompt("l2_refine_context")
+    _template = load_optimizer_prompt("l2_refine_strategy")
     return _template.compile_prompt(**_compile_vars), _template, _compile_vars
 
 
@@ -150,7 +150,7 @@ def _parse_l2_response(
     if result.get("optimizer_params"):
         new_params = {**opt_sp.optimizer_params, **result["optimizer_params"]}
         changes["optimizer_params"] = new_params
-    rationale = result.get("rationale", "L2 refine_context transition")
+    rationale = result.get("rationale", "L2 refine_strategy transition")
     changes["changes_description"] = f"L2: {rationale[:80]}"
 
     new_task_context = None
@@ -169,7 +169,7 @@ def _parse_l2_response(
         l2_directive = ""
 
     logger.debug(
-        "L2 refine_context: %d param changes, task_context %s, action=%s, directive=%d chars",
+        "L2 refine_strategy: %d param changes, task_context %s, action=%s, directive=%d chars",
         len(result.get("optimizer_params", {})),
         "updated" if new_task_context else "unchanged",
         action,
@@ -187,14 +187,14 @@ def _parse_l2_response(
     )
 
 
-async def refine_context(
+async def refine_strategy(
     opt_sp: OptSearchPoint,
     llm_client: LLMClientBase,
     model: str | None = None,
     temperature: float = 0.3,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
-    escalation_context: dict | None = None,
+    escalation_check_result: dict | None = None,
     search_memory: object | None = None,
     rounds: list | None = None,
     candidate_scores: list[dict] | None = None,
@@ -210,7 +210,7 @@ async def refine_context(
         opt_sp,
         pipeline_params,
         pipeline_schema,
-        escalation_context,
+        escalation_check_result,
         search_memory=search_memory,
         rounds=rounds,
         candidate_scores=candidate_scores,
@@ -219,11 +219,11 @@ async def refine_context(
     response = await llm_call(
         llm_client,
         messages=[{"role": "user", "content": prompt}],
-        node="l2_refine_context",
+        node="l2_refine_strategy",
         model=model,
         temperature=temperature,
         trace_meta={
-            "template_name": "l2_refine_context",
+            "template_name": "l2_refine_strategy",
             "template_fields": _template.prompt_field_dict(),
             "variables": _compile_vars,
         },
@@ -270,7 +270,7 @@ async def modify_plan(
 
     # SearchMemory intelligence — aggregate strategic picture for L3
     sm_section = ""
-    sm_ctx = build_strategic_search_memory_context(search_memory, include_clusters=True)
+    sm_ctx = build_strategic_search_memory_digest(search_memory, include_clusters=True)
     if sm_ctx:
         sm_lines = ["HISTORICAL INTELLIGENCE:"]
         if sm_ctx.get("axis_rankings"):
@@ -358,7 +358,7 @@ def _build_pipeline_prompt_section(
 
 
 def _build_escalation_prompt_section(
-    escalation_context: dict | None,
+    escalation_check_result: dict | None,
     escalation_journal: list[dict] | None,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
@@ -370,14 +370,14 @@ def _build_escalation_prompt_section(
     shows a data-driven stability map of tried configs so the LLM can
     figure out what to change.
     """
-    if not escalation_context:
+    if not escalation_check_result:
         return ""
 
-    dominant = escalation_context.get("dominant_warning", "unknown")
+    dominant = escalation_check_result.get("dominant_warning", "unknown")
     step_name = dominant.split(":")[0] if ":" in dominant else "unknown"
-    rate = escalation_context.get("degraded_rate", 0)
+    rate = escalation_check_result.get("degraded_rate", 0)
 
-    wt = escalation_context.get("warning_types", {})
+    wt = escalation_check_result.get("warning_types", {})
     wt_str = ", ".join(f"{k} ({v})" for k, v in sorted(wt.items(), key=lambda x: -x[1]))
 
     lines = [

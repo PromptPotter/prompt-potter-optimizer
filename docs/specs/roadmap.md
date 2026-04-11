@@ -31,7 +31,7 @@ PipelineSchema model, `GET /pipeline` self-describing config, schema derivation 
 
 ## M7: Optimizer-as-Pipeline -- Complete
 
-5-node optimizer pipeline (l1_generate, l1_evaluate, critique, l2_refine_context, l3_modify_plan) with `llm_call()` primitive, `observed_node()` tracing, OptSearchPoint consolidation, warning inventory, L2 probe rounds, l2_directive bridge. Spec: [`archive/m7-optimizer-pipeline.md`](archive/m7-optimizer-pipeline.md)
+5-node optimizer pipeline (l1_generate, l1_evaluate, critique, l2_refine_strategy, l3_modify_plan) with `llm_call()` primitive, `observed_node()` tracing, OptSearchPoint consolidation, warning inventory, L2 probe rounds, l2_directive bridge. Spec: [`archive/m7-optimizer-pipeline.md`](archive/m7-optimizer-pipeline.md)
 
 ---
 

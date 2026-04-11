@@ -333,7 +333,7 @@ async def cmd_scan(args: argparse.Namespace) -> None:
     from promptpotter.services.campaign.orchestration import run_scan_and_persist
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
-    baseline = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
+    baseline = load_baseline_prompt(session.experiment_extract, prompt_node_names=_pn)
     train_data = session.queries or []
 
     sample_size = (
@@ -394,7 +394,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
         )
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
-    scan_baseline_sp = load_baseline_prompt(session.exp_data, prompt_node_names=_pn)
+    scan_baseline_sp = load_baseline_prompt(session.experiment_extract, prompt_node_names=_pn)
 
     campaign_rounds: list = []
     _seed_result = _seed_campaign_from_scan(
@@ -415,7 +415,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
-    from promptpotter.services.campaign.orchestration import load_scan_context
+    from promptpotter.services.campaign.orchestration import load_scan_brief
 
     ctx = _load_session(args)
     campaign_config = ctx.state["campaign_config"]
@@ -436,7 +436,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
     # Load scan context via shared orchestration function
     baseline_acc = campaign_rounds[-1].get("accuracy", 0.0) if campaign_rounds else 0.0
-    scan_context = load_scan_context(
+    scan_brief = load_scan_brief(
         session,
         ctx.session_id,
         ctx.state.get("scan_variants") or {},
@@ -485,7 +485,7 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             dataset,
             campaign_config,
             session=session,
-            scan_context=scan_context,
+            scan_brief=scan_brief,
             experiment_id=ctx.state.get("experiment_id"),
             task_context=ctx.state.get("task_context"),
             session_id=ctx.session_id,

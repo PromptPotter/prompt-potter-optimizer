@@ -145,7 +145,7 @@ def dev_reload() -> None:
         "promptpotter.ui.campaign.search_scan",
         # NOTE: Do NOT reload promptpotter.models.* or dataclass modules —
         # Pydantic/dataclass classes break when reloaded (existing
-        # instances fail type checks).  scan_results.py has ScanContext
+        # instances fail type checks).  scan_results.py has ScanBrief
         # dataclass, so it must not be reloaded.
         # For model/dataclass changes, restart the kernel.
     ]:
@@ -246,7 +246,7 @@ async def init_services(
         print(f"Session terms: {len(session.index_terms)}")
         return session
 
-    if not session.exp_data:
+    if not session.experiment_extract:
         print(
             "WARNING: No experiment data available. "
             "Use prepare_datasets() to load from Excel, "
@@ -254,9 +254,11 @@ async def init_services(
         )
         return session
 
-    mappings = session.exp_data.get("mappings", [])
+    mappings = session.experiment_extract.get("mappings", [])
     verified = sum(1 for m in mappings if m.get("dataset_entry", "").strip() not in ("", "--"))
-    print(f"Experiment : {session.exp_data.get('experiment', {}).get('name', experiment_id)}")
+    print(
+        f"Experiment : {session.experiment_extract.get('experiment', {}).get('name', experiment_id)}"
+    )
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
     print(f"Queries    : {len(session.queries)}  |  Session terms: {len(session.index_terms)}")
 

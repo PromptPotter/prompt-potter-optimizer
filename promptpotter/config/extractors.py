@@ -24,7 +24,7 @@ Keyed by ``pipeline_schema.name.lower()``.
 TRACE_GT_RESOLVERS: dict[str, Callable[[dict, str], str | None]] = {}
 """Resolve ground truth for a single query string from experiment data.
 
-Signature: ``(exp_data, query_str) -> ground_truth | None``.
+Signature: ``(experiment_extract, query_str) -> ground_truth | None``.
 Keyed by ``pipeline_schema.name.lower()``.
 """
 
@@ -125,14 +125,14 @@ def extract_queries(experiment_data: dict) -> list[dict[str, Any]]:
 # -- Registry self-registration -----------------------------------------------
 
 
-def _extract_experiment(exp_data: dict) -> tuple[list[dict[str, Any]], list[str]]:
+def _extract_experiment(experiment_extract: dict) -> tuple[list[dict[str, Any]], list[str]]:
     """Registered extractor: experiment data → (queries, index_terms)."""
-    return extract_queries(exp_data), extract_index_terms(exp_data)
+    return extract_queries(experiment_extract), extract_index_terms(experiment_extract)
 
 
-def _resolve_trace_gt(exp_data: dict, query_str: str) -> str | None:
+def _resolve_trace_gt(experiment_extract: dict, query_str: str) -> str | None:
     """Registered resolver: experiment data + query → ground truth."""
-    gt_map = extract_ground_truth_map(exp_data)
+    gt_map = extract_ground_truth_map(experiment_extract)
     bom, _ = split_query(query_str)
     return gt_map.get(bom)
 

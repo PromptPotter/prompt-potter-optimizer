@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from promptpotter.models.pipeline_schema import PipelineSchema
 from promptpotter.models.task_decomposition import TaskDecomposition
-from promptpotter.services.search.scan_results import ScanContext
+from promptpotter.services.search.scan_results import ScanBrief
 
 if TYPE_CHECKING:
     from promptpotter.services.llm_client import LLMClientBase
@@ -126,7 +126,7 @@ class LoopConfig(BaseModel):
     enable_critique: bool = Field(True, description="Enable critique agent between rounds")
 
     # Scan-aware optimization
-    scan_context: ScanContext | None = Field(
+    scan_brief: ScanBrief | None = Field(
         None, description="Scan analytics context for candidate gen"
     )
 
@@ -148,13 +148,13 @@ class LoopConfig(BaseModel):
         return None
 
     # L2/L3 escalation
-    enable_l2: bool = Field(True, description="Enable L2 refine_context loop")
+    enable_l2: bool = Field(True, description="Enable L2 refine_strategy loop")
     enable_l3: bool = Field(True, description="Enable L3 modify_plan loop")
     l2_patience: int | None = Field(2, description="L2 stalls before L3 (None=unlimited)")
     l3_patience: int | None = Field(1, description="L3 stalls before stop (None=unlimited)")
 
     # Configurable temperatures for L2/L3
-    l2_temperature: float = Field(0.3, description="Temperature for L2 refine_context LLM call")
+    l2_temperature: float = Field(0.3, description="Temperature for L2 refine_strategy LLM call")
     l3_temperature: float = Field(0.5, description="Temperature for L3 modify_plan LLM call")
 
     # Escalation
@@ -235,7 +235,7 @@ class LoopConfig(BaseModel):
         project_root: str = "",
         session_id: str = "",
         pipeline_schema: PipelineSchema | None = None,
-        scan_context: ScanContext | None = None,
+        scan_brief: ScanBrief | None = None,
         task_context: TaskDecomposition | dict | None = None,
     ) -> LoopConfig:
         """Build from the notebook's ``campaign_config`` dict.
@@ -260,7 +260,7 @@ class LoopConfig(BaseModel):
             sp_budget_ttest=campaign_config.get("sp_budget_ttest", 20),
             seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
-            scan_context=scan_context,
+            scan_brief=scan_brief,
             task_context=task_context,
             enable_l2=opt.get("enable_l2", True),
             enable_l3=opt.get("enable_l3", True),
@@ -299,12 +299,12 @@ class PipelineConfigResult:
 def configure_pipeline(
     pipeline_schema: PipelineSchema | None,
     campaign_config: CampaignConfig,
-    exp_data: dict | None = None,
+    experiment_extract: dict | None = None,
 ) -> PipelineConfigResult:
     """Build pipeline identity from live pipeline schema and campaign_config.
 
     Uses *pipeline_schema* (from ``GET /pipeline``) as the source of
-    truth for node names, falling back to *exp_data* only when the schema
+    truth for node names, falling back to *experiment_extract* only when the schema
     is unavailable.  Reads ``exclude_nodes`` and ``pipeline_overrides`` from
     *campaign_config*.
 
@@ -321,8 +321,8 @@ def configure_pipeline(
 
     if pipeline_schema:
         all_names = [n.name for n in pipeline_schema.nodes]
-    elif exp_data:
-        pipeline_config = extract_pipeline_config(exp_data)
+    elif experiment_extract:
+        pipeline_config = extract_pipeline_config(experiment_extract)
         all_names = [s["name"] for s in pipeline_config["steps"]]
     else:
         all_names = []
@@ -383,7 +383,7 @@ def compute_preflight_metrics(
     config: LoopConfig,
     dataset_size: int,
     exclude_nodes: list[str] | None = None,
-    has_scan_context: bool = False,
+    has_scan_brief: bool = False,
 ) -> PreflightMetrics:
     """Derive display-ready metrics from LoopConfig and dataset size."""
     eff_queries = config.sp_budget_ttest
@@ -412,7 +412,7 @@ def compute_preflight_metrics(
         est_calls=est_calls,
         l2_label=f"enabled, patience={config.l2_patience}" if config.enable_l2 else "disabled",
         l3_label=f"enabled, patience={config.l3_patience}" if config.enable_l3 else "disabled",
-        strategy="SCAN-AWARE" if has_scan_context else "FREEFORM",
+        strategy="SCAN-AWARE" if has_scan_brief else "FREEFORM",
     )
 
 

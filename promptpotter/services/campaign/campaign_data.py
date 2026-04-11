@@ -187,7 +187,7 @@ async def run_baseline_scoring(
 
 
 async def prepare_scoring_context(
-    exp_data: dict | None,
+    experiment_extract: dict | None,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
     *,
@@ -198,7 +198,7 @@ async def prepare_scoring_context(
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set dataset, optionally run baseline eval."""
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
-    baseline = load_baseline_prompt(exp_data or {}, prompt_node_names=prompt_nodes)
+    baseline = load_baseline_prompt(experiment_extract or {}, prompt_node_names=prompt_nodes)
     dataset = train_data or []
 
     campaign_rounds: list = []

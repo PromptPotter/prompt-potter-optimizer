@@ -14,17 +14,17 @@ from promptpotter.services.campaign.critique import summarize_warning_inventory
 
 if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
-    from promptpotter.services.search.scan_results import ScanContext
+    from promptpotter.services.search.scan_results import ScanBrief
 
 __all__ = [
     "L1PromptData",
     "L2IntelligenceData",
     "assess_candidate_diversity",
     "build_candidate_comparison",
-    "build_critique_search_memory_context",
-    "build_l1_search_memory_context",
+    "build_critique_search_memory_digest",
+    "build_l1_search_memory_digest",
     "build_round_trajectory",
-    "build_strategic_search_memory_context",
+    "build_strategic_search_memory_digest",
     "candidate_summaries",
     "classify_trajectory",
     "format_context_sections",
@@ -44,20 +44,20 @@ class L1PromptData:
     warning_inventory: dict | None = None
     escalation_journal: list[dict] | None = None
     is_probe_round: bool = False
-    scan_context: ScanContext | None = None
+    scan_brief: ScanBrief | None = None
     scan_compact: bool = False
     failure_analysis: FailureAnalysis | None = None
-    search_memory_context: dict | None = None
+    search_memory_digest: dict | None = None
     pipeline_schema_text: str = ""
 
 
-def _format_search_memory_block(smc: dict | None, key_labels: dict[str, str]) -> str:
-    """Build HISTORICAL INTELLIGENCE block from search memory context dict."""
-    if not smc:
+def _format_search_memory_block(sm_digest: dict | None, key_labels: dict[str, str]) -> str:
+    """Build HISTORICAL INTELLIGENCE block from search memory digest dict."""
+    if not sm_digest:
         return ""
     lines = ["HISTORICAL INTELLIGENCE:"]
     for key, label in key_labels.items():
-        val = smc.get(key)
+        val = sm_digest.get(key)
         if val:
             lines.append(f"  {label}: {val}")
     return "\n".join(lines) if len(lines) > 1 else ""
@@ -78,7 +78,7 @@ def format_context_sections(ctx: L1PromptData) -> str:
         sections.append(ctx.pipeline_schema_text)
 
     # Scan analytics — full on first round, sensitivity-only thereafter
-    sc = ctx.scan_context
+    sc = ctx.scan_brief
     if sc:
         if ctx.scan_compact and sc.sensitivity_text:
             sections.append(f"SCAN:\n{sc.sensitivity_text}")
@@ -113,7 +113,7 @@ def format_context_sections(ctx: L1PromptData) -> str:
 
     # Historical intelligence from SearchMemory (Wave 3c)
     hi = _format_search_memory_block(
-        ctx.search_memory_context,
+        ctx.search_memory_digest,
         {
             "failure_clusters": "Common failure patterns",
             "dead_queries": "Dead queries (never hit)",
@@ -216,7 +216,7 @@ class L2IntelligenceData:
     warning_inventory: dict | None = None
     critique_text: str = ""
     l2_directive: str = ""
-    search_memory_context: dict | None = None
+    search_memory_digest: dict | None = None
     round_trajectory: str | None = None
     trajectory_classification: dict | None = None
     candidate_comparison: str | None = None
@@ -224,7 +224,7 @@ class L2IntelligenceData:
 
 
 def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
-    """Build the intelligence bundle for L2 refine_context.
+    """Build the intelligence bundle for L2 refine_strategy.
 
     Mirrors L1's ``format_context_sections()`` pattern — a single string
     with titled blocks for escalation/warnings, critique, and previous
@@ -274,7 +274,7 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
 
     # Historical intelligence from SearchMemory
     hi = _format_search_memory_block(
-        ctx.search_memory_context,
+        ctx.search_memory_digest,
         {
             "axis_rankings": "Axis impact rankings",
             "bottleneck_distribution": "Bottleneck distribution",
@@ -289,7 +289,7 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
     return "\n\n".join(sections)
 
 
-def build_l1_search_memory_context(search_memory: Any) -> dict | None:
+def build_l1_search_memory_digest(search_memory: Any) -> dict | None:
     """Build SearchMemory context dict for L1 generation prompt."""
     if search_memory is None:
         return None
@@ -321,7 +321,7 @@ def build_l1_search_memory_context(search_memory: Any) -> dict | None:
     return ctx if ctx else None
 
 
-def build_critique_search_memory_context(search_memory: Any) -> dict[str, str] | None:
+def build_critique_search_memory_digest(search_memory: Any) -> dict[str, str] | None:
     """Build SearchMemory context dict for the critique agent.
 
     Surfaces discriminating queries, failure clusters, tractability profiles,
@@ -375,7 +375,7 @@ def build_critique_search_memory_context(search_memory: Any) -> dict[str, str] |
     return ctx if ctx else None
 
 
-def build_strategic_search_memory_context(
+def build_strategic_search_memory_digest(
     search_memory: Any,
     *,
     include_correlations: bool = False,

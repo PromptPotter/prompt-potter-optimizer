@@ -26,14 +26,14 @@ from promptpotter.services.campaign.state import RunCallbacks
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.optimization_loop import RunResult
-    from promptpotter.services.search.scan_results import ScanContext
+    from promptpotter.services.search.scan_results import ScanBrief
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "build_run_config",
     "configure_and_apply_pipeline",
-    "load_scan_context",
+    "load_scan_brief",
     "prepare_scoring_context",
     "run_optimization",
     "run_scan_and_persist",
@@ -58,7 +58,7 @@ def configure_and_apply_pipeline(
     result = _svc_configure_pipeline(
         session.pipeline_schema,
         campaign_config,
-        exp_data=getattr(session, "exp_data", None),
+        experiment_extract=getattr(session, "experiment_extract", None),
     )
 
     if result.filtered_schema is not None:
@@ -94,7 +94,7 @@ async def prepare_scoring_context(
     )
 
     baseline, dataset, campaign_rounds, baseline_results = await _svc_prepare(
-        session.exp_data,
+        session.experiment_extract,
         train_data,
         campaign_config,
         run_baseline=run_baseline,
@@ -116,7 +116,7 @@ def build_run_config(
     campaign_config: CampaignConfig,
     session: SessionEnv,
     *,
-    scan_context: ScanContext | None = None,
+    scan_brief: ScanBrief | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
 ) -> LoopConfig:
@@ -126,7 +126,7 @@ def build_run_config(
         backend_id=session.backend_id,
         project_root=str(session.store.base_dir),
         session_id=session_id,
-        scan_context=scan_context,
+        scan_brief=scan_brief,
         pipeline_schema=session.pipeline_schema,
         task_context=task_context,
     )
@@ -160,7 +160,7 @@ async def run_optimization(
     campaign_config: CampaignConfig,
     *,
     session: SessionEnv,
-    scan_context: ScanContext | None = None,
+    scan_brief: ScanBrief | None = None,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
@@ -183,7 +183,7 @@ async def run_optimization(
     config = build_run_config(
         campaign_config,
         session,
-        scan_context=scan_context,
+        scan_brief=scan_brief,
         task_context=task_context,
         session_id=session_id,
     )
@@ -218,7 +218,7 @@ async def run_optimization(
         baseline_results=bl.baseline_results,
         callbacks=merged_cb,
         langfuse_session_id=langfuse_session_id,
-        scan_context=scan_context,
+        scan_brief=scan_brief,
         cycle_id=cycle_id,
         experiment_id=experiment_id or "",
         session=session,
@@ -230,12 +230,12 @@ async def run_optimization(
 # ---------------------------------------------------------------------------
 
 
-def load_scan_context(
+def load_scan_brief(
     session: SessionEnv,
     session_id: str,
     scan_variants: dict,
     baseline_acc: float,
-) -> ScanContext | None:
+) -> ScanBrief | None:
     """Reconstruct scan context from persisted scan results.
 
     Shared by CLI and notebook — avoids inlining DataFrame construction
@@ -249,11 +249,11 @@ def load_scan_context(
         return None
     import pandas as pd
 
-    from promptpotter.services.search.scan_results import prepare_scan_context
+    from promptpotter.services.search.scan_results import prepare_scan_brief
 
     scan_df = pd.DataFrame(scan_data["scan_df"])
     axis_profiles = scan_data["axis_profiles"]
-    return prepare_scan_context(scan_df, axis_profiles, scan_variants, baseline_acc)
+    return prepare_scan_brief(scan_df, axis_profiles, scan_variants, baseline_acc)
 
 
 # ---------------------------------------------------------------------------

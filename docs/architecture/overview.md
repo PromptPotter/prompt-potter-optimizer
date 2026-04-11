@@ -21,7 +21,7 @@ All core logic lives in `promptpotter/services/`.
   │ Classify by      │───starting──────►  critique + thinking      │
   │  sensitivity     │  point          │  styles + scan analytics  │
   │ Show leaderboard │                 │ Evaluate via backend,     │
-  │ Query difficulty  │  scan_context  │  select winner            │
+  │ Query difficulty  │  scan_brief  │  select winner            │
   │ Show coverage    │─────────────────► Critique failures →       │
   └──────┬───────────┘                 │  next round               │
          │                             │ L1→L2→L3 escalation      │
@@ -117,7 +117,7 @@ Five nodes, declared in `promptpotter/config/optimizer_pipeline.json`:
 | `l1_generate` | Candidate generation (sole `pipeline_params` decider) | Every round |
 | `l1_evaluate` | Eval + winner selection + stale data protocol | Every round |
 | `critique` | Every-round intelligence hub — sole reader of raw eval results + SearchMemory consumer (tractability, axis exhaustion, value trends) | Every round (after L1 evaluate) |
-| `l2_refine_context` | Escalation-only meta-controller — refine `task_context` + meta-settings; receives round trajectory, candidate comparison, failure group × axis | L1 patience exhausted or degradation |
+| `l2_refine_strategy` | Escalation-only meta-controller — refine `task_context` + meta-settings; receives round trajectory, candidate comparison, failure group × axis | L1 patience exhausted or degradation |
 | `l3_modify_plan` | Strategic replanning; receives SearchMemory aggregate picture (axis rankings, bottlenecks, clusters, persistent failures) | L2 patience exhausted |
 
 `l1_evaluate` also carries the **stale data load protocol** config: `stale_data_load_protocol` (step sequence), `rerun_trigger_count`, `samplescan_candidates`, `samplescan_threshold`, `sampleswitch_min_degradation_rate` — all tunable via `optimizer.param_keys`.
@@ -130,8 +130,8 @@ Five nodes, declared in `promptpotter/config/optimizer_pipeline.json`:
   │       │  + thinking_styles                               │
   │       └──────── ◄───────┘                                │
   │                                                          │
-  │  stall?       ──► l2_refine_context ──► resume L1        │
-  │  degradation? ──► l2_refine_context ──► resume L1        │
+  │  stall?       ──► l2_refine_strategy ──► resume L1        │
+  │  degradation? ──► l2_refine_strategy ──► resume L1        │
   │  l2 stall?    ──► l3_modify_plan    ──► resume L2+L1     │
   └──────────────────────────────────────────────────────────┘
 ```
@@ -286,7 +286,7 @@ init_services()
   │
   ▼
 BackendContext (dataclass)                    ← session-scoped infra bundle
-  │  store, backend_client, pipeline_schema, index_terms, exp_data
+  │  store, backend_client, pipeline_schema, index_terms, experiment_extract
   │
   ├──► build_run_config()
   │       │
@@ -308,9 +308,9 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
   │       └──► LoopState mutated (current_sp, stall_count, opt_sp, ...)
   │
   ▼
-[optional] prepare_scan_context()
-  └─ ScanContext (read-only)                  ← pre-formatted scan analytics
-       injected into RunConfig.scan_context
+[optional] prepare_scan_brief()
+  └─ ScanBrief (read-only)                  ← pre-formatted scan analytics
+       injected into RunConfig.scan_brief
 ```
 
 ### Lifecycle table
@@ -324,6 +324,6 @@ BackendContext (dataclass)                    ← session-scoped infra bundle
 | **LoopState** | `campaign/state.py` | `cycle_init._build_baseline_state()` | Cycle | Intensely (every round) | Yes (`opt_sp` + escalation) |
 | **CritiqueContext** | `campaign/critique.py` | `execute_round()` | Per-round | No (read-only stats) | No |
 | **ContextData** | `campaign/formatting.py` | `l1_generate()` | Per-generation | No (formatting input) | No |
-| **ScanContext** | `search/scan_results.py` | `prepare_scan_context()` | Campaign | No (read-only) | No |
+| **ScanBrief** | `search/scan_results.py` | `prepare_scan_brief()` | Campaign | No (read-only) | No |
 
 **Key invariants:** All optimizer state lives on `LoopState.opt_sp` (only `opt_sp` is checkpointed). `EvalContext.store` is `BackendContext.store` (no duplication). `CampaignConfig` → `RunConfig` is a one-way transformation; services read `RunConfig` only.

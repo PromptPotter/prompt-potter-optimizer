@@ -51,7 +51,7 @@ class CampaignPhase(enum.StrEnum):
     INIT = "init"
     L1_GENERATE = "l1_generate"
     L1_SCORE = "l1_score"
-    REFINE_CONTEXT = "refine_context"
+    REFINE_STRATEGY = "refine_strategy"
     MODIFY_PLAN = "modify_plan"
     ESCALATION = "escalation"
     BACKEND_WARNING = "backend_warning"
@@ -275,7 +275,7 @@ class LoopState:
 class PhaseEvent(BaseModel):
     """Emitted at phase boundaries during the feedback cycle.
 
-    Phases: init, l1_generate, l1_score, refine_context, modify_plan.
+    Phases: init, l1_generate, l1_score, refine_strategy, modify_plan.
     Each phase emits an "enter" and "exit" event with phase-specific data.
     """
 

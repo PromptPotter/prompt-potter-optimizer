@@ -321,10 +321,10 @@ def build_dataset_run_data(
 # ---------------------------------------------------------------------------
 
 
-def _generic_resolve_gt(exp_data: dict) -> dict[str, str]:
+def _generic_resolve_gt(experiment_extract: dict) -> dict[str, str]:
     """Build ``{query: ground_truth}`` from evaluation_results (generic fallback)."""
     gt_map: dict[str, str] = {}
-    runs = exp_data.get("runs", [])
+    runs = experiment_extract.get("runs", [])
     if not runs:
         return gt_map
     for er in runs[0].get("evaluation_results", []):
@@ -336,7 +336,7 @@ def _generic_resolve_gt(exp_data: dict) -> dict[str, str]:
 
 
 def _extract_dataset_from_traces(
-    exp_data: dict,
+    experiment_extract: dict,
     schema: PipelineSchema,
     backend_name: str | None = None,
 ) -> list:
@@ -356,9 +356,9 @@ def _extract_dataset_from_traces(
     resolver = TRACE_GT_RESOLVERS.get((backend_name or "").lower())
 
     # Pre-build generic fallback map if no connector resolver
-    generic_gt = _generic_resolve_gt(exp_data) if not resolver else {}
+    generic_gt = _generic_resolve_gt(experiment_extract) if not resolver else {}
 
-    runs = exp_data.get("runs", [])
+    runs = experiment_extract.get("runs", [])
     if not runs:
         return []
 
@@ -372,7 +372,7 @@ def _extract_dataset_from_traces(
         if not query:
             continue
 
-        ground_truth = resolver(exp_data, query) if resolver else generic_gt.get(query)
+        ground_truth = resolver(experiment_extract, query) if resolver else generic_gt.get(query)
         if not ground_truth:
             continue
 
@@ -438,19 +438,21 @@ def load_dataset_from_traces(
         2. Stored replay executions
         3. Empty list if neither found
     """
-    exp_data = store.backends.load_sync(
+    experiment_extract = store.backends.load_sync(
         backend_id,
         f"experiments/{experiment_id}.json",
     )
 
-    if exp_data:
+    if experiment_extract:
         if schema is None:
             from promptpotter.models.pipeline_schema import PipelineSchema
 
             schema = PipelineSchema()
         backend = store.backends.get(backend_id)
         backend_name = backend.name if backend else None
-        dataset = _extract_dataset_from_traces(exp_data, schema=schema, backend_name=backend_name)
+        dataset = _extract_dataset_from_traces(
+            experiment_extract, schema=schema, backend_name=backend_name
+        )
         if dataset:
             if sample_size > 0 and len(dataset) > sample_size:
                 rng = random.Random(42)

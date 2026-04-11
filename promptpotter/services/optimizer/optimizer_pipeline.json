@@ -9,7 +9,7 @@
         "max_tokens": 8192,
         "output_format": "json",
         "prompt_family": "meta_scan_aware",
-        "context_sources": ["scan_context", "critique", "task_context", "escalation_journal"],
+        "context_sources": ["scan_brief", "critique", "task_context", "escalation_journal"],
         "response_parser": "candidate_list"
       }
     },
@@ -41,13 +41,13 @@
         "positive_threshold": 0.7
       }
     },
-    "l2_refine_context": {
+    "l2_refine_strategy": {
       "type": "llm/meta",
       "config": {
         "temperature": 0.3,
         "max_tokens": 2048,
         "output_format": "json",
-        "prompt_family": "l2_refine_context",
+        "prompt_family": "l2_refine_strategy",
         "context_sources": ["critique", "task_context", "l2_directive"],
         "response_parser": "transition_result"
       }
@@ -83,7 +83,7 @@
   "pipelines": {
     "l1_round": ["l1_generate", "l1_score"],
     "l1_round_with_critique": ["l1_generate", "l1_score", "critique"],
-    "l2_escalation": ["l2_refine_context", "l1_generate", "l1_score", "critique"],
-    "l3_escalation": ["l3_modify_plan", "l2_refine_context", "l1_generate", "l1_score", "critique"]
+    "l2_escalation": ["l2_refine_strategy", "l1_generate", "l1_score", "critique"],
+    "l3_escalation": ["l3_modify_plan", "l2_refine_strategy", "l1_generate", "l1_score", "critique"]
   }
 }

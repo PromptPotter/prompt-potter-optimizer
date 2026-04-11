@@ -212,8 +212,8 @@ class CampaignPersistenceEmitter:
             getattr(self, handler_name)(event.data)
 
         # L2/L3 layer label (both enter and exit)
-        if event.phase in (CampaignPhase.REFINE_CONTEXT, CampaignPhase.MODIFY_PLAN):
-            s["layer"] = "L2" if event.phase == CampaignPhase.REFINE_CONTEXT else "L3"
+        if event.phase in (CampaignPhase.REFINE_STRATEGY, CampaignPhase.MODIFY_PLAN):
+            s["layer"] = "L2" if event.phase == CampaignPhase.REFINE_STRATEGY else "L3"
 
         self._log(f"--- {event.phase} {event.event} (round {event.round}) ---")
         self._flush()
@@ -562,7 +562,7 @@ class RoundRecorder:
     def add_action(self, action: dict[str, Any]) -> None:
         """Append an action to the current round's trace."""
         action.setdefault("timestamp", datetime.now(UTC).isoformat())
-        if action.get("type") in ("l2_refine_context", "l3_modify_plan"):
+        if action.get("type") in ("l2_refine_strategy", "l3_modify_plan"):
             self._has_escalation = True
         self._actions.append(action)
 
@@ -576,7 +576,7 @@ class RoundRecorder:
         suffix = ""
         if self._has_escalation:
             for a in self._actions:
-                if a.get("type") == "l2_refine_context":
+                if a.get("type") == "l2_refine_strategy":
                     suffix = "_l2"
                     break
                 if a.get("type") == "l3_modify_plan":

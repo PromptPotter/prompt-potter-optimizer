@@ -23,7 +23,7 @@ from promptpotter.services.campaign.critique import (
     update_query_tracker,
 )
 from promptpotter.services.campaign.formatting import (
-    build_critique_search_memory_context,
+    build_critique_search_memory_digest,
     candidate_summaries,
 )
 from promptpotter.services.campaign.state import (
@@ -99,7 +99,7 @@ async def _generate_or_load_candidates(
         n_variants=_n_variants,
         creativity=_creativity,
         model=config.model or "(default)",
-        has_scan_context=config.scan_context is not None,
+        has_scan_brief=config.scan_brief is not None,
         has_critique=bool(state.opt_sp.critique_text),
         pipeline_params=state.current_sp.pipeline_params,
     )
@@ -130,10 +130,10 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    from promptpotter.services.campaign.formatting import build_l1_search_memory_context
+    from promptpotter.services.campaign.formatting import build_l1_search_memory_digest
     from promptpotter.services.campaign.l1_optimizer import l1_generate
 
-    sm_ctx = build_l1_search_memory_context(search_memory)
+    sm_ctx = build_l1_search_memory_digest(search_memory)
 
     client = _llm_client.get_llm_client()
     async with observed_node(f"l1_generate_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
@@ -145,11 +145,11 @@ async def _generate_or_load_candidates(
             _creativity,
             client,
             model=config.model,
-            scan_context=config.scan_context,
+            scan_brief=config.scan_brief,
             is_probe_round=state.probe_next_round,
             scan_compact=(round_num > 0),
             failure_analysis=state.failure_analysis,
-            search_memory_context=sm_ctx,
+            search_memory_digest=sm_ctx,
             pipeline_schema=config.pipeline_schema,
         )
 
@@ -193,7 +193,7 @@ async def _run_critique(
         scoring_result,
         config,
         round_num=round_num,
-        search_memory_context=build_critique_search_memory_context(state.search_memory),
+        search_memory_digest=build_critique_search_memory_digest(state.search_memory),
     )
     result = await agent.run(cctx)
     return format_critique_for_prompt(result)

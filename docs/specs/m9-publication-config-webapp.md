@@ -118,7 +118,7 @@ The meta-prompts in `promptpotter/config/optimizer_prompts/` are functional but 
 | L1 Generate | `meta_scan_aware.json` | 0.7 | 8192 | Working, tuned for multi-node pipeline references |
 | Critique | `critique.json` | 0.3 | 4096 | Working, extensive stat assembly |
 | Critique (negative) | `critique_negative.json` | 0.3 | 4096 | Fallback for low accuracy |
-| L2 Refine | `l2_refine_context.json` | 0.3 | 2048 | Working, clean layer transition |
+| L2 Refine | `l2_refine_strategy.json` | 0.3 | 2048 | Working, clean layer transition |
 | L3 Replan | `l3_modify_plan.json` | 0.5 | 2048 | Working, strategic pivots |
 
 Current model: `openai/gpt-oss-120b` via Groq for all optimizer calls.

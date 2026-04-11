@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.scoring_env import ScoringEnv
     from promptpotter.services.campaign.state import RunCallbacks
-    from promptpotter.services.search.scan_results import ScanContext
+    from promptpotter.services.search.scan_results import ScanBrief
 
 logger = logging.getLogger(__name__)
 
@@ -125,11 +125,11 @@ async def l1_generate(
     creativity: float,
     llm_client: LLMClientBase,
     model: str | None = None,
-    scan_context: ScanContext | None = None,
+    scan_brief: ScanBrief | None = None,
     is_probe_round: bool = False,
     scan_compact: bool = False,
     failure_analysis: FailureAnalysis | None = None,
-    search_memory_context: dict | None = None,
+    search_memory_digest: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> list[dict]:
     """Generate candidate pipeline-param variants via LLM meta-prompt.
@@ -162,10 +162,10 @@ async def l1_generate(
                 warning_inventory=opt_sp.warning_inventory or None,
                 escalation_journal=opt_sp.escalation_journal or None,
                 is_probe_round=is_probe_round,
-                scan_context=scan_context,
+                scan_brief=scan_brief,
                 scan_compact=scan_compact,
                 failure_analysis=failure_analysis,
-                search_memory_context=search_memory_context,
+                search_memory_digest=search_memory_digest,
                 pipeline_schema_text=schema_text,
             )
         ),

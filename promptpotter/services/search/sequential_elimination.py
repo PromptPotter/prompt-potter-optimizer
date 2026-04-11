@@ -164,7 +164,7 @@ class EliminationCheck:
         return EscalationSignal(
             check_name=self.name,
             target=EscalationTarget.ABORT,
-            context={
+            check_result={
                 "queries_evaluated": n,
                 "total_queries": self.n_queries,
                 "n_priors": len(self._prior_scores),

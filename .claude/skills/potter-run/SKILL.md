@@ -300,7 +300,7 @@ Read `reference/optimization-layers.md` for the full escalation model, configura
 While `optimize` runs, you can monitor progress:
 
 - **`show-status` command** (from another terminal): `python -m promptpotter show-status` — shows live dashboard with round, accuracy, layer, ETA.
-- **`campaign_state.json`** — updated on every event. Key fields to watch: `round`, `best`, `phase` (l1_generate/l1_evaluate/refine_context/modify_plan), `cache_hit_rate`, `eta_s`, `stop_reason`.
+- **`campaign_state.json`** — updated on every event. Key fields to watch: `round`, `best`, `phase` (l1_generate/l1_evaluate/refine_strategy/modify_plan), `cache_hit_rate`, `eta_s`, `stop_reason`.
 - **`campaign_log.md`** — structured round-by-round markdown report. Best diagnostic tool when something looks wrong.
 
 ### Controlling a Running Campaign

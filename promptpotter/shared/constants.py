@@ -39,7 +39,7 @@ LAYER_FIELDS: dict[str, list[str]] = {
         "answer_format",
         "few_shot_examples",
     ],
-    "refine_context": ["optimizer_params"],
+    "refine_strategy": ["optimizer_params"],
     "modify_plan": ["plan"],
 }
 

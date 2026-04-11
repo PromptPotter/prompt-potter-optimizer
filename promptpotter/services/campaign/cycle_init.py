@@ -245,7 +245,7 @@ async def init_cycle_state(
         enable_l3=config.enable_l3,
         dataset_count=len(dataset),
         baseline_accuracy=baseline_accuracy,
-        has_scan_context=config.scan_context is not None,
+        has_scan_brief=config.scan_brief is not None,
         enable_critique=config.enable_critique,
         pipeline_params=config.pipeline_schema.to_pipeline_params()
         if config.pipeline_schema

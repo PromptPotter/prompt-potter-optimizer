@@ -55,16 +55,16 @@ class SessionEnv:
     pipeline_schema: PipelineSchema | None
     synced: bool
     queries: list[dict] = field(default_factory=list)
-    exp_data: dict = field(default_factory=dict)
+    experiment_extract: dict = field(default_factory=dict)
     index_terms: list[str] = field(default_factory=list)
 
 
 def load_baseline_prompt(
-    exp_data: dict,
+    experiment_extract: dict,
     prompt_node_names: list[str] | None = None,
 ) -> OptSearchPoint:
     """Extract baseline prompt from experiment data's prompt registry."""
-    dependencies = exp_data.get("dependencies", {})
+    dependencies = experiment_extract.get("dependencies", {})
     prompts = dependencies.get("prompts", {})
     names = prompt_node_names or []
 
@@ -305,18 +305,24 @@ async def init_services(
         )
 
     # --- Experiment sync path (when no dataset_name — via experiment traces) ---
-    exp_data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
+    experiment_extract = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
 
     # Detect stale sync data: data exists but has no traces
-    _has_traces = bool(exp_data and exp_data.get("runs") and exp_data["runs"][0].get("traces"))
+    _has_traces = bool(
+        experiment_extract
+        and experiment_extract.get("runs")
+        and experiment_extract["runs"][0].get("traces")
+    )
 
     synced = False
-    if not exp_data or not _has_traces:
-        reason = "No stored experiment data" if not exp_data else "Stored data has no traces"
+    if not experiment_extract or not _has_traces:
+        reason = (
+            "No stored experiment data" if not experiment_extract else "Stored data has no traces"
+        )
         logger.info("%s — syncing from %s ...", reason, backend_url)
         _status(f"Syncing experiment {experiment_id} ...")
         try:
-            exp_data = await client.sync_experiment(
+            experiment_extract = await client.sync_experiment(
                 store,
                 backend_id,
                 experiment_id,
@@ -332,7 +338,7 @@ async def init_services(
 
     base.synced = synced
 
-    if not exp_data:
+    if not experiment_extract:
         logger.warning(
             "No experiment data available. "
             "Downstream calls will fail until data is synced or datasets are loaded."
@@ -345,22 +351,22 @@ async def init_services(
     schema_key = pipeline_schema.name.lower() if pipeline_schema else ""
     extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
     if extractor:
-        queries, index_terms = extractor(exp_data)
+        queries, index_terms = extractor(experiment_extract)
     else:
         # Generic fallback: extract from evaluation_results
-        queries, index_terms = _generic_extract_experiment(exp_data)
-    exp_name = exp_data.get("experiment", {}).get("name", experiment_id)
+        queries, index_terms = _generic_extract_experiment(experiment_extract)
+    exp_name = experiment_extract.get("experiment", {}).get("name", experiment_id)
     _status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
 
     base.queries = queries
-    base.exp_data = exp_data
+    base.experiment_extract = experiment_extract
     base.index_terms = index_terms
     return base
 
 
-def _generic_extract_experiment(exp_data: dict) -> tuple[list[dict], list[str]]:
+def _generic_extract_experiment(experiment_extract: dict) -> tuple[list[dict], list[str]]:
     """Generic fallback: extract queries from evaluation_results."""
-    runs = exp_data.get("runs", [])
+    runs = experiment_extract.get("runs", [])
     if not runs:
         return [], []
     queries: list[dict] = []

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from promptpotter.services.campaign.state import PhaseEvent
 
 if TYPE_CHECKING:
-    from promptpotter.services.search.scan_results import ScanContext
+    from promptpotter.services.search.scan_results import ScanBrief
 
 from promptpotter.services.search.failure_group_analysis import (
     min_detectable_effect,
@@ -58,7 +58,7 @@ class _CycleDisplayState:
     round_num: int = 0
     baseline_accuracy: float = 0.0
     baseline_total: int = 0  # sample count for significance tests
-    scan_context: ScanContext | None = None  # cached for scan reasoning display
+    scan_brief: ScanBrief | None = None  # cached for scan reasoning display
     candidates_meta: list = field(default_factory=list)  # from l1_generate exit
     n_scoring_queries: int = 0  # from generate:exit, used in evaluate:enter banner
     current_pipeline_params: dict | None = None  # raw pp for candidate eval callback
@@ -334,7 +334,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     model = d.get("model", "(default)")
     l2 = "enabled" if d.get("enable_l2") else "disabled"
     l3 = "enabled" if d.get("enable_l3") else "disabled"
-    scan = "YES" if d.get("has_scan_context") else "NO"
+    scan = "YES" if d.get("has_scan_brief") else "NO"
 
     print()
     print(_dbox_top())
@@ -397,7 +397,7 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     n = d.get("n_variants", 0)
     model = d.get("model") or "(default)"
     creativity = d.get("creativity", 0.7)
-    scan = "YES" if d.get("has_scan_context") else "NO"
+    scan = "YES" if d.get("has_scan_brief") else "NO"
     crit = "YES" if d.get("has_critique") else "NO"
 
     # Rotate SP diff state
@@ -430,9 +430,9 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_node_line(f"Model           {model}"))
 
     # Scan reasoning inside node frame
-    if state.scan_context and d.get("has_scan_context"):
-        axes = state.scan_context.improving_axes
-        bl_acc = state.scan_context.baseline_accuracy
+    if state.scan_brief and d.get("has_scan_brief"):
+        axes = state.scan_brief.improving_axes
+        bl_acc = state.scan_brief.baseline_accuracy
         if axes:
             print(
                 _node_line(
@@ -718,8 +718,8 @@ _PHASE_HANDLERS: dict[str, Callable] = {
     "l1_generate:exit": _print_l1_generate_exit,
     "l1_score:enter": _print_l1_score_enter,
     "l1_score:exit": _print_l1_score_exit,
-    "refine_context:enter": _print_refine_enter,
-    "refine_context:exit": _print_refine_exit,
+    "refine_strategy:enter": _print_refine_enter,
+    "refine_strategy:exit": _print_refine_exit,
     "modify_plan:enter": _print_plan_enter,
     "modify_plan:exit": _print_plan_exit,
     "escalation:enter": _print_escalation_enter,

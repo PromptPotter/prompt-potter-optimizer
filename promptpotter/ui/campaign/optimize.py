@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.state import RunCallbacks
-    from promptpotter.services.search.scan_results import ScanContext
+    from promptpotter.services.search.scan_results import ScanBrief
 
 __all__ = [
     # stats
@@ -89,7 +89,7 @@ def show_feedback_preflight(
     axis_profiles=None,
     scan_variants=None,
     difficulty_df=None,
-) -> ScanContext | None:
+) -> ScanBrief | None:
     """Display a rich pre-flight walkthrough for the feedback cycle.
 
     Builds scan context from raw DataFrames when available, then prints
@@ -100,14 +100,14 @@ def show_feedback_preflight(
     so the user can review config before committing to a run.
 
     Returns:
-        ScanContext (or None) for passing to the run cell.
+        ScanBrief (or None) for passing to the run cell.
     """
     from promptpotter.services.campaign.config import LoopConfig
 
     # Build scan context from scan data when available
-    scan_context = None
+    scan_brief = None
     if scan_df is not None and axis_profiles is not None and scan_variants is not None:
-        from promptpotter.services.search import prepare_scan_context
+        from promptpotter.services.search import prepare_scan_brief
         from promptpotter.services.search.scan_results import compute_difficulty_summary
 
         baseline_acc = 0.0
@@ -116,7 +116,7 @@ def show_feedback_preflight(
 
         difficulty_summary = compute_difficulty_summary(difficulty_df)
 
-        scan_context = prepare_scan_context(
+        scan_brief = prepare_scan_brief(
             scan_df,
             axis_profiles,
             scan_variants,
@@ -126,7 +126,7 @@ def show_feedback_preflight(
 
     config = LoopConfig.from_campaign_config(
         campaign_config,
-        scan_context=scan_context,
+        scan_brief=scan_brief,
         pipeline_schema=pipeline_schema,
     )
 
@@ -143,13 +143,13 @@ def show_feedback_preflight(
         bl,
         dataset,
         campaign_config=campaign_config,
-        scan_context=scan_context,
+        scan_brief=scan_brief,
     )
 
-    return scan_context
+    return scan_brief
 
 
-def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan_context=None):
+def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan_brief=None):
     """Print three-section preflight walkthrough."""
     baseline_acc = bl["baseline_acc"]
     instruction = bl["instruction"]
@@ -161,7 +161,7 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     _instr_preview = _instr_preview or "(empty)"
     exclude = (campaign_config or {}).get("exclude_nodes", [])
     m = compute_preflight_metrics(
-        config, len(dataset), exclude_nodes=exclude, has_scan_context=scan_context is not None
+        config, len(dataset), exclude_nodes=exclude, has_scan_brief=scan_brief is not None
     )
 
     # ── Section 1: Configuration Summary ──
@@ -210,19 +210,19 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     # Step 3: Context assembly
     print(f"  {CYAN}3. CONTEXT ASSEMBLY{RESET}")
     print(f"     Strategy: {m.strategy}")
-    if scan_context:
-        improving = scan_context.improving_axes
-        leaderboard = scan_context.leaderboard_text
+    if scan_brief:
+        improving = scan_brief.improving_axes
+        leaderboard = scan_brief.leaderboard_text
         n_leaderboard = leaderboard.count("\n") + 1 if leaderboard.strip() else 0
-        tested = scan_context.tested_values
+        tested = scan_brief.tested_values
         n_tested = (
             sum(1 for line in tested.split("\n") if line.strip() and "values tested" in line)
             if tested
             else 0
         )
-        sensitivity = scan_context.sensitivity_text
+        sensitivity = scan_brief.sensitivity_text
         n_axes = sensitivity.count("\n") + 1 if sensitivity.strip() else 0
-        difficulty = scan_context.difficulty_text
+        difficulty = scan_brief.difficulty_text
 
         print(f"     Scan leaderboard: {n_leaderboard} entries")
         if n_leaderboard > 0:
@@ -240,7 +240,7 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     print(f"  {CYAN}4. LLM CANDIDATE GENERATION{RESET}")
     print(f"     Model: {config.model or '(default)'}  |  Temperature: {config.creativity}")
     print(f"     Candidates: {config.n_variants}")
-    if scan_context:
+    if scan_brief:
         print("     Output: prompt + pipeline_params_override per candidate")
     else:
         print("     Output: prompt variants")
@@ -277,13 +277,13 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
         )
 
     # ── Section 3: Scan Context Preview ──
-    if scan_context:
+    if scan_brief:
         print()
         print(f"  {BOLD}SCAN CONTEXT PREVIEW{RESET} (injected into LLM meta-prompt)")
         print("  " + "-" * 66)
 
         # Leaderboard (top 10)
-        leaderboard = scan_context.leaderboard_text
+        leaderboard = scan_brief.leaderboard_text
         if leaderboard.strip():
             lines = leaderboard.strip().split("\n")
             print(f"  {CYAN}Leaderboard:{RESET}")
@@ -293,25 +293,25 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
                 print(f"    ... {len(lines) - 10} more")
 
         # Axis sensitivity
-        sensitivity = scan_context.sensitivity_text
+        sensitivity = scan_brief.sensitivity_text
         if sensitivity.strip():
             print(f"  {CYAN}Axis sensitivity:{RESET}")
             for line in sensitivity.strip().split("\n"):
                 print(f"  {line}")
 
         # Difficulty
-        difficulty = scan_context.difficulty_text
+        difficulty = scan_brief.difficulty_text
         if difficulty.strip():
             print(f"  {CYAN}Query difficulty:{RESET}")
             print(f"  {difficulty.strip()}")
 
         # Improving axes
-        improving = scan_context.improving_axes
+        improving = scan_brief.improving_axes
         if improving:
             print(f"  {CYAN}Improving axes:{RESET} {', '.join(improving)}")
 
         # Tested values
-        tested = scan_context.tested_values
+        tested = scan_brief.tested_values
         if tested.strip():
             lines = tested.strip().split("\n")
             print(f"  {CYAN}Tested values:{RESET}")
@@ -335,7 +335,7 @@ async def run_optimization_notebook(
     *,
     pipeline_params: dict | None = None,
     langfuse_session_id: str | None = None,
-    scan_context: ScanContext | None = None,
+    scan_brief: ScanBrief | None = None,
     experiment_id: str | None = None,
     session: SessionEnv | None = None,
     task_context: TaskDecomposition | dict | None = None,
@@ -360,7 +360,7 @@ async def run_optimization_notebook(
         build_run_config(
             campaign_config,
             session,
-            scan_context=scan_context,
+            scan_brief=scan_brief,
             task_context=task_context,
             session_id=session_id,
         )
@@ -372,14 +372,14 @@ async def run_optimization_notebook(
     baseline_acc = _bl.baseline_acc
 
     # --- Warn if scan context was lost (kernel restart) ---
-    if scan_context is None and any(r.get("round") == "search" for r in campaign_rounds):
+    if scan_brief is None and any(r.get("round") == "search" for r in campaign_rounds):
         print(f"  {YELLOW}⚠ Scan context not available — running without scan data.{RESET}")
-        print("    Run the preflight cell to rebuild scan_context from scan variables.")
+        print("    Run the preflight cell to rebuild scan_brief from scan variables.")
 
     # --- Display state (shared across closures) ---
     initial_len = len(campaign_rounds)
     _ds = _CycleDisplayState(baseline_accuracy=baseline_acc)
-    _ds.scan_context = scan_context
+    _ds.scan_brief = scan_brief
     _query_counter = [0]
 
     def _on_phase(event: PhaseEvent) -> None:
@@ -653,7 +653,7 @@ async def run_optimization_notebook(
         dataset,
         campaign_config,
         session=session,
-        scan_context=scan_context,
+        scan_brief=scan_brief,
         experiment_id=experiment_id,
         task_context=task_context,
         session_id=session_id,

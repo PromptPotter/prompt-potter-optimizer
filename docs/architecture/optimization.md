@@ -5,7 +5,7 @@
 │                                                                        │
 │  L1 GENERATE (LLM)                                                     │
 │    in:  critique OR l2_directive (mutual exclusion),                   │
-│         task_context, thinking_styles, scan_context, plan,            │
+│         task_context, thinking_styles, scan_brief, plan,            │
 │         escalation_journal + warning_inventory (probe rounds only),   │
 │         failure_analysis (clustered failure patterns + signals),      │
 │         search_memory (failure clusters, top axes, dead queries)      │
@@ -149,7 +149,7 @@ Each round:
 2. **Eval + Critique** -- Evaluate candidates via the backend, compare by composite score against the current best (previous winner). Generate a **critique** of remaining failures/successes, fed forward to next round.
 3. **Loop control** -- Stall counter on no improvement. Patience exhausted: escalate L2 (`task_context`) then L3 (strategy). Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (e.g., `DegradationCheck` on target pipeline regression). Stop on `max_rounds` or perfect accuracy.
 
-**Init** configures the pipeline; baseline evaluation is deferred and runs automatically when `optimize` starts. The first critique is bootstrapped from baseline results at that point. When scan data is available (leaderboard, axis sensitivity, query difficulty), it feeds into both the bootstrap critique and subsequent rounds via `prepare_scan_context()`.
+**Init** configures the pipeline; baseline evaluation is deferred and runs automatically when `optimize` starts. The first critique is bootstrapped from baseline results at that point. When scan data is available (leaderboard, axis sensitivity, query difficulty), it feeds into both the bootstrap critique and subsequent rounds via `prepare_scan_brief()`.
 
 ---
 
@@ -262,7 +262,7 @@ Each round samples 2-3 styles from the variant library (`promptpotter/config/pro
 
 ## Scan-Aware Generation
 
-When scan data is available, `prepare_scan_context()` enriches the meta-prompt with `scan_context` analytics and each candidate can include a `pipeline_params_override` for per-candidate exploration. Keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields), all other keys stay as node-level pipeline overrides. See [Sensitivity Scan](../specs/archive/sensitivity-scan.md) for scan workflow details.
+When scan data is available, `prepare_scan_brief()` enriches the meta-prompt with `scan_brief` analytics and each candidate can include a `pipeline_params_override` for per-candidate exploration. Keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields), all other keys stay as node-level pipeline overrides. See [Sensitivity Scan](../specs/archive/sensitivity-scan.md) for scan workflow details.
 
 ### SearchMemory Intelligence Feed
 
@@ -291,7 +291,7 @@ The feedback cycle emits `PhaseEvent` objects at phase boundaries via `on_phase`
 | `init` | Cycle start |
 | `l1_generate` | Candidate generation |
 | `l1_evaluate` | Evaluation, winner selection & critique |
-| `refine_context` | L2 escalation |
+| `refine_strategy` | L2 escalation |
 | `modify_plan` | L3 escalation |
 | `escalation` | `EscalationCheck` fires mid-eval |
 

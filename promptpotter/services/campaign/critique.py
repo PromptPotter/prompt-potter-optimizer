@@ -77,7 +77,7 @@ class RoundSnapshot:
     near_miss_ratio: float = 0.3
 
     # SearchMemory context (M8 Wave 3c)
-    search_memory_context: dict | None = None
+    search_memory_digest: dict | None = None
 
     @classmethod
     def from_round_state(
@@ -87,12 +87,12 @@ class RoundSnapshot:
         config: LoopConfig,
         *,
         round_num: int,
-        search_memory_context: dict | None = None,
+        search_memory_digest: dict | None = None,
     ) -> RoundSnapshot:
         """Build from loop state, scoring result, and config.
 
         Computes cross-candidate diff and trajectory classification,
-        enriching the search_memory_context dict in-place.
+        enriching the search_memory_digest dict in-place.
         """
         from promptpotter.services.campaign.formatting import (
             build_cross_candidate_diff,
@@ -100,7 +100,7 @@ class RoundSnapshot:
         )
 
         # Enrich SM context with cross-candidate diff + trajectory
-        sm_ctx = search_memory_context
+        sm_ctx = search_memory_digest
         diff = build_cross_candidate_diff(
             cast(list[dict], scoring_result.winner_results),
             scoring_result.all_candidate_results,
@@ -145,7 +145,7 @@ class RoundSnapshot:
             pipeline_schema=config.pipeline_schema,
             degradation_threshold=config.critique_degradation_threshold,
             near_miss_ratio=config.critique_near_miss_ratio,
-            search_memory_context=sm_ctx,
+            search_memory_digest=sm_ctx,
         )
 
 
@@ -587,26 +587,28 @@ def assemble_critique_sections(ctx: RoundSnapshot) -> str:
         )
         sections.insert(1, anomaly_block)
 
-    # SearchMemory historical context (Wave 3c + M8 completion)
-    smc = ctx.search_memory_context
-    if smc:
+    # SearchMemory historical intelligence (Wave 3c + M8 completion)
+    sm_digest = ctx.search_memory_digest
+    if sm_digest:
         sm_lines = ["## HISTORICAL INTELLIGENCE"]
-        if smc.get("discriminating_queries"):
-            sm_lines.append(f"  Discriminating queries: {smc['discriminating_queries']}")
-        if smc.get("failure_clusters"):
-            sm_lines.append(f"  Failure clusters: {smc['failure_clusters']}")
-        if smc.get("tractability"):
-            sm_lines.append(f"  Query tractability: {smc['tractability']}")
-        if smc.get("exhausted_axes"):
-            sm_lines.append(f"  Exhausted axes (DO NOT suggest these): {smc['exhausted_axes']}")
-        if smc.get("value_trends"):
-            sm_lines.append(f"  Value trends: {smc['value_trends']}")
-        if smc.get("trajectory"):
-            sm_lines.append(f"  [TRAJECTORY] {smc['trajectory']}")
-        if smc.get("improvement_attribution"):
-            sm_lines.append(f"  WHAT WORKED:\n{smc['improvement_attribution']}")
-        if smc.get("cross_candidate_diff"):
-            sm_lines.append(f"  MISSED OPPORTUNITIES:\n{smc['cross_candidate_diff']}")
+        if sm_digest.get("discriminating_queries"):
+            sm_lines.append(f"  Discriminating queries: {sm_digest['discriminating_queries']}")
+        if sm_digest.get("failure_clusters"):
+            sm_lines.append(f"  Failure clusters: {sm_digest['failure_clusters']}")
+        if sm_digest.get("tractability"):
+            sm_lines.append(f"  Query tractability: {sm_digest['tractability']}")
+        if sm_digest.get("exhausted_axes"):
+            sm_lines.append(
+                f"  Exhausted axes (DO NOT suggest these): {sm_digest['exhausted_axes']}"
+            )
+        if sm_digest.get("value_trends"):
+            sm_lines.append(f"  Value trends: {sm_digest['value_trends']}")
+        if sm_digest.get("trajectory"):
+            sm_lines.append(f"  [TRAJECTORY] {sm_digest['trajectory']}")
+        if sm_digest.get("improvement_attribution"):
+            sm_lines.append(f"  WHAT WORKED:\n{sm_digest['improvement_attribution']}")
+        if sm_digest.get("cross_candidate_diff"):
+            sm_lines.append(f"  MISSED OPPORTUNITIES:\n{sm_digest['cross_candidate_diff']}")
         sections.append("\n".join(sm_lines))
 
     # Pipeline mutation capabilities — teach critique about schema mutations

@@ -62,9 +62,9 @@ Subtype of `llm`. Adds prompt template compilation (`prompt_family` → rendered
 
 ### `llm/meta` — Context-aware LLM node
 
-Subtype of `llm/structured`. Adds multi-source prompt assembly (scan_context, critique, task_context, escalation_journal, etc.) + context-aware response parsing.
+Subtype of `llm/structured`. Adds multi-source prompt assembly (scan_brief, critique, task_context, escalation_journal, etc.) + context-aware response parsing.
 
-**Optimizer examples:** `l1_generate`, `l2_refine_context`, `l3_modify_plan` — each is an `llm/meta` node. Self-contained: give it the optimizer context, it assembles the meta-prompt from multiple sources, calls the LLM, and parses the structured response.
+**Optimizer examples:** `l1_generate`, `l2_refine_strategy`, `l3_modify_plan` — each is an `llm/meta` node. Self-contained: give it the optimizer context, it assembles the meta-prompt from multiple sources, calls the LLM, and parses the structured response.
 
 ```json
 {
@@ -73,7 +73,7 @@ Subtype of `llm/structured`. Adds multi-source prompt assembly (scan_context, cr
     "model": "...",
     "temperature": 0.7,
     "prompt_family": "meta_scan_aware",
-    "context_sources": ["scan_context", "critique", "task_context", "escalation_journal"],
+    "context_sources": ["scan_brief", "critique", "task_context", "escalation_journal"],
     "response_parser": "candidate_list"
   }
 }
@@ -171,7 +171,7 @@ Excluding `llm_ranking` makes `token_matching` the last exit point. Cached full-
 
 ## Current State
 
-Shared primitives: `llm_call()` (config + runtime overrides), `get_node_config()` (cached from `optimizer_pipeline.json`), `observed_node()` (tracing). All optimizer nodes (`l1_generate`, `l1_evaluate`, `critique`, `l2_refine_context`, `l3_modify_plan`) use these. Future: extract node types into a shared package (post-ConnectorProtocol).
+Shared primitives: `llm_call()` (config + runtime overrides), `get_node_config()` (cached from `optimizer_pipeline.json`), `observed_node()` (tracing). All optimizer nodes (`l1_generate`, `l1_evaluate`, `critique`, `l2_refine_strategy`, `l3_modify_plan`) use these. Future: extract node types into a shared package (post-ConnectorProtocol).
 
 ---
 

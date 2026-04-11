@@ -26,7 +26,7 @@ from promptpotter.services.search.scan_advisor import (
 # scan_results (also absorbs scan_baseline)
 from promptpotter.services.search.scan_results import (
     decompose_scan_baseline,
-    prepare_scan_context,
+    prepare_scan_brief,
     resume_or_build_diagnostic,
     seed_campaign_from_scan,
     select_scan_winner,
@@ -53,7 +53,7 @@ __all__ = [
     "convert_advisory_to_scan_variants",
     "decompose_scan_baseline",
     "load_filtered_variant_library",
-    "prepare_scan_context",
+    "prepare_scan_brief",
     "preview_advisor_prompt",
     "resume_or_build_diagnostic",
     "seed_campaign_from_scan",

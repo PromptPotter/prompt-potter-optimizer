@@ -53,7 +53,7 @@ class EscalationSignal:
 
     check_name: str
     target: EscalationTarget
-    context: dict[str, Any]
+    check_result: dict[str, Any]
     candidate_idx: int
     candidates_scored: int
     candidates_skipped: int
@@ -111,7 +111,7 @@ class DegradationCheck:
         return EscalationSignal(
             check_name=self.name,
             target=strategy.target,
-            context={
+            check_result={
                 "degraded_rate": rate,
                 "degraded_count": degraded,
                 "total_evaluated": len(results_so_far),
@@ -189,19 +189,19 @@ def _maybe_emit_backend_warning(
 
 def _rebuild_current_sp(
     state: LoopState,
-    tr: Any,
+    transition: Any,
     *,
     schema: PipelineSchema | None = None,
 ) -> None:
     """Update opt_sp from a transition result and rebuild current_sp."""
-    new_opt = tr.opt_search_point
+    new_opt = transition.opt_search_point
     new_opt.inherit_memory(state.opt_sp)
     state.opt_sp = new_opt
     cur = state.current_sp
     assert cur is not None
-    pp = getattr(tr, "pipeline_params", None) or cur.pipeline_params
+    base_params = getattr(transition, "pipeline_params", None) or cur.pipeline_params
     state.current_sp = state.opt_sp.to_job_search_point(
-        base_pipeline_params=pp,
+        base_pipeline_params=base_params,
         schema=schema,
     )
 
@@ -232,7 +232,7 @@ async def _degradation_reset_and_l2(
     *,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
-    escalation_context: dict | None = None,
+    escalation_check_result: dict | None = None,
     reset_l3: bool = False,
 ) -> None:
     """Reset degradation counters and trigger a fresh L2 transition."""
@@ -250,7 +250,7 @@ async def _degradation_reset_and_l2(
         on_phase,
         obs=obs,
         trace_id=trace_id,
-        escalation_context=escalation_context,
+        escalation_check_result=escalation_check_result,
     )
 
 
@@ -261,9 +261,9 @@ async def _do_l2_transition(
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
-    escalation_context: dict | None = None,
+    escalation_check_result: dict | None = None,
 ) -> Any:
-    """Perform L2 refine_context transition. Updates state in-place."""
+    """Perform L2 refine_strategy transition. Updates state in-place."""
     from promptpotter.services import llm_client as _llm_client
     from promptpotter.services.campaign import layer_transitions
     from promptpotter.services.campaign.critique import warning_summary
@@ -274,7 +274,7 @@ async def _do_l2_transition(
 
     emit_phase(
         on_phase,
-        CampaignPhase.REFINE_CONTEXT,
+        CampaignPhase.REFINE_STRATEGY,
         "enter",
         round=round_num,
         l2_round=state.escalation.l2_round,
@@ -288,58 +288,58 @@ async def _do_l2_transition(
     async with observed_node(f"l2_refine_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
         # Pass round trajectory and last round's candidate scores for L2 intelligence
         _last_candidates = state.rounds[-1].candidate_scores if state.rounds else []
-        tr = await layer_transitions.refine_context(
+        transition = await layer_transitions.refine_strategy(
             state.opt_sp,
             client,
             model=config.model,
             temperature=config.l2_temperature,
             pipeline_params=current_pp,
             pipeline_schema=config.pipeline_schema,
-            escalation_context=escalation_context,
+            escalation_check_result=escalation_check_result,
             search_memory=state.search_memory,
             rounds=state.rounds,
             candidate_scores=_last_candidates,
         )
     # Rebuild first — inherit_memory preserves accumulated state,
     # then apply L2's new values to the rebuilt opt_sp.
-    _rebuild_current_sp(state, tr, schema=config.pipeline_schema)
-    if tr.task_context:
-        state.opt_sp.task_context = tr.task_context
-    state.opt_sp.l2_directive = tr.l2_directive
+    _rebuild_current_sp(state, transition, schema=config.pipeline_schema)
+    if transition.task_context:
+        state.opt_sp.task_context = transition.task_context
+    state.opt_sp.l2_directive = transition.l2_directive
     state.escalation.record_l2_entry(state.best_accuracy, state.best_composite)
     # Build warning inventory one-liner for display
     _warned_count, _top_warning = warning_summary(state.opt_sp.warning_inventory)
 
     emit_phase(
         on_phase,
-        CampaignPhase.REFINE_CONTEXT,
+        CampaignPhase.REFINE_STRATEGY,
         "exit",
         round=round_num,
         l2_round=state.escalation.l2_round,
-        param_changes_count=len(tr.opt_search_point.optimizer_params),
-        task_context_changed=tr.task_context is not None,
-        changes_description=tr.opt_search_point.changes_description or "",
-        pipeline_params_changed=tr.pipeline_params is not None,
-        pipeline_params=tr.pipeline_params,
-        action=tr.action,
+        param_changes_count=len(transition.opt_search_point.optimizer_params),
+        task_context_changed=transition.task_context is not None,
+        changes_description=transition.opt_search_point.changes_description or "",
+        pipeline_params_changed=transition.pipeline_params is not None,
+        pipeline_params=transition.pipeline_params,
+        action=transition.action,
         warned_queries=_warned_count,
         top_warning=_top_warning,
-        l2_prompt=tr.debug_prompt,
-        l2_response=tr.debug_response,
+        l2_prompt=transition.debug_prompt,
+        l2_response=transition.debug_response,
     )
     # Flag next round as probe if L2 requested it
     from promptpotter.services.campaign.layer_transitions import TransitionAction
 
-    if tr.action == TransitionAction.PROBE:
+    if transition.action == TransitionAction.PROBE:
         state.enter_probe_mode()
         logger.debug("L2 requested probe — next round uses warned queries")
 
     logger.debug(
-        "L2 refine_context at round %d (l2_round=%d)",
+        "L2 refine_strategy at round %d (l2_round=%d)",
         round_num,
         state.escalation.l2_round,
     )
-    return tr
+    return transition
 
 
 async def _do_l3_transition(
@@ -379,7 +379,7 @@ async def _do_l3_transition(
     async with observed_node(
         f"l3_modify_plan_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id
     ):
-        tr = await layer_transitions.modify_plan(
+        transition = await layer_transitions.modify_plan(
             state.opt_sp,
             l2_history,
             client,
@@ -389,7 +389,7 @@ async def _do_l3_transition(
             pipeline_schema=config.pipeline_schema,
             search_memory=state.search_memory,
         )
-    _rebuild_current_sp(state, tr, schema=config.pipeline_schema)
+    _rebuild_current_sp(state, transition, schema=config.pipeline_schema)
     state.escalation.record_l3_entry(state.best_accuracy, state.best_composite)
     state.escalation.reset_for_l3(state.best_accuracy, state.best_composite)
     emit_phase(
@@ -398,16 +398,16 @@ async def _do_l3_transition(
         "exit",
         round=round_num,
         l3_round=state.escalation.l3_round,
-        new_plan_preview=str(tr.opt_search_point.plan)[:120],
-        changes_description=tr.opt_search_point.changes_description or "",
-        pipeline_params_changed=tr.pipeline_params is not None,
+        new_plan_preview=str(transition.opt_search_point.plan)[:120],
+        changes_description=transition.opt_search_point.changes_description or "",
+        pipeline_params_changed=transition.pipeline_params is not None,
     )
     logger.debug(
         "L3 modify_plan at round %d (l3_round=%d)",
         round_num,
         state.escalation.l3_round,
     )
-    return tr
+    return transition
 
 
 async def escalate_l2(
@@ -419,7 +419,7 @@ async def escalate_l2(
     obs: ObsLogger | None = None,
     trace_id: str | None = None,
     from_degradation: bool = False,
-    escalation_context: dict | None = None,
+    escalation_check_result: dict | None = None,
 ) -> StopReason | None:
     """Handle L1→L2 escalation and optionally L2→L3.
 
@@ -442,7 +442,7 @@ async def escalate_l2(
             on_phase,
             obs=obs,
             trace_id=trace_id,
-            escalation_context=escalation_context,
+            escalation_check_result=escalation_check_result,
         )
         # HITL checkpoint: pause after L2 generates new context, before L1 resumes
         if on_checkpoint:
@@ -463,7 +463,7 @@ async def escalate_l2(
                 on_phase,
                 obs=obs,
                 trace_id=trace_id,
-                escalation_context=escalation_context,
+                escalation_check_result=escalation_check_result,
             )
             return None
         logger.debug(
@@ -496,7 +496,7 @@ async def escalate_l2(
             on_phase,
             obs=obs,
             trace_id=trace_id,
-            escalation_context=escalation_context,
+            escalation_check_result=escalation_check_result,
             reset_l3=True,
         )
         return None

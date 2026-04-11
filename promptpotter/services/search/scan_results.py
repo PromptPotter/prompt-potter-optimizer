@@ -152,8 +152,8 @@ async def decompose_scan_baseline(
 
 
 @dataclass
-class ScanContext:
-    """Structured scan context for the LLM meta-prompt."""
+class ScanBrief:
+    """Structured scan brief for the LLM meta-prompt."""
 
     leaderboard_text: str = ""
     sensitivity_text: str = ""
@@ -441,15 +441,15 @@ def compute_difficulty_summary(difficulty_df: Any) -> dict[str, int] | None:
     return summary
 
 
-def prepare_scan_context(
+def prepare_scan_brief(
     scan_df: pd.DataFrame,
     axis_profiles: list[dict],
     scan_variants: dict[str, list],
     baseline_accuracy: float,
     *,
     difficulty_summary: dict | None = None,
-) -> ScanContext:
-    """Build structured scan context for the LLM meta-prompt.
+) -> ScanBrief:
+    """Build structured scan brief for the LLM meta-prompt.
 
     All formatting is deterministic — no LLM calls. Returns a dict with
     pre-formatted text sections plus structured data for downstream use.
@@ -514,7 +514,7 @@ def prepare_scan_context(
         tested_lines.extend(vals)
     tested_values = "\n".join(tested_lines)
 
-    return ScanContext(
+    return ScanBrief(
         leaderboard_text=leaderboard_text,
         sensitivity_text=sensitivity_text,
         difficulty_text=difficulty_text,

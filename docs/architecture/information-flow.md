@@ -22,7 +22,7 @@ What gets injected into each LLM node's prompt, where it originates, and how it 
 |-----------|--------------------|-------------|----------|-----------|---------|
 | **Rendered prompt** | `opt_sp.render()` from 8 prompt scheme fields | full | — | — | full |
 | **Critique text** | `CritiqueAgent.run()` → `opt_sp.critique_text` | when no L2 directive **(a)** | — | always (builds on it) | — |
-| **L2 directive** | `refine_context()` → `opt_sp.l2_directive` | replaces critique when set **(a)** | — | prev only (evolves it) | — |
+| **L2 directive** | `refine_strategy()` → `opt_sp.l2_directive` | replaces critique when set **(a)** | — | prev only (evolves it) | — |
 | **Escalation journal** | appended pre-L2 → `opt_sp.escalation_journal` | probe only **(b)** | — | full history | — |
 | **Warning inventory** | `update_query_tracker()` → `opt_sp.warning_inventory` | probe only **(b)** | — | when no esc. report **(c)** | — |
 | **Task context** | campaign init / L2 override → `opt_sp.task_context` | read-only | — | editable | — |
@@ -43,7 +43,7 @@ What gets injected into each LLM node's prompt, where it originates, and how it 
 
 | Injection | Origin → Retention | L1 Generate | Critique | L2 Refine | L3 Plan |
 |-----------|--------------------|-------------|----------|-----------|---------|
-| **Scan context** | sensitivity scan → `config.scan_context` | full on r0, compact after | — | — | — |
+| **Scan context** | sensitivity scan → `config.scan_brief` | full on r0, compact after | — | — | — |
 | **Pipeline schema** | `GET /pipeline` → `config.pipeline_schema` | — | `candidate_keys` derived | via escalation report only **(d)** | param keys per node |
 
 ### SearchMemory (cross-campaign)
@@ -52,17 +52,17 @@ Each consumer queries a **tailored subset** via a dedicated builder. Critique is
 
 | Method | L1 Generate | Critique | L2 Refine | L3 Plan |
 |--------|-------------|----------|-----------|---------|
-| `failure_clusters()` | `build_l1_search_memory_context()` | `build_critique_search_memory_context()` | — | `build_strategic_search_memory_context(..., include_clusters=True)` |
-| `dead_queries()` | `build_l1_search_memory_context()` | — | — | — |
-| `axis_rankings()` | `build_l1_search_memory_context()` (top 3) | `build_critique_search_memory_context()` (top 3) | `build_strategic_search_memory_context()` (top 5) | `build_strategic_search_memory_context()` (top 5) |
-| `top_k_values()` | `build_l1_search_memory_context()` | — | — | — |
-| `discriminating_queries()` | — | `build_critique_search_memory_context()` | — | — |
-| `bottleneck_distribution()` | — | — | `build_strategic_search_memory_context()` | `build_strategic_search_memory_context()` |
-| `persistent_failures()` | — | `build_critique_search_memory_context()` (tractability) | `build_strategic_search_memory_context()` | `build_strategic_search_memory_context()` |
-| `exhausted_axes()` | — | `build_critique_search_memory_context()` | — | — |
-| `axis_value_trend()` | — | `build_critique_search_memory_context()` | — | — |
+| `failure_clusters()` | `build_l1_search_memory_digest()` | `build_critique_search_memory_digest()` | — | `build_strategic_search_memory_digest(..., include_clusters=True)` |
+| `dead_queries()` | `build_l1_search_memory_digest()` | — | — | — |
+| `axis_rankings()` | `build_l1_search_memory_digest()` (top 3) | `build_critique_search_memory_digest()` (top 3) | `build_strategic_search_memory_digest()` (top 5) | `build_strategic_search_memory_digest()` (top 5) |
+| `top_k_values()` | `build_l1_search_memory_digest()` | — | — | — |
+| `discriminating_queries()` | — | `build_critique_search_memory_digest()` | — | — |
+| `bottleneck_distribution()` | — | — | `build_strategic_search_memory_digest()` | `build_strategic_search_memory_digest()` |
+| `persistent_failures()` | — | `build_critique_search_memory_digest()` (tractability) | `build_strategic_search_memory_digest()` | `build_strategic_search_memory_digest()` |
+| `exhausted_axes()` | — | `build_critique_search_memory_digest()` | — | — |
+| `axis_value_trend()` | — | `build_critique_search_memory_digest()` | — | — |
 | `intractable_queries_ci()` | — | — | — | — |
-| `parameter_failure_correlation()` | — | — | `build_strategic_search_memory_context(..., include_correlations=True)` | — |
+| `parameter_failure_correlation()` | — | — | `build_strategic_search_memory_digest(..., include_correlations=True)` | — |
 
 ### Planned Intelligence Extensions
 
@@ -75,7 +75,7 @@ By design, L1 stays clean — it generates candidates. Deeper sample intelligenc
 | **Round trajectory** | Strategic | L2 Refine — `build_round_trajectory()` | Done |
 | **Candidate comparison** | Strategic | L2 Refine — `build_candidate_comparison()` | Done |
 | **Failure group × axis** | Strategic | L2 Refine — `parameter_failure_correlation()` | Done (scan-only producer; periodic refresh planned) |
-| **L3 SearchMemory intelligence** | Strategic | L3 Plan — `build_strategic_search_memory_context(..., include_clusters=True)` | Done |
+| **L3 SearchMemory intelligence** | Strategic | L3 Plan — `build_strategic_search_memory_digest(..., include_clusters=True)` | Done |
 | **Critique tractability profiles** | Every-round | Critique — intractable/chronic/intermittent classification | Done |
 | **Axis exhaustion detection** | Every-round | Critique — `exhausted_axes()` | Done |
 | **Value momentum/direction** | Every-round | Critique — `axis_value_trend()` | Done |

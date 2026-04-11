@@ -40,7 +40,7 @@ from promptpotter.services.campaign.state import (
     get_obs_trace,
 )
 from promptpotter.services.metrics import compile_query_difficulty
-from promptpotter.services.search.scan_results import ScanContext
+from promptpotter.services.search.scan_results import ScanBrief
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -111,7 +111,7 @@ async def _handle_escalation_signal(
         signal["context"].get("degraded_rate", 0) * 100,
     )
 
-    esc_context = signal["context"]
+    esc_check_result = signal["check_result"]
 
     from promptpotter.services.campaign.escalation import EscalationTarget
 
@@ -120,12 +120,12 @@ async def _handle_escalation_signal(
         # Fill outcome of previous journal entry (if any)
         journal = state.opt_sp.escalation_journal
         if journal and journal[-1].get("outcome_degraded_rate") is None:
-            journal[-1]["outcome_degraded_rate"] = esc_context.get("degraded_rate", 0)
+            journal[-1]["outcome_degraded_rate"] = esc_check_result.get("degraded_rate", 0)
 
         # Record journal entry BEFORE L2 so L2 sees the current event
         # in the journal (not just history). Also ensures the entry is
         # persisted even if L2 returns a stop signal.
-        dominant = esc_context.get("dominant_warning", "unknown:unknown")
+        dominant = esc_check_result.get("dominant_warning", "unknown:unknown")
         problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
         step_cfg = ((state.current_sp.pipeline_params if state.current_sp else None) or {}).get(
             problem_step, {}
@@ -133,10 +133,10 @@ async def _handle_escalation_signal(
         state.opt_sp.escalation_journal.append(
             {
                 "round": round_num,
-                "degraded_rate": esc_context.get("degraded_rate", 0),
+                "degraded_rate": esc_check_result.get("degraded_rate", 0),
                 "problem_step": problem_step,
                 "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
-                "warning_types": esc_context.get("warning_types", {}),
+                "warning_types": esc_check_result.get("warning_types", {}),
                 "outcome_degraded_rate": None,
             }
         )
@@ -152,7 +152,7 @@ async def _handle_escalation_signal(
                 obs=_obs,
                 trace_id=_tid,
                 from_degradation=True,
-                escalation_context=esc_context,
+                escalation_check_result=esc_check_result,
             )
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
@@ -252,7 +252,7 @@ async def run_optimization(
     baseline_results: list | None = None,
     callbacks: RunCallbacks | None = None,
     langfuse_session_id: str | None = None,
-    scan_context: ScanContext | None = None,
+    scan_brief: ScanBrief | None = None,
     cycle_id: str | None = None,
     experiment_id: str = "",
     session: SessionEnv | None = None,
@@ -262,8 +262,8 @@ async def run_optimization(
     Executes: init → round loop (l1_generate → l1_score) → finalize.
     Stops on: patience exhaustion, max_rounds, perfect score, or interrupt.
     """
-    if scan_context is not None:
-        config = config.model_copy(update={"scan_context": scan_context})
+    if scan_brief is not None:
+        config = config.model_copy(update={"scan_brief": scan_brief})
     started_at = datetime.now(UTC).isoformat()
 
     cb = callbacks or RunCallbacks()

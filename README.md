@@ -21,8 +21,8 @@ At its core, PromptPotter just collects a lot of datapoints. Every evaluation is
   │       │  + thinking_styles                               │
   │       └──────── ◄───────┘                                │
   │                                                          │
-  │  stall?       ──► l2_refine_context ──► resume L1        │
-  │  degradation? ──► l2_refine_context ──► resume L1        │
+  │  stall?       ──► l2_refine_strategy ──► resume L1        │
+  │  degradation? ──► l2_refine_strategy ──► resume L1        │
   │  l2 stall?    ──► l3_modify_plan    ──► resume L2+L1     │
   └──────────────────────────────────────────────────────────┘
 ```
