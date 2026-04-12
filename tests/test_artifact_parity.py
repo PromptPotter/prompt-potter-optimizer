@@ -32,41 +32,19 @@ def session_dir(tmp_path: Path) -> Path:
     return sdir
 
 
-def _make_mock_session_store(tmp_path: Path):
-    """Minimal SessionStore stand-in that writes campaign_log.md."""
-    from unittest.mock import MagicMock
-
-    store = MagicMock()
-
-    def _append_log(bid: str, sid: str, text: str) -> None:
-        log_path = tmp_path / bid / "sessions" / sid / "campaign_log.md"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with log_path.open("a", encoding="utf-8") as f:
-            f.write(text + "\n\n")
-
-    store.append_log = _append_log
-    return store
-
-
 def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Path) -> None:
     """Emitter lifecycle (init + on_phase + on_query + on_candidate + on_round + finalize)
     must produce all CAMPAIGN_SESSION_ARTIFACTS."""
     from promptpotter.services.campaign.config import LoopConfig
-    from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
+    from promptpotter.services.campaign.session_emitter import CampaignPersistenceEmitter
     from promptpotter.services.campaign.state import PhaseEvent, RoundResult
-
-    store = _make_mock_session_store(tmp_path)
 
     config = LoopConfig(
         backend_id="test_backend",
         session_id="test_session",
         max_rounds=5,
     )
-    emitter = CampaignPersistenceEmitter(
-        session_dir,
-        config,
-        session_store=store,
-    )
+    emitter = CampaignPersistenceEmitter(session_dir, config)
 
     # Simulate a single round lifecycle
     emitter.on_phase(
@@ -171,9 +149,15 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     assert state["workflow"] == "idle"
     assert state["stop_reason"] == "max_rounds"
     assert state["cycle_id"] == "cycle_test_001"
-    assert "control" in state
+    # Control lives in its own file — not merged into state
+    assert "control" not in state
     assert state["rounds_completed"] == 0
     assert state["total_queries_scored"] == 2
+
+    # Verify campaign_control.json seeded with defaults
+    control = json.loads((session_dir / "campaign_control.json").read_text())
+    assert control["requested_state"] == "running"
+    assert control["pause_before_l2_scoring"] is False
 
     # Verify campaign_output.log has content
     log = (session_dir / "campaign_output.log").read_text()
@@ -188,57 +172,45 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
 
 
 def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
-    """CampaignControlReader reads control signals from campaign_state.json."""
-    from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
+    """CampaignControlReader reads control signals from campaign_control.json."""
+    from promptpotter.services.campaign.control import CampaignControlReader
 
-    state_path = session_dir / "campaign_state.json"
-    state_path.write_text(
-        json.dumps(
-            {
-                "control": {"requested_state": "pause", "pause_before_l2_scoring": False},
-            }
-        )
+    control_path = session_dir / "campaign_control.json"
+    control_path.write_text(
+        json.dumps({"requested_state": "pause", "pause_before_l2_scoring": False})
     )
 
-    surface = CampaignControlReader(state_path)
+    surface = CampaignControlReader(session_dir)
     assert surface.check("after_round") == "pause"
 
 
 def test_control_surface_resumes(session_dir: Path) -> None:
     """CampaignControlReader acknowledges resume by clearing to running."""
-    from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
+    from promptpotter.services.campaign.control import CampaignControlReader
 
-    state_path = session_dir / "campaign_state.json"
-    state_path.write_text(
-        json.dumps(
-            {
-                "control": {"requested_state": "resume", "pause_before_l2_scoring": False},
-            }
-        )
+    control_path = session_dir / "campaign_control.json"
+    control_path.write_text(
+        json.dumps({"requested_state": "resume", "pause_before_l2_scoring": False})
     )
 
-    surface = CampaignControlReader(state_path)
+    surface = CampaignControlReader(session_dir)
     assert surface.check("after_round") is None
 
     # Verify it wrote "running" back
-    data = json.loads(state_path.read_text())
-    assert data["control"]["requested_state"] == "running"
+    data = json.loads(control_path.read_text())
+    assert data["requested_state"] == "running"
 
 
 def test_control_surface_l2_pause(session_dir: Path) -> None:
     """CampaignControlReader honors pause_before_l2_scoring at before_l2_scoring checkpoint."""
-    from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
+    from promptpotter.services.campaign.control import CampaignControlReader
 
-    state_path = session_dir / "campaign_state.json"
-    state_path.write_text(
-        json.dumps(
-            {
-                "control": {"requested_state": "running", "pause_before_l2_scoring": True},
-            }
-        )
+    control_path = session_dir / "campaign_control.json"
+    control_path.write_text(
+        json.dumps({"requested_state": "running", "pause_before_l2_scoring": True})
     )
 
-    surface = CampaignControlReader(state_path)
+    surface = CampaignControlReader(session_dir)
     # At non-L2 checkpoint: no pause
     assert surface.check("after_round") is None
     # At L2 checkpoint: pause

@@ -11,7 +11,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.scoring import ScoringEnv
     from promptpotter.services.campaign.nodes.escalation import DegradationCheck
-    from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
+    from promptpotter.services.campaign.session_emitter import CampaignPersistenceEmitter
     from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "CAMPAIGN_SESSION_ARTIFACTS",
     "CampaignPhase",
+    "CampaignStateSchema",
     "EscalationCounters",
     "LoopState",
     "OnCandidateScored",
@@ -48,6 +49,56 @@ __all__ = [
 ]
 
 
+class CampaignStateSchema(TypedDict):
+    """On-disk shape of ``campaign_state.json``.
+
+    Scalar-only, emitter-owned.  Readers (``show-status``, webapp, parity
+    test) should treat this as the source of truth for field names.  Live
+    per-query / per-candidate / per-round detail lives in
+    ``campaign_output.log`` and ``rounds/round_NNN.json`` — not here.
+    """
+
+    # Execution
+    workflow: str
+    phase: str
+    round: int
+    max_rounds: int
+    candidate: str
+    query: str
+    patience: str
+    layer: str
+    baseline: float
+    best: float
+    current_acc: float
+    cycle_id: str | None
+    stop_reason: str | None
+    pause_point: str | None
+    # Timing
+    elapsed_s: float
+    round_elapsed_s: float
+    avg_query_time_s: float
+    eta_s: float
+    # Pipeline
+    active_nodes: list[str]
+    excluded_nodes: list[str]
+    terminated_at: str | None
+    cache_hit_rate: float
+    # Quality
+    hit_rate: float
+    degraded_count: int
+    error_count: int
+    best_round: int
+    improvement_streak: int
+    # Historical (carried over across cycles)
+    rounds_completed: int
+    total_queries_scored: int
+    total_backend_calls: int
+    # Config
+    model: str
+    n_variants: int
+    sp_budget_ttest: int
+
+
 class CampaignPhase(enum.StrEnum):
     """Feedback cycle phase names used in PhaseEvent and persistence."""
 
@@ -62,6 +113,7 @@ class CampaignPhase(enum.StrEnum):
 
 CAMPAIGN_SESSION_ARTIFACTS = {
     "campaign_state.json",
+    "campaign_control.json",
     "campaign_output.log",
     "campaign_log.md",
     "session.json",

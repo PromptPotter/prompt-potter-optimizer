@@ -456,15 +456,15 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     ctx.save_phase("optimizing")
 
     # Bidirectional control — CLI provides CampaignControlReader as on_checkpoint
-    from promptpotter.services.campaign.persistence_emitter import CampaignControlReader
+    from promptpotter.services.campaign.control import CampaignControlReader
     from promptpotter.services.campaign.state import RunCallbacks
 
     session_dir = session.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
-    control = CampaignControlReader(session_dir / "campaign_state.json")
+    control = CampaignControlReader(session_dir)
     control_cb = RunCallbacks(on_checkpoint=control.check)
 
     # Round recorder — write rounds/round_NNN.json with full action traces
-    from promptpotter.services.campaign.persistence_emitter import RoundRecorder
+    from promptpotter.services.campaign.round_recorder import RoundRecorder
     from promptpotter.services.optimizer.pipeline import set_round_recorder
 
     recorder = RoundRecorder(session_dir / "rounds")
@@ -524,16 +524,18 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
 
 async def cmd_control(args: argparse.Namespace) -> None:
-    """Write control signals to campaign_state.json (bidirectional dashboard)."""
+    """Write control signals to campaign_control.json (bidirectional dashboard)."""
+    from promptpotter.services.campaign.control import CONTROL_FILENAME
+    from promptpotter.services.store.base import write_json
+
     ctx = _load_session(args)
     session_dir = ctx.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
-    state_path = session_dir / "campaign_state.json"
+    control_path = session_dir / CONTROL_FILENAME
 
-    if not state_path.exists():
-        _die("No campaign_state.json — run 'optimize' first.")
+    if not control_path.exists():
+        _die(f"No {CONTROL_FILENAME} — run 'optimize' first.")
 
-    data = json.loads(state_path.read_text(encoding="utf-8"))
-    control = data.get("control", {})
+    control = json.loads(control_path.read_text(encoding="utf-8"))
 
     _SIGNALS: dict[str, tuple[str, str | bool, str]] = {
         "pause": ("requested_state", "pause", "pause"),
@@ -549,8 +551,7 @@ async def cmd_control(args: argparse.Namespace) -> None:
             action = label
             break
 
-    data["control"] = control
-    state_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    write_json(control_path, control)
 
     if getattr(args, "json_output", False):
         print(json.dumps({"action": action, "control": control}, indent=2))
@@ -716,9 +717,12 @@ async def cmd_results(args: argparse.Namespace) -> None:
 
 async def cmd_status(args: argparse.Namespace) -> None:
     """Print live dashboard from campaign_state.json (or session state if idle)."""
+    from promptpotter.services.campaign.control import CONTROL_FILENAME
+
     ctx = _load_session(args)
     session_dir = ctx.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
     state_path = session_dir / "campaign_state.json"
+    control_path = session_dir / CONTROL_FILENAME
 
     # Machine-readable JSON mode
     if getattr(args, "json_output", False):
@@ -735,6 +739,9 @@ async def cmd_status(args: argparse.Namespace) -> None:
         if state_path.exists():
             with contextlib.suppress(json.JSONDecodeError, OSError):
                 output["live_dashboard"] = json.loads(state_path.read_text(encoding="utf-8"))
+        if control_path.exists():
+            with contextlib.suppress(json.JSONDecodeError, OSError):
+                output["control"] = json.loads(control_path.read_text(encoding="utf-8"))
         result_path = session_dir / "optimize_result.json"
         if result_path.exists():
             with contextlib.suppress(json.JSONDecodeError, OSError):
@@ -768,10 +775,14 @@ async def cmd_status(args: argparse.Namespace) -> None:
             print(f"Cache: {live.get('cache_hit_rate', 0):.1%}")
             print(f"ETA: {live.get('eta_s', 0):.0f}s")
             print(f"Elapsed: {live.get('elapsed_s', 0):.0f}s")
-            control = live.get("control", {})
-            print(f"Control: {control.get('requested_state', 'running')}")
-            if control.get("pause_before_l2_scoring"):
-                print("  pause_before_l2_scoring: enabled")
+            if control_path.exists():
+                try:
+                    control = json.loads(control_path.read_text(encoding="utf-8"))
+                    print(f"Control: {control.get('requested_state', 'running')}")
+                    if control.get("pause_before_l2_scoring"):
+                        print("  pause_before_l2_scoring: enabled")
+                except (json.JSONDecodeError, OSError):
+                    pass
             if live.get("stop_reason"):
                 print(f"Stop reason: {live['stop_reason']}")
             if live.get("pause_point"):

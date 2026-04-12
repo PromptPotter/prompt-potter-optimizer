@@ -84,7 +84,7 @@ Everything else (`compile_scorer`, prompt variant library, backend pipeline) is 
    - `phase: "init"` or `"set-task"` → pick up from Phase 2/3
    - `phase: "optimizing"` or `"optimize"` with no `stop_reason` → go straight to Phase 4 (`optimize`)
    - `stop_reason` is set → read `optimize_result.json`, recommend reviewing results or starting fresh
-   - `control.requested_state` is `"pause"` or `"stop"` → offer to resume (`control --resume`) or review
+   - `campaign_control.json` has `requested_state: "pause"` / `"stop"` → offer to resume (`control --resume`) or review
 4. **Dataset mismatch or no active session** → Phase 1 (new `init`)
 
 ### Data assessment
@@ -313,7 +313,7 @@ python -m promptpotter control --resume    # resume paused campaign
 python -m promptpotter control --stop      # stop gracefully
 ```
 
-You can also edit `campaign_state.json` directly: set `control.requested_state` to `"pause"`, `"resume"`, or `"stop"`.
+You can also edit `campaign_control.json` directly: set `requested_state` to `"pause"`, `"resume"`, or `"stop"`.
 
 ---
 

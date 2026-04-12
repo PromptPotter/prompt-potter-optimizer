@@ -154,7 +154,8 @@ Two independent persistence tiers with different lifecycles:
 ```
 {backend_id}/sessions/{session_id}/
   session.json              # init config, phase tracking, task_context
-  campaign_state.json       # live UI dashboard + HITL control surface
+  campaign_state.json       # live UI dashboard (emitter-owned, high-frequency)
+  campaign_control.json     # HITL control surface (user/webapp-owned, low-frequency)
   campaign_output.log       # append-only query eval trace
   campaign_log.md           # human-readable round-by-round summary
   rounds/
@@ -176,20 +177,22 @@ Session state survives interrupts for display continuity but is **not** the sour
 
 Keyed by `cycle_id` (content hash of baseline + dataset + pipeline). Resume: `lifecycle.py` counts trials → `resumed_from_round`, `cycle_init.py` restores from last trial, `round_execution.py` loads persisted candidates. Trial files written on round completion; candidate files written before eval starts.
 
-### `campaign_state.json` — UI & Control Surface
+### `campaign_state.json` — UI Dashboard
 
-Live dashboard for `show-status` and HITL checkpoints — **not** an optimizer checkpoint. Written by `CampaignPersistenceEmitter` (read-merge-write on every event). The `control` section is bidirectional: emitter writes execution state, user/webapp writes control signals (`pause`, `resume`, `stop`).
+Live dashboard for `show-status` and the webapp — **not** an optimizer checkpoint. Written atomically by `CampaignPersistenceEmitter` on every phase/sample/candidate/round event. Emitter-owned: no other writer touches this file during optimization.
+
+### `campaign_control.json` — HITL Control Surface
+
+Bidirectional control file, seeded with defaults by the emitter on init. The CLI `control` command, the webapp, and hand-edits are the only writers; the optimizer reads it at natural checkpoints via `CampaignControlReader`. Keeping the control surface in its own file means emitter flushes never race with user intent edits.
 
 ```json
 {
-  "control": {
-    "requested_state": "running",       // user sets: "pause", "resume", "stop"
-    "pause_before_l2_eval": false       // user sets: true to pause before L2
-  }
+  "requested_state": "running",         // user sets: "pause", "resume", "stop"
+  "pause_before_l2_scoring": false      // user sets: true to pause before L2
 }
 ```
 
-**Schema sections:**
+**`campaign_state.json` schema sections:**
 
 | Section | Fields | Purpose |
 |---------|--------|---------|
@@ -198,10 +201,10 @@ Live dashboard for `show-status` and HITL checkpoints — **not** an optimizer c
 | Pipeline | `active_nodes`, `excluded_nodes`, `terminated_at`, `cache_hit_rate` | Pipeline health |
 | Quality | `hit_rate`, `degraded_count`, `error_count` | Eval quality metrics |
 | Best | `best`, `best_round`, `improvement_streak` | Optimization progress |
-| Historical | `rounds_completed`, `total_queries_evaluated`, `total_backend_calls` | Cumulative counters (carried across resumes for display continuity) |
+| Historical | `rounds_completed`, `total_queries_scored`, `total_backend_calls` | Cumulative counters (carried across resumes for display continuity) |
 | Config | `model`, `n_variants`, `sp_budget_ttest` | Snapshot of active config |
-| Accumulators | `current_queries`, `round_candidates`, `last_round` | Ephemeral per-round/candidate data (reset on transitions) |
-| Control | `requested_state`, `pause_before_l2_eval` | Bidirectional HITL surface |
+
+Per-query / per-candidate / per-round detail lives in `campaign_output.log` (append-only audit trail) and `rounds/round_NNN.json` (per-round action trace). The dashboard is scalar-only — no nested accumulators.
 
 ### Shared Data Stores
 

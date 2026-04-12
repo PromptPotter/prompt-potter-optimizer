@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -26,18 +27,26 @@ def validate_path_component(name: str) -> str:
     return name
 
 
-def write_json(path: Path, data: Any) -> None:
+def write_json(
+    path: Path,
+    data: Any,
+    *,
+    default: Callable[[Any], Any] | None = None,
+) -> None:
     """Write *data* as pretty-printed JSON atomically.
 
     Writes to a temp file in the same directory, then uses ``os.replace()``
     to atomically swap it into place.  This prevents partial/corrupt files
     if the process crashes mid-write.
+
+    ``default`` is forwarded to ``json.dump`` for non-native types (e.g.
+    pass ``str`` to coerce enums / datetimes to their ``str`` form).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(data, f, indent=2, ensure_ascii=False, default=default)
         os.replace(tmp, path)
     except Exception:
         # Clean up temp file on failure (fd already closed by os.fdopen)

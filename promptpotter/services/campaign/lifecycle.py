@@ -351,25 +351,33 @@ async def init_cycle_state(
     if config.project_root and config.backend_id and config.session_id:
         from pathlib import Path
 
-        from promptpotter.services.campaign.persistence_emitter import CampaignPersistenceEmitter
+        from promptpotter.services.campaign.session_emitter import CampaignPersistenceEmitter
 
         _session_dir = (
             Path(config.project_root) / config.backend_id / "sessions" / config.session_id
         )
-        _session_store = None
-        if _store:
-            from promptpotter.services.store.stores import SessionStore
 
-            _session_store = SessionStore(Path(config.project_root))
+        # UI counter continuity on resume — purely cosmetic, not optimizer
+        # resume (that lives in trial_NNNN.json via _restore_from_checkpoint).
+        resume_from: dict[str, Any] | None = None
+        _prior_state = _session_dir / "campaign_state.json"
+        if _prior_state.exists():
+            try:
+                _prior = json.loads(_prior_state.read_text(encoding="utf-8"))
+                resume_from = {
+                    "best": _prior.get("best", 0.0),
+                    "best_round": _prior.get("best_round", 0),
+                    "baseline": baseline_accuracy,
+                    "rounds_completed": _prior.get("rounds_completed", 0),
+                    "total_queries_scored": _prior.get("total_queries_scored", 0),
+                    "total_backend_calls": _prior.get("total_backend_calls", 0),
+                }
+            except (json.JSONDecodeError, OSError):
+                pass
 
-        resume_from = CampaignPersistenceEmitter.load_resume_state(
-            _session_dir,
-            baseline=baseline_accuracy,
-        )
         persistence_emitter = CampaignPersistenceEmitter(
             _session_dir,
             config,
-            session_store=_session_store,
             resume_from=resume_from,
             cycle_id=cycle_id,
         )

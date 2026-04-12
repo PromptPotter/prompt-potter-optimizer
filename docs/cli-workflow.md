@@ -114,7 +114,7 @@ python -m promptpotter control --resume
 python -m promptpotter control --stop
 ```
 
-Bidirectional control via `campaign_state.json`. You can also edit the file directly: set `control.requested_state` to `"pause"`, `"resume"`, or `"stop"`.
+Bidirectional control lives in `campaign_control.json` (a sibling of `campaign_state.json`). You can also edit it directly: set `requested_state` to `"pause"`, `"resume"`, or `"stop"`.
 
 ---
 
@@ -203,11 +203,9 @@ The active session pointer lives at `.promptpotter/active_session.json` (see [Ac
 
 ### campaign_state.json
 
-Overwritten on every event during optimization. Carries counters across cycles via `resume_from`.
+Scalar-only live dashboard. Atomically rewritten on every event during optimization. Carries display counters across cycles via `resume_from`.
 
-Key fields: `workflow`, `phase`, `round`, `baseline`, `best`, `cycle_id`, `rounds_completed`, `total_queries_evaluated`, `total_backend_calls`, `cache_hit_rate`, `degraded_count`, `current_queries[]`, `round_candidates[]`, `last_round{}`.
-
-Accumulators reset: `current_queries` per candidate, `round_candidates` per round, `degraded_count` per round.
+Key fields: `workflow`, `phase`, `round`, `baseline`, `best`, `cycle_id`, `rounds_completed`, `total_queries_scored`, `total_backend_calls`, `cache_hit_rate`, `hit_rate`, `eta_s`, `candidate`, `query`. For per-query / per-candidate / per-round detail, read `campaign_output.log` or `rounds/round_NNN.json` directly.
 
 ---
 

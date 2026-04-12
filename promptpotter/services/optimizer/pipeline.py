@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.persistence_emitter import RoundRecorder
+    from promptpotter.services.campaign.round_recorder import RoundRecorder
 
 from promptpotter.models.opt_search_point import PromptTemplate
 from promptpotter.models.search_point import TaskDecomposition
