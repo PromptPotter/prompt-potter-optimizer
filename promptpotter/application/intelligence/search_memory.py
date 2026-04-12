@@ -2,7 +2,7 @@
 
 A persistent, incrementally-updated statistical index over ALL historical
 search points and their evaluation results.  Exposes atomic data accessors
-for consumers (scan_advisor, L1, L2, critique) to compose what they need.
+for consumers (recon_advisor, L1, L2, critique) to compose what they need.
 
 Persisted to disk at ``{backend_id}/search_memory.json``.  Updated lazily
 via ``refresh()`` which loads only new dataset runs since the last watermark.
@@ -103,7 +103,7 @@ class SearchMemory:
         self._bottleneck_counts: dict[str, int] = defaultdict(int)
         self._total_failures: int = 0
 
-        # Failure group analysis (populated by ingest_failure_group_analysis)
+        # Failure group analysis (populated by ingest_failure_groups)
         # {query: [axis_names]}
         self._query_axis_sensitivity: dict[str, list[str]] = {}
         # {axis: {failure_mode: delta}}
@@ -319,7 +319,7 @@ class SearchMemory:
             return {}
         return self._axis_failure_group_deltas.get(axis, {})
 
-    def ingest_failure_group_analysis(self, result: Any) -> None:
+    def ingest_failure_groups(self, result: Any) -> None:
         """Ingest failure group sensitivity results.
 
         Populates per-query sensitive axes and per-axis failure correlations
@@ -506,7 +506,7 @@ class SearchMemory:
 
         Owns the round-boundary work that used to live in the runner.
         """
-        from promptpotter.application.optimization.nodes.round_execution import adapt_eval_set
+        from promptpotter.application.intelligence.eval_set_adaptation import adapt_eval_set
         from promptpotter.application.scoring.metrics import compile_query_difficulty
 
         # Refresh + correlations + save

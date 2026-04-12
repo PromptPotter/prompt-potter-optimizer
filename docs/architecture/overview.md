@@ -5,14 +5,14 @@
 Four entry points over a shared hexagonal core (`domain/` → `application/` → `infrastructure/` → `presentation/`):
 
 1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `promptpotter/presentation/ui/campaign/` (display layer wrapping `application/`). No business logic in the notebook layer.
-2. **CLI** — `promptpotter/presentation/cli/campaign_runner.py` — terminal-based HITL workflow: `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
+2. **CLI** — `promptpotter/presentation/cli/campaign_runner.py` — terminal-based HITL workflow. Core path: `init → [set-task] → optimize → show-results`. Optional recon step (`recon → show-recon`) inserts between set-task and optimize for users who want to explore axes first.
 3. **FastAPI API** (`promptpotter/main.py` mounts `presentation/api/`) — REST at `/api/v1/`. Routers: `backends`, `campaigns`.
 4. **Next.js webapp** *(planned, M10 → M11)* — browser surface consuming the FastAPI API, reading the M9 file-directory view model.
 
 Layer contents:
 
 - **`domain/`** — `JobSearchPoint`, `OptSearchPoint`, `PipelineSchema`, `ScoringEnv`, `TenantContext`. Pure, no I/O, no logging.
-- **`application/`** — `campaign/`, `optimization/` (+ `nodes/`), `search/`, `scoring/`, `datasets/`, `pipeline_discovery.py`. Orchestration and use cases.
+- **`application/`** — `campaign/`, `optimization/` (+ `nodes/` — the core loop), `recon/` (optional human-loop sensitivity scan, self-contained), `intelligence/` (shared SearchMemory + variant library + eval-set adaptation), `scoring/`, `datasets/`, `pipeline_discovery.py`. Orchestration and use cases.
 - **`infrastructure/`** — `store/`, `backend/`, `llm/`, `tracing/`, `persistence/` (state, control, session_emitter, round_recorder). Every I/O adapter lives here.
 - **`presentation/`** — `cli/`, `api/`, `ui/`. Thin per-surface adapters.
 - Leaf: `shared/` (errors, constants, scorer compiler) and `config/` (settings, logging).
@@ -30,36 +30,54 @@ Each render layer is ~50 lines per verb. The *logic* lives in exactly one place 
 
 **Maturity order** (features land left → right): Notebook > CLI > FastAPI > webapp. Notebook is the daily driver; the webapp is a polish layer on top of what the other surfaces already expose. Do not invert this order.
 
-## Two-Loop Architecture
+## Core Loop + Optional Recon
+
+The system has **one core feature** — the critique-guided optimization loop — and **one optional pre-step** — the recon pass (a sensitivity scan). They are independent, live in independent packages, and do not import each other's code. The only runtime handoff is `ReconBrief` passed through `RunConfig.recon_brief`.
 
 ```
-  HUMAN LOOP                           AI LOOP (Potter)
-  ──────────                           ────────────────
-  Sensitivity Scan                     Critique-Guided Feedback Cycle
-  ┌──────────────────┐                 ┌───────────────────────────┐
-  │ Measure axes     │  select best    │ Generate candidates using │
-  │ Classify by      │───starting──────►  critique + thinking      │
-  │  sensitivity     │  point          │  styles + scan analytics  │
-  │ Show leaderboard │                 │ Evaluate via backend,     │
-  │ Query difficulty  │  scan_brief  │  select winner            │
-  │ Show coverage    │─────────────────► Critique failures →       │
-  └──────┬───────────┘                 │  next round               │
-         │                             │ L1→L2→L3 escalation      │
-         │  all eval data              └────────┬──────────────────┘
-         │  feeds back                          │
-         └──────────────◄───────────────────────┘
-              richer landscape → better starting point → repeat
-
-         SearchMemory *(M8 — live)* aggregates all historical
-         evaluation data and feeds parameter impact, query patterns,
-         and failure modes to both loops.
+  OPTIONAL  (application/recon/)       CORE  (application/optimization/)
+  ─────────────────────────            ────────────────────────────────
+  Sensitivity Scan                     Critique-Guided Optimization Loop
+  ┌──────────────────┐                 ┌──────────────────────────────┐
+  │ 1 LLM:            │                 │ 5 LLMs:                      │
+  │  recon_advisor    │                 │  restructure  (one-time setup)│
+  │                  │                 │  l1_generate  (every round)  │
+  │ OAT perturbation │    ReconBrief    │  critique     (every round)  │
+  │ Per-axis Δ       │────(optional)──►│  l2_context   (on stall)     │
+  │ Coverage report  │   starting-hint │  l3_plan      (rare)         │
+  │ Query difficulty │                 │                              │
+  └────────┬─────────┘                 │ Layer 1 generates candidates │
+           │                           │ Layer 2 adjusts context      │
+           │ (you can skip             │  when Layer 1 stalls         │
+           │  this entire column       │ Layer 3 replans strategy     │
+           │  and `optimize` still     │  when Layer 2 stalls         │
+           │  runs end-to-end)         │                              │
+           │                           └──────────┬───────────────────┘
+           │                                      │
+           │    application/intelligence/ — SearchMemory (shared)
+           └──────────────────► ◄─────────────────┘
+                   both loops write evaluations here,
+                   both loops read aggregate history on next run
 ```
 
-**Human Loop** — OAT scan measures which axes matter. You pick the best starting point.
+**Core loop (always runs).** Critique-guided feedback cycle. Each round: generate candidates, evaluate, critique failures, feed forward. L1→L2→L3 escalation on diminishing returns. Self-contained — does not require the recon pass and does not import from `recon/`.
 
-**AI Loop** — Critique-guided feedback cycle. Each round: generate candidates, evaluate, critique failures, feed forward. L1→L2→L3 escalation on diminishing returns.
+**Optional recon (human-driven).** OAT sensitivity scan measures which axes matter. You look at the coverage/difficulty report and either (a) pick a starting point and feed it to `optimize` as a `ReconBrief`, or (b) use the report to refine your pipeline config before running `optimize`. Adaptive mode (`recon/adaptive_recon.py`) runs multiple elimination rounds automatically.
 
-**SearchMemory** — Materialized view over `dataset_runs/` feeding both loops. See [SearchMemory design](../research/search-memory-intelligence.md).
+**What happens if you skip the recon pass?** `optimize` measures the baseline, generates candidates, and discovers axis sensitivities through the critique loop instead of from a scan report. You get a slightly slower start (no prior on which axes to move first), but zero recon LLM cost and one fewer step to run. For most users this is the right default; skip unless you specifically want to explore the landscape first.
+
+**SearchMemory (`intelligence/search_memory.py`)** — Materialized view over `dataset_runs/` feeding both features without either importing the other. Writes are append-only and reads are aggregate, so there's no runtime coupling. See [SearchMemory design](../research/search-memory-intelligence.md).
+
+### Directionality rules
+
+| Package           | May import from                                                                      | Must not import from     |
+|-------------------|--------------------------------------------------------------------------------------|--------------------------|
+| `optimization/`   | `domain/`, `infrastructure/`, `intelligence/`, `scoring/`, `shared/`                 | `recon/`                  |
+| `recon/`           | `domain/`, `infrastructure/`, `intelligence/`, `optimization/` (primitives only), `scoring/`, `shared/` | —                        |
+| `intelligence/`   | `domain/`, `infrastructure/`, `shared/`                                              | `recon/`, `optimization/` |
+| `campaign/`       | all of the above (it's the orchestration bridge)                                     | —                        |
+
+The only runtime bridge between `recon/` and `optimization/` at object level is `ReconBrief` threading through `RunConfig.recon_brief` into `l1_generate`. That's documented as the sanctioned bridge in `application/campaign/config.py`.
 
 ## Two-Layer Tracing
 
@@ -251,7 +269,7 @@ Per-query / per-candidate / per-round detail lives in `campaign_output.log` (app
   datasets/{name}.json
   dataset_runs/{run_id}.json          # content-addressed eval archive (shared across all paths)
   dataset_runs.json
-  smart_search_plans/{plan_id}.json
+  adaptive_recon_plans/{plan_id}.json
   obs/langfuse/events.jsonl
   search_memory.json                  # (M8) materialized view index
   suffix_cache/{suffix_key}.json        # per-query suffix-hash cache (M9, replaces intermediate_cache)
@@ -263,7 +281,7 @@ Per-query / per-candidate / per-round detail lives in `campaign_output.log` (app
 
 Cross-campaign intelligence layer. Materialized view over `dataset_runs/`, persisted at `{backend_id}/search_memory.json`, refreshed incrementally via watermark. Three pillars: parameter impact, query patterns, failure modes. Atomic data accessors only — each consumer composes its own prompt section.
 
-Full design, accessors, and consumer matrix: [`docs/research/search-memory-intelligence.md`](../research/search-memory-intelligence.md). Implementation: `application/search/search_memory.py`.
+Full design, accessors, and consumer matrix: [`docs/research/search-memory-intelligence.md`](../research/search-memory-intelligence.md). Implementation: `application/intelligence/search_memory.py`.
 
 ### Node-Level Cache
 
@@ -347,9 +365,9 @@ SessionEnv (dataclass)                       ← session-scoped infra bundle
   │       └──► LoopState mutated (current_sp, stall_count, opt_sp, ...)
   │
   ▼
-[optional] prepare_scan_brief()
-  └─ ScanBrief (read-only)                  ← pre-formatted scan analytics
-       injected into RunConfig.scan_brief
+[optional] prepare_recon_brief()
+  └─ ReconBrief (read-only)                  ← pre-formatted scan analytics
+       injected into RunConfig.recon_brief
 ```
 
 ### Lifecycle table
@@ -363,6 +381,6 @@ SessionEnv (dataclass)                       ← session-scoped infra bundle
 | **LoopState** | `campaign/state.py` | `cycle_init._build_baseline_state()` | Cycle | Intensely (every round) | Yes (`opt_sp` + escalation) |
 | **CritiqueContext** | `campaign/nodes/critique.py` | `execute_round()` | Per-round | No (read-only stats) | No |
 | **ContextData** | `campaign/nodes/formatting.py` | `l1_generate()` | Per-generation | No (formatting input) | No |
-| **ScanBrief** | `search/scan_results.py` | `prepare_scan_brief()` | Campaign | No (read-only) | No |
+| **ReconBrief** | `search/recon_results.py` | `prepare_recon_brief()` | Campaign | No (read-only) | No |
 
 **Key invariants:** All optimizer state lives on `LoopState.opt_sp` (only `opt_sp` is checkpointed). `ScoringEnv.store` is `SessionEnv.store` (no duplication). `CampaignConfig` → `RunConfig` is a one-way transformation; services read `RunConfig` only.

@@ -105,7 +105,7 @@ Three transformations bridge optimizer state to the wire:
 
 ## Variant Library
 
-`promptpotter/config/prompt_variants.json` provides pre-built alternatives per field for the sensitivity scan (OAT).
+`promptpotter/config/prompt_variants.json` provides pre-built alternatives per field. It is a **shared resource** — loaded from `application/intelligence/variant_library.py` and consumed by both the optional sensitivity scan (`application/recon/`, OAT perturbation) and the core optimization loop's L1 generator.
 
 **Index convention (provisional):**
 - **Index 0** — empty string (always present; lets the optimizer start from scratch)
@@ -124,7 +124,7 @@ Index 1 variants are a provisional starting point for new campaigns. For product
 | `instruction` | — | Always LLM-generated |
 | `few_shot_examples` | — | Not in variant library |
 
-`filter_variant_library()` (`smart_search.py`) drops prompt field axes when the pipeline has no LLM node with `prompt_meta`. In practice, this means prompt fields are inactive when the only LLM node (e.g. `llm_ranking`) is excluded from the pipeline.
+`filter_variant_library()` (`adaptive_recon.py`) drops prompt field axes when the pipeline has no LLM node with `prompt_meta`. In practice, this means prompt fields are inactive when the only LLM node (e.g. `llm_ranking`) is excluded from the pipeline.
 
 ---
 
@@ -135,4 +135,4 @@ Index 1 variants are a provisional starting point for new campaigns. For product
 | Field constants | `promptpotter/shared/constants.py` |
 | OptSearchPoint (render, derive, project) | `promptpotter/domain/opt_search_point.py` |
 | Variant library | `promptpotter/config/prompt_variants.json` |
-| Variant filtering | `promptpotter/application/search/smart_search.py` |
+| Variant filtering | `promptpotter/application/recon/adaptive_recon.py` |

@@ -45,8 +45,8 @@ class SessionCtx:
         return self.state.get("task_context")
 
     @property
-    def scan_variants(self) -> dict:
-        return self.state.get("scan_variants") or {}
+    def recon_variants(self) -> dict:
+        return self.state.get("recon_variants") or {}
 
     def save_phase(self, phase: str, *, log: str = "") -> None:
         """Set phase, persist state, optionally append log entry."""
@@ -81,7 +81,7 @@ def new_session_state(
         "dataset_count": 0,
         "baseline_accuracy": 0.0,
         "task_context": None,
-        "scan_variants": None,
+        "recon_variants": None,
         "cycle_id": None,
         "experiment_id": None,
     }

@@ -15,15 +15,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
+from promptpotter.application.recon.failure_groups import preview as _preview
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.application.search.failure_group_analysis import preview as _preview
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.shared.constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,
     DIAGNOSTIC_HIT_RATIO,
     MIN_DIAGNOSTIC_QUERIES,
-    SCAN_TARGET_MDE,
+    RECON_TARGET_MDE,
 )
 from promptpotter.shared.errors import is_error_result
 
@@ -36,8 +36,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ScanEvent(TypedDict, total=False):
-    """Progress event emitted by ``sensitivity_scan()`` and ``adaptive_search()``.
+class ReconEvent(TypedDict, total=False):
+    """Progress event emitted by ``run_recon()`` and ``run_adaptive_recon()``.
 
     All events carry ``type``.  Other fields depend on the event type:
 
@@ -206,9 +206,9 @@ def build_diagnostic_set(
 
     # Auto-adjust sample size for statistical power (Wave 2a)
     try:
-        from promptpotter.application.search.failure_group_analysis import min_sample_size
+        from promptpotter.application.recon.failure_groups import min_sample_size
 
-        min_n = min_sample_size(SCAN_TARGET_MDE)
+        min_n = min_sample_size(RECON_TARGET_MDE)
         if n_queries < min_n:
             adjusted = min(min_n, len(dataset))
             if adjusted > n_queries:
@@ -216,7 +216,7 @@ def build_diagnostic_set(
                     "Scan sample size %d too small to detect %.0f%% effect "
                     "(need %d); adjusting to %d",
                     n_queries,
-                    SCAN_TARGET_MDE * 100,
+                    RECON_TARGET_MDE * 100,
                     min_n,
                     adjusted,
                 )
@@ -440,7 +440,7 @@ def load_filtered_variant_library(
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
     """Load variant library, filtering to active pipeline steps when possible."""
-    from promptpotter.application.search import load_variant_library
+    from promptpotter.application.intelligence import load_variant_library
 
     lib = load_variant_library()
     if pipeline_params and pipeline_schema:
@@ -451,10 +451,10 @@ def load_filtered_variant_library(
 SSPLAN_PREFIX = "ssplan_"
 
 
-def smart_search_plan_identity(
+def adaptive_recon_plan_identity(
     baseline_instruction: str,
     variant_library: dict,
-    smart_search_config: Mapping[str, Any],
+    adaptive_recon_config: Mapping[str, Any],
     seed: int = 42,
 ) -> str:
     """Compute a stable identity hash for a smart search plan."""
@@ -462,9 +462,9 @@ def smart_search_plan_identity(
         {
             "baseline_instruction": baseline_instruction,
             "variant_library": variant_library,
-            "n_diagnostic": smart_search_config.get("n_diagnostic", 6),
-            "max_rounds": smart_search_config.get("max_rounds", 3),
-            "stop_threshold": smart_search_config.get("stop_threshold", 0.0),
+            "n_diagnostic": adaptive_recon_config.get("n_diagnostic", 6),
+            "max_rounds": adaptive_recon_config.get("max_rounds", 3),
+            "stop_threshold": adaptive_recon_config.get("stop_threshold", 0.0),
             "seed": seed,
         },
         sort_keys=True,
@@ -474,7 +474,7 @@ def smart_search_plan_identity(
     return f"{SSPLAN_PREFIX}{digest}"
 
 
-def serialize_smart_search_plan(
+def serialize_adaptive_recon_plan(
     plan_id: str,
     config: dict,
     baseline_opt: OptSearchPoint,
@@ -498,7 +498,7 @@ def serialize_smart_search_plan(
     }
 
 
-def deserialize_smart_search_plan(plan_data: dict) -> dict:
+def deserialize_adaptive_recon_plan(plan_data: dict) -> dict:
     """Reconstruct smart search plan objects from saved data."""
     return {
         "plan_id": plan_data["plan_id"],
@@ -510,12 +510,12 @@ def deserialize_smart_search_plan(plan_data: dict) -> dict:
         "diagnostic": plan_data.get("diagnostic", []),
         "diag_summary": plan_data.get("diag_summary", {}),
         "variant_library_hash": plan_data.get("variant_library_hash", ""),
-        "scan_results": plan_data.get("scan_results"),
+        "recon_results": plan_data.get("recon_results"),
         "search_results": plan_data.get("search_results"),
     }
 
 
-async def adaptive_search(
+async def run_adaptive_recon(
     baseline_opt: OptSearchPoint,
     variant_library: dict,
     dataset: list,
@@ -524,7 +524,7 @@ async def adaptive_search(
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
     pipeline_params: dict | None = None,
-    progress_cb: Callable[[ScanEvent], None] | None = None,
+    progress_cb: Callable[[ReconEvent], None] | None = None,
     plan_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
     experiment_id: str = "",
@@ -542,7 +542,7 @@ async def adaptive_search(
         variant_library: Full variant library dict.
         dataset: Diagnostic query set.
         backend_client: Backend client for evaluation.
-        axis_profiles: From ``sensitivity_scan()``.
+        axis_profiles: From ``run_recon()``.
         max_rounds: Maximum coordinate descent rounds.
         stop_threshold: Minimum per-round improvement to continue an axis.
         store: Optional ProjectStore for caching.
@@ -592,7 +592,7 @@ async def adaptive_search(
         store=store,
         backend_id=backend_id,
         pipeline_schema=pipeline_schema,
-        source="adaptive_search",
+        source="run_adaptive_recon",
         experiment_id=experiment_id,
         scorer=compile_scorer(scoring_formula),
     )
@@ -767,7 +767,7 @@ async def adaptive_search(
 
     # Persist search results to plan
     if store and backend_id and plan_id:
-        store.smart_search.update(
+        store.adaptive_recon.update(
             backend_id,
             plan_id,
             {

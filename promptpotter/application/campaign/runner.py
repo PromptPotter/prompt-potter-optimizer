@@ -18,6 +18,7 @@ from promptpotter.application.campaign.campaign_setup import SessionEnv
 from promptpotter.application.campaign.config import LoopConfig
 from promptpotter.application.campaign.data import CampaignBaseline
 from promptpotter.application.datasets.builder import sample_dataset
+from promptpotter.application.intelligence.search_memory import SearchMemory
 from promptpotter.application.optimization.loop_env import LoopEnv
 from promptpotter.application.optimization.loop_state import LoopState
 from promptpotter.application.optimization.nodes.critique import sample_thinking_styles
@@ -39,7 +40,6 @@ from promptpotter.application.optimization.phases import (
 )
 from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import RoundResult, RunResult
-from promptpotter.application.search.search_memory import SearchMemory
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.domain.search_point import TaskDecomposition
@@ -50,7 +50,7 @@ from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.search.scan_results import ScanBrief
+    from promptpotter.application.recon.recon_report import ReconBrief
 
 logger = logging.getLogger(__name__)
 
@@ -480,7 +480,7 @@ async def run_optimization(
     *,
     baseline: CampaignBaseline,
     session: SessionEnv,
-    scan_brief: ScanBrief | None = None,
+    recon_brief: ReconBrief | None = None,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
@@ -501,7 +501,7 @@ async def run_optimization(
         backend_id=session.backend_id,
         project_root=str(session.store.base_dir),
         session_id=session_id,
-        scan_brief=scan_brief,
+        recon_brief=recon_brief,
         pipeline_schema=session.pipeline_schema,
         task_context=task_context,
     )

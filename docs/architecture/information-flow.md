@@ -43,7 +43,7 @@ What gets injected into each LLM node's prompt, where it originates, and how it 
 
 | Injection | Origin → Retention | L1 Generate | Critique | L2 Refine | L3 Plan |
 |-----------|--------------------|-------------|----------|-----------|---------|
-| **Scan context** | sensitivity scan → `config.scan_brief` | full on r0, compact after | — | — | — |
+| **Scan context** *(optional)* | sensitivity scan → `config.recon_brief` — **the only sanctioned bridge from `scan/` into `optimization/`**. Absent when the scan is skipped. | full on r0, compact after | — | — | — |
 | **Pipeline schema** | `GET /pipeline` → `config.pipeline_schema` | — | `candidate_keys` derived | via escalation report only **(d)** | param keys per node |
 
 ### SearchMemory (cross-campaign)

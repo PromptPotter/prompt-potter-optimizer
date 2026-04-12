@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer optimization loop (L1 generate + evaluate → L2 refine → L3 replan), with a critique node between rounds. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH (see [`docs/research/benchmarks.md`](docs/research/benchmarks.md)).
+PromptPotter finds better prompts automatically.
+
+**Core — the optimization loop.** Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer optimization loop (L1 generate + evaluate → L2 refine → L3 replan), with a critique node between rounds. Five LLM call sites total: `restructure` (one-time campaign setup), `l1_generate`, `critique`, `l2_context`, `l3_plan`. This is the product. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH (see [`docs/research/benchmarks.md`](docs/research/benchmarks.md)).
+
+**Optional — the sensitivity scan.** A separate, human-driven pre-step that measures which prompt/parameter axes matter before optimization starts. One LLM call site (`recon_advisor`) plus a one-at-a-time perturbation runner. Lives in its own `application/recon/` package and is fully optional — `optimize` runs end-to-end without it. When used, the scan produces a `ReconBrief` that is passed into the optimizer as a starting-point hint; that handoff is the **only** sanctioned bridge between the two features.
 
 ## Commands
 
@@ -28,8 +32,8 @@ uvicorn promptpotter.main:app --port 8001 --reload
 # CLI workflow
 python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/lca-termnorm/campaign.json --skip-baseline
 python -m promptpotter set-task --task-file datasets/lca-termnorm/task_description.md
-python -m promptpotter scan --variants-file datasets/lca-termnorm/scan_variants.json
-python -m promptpotter show-scan
+python -m promptpotter recon --variants-file datasets/lca-termnorm/recon_variants.json
+python -m promptpotter show-recon
 python -m promptpotter optimize             # full loop
 python -m promptpotter show-results
 python -m promptpotter show-status          # live dashboard
@@ -50,7 +54,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`. All mus
   1. `init_services()`: local `LLMOnlyAdapter` → `BackendClient` when `LOCAL_SCORING_SECRET` auth fails (security gate, not hidden default).
   Any doc or code introducing a new fallback must add it to this list.
 - **Cycle identity**: Two-tier system. Experiment mode (default) hashes only the *problem* (dataset, baseline, pipeline steps) — everything else (optimizer model, seed, n_variants, creativity, patience, thresholds) is tweakable without breaking the cycle. Strict mode (`strict_cycle_identity: true`) hashes everything — for publication reproducibility only. See `TUNING_KEYS` in `lifecycle.py` and `docs/research/benchmarks.md` "Reproducibility: Cycle Identity Modes".
-- **Two-tier sampling**: `sp_budget_ttest` (must be > 0) controls the optimization loop scoring set. `scan_sample_size` controls sensitivity scan queries. Sequential elimination early-stops inferior candidates via Welch's t-test after 20 queries, so actual round cost is well below `n_variants × eval_size`.
+- **Two-tier sampling**: `sp_budget_ttest` (must be > 0) controls the optimization loop scoring set. `recon_sample_size` controls sensitivity scan queries. Sequential elimination early-stops inferior candidates via Welch's t-test after 20 queries, so actual round cost is well below `n_variants × eval_size`.
 - **Skip baseline by default**: Always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists (≥ 50 unique queries, ≥ 5 dataset runs) and the user requests comparison.
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
 - **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground so stale processes don't leak.
@@ -66,19 +70,29 @@ Hexagonal layout: `domain/` (pure models) → `application/` (use cases) → `in
 ```
 promptpotter/
 ├── domain/          # JobSearchPoint, OptSearchPoint, PipelineSchema, ScoringEnv, TenantContext — pure, no I/O
-├── application/     # campaign/, optimization/ (+ nodes/), search/, scoring/, datasets/, pipeline_discovery.py
+├── application/
+│   ├── campaign/           # campaign lifecycle + thin orchestration (setup, runner, config)
+│   ├── optimization/       # THE CORE LOOP: L1/L2/L3 nodes, critique, llm_call, restructure, prompts/
+│   │   └── nodes/
+│   ├── recon/              # OPTIONAL human loop — recon_advisor, recon_runner, adaptive_recon, recon_report, coverage, failure_groups
+│   ├── intelligence/       # SHARED materialized view — SearchMemory, variant_library, eval_set_adaptation. Feeds both loops, imports from neither.
+│   ├── scoring/            # scoring gateway (score_search_point), stale_data
+│   ├── datasets/
+│   └── pipeline_discovery.py
 ├── infrastructure/  # store/, backend/, llm/, tracing/, persistence/ (state, control, session_emitter, round_recorder)
 ├── presentation/    # cli/, api/, ui/ — thin adapters per surface
 ├── shared/          # leaf utilities (errors, constants, scoring formula compiler)
 └── config/          # settings, APP_VERSION, logging
 ```
 
+**Directionality rule (strict):** `optimization/` MUST NOT import from `recon/`. `recon/` MAY import from `optimization/` for shared primitives (`llm_call`, `decompose_prompt_fields`, etc.) — recon runs before optimization as campaign setup. `intelligence/` MUST NOT import from either `recon/` or `optimization/` — it's shared ground. The **only** sanctioned runtime bridge between recon and optimization is `ReconBrief` flowing through `RunConfig.recon_brief` into L1.
+
 **Three-layer I/O architecture (INVARIANT):**
 - **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts → `CAMPAIGN_SESSION_ARTIFACTS` in `infrastructure/persistence/session_emitter.py`; `tests/test_artifact_parity.py` enforces.
 - **Display** (per-entry-point) — caller passes `RunCallbacks`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
-**Two loops:** Human sensitivity scan (explore which axes matter) feeds the AI critique-guided optimization loop (L1 generate → L1 evaluate → L2 refine → L3 replan). All evaluation data archived to `dataset_runs/` store. SearchMemory (M8) aggregates historical data into a materialized view that feeds both loops. Three-tier intelligence: deterministic code triage (CI-gated query exclusion, no LLM), critique (every-round intelligence hub — enriched with SearchMemory tractability, axis exhaustion, value trends), L2 (escalation-only — round trajectory, candidate comparison, failure group × axis). L3 receives SearchMemory aggregate picture. L1 stays clean. See [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md).
+**Core loop + optional scan:** The **optimization loop** (L1 generate → L1 evaluate → critique → L2 refine → L3 replan) is the product and always runs. The **sensitivity scan** is an optional, human-driven pre-step that explores which axes matter and hands a `ReconBrief` to the optimizer as a starting-point hint. They are independent features in independent packages; skipping the scan leaves the optimization loop fully functional. All evaluation data from both (and from any earlier run) is archived to `dataset_runs/` store. SearchMemory (lives in `intelligence/`, M8) aggregates historical data into a materialized view that feeds both features without either importing the other. Three-tier intelligence: deterministic code triage (CI-gated query exclusion, no LLM), critique (every-round intelligence hub — enriched with SearchMemory tractability, axis exhaustion, value trends), L2 (escalation-only — round trajectory, candidate comparison, failure group × axis). L3 receives SearchMemory aggregate picture. L1 stays clean. See [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md).
 
 ### SearchPoint Hierarchy
 
@@ -114,7 +128,7 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 Features land left → right. Notebook is the daily driver and the testing ground; the webapp is a polish layer on top of whatever the first three surfaces expose. When adding a feature, prove it in the notebook first, then the CLI, then the API, then the webapp. Do not invert this order.
 
 1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/presentation/ui/campaign/` is pure display, delegates to `application/`. Most features land here first.
-2. **CLI**: `python -m promptpotter` — scripted and local workflows. `init → [set-task] → [scan] → [show-scan] → optimize → show-results`. Lives at `presentation/cli/`.
+2. **CLI**: `python -m promptpotter` — scripted and local workflows. Core path: `init → [set-task] → optimize → show-results`. Optional recon step: `recon → show-recon` inserted between set-task and optimize. Lives at `presentation/cli/`.
 3. **FastAPI REST API**: `promptpotter/main.py` mounts routers from `presentation/api/` — `/api/v1/backends`, `/api/v1/campaigns`. Programmatic access for automation and the webapp.
 4. **Next.js webapp** (planned, M10 → M11): browser surface, consumes the FastAPI API. Reads the M9 file-directory view model. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
@@ -128,8 +142,9 @@ Features land left → right. Notebook is the daily driver and the testing groun
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation signals flow via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. No completed work discarded.
 - **HITL mode**: `RunConfig.pause_before_scoring` raises `PauseForReviewError` between L1 generate and score. Candidates persisted to `round_NNNN_candidates.json` before pause.
-- **Optimizer LLM calls**: All go through `llm_call()` in `application/optimization/pipeline.py`, not `chat()` directly.
+- **Optimizer LLM calls**: All go through `llm_call()` in `application/optimization/pipeline.py`, not `chat()` directly. The recon advisor also routes through this primitive (recon → optimization is allowed).
 - **`shared/`**: Leaf-level utilities only — no domain model or service dependencies allowed.
+- **Recon/optimization isolation**: `optimization/` must not import from `recon/`. `intelligence/` must not import from either. Sole sanctioned bridge is `RunConfig.recon_brief`. Enforced by review; breaking this couples an optional feature into the core loop.
 
 ## Design Principles
 

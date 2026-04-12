@@ -46,30 +46,27 @@ L2 REFINE ──► add_field("domain_constraints")
 └──────────────────────────────────────────┘
 ```
 
-## The 4-Step Workflow
+## The Workflow
+
+**Core path (what everyone runs):**
 
 1. **Provide a labeled dataset** — input/output pairs (and any extra context)
 2. **Provide your `pipeline.json`** — your backend serves this via `GET /pipeline`. It declares every node, its parameters, and their allowed values. The optimizer only searches parameters defined in this file — nothing else is touched.
-3. **Sensitivity scan** — measure which axes matter at a given `sample_size`; statistical confidence in each axis guides how aggressively the optimizer should change it
-4. **Optimize** — run the feedback cycle from the scan's best starting point
+3. **Optimize** — run the critique-guided feedback cycle. The optimization loop is self-contained: it measures the baseline, generates candidates, scores them, critiques failures, and iterates.
+
+**Optional pre-step — Sensitivity scan.** Before optimizing, you can run a one-at-a-time perturbation scan to measure which prompt axes actually matter. The scan is a **separate, optional feature** — a human-driven exploration tool that lives in its own `recon/` package. Skip it and `optimize` still runs end-to-end. Run it and its results (`ReconBrief`) are passed into the optimizer as a hint about where to look first. That's the single, sanctioned bridge between the two features.
 
 The primary UI is a Jupyter notebook, backed by a FastAPI service designed to work with any LLM pipeline backend.
 
 ## How It Works
 
-PromptPotter is built on human-in-the-loop roundtrips. The human drives exploration decisions; the system handles evaluation and search. The concrete workflow:
+**The Optimization Loop (always runs).** A **critique-guided** feedback cycle: each round generates candidates, scores them against your dataset, and produces a structured **critique** of failures (or successes) that feeds forward into the next round's candidate generation — alongside sampled **thinking styles** as mutation guidance. This separates failure analysis from candidate generation (inspired by [PromptWizard](https://arxiv.org/abs/2405.18369)'s critique-and-refine pattern). Candidates are evaluated against the backend and winners selected by composite score. 3-layer escalation: Layer 1 generates prompt and parameter candidates every round, Layer 2 (context) adjusts when Layer 1 stalls, Layer 3 (strategy) rarely changes. Five LLM call sites: `restructure` (one-time setup — parses your task into 8 canonical prompt fields), `l1_generate`, `critique`, `l2_context`, `l3_plan`. The critique and thinking styles operate at the **optimizer agent** level (guiding the LLM that generates candidates) — they are not injected into the pipeline prompt being optimized.
 
-1. **Scan advisor** recommends which prompt axes to explore
-2. **Sensitivity scan** measures each axis independently
-3. **Coverage advisor** shows what's been measured and what's missing
-4. **PromptPotter optimizer** iterates from the best starting point
-5. **Evaluate** — increase `sample_size` to validate winners with statistical confidence
+**The Sensitivity Scan (optional, human-driven).** Completely independent. One LLM call site (`recon_advisor`) plus a one-at-a-time perturbation runner. You analyze the prompt landscape: the scan measures which axes actually matter (persona, thinking style, pipeline temperature, etc.) and how sensitive accuracy is to each, and the coverage advisor shows what's already been measured and what still needs exploration. If you run it, you get a `ReconBrief` to hand to the optimizer as a starting-point hint. If you don't, the optimizer starts from the baseline and discovers axes as it goes.
 
-Confidence intervals and two-proportion significance tests are built in. Non-parametric tests are planned.
+**What happens if you skip the scan?** `optimize` runs end-to-end. The baseline is measured automatically. The optimizer has no prior knowledge of which axes are sensitive — it discovers this through the critique loop. You trade a faster start (no scan) for a slightly slower convergence. For most users, skipping is the right default.
 
-**The Human Loop (Sensitivity Scan)** — You analyze the prompt landscape. A one-at-a-time perturbation scan measures which prompt axes actually matter (persona, thinking style, pipeline temperature, etc.) and how sensitive accuracy is to each. The coverage advisor shows what's already been measured and what still needs exploration. You pick the best starting point.
-
-**The AI Loop (Potter)** — From that starting point, a **critique-guided** feedback cycle iterates: each evaluation produces a structured **critique** of failures (or successes), which feeds forward into the next round's candidate generation alongside sampled **thinking styles** as mutation guidance. This separates failure analysis from candidate generation (inspired by [PromptWizard](https://arxiv.org/abs/2405.18369)'s critique-and-refine pattern). Candidates are evaluated against the backend and winners selected by composite score. 3-layer escalation: Layer 1 generates prompt and parameter candidates every round, Layer 2 (context) adjusts when Layer 1 stalls, Layer 3 (strategy) rarely changes. The critique and thinking styles operate at the **optimizer agent** level (guiding the eval LLM that generates candidates) — they are not injected into the pipeline prompt being optimized.
+Confidence intervals and two-proportion significance tests are built into both the optimization loop's candidate comparison and the scan's axis sensitivity reporting. Non-parametric tests are planned.
 
 **Prompt decomposition** is the core architectural move. Backends have one monolithic prompt — PromptPotter decomposes it into independent fields (persona, task_intent, thinking style, etc.) via LLM restructure, then perturbs each using a [variant library](promptpotter/config/prompt_variants.json) that includes variants from published research (e.g. PromptWizard's 40 thinking styles). Each variant carries provenance metadata (source, year) for traceability. This turns one opaque prompt into a combinatorial search space where each field can be independently measured, combined, and optimized.
 
@@ -86,26 +83,24 @@ SearchPoint (abstract — render())
 
 Intermediate node outputs are cached in a [suffix-hash store](docs/architecture/suffix-cache.md) keyed at every pipeline cut point — O(1) lookup for the common case, symmetric reuse across both upstream and downstream config changes. The cache replaced an earlier prefix-chain scheme during M9 and is a deliberate pre-publication architectural improvement.
 
-**The key insight: every evaluation is saved.** When an optimization thread stops improving, its data isn't wasted — the next sensitivity scan discovers all stored evaluations, knows the landscape better, and a fresh optimization starts from higher ground.
+**The key insight: every evaluation is saved.** When an optimization thread stops improving, its data isn't wasted — on a later run, the optimizer (or the optional scan) discovers all stored evaluations, knows the landscape better, and a fresh optimization starts from higher ground. This shared memory lives in the `intelligence/` package and is independent of both the optimization loop and the scan.
 
 ```
-  HUMAN LOOP                           AI LOOP (Potter)
-  ──────────                           ────────────────
-  Sensitivity Scan                     Critique-Guided Feedback Cycle
+  OPTIONAL                             CORE — always runs
+  ────────                             ─────────────────
+  Sensitivity Scan                     Critique-Guided Optimization Loop
   ┌──────────────────┐                 ┌───────────────────────────┐
-  │ Measure axes     │  select best    │ Growth: generate          │
-  │ Classify by      │───starting──────►  candidates using         │
-  │  sensitivity     │  point          │  critique + thinking      │
-  │ Show coverage    │                 │  styles                   │
-  └──────┬───────────┘                 │ Eval: evaluate via        │
-         │                             │  backend, select winner   │
-         │  all eval data              │ Critique: analyze         │
-         │  feeds back                 │  failures → next round    │
-         │                             └────────┬──────────────────┘
-         │                                      │
-         └──────────────◄───────────────────────┘
-              richer landscape → better starting point → repeat
+  │ recon_advisor     │  ReconBrief      │ restructure → l1_generate │
+  │ Measure axes     │───(optional)────►  → critique                │
+  │ Classify by      │  starting hint  │     ↓ stall?               │
+  │  sensitivity     │                 │  → l2_context              │
+  │ Show coverage    │                 │     ↓ stall?               │
+  └──────────────────┘                 │  → l3_plan                 │
+                                       └───────────────────────────┘
+        (skip entirely and `optimize` still runs end-to-end)
 ```
+
+Every evaluation — from the optional scan AND the optimization loop — flows into the same shared `intelligence/` store (`SearchMemory`). That shared store feeds both features on subsequent runs, but the two features never import each other's code.
 
 ```
 ┌─────────────────────┐         ┌─────────────────────┐

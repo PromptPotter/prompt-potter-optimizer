@@ -15,9 +15,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.intelligence import load_variant_library
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.application.scoring.metrics import find_rank
-from promptpotter.application.search import load_variant_library
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:

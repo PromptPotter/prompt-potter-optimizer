@@ -31,11 +31,11 @@ logger = logging.getLogger(__name__)
 class ReusablePlanMatch:
     """Result of a smart-search plan reuse lookup.
 
-    ``data`` is the raw on-disk plan dict (ready for ``deserialize_smart_search_plan``).
+    ``data`` is the raw on-disk plan dict (ready for ``deserialize_adaptive_recon_plan``).
     ``kind`` tells the caller how to post-process it:
 
-    - ``complete``  — scan finished; reuse ``scan_results.axis_profiles`` directly.
-    - ``partial``   — scan interrupted; caller rebuilds profiles from ``scan_results.rows``.
+    - ``complete``  — scan finished; reuse ``recon_results.axis_profiles`` directly.
+    - ``partial``   — scan interrupted; caller rebuilds profiles from ``recon_results.rows``.
     - ``sibling``   — another plan with matching variant_library_hash had scan data;
                        reuse its baseline/diagnostic/profiles under the current ``plan_id``.
     - ``diagnostic_only`` — plan existed but has no usable scan data.
@@ -49,7 +49,7 @@ class PlanStore(EntityStore):
     """File I/O for smart search plan persistence and resume."""
 
     def __init__(self, base_dir: Path):
-        super().__init__(base_dir, "smart_search_plans")
+        super().__init__(base_dir, "adaptive_recon_plans")
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return summary metadata for all smart search plans on disk."""
@@ -60,7 +60,7 @@ class PlanStore(EntityStore):
         for path in sorted(plans_dir.glob("ssplan_*.json")):
             data = read_json(path)
             config = data.get("config", {})
-            scan = data.get("scan_results", {})
+            scan = data.get("recon_results", {})
             results.append(
                 {
                     "plan_id": data["plan_id"],
@@ -86,7 +86,7 @@ class PlanStore(EntityStore):
             return None
 
         status = existing.get("status", "?")
-        scan = existing.get("scan_results") or {}
+        scan = existing.get("recon_results") or {}
         if status in ("scan_complete", "search_complete") and scan:
             return ReusablePlanMatch(kind="complete", data=existing)
         if status == "scan_partial" and scan:
@@ -309,7 +309,7 @@ class SessionStore:
 
     # -- Scan results ----------------------------------------------------------
 
-    def save_scan_results(
+    def save_recon_results(
         self,
         backend_id: str,
         session_id: str,
@@ -317,23 +317,23 @@ class SessionStore:
         axis_profiles: list[dict],
     ) -> None:
         """Persist sensitivity scan results (fills the persistence gap)."""
-        path = self._session_dir(backend_id, session_id) / "scan_results.json"
+        path = self._session_dir(backend_id, session_id) / "recon_results.json"
         write_json(
             path,
             {
-                "scan_df": scan_df_records,
+                "recon_df": scan_df_records,
                 "axis_profiles": axis_profiles,
                 "saved_at": datetime.now(UTC).isoformat(),
             },
         )
 
-    def load_scan_results(
+    def load_recon_results(
         self,
         backend_id: str,
         session_id: str,
     ) -> dict[str, Any] | None:
         """Load scan results. Returns None if not found."""
-        path = self._session_dir(backend_id, session_id) / "scan_results.json"
+        path = self._session_dir(backend_id, session_id) / "recon_results.json"
         return read_json_optional(path)
 
     # -- Campaign log ----------------------------------------------------------

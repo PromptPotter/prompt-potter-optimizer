@@ -1,0 +1,25 @@
+"""Shared materialized view over historical search data.
+
+The ``intelligence`` package is the common ground between the optional human
+sensitivity scan and the optimization loop. It owns SearchMemory (aggregated
+dataset_runs), the variant library loader, and eval-set adaptation — all
+shared primitives that both loops consume.
+
+Directionality: this package must NOT import from ``scan`` or ``optimization``.
+"""
+
+from __future__ import annotations
+
+from promptpotter.application.intelligence.eval_set_adaptation import adapt_eval_set
+from promptpotter.application.intelligence.search_memory import SearchMemory
+from promptpotter.application.intelligence.variant_library import (
+    load_variant_library,
+    load_variant_library_rich,
+)
+
+__all__ = [
+    "SearchMemory",
+    "adapt_eval_set",
+    "load_variant_library",
+    "load_variant_library_rich",
+]

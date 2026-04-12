@@ -4,7 +4,7 @@ Two concerns live here:
 
 1. ``DegradationCheck`` — per-query check that can fire mid-evaluation
    and abort remaining queries/candidates.  Duck-types with
-   ``EliminationCheck`` in ``search/failure_group_analysis.py``.
+   ``EliminationCheck`` in ``search/failure_groups.py``.
 2. ``escalate_l2`` — state-machine that decides whether a stall triggers
    L2 refine_strategy, L3 modify_plan, counter reset, or stop.
 

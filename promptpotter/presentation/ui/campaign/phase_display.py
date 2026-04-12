@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING
 from promptpotter.application.optimization.phases import PhaseEvent
 
 if TYPE_CHECKING:
-    from promptpotter.application.search.scan_results import ScanBrief
+    from promptpotter.application.recon.recon_report import ReconBrief
 
-from promptpotter.application.search.failure_group_analysis import (
+from promptpotter.application.recon.failure_groups import (
     min_detectable_effect,
     proportion_test,
 )
@@ -58,7 +58,7 @@ class _CycleDisplayState:
     round_num: int = 0
     baseline_accuracy: float = 0.0
     baseline_total: int = 0  # sample count for significance tests
-    scan_brief: ScanBrief | None = None  # cached for scan reasoning display
+    recon_brief: ReconBrief | None = None  # cached for scan reasoning display
     candidates_meta: list = field(default_factory=list)  # from l1_generate exit
     n_scoring_queries: int = 0  # from generate:exit, used in evaluate:enter banner
     current_pipeline_params: dict | None = None  # raw pp for candidate eval callback
@@ -339,7 +339,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     model = config.model or "(default)"
     l2 = "enabled" if config.enable_l2 else "disabled"
     l3 = "enabled" if config.enable_l3 else "disabled"
-    scan = "YES" if config.scan_brief is not None else "NO"
+    scan = "YES" if config.recon_brief is not None else "NO"
     sample = config.sp_budget_ttest
     state.baseline_total = sample
 
@@ -408,7 +408,7 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     n = d.get("n_variants", 0)
     model = d.get("model") or "(default)"
     creativity = d.get("creativity", 0.7)
-    scan = "YES" if d.get("has_scan_brief") else "NO"
+    scan = "YES" if d.get("has_recon_brief") else "NO"
     crit = "YES" if d.get("has_critique") else "NO"
 
     # Rotate SP diff state
@@ -441,9 +441,9 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_node_line(f"Model           {model}"))
 
     # Scan reasoning inside node frame
-    if state.scan_brief and d.get("has_scan_brief"):
-        axes = state.scan_brief.improving_axes
-        bl_acc = state.scan_brief.baseline_accuracy
+    if state.recon_brief and d.get("has_recon_brief"):
+        axes = state.recon_brief.improving_axes
+        bl_acc = state.recon_brief.baseline_accuracy
         if axes:
             print(
                 _node_line(

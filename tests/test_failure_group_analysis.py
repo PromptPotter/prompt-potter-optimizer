@@ -1,10 +1,10 @@
 """Tests for failure group sensitivity analysis and SearchMemory integration."""
 
-from promptpotter.application.search.failure_group_analysis import (
+from promptpotter.application.intelligence.search_memory import SearchMemory
+from promptpotter.application.recon.failure_groups import (
     FailureGroupResult,
     failure_group_sensitivity,
 )
-from promptpotter.application.search.search_memory import SearchMemory
 
 
 class _FakeCluster:
@@ -98,7 +98,7 @@ def test_search_memory_ingest_and_accessors():
     result = failure_group_sensitivity(rows, clusters)
 
     sm = SearchMemory()
-    sm.ingest_failure_group_analysis(result)
+    sm.ingest_failure_groups(result)
 
     # parameter_failure_correlation should return deltas for max_sites
     corr = sm.parameter_failure_correlation("max_sites")

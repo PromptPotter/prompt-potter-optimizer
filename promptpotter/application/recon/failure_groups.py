@@ -141,7 +141,7 @@ def failure_group_sensitivity(
     specifically help which failure modes.
 
     Args:
-        scan_rows: Rows from sensitivity_scan() — each must have ``per_query_hits``
+        scan_rows: Rows from run_recon() — each must have ``per_query_hits``
             dict mapping query → hit bool.
         failure_clusters: FailureCluster objects with ``failure_mode`` and
             ``example_queries`` attributes.

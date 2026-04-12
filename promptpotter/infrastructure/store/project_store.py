@@ -18,11 +18,11 @@ Layout on disk::
         datasets/test_material.json
         dataset_runs/{run_id}.json
         dataset_runs.json
-        smart_search_plans/{plan_id}.json
+        adaptive_recon_plans/{plan_id}.json
         campaigns/{campaign_id}.json
         campaigns/{campaign_id}/trial_NNNN.json
         sessions/{session_id}/session.json
-        sessions/{session_id}/scan_results.json
+        sessions/{session_id}/recon_results.json
         sessions/{session_id}/campaign_log.md
 """
 
@@ -50,6 +50,6 @@ class ProjectStore:
         self.backends = BackendStore(self.base_dir)
         self.campaigns = CampaignStore(self.base_dir)
         self.dataset_runs = DatasetRunStore(self.base_dir)
-        self.smart_search = PlanStore(self.base_dir)
+        self.adaptive_recon = PlanStore(self.base_dir)
         self.intermediate_cache = IntermediateCache(self.base_dir)
         self.sessions = SessionStore(self.base_dir)

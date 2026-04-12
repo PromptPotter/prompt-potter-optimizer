@@ -40,7 +40,7 @@ class CoverageEstimate(BaseModel):
     total_needed: int
 
 
-def estimate_scan_coverage(
+def estimate_recon_coverage(
     baseline_opt: OptSearchPoint,
     variant_library: dict,
     diagnostic_queries: list[dict],

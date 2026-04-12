@@ -10,7 +10,7 @@ Both layers use the same chained node hashes from
 serves as ``sp_hash``; prefix matching enables reuse of prior results
 when only downstream nodes changed.
 
-Prompt alias groups are used by ``scan_baseline.py`` and
+Prompt alias groups are used by ``recon_baseline.py`` and
 ``optimization_loop.py`` for SearchMemory historical linking.
 """
 

@@ -20,7 +20,7 @@ from promptpotter.application.campaign.data import (
 from promptpotter.application.campaign.mgmt import (
     save_campaign_winner,
 )
-from promptpotter.application.search import load_variant_library
+from promptpotter.application.intelligence import load_variant_library
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.project_store import ProjectStore
@@ -134,9 +134,9 @@ def dev_reload() -> None:
         "promptpotter.application.optimization.nodes.generate",
         "promptpotter.application.optimization.nodes.score",
         "promptpotter.application.optimization.nodes.formatting",
-        "promptpotter.application.search.smart_search",
-        "promptpotter.application.search.sensitivity_scanner",
-        "promptpotter.application.search.scan_baseline",
+        "promptpotter.application.recon.adaptive_recon",
+        "promptpotter.application.recon.recon_runner",
+        "promptpotter.application.recon.recon_report",
         "promptpotter.application.campaign.campaign_setup",
         # Display layer — safe to reload (no model classes)
         "promptpotter.presentation.ui.campaign.display",
@@ -145,10 +145,10 @@ def dev_reload() -> None:
         "promptpotter.presentation.ui.campaign.setup",
         "promptpotter.presentation.ui.campaign.campaigns",
         "promptpotter.presentation.ui.campaign.search",
-        "promptpotter.presentation.ui.campaign.search_scan",
+        "promptpotter.presentation.ui.campaign.search_recon",
         # NOTE: Do NOT reload promptpotter.domain.* or dataclass modules —
         # Pydantic/dataclass classes break when reloaded (existing
-        # instances fail type checks).  scan_results.py has ScanBrief
+        # instances fail type checks).  recon_results.py has ReconBrief
         # dataclass, so it must not be reloaded.
         # For model/dataclass changes, restart the kernel.
     ]:

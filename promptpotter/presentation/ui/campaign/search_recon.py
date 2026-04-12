@@ -7,11 +7,11 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from promptpotter.application.search.sensitivity_scanner import (
-    sensitivity_scan as _sensitivity_scan,
+from promptpotter.application.recon.adaptive_recon import ReconEvent
+from promptpotter.application.recon.adaptive_recon import run_adaptive_recon as _adaptive_search
+from promptpotter.application.recon.recon_runner import (
+    run_recon as _run_recon,
 )
-from promptpotter.application.search.smart_search import ScanEvent
-from promptpotter.application.search.smart_search import adaptive_search as _adaptive_search
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
@@ -31,15 +31,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "adaptive_search",
-    "run_sensitivity_scan",
-    "sensitivity_scan",
+    "run_adaptive_recon",
+    "run_recon",
+    "run_sensitivity_recon",
 ]
 
 
-async def sensitivity_scan(
+async def run_recon(
     baseline,
-    scan_variants: dict[str, list | dict],
+    recon_variants: dict[str, list | dict],
     dataset: list,
     session: SessionEnv,
     *,
@@ -75,8 +75,8 @@ async def sensitivity_scan(
                 print(f"  {DIM}{field}:{RESET} (empty)")
         print()
 
-    n_axes = sum(1 for v in scan_variants.values() if len(v) > 1)
-    n_configs = sum(len(v) for v in scan_variants.values() if len(v) > 1)
+    n_axes = sum(1 for v in recon_variants.values() if len(v) > 1)
+    n_configs = sum(len(v) for v in recon_variants.values() if len(v) > 1)
     n_samples = sample_size if sample_size > 0 else len(dataset)
     n_cached = (
         sum(e.get("item_count", 0) for e in store.dataset_runs.list_all(backend_id))
@@ -100,9 +100,9 @@ async def sensitivity_scan(
 
     try:
         print("  Evaluating baseline...")
-        df, profiles = await _sensitivity_scan(
+        df, profiles = await _run_recon(
             baseline,
-            scan_variants,
+            recon_variants,
             dataset,
             session,
             baseline_opt=baseline_opt,
@@ -134,7 +134,7 @@ async def sensitivity_scan(
 
     # Persist scan results via SessionStore if session is active
     if session_id and store and backend_id:
-        store.sessions.save_scan_results(
+        store.sessions.save_recon_results(
             backend_id,
             session_id,
             df.to_dict(orient="records"),
@@ -146,9 +146,9 @@ async def sensitivity_scan(
 
 
 def _make_scan_progress_cb() -> tuple[
-    Callable[[ScanEvent], None], Callable[[dict, int, int], None]
+    Callable[[ReconEvent], None], Callable[[dict, int, int], None]
 ]:
-    """Build a progress callback for sensitivity_scan with flip tracking."""
+    """Build a progress callback for run_recon with flip tracking."""
     baseline_results: list[dict] = []
 
     def _on_result(result: dict, index: int, total: int) -> None:
@@ -156,7 +156,7 @@ def _make_scan_progress_cb() -> tuple[
         is_cached = result.get("cached", False)
         print(_fmt_query_result(result, cached=is_cached), flush=True)
 
-    def _cb(event: ScanEvent) -> None:
+    def _cb(event: ReconEvent) -> None:
         t = event["type"]
 
         if t == "baseline_done":
@@ -233,7 +233,7 @@ def _make_scan_progress_cb() -> tuple[
     return _cb, _on_result
 
 
-async def adaptive_search(
+async def run_adaptive_recon(
     baseline_ps,
     variant_library: dict,
     dataset: list,
@@ -307,9 +307,9 @@ async def adaptive_search(
 
 
 def _make_search_progress_cb():
-    """Build a progress callback for adaptive_search."""
+    """Build a progress callback for run_adaptive_recon."""
 
-    def _cb(event: ScanEvent) -> None:
+    def _cb(event: ReconEvent) -> None:
         t = event["type"]
 
         if t == "round_start":
@@ -375,43 +375,43 @@ def _make_search_progress_cb():
     return _cb
 
 
-async def run_sensitivity_scan(
+async def run_sensitivity_recon(
     baseline,
     campaign_config: CampaignConfig,
-    scan_variants: dict[str, list | dict],
+    recon_variants: dict[str, list | dict],
     dataset: list,
     *,
-    scan_sample_size: int = 0,
+    recon_sample_size: int = 0,
     session: SessionEnv | None = None,
     experiment_id: str = "",
     session_id: str = "",
 ):
     """Prepare scan baseline and run sensitivity scan in one call.
 
-    Absorbs ``decompose_scan_baseline()`` and ``sensitivity_scan()`` plumbing.
+    Absorbs ``decompose_recon_baseline()`` and ``run_recon()`` plumbing.
 
     Returns:
-        (scan_baseline_sp, scan_df, axis_profiles) — the JobSearchPoint
+        (recon_baseline_sp, recon_df, axis_profiles) — the JobSearchPoint
         baseline, per-variant DataFrame, and axis profile list.
     """
-    from .search import decompose_scan_baseline
+    from .search import decompose_recon_baseline
 
-    scan_baseline_sp, search_baseline = await decompose_scan_baseline(
+    recon_baseline_sp, search_baseline = await decompose_recon_baseline(
         baseline,
         campaign_config,
         session=session,
-        scan_variants=scan_variants,
+        recon_variants=recon_variants,
     )
     assert session is not None
-    scan_df, axis_profiles = await sensitivity_scan(
-        scan_baseline_sp,
-        scan_variants,
+    recon_df, axis_profiles = await run_recon(
+        recon_baseline_sp,
+        recon_variants,
         dataset,
         baseline_opt=search_baseline,
-        sample_size=scan_sample_size,
+        sample_size=recon_sample_size,
         session=session,
         experiment_id=experiment_id,
         session_id=session_id,
         scoring_formula=campaign_config.get("scoring"),
     )
-    return scan_baseline_sp, scan_df, axis_profiles
+    return recon_baseline_sp, recon_df, axis_profiles

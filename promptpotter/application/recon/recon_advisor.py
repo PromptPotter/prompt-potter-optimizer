@@ -419,8 +419,8 @@ def _build_advisor_prompt(
         ),
         llm_details,
         search_memory_section,
-        _load_prompt("scan_advisor_analysis"),
-        _load_prompt("scan_advisor_output_format"),
+        _load_prompt("recon_advisor_analysis"),
+        _load_prompt("recon_advisor_output_format"),
     ]
     return "\n\n".join(s for s in sections if s)
 
@@ -439,7 +439,7 @@ def preview_advisor_prompt(
     back to representative placeholders so all conditional sections are visible.
     """
     if pipeline_schema is not None:
-        from promptpotter.application.search import load_variant_library as _load_vl
+        from promptpotter.application.intelligence import load_variant_library as _load_vl
 
         if variant_library is None:
             variant_library = _load_vl()
@@ -638,11 +638,11 @@ def resolve_schema_axes(
     return resolved, schema_labels
 
 
-def convert_advisory_to_scan_variants(
+def convert_advisory_to_recon_variants(
     advisory: dict,
     pipeline_schema: PipelineSchema | None = None,
 ) -> tuple[dict, dict[str, list[str]]]:
-    """Convert scan advisory into nested scan_variants dict.
+    """Convert scan advisory into nested recon_variants dict.
 
     Extracts ``priority_axes`` entries whose ``source`` is ``"pipeline_param"``
     and that carry ``suggested_values``.  Groups params under their owning
@@ -651,7 +651,7 @@ def convert_advisory_to_scan_variants(
     For schema axes (name ends with ``_schema``), parses mutation tuples,
     resolves against the baseline JSON Schema, and returns concrete dicts.
 
-    Returns ``(scan_variants, schema_labels)`` where ``schema_labels`` maps
+    Returns ``(recon_variants, schema_labels)`` where ``schema_labels`` maps
     schema axis names to human-readable labels (``"(baseline)"`` at index 0).
     """
     raw: dict[str, list] = {}
@@ -690,7 +690,7 @@ def convert_advisory_to_scan_variants(
     return nested, schema_labels
 
 
-async def advise_scan_config(
+async def advise_recon(
     pipeline_schema: PipelineSchema,
     variant_library: dict,
     llm_client: Any,
@@ -748,7 +748,7 @@ async def advise_scan_config(
     response = await llm_call(
         llm_client,
         messages=[{"role": "user", "content": prompt}],
-        node="scan_advisor",
+        node="recon_advisor",
         model=model,
         max_tokens=max_tokens,
     )
@@ -800,14 +800,14 @@ async def advise_scan_config(
 # ---------------------------------------------------------------------------
 
 
-def flatten_scan_variants(scan_variants: dict) -> dict[str, list]:
+def flatten_recon_variants(recon_variants: dict) -> dict[str, list]:
     """Flatten nested ``{"node": {"param": [...]}}`` to flat ``{"param": [...]}``.
 
     List values pass through unchanged; dict values (node groups) are
     expanded so each param becomes a top-level key.
     """
     flat: dict[str, list] = {}
-    for key, spec in scan_variants.items():
+    for key, spec in recon_variants.items():
         if isinstance(spec, list):
             flat[key] = spec
         elif isinstance(spec, dict):
@@ -817,14 +817,14 @@ def flatten_scan_variants(scan_variants: dict) -> dict[str, list]:
     return flat
 
 
-def rebuild_nested_resolved(scan_variants: dict, resolved: dict) -> dict:
+def rebuild_nested_resolved(recon_variants: dict, resolved: dict) -> dict:
     """Rebuild nested structure after flat schema resolution.
 
-    Mirrors the original ``scan_variants`` shape, replacing list values
+    Mirrors the original ``recon_variants`` shape, replacing list values
     with their resolved counterparts from *resolved*.
     """
     nested: dict = {}
-    for key, spec in scan_variants.items():
+    for key, spec in recon_variants.items():
         if isinstance(spec, list):
             nested[key] = resolved.get(key, spec)
         elif isinstance(spec, dict):

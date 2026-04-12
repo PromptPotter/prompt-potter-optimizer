@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import BaseModel, Field, field_validator
 
-from promptpotter.application.search.scan_results import ScanBrief
+# Sole sanctioned bridge from scan -> optimization: ReconBrief flows through RunConfig into L1.
+from promptpotter.application.recon.recon_report import ReconBrief
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.search_point import TaskDecomposition
 
@@ -68,7 +69,7 @@ class OptimizerLLMConfig(TypedDict, total=False):
 
 
 class SmartSearchConfig(TypedDict, total=False):
-    """Sensitivity scan parameters (``campaign_config["smart_search"]``)."""
+    """Sensitivity scan parameters (``campaign_config["adaptive_recon"]``)."""
 
     n_diagnostic: int
     max_rounds: int
@@ -90,13 +91,13 @@ class CampaignConfig(TypedDict, total=False):
     dataset_type: str
     local_scoring_token: str
     sp_budget_ttest: int
-    scan_sample_size: int
+    recon_sample_size: int
     exclude_nodes: list[str]
     pipeline_overrides: dict
     pipeline_params: dict | None
     optimization: OptimizationConfig
     optimizer_llm: OptimizerLLMConfig
-    smart_search: SmartSearchConfig
+    adaptive_recon: SmartSearchConfig
     scoring: str
 
 
@@ -127,7 +128,7 @@ class LoopConfig(BaseModel):
     enable_critique: bool = Field(True, description="Enable critique agent between rounds")
 
     # Scan-aware optimization
-    scan_brief: ScanBrief | None = Field(
+    recon_brief: ReconBrief | None = Field(
         None, description="Scan analytics context for candidate gen"
     )
 
@@ -236,7 +237,7 @@ class LoopConfig(BaseModel):
         project_root: str = "",
         session_id: str = "",
         pipeline_schema: PipelineSchema | None = None,
-        scan_brief: ScanBrief | None = None,
+        recon_brief: ReconBrief | None = None,
         task_context: TaskDecomposition | dict | None = None,
     ) -> LoopConfig:
         """Build from the notebook's ``campaign_config`` dict.
@@ -261,7 +262,7 @@ class LoopConfig(BaseModel):
             sp_budget_ttest=campaign_config.get("sp_budget_ttest", 20),
             seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
-            scan_brief=scan_brief,
+            recon_brief=recon_brief,
             task_context=task_context,
             enable_l2=opt.get("enable_l2", True),
             enable_l3=opt.get("enable_l3", True),
@@ -305,7 +306,7 @@ def compute_preflight_metrics(
     config: LoopConfig,
     dataset_size: int,
     exclude_nodes: list[str] | None = None,
-    has_scan_brief: bool = False,
+    has_recon_brief: bool = False,
 ) -> PreflightMetrics:
     """Derive display-ready metrics from LoopConfig and dataset size."""
     eff_queries = config.sp_budget_ttest
@@ -334,7 +335,7 @@ def compute_preflight_metrics(
         est_calls=est_calls,
         l2_label=f"enabled, patience={config.l2_patience}" if config.enable_l2 else "disabled",
         l3_label=f"enabled, patience={config.l3_patience}" if config.enable_l3 else "disabled",
-        strategy="SCAN-AWARE" if has_scan_brief else "FREEFORM",
+        strategy="RECON-AWARE" if has_recon_brief else "FREEFORM",
     )
 
 

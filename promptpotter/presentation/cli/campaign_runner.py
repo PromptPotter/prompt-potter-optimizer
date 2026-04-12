@@ -151,11 +151,11 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     )
 
 
-async def cmd_scan(args: argparse.Namespace) -> CommandResult:
-    """Run sensitivity scan with provided variants."""
-    from promptpotter.application.campaign.campaign_setup import run_scan_and_persist
-    from promptpotter.application.search.scan_advisor import (
-        flatten_scan_variants,
+async def cmd_recon(args: argparse.Namespace) -> CommandResult:
+    """Run reconnaissance pass (sensitivity scan) with provided variants."""
+    from promptpotter.application.campaign.campaign_setup import run_recon_and_persist
+    from promptpotter.application.recon.recon_advisor import (
+        flatten_recon_variants,
         resolve_schema_axes,
     )
     from promptpotter.shared.constants import PROMPT_STRING_FIELDS
@@ -163,83 +163,83 @@ async def cmd_scan(args: argparse.Namespace) -> CommandResult:
     ctx = load_session(args)
 
     with open(args.variants_file) as f:
-        scan_variants = json.load(f)
+        recon_variants = json.load(f)
 
     session = await init_services_cli(**ctx.init_params)
 
-    resolve_schema_axes(flatten_scan_variants(scan_variants), session.pipeline_schema)
-    prompt_axes = [k for k in scan_variants if k in PROMPT_STRING_FIELDS]
-    node_axes = [k for k in scan_variants if k not in PROMPT_STRING_FIELDS]
+    resolve_schema_axes(flatten_recon_variants(recon_variants), session.pipeline_schema)
+    prompt_axes = [k for k in recon_variants if k in PROMPT_STRING_FIELDS]
+    node_axes = [k for k in recon_variants if k not in PROMPT_STRING_FIELDS]
     logger.info(
-        "Scan variants resolved: %d prompt axes, %d node axes", len(prompt_axes), len(node_axes)
+        "Recon variants resolved: %d prompt axes, %d node axes", len(prompt_axes), len(node_axes)
     )
 
     baseline = load_cli_baseline(session)
     sample_size = (
         args.sample_size
         if args.sample_size is not None
-        else ctx.campaign_config.get("scan_sample_size", 0)
+        else ctx.campaign_config.get("recon_sample_size", 0)
     )
-    _scan_bl, _baseline_opt, scan_df, _axis_profiles = await run_scan_and_persist(
+    _recon_bl, _baseline_opt, recon_df, _axis_profiles = await run_recon_and_persist(
         baseline,
         ctx.campaign_config,
-        scan_variants,
+        recon_variants,
         session.queries or [],
         session=session,
-        scan_sample_size=sample_size,
+        recon_sample_size=sample_size,
         experiment_id=ctx.init_params["experiment_id"],
         session_id=ctx.session_id,
         log=logger.info,
     )
 
-    ctx.state["scan_variants"] = scan_variants
-    records = scan_df.to_dict(orient="records") if scan_df is not None else []
+    ctx.state["recon_variants"] = recon_variants
+    records = recon_df.to_dict(orient="records") if recon_df is not None else []
     best = max(records, key=lambda r: r.get("accuracy", 0)) if records else {}
     ctx.save_phase(
-        "scan",
-        log=f"## Scan\n- Axes: {len(scan_variants)}, variants: {len(records)}\n"
+        "recon",
+        log=f"## Recon\n- Axes: {len(recon_variants)}, variants: {len(records)}\n"
         f"- Best: {best.get('axis', '?')}={best.get('value_preview', '?')} "
         f"\u2192 {best.get('accuracy', 0):.1%} (delta: {best.get('delta', 0):+.1%})",
     )
     return CommandResult(data={"n_variants": len(records), "best": best})
 
 
-async def cmd_scan_results(args: argparse.Namespace) -> CommandResult:
-    """Show scan analytics and seed campaign from scan winner."""
+async def cmd_show_recon(args: argparse.Namespace) -> CommandResult:
+    """Show recon analytics and seed campaign from recon winner."""
     import pandas as pd
 
-    from promptpotter.application.search.scan_results import (
-        seed_campaign_from_scan as _seed_campaign_from_scan,
+    from promptpotter.application.recon.recon_report import (
+        seed_campaign_from_recon,
     )
 
     ctx = load_session(args)
     session = await init_services_cli(**ctx.init_params)
 
-    scan_data = session.store.sessions.load_scan_results(ctx.backend_id, ctx.session_id)
-    if not scan_data:
-        sys.exit("ERROR: No scan results. Run 'scan' first.")
+    recon_data = session.store.sessions.load_recon_results(ctx.backend_id, ctx.session_id)
+    if not recon_data:
+        sys.exit("ERROR: No recon results. Run 'recon' first.")
 
-    scan_df = pd.DataFrame(scan_data["scan_df"])
-    axis_profiles = scan_data["axis_profiles"]
+    recon_df = pd.DataFrame(recon_data["recon_df"])
+    axis_profiles = recon_data["axis_profiles"]
 
     human_parts: list[str] = []
-    if not scan_df.empty:
-        best_row = scan_df.loc[scan_df["accuracy"].idxmax()]
+    if not recon_df.empty:
+        best_row = recon_df.loc[recon_df["accuracy"].idxmax()]
         human_parts.append(
-            f"Scan results: {len(scan_df)} variants across {scan_df['axis'].nunique()} axes"
+            f"Recon results: {len(recon_df)} variants across {recon_df['axis'].nunique()} axes"
         )
         human_parts.append(
             f"Best: {best_row['axis']}={best_row.get('value_preview', '?')} "
             f"({best_row['accuracy']:.1%}, delta={best_row.get('delta', 0):+.1%})"
         )
 
-    scan_baseline_sp = load_cli_baseline(session)
+    recon_baseline_sp = load_cli_baseline(session)
     campaign_rounds: list = []
-    _seed_campaign_from_scan(
-        scan_df,
+    seed_campaign_from_recon(
+        recon_df,
         axis_profiles,
-        scan_baseline_sp.to_job_search_point(),
-        ctx.scan_variants,
+        recon_baseline_sp.to_job_search_point(),
+        ctx.recon_variants,
         campaign_rounds,
         ctx.campaign_config,
     )
@@ -248,10 +248,10 @@ async def cmd_scan_results(args: argparse.Namespace) -> CommandResult:
         ctx.state["baseline_accuracy"] = campaign_rounds[-1].get("accuracy", 0.0)
         ctx.state["baseline_prompt_fields"] = campaign_rounds[-1].get("prompt_fields", {})
 
-    ctx.save_phase("scan-results")
+    ctx.save_phase("recon-results")
     return CommandResult(
         data={
-            "n_variants": len(scan_df),
+            "n_variants": len(recon_df),
             "baseline_accuracy": ctx.state.get("baseline_accuracy", 0.0),
         },
         human="\n".join(human_parts) if human_parts else None,
@@ -261,7 +261,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> CommandResult:
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
     from promptpotter.application.campaign.callbacks import RunCallbacks
-    from promptpotter.application.campaign.campaign_setup import load_scan_brief
+    from promptpotter.application.campaign.campaign_setup import load_recon_brief
     from promptpotter.application.campaign.data import extract_campaign_baseline
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
@@ -298,7 +298,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     )
 
     baseline_acc = campaign_rounds[-1].get("accuracy", 0.0) if campaign_rounds else 0.0
-    scan_brief = load_scan_brief(session, ctx.session_id, ctx.scan_variants, baseline_acc)
+    recon_brief = load_recon_brief(session, ctx.session_id, ctx.recon_variants, baseline_acc)
 
     campaign_config.setdefault("optimization", {}).pop("pause_before_scoring", None)
     ctx.save_phase("optimizing")
@@ -314,7 +314,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             campaign_config,
             baseline=baseline,
             session=session,
-            scan_brief=scan_brief,
+            recon_brief=recon_brief,
             experiment_id=ctx.state.get("experiment_id"),
             task_context=ctx.task_context,
             session_id=ctx.session_id,
@@ -427,8 +427,8 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
 COMMANDS = {
     "init": cmd_init,
     "set-task": cmd_task_context,
-    "scan": cmd_scan,
-    "show-scan": cmd_scan_results,
+    "recon": cmd_recon,
+    "show-recon": cmd_show_recon,
     "optimize": cmd_optimize,
     "control": cmd_control,
     "profile": cmd_profile,

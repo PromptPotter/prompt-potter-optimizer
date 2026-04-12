@@ -2,7 +2,7 @@
 and scan baseline preparation.
 
 Pure functions for working with scan results — no backend calls, no eval
-(except ``decompose_scan_baseline`` which delegates to decompose).
+(except ``decompose_recon_baseline`` which delegates to decompose).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ScanBaselineResult:
-    """Result from ``decompose_scan_baseline()``."""
+    """Result from ``decompose_recon_baseline()``."""
 
     baseline_jsp: JobSearchPoint
     search_baseline: OptSearchPoint
@@ -39,7 +39,7 @@ class ScanBaselineResult:
     restructured_fields: dict[str, str]
 
 
-async def decompose_scan_baseline(
+async def decompose_recon_baseline(
     baseline: OptSearchPoint,
     campaign_config: CampaignConfig,
     llm_client: LLMClientBase,
@@ -47,7 +47,7 @@ async def decompose_scan_baseline(
     *,
     pipeline_params: dict | None = None,
     session: SessionEnv | None = None,
-    scan_variants: dict | None = None,
+    recon_variants: dict | None = None,
     force_restructure: bool = False,
     pipeline_schema: PipelineSchema | None = None,
 ) -> ScanBaselineResult:
@@ -131,7 +131,7 @@ async def decompose_scan_baseline(
 
 
 @dataclass
-class ScanBrief:
+class ReconBrief:
     """Structured scan brief for the LLM meta-prompt."""
 
     leaderboard_text: str = ""
@@ -155,12 +155,12 @@ class DiagnosticResult:
 
 
 def _partial_profiles_from_rows(
-    scan_results: dict,
+    recon_results: dict,
     diagnostic_len: int,
 ) -> list:
     """Rebuild axis profiles from the rows of a partial scan."""
-    from promptpotter.application.search import load_variant_library
-    from promptpotter.application.search.smart_search import build_axis_profiles
+    from promptpotter.application.intelligence import load_variant_library
+    from promptpotter.application.recon.adaptive_recon import build_axis_profiles
 
     vl = load_variant_library()
     axes: list[tuple[str, str, list]] = []
@@ -170,7 +170,7 @@ def _partial_profiles_from_rows(
     for name, vals in vl.get("pipeline_params", {}).items():
         if len(vals) > 1:
             axes.append((name, "pipeline_param", vals))
-    rows = scan_results.get("rows", [])
+    rows = recon_results.get("rows", [])
     return build_axis_profiles(rows, axes, diagnostic_len)
 
 
@@ -187,48 +187,48 @@ async def resume_or_build_diagnostic(
 ) -> DiagnosticResult:
     """Resume or build a smart-search diagnostic set.
 
-    Asks ``store.smart_search.find_reusable_plan`` for an on-disk match. On a
+    Asks ``store.adaptive_recon.find_reusable_plan`` for an on-disk match. On a
     hit, post-processes the match according to its ``kind`` (complete / partial
     / sibling / diagnostic_only). On a miss, runs the LLM restructure + builds
     a fresh diagnostic set and saves the new plan.
     """
+    from promptpotter.application.intelligence import load_variant_library
     from promptpotter.application.optimization.pipeline import decompose_prompt_fields
-    from promptpotter.application.search import load_variant_library
-    from promptpotter.application.search.smart_search import (
+    from promptpotter.application.recon.adaptive_recon import (
+        adaptive_recon_plan_identity,
         build_diagnostic_set,
-        deserialize_smart_search_plan,
-        serialize_smart_search_plan,
-        smart_search_plan_identity,
+        deserialize_adaptive_recon_plan,
+        serialize_adaptive_recon_plan,
     )
 
-    ss = campaign_config.get("smart_search", {})
+    ss = campaign_config.get("adaptive_recon", {})
     if variant_library is None:
         variant_library = load_variant_library()
 
-    plan_id = smart_search_plan_identity(
+    plan_id = adaptive_recon_plan_identity(
         baseline.instruction,
         variant_library,
         ss,
         seed=ss.get("seed", 42),
     )
 
-    match = store.smart_search.find_reusable_plan(backend_id, plan_id)
+    match = store.adaptive_recon.find_reusable_plan(backend_id, plan_id)
     if match is not None:
-        plan = deserialize_smart_search_plan(match.data)
-        scan_results = plan.get("scan_results") or {}
+        plan = deserialize_adaptive_recon_plan(match.data)
+        recon_results = plan.get("recon_results") or {}
         if match.kind == "complete":
-            profiles = scan_results.get("axis_profiles", [])
+            profiles = recon_results.get("axis_profiles", [])
             logger.info("Scan complete in plan %s, reusing profiles", plan_id)
         elif match.kind == "partial":
-            profiles = _partial_profiles_from_rows(scan_results, len(plan["diagnostic"]))
+            profiles = _partial_profiles_from_rows(recon_results, len(plan["diagnostic"]))
             logger.info(
                 "Scan partial in plan %s: %d axes done, %d profiles",
                 plan_id,
-                len(scan_results.get("completed_axes", [])),
+                len(recon_results.get("completed_axes", [])),
                 len(profiles),
             )
         elif match.kind == "sibling":
-            profiles = scan_results.get("axis_profiles", [])
+            profiles = recon_results.get("axis_profiles", [])
             logger.info(
                 "Adopting scan data from sibling plan %s (%d profiles)",
                 plan["plan_id"],
@@ -267,7 +267,7 @@ async def resume_or_build_diagnostic(
         "max_rounds": ss.get("max_rounds", 3),
         "stop_threshold": ss.get("stop_threshold", 0.0),
     }
-    plan_data = serialize_smart_search_plan(
+    plan_data = serialize_adaptive_recon_plan(
         plan_id,
         config,
         baseline,
@@ -277,7 +277,7 @@ async def resume_or_build_diagnostic(
         diag_summary,
         vl_hash,
     )
-    store.smart_search.save(backend_id, plan_id, plan_data)
+    store.adaptive_recon.save(backend_id, plan_id, plan_data)
 
     return DiagnosticResult(
         plan_id=plan_id,
@@ -288,11 +288,11 @@ async def resume_or_build_diagnostic(
     )
 
 
-def select_scan_winner(
-    scan_df: pd.DataFrame,
+def select_recon_winner(
+    recon_df: pd.DataFrame,
     axis_profiles: list[dict],
     baseline: JobSearchPoint,
-    scan_variants: dict[str, list],
+    recon_variants: dict[str, list],
     *,
     baseline_opt: OptSearchPoint | None = None,
     pipeline_schema: PipelineSchema | None = None,
@@ -303,7 +303,7 @@ def select_scan_winner(
     improvement (best_delta > 0) into a single JobSearchPoint.
 
     Args:
-        baseline_opt: Required when scan_variants contains prompt_field axes.
+        baseline_opt: Required when recon_variants contains prompt_field axes.
             Used to derive prompt-field perturbations via OptSearchPoint.
     """
     prompt_changes: dict[str, Any] = {}
@@ -315,15 +315,15 @@ def select_scan_winner(
 
     for profile in improving:
         axis_name = profile["axis"]
-        axis_rows = scan_df[scan_df["axis"] == axis_name]
+        axis_rows = recon_df[recon_df["axis"] == axis_name]
         if axis_rows.empty:
             continue
         best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
         value_idx = int(best_row["value_idx"])
-        values = scan_variants.get(axis_name, [])
+        values = recon_variants.get(axis_name, [])
         if value_idx >= len(values):
             logger.warning(
-                "select_scan_winner: value_idx %d out of range for %s (len=%d)",
+                "select_recon_winner: value_idx %d out of range for %s (len=%d)",
                 value_idx,
                 axis_name,
                 len(values),
@@ -338,11 +338,11 @@ def select_scan_winner(
     best = baseline
     if prompt_changes:
         assert baseline_opt is not None, (
-            "baseline_opt required for prompt_field perturbation in select_scan_winner"
+            "baseline_opt required for prompt_field perturbation in select_recon_winner"
         )
         best_opt = baseline_opt.derive_candidate(
             **prompt_changes,
-            changes_description="scan_winner",
+            changes_description="recon_winner",
         )
         best = best_opt.to_job_search_point(
             base_pipeline_params=baseline.pipeline_params,
@@ -353,7 +353,7 @@ def select_scan_winner(
             pipeline_params={**(best.pipeline_params or {}), **param_changes},
         )
     logger.debug(
-        "select_scan_winner: %d prompt changes, %d param changes from %d improving axes",
+        "select_recon_winner: %d prompt changes, %d param changes from %d improving axes",
         len(prompt_changes),
         len(param_changes),
         len(improving),
@@ -373,21 +373,21 @@ def compute_difficulty_summary(difficulty_df: Any) -> dict[str, int] | None:
     return summary
 
 
-def prepare_scan_brief(
-    scan_df: pd.DataFrame,
+def prepare_recon_brief(
+    recon_df: pd.DataFrame,
     axis_profiles: list[dict],
-    scan_variants: dict[str, list],
+    recon_variants: dict[str, list],
     baseline_accuracy: float,
     *,
     difficulty_summary: dict | None = None,
-) -> ScanBrief:
+) -> ReconBrief:
     """Build structured scan brief for the LLM meta-prompt.
 
     All formatting is deterministic — no LLM calls. Returns a dict with
     pre-formatted text sections plus structured data for downstream use.
     """
-    sort_col = "composite" if "composite" in scan_df.columns else "accuracy"
-    ranked = scan_df.sort_values(sort_col, ascending=False)
+    sort_col = "composite" if "composite" in recon_df.columns else "accuracy"
+    ranked = recon_df.sort_values(sort_col, ascending=False)
 
     lines = []
     for _, r in ranked.iterrows():
@@ -432,7 +432,7 @@ def prepare_scan_brief(
 
     tested_lines = []
     for axis_name in improving_axes:
-        axis_rows = scan_df[scan_df["axis"] == axis_name].sort_values(
+        axis_rows = recon_df[recon_df["axis"] == axis_name].sort_values(
             "accuracy",
             ascending=False,
         )
@@ -446,7 +446,7 @@ def prepare_scan_brief(
         tested_lines.extend(vals)
     tested_values = "\n".join(tested_lines)
 
-    return ScanBrief(
+    return ReconBrief(
         leaderboard_text=leaderboard_text,
         sensitivity_text=sensitivity_text,
         difficulty_text=difficulty_text,
@@ -459,7 +459,7 @@ def prepare_scan_brief(
 
 @dataclass
 class SeedResult:
-    """Result from ``seed_campaign_from_scan()``."""
+    """Result from ``seed_campaign_from_recon()``."""
 
     best_sp: JobSearchPoint
     merged_pipeline_params: dict | None
@@ -467,11 +467,11 @@ class SeedResult:
     improving_axes: list[dict]
 
 
-def seed_campaign_from_scan(
-    scan_df: pd.DataFrame,
+def seed_campaign_from_recon(
+    recon_df: pd.DataFrame,
     axis_profiles: list[dict],
     baseline: JobSearchPoint,
-    scan_variants: dict[str, list],
+    recon_variants: dict[str, list],
     campaign_rounds: list[dict],
     campaign_config: CampaignConfig,
 ) -> SeedResult:
@@ -484,11 +484,11 @@ def seed_campaign_from_scan(
         SeedResult with best_sp, merged params, new round entry, and
         improving axes for display.
     """
-    best_sp = select_scan_winner(
-        scan_df,
+    best_sp = select_recon_winner(
+        recon_df,
         axis_profiles,
         baseline,
-        scan_variants,
+        recon_variants,
     )
 
     improving = [
@@ -507,17 +507,17 @@ def seed_campaign_from_scan(
         campaign_config["pipeline_params"] = merged
         merged_pp = merged
 
-    # Compute scan winner accuracy from scan_df (best single-variant result)
-    best_row = scan_df.loc[scan_df["accuracy"].idxmax()] if not scan_df.empty else None
+    # Compute scan winner accuracy from recon_df (best single-variant result)
+    best_row = recon_df.loc[recon_df["accuracy"].idxmax()] if not recon_df.empty else None
     scan_winner_acc = float(best_row["accuracy"]) if best_row is not None else 0.0
 
     search_opt = OptSearchPoint(
         instruction=best_sp.render(),
-        changes_description=f"scan_winner (sp_hash={best_sp.sp_hash()[:12]})",
+        changes_description=f"recon_winner (sp_hash={best_sp.sp_hash()[:12]})",
     )
     round_entry = {
         "round": "search",
-        "label": f"smart_search ({search_opt.changes_description or search_opt.id[:12]})",
+        "label": f"adaptive_recon ({search_opt.changes_description or search_opt.id[:12]})",
         "prompt_fields": search_opt,
         "accuracy": scan_winner_acc,
         "hits": int(best_row["hits"]) if best_row is not None else 0,

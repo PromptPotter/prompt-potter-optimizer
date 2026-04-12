@@ -58,11 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_tc.add_argument("--task-file", default=None)
     p_tc.add_argument("--task-text", default=None)
 
-    p_scan = sub.add_parser("scan", help="Run sensitivity scan")
-    p_scan.add_argument("--variants-file", required=True, help="Scan variants JSON")
-    p_scan.add_argument("--sample-size", type=int, default=None)
+    p_recon = sub.add_parser("recon", help="Run reconnaissance pass (sensitivity scan)")
+    p_recon.add_argument("--variants-file", required=True, help="Recon variants JSON")
+    p_recon.add_argument("--sample-size", type=int, default=None)
 
-    sub.add_parser("show-scan", help="Show scan analytics and seed campaign")
+    sub.add_parser("show-recon", help="Show recon analytics and seed campaign")
     sub.add_parser("optimize", help="Run optimization loop")
 
     p_ctl = sub.add_parser("control", help="Write control signal to dashboard")

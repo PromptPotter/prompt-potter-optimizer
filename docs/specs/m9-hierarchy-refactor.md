@@ -33,7 +33,7 @@ promptpotter/
 ├── application/            # use cases / orchestration — no direct disk or network
 │   ├── campaign/           # lifecycle, runner, round_execution, setup
 │   ├── optimization/       # L1/L2/L3 pipeline, critique, escalation, layer_transitions
-│   ├── search/             # scan_advisor, smart_search, sensitivity_scanner, search_memory
+│   ├── search/             # recon_advisor, adaptive_recon, recon_runner, search_memory
 │   └── scoring/            # search_point_scorer, sample_measurement, metrics
 │
 ├── infrastructure/         # adapters — all I/O lives here
@@ -92,10 +92,10 @@ Moved intact in M9; each gets its own splitting spec later.
 
 1. `services/tracing/observability_logger.py` (37KB) → `infrastructure/tracing/observability_logger.py`
 2. `cli/campaign_runner.py` (34KB) → `presentation/cli/campaign_runner.py`
-3. `services/search/scan_advisor.py` (34KB) → `application/search/scan_advisor.py`
+3. `services/search/recon_advisor.py` (34KB) → `application/search/recon_advisor.py`
 4. `ui/campaign/{search,optimize,phase_display,display}.py` (26–32KB) → `presentation/ui/campaign/`
 5. `services/campaign/nodes/formatting.py` (31KB) → `application/optimization/nodes/formatting.py`
-6. `services/search/smart_search.py` (28KB) → `application/search/smart_search.py`
+6. `services/search/adaptive_recon.py` (28KB) → `application/search/adaptive_recon.py`
 
 ## Invariants Preserved
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.search_point import TaskDecomposition
 
 if TYPE_CHECKING:
-    from promptpotter.application.search.scan_results import ScanBrief
+    from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.analysis import FailureAnalysis
 
 __all__ = [
@@ -45,7 +45,7 @@ class L1PromptData:
     warning_inventory: dict | None = None
     escalation_journal: list[dict] | None = None
     is_probe_round: bool = False
-    scan_brief: ScanBrief | None = None
+    recon_brief: ReconBrief | None = None
     scan_compact: bool = False
     failure_analysis: FailureAnalysis | None = None
     search_memory_digest: dict | None = None
@@ -79,7 +79,7 @@ def format_context_sections(ctx: L1PromptData) -> str:
         sections.append(ctx.pipeline_schema_text)
 
     # Scan analytics — full on first round, sensitivity-only thereafter
-    sc = ctx.scan_brief
+    sc = ctx.recon_brief
     if sc:
         if ctx.scan_compact and sc.sensitivity_text:
             sections.append(f"SCAN:\n{sc.sensitivity_text}")

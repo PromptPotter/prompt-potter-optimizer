@@ -73,7 +73,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 4. CLI commands accept `--dataset` and `--pipeline` overrides; default comes from the active session.
 5. Two datasets demonstrably coexist (`datasets/lca-termnorm/` + one benchmark dataset) in a single project store without collision.
 
-**Open decisions during the track:** migration vs coexistence for legacy data, how `show-status` aggregates across datasets, whether `scan_variants` libraries are per-dataset or shared.
+**Open decisions during the track:** migration vs coexistence for legacy data, how `show-status` aggregates across datasets, whether `recon_variants` libraries are per-dataset or shared.
 
 ### Track 4: File-Directory UI v0 (Webapp Preparation)
 

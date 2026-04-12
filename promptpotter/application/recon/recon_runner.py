@@ -13,12 +13,12 @@ import random
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.application.search.failure_group_analysis import preview as _preview
-from promptpotter.application.search.smart_search import (
-    ScanEvent,
+from promptpotter.application.recon.adaptive_recon import (
+    ReconEvent,
     build_axis_profiles,
 )
+from promptpotter.application.recon.failure_groups import preview as _preview
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.domain.search_point import JobSearchPoint
@@ -34,16 +34,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def sensitivity_scan(
+async def run_recon(
     baseline: JobSearchPoint,
-    scan_variants: dict[str, list | dict],
+    recon_variants: dict[str, list | dict],
     dataset: list,
     session: SessionEnv,
     *,
     baseline_opt: OptSearchPoint | None = None,
     sample_size: int = 0,
     pipeline_schema: PipelineSchema | None = None,
-    progress_cb: Callable[[ScanEvent], None] | None = None,
+    progress_cb: Callable[[ReconEvent], None] | None = None,
     on_result: Callable | None = None,
     experiment_id: str = "",
     pruning_enabled: bool = True,
@@ -57,13 +57,13 @@ async def sensitivity_scan(
 
     Args:
         baseline: Baseline JobSearchPoint (pipeline_params).
-        scan_variants: Dict mapping axes to value lists.  Two formats:
+        recon_variants: Dict mapping axes to value lists.  Two formats:
             - Prompt fields: ``{"thinking_style": ["a", "b"]}`` (list → prompt)
             - Pipeline params: ``{"web_search": {"max_sites": [3, 5]}}`` (dict → node)
         dataset: Full evaluation dataset.
         session: SessionEnv bundling backend_client, store, backend_id.
         baseline_opt: OptSearchPoint for prompt-field perturbation. Required
-            when scan_variants contains prompt_field axes.
+            when recon_variants contains prompt_field axes.
         sample_size: If >0, subsample dataset to this many queries
             (deterministic seed=42). 0 means use all.
         pipeline_schema: Override PipelineSchema (defaults to session's).
@@ -95,7 +95,7 @@ async def sensitivity_scan(
         store=store,
         backend_id=backend_id,
         pipeline_schema=pipeline_schema,
-        source="sensitivity_scan",
+        source="run_recon",
         experiment_id=experiment_id,
         scorer=compile_scorer(scoring_formula),
     )
@@ -120,7 +120,7 @@ async def sensitivity_scan(
     # Classify axes: prompt_field vs pipeline_param
     # Axis tuple: (param_name, axis_type, values, node_name | None)
     axes: list[tuple[str, str, list, str | None]] = []
-    for key, spec in scan_variants.items():
+    for key, spec in recon_variants.items():
         if key in PROMPT_STRING_FIELDS and isinstance(spec, list):
             if len(spec) <= 1:
                 continue
@@ -137,7 +137,7 @@ async def sensitivity_scan(
         elif isinstance(spec, list):
             # Bare list but not a prompt field — skip with warning
             logger.warning(
-                "scan_variants: bare list for %r is not a prompt field; "
+                "recon_variants: bare list for %r is not a prompt field; "
                 'nest under node name: {"node": {"%s": [...]}}',
                 key,
                 key,
@@ -218,7 +218,7 @@ async def sensitivity_scan(
     _baseline_ci: tuple[float, float] | None = None
     if pruning_enabled:
         try:
-            from promptpotter.application.search.failure_group_analysis import wilson_ci
+            from promptpotter.application.recon.failure_groups import wilson_ci
 
             _baseline_ci = wilson_ci(baseline_scores["hits"], baseline_scores["total"])
         except ImportError:
@@ -353,7 +353,7 @@ async def sensitivity_scan(
 
             # Per-axis early pruning (Wave 2b)
             if _baseline_ci is not None and not _axis_pruned:
-                from promptpotter.application.search.failure_group_analysis import wilson_ci
+                from promptpotter.application.recon.failure_groups import wilson_ci
 
                 var_ci = wilson_ci(scores["hits"], scores["total"])
                 _axis_variant_cis.append(var_ci)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from promptpotter.application.search.failure_group_analysis import wilson_ci
+from promptpotter.application.recon.failure_groups import wilson_ci
 from promptpotter.shared.errors import is_error_result
 
 
@@ -57,8 +57,8 @@ __all__ = [
     "show_flip_tracking",
     "show_lineage_chain",
     "show_progress",
-    "show_scan_leaderboard",
-    "show_scan_query_difficulty",
+    "show_recon_leaderboard",
+    "show_recon_query_difficulty",
 ]
 
 # ANSI foreground colors
@@ -474,21 +474,21 @@ def show_axis_profiles(profiles: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def show_scan_leaderboard(
-    scan_df,
+def show_recon_leaderboard(
+    recon_df,
     axis_profiles: list[dict],
 ) -> None:
     """Display variant leaderboard and per-axis statistics from scan results."""
     import pandas as pd
     from IPython.display import display as ipy_display
 
-    if scan_df.empty:
+    if recon_df.empty:
         print("No scan data to display.")
         return
 
     # --- A. Variant leaderboard ---
-    sort_col = "composite" if "composite" in scan_df.columns else "accuracy"
-    ranked = scan_df.sort_values(sort_col, ascending=False).reset_index(drop=True)
+    sort_col = "composite" if "composite" in recon_df.columns else "accuracy"
+    ranked = recon_df.sort_values(sort_col, ascending=False).reset_index(drop=True)
 
     rows = []
     for i, r in ranked.iterrows():
@@ -514,7 +514,7 @@ def show_scan_leaderboard(
     # --- B. Per-axis statistics ---
     profile_lookup = {p["axis"]: p for p in axis_profiles}
     axis_rows = []
-    for axis_name, grp in scan_df.groupby("axis", sort=False):
+    for axis_name, grp in recon_df.groupby("axis", sort=False):
         prof = profile_lookup.get(axis_name, {})
         accs = grp["accuracy"]
         axis_rows.append(
@@ -536,7 +536,7 @@ def show_scan_leaderboard(
     ipy_display(pd.DataFrame(axis_rows))
 
 
-def show_scan_query_difficulty(
+def show_recon_query_difficulty(
     store,
     backend_id: str,
 ):
@@ -550,10 +550,10 @@ def show_scan_query_difficulty(
 
     # Collect scan-source dataset runs
     summaries = store.dataset_runs.list_all(backend_id)
-    scan_summaries = [s for s in summaries if s.get("source") == "sensitivity_scan"]
+    scan_summaries = [s for s in summaries if s.get("source") == "run_recon"]
 
     if not scan_summaries:
-        print("No sensitivity_scan runs found.")
+        print("No run_recon runs found.")
         return pd.DataFrame()
 
     # Aggregate per-query stats

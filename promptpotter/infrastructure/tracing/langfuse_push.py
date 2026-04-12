@@ -104,10 +104,10 @@ logger = logging.getLogger(__name__)
 # Fixed ordering for origin groups
 ORIGIN_ORDER = [
     "baseline",
-    "sensitivity_scan",
+    "run_recon",
     "feedback_cycle",
     "optimization_loop",
-    "smart_search_winner",
+    "adaptive_recon_winner",
     "other",
 ]
 

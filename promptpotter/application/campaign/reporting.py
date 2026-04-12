@@ -28,10 +28,10 @@ import sys
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.search.failure_group_analysis import proportion_test, wilson_ci
+from promptpotter.application.recon.failure_groups import proportion_test, wilson_ci
 
 if TYPE_CHECKING:
-    from promptpotter.application.search.search_memory import SearchMemory
+    from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.analysis import FailureAnalysis, QueryDifficulty
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store.project_store import ProjectStore

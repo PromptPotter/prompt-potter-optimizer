@@ -17,7 +17,7 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
-    from promptpotter.application.search.scan_results import ScanBrief
+    from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.analysis import FailureAnalysis
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ async def l1_generate(
     creativity: float,
     llm_client: LLMClientBase,
     model: str | None = None,
-    scan_brief: ScanBrief | None = None,
+    recon_brief: ReconBrief | None = None,
     is_probe_round: bool = False,
     scan_compact: bool = False,
     failure_analysis: FailureAnalysis | None = None,
@@ -126,7 +126,7 @@ async def l1_generate(
                 warning_inventory=opt_sp.warning_inventory or None,
                 escalation_journal=opt_sp.escalation_journal or None,
                 is_probe_round=is_probe_round,
-                scan_brief=scan_brief,
+                recon_brief=recon_brief,
                 scan_compact=scan_compact,
                 failure_analysis=failure_analysis,
                 search_memory_digest=search_memory_digest,

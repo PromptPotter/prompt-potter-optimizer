@@ -8,31 +8,31 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.application.search import (
-    advise_scan_config as _advise_scan_config,
+from promptpotter.application.intelligence import load_variant_library_rich
+from promptpotter.application.recon import (
+    advise_recon as _advise_recon,
 )
-from promptpotter.application.search import (
+from promptpotter.application.recon import (
     load_filtered_variant_library as _load_filtered_variants,
 )
-from promptpotter.application.search import load_variant_library_rich
-from promptpotter.application.search import (
+from promptpotter.application.recon import (
     preview_advisor_prompt as _preview_advisor_prompt,
 )
-from promptpotter.application.search import (
+from promptpotter.application.recon import (
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
 )
-from promptpotter.application.search import (
-    select_scan_winner as _select_scan_winner,
+from promptpotter.application.recon import (
+    select_recon_winner as _select_scan_winner,
 )
-from promptpotter.application.search.scan_advisor import (
-    convert_advisory_to_scan_variants,
+from promptpotter.application.recon.recon_advisor import (
+    convert_advisory_to_recon_variants,
     resolve_schema_axes,
 )
-from promptpotter.application.search.scan_results import (
-    decompose_scan_baseline as _decompose_scan_baseline,
+from promptpotter.application.recon.recon_report import (
+    decompose_recon_baseline as _decompose_scan_baseline,
 )
-from promptpotter.application.search.scan_results import (
-    seed_campaign_from_scan as _seed_campaign_from_scan,
+from promptpotter.application.recon.recon_report import (
+    seed_campaign_from_recon as _seed_campaign_from_scan,
 )
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
@@ -43,8 +43,8 @@ from .display import (
     RESET,
     format_pipeline_overrides,
     show_progress,
-    show_scan_leaderboard,
-    show_scan_query_difficulty,
+    show_recon_leaderboard,
+    show_recon_query_difficulty,
 )
 from .setup import setup_llm
 
@@ -56,20 +56,20 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     # search_variants
-    "convert_advisory_to_scan_variants",
+    "convert_advisory_to_recon_variants",
     # search_baseline
-    "decompose_scan_baseline",
+    "decompose_recon_baseline",
     # search_advisor
     "load_task_description",
     "preview_advisor_prompt",
-    "resolve_scan_variants",
+    "recon_advisor",
+    "resolve_recon_variants",
     # search_results
     "resume_or_build_diagnostic",
-    "run_scan_advisor",
-    "scan_advisor",
-    "seed_campaign_from_scan",
-    "select_scan_winner_notebook",
-    "show_scan_analytics",
+    "run_recon_advisor",
+    "seed_campaign_from_recon",
+    "select_recon_winner_notebook",
+    "show_recon_analytics",
     "show_variant_library",
 ]
 
@@ -79,18 +79,18 @@ __all__ = [
 # ===========================================================================
 
 
-async def decompose_scan_baseline(
+async def decompose_recon_baseline(
     baseline,
     campaign_config: CampaignConfig,
     pipeline_params: dict | None = None,
     *,
-    scan_variants: dict | None = None,
+    recon_variants: dict | None = None,
     force_restructure: bool = False,
     session: SessionEnv | None = None,
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
-    Delegates to ``application.search.scan_results.decompose_scan_baseline()``
+    Delegates to ``application.scan.recon_report.decompose_recon_baseline()``
     and prints the restructured fields.
 
     Returns:
@@ -113,7 +113,7 @@ async def decompose_scan_baseline(
         llm_model,
         pipeline_params=pipeline_params,
         session=session,
-        scan_variants=scan_variants,
+        recon_variants=recon_variants,
         force_restructure=force_restructure,
         pipeline_schema=ps,
     )
@@ -157,7 +157,7 @@ def show_variant_library(
     Returns:
         The filtered rich variant dict (objects with ``text``/``source``/``year``).
     """
-    from promptpotter.application.search.smart_search import filter_variant_library_display
+    from promptpotter.application.recon.adaptive_recon import filter_variant_library_display
 
     from .display import BOLD, GREEN, YELLOW
 
@@ -190,8 +190,8 @@ def show_variant_library(
     return {"prompt_fields": lib.fields}
 
 
-def resolve_scan_variants(
-    scan_variants: dict,
+def resolve_recon_variants(
+    recon_variants: dict,
     pipeline_schema: PipelineSchema | None = None,
     *,
     session: SessionEnv | None = None,
@@ -213,16 +213,16 @@ def resolve_scan_variants(
     if pipeline_schema is None and session is not None:
         pipeline_schema = session.pipeline_schema
 
-    from promptpotter.application.search.scan_advisor import (
-        flatten_scan_variants,
+    from promptpotter.application.recon.recon_advisor import (
+        flatten_recon_variants,
         rebuild_nested_resolved,
     )
 
-    flat_for_resolve = flatten_scan_variants(scan_variants)
+    flat_for_resolve = flatten_recon_variants(recon_variants)
     resolved, schema_labels = resolve_schema_axes(flat_for_resolve, pipeline_schema)
 
     # Display: group by prompt fields vs node params
-    for key, spec in scan_variants.items():
+    for key, spec in recon_variants.items():
         if key in PROMPT_STRING_FIELDS and isinstance(spec, list):
             if key in schema_labels:
                 print(f"  {key}: (baseline + {len(spec) - 1} mutations)")
@@ -241,7 +241,7 @@ def resolve_scan_variants(
                     else:
                         print(f"  {key}.{param}: {r_vals}")
 
-    return rebuild_nested_resolved(scan_variants, resolved), schema_labels
+    return rebuild_nested_resolved(recon_variants, resolved), schema_labels
 
 
 # ===========================================================================
@@ -305,7 +305,7 @@ def load_task_description(path: str | None) -> str:
     return text
 
 
-def _display_scan_advisory(advisory: dict) -> None:
+def _display_recon_advisory(advisory: dict) -> None:
     """Print the scan advisor results (priority axes, budget, warnings)."""
     print("PRIORITY AXES (ranked by importance)")
     print("-" * 40)
@@ -351,7 +351,7 @@ def _display_scan_advisory(advisory: dict) -> None:
             print(f"  [!] {w}")
 
 
-async def scan_advisor(
+async def recon_advisor(
     campaign_config: CampaignConfig,
     session: SessionEnv,
     *,
@@ -399,7 +399,7 @@ async def scan_advisor(
     optimizer_llm = campaign_config.get("optimizer_llm", {})
     max_tokens = optimizer_llm.get("max_tokens", 2000)
 
-    advisory = await _advise_scan_config(
+    advisory = await _advise_recon(
         pipeline_schema=pipeline_schema,
         variant_library=variant_library,
         llm_client=llm_client,
@@ -411,12 +411,12 @@ async def scan_advisor(
         search_memory=None,
     )
 
-    _display_scan_advisory(advisory)
+    _display_recon_advisory(advisory)
 
     return advisory
 
 
-async def run_scan_advisor(
+async def run_recon_advisor(
     campaign_config: CampaignConfig,
     session: SessionEnv,
     *,
@@ -425,10 +425,10 @@ async def run_scan_advisor(
 ) -> tuple[dict, dict, dict]:
     """Run scan advisor + extract/display proposed variants.
 
-    Calls scan_advisor(), then convert_advisory_to_scan_variants(), prints summary.
-    Returns (advisory, scan_variants, schema_labels).
+    Calls recon_advisor(), then convert_advisory_to_recon_variants(), prints summary.
+    Returns (advisory, recon_variants, schema_labels).
     """
-    advisory = await scan_advisor(
+    advisory = await recon_advisor(
         campaign_config,
         session,
         task_description=task_description,
@@ -437,14 +437,14 @@ async def run_scan_advisor(
     if not advisory:
         return {}, {}, {}
 
-    proposed, schema_labels = convert_advisory_to_scan_variants(
+    proposed, schema_labels = convert_advisory_to_recon_variants(
         advisory,
         pipeline_schema=session.pipeline_schema,
     )
 
     # Print copy-pasteable Python dict (nested format)
     print("\n--- PROPOSED SCAN VARIANTS (copy-paste into next cell) ---")
-    print("scan_variants = {")
+    print("recon_variants = {")
     for key, spec in proposed.items():
         if isinstance(spec, dict):
             # Node param group
@@ -473,7 +473,7 @@ async def run_scan_advisor(
     print("}")
 
     n_diag = advisory.get("suggested_n_diagnostic", 10)
-    print(f"\nscan_sample_size = {n_diag}  # queries per variant (advisor recommendation)")
+    print(f"\nrecon_sample_size = {n_diag}  # queries per variant (advisor recommendation)")
 
     return advisory, proposed if proposed else {}, schema_labels
 
@@ -489,7 +489,7 @@ async def resume_or_build_diagnostic(
     baseline_results: list,
     session: SessionEnv,
     dataset: list,
-    scan_variants: dict | None = None,
+    recon_variants: dict | None = None,
 ) -> tuple[str, object, list, list, dict]:
     """Resume or build smart search diagnostic set.
 
@@ -499,11 +499,11 @@ async def resume_or_build_diagnostic(
     Returns:
         (plan_id, search_baseline, diagnostic, cached_profiles, variant_library)
     """
-    # Prepare variant library: base + scan_variants merge
+    # Prepare variant library: base + recon_variants merge
     pipeline_params = campaign_config.get("pipeline_params")
     variant_library = _load_filtered_variants(pipeline_params, session.pipeline_schema)
-    if scan_variants:
-        variant_library["pipeline_params"] = scan_variants
+    if recon_variants:
+        variant_library["pipeline_params"] = recon_variants
 
     # Prepare LLM client
     llm_client, llm_model = setup_llm(campaign_config)
@@ -535,12 +535,12 @@ async def resume_or_build_diagnostic(
     return plan_id, search_baseline, diagnostic, axis_profiles, variant_library
 
 
-def _display_improving_axes(scan_df, improving_axes: list) -> None:
+def _display_improving_axes(recon_df, improving_axes: list) -> None:
     """Print formatted summary of improving scan axes."""
     if improving_axes:
         print(f"Selected best from {len(improving_axes)} improving axes:")
         for p in improving_axes:
-            axis_rows = scan_df[scan_df["axis"] == p["axis"]]
+            axis_rows = recon_df[recon_df["axis"] == p["axis"]]
             if not axis_rows.empty:
                 best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
                 print(
@@ -552,33 +552,33 @@ def _display_improving_axes(scan_df, improving_axes: list) -> None:
         print("No axes improved over baseline -- using baseline as-is.")
 
 
-def select_scan_winner_notebook(
-    scan_df,
+def select_recon_winner_notebook(
+    recon_df,
     axis_profiles: list[dict],
     baseline,
-    scan_variants: dict[str, list],
+    recon_variants: dict[str, list],
 ):
     """Pick best from scan and print summary. No backend needed.
 
     Returns:
         SearchPoint with best values composed in.
     """
-    if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
+    if recon_df is None or (hasattr(recon_df, "empty") and recon_df.empty):
         print("No scan data available. Run sensitivity scan first.")
         return baseline
 
     best_sp = _select_scan_winner(
-        scan_df,
+        recon_df,
         axis_profiles,
         baseline,
-        scan_variants,
+        recon_variants,
     )
 
     # Print summary
     improving = [
         p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
     ]
-    _display_improving_axes(scan_df, improving)
+    _display_improving_axes(recon_df, improving)
 
     if best_sp.sp_hash() != baseline.sp_hash():
         print(f"\nComposed winner: sp_hash={best_sp.sp_hash()[:12]}")
@@ -586,35 +586,35 @@ def select_scan_winner_notebook(
     return best_sp
 
 
-def seed_campaign_from_scan(
-    scan_df,
+def seed_campaign_from_recon(
+    recon_df,
     axis_profiles: list,
     baseline,
-    scan_variants: dict[str, list],
+    recon_variants: dict[str, list],
     campaign_rounds: list,
     campaign_config: CampaignConfig,
     pipeline_schema=None,
 ):
     """Select scan winner, update pipeline_params, seed campaign_rounds.
 
-    Delegates to ``promptpotter.application.search.scan_results.seed_campaign_from_scan()``
+    Delegates to ``promptpotter.application.recon.recon_report.seed_campaign_from_recon()``
     and prints summary + progress.
     """
-    if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):
+    if recon_df is None or (hasattr(recon_df, "empty") and recon_df.empty):
         print("No scan data available. Run sensitivity scan first.")
         return baseline
 
     result = _seed_campaign_from_scan(
-        scan_df,
+        recon_df,
         axis_profiles,
         baseline,
-        scan_variants,
+        recon_variants,
         campaign_rounds,
         campaign_config,
     )
 
     # Print improving axes summary
-    _display_improving_axes(scan_df, result.improving_axes)
+    _display_improving_axes(recon_df, result.improving_axes)
 
     # Print pipeline_params update
     if result.merged_pipeline_params:
@@ -636,12 +636,12 @@ def seed_campaign_from_scan(
     return result.best_sp
 
 
-def show_scan_analytics(scan_df, axis_profiles, session: SessionEnv):
+def show_recon_analytics(recon_df, axis_profiles, session: SessionEnv):
     """Display scan leaderboard and query difficulty if results are available.
 
-    Returns difficulty_df (or None if scan_df is empty/None).
+    Returns difficulty_df (or None if recon_df is empty/None).
     """
-    if scan_df is None or scan_df.empty:
+    if recon_df is None or recon_df.empty:
         return None
-    show_scan_leaderboard(scan_df, axis_profiles)
-    return show_scan_query_difficulty(session.store, session.backend_id)
+    show_recon_leaderboard(recon_df, axis_profiles)
+    return show_recon_query_difficulty(session.store, session.backend_id)

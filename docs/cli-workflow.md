@@ -11,7 +11,7 @@ python -m promptpotter <subcommand> [options]
 PromptPotter remembers which campaign you're working on via an **active session pointer** at `.promptpotter/active_session.json`. This stores `{backend_id, session_id}` — like a browser's active tab.
 
 - **`init`** creates a new session and sets it as active (overwrites the pointer).
-- **Every other command** (`optimize`, `show-status`, `show-results`, `set-task`, `scan`, `control`) operates on the active session automatically — no flags needed.
+- **Every other command** (`optimize`, `show-status`, `show-results`, `set-task`, `recon`, `control`) operates on the active session automatically — no flags needed.
 - **`--session <id>`** overrides the active pointer for a single command.
 - **`--backend-id`** is auto-derived from `dataset_name` in the config when not explicitly passed (so `init --config datasets/aime_2025/campaign.json` correctly uses `backend_id=aime_2025`, not the default `local`).
 
@@ -24,7 +24,7 @@ To resume a campaign: just run `python -m promptpotter optimize`. No need to `in
 ### Subcommand Sequence
 
 ```
-init ──→ [set-task] ──→ [scan] ──→ [show-scan] ──→ optimize ──→ show-results ──→ export
+init ──→ [set-task] ──→ [recon] ──→ [show-recon] ──→ optimize ──→ show-results ──→ export
 ```
 
 Steps in brackets are optional. Minimum viable workflow: `init` then `optimize`.
@@ -33,8 +33,8 @@ Steps in brackets are optional. Minimum viable workflow: `init` then `optimize`.
 |------|---------|-------------|------------|
 | 1 | `init` | Connect to backend, configure pipeline (baseline deferred) | Config file |
 | 2 | `set-task` | Decompose a task description into structured domain context | init_params |
-| 3 | `scan` | Run sensitivity scan over parameter variants | init_params, config |
-| 4 | `show-scan` | Seed campaign from scan winner | scan_results |
+| 3 | `recon` | Run sensitivity scan (recon pass) over parameter variants | init_params, config |
+| 4 | `show-recon` | Seed campaign from recon winner | recon_results |
 | 5 | `optimize` | Run L1/L2/L3 optimization cycle | All above |
 | 6 | `show-results` | Show summary, optionally save winner to backend | Campaign cycles |
 | 7 | `export` | Generate supplemental materials or JSON | Campaign data |
@@ -60,22 +60,22 @@ python -m promptpotter set-task \
 
 Passes a plain-text task description through LLM decomposition to produce structured `task_context` fields (problem_description, success_criteria, domain_vocabulary). These feed L2 context refinement.
 
-### scan
+### recon
 
 ```bash
-python -m promptpotter scan \
+python -m promptpotter recon \
     --variants-file variants.json
 ```
 
-Runs a one-axis-at-a-time (OAT) sensitivity scan. Each parameter axis is varied independently while others stay at baseline. Identifies which axes have the most impact on accuracy.
+Runs a one-axis-at-a-time (OAT) sensitivity scan — the "recon pass". Each parameter axis is varied independently while others stay at baseline. Identifies which axes have the most impact on accuracy.
 
-### show-scan
+### show-recon
 
 ```bash
-python -m promptpotter show-scan
+python -m promptpotter show-recon
 ```
 
-Displays scan results leaderboard and seeds the optimization campaign with the best-performing variant as starting point.
+Displays recon results leaderboard and seeds the optimization campaign with the best-performing variant as starting point.
 
 ### optimize
 
@@ -147,12 +147,12 @@ python -m promptpotter init \
 python -m promptpotter set-task \
     --task-file my_task_description.txt
 
-# 3. (Optional) Run sensitivity scan to find impactful axes
-python -m promptpotter scan \
+# 3. (Optional) Run recon pass to find impactful axes
+python -m promptpotter recon \
     --variants-file configs/variants.json
 
-# 4. (Optional) Seed campaign from scan winner
-python -m promptpotter show-scan
+# 4. (Optional) Seed campaign from recon winner
+python -m promptpotter show-recon
 
 # 5. Run optimization (full loop — default)
 python -m promptpotter optimize
@@ -174,7 +174,7 @@ python -m promptpotter export supplemental \
 This `pipeline_params` dict flows to every eval call:
 - `init` — baseline eval uses the configured pipeline (skipped by default, runs automatically before first optimize round)
 - `optimize` — each candidate is evaluated with the configured pipeline
-- `scan` — builds per-variant pipeline_params (one axis changed at a time)
+- `recon` — builds per-variant pipeline_params (one axis changed at a time)
 
 If `pipeline_params` is `None`, the backend runs the full pipeline including excluded nodes.
 
@@ -190,7 +190,7 @@ The active session pointer lives at `.promptpotter/active_session.json` (see [Ac
 | `campaign_state.json` | Every optimization event | Live state: round, baseline, best, candidates, counters |
 | `campaign_output.log` | Append per eval query | Raw eval output (ANSI-stripped) |
 | `campaign_log.md` | End of each round | Structured markdown report |
-| `scan_results.json` | After scan completes | scan_df + axis_profiles |
+| `recon_results.json` | After recon completes | recon_df + axis_profiles |
 
 ### campaign_state.json
 

@@ -31,7 +31,7 @@ from promptpotter.infrastructure.store.project_store import ProjectStore
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.search.scan_results import ScanBrief
+    from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
@@ -41,9 +41,9 @@ __all__ = [
     "SessionEnv",
     "init_services",
     "load_baseline_prompt",
-    "load_scan_brief",
+    "load_recon_brief",
     "resolve_campaign_id",
-    "run_scan_and_persist",
+    "run_recon_and_persist",
 ]
 
 
@@ -424,40 +424,40 @@ def resolve_campaign_id(
 # ---------------------------------------------------------------------------
 
 
-def load_scan_brief(
+def load_recon_brief(
     session: SessionEnv,
     session_id: str,
-    scan_variants: dict,
+    recon_variants: dict,
     baseline_acc: float,
-) -> ScanBrief | None:
+) -> ReconBrief | None:
     """Reconstruct scan context from persisted scan results.
 
     Shared by CLI and notebook — avoids inlining DataFrame construction
     in each entry point.
     """
-    scan_data = session.store.sessions.load_scan_results(
+    recon_data = session.store.sessions.load_recon_results(
         session.backend_id,
         session_id,
     )
-    if not scan_data:
+    if not recon_data:
         return None
     import pandas as pd
 
-    from promptpotter.application.search.scan_results import prepare_scan_brief
+    from promptpotter.application.recon.recon_report import prepare_recon_brief
 
-    scan_df = pd.DataFrame(scan_data["scan_df"])
-    axis_profiles = scan_data["axis_profiles"]
-    return prepare_scan_brief(scan_df, axis_profiles, scan_variants, baseline_acc)
+    recon_df = pd.DataFrame(recon_data["recon_df"])
+    axis_profiles = recon_data["axis_profiles"]
+    return prepare_recon_brief(recon_df, axis_profiles, recon_variants, baseline_acc)
 
 
-async def run_scan_and_persist(
+async def run_recon_and_persist(
     baseline,
     campaign_config: CampaignConfig,
-    scan_variants: dict,
+    recon_variants: dict,
     dataset: list,
     *,
     session: SessionEnv,
-    scan_sample_size: int = 0,
+    recon_sample_size: int = 0,
     experiment_id: str = "",
     session_id: str = "",
     log: Callable[[str], None] = logger.info,
@@ -466,17 +466,17 @@ async def run_scan_and_persist(
 ):
     """Decompose scan baseline, run sensitivity scan, persist results.
 
-    Returns ``(scan_baseline_sp, baseline_opt, df, profiles)``.
+    Returns ``(recon_baseline_sp, baseline_opt, df, profiles)``.
     """
     from promptpotter.application.campaign.config import (
         configure_and_apply_pipeline,
         create_llm_client,
     )
-    from promptpotter.application.search.scan_results import (
-        decompose_scan_baseline as _decompose_scan_baseline,
+    from promptpotter.application.recon.recon_report import (
+        decompose_recon_baseline as _decompose_scan_baseline,
     )
-    from promptpotter.application.search.sensitivity_scanner import (
-        sensitivity_scan as _sensitivity_scan,
+    from promptpotter.application.recon.recon_runner import (
+        run_recon as _run_recon,
     )
 
     # Configure pipeline (ensures filtered schema is applied with overrides baked in)
@@ -493,10 +493,10 @@ async def run_scan_and_persist(
         llm_model,
         pipeline_params=pipeline_params,
         session=session,
-        scan_variants=scan_variants,
+        recon_variants=recon_variants,
         pipeline_schema=ps,
     )
-    scan_baseline_sp = result.baseline_jsp
+    recon_baseline_sp = result.baseline_jsp
     baseline_opt = result.search_baseline
 
     # Init backend session
@@ -504,9 +504,9 @@ async def run_scan_and_persist(
         await session.backend_client.init_session(session.index_terms)
 
     # Run scan
-    log(f"Running sensitivity scan ({len(scan_variants)} axes) ...")
+    log(f"Running sensitivity scan ({len(recon_variants)} axes) ...")
     scan_kwargs: dict[str, Any] = {
-        "sample_size": scan_sample_size,
+        "sample_size": recon_sample_size,
         "pipeline_schema": ps,
         "experiment_id": experiment_id,
         "scoring_formula": campaign_config.get("scoring"),
@@ -516,9 +516,9 @@ async def run_scan_and_persist(
     if on_result is not None:
         scan_kwargs["on_result"] = on_result
 
-    df, profiles = await _sensitivity_scan(
-        scan_baseline_sp,
-        scan_variants,
+    df, profiles = await _run_recon(
+        recon_baseline_sp,
+        recon_variants,
         dataset,
         session,
         baseline_opt=baseline_opt,
@@ -527,16 +527,16 @@ async def run_scan_and_persist(
 
     if df is None or (hasattr(df, "empty") and df.empty):
         log("Scan returned no results")
-        return scan_baseline_sp, baseline_opt, None, []
+        return recon_baseline_sp, baseline_opt, None, []
 
     log(f"Sensitivity scan complete: {len(df)} variants evaluated")
 
     # Failure group sensitivity — cross-tabulate scan results with failure groups
     if session.store and session.backend_id:
-        from promptpotter.application.search.failure_group_analysis import (
+        from promptpotter.application.intelligence.search_memory import SearchMemory
+        from promptpotter.application.recon.failure_groups import (
             failure_group_sensitivity,
         )
-        from promptpotter.application.search.search_memory import SearchMemory
 
         _sm_path = Path(session.store.base_dir) / session.backend_id / "search_memory.json"
         _sm = SearchMemory.load(_sm_path)
@@ -546,7 +546,7 @@ async def run_scan_and_persist(
             scan_rows = df.to_dict(orient="records")
             fg_result = failure_group_sensitivity(scan_rows, clusters)
             if fg_result.sensitivities:
-                _sm.ingest_failure_group_analysis(fg_result)
+                _sm.ingest_failure_groups(fg_result)
                 _sm.save(_sm_path)
                 log(
                     f"Failure group analysis: {len(fg_result.sensitivities)} "
@@ -555,7 +555,7 @@ async def run_scan_and_persist(
 
     # Persist results
     if session_id and session.store and session.backend_id:
-        session.store.sessions.save_scan_results(
+        session.store.sessions.save_recon_results(
             session.backend_id,
             session_id,
             df.to_dict(orient="records"),
@@ -563,4 +563,4 @@ async def run_scan_and_persist(
         )
         log(f"Scan results persisted to session {session_id}")
 
-    return scan_baseline_sp, baseline_opt, df, profiles
+    return recon_baseline_sp, baseline_opt, df, profiles
