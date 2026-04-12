@@ -115,3 +115,9 @@ eval results ──► Critique (LLM) ──► critique_text ──► L2 (LLM)
 When L2 fires, L1 is 2 LLM hops from eval data. Each hop is lossy compression. The directive/critique mutual exclusion ensures L1 gets the most processed form available. Round trajectory and failure group insights will feed L2 directly (bypassing this chain), so L2 can produce better-informed directives for L1.
 
 L3 sees only `l2_summary` (last 3 L2 outcomes: what changed, whether accuracy moved) — never L2's directive or reasoning. Strategy from outcomes, not tactics.
+
+---
+
+## Self-Optimization (Meta-Level)
+
+The potter's own prompts are themselves `PromptTemplate` instances — the 8-field decomposition applies recursively, which is what enables a future self-optimization mode. The trace dataset (`potter_traces` loader) freezes archived campaign transitions into `{round_context → next_directive → score_delta}` rows that an outer-loop PromptPotter instance can score meta-prompt variants against. See [prompt-scheme.md § Optimizer Meta-Prompts](prompt-scheme.md#optimizer-meta-prompts) and [§ Potter Trace Dataset](prompt-scheme.md#potter-trace-dataset).

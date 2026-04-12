@@ -361,7 +361,7 @@ async def execute_round(
                 candidate_scores=scoring_result.candidate_scores,
                 model=config.model or "",
                 n_variants=config.n_variants,
-                optimizer_templates=["meta_scan_aware", "critique_negative"],
+                optimizer_templates=["meta_scan_aware", "critique"],
             )
         with graceful("ObsLogger.log_prompt_version failed"):
             winner_fields = scoring_result.winner_prompt_fields

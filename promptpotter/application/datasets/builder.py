@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.datasets.trace_dataset import load_potter_traces
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
@@ -32,6 +33,7 @@ __all__ = [
     "load_dataset_from_traces",
     "load_excel_ground_truth",
     "load_gsm8k",
+    "load_potter_traces",
     "sample_dataset",
     "split_train_test",
 ]
@@ -262,6 +264,7 @@ def load_aime_2025(
 DATASET_LOADERS: dict[str, Callable[..., list[dict]]] = {
     "gsm8k": load_gsm8k,
     "aime_2025": load_aime_2025,
+    "potter_traces": load_potter_traces,
 }
 """Map dataset name → loader function. Register new datasets here."""
 

@@ -85,7 +85,23 @@ In optimizer prompts, `problem_description` carries analytical evidence (eval st
 └────────────────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
 ```
 
-All optimizer prompts follow: JSON template (`promptpotter/config/optimizer_prompts/`) → `load_optimizer_prompt()` → `compile_prompt()` → `llm_call()`.
+All optimizer prompts follow: JSON template (`promptpotter/application/optimization/prompts/`) → `load_optimizer_prompt()` → `compile_prompt()` → `llm_call()`.
+
+---
+
+## Optimizer Meta-Prompts
+
+The optimizer's own prompts are themselves `PromptTemplate` instances — the 8-field decomposition applies recursively. Every meta-prompt file under `promptpotter/application/optimization/prompts/` populates the same 6 string fields (`PROMPT_STRING_FIELDS`), plus `plan` where applicable. This is what lets a future outer loop perturb them the same way the core loop perturbs target-backend prompts.
+
+| Template file | Consumer | Compile variables |
+|---|---|---|
+| `meta_scan_aware.json` | `l1_generate()` — `nodes/generate.py` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `context_sections` |
+| `critique.json` | `CritiqueAgent.run()` — `nodes/critique.py` | `stat_sections` |
+| `l2_refine_strategy.json` | `refine_strategy()` — `nodes/layer_transitions.py` | `current_params`, `task_context_section`, `intelligence_sections` |
+| `l3_modify_plan.json` | `modify_plan()` — `nodes/layer_transitions.py` | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `intelligence_section` |
+| `restructure.json` | `decompose_prompt_fields()` — `pipeline.py` | `consultation_instruction` |
+
+Loader: `load_optimizer_prompt()` at `application/optimization/pipeline.py:218`. The returned `PromptTemplate` is defined at `domain/opt_search_point.py:56` — `prompt_field_dict()` emits the 6 string fields plus `few_shot_examples` for observability tracing.
 
 ---
 
@@ -128,11 +144,35 @@ Index 1 variants are a provisional starting point for new campaigns. For product
 
 ---
 
+## Potter Trace Dataset
+
+The `potter_traces` dataset loader (`application/datasets/trace_dataset.py`) is the raw material for future self-optimization. It reads archived `campaigns/{cycle_id}/trial_NNNN.json` files and emits one row per round-to-round transition — the potter-state context at round N, the prompt change the potter actually made, and the accuracy delta that resulted. Pure-read, no new persistence, registered through the normal `DATASET_LOADERS` dict.
+
+Row schema:
+
+| Key | Type | Source |
+|---|---|---|
+| `query` | str | `f"{cycle_id}:round_{N}"` — identifies the transition |
+| `ground_truth` | str | `trial[N+1].prompt_fields.changes_description` (or label) |
+| `round_context` | dict | Serialized `OptSearchPoint` at round N + critique_text, l2_directive, optimizer_params, prev_accuracy |
+| `score_delta` | float | `trial[N+1].accuracy - trial[N].accuracy` |
+| `prev_prompt` | str | `OptSearchPoint.render()` at round N |
+| `next_prompt` | str | `OptSearchPoint.render()` at round N+1 |
+| `escalation_layer` | str | `"L1"` / `"L2"` / `"L3"` inferred from which field changed |
+
+Escalation-layer rule (deterministic, no import from `optimization/`): `plan` changed → L3; else `optimizer_params` changed or `l2_directive` set fresh → L2; else L1.
+
+Usage: `load_dataset("potter_traces", store=..., backend_id=...)`. Natural scoring formula via `compile_scorer()`: `"score_delta"` — feeds directly from the row into the outer potter. No outer scoring loop exists yet; when it does, it will score meta-prompt variants by replaying these rows (see [research/benchmarks.md](../research/benchmarks.md) for the broader self-optimization direction).
+
+---
+
 ## Key Files
 
 | Concern | File |
 |---------|------|
 | Field constants | `promptpotter/shared/constants.py` |
 | OptSearchPoint (render, derive, project) | `promptpotter/domain/opt_search_point.py` |
+| Meta-prompt templates | `promptpotter/application/optimization/prompts/` |
+| Trace dataset loader | `promptpotter/application/datasets/trace_dataset.py` |
 | Variant library | `promptpotter/config/prompt_variants.json` |
 | Variant filtering | `promptpotter/application/recon/adaptive_recon.py` |
