@@ -31,6 +31,19 @@ PROMPT_STRING_FIELDS: list[str] = [
 # Layer 1 string fields (prompt decomposition fields, excluding few_shot_examples).
 LAYER1_STRING_FIELDS = list(PROMPT_STRING_FIELDS)
 
+# task_context sub-fields that L1 may emit alongside prompt/node overrides.
+TASK_CONTEXT_OVERRIDES: frozenset[str] = frozenset({"upstream_context", "downstream_context"})
+
+
+def classify_axis(axis_key: str) -> str:
+    """Classify a pipeline_params override key as 'prompt_field', 'task_context', or 'pipeline_param'."""
+    if axis_key in PROMPT_STRING_FIELDS:
+        return "prompt_field"
+    if axis_key in TASK_CONTEXT_OVERRIDES:
+        return "task_context"
+    return "pipeline_param"
+
+
 # Persistence versioning
 DATASET_RUNS_SCHEMA_VERSION = 1
 DEFAULT_CONNECTOR_TYPE = "default"

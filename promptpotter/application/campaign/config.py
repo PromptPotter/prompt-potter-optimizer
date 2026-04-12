@@ -242,49 +242,22 @@ class LoopConfig(BaseModel):
     ) -> LoopConfig:
         """Build from the notebook's ``campaign_config`` dict.
 
-        Uses LoopConfig field defaults for any missing keys — a minimal
-        connector profile (e.g. just ``exclude_nodes``) is valid input.
-        ``pipeline_schema`` should be the filtered schema with overrides
-        already baked in (from ``configure_pipeline()``).
+        Uses LoopConfig field defaults for any missing keys — defaults live
+        on the pydantic fields, not here. ``pipeline_schema`` should be the
+        filtered schema with overrides already baked in.
         """
-        opt = campaign_config.get("optimization", {})
-        optimizer_llm = campaign_config.get("optimizer_llm", {})
+        opt = dict(campaign_config.get("optimization", {}))
         return cls(
-            max_rounds=opt.get("max_rounds", 10),
-            l1_patience=opt.get("l1_patience", 3),
-            n_variants=opt.get("n_variants", 5),
-            creativity=opt.get("creativity", 0.7),
-            improvement_threshold=opt.get("improvement_threshold", 0.01),
-            model=optimizer_llm.get("model"),
+            **opt,
+            model=campaign_config.get("optimizer_llm", {}).get("model"),
+            sp_budget_ttest=campaign_config.get("sp_budget_ttest", 20),
+            scoring_formula=campaign_config.get("scoring"),
             backend_id=backend_id,
             project_root=project_root,
             session_id=session_id,
-            sp_budget_ttest=campaign_config.get("sp_budget_ttest", 20),
-            seed=opt.get("seed", 42),
             pipeline_schema=pipeline_schema,
             recon_brief=recon_brief,
             task_context=task_context,
-            enable_l2=opt.get("enable_l2", True),
-            enable_l3=opt.get("enable_l3", True),
-            l2_patience=opt.get("l2_patience", 2),
-            l3_patience=opt.get("l3_patience", 1),
-            l2_temperature=opt.get("l2_temperature", 0.3),
-            l3_temperature=opt.get("l3_temperature", 0.5),
-            enable_critique=opt.get("enable_critique", True),
-            degradation_threshold=opt.get("degradation_threshold", 0.4),
-            backend_warning_threshold=opt.get("backend_warning_threshold", 2),
-            max_failures=opt.get("max_failures", 15),
-            elimination_n_min=opt.get("elimination_n_min", 20),
-            elimination_alpha=opt.get("elimination_alpha", 0.05),
-            max_consecutive_errors=opt.get("max_consecutive_errors", 3),
-            hard_cap=opt.get("hard_cap", 100),
-            critique_degradation_threshold=opt.get("critique_degradation_threshold", 0.4),
-            critique_near_miss_ratio=opt.get("critique_near_miss_ratio", 0.3),
-            stale_data_load_protocol=opt.get(
-                "stale_data_load_protocol", ["rerun", "samplescan", "sampleswitch"]
-            ),
-            pause_before_scoring=opt.get("pause_before_scoring", False),
-            scoring_formula=campaign_config.get("scoring"),
         )
 
 

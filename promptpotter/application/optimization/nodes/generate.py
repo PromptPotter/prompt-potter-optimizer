@@ -13,7 +13,7 @@ from promptpotter.application.optimization.pipeline import llm_call, load_optimi
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm.client import LLMClientBase
-from promptpotter.shared.constants import PROMPT_STRING_FIELDS
+from promptpotter.shared.constants import classify_axis
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
@@ -155,20 +155,19 @@ async def l1_generate(
 
     candidates: list[dict] = []
     for v in variants_list[:n_variants]:
-        # Split pipeline_params_override: prompt scheme fields go to
-        # derive_candidate (rendered into the prompt string), task_context
-        # sub-fields update task_context, the rest stays as node-level
-        # pipeline overrides (already nested).
-        _TASK_CONTEXT_OVERRIDES = {"upstream_context", "downstream_context"}
         pp_override = v.get("pipeline_params_override") or {}
         pp_override.pop("steps", None)  # LLM must not override pipeline composition
-        prompt_changes = {k: pp_override[k] for k in pp_override if k in PROMPT_STRING_FIELDS}
-        tc_changes = {k: pp_override[k] for k in pp_override if k in _TASK_CONTEXT_OVERRIDES}
-        node_overrides = {
-            k: pv
-            for k, pv in pp_override.items()
-            if k not in PROMPT_STRING_FIELDS and k not in _TASK_CONTEXT_OVERRIDES
-        }
+        prompt_changes: dict = {}
+        tc_changes: dict = {}
+        node_overrides: dict = {}
+        for k, pv in pp_override.items():
+            kind = classify_axis(k)
+            if kind == "prompt_field":
+                prompt_changes[k] = pv
+            elif kind == "task_context":
+                tc_changes[k] = pv
+            else:
+                node_overrides[k] = pv
 
         # Safety net: auto-nest flat params the LLM may still emit
         if pipeline_schema:
