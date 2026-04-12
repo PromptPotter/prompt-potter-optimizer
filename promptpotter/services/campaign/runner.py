@@ -436,10 +436,12 @@ async def _run_round_loop(
                     round_num,
                 )
 
-            # Round recorder: eval + decision + flush
+            # Round recorder: flush the round's LLM call audit trail.
+            # Round outcome (accuracy/hits/opt_sp) is already in trial_NNNN.json
+            # via _checkpoint_round above.
             _rr = get_round_recorder()
             if _rr:
-                _rr.record_round_outcome(round_result, state)
+                _rr.flush()
 
             # Bidirectional control checkpoint — user may pause/stop via dashboard
             if cb.on_checkpoint:
@@ -523,7 +525,7 @@ async def _run_optimization_core(
     cb = callbacks or RunCallbacks()
 
     # -- Init --
-    state = await init_cycle_state(
+    state, _emitter = await init_cycle_state(
         instruction,
         dataset,
         config,
@@ -537,23 +539,20 @@ async def _run_optimization_core(
         session,
         started_at,
     )
-    # init_cycle_state populates infrastructure fields on state:
-    # campaign_store, cycle_id, obs_campaign_id, scoring_dataset,
-    # degradation_checks, resumed_from_round, persistence_emitter,
-    # search_memory (+ scoring_ctx.search_memory wiring).
 
     # Chain persistence callbacks (fires first) with caller display callbacks
-    _emitter = state.persistence_emitter
     if _emitter:
         from promptpotter.services.campaign.state import chain_callbacks
 
-        persistence_cb = RunCallbacks(
-            on_phase=_emitter.on_phase,
-            on_sample_scored=_emitter.on_sample_scored,
-            on_candidate_scored=_emitter.on_candidate_scored,
-            on_round_complete=_emitter.on_round_complete,
+        cb = chain_callbacks(
+            RunCallbacks(
+                on_phase=_emitter.on_phase,
+                on_sample_scored=_emitter.on_sample_scored,
+                on_candidate_scored=_emitter.on_candidate_scored,
+                on_round_complete=_emitter.on_round_complete,
+            ),
+            cb,
         )
-        cb = chain_callbacks(persistence_cb, cb)
 
     stop_reason = await _run_round_loop(state, dataset, config, cb)
 

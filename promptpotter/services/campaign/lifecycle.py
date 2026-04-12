@@ -45,6 +45,7 @@ from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
     from promptpotter.services.backend_client import BackendClient
+    from promptpotter.services.campaign.session_emitter import CampaignPersistenceEmitter
     from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
@@ -225,11 +226,13 @@ async def init_cycle_state(
     experiment_id: str,
     session: SessionEnv | None,
     started_at: str,
-) -> LoopState:
+) -> tuple[LoopState, CampaignPersistenceEmitter | None]:
     """Initialize all cycle state: baseline, resume, obs, eval context.
 
-    Returns a fully-wired ``LoopState`` with infrastructure fields
-    (campaign_store, cycle_id, scoring_dataset, etc.) populated.
+    Returns ``(state, emitter)``. ``state`` is fully wired with infrastructure
+    fields (campaign_store, cycle_id, scoring_dataset, etc.). ``emitter`` is
+    kept out of ``LoopState`` so the mutation contract stays tight — the
+    caller wires it onto the user's callbacks directly.
     """
     emit_phase(
         on_phase,
@@ -357,21 +360,16 @@ async def init_cycle_state(
             Path(config.project_root) / config.backend_id / "sessions" / config.session_id
         )
 
-        # UI counter continuity on resume — purely cosmetic, not optimizer
-        # resume (that lives in trial_NNNN.json via _restore_from_checkpoint).
+        # UI counter continuity on resume — cosmetic only. Optimizer resume
+        # lives in trial_NNNN.json via _restore_from_checkpoint. Emitter picks
+        # out the counters it cares about via .get() with defaults, so we can
+        # just hand it the prior dict verbatim (baseline override excepted).
         resume_from: dict[str, Any] | None = None
         _prior_state = _session_dir / "campaign_state.json"
         if _prior_state.exists():
             try:
-                _prior = json.loads(_prior_state.read_text(encoding="utf-8"))
-                resume_from = {
-                    "best": _prior.get("best", 0.0),
-                    "best_round": _prior.get("best_round", 0),
-                    "baseline": baseline_accuracy,
-                    "rounds_completed": _prior.get("rounds_completed", 0),
-                    "total_queries_scored": _prior.get("total_queries_scored", 0),
-                    "total_backend_calls": _prior.get("total_backend_calls", 0),
-                }
+                resume_from = json.loads(_prior_state.read_text(encoding="utf-8"))
+                resume_from["baseline"] = baseline_accuracy
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -389,9 +387,8 @@ async def init_cycle_state(
     state.scoring_dataset = scoring_dataset
     state.degradation_checks = degradation_checks
     state.resumed_from_round = resumed_from_round
-    state.persistence_emitter = persistence_emitter
 
-    return state
+    return state, persistence_emitter
 
 
 # ---------------------------------------------------------------------------

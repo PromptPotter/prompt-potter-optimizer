@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from promptpotter.models.analysis import FailureAnalysis
     from promptpotter.models.scoring import ScoringEnv
     from promptpotter.services.campaign.nodes.escalation import DegradationCheck
-    from promptpotter.services.campaign.session_emitter import CampaignPersistenceEmitter
     from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
@@ -291,7 +290,6 @@ class LoopState:
     scoring_dataset: list[dict] = field(default_factory=list)
     degradation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
-    persistence_emitter: CampaignPersistenceEmitter | None = None
 
     # Checkpoint schema version — incremented when LoopState/OptSearchPoint
     # fields change, so resume can detect stale checkpoints.
@@ -381,35 +379,22 @@ def chain_callbacks(a: RunCallbacks, b: RunCallbacks) -> RunCallbacks:
     """Compose two RunCallbacks so both fire on every event.
 
     ``a`` fires first (typically persistence), ``b`` second (typically display).
-    For ``on_checkpoint``, returns the first non-None result.
+    For ``on_checkpoint``, returns the first non-None result (``None`` is
+    falsy, so the ``or`` short-circuits naturally).
     """
 
-    def _chain(fn_a: Callable | None, fn_b: Callable | None) -> Callable | None:
-        if fn_a and fn_b:
-            return lambda *args, **kw: (fn_a(*args, **kw), fn_b(*args, **kw))
-        return fn_a or fn_b
+    def side(x: Callable | None, y: Callable | None) -> Callable | None:
+        return (lambda *args, **kw: (x(*args, **kw), y(*args, **kw))) if x and y else (x or y)
 
-    def _chain_checkpoint(
-        fn_a: Callable | None,
-        fn_b: Callable | None,
-    ) -> Callable | None:
-        if fn_a and fn_b:
-
-            def _both(*args: object, **kw: object) -> str | None:
-                r = fn_a(*args, **kw)
-                if r is not None:
-                    return r
-                return fn_b(*args, **kw)
-
-            return _both
-        return fn_a or fn_b
+    def checkpoint(x: Callable | None, y: Callable | None) -> Callable | None:
+        return (lambda name: x(name) or y(name)) if x and y else (x or y)
 
     return RunCallbacks(
-        on_round_complete=_chain(a.on_round_complete, b.on_round_complete),
-        on_candidate_scored=_chain(a.on_candidate_scored, b.on_candidate_scored),
-        on_sample_scored=_chain(a.on_sample_scored, b.on_sample_scored),
-        on_phase=_chain(a.on_phase, b.on_phase),
-        on_checkpoint=_chain_checkpoint(a.on_checkpoint, b.on_checkpoint),
+        on_round_complete=side(a.on_round_complete, b.on_round_complete),
+        on_candidate_scored=side(a.on_candidate_scored, b.on_candidate_scored),
+        on_sample_scored=side(a.on_sample_scored, b.on_sample_scored),
+        on_phase=side(a.on_phase, b.on_phase),
+        on_checkpoint=checkpoint(a.on_checkpoint, b.on_checkpoint),
     )
 
 

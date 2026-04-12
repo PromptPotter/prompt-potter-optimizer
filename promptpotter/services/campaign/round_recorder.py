@@ -50,8 +50,14 @@ class RoundRecorder:
             self._has_escalation = True
         self._actions.append(action)
 
-    def flush(self, state_snapshot: dict[str, Any] | None = None) -> Path | None:
-        """Write the round file and reset. Returns the written path."""
+    def flush(self) -> Path | None:
+        """Write the round file and reset. Returns the written path.
+
+        Round files are the LLM-call audit trail — every ``add_action`` from
+        ``pipeline.py``'s ``llm_call()`` during the round. Round *outcome*
+        (accuracy, hits, decision, opt_sp) lives in ``trial_NNNN.json`` via
+        ``_checkpoint_round`` — this file is not the place for that data.
+        """
         if not self._actions:
             return None
 
@@ -70,16 +76,16 @@ class RoundRecorder:
         filename = f"round_{self._current_round:03d}{suffix}.json"
         path = self.rounds_dir / filename
 
-        record: dict[str, Any] = {
-            "round": self._current_round,
-            "started_at": self._started_at,
-            "finished_at": datetime.now(UTC).isoformat(),
-            "actions": self._actions,
-        }
-        if state_snapshot:
-            record["state_snapshot"] = state_snapshot
-
-        write_json(path, record, default=str)
+        write_json(
+            path,
+            {
+                "round": self._current_round,
+                "started_at": self._started_at,
+                "finished_at": datetime.now(UTC).isoformat(),
+                "actions": self._actions,
+            },
+            default=str,
+        )
         logger.debug(
             "Round %d recorded: %d actions → %s",
             self._current_round,
@@ -90,46 +96,3 @@ class RoundRecorder:
         self._actions = []
         self._has_escalation = False
         return path
-
-    def record_round_outcome(
-        self,
-        round_result: Any,
-        state: Any,
-    ) -> Path | None:
-        """Record eval + decision actions for a normal round, then flush.
-
-        Encapsulates the serialization format so the optimization loop
-        doesn't need to know the recorder's schema.
-        """
-        self.add_action(
-            {
-                "type": "l1_score",
-                "n_candidates": round_result.candidates_scored,
-                "n_queries": round_result.total,
-                "candidates": round_result.candidate_scores,
-            }
-        )
-        self.add_action(
-            {
-                "type": "decision",
-                "winner": round_result.label,
-                "accuracy": round_result.accuracy,
-                "composite": round_result.composite,
-                "improved": round_result.improved,
-                "stall_count": state.stall_count,
-                "winner_prompt_fields": round_result.prompt_fields,
-                "winner_pipeline_params": round_result.pipeline_params,
-            }
-        )
-        return self.flush(
-            state_snapshot={
-                "opt_search_point_id": state.opt_sp.id,
-                "l2_directive": state.opt_sp.l2_directive or "",
-                "escalation_counters": {
-                    "l2_stall": state.escalation.l2_stall_count,
-                    "l3_stall": state.escalation.l3_stall_count,
-                    "l2_round": state.escalation.l2_round,
-                    "l3_round": state.escalation.l3_round,
-                },
-            }
-        )
