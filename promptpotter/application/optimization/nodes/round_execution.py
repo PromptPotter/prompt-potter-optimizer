@@ -10,7 +10,10 @@ import logging
 import random
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.campaign.callbacks import RunCallbacks
 from promptpotter.application.campaign.config import LoopConfig
+from promptpotter.application.optimization.loop_env import LoopEnv
+from promptpotter.application.optimization.loop_state import LoopState
 from promptpotter.application.optimization.nodes.critique import (
     CritiqueAgent,
     RoundSnapshot,
@@ -22,17 +25,12 @@ from promptpotter.application.optimization.nodes.formatting import (
     build_critique_search_memory_digest,
     candidate_summaries,
 )
+from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
+from promptpotter.application.optimization.results import RoundResult
 from promptpotter.domain.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from promptpotter.infrastructure.llm import client as _llm_client
-from promptpotter.infrastructure.persistence.state import (
-    CampaignPhase,
-    LoopState,
-    RoundResult,
-    RunCallbacks,
-    emit_phase,
-)
 from promptpotter.infrastructure.tracing.observability_logger import observed_node
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
@@ -42,7 +40,6 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.nodes.score import L1ScoringResult
     from promptpotter.domain.analysis import QueryDifficulty
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.store.campaign_store import CampaignStore
     from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
@@ -70,9 +67,8 @@ class PauseForReviewError(Exception):
 async def _generate_or_load_candidates(
     round_num: int,
     state: LoopState,
+    env: LoopEnv,
     config: LoopConfig,
-    campaign_store: CampaignStore | None,
-    cycle_id: str | None,
     on_phase=None,
     n_eval_queries: int = 0,
     *,
@@ -104,10 +100,10 @@ async def _generate_or_load_candidates(
         pipeline_params=state.current_sp.pipeline_params,
     )
 
-    if campaign_store and cycle_id:
-        persisted = campaign_store.load_round_candidates(
+    if env.campaign_store and env.cycle_id:
+        persisted = env.campaign_store.load_round_candidates(
             config.backend_id,
-            cycle_id,
+            env.cycle_id,
             round_num,
         )
         if persisted is not None:
@@ -153,10 +149,10 @@ async def _generate_or_load_candidates(
             pipeline_schema=config.pipeline_schema,
         )
 
-    if campaign_store and cycle_id:
-        campaign_store.save_round_candidates(
+    if env.campaign_store and env.cycle_id:
+        env.campaign_store.save_round_candidates(
             config.backend_id,
-            cycle_id,
+            env.cycle_id,
             round_num,
             candidates,
         )
@@ -203,6 +199,7 @@ async def _score_and_select(
     candidates: list[dict],
     round_num: int,
     state: LoopState,
+    env: LoopEnv,
     scoring_dataset: list[dict],
     config: LoopConfig,
     callbacks: RunCallbacks,
@@ -236,13 +233,13 @@ async def _score_and_select(
     async with observed_node(
         f"l1_score_r{round_num}", "scoring", obs=obs, trace_id=trace_id, obs_type="span"
     ):
-        assert state.scoring_ctx is not None
+        assert env.scoring_ctx is not None
         assert state.current_sp is not None
         scoring_result = await l1_score(
             candidates,
             scoring_dataset,
             current_best,
-            state.scoring_ctx,
+            env.scoring_ctx,
             pipeline_params=state.current_sp.pipeline_params,
             improvement_threshold=config.improvement_threshold,
             callbacks=callbacks,
@@ -275,28 +272,25 @@ async def _score_and_select(
 async def execute_round(
     round_num: int,
     state: LoopState,
+    env: LoopEnv,
     scoring_dataset: list[dict],
     config: LoopConfig,
-    obs_campaign_id: str,
-    campaign_store: CampaignStore | None,
-    cycle_id: str | None,
     callbacks: RunCallbacks,
     degradation_checks: list[DegradationCheck] | None = None,
     search_memory: Any = None,
 ) -> RoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
-    obs = state.scoring_ctx.obs if state.scoring_ctx else None
-    trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
+    obs = env.scoring_ctx.obs if env.scoring_ctx else None
+    trace_id = obs.get_file_trace_id(env.obs_campaign_id) if obs else None
     if obs:
         with graceful("ObsLogger.log_round_start failed"):
-            obs.log_round_start(obs_campaign_id, round_num)
+            obs.log_round_start(env.obs_campaign_id, round_num)
 
     candidates = await _generate_or_load_candidates(
         round_num,
         state,
+        env,
         config,
-        campaign_store,
-        cycle_id,
         callbacks.on_phase,
         n_eval_queries=len(scoring_dataset),
         obs=obs,
@@ -311,6 +305,7 @@ async def execute_round(
         candidates,
         round_num,
         state,
+        env,
         scoring_dataset,
         config,
         callbacks,
@@ -360,7 +355,7 @@ async def execute_round(
     if obs:
         with graceful("ObsLogger.log_round_end failed"):
             obs.log_round_end(
-                campaign_id=obs_campaign_id,
+                campaign_id=env.obs_campaign_id,
                 round_num=round_num,
                 accuracy=scoring_result.winner_accuracy,
                 hits=scoring_result.hits,

@@ -260,6 +260,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> CommandResult:
 
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
+    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.campaign.campaign_setup import load_scan_brief
     from promptpotter.application.campaign.data import extract_campaign_baseline
     from promptpotter.application.campaign.runner import (
@@ -268,7 +269,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     from promptpotter.application.optimization.pipeline import set_round_recorder
     from promptpotter.infrastructure.persistence.control import CampaignControlReader
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
-    from promptpotter.infrastructure.persistence.state import RunCallbacks
 
     ctx = load_session(args)
     campaign_config = ctx.campaign_config

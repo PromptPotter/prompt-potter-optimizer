@@ -14,17 +14,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.phases import CampaignPhase
 from promptpotter.infrastructure.persistence.control import ensure_control_file
-from promptpotter.infrastructure.persistence.state import CampaignPhase
 from promptpotter.infrastructure.store.base import write_json
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.campaign.config import LoopConfig
-    from promptpotter.infrastructure.persistence.state import (
-        PhaseEvent,
-        RoundResult,
-        RunCallbacks,
-    )
+    from promptpotter.application.optimization.phases import PhaseEvent
+    from promptpotter.application.optimization.results import RoundResult
 
 __all__ = ["CAMPAIGN_SESSION_ARTIFACTS", "CampaignPersistenceEmitter"]
 
@@ -181,7 +179,7 @@ class CampaignPersistenceEmitter:
 
     def as_callbacks(self) -> RunCallbacks:
         """Return a ``RunCallbacks`` with this emitter's 4 dispatch methods wired."""
-        from promptpotter.infrastructure.persistence.state import RunCallbacks
+        from promptpotter.application.campaign.callbacks import RunCallbacks
 
         return RunCallbacks(
             on_phase=self.on_phase,
@@ -201,8 +199,9 @@ class CampaignPersistenceEmitter:
         phase, data = event.phase, event.data
         if phase == CampaignPhase.INIT and event.event == "exit":
             loop_state = data["state"]
+            loop_env = data["env"]
             config = data["config"]
-            s["cycle_id"] = loop_state.cycle_id
+            s["cycle_id"] = loop_env.cycle_id
             s["baseline"] = loop_state.current_accuracy
             self._patience_max = config.l1_patience
             s["patience"] = f"0/{self._patience_max}"

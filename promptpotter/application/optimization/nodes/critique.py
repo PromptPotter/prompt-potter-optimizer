@@ -22,10 +22,10 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.application.optimization.loop_state import LoopState
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryResult
     from promptpotter.infrastructure.llm.client import LLMClientBase
-    from promptpotter.infrastructure.persistence.state import LoopState
 
     from .score import L1ScoringResult
 

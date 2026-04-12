@@ -10,6 +10,8 @@ from promptpotter.application.campaign.campaign_setup import (
 from promptpotter.application.campaign.data import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
+from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent
+from promptpotter.application.optimization.results import RoundResult, RunResult
 from promptpotter.application.search.failure_group_analysis import (
     min_detectable_effect,
     proportion_test,
@@ -17,12 +19,6 @@ from promptpotter.application.search.failure_group_analysis import (
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.persistence.state import (
-    CampaignPhase,
-    PhaseEvent,
-    RoundResult,
-    RunResult,
-)
 from promptpotter.shared.errors import is_error_result
 
 from .display import (
@@ -56,11 +52,11 @@ from .phase_display import (
 )
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.campaign.campaign_setup import SessionEnv
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.search.scan_results import ScanBrief
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.persistence.state import RunCallbacks
 
 __all__ = [
     # stats
@@ -398,7 +394,7 @@ async def run_optimization_notebook(
         if (
             event.phase == CampaignPhase.INIT
             and event.event == "exit"
-            and event.data["state"].resumed_from_round > 0
+            and event.data["env"].resumed_from_round > 0
         ):
             del campaign_rounds[initial_len:]
 
@@ -658,10 +654,10 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
+    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
-    from promptpotter.infrastructure.persistence.state import RunCallbacks
 
     notebook_display_cb = RunCallbacks(
         on_round_complete=_on_round,

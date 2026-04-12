@@ -14,8 +14,8 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.scoring import QueryResult
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.domain.scoring import ScoringEnv
-    from promptpotter.infrastructure.persistence.state import RunCallbacks
 
 logger = logging.getLogger(__name__)
 

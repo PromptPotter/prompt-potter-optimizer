@@ -74,7 +74,7 @@ promptpotter/
 ```
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts → `CAMPAIGN_SESSION_ARTIFACTS` in `infrastructure/persistence/state.py`; `tests/test_artifact_parity.py` enforces.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts → `CAMPAIGN_SESSION_ARTIFACTS` in `infrastructure/persistence/session_emitter.py`; `tests/test_artifact_parity.py` enforces.
 - **Display** (per-entry-point) — caller passes `RunCallbacks`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 

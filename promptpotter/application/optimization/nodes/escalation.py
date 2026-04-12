@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.nodes.critique import extract_warning_types
+from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import (
     DEFAULT_STRATEGIES,
@@ -25,12 +26,12 @@ from promptpotter.domain.analysis import (
     EscalationStrategy,
     EscalationTarget,
 )
-from promptpotter.infrastructure.persistence.state import CampaignPhase, PhaseEvent, emit_phase
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.phases import StopReason
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.persistence.state import LoopState, StopReason
     from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
@@ -186,11 +187,11 @@ def _degradation_reset(
     reset_l3: bool = False,
 ) -> None:
     """Reset L2 (and optionally L3) counters during degradation investigation."""
-    state.escalation.l2_stall_count = 0
-    state.escalation.l2_round = 0
+    state.escalation.l2.stall_count = 0
+    state.escalation.l2.round = 0
     if reset_l3:
-        state.escalation.l3_stall_count = 0
-        state.escalation.l3_round = 0
+        state.escalation.l3.stall_count = 0
+        state.escalation.l3.round = 0
     state.opt_sp.degradation_reset_count += 1
     _maybe_emit_backend_warning(state, config, round_num, on_phase)
 
@@ -248,7 +249,7 @@ async def _do_l2_transition(
         CampaignPhase.REFINE_STRATEGY,
         "enter",
         round=round_num,
-        l2_round=state.escalation.l2_round,
+        l2_round=state.escalation.l2.round,
         stall_count=state.stall_count,
         current_params=state.opt_sp.optimizer_params,
         current_accuracy=state.current_accuracy,
@@ -277,7 +278,7 @@ async def _do_l2_transition(
     if transition.task_context:
         state.opt_sp.task_context = transition.task_context
     state.opt_sp.l2_directive = transition.l2_directive
-    state.escalation.record_l2_entry(state.best_accuracy, state.best_composite)
+    state.escalation.l2.record_entry(state.best_accuracy, state.best_composite)
     # Build warning inventory one-liner for display
     _warned_count, _top_warning = warning_summary(state.opt_sp.warning_inventory)
 
@@ -286,7 +287,7 @@ async def _do_l2_transition(
         CampaignPhase.REFINE_STRATEGY,
         "exit",
         round=round_num,
-        l2_round=state.escalation.l2_round,
+        l2_round=state.escalation.l2.round,
         param_changes_count=len(transition.opt_search_point.optimizer_params),
         task_context_changed=transition.task_context is not None,
         changes_description=transition.opt_search_point.changes_description or "",
@@ -308,7 +309,7 @@ async def _do_l2_transition(
     logger.debug(
         "L2 refine_strategy at round %d (l2_round=%d)",
         round_num,
-        state.escalation.l2_round,
+        state.escalation.l2.round,
     )
     return transition
 
@@ -331,9 +332,9 @@ async def _do_l3_transition(
 
     l2_history = [
         {
-            "l2_round": state.escalation.l2_round,
+            "l2_round": state.escalation.l2.round,
             "optimizer_params": state.opt_sp.optimizer_params,
-            "accuracy_change": state.best_composite - state.escalation.best_composite_at_l3_entry,
+            "accuracy_change": state.best_composite - state.escalation.l3.best_composite_at_entry,
         }
     ]
     emit_phase(
@@ -341,8 +342,8 @@ async def _do_l3_transition(
         CampaignPhase.MODIFY_PLAN,
         "enter",
         round=round_num,
-        l3_round=state.escalation.l3_round,
-        l2_stall_count=state.escalation.l2_stall_count,
+        l3_round=state.escalation.l3.round,
+        l2_stall_count=state.escalation.l2.stall_count,
         current_plan_preview=str(state.opt_sp.plan)[:120],
     )
 
@@ -361,14 +362,14 @@ async def _do_l3_transition(
             search_memory=state.search_memory,
         )
     _rebuild_current_sp(state, transition, schema=config.pipeline_schema)
-    state.escalation.record_l3_entry(state.best_accuracy, state.best_composite)
+    state.escalation.l3.record_entry(state.best_accuracy, state.best_composite)
     state.escalation.reset_for_l3(state.best_accuracy, state.best_composite)
     emit_phase(
         on_phase,
         CampaignPhase.MODIFY_PLAN,
         "exit",
         round=round_num,
-        l3_round=state.escalation.l3_round,
+        l3_round=state.escalation.l3.round,
         new_plan_preview=str(transition.opt_search_point.plan)[:120],
         changes_description=transition.opt_search_point.changes_description or "",
         pipeline_params_changed=transition.pipeline_params is not None,
@@ -376,7 +377,7 @@ async def _do_l3_transition(
     logger.debug(
         "L3 modify_plan at round %d (l3_round=%d)",
         round_num,
-        state.escalation.l3_round,
+        state.escalation.l3.round,
     )
     return transition
 
@@ -399,12 +400,12 @@ async def escalate_l2(
     instead of stopping — the degradation investigation loop continues.
     """
     from promptpotter.application.optimization.nodes.round_execution import PauseForReviewError
-    from promptpotter.infrastructure.persistence.state import StopReason
+    from promptpotter.application.optimization.phases import StopReason
 
     esc = state.escalation
-    esc.record_l2_outcome(state.best_composite)
+    esc.l2.record_outcome(state.best_composite)
 
-    l2_stalled = config.l2_patience is not None and esc.l2_stall_count >= config.l2_patience
+    l2_stalled = config.l2_patience is not None and esc.l2.stall_count >= config.l2_patience
     if not l2_stalled:
         await _do_l2_transition(
             state,
@@ -439,14 +440,14 @@ async def escalate_l2(
             return None
         logger.debug(
             "L2 patience exhausted (%d stalls) at round %d",
-            esc.l2_stall_count,
+            esc.l2.stall_count,
             round_num,
         )
         return StopReason.L2_PATIENCE
 
     # L2 stalled, L3 enabled — track L3 stall
-    esc.record_l3_outcome(state.best_composite)
-    l3_exhausted = config.l3_patience is not None and esc.l3_stall_count >= config.l3_patience
+    esc.l3.record_outcome(state.best_composite)
+    l3_exhausted = config.l3_patience is not None and esc.l3.stall_count >= config.l3_patience
     if not l3_exhausted:
         await _do_l3_transition(
             state,
@@ -473,7 +474,7 @@ async def escalate_l2(
         return None
     logger.debug(
         "L3 patience exhausted (%d stalls) at round %d",
-        esc.l3_stall_count,
+        esc.l3.stall_count,
         round_num,
     )
     return StopReason.L3_PATIENCE

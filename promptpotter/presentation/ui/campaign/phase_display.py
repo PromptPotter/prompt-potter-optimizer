@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from promptpotter.infrastructure.persistence.state import PhaseEvent
+from promptpotter.application.optimization.phases import PhaseEvent
 
 if TYPE_CHECKING:
     from promptpotter.application.search.scan_results import ScanBrief
@@ -365,10 +365,11 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
 
 def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
     loop_state = d["state"]
+    loop_env = d["env"]
     state.baseline_accuracy = loop_state.current_accuracy
-    cycle_id = (loop_state.cycle_id or "?")[:12]
-    samples = len(loop_state.scoring_dataset)
-    obs = "ON" if (loop_state.scoring_ctx and loop_state.scoring_ctx.obs) else "OFF"
+    cycle_id = (loop_env.cycle_id or "?")[:12]
+    samples = len(loop_env.scoring_dataset)
+    obs = "ON" if (loop_env.scoring_ctx and loop_env.scoring_ctx.obs) else "OFF"
     print(
         f"  {GREEN}\u2713{RESET} Initialized  baseline={loop_state.current_accuracy:.1%}  "
         f"cycle={cycle_id}  samples={samples}  obs={obs}"
@@ -379,12 +380,12 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
         if len(preview) > 80:
             preview = preview[:77] + "..."
         print(f"    {CYAN}Bootstrap critique:{RESET} {preview}")
-    resumed = loop_state.resumed_from_round
+    resumed = loop_env.resumed_from_round
     if resumed > 0:
         state_parts = []
         critique_chars = len(loop_state.opt_sp.critique_text)
         task_context_keys = len(loop_state.opt_sp.task_context)
-        l2_round = loop_state.escalation.l2_round
+        l2_round = loop_state.escalation.l2.round
         if critique_chars:
             state_parts.append(f"critique={critique_chars} chars")
         if task_context_keys:

@@ -36,8 +36,11 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     """Emitter lifecycle (init + on_phase + on_query + on_candidate + on_round + finalize)
     must produce all CAMPAIGN_SESSION_ARTIFACTS."""
     from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.application.optimization.loop_env import LoopEnv
+    from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.phases import PhaseEvent
+    from promptpotter.application.optimization.results import RoundResult
     from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
-    from promptpotter.infrastructure.persistence.state import LoopState, PhaseEvent, RoundResult
 
     config = LoopConfig(
         backend_id="test_backend",
@@ -48,13 +51,14 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     emitter = CampaignPersistenceEmitter(session_dir, config)
 
     # Simulate a single round lifecycle
-    init_state = LoopState(current_accuracy=0.5, cycle_id="cycle_test_001")
+    init_state = LoopState(current_accuracy=0.5)
+    init_env = LoopEnv(cycle_id="cycle_test_001")
     emitter.on_phase(
         PhaseEvent(
             phase="init",
             event="exit",
             round=0,
-            data={"state": init_state, "config": config},
+            data={"state": init_state, "env": init_env, "config": config},
         )
     )
     emitter.on_phase(

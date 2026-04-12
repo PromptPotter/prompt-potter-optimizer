@@ -492,6 +492,7 @@ class SearchMemory:
     def on_round_complete(
         self,
         state: Any,
+        env: Any,
         config: Any,
         round_num: int,
         full_dataset: list[dict[str, Any]],
@@ -505,7 +506,7 @@ class SearchMemory:
         from promptpotter.application.scoring.metrics import compile_query_difficulty
 
         # Refresh + correlations + save
-        store = state.scoring_ctx.store if state.scoring_ctx else None
+        store = env.scoring_ctx.store if env.scoring_ctx else None
         if store and self.refresh(store, config.backend_id):
             if round_num > 0 and round_num % 5 == 0 and self.recompute_failure_group_correlations():
                 logger.info(
@@ -521,8 +522,8 @@ class SearchMemory:
         if len(hist) < 3:
             return
         qd = compile_query_difficulty(hist)
-        state.scoring_dataset, adapt_info = adapt_eval_set(
-            state.scoring_dataset,
+        env.scoring_dataset, adapt_info = adapt_eval_set(
+            env.scoring_dataset,
             qd,
             full_dataset,
             seed=config.seed + round_num,
