@@ -119,8 +119,8 @@ async def _handle_escalation_signal(
         round=round_num,
         check_name=signal["check_name"],
         target=signal["target"],
-        degraded_rate=signal["context"].get("degraded_rate"),
-        warning_types=signal["context"].get("warning_types"),
+        degraded_rate=signal["check_result"].get("degraded_rate"),
+        warning_types=signal["check_result"].get("warning_types"),
     )
 
     esc_check_result = signal["check_result"]

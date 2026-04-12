@@ -95,15 +95,3 @@ class EscalationSignal:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-@dataclass
-class EscalationStrategy:
-    """Configurable response to a specific warning type."""
-
-    target: EscalationTarget = EscalationTarget.L2
-
-
-DEFAULT_STRATEGIES: dict[str, EscalationStrategy] = {
-    "web_search:low_document_count": EscalationStrategy(target=EscalationTarget.L2),
-}

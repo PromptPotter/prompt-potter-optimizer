@@ -284,6 +284,8 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         ctx.backend_url,
         ctx.init_params.get("dataset_name"),
     )
+    session_dir = session.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
+    logger.info("Session: %s", session_dir)
 
     # Re-run baseline (fast — cached) to populate baseline_results for critique
     has_baseline = ctx.state.get("baseline_accuracy", 0) > 0
@@ -301,7 +303,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     campaign_config.setdefault("optimization", {}).pop("pause_before_scoring", None)
     ctx.save_phase("optimizing")
 
-    session_dir = session.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
     control_cb = RunCallbacks(on_checkpoint=CampaignControlReader(session_dir).check)
     set_round_recorder(RoundRecorder(session_dir / "rounds"))
 
@@ -339,7 +340,9 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 
     return CommandResult(
         data=cycle_result.model_dump(),
-        human=f"Dashboard: {state_path}\nResult: {result_path}",
+        human=(
+            f"Campaign: {cycle_result.cycle_id}\nDashboard: {state_path}\nResult: {result_path}"
+        ),
     )
 
 
