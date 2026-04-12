@@ -11,7 +11,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.models.analysis import EscalationSignal, EscalationTarget
+from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 
 logger = logging.getLogger(__name__)
 

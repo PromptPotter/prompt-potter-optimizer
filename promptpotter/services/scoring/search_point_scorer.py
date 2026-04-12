@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.models.scoring import QueryResult
+from promptpotter.domain.scoring import QueryResult
 from promptpotter.services.dataset_builder import build_dataset_run_data
 from promptpotter.services.metrics import compute_composite_score
 from promptpotter.services.scoring.sample_measurement import (
@@ -53,9 +53,9 @@ def _graceful_interrupt():
 
 
 if TYPE_CHECKING:
-    from promptpotter.models.analysis import EscalationSignal
-    from promptpotter.models.scoring import QueryRunner, ScoringEnv
-    from promptpotter.models.search_point import JobSearchPoint
+    from promptpotter.domain.analysis import EscalationSignal
+    from promptpotter.domain.scoring import QueryRunner, ScoringEnv
+    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)

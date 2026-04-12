@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.search_point import TaskDecomposition
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.services.campaign.campaign_setup import (
     SessionEnv,
 )
@@ -147,7 +147,7 @@ def dev_reload() -> None:
         "promptpotter.ui.campaign.campaigns",
         "promptpotter.ui.campaign.search",
         "promptpotter.ui.campaign.search_scan",
-        # NOTE: Do NOT reload promptpotter.models.* or dataclass modules —
+        # NOTE: Do NOT reload promptpotter.domain.* or dataclass modules —
         # Pydantic/dataclass classes break when reloaded (existing
         # instances fail type checks).  scan_results.py has ScanBrief
         # dataclass, so it must not be reloaded.

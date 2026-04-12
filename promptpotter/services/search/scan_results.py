@@ -12,14 +12,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.search_point import JobSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS, PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     import pandas as pd
 
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.llm_client import LLMClientBase

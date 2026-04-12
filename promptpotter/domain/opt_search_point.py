@@ -37,12 +37,12 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from pydantic import BaseModel, Field, field_validator
 
-from promptpotter.models.search_point import SearchPoint, TaskDecomposition
+from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.models.search_point import JobSearchPoint
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.search_point import JobSearchPoint
 
 
 class FewShotExample(BaseModel):
@@ -279,7 +279,7 @@ class OptSearchPoint(PromptTemplate):
         campaign and must not depend on what ``base_pipeline_params``
         carries.
         """
-        from promptpotter.models.search_point import JobSearchPoint
+        from promptpotter.domain.search_point import JobSearchPoint
 
         pp = copy.deepcopy(base_pipeline_params or {})
         active_steps = schema.active_steps if schema else ()

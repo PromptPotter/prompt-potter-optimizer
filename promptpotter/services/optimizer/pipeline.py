@@ -27,11 +27,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.round_recorder import RoundRecorder
 
-from promptpotter.models.opt_search_point import PromptTemplate
-from promptpotter.models.search_point import TaskDecomposition
+from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.services.llm_client import LLMClientBase, LLMResponse
 from promptpotter.services.store.base import (
     read_json_optional,
@@ -49,7 +49,7 @@ _PIPELINE_PATH = Path(__file__).parent / "optimizer_pipeline.json"
 @functools.lru_cache(maxsize=1)
 def get_optimizer_schema() -> PipelineSchema:
     """Load optimizer_pipeline.json as PipelineSchema (cached)."""
-    from promptpotter.models.pipeline_schema import PipelineNode
+    from promptpotter.domain.pipeline_schema import PipelineNode
 
     data = json.loads(_PIPELINE_PATH.read_text())
     nodes = [

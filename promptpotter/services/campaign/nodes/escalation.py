@@ -7,7 +7,7 @@ Two layers:
    triggered when the feedback cycle stalls.
 
 Pure data types (``EscalationTarget``, ``EscalationSignal``,
-``EscalationStrategy``) live in ``promptpotter.models.analysis``.
+``EscalationStrategy``) live in ``promptpotter.domain.analysis``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.analysis import (
+from promptpotter.domain.analysis import (
     DEFAULT_STRATEGIES,
     EscalationSignal,
     EscalationStrategy,
@@ -28,7 +28,7 @@ from promptpotter.services.campaign.state import CampaignPhase, PhaseEvent, emit
 from promptpotter.services.metrics import count_degraded_queries
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.config import LoopConfig
     from promptpotter.services.campaign.state import LoopState, StopReason
     from promptpotter.services.tracing.observability_logger import ObsLogger

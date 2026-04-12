@@ -15,8 +15,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.search_point import TaskDecomposition
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.services.campaign.nodes.formatting import (
     L2IntelligenceData,
     assess_candidate_diversity,
@@ -30,8 +30,8 @@ from promptpotter.services.optimizer.pipeline import llm_call, load_optimizer_pr
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
-    from promptpotter.models.opt_search_point import PromptTemplate
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.opt_search_point import PromptTemplate
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)

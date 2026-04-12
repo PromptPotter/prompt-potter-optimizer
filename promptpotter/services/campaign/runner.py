@@ -17,8 +17,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.search_point import TaskDecomposition
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.services.campaign.campaign_setup import SessionEnv
 from promptpotter.services.campaign.config import LoopConfig
 from promptpotter.services.campaign.data import extract_campaign_baseline

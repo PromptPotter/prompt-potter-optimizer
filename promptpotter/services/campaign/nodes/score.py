@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.pipeline_schema import PipelineSchema
-from promptpotter.models.scoring import QueryResult
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.scoring import QueryResult
 from promptpotter.services.metrics import compute_composite_score, count_degraded_queries
 
 if TYPE_CHECKING:
-    from promptpotter.models.scoring import ScoringEnv
+    from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.services.campaign.state import RunCallbacks
 
 logger = logging.getLogger(__name__)

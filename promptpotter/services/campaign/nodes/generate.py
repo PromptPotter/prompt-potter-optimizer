@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.pipeline_schema import PipelineSchema
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.services.campaign.nodes.formatting import (
     L1PromptData,
     format_context_sections,
@@ -17,7 +17,7 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
-    from promptpotter.models.analysis import FailureAnalysis
+    from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.services.search.scan_results import ScanBrief
 
 logger = logging.getLogger(__name__)

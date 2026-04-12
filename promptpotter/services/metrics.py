@@ -14,17 +14,17 @@ from pydantic import BaseModel
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.models.analysis import (
+    from promptpotter.domain.analysis import (
         DifficultyClass,
         FailureAnalysis,
         FailurePattern,
         QueryDifficulty,
     )
-    from promptpotter.models.pipeline_schema import (
+    from promptpotter.domain.pipeline_schema import (
         PipelineNode,
         PipelineSchema,
     )
-    from promptpotter.models.scoring import QueryResult
+    from promptpotter.domain.scoring import QueryResult
 
 
 class IntermediateMetric(BaseModel):
@@ -453,7 +453,7 @@ def compile_failure_analysis(
     ``(gt_in_source, gt_in_ranked, terminated_at)`` key, and returns the top
     patterns ranked by failure count.
     """
-    from promptpotter.models.analysis import FailureAnalysis, FailurePattern
+    from promptpotter.domain.analysis import FailureAnalysis, FailurePattern
 
     failures = [r for r in results if not r.get("hit") and not is_error_result(r)]
     if not failures:
@@ -503,7 +503,7 @@ def compile_query_difficulty(
     Returns:
         QueryDifficulty with per-query classification.
     """
-    from promptpotter.models.analysis import QueryDifficulty, QueryProfile
+    from promptpotter.domain.analysis import QueryDifficulty, QueryProfile
 
     query_hits: dict[str, list[bool]] = defaultdict(list)
     for round_results in historical_results:

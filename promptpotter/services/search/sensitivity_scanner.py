@@ -13,9 +13,9 @@ import random
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.scoring import ScoringEnv
-from promptpotter.models.search_point import JobSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.scoring import ScoringEnv
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.services.scoring.search_point_scorer import score_search_point
 from promptpotter.services.search.failure_group_analysis import preview as _preview
 from promptpotter.services.search.smart_search import (
@@ -28,7 +28,7 @@ from promptpotter.shared.errors import most_common_error_category
 if TYPE_CHECKING:
     import pandas as pd
 
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.campaign_setup import SessionEnv
 
 logger = logging.getLogger(__name__)

@@ -97,7 +97,7 @@ class QueryRunner(Protocol):
 
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.search_memory import SearchMemory
     from promptpotter.services.tracing.observability_logger import ObsLogger

@@ -18,7 +18,7 @@ from promptpotter.services.campaign.mgmt import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.project_store import ProjectStore

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.search_point import TaskDecomposition
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.services.campaign.campaign_setup import (
     resolve_campaign_id as _resolve_campaign_id,
 )
@@ -56,7 +56,7 @@ from .phase_display import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.campaign.state import RunCallbacks

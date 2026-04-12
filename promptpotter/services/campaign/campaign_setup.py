@@ -23,13 +23,14 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
-from promptpotter.models.backend import BackendConnection
-from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.domain.backend import BackendConnection
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.tenant import TenantContext
 from promptpotter.services.backend_client import BackendClient
 from promptpotter.services.project_store import ProjectStore
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.search.scan_results import ScanBrief
 
@@ -59,6 +60,7 @@ class SessionEnv:
     queries: list[dict] = field(default_factory=list)
     experiment_extract: dict = field(default_factory=dict)
     index_terms: list[str] = field(default_factory=list)
+    tenant: TenantContext | None = None
 
 
 def load_baseline_prompt(

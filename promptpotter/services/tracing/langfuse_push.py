@@ -32,7 +32,7 @@ from promptpotter.services.store.base import read_json_optional, write_json
 from promptpotter.shared.constants import DATASET_NAME as _DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
 @dataclass(frozen=True)

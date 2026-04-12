@@ -23,14 +23,14 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.models.scoring import ExactMatchComparator, GroundTruthResult, QueryResult
+from promptpotter.domain.scoring import ExactMatchComparator, GroundTruthResult, QueryResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.scoring import Scorer
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.models.scoring import QueryRunner
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.scoring import QueryRunner
     from promptpotter.services.store.stores import IntermediateCache
 
 _comparator = ExactMatchComparator({"strip": True})
@@ -257,7 +257,7 @@ async def measure_sample(
     ground_truth = query_data["ground_truth"]
 
     if pipeline_schema is None:
-        from promptpotter.models.pipeline_schema import PipelineSchema
+        from promptpotter.domain.pipeline_schema import PipelineSchema
 
         pipeline_schema = PipelineSchema()
 

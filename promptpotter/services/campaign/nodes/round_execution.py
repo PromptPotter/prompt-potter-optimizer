@@ -10,7 +10,7 @@ import logging
 import random
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from promptpotter.services import llm_client as _llm_client
@@ -38,8 +38,8 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.models.analysis import QueryDifficulty
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.analysis import QueryDifficulty
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.campaign.nodes.escalation import DegradationCheck
     from promptpotter.services.campaign.nodes.score import L1ScoringResult
     from promptpotter.services.store.campaign_store import CampaignStore

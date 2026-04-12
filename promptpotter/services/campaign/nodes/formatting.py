@@ -9,10 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.search_point import TaskDecomposition
+from promptpotter.domain.search_point import TaskDecomposition
 
 if TYPE_CHECKING:
-    from promptpotter.models.analysis import FailureAnalysis
+    from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.services.search.scan_results import ScanBrief
 
 __all__ = [

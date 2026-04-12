@@ -15,7 +15,7 @@ from promptpotter.services.campaign.config import CampaignConfig
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ def resolve_active_campaign_id(
     Used by display layer to detect which stored campaign matches the active
     notebook/CLI configuration.
     """
-    from promptpotter.models.opt_search_point import OptSearchPoint
+    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.services.campaign.config import LoopConfig
     from promptpotter.services.campaign.lifecycle import cycle_config_identity
 

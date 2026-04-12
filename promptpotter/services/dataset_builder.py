@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.models.search_point import JobSearchPoint
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -447,7 +447,7 @@ def load_dataset_from_traces(
 
     if experiment_extract:
         if schema is None:
-            from promptpotter.models.pipeline_schema import PipelineSchema
+            from promptpotter.domain.pipeline_schema import PipelineSchema
 
             schema = PipelineSchema()
         backend = store.backends.get(backend_id)

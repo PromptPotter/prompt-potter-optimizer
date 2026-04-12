@@ -14,7 +14,7 @@ import time
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.pipeline_schema import (
+from promptpotter.domain.pipeline_schema import (
     NodeOutputSchema,
     NodePromptMeta,
     ObservationMapping,

@@ -25,7 +25,7 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import content_hash
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
 class SearchPoint(BaseModel):
@@ -84,7 +84,7 @@ class JobSearchPoint(SearchPoint):
         if pipeline_schema is not None:
             return pipeline_schema.sp_hash(self.pipeline_params or {})
         # Fallback for schema-less contexts (display comparisons, tests)
-        from promptpotter.models.pipeline_schema import node_cache_key
+        from promptpotter.domain.pipeline_schema import node_cache_key
 
         return node_cache_key("_flat", self.pipeline_params or {}, "")
 

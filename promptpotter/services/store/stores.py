@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from promptpotter.models.backend import BackendConnection, Execution
+from promptpotter.domain.backend import BackendConnection, Execution
 from promptpotter.services.store.base import (
     EntityStore,
     read_json,

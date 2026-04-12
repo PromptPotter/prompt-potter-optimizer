@@ -4,7 +4,7 @@ Verifies derivation methods, parse_pipeline_response factory,
 and registry metadata flow.
 """
 
-from promptpotter.models.pipeline_schema import (
+from promptpotter.domain.pipeline_schema import (
     NodePromptMeta,
     ObservationMapping,
     PipelineNode,
@@ -356,7 +356,7 @@ class TestCoordinateLookups:
 
     def test_prefix_keys_matches_node_cache_key(self):
         """prefix_keys produces the same hashes as node_cache_key."""
-        from promptpotter.models.pipeline_schema import node_cache_key
+        from promptpotter.domain.pipeline_schema import node_cache_key
 
         schema = _three_node_schema()
         pp = {"a": {"max_results": 5}}

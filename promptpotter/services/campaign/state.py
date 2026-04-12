@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict
 
 from pydantic import BaseModel, Field
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.search_point import JobSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
-    from promptpotter.models.analysis import FailureAnalysis
-    from promptpotter.models.scoring import ScoringEnv
+    from promptpotter.domain.analysis import FailureAnalysis
+    from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.services.campaign.nodes.escalation import DegradationCheck
     from promptpotter.services.store.campaign_store import CampaignStore
 

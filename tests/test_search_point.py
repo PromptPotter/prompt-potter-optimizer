@@ -3,9 +3,9 @@
 import pydantic
 import pytest
 
-from promptpotter.models.opt_search_point import OptSearchPoint
-from promptpotter.models.pipeline_schema import NodePromptMeta, PipelineNode, PipelineSchema
-from promptpotter.models.search_point import JobSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.pipeline_schema import NodePromptMeta, PipelineNode, PipelineSchema
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared.hashing import content_hash
 
 
@@ -194,7 +194,7 @@ def test_to_job_search_point_no_prompt_node():
 
 def test_to_job_search_point_includes_few_shot_block():
     """Few-shot examples are pre-rendered into prompt_fields."""
-    from promptpotter.models.opt_search_point import FewShotExample
+    from promptpotter.domain.opt_search_point import FewShotExample
 
     osp = OptSearchPoint(
         instruction="Rank.",

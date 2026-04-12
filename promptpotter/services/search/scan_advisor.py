@@ -22,8 +22,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from promptpotter.models.pipeline_schema import NodeOutputSchema, PipelineNode, PipelineSchema
-from promptpotter.models.search_point import TaskDecomposition
+from promptpotter.domain.pipeline_schema import NodeOutputSchema, PipelineNode, PipelineSchema
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.services.optimizer.pipeline import llm_call
 
 logger = logging.getLogger(__name__)

@@ -12,13 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.services.campaign.campaign_setup import SessionEnv, load_baseline_prompt
 from promptpotter.services.campaign.config import CampaignConfig
 from promptpotter.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.project_store import ProjectStore
 
 
@@ -114,7 +114,7 @@ async def run_baseline_scoring(
     Raises:
         RuntimeError: If no evaluation data is available.
     """
-    from promptpotter.models.scoring import ScoringEnv
+    from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.services.scoring.search_point_scorer import score_search_point
     from promptpotter.shared.errors import graceful
     from promptpotter.shared.scoring import compile_scorer

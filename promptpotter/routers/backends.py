@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from promptpotter.dependencies import StoreDep
-from promptpotter.models.backend import BackendConnection
+from promptpotter.domain.backend import BackendConnection
 from promptpotter.services.backend_client import BackendClient
 from promptpotter.services.pipeline_discovery import compute_pipeline_view
 from promptpotter.services.project_store import ProjectStore

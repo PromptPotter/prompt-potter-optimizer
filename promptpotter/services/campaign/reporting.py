@@ -31,8 +31,8 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.services.search.failure_group_analysis import proportion_test, wilson_ci
 
 if TYPE_CHECKING:
-    from promptpotter.models.analysis import FailureAnalysis, QueryDifficulty
-    from promptpotter.models.pipeline_schema import PipelineSchema
+    from promptpotter.domain.analysis import FailureAnalysis, QueryDifficulty
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.services.project_store import ProjectStore
     from promptpotter.services.search.search_memory import SearchMemory
 

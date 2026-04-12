@@ -15,7 +15,7 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from promptpotter.models.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.services.project_store import ProjectStore
 from promptpotter.services.search.failure_group_analysis import preview
 from promptpotter.services.search.smart_search import deserialize_smart_search_plan
@@ -23,8 +23,8 @@ from promptpotter.shared.constants import DEFAULT_DIAGNOSTIC_QUERIES, PROMPT_STR
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.models.search_point import JobSearchPoint
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.search_point import JobSearchPoint
 
 logger = logging.getLogger(__name__)
 

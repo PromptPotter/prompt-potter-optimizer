@@ -15,8 +15,8 @@ from promptpotter.services.metrics import find_rank
 from promptpotter.services.scoring.sample_measurement import measure_sample
 
 if TYPE_CHECKING:
-    from promptpotter.models.pipeline_schema import PipelineSchema
-    from promptpotter.models.scoring import QueryRunner
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.scoring import QueryRunner
     from promptpotter.services.search.search_memory import SearchMemory
     from promptpotter.services.store.stores import IntermediateCache
 

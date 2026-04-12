@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.models.pipeline_schema import PipelineSchema
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.services.search import (
     advise_scan_config as _advise_scan_config,
 )
