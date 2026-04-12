@@ -84,6 +84,8 @@ SearchPoint (abstract — render())
 
 **Prompt alias groups** link the original monolithic prompt to its decomposed form (and any future variants) so all historical evaluations are discoverable across both. Core to the data model and actively evolving.
 
+Intermediate node outputs are cached in a [suffix-hash store](docs/architecture/suffix-cache.md) keyed at every pipeline cut point — O(1) lookup for the common case, symmetric reuse across both upstream and downstream config changes. The cache replaced an earlier prefix-chain scheme during M9 and is a deliberate pre-publication architectural improvement.
+
 **The key insight: every evaluation is saved.** When an optimization thread stops improving, its data isn't wasted — the next sensitivity scan discovers all stored evaluations, knows the landscape better, and a fresh optimization starts from higher ground.
 
 ```
@@ -167,6 +169,7 @@ Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (
 - [Prompt Scheme](docs/architecture/prompt-scheme.md) — 8-field decomposition, variant library, rendering
 - [Information Flow](docs/architecture/information-flow.md) — Prompt injection map
 - [Node Standard](docs/architecture/node-standard.md) — Node types, `llm_call()` primitive
+- [Suffix-Hash Cache](docs/architecture/suffix-cache.md) — Per-query intermediate cache (M9, replaces prefix-chain scheme)
 
 **Operations** (how to use it):
 - [Setup Guide](docs/setup-guide.md) — Prerequisites, installation, configuration

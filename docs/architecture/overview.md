@@ -238,7 +238,7 @@ Per-query / per-candidate / per-round detail lives in `campaign_output.log` (app
   smart_search_plans/{plan_id}.json
   obs/langfuse/events.jsonl
   search_memory.json                  # (M8) materialized view index
-  intermediate_cache/{node}_{key}.json  # per-node output cache
+  suffix_cache/{suffix_key}.json        # per-query suffix-hash cache (M9, replaces intermediate_cache)
 ```
 
 `dataset_runs/` is shared across all eval paths (content-addressed). `campaigns/` holds optimizer-layer trial checkpoints per round.
@@ -251,19 +251,19 @@ Full design, accessors, and consumer matrix: [`docs/research/search-memory-intel
 
 ### Node-Level Cache
 
-Per-node output caching with chained dependency keys. Each node's output is keyed by `node_cache_key(node_name, node_config, upstream_key)` where `upstream_key` is the cache key of the previous node. This creates a dependency chain: if fuzzy_matching config is unchanged, its cache key is stable, making web_search's key stable too (since web_search depends on fuzzy_matching output).
+**Suffix-hash cache** (M9, replaces the deprecated `IntermediateCache`). One flat KV store keyed by `suffix_key(input, [node_configs...])` with entries emitted at *every* pipeline cut point — both partial prefixes from the query and partial tails from each intermediate output. Because the backend already returns all `node_outputs` in a single response, populating every cut point costs only hashing (`n(n+1)/2` entries per run).
 
-**Prefix walk:** `walk_prefix()` walks the node chain from pipeline start. At each node, checks if `{node}_{key}.json` has the query. Stops at the first miss. Sends all cached outputs as `precomputed` to the backend — it only runs the remaining nodes. When ALL nodes are cached, `_build_local_result()` constructs the result locally without any backend call.
+**Lookup:** O(1) for the common case (identical pipeline) — a single hash check on the full-pipeline suffix key. For a single changed node, either a prefix up-to-the-changed-node hits or a tail from the unchanged upstream hits — still 1–2 lookups. The prior `IntermediateCache` required an O(n) sequential walk (`walk_prefix`) and could only reuse upstream nodes, cascading invalidation through every downstream key when an upstream node changed. The suffix scheme gives symmetric reuse across both upstream and downstream config changes, and enables mid-call short-circuiting when the backend streams intermediates.
 
-**Unified chain addressing:** `sp_hash` is the terminal element of `prefix_keys()` — no separate hash computation. `find_by_prefix_chain()` in `dataset_run_store` matches prior runs by exact or partial prefix for result-level reuse (queries that terminated within the shared prefix are reusable even when downstream nodes differ). `dataset_run_store` also feeds SearchMemory and campaign lineage.
+**Two layers, different jobs:** `sp_hash` (terminal element of `PipelineSchema.prefix_keys()`) and `find_by_prefix_chain()` in `dataset_run_store` still address the full-run archive layer (SearchMemory, observability, lineage, result-level reuse). The suffix cache is strictly the per-query intermediate layer.
 
 **Disk layout:**
 ```
-intermediate_cache/
-  {node_name}_{cache_key}.json    ← {query: node_output}
+suffix_cache/
+  {suffix_key}.json    ← {input_hash: {node_outputs}}
 ```
 
-**Implementation:** `PipelineSchema.prefix_keys()` computes the key chain; `IntermediateCache.walk_prefix()` does the disk I/O. Wired through `measure_sample()` in `scoring/sample_measurement.py`.
+**Implementation:** `SuffixCache` at `infrastructure/store/suffix_cache.py`, consumed only by `measure_sample()` in `application/scoring/sample_measurement.py`. Full design and complexity analysis: [`docs/architecture/suffix-cache.md`](suffix-cache.md).
 
 Gracefully no-ops until the target backend supports `node_outputs` in responses and `precomputed` in requests.
 

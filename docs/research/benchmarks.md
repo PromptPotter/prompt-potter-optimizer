@@ -166,6 +166,10 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 | GSM8K EM | PromptWizard | — | [Agarwal et al., 2024](https://arxiv.org/abs/2405.18369) |
 | AIME 2025 EM | GEPA | — | [GEPA, 2025](https://arxiv.org/abs/2507.19457) |
 
+## Infrastructure Notes
+
+**Suffix-hash cache (M9).** Per-query intermediate caching was rebuilt for this publication. The prior `IntermediateCache` used a chained-prefix scheme that walked O(n) per lookup and could only reuse upstream nodes across config changes — changing any node cascaded invalidation downstream. We replaced it with a **suffix-hash cache** keyed at every pipeline cut point, giving O(1) lookup for the common case, symmetric reuse across both upstream and downstream config changes, and mid-call short-circuiting when the backend streams intermediates. This is a deliberate pre-publication simplification, not an incidental rewrite — benchmark wall-clock numbers reported in this document are produced against the suffix-hash cache. Design: [`docs/architecture/suffix-cache.md`](../architecture/suffix-cache.md).
+
 ## Reference Papers
 
 | Paper | Affiliation | Year | Datasets | Key Result |
