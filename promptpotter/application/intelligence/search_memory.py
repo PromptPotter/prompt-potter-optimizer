@@ -1,4 +1,4 @@
-"""SearchMemory — cross-campaign intelligence materialized view (M8 Wave 3).
+"""SearchMemory — cross-campaign intelligence materialized view.
 
 A persistent, incrementally-updated statistical index over ALL historical
 search points and their evaluation results.  Exposes atomic data accessors
@@ -614,7 +614,9 @@ class SearchMemory:
 
         Owns the round-boundary work that used to live in the runner.
         """
-        from promptpotter.application.intelligence.eval_set_adaptation import adapt_eval_set
+        from promptpotter.application.intelligence.scoring_set_adaptation import (
+            adapt_scoring_set,
+        )
         from promptpotter.application.scoring.metrics import compile_query_difficulty
 
         # Refresh + correlations + save
@@ -627,21 +629,21 @@ class SearchMemory:
                 )
             self.save(Path(store.base_dir) / config.backend_id / "search_memory.json")
 
-        # Adaptive eval-set swap (needs 3+ rounds of history)
+        # Adaptive scoring-set swap (needs 3+ rounds of history)
         if round_num < 2:
             return
         hist = [r.results for r in state.rounds if r.results]
         if len(hist) < 3:
             return
         qd = compile_query_difficulty(hist)
-        env.scoring_dataset, adapt_info = adapt_eval_set(
+        env.scoring_dataset, adapt_info = adapt_scoring_set(
             env.scoring_dataset,
             qd,
             full_dataset,
             seed=config.seed + round_num,
         )
         if not adapt_info.get("unchanged"):
-            logger.info("Adaptive eval: %s", adapt_info)
+            logger.info("Adaptive scoring-set: %s", adapt_info)
 
     def record_flips_from_rounds(self, rounds: list[Any], round_num: int) -> None:
         """Record query flips between the last two rounds."""

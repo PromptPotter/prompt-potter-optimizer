@@ -76,8 +76,7 @@ class QueryRunner(Protocol):
     """Async backend connector interface.
 
     Satisfied by both ``BackendClient`` (multi-node pipelines) and
-    ``LLMOnlyAdapter`` (single-call LLM datasets).  Aligns with the
-    planned M11 ``ConnectorProtocol``.
+    ``LLMOnlyAdapter`` (single-call LLM datasets).
     """
 
     async def run_query(

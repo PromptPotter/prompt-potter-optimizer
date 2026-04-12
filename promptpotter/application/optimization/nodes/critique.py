@@ -73,7 +73,7 @@ class RoundSnapshot:
     degradation_threshold: float = 0.4
     near_miss_ratio: float = 0.3
 
-    # SearchMemory context (M8 Wave 3c)
+    # SearchMemory context
     search_memory_digest: dict | None = None
 
     @classmethod
@@ -530,7 +530,7 @@ def assemble_critique_sections(ctx: RoundSnapshot) -> str:
         )
         sections.insert(1, anomaly_block)
 
-    # SearchMemory historical intelligence (Wave 3c + M8 completion)
+    # SearchMemory historical intelligence
     sm_digest = ctx.search_memory_digest
     if sm_digest:
         sm_lines = ["## HISTORICAL INTELLIGENCE"]

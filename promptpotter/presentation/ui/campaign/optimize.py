@@ -10,8 +10,7 @@ from promptpotter.application.campaign.campaign_setup import (
 from promptpotter.application.campaign.data import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
-from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent
-from promptpotter.application.optimization.results import RoundResult, RunResult
+from promptpotter.application.optimization.results import RunResult
 from promptpotter.application.recon.failure_groups import (
     min_detectable_effect,
     proportion_test,
@@ -25,30 +24,16 @@ from .display import (
     BOLD,
     CYAN,
     GREEN,
-    RED,
     RESET,
     YELLOW,
-    _box_bottom,
-    _box_bottom_info,
-    _box_line,
-    _box_top,
     _dbox_bottom,
     _dbox_line,
     _dbox_sep,
     _dbox_top,
-    _fmt_delta,
     _fmt_query_result,
     _print_interrupt_banner,
     format_pipeline_overrides,
     show_progress,
-)
-from .phase_display import (
-    _CycleDisplayState,
-    _dispatch_phase,
-    _node_bottom,
-    _node_line,
-    _node_top,
-    _pp_val,
 )
 
 if TYPE_CHECKING:
@@ -349,25 +334,11 @@ async def run_optimization_notebook(
     Returns:
         Tuple of (campaign_rounds, RunResult or None if interrupted).
     """
-    from promptpotter.application.campaign.config import LoopConfig
+    from .display_callbacks import NotebookDisplay
 
-    # Session-derived locals for display closures
-    store = session.store if session else None
-    backend_id = session.backend_id if session else ""
-    pipeline_schema = session.pipeline_schema if session else None
-    config = (
-        LoopConfig.from_campaign_config(
-            campaign_config,
-            backend_id=session.backend_id,
-            project_root=str(session.store.base_dir),
-            session_id=session_id,
-            recon_brief=recon_brief,
-            pipeline_schema=session.pipeline_schema,
-            task_context=task_context,
-        )
-        if session
-        else None
-    )
+    assert session is not None, "session (SessionEnv) required for optimization"
+    store = session.store
+    backend_id = session.backend_id
 
     _bl = _extract_campaign_baseline(campaign_rounds)
     baseline_acc = _bl.baseline_acc
@@ -377,258 +348,14 @@ async def run_optimization_notebook(
         print(f"  {YELLOW}⚠ Scan context not available — running without scan data.{RESET}")
         print("    Run the preflight cell to rebuild recon_brief from scan variables.")
 
-    # --- Display state (shared across closures) ---
-    initial_len = len(campaign_rounds)
-    _ds = _CycleDisplayState(baseline_accuracy=baseline_acc)
-    _ds.recon_brief = recon_brief
-    _query_counter = [0]
-
-    def _on_phase(event: PhaseEvent) -> None:
-        _dispatch_phase(event, _ds)
-        # Reset query counter on escalation exit (on_round is skipped)
-        if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
-            _query_counter[0] = 0
-        # On resume: clear stale optimization rounds before replay re-appends them
-        if (
-            event.phase == CampaignPhase.INIT
-            and event.event == "exit"
-            and event.data["env"].resumed_from_round > 0
-        ):
-            del campaign_rounds[initial_len:]
-
-    def _on_query(
-        cand_idx: int, n_cands: int, query_idx: int, n_queries: int, result: dict
-    ) -> None:
-        _query_counter[0] += 1
-        is_cached = result.get("cached", False)
-        prefix = f"  [{_query_counter[0]:>3d}] "
-        print(
-            _fmt_query_result(result, cached=is_cached, prefix=prefix),
-            flush=True,
-        )
-
-    def _on_candidate(idx: int, total: int, scores: dict) -> None:
-        label = f"C{idx + 1}"
-        w = 66
-
-        acc = scores["accuracy"]
-        hits = scores.get("hits", 0)
-        n = scores.get("total", 0)
-        comp = scores.get("composite")
-        ci_lo, ci_hi = wilson_ci(hits, n)
-        delta = acc - _ds.baseline_accuracy
-
-        # Line 1 (top frame): label + accuracy with CI
-        acc_tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
-        print(f"  {_box_top(f'{label}/{total}', acc_tag, width=w)}")
-
-        # Line 2 (content): cyan mutations + hits + vs baseline
-        meta = {}
-        if idx < len(_ds.candidates_meta):
-            meta = _ds.candidates_meta[idx]
-        pp = meta.get("pipeline_params_override")
-        parts: list[str] = []
-        if pp:
-            for node, val in pp.items():
-                if isinstance(val, dict):
-                    for k, v in val.items():
-                        parts.append(f"{node}.{k}: {_pp_val(v)}")
-                else:
-                    parts.append(f"{node}: {_pp_val(val)}")
-        mutations = f"{CYAN}{'  '.join(parts)}{RESET}  " if parts else ""
-        if scores.get("escalation_aborted"):
-            scored_q = scores.get("scored_queries", n)
-            expected_q = scores.get("expected_queries", n)
-            hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
-        else:
-            hit_str = f"{hits}/{n} hits"
-        content = f"{mutations}{hit_str}  vs baseline: {_fmt_delta(delta)}"
-        print(f"  {_box_line(content, width=w)}")
-
-        # Line 3 (bottom frame): composite + degraded
-        bottom_parts: list[str] = []
-        if comp is not None and comp != acc:
-            bottom_parts.append(f"composite={comp:.4f}")
-        degraded = scores.get("degraded_queries", 0)
-        if degraded:
-            bottom_parts.append(f"{YELLOW}\u26a0 {degraded}/{n} degraded{RESET}")
-        if bottom_parts:
-            print(f"  {_box_bottom_info('  '.join(bottom_parts), width=w)}")
-        else:
-            print(f"  {_box_bottom(width=w)}")
-
-    def _on_round(round_result: RoundResult, stall_count: int) -> None:
-        assert config is not None
-        _query_counter[0] = 0
-        _ds.stall_count = stall_count
-
-        # Append to notebook-local display list (runner no longer mutates it)
-        campaign_rounds.append(
-            {
-                "round": len(campaign_rounds),
-                "label": round_result.label,
-                "accuracy": round_result.accuracy,
-                "composite": round_result.composite,
-                "hits": round_result.hits,
-                "total": round_result.total,
-                "improved": round_result.improved,
-                "prompt_fields": OptSearchPoint.from_prompt_fields(round_result.prompt_fields),
-                "results": round_result.results,
-                "candidates_scored": round_result.candidates_scored,
-                "candidate_scores": list(round_result.candidate_scores),
-            }
-        )
-
-        rn = _ds.round_num + 1
-
-        # --- ROUND SUMMARY node ---
-        print()
-        print(_node_top(f"ROUND {rn} SUMMARY"))
-
-        # Inline progress table (same logic as show_progress)
-        _accs = []
-        has_comp = any(
-            rd.get("composite") is not None and rd.get("composite") != rd["accuracy"]
-            for rd in campaign_rounds
-        )
-        if has_comp:
-            print(
-                _node_line(
-                    f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
-                    f" {'Rolling Avg':>13s} {'Trend':>8s}"
-                )
-            )
-        else:
-            print(_node_line(f"{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>8s}"))
-
-        for rd in campaign_rounds:
-            acc = rd["accuracy"]
-            _accs.append(acc)
-            n_a = len(_accs)
-            window_slice = _accs[-8:]
-            rolling = sum(window_slice) / len(window_slice)
-            if n_a <= 1:
-                trend = "-"
-            else:
-                d = acc - _accs[-2]
-                if abs(d) < 0.001:
-                    trend = "+0.0%  <-- plateau"
-                elif d > 0:
-                    trend = f"+{d:.1%}"
-                else:
-                    trend = f"{d:.1%}"
-            rl = str(rd["round"])
-            if rd.get("round") == "grid":
-                rl = "G"
-            if has_comp:
-                comp = rd.get("composite", acc)
-                print(_node_line(f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f} {rolling:>12.1%}  {trend}"))
-            else:
-                print(_node_line(f"  {rl:<5s} {acc:>8.1%} {rolling:>12.1%}  {trend}"))
-
-        # Plateau detection
-        if len(_accs) >= 3:
-            recent = _accs[-3:]
-            recent_avg = sum(recent) / len(recent)
-            if all(abs(a - recent_avg) < 0.005 for a in recent):
-                print(
-                    _node_line(
-                        f"{YELLOW}-- Plateau: rolling avg stable at"
-                        f" {recent_avg:.1%} for 3 rounds{RESET}"
-                    )
-                )
-
-        print(_node_line(""))
-
-        # Hits / evaluated
-        _rr_hits = round_result.hits
-        _rr_total = round_result.total
-        if _rr_total == 0 and round_result.candidate_scores:
-            best_cs = max(round_result.candidate_scores, key=lambda s: s.get("accuracy", 0))
-            _rr_hits = best_cs.get("hits", 0)
-            _rr_total = best_cs.get("total", 0)
-        print(
-            _node_line(
-                f"hits: {_rr_hits}/{_rr_total}"
-                f"  |  evaluated: {round_result.candidates_scored} candidates"
-            )
-        )
-
-        # Per-round pipeline health stats
-        if round_result.results:
-            try:
-                from collections import Counter
-
-                from promptpotter.application.optimization.nodes.critique import (
-                    candidate_keys_from_schema,
-                    get_candidates,
-                )
-                from promptpotter.application.scoring.metrics import find_rank
-
-                _ck = candidate_keys_from_schema(config.pipeline_schema)
-
-                _results = round_result.results
-                _total = len(_results)
-                _td: Counter[str] = Counter()
-                _deg = 0
-                for _r in _results:
-                    _pd = _r.get("pipeline_data") or {}
-                    _td[_pd.get("terminated_at", "unknown")] += 1
-                    if (_pd.get("diagnostics") or {}).get("warnings"):
-                        _deg += 1
-
-                if _td:
-                    print(
-                        _node_line(
-                            f"Pipeline: {' | '.join(f'{k}:{v}' for k, v in _td.most_common())}"
-                        )
-                    )
-                if _deg > 0:
-                    print(_node_line(f"Degradation: {_deg / _total:.0%}"))
-
-                _valid = [_r for _r in _results if not is_error_result(_r)]
-                if _valid:
-
-                    def _recall_at_k(k):
-                        return sum(
-                            1
-                            for _r in _valid
-                            if (
-                                _rk := find_rank(
-                                    get_candidates(_r, _ck),
-                                    _r.get("ground_truth", ""),
-                                )
-                            )
-                            is not None
-                            and _rk <= k
-                        ) / len(_valid)
-
-                    print(
-                        _node_line(
-                            f"Recall: top-1={_recall_at_k(1):.0%} top-5={_recall_at_k(5):.0%}"
-                        )
-                    )
-            except Exception:
-                pass  # stats are best-effort
-
-        # Improvement / patience status
-        if round_result.improved:
-            print(_node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}"))
-        else:
-            print(
-                _node_line(
-                    f"{YELLOW}⚠ No improvement ({stall_count}/{config.l1_patience} patience){RESET}"
-                )
-            )
-            if stall_count >= config.l1_patience:
-                print(
-                    _node_line(
-                        f"{RED}Stopping: patience exhausted"
-                        f" ({config.l1_patience} consecutive stalls){RESET}"
-                    )
-                )
-
-        print(_node_bottom())
+    l1_patience = campaign_config.get("optimization", {}).get("l1_patience", 3)
+    display = NotebookDisplay(
+        campaign_rounds=campaign_rounds,
+        baseline_acc=baseline_acc,
+        l1_patience=l1_patience,
+        pipeline_schema=session.pipeline_schema,
+        recon_brief=recon_brief,
+    )
 
     # Resolve explicit experiment_id to full cycle_id
     resolved_cycle_id = None
@@ -652,22 +379,15 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
 
-    notebook_display_cb = RunCallbacks(
-        on_round_complete=_on_round,
-        on_candidate_scored=_on_candidate,
-        on_sample_scored=_on_query,
-        on_phase=_on_phase,
-    )
+    notebook_display_cb = display.as_callbacks()
     callbacks = (
         notebook_display_cb.merge(display_callbacks) if display_callbacks else notebook_display_cb
     )
 
-    assert session is not None, "session (SessionEnv) required for optimization"
     result = await _orch_run_optimization(
         dataset,
         campaign_config,
@@ -721,7 +441,7 @@ async def run_optimization_notebook(
         print(_dbox_line(f"Langfuse     {result.langfuse_trace_id}"))
     print(_dbox_bottom())
 
-    format_pipeline_overrides(result.winner_pipeline_params, pipeline_schema)
+    format_pipeline_overrides(result.winner_pipeline_params, session.pipeline_schema)
 
     return campaign_rounds, result
 

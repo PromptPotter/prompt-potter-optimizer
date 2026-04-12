@@ -2,10 +2,7 @@
 
 Each extractor self-registers into the dictionaries below.
 Core services dispatch through these registries — they never import
-an extractor function directly.
-
-Currently only TermNorm is registered.  M11 will replace this with
-``ConnectorProtocol``.
+an extractor function directly.  Currently only TermNorm is registered.
 """
 
 from __future__ import annotations

@@ -2,8 +2,8 @@
 
 Owns the per-session artifacts in ``CAMPAIGN_SESSION_ARTIFACTS`` (see
 ``docs/architecture/overview.md § Persistence Architecture`` for the
-canonical file-role table and M9 Track 4 future direction).  Instantiated
-by ``run_optimization()`` so every entry point produces identical artifacts.
+canonical file-role table).  Instantiated by ``run_optimization()`` so
+every entry point produces identical artifacts.
 """
 
 from __future__ import annotations
