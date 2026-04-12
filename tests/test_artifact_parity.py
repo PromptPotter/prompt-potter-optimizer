@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from promptpotter.services.campaign.state import CAMPAIGN_SESSION_ARTIFACTS
+from promptpotter.infrastructure.persistence.state import CAMPAIGN_SESSION_ARTIFACTS
 
 
 @pytest.fixture
@@ -35,9 +35,9 @@ def session_dir(tmp_path: Path) -> Path:
 def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Path) -> None:
     """Emitter lifecycle (init + on_phase + on_query + on_candidate + on_round + finalize)
     must produce all CAMPAIGN_SESSION_ARTIFACTS."""
-    from promptpotter.services.campaign.config import LoopConfig
-    from promptpotter.services.campaign.session_emitter import CampaignPersistenceEmitter
-    from promptpotter.services.campaign.state import PhaseEvent, RoundResult
+    from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
+    from promptpotter.infrastructure.persistence.state import PhaseEvent, RoundResult
 
     config = LoopConfig(
         backend_id="test_backend",
@@ -173,7 +173,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
 
 def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
     """CampaignControlReader reads control signals from campaign_control.json."""
-    from promptpotter.services.campaign.control import CampaignControlReader
+    from promptpotter.infrastructure.persistence.control import CampaignControlReader
 
     control_path = session_dir / "campaign_control.json"
     control_path.write_text(
@@ -186,7 +186,7 @@ def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
 
 def test_control_surface_resumes(session_dir: Path) -> None:
     """CampaignControlReader acknowledges resume by clearing to running."""
-    from promptpotter.services.campaign.control import CampaignControlReader
+    from promptpotter.infrastructure.persistence.control import CampaignControlReader
 
     control_path = session_dir / "campaign_control.json"
     control_path.write_text(
@@ -203,7 +203,7 @@ def test_control_surface_resumes(session_dir: Path) -> None:
 
 def test_control_surface_l2_pause(session_dir: Path) -> None:
     """CampaignControlReader honors pause_before_l2_scoring at before_l2_scoring checkpoint."""
-    from promptpotter.services.campaign.control import CampaignControlReader
+    from promptpotter.infrastructure.persistence.control import CampaignControlReader
 
     control_path = session_dir / "campaign_control.json"
     control_path.write_text(

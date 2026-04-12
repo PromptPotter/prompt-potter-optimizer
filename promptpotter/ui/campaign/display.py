@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from promptpotter.services.search.failure_group_analysis import wilson_ci
+from promptpotter.application.search.failure_group_analysis import wilson_ci
 from promptpotter.shared.errors import is_error_result
 
 
@@ -293,7 +293,7 @@ def _infer_terminated_step(step_timings: dict) -> str | None:
 
 def _find_gt_rank(r: dict) -> int | None:
     """Find ground truth rank in candidates. Returns 1-indexed rank or None."""
-    from promptpotter.services.metrics import find_rank
+    from promptpotter.application.scoring.metrics import find_rank
 
     gt = r.get("ground_truth", "")
     if not gt:

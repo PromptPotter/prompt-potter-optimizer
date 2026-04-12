@@ -8,16 +8,16 @@ display for interactive use.
 import types as _types
 
 # -- Setup (init, pipeline, LLM, langfuse, datasets) -------------------------
-# -- Re-exports from promptpotter.services.search (used directly in notebook) ----------
+# -- Re-exports from promptpotter.application.search (used directly in notebook) ----------
 # -- Reporting (supplemental materials) — direct from services ----------------
-from promptpotter.services.campaign.reporting import generate_export_json, generate_supplemental
-from promptpotter.services.search import (
+from promptpotter.application.campaign.reporting import generate_export_json, generate_supplemental
+from promptpotter.application.search import (
     build_diagnostic_set,
     build_llm_context,
     build_pipeline_overview,
     build_tunable_params,
 )
-from promptpotter.services.search import (
+from promptpotter.application.search import (
     build_prompt_result_index as build_historical_index,
 )
 

@@ -5,23 +5,23 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.services.campaign.campaign_setup import (
+from promptpotter.application.campaign.campaign_setup import (
     resolve_campaign_id as _resolve_campaign_id,
 )
-from promptpotter.services.campaign.mgmt import (
+from promptpotter.application.campaign.mgmt import (
     apply_stored_overrides,
 )
-from promptpotter.services.campaign.mgmt import (
+from promptpotter.application.campaign.mgmt import (
     diff_campaign_config as _diff_campaign_config,
 )
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store.project_store import ProjectStore
-    from promptpotter.services.campaign.campaign_setup import SessionEnv
-    from promptpotter.services.campaign.config import CampaignConfig
 
 
 __all__ = [
@@ -277,7 +277,7 @@ def show_experiment_dashboard(
     # --- Detect active campaign from current config ---
     active_id = None
     if campaign_config is not None and dataset is not None:
-        from promptpotter.services.campaign.mgmt import resolve_active_campaign_id
+        from promptpotter.application.campaign.mgmt import resolve_active_campaign_id
 
         active_id = resolve_active_campaign_id(
             campaign_config,
@@ -352,7 +352,7 @@ def show_experiment_dashboard(
     # --- Overview mode ---
     assert store is not None
     # Dataset runs summary
-    from promptpotter.services.campaign.data import summarize_dataset_runs
+    from promptpotter.application.campaign.data import summarize_dataset_runs
 
     runs = store.dataset_runs.list_all(backend_id)
     run_summary = summarize_dataset_runs(runs)

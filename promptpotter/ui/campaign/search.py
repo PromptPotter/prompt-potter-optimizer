@@ -8,42 +8,42 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.services.search import (
+from promptpotter.application.search import (
     advise_scan_config as _advise_scan_config,
 )
-from promptpotter.services.search import (
+from promptpotter.application.search import (
     assess_scan_coverage as _assess_scan_coverage,
 )
-from promptpotter.services.search import (
+from promptpotter.application.search import (
     build_data_inventory as _build_data_inventory,
 )
-from promptpotter.services.search import (
+from promptpotter.application.search import (
     build_prompt_result_index as build_historical_index,
 )
-from promptpotter.services.search import (
+from promptpotter.application.search import (
     load_filtered_variant_library as _load_filtered_variants,
 )
-from promptpotter.services.search import load_variant_library_rich
-from promptpotter.services.search import (
+from promptpotter.application.search import load_variant_library_rich
+from promptpotter.application.search import (
     preview_advisor_prompt as _preview_advisor_prompt,
 )
-from promptpotter.services.search import (
+from promptpotter.application.search import (
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
 )
-from promptpotter.services.search import (
+from promptpotter.application.search import (
     select_scan_winner as _select_scan_winner,
 )
-from promptpotter.services.search.scan_advisor import (
+from promptpotter.application.search.scan_advisor import (
     convert_advisory_to_scan_variants,
     resolve_schema_axes,
 )
-from promptpotter.services.search.scan_results import (
+from promptpotter.application.search.scan_results import (
     decompose_scan_baseline as _decompose_scan_baseline,
 )
-from promptpotter.services.search.scan_results import (
+from promptpotter.application.search.scan_results import (
     seed_campaign_from_scan as _seed_campaign_from_scan,
 )
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
 from .display import (
@@ -59,8 +59,8 @@ from .display import (
 from .setup import setup_llm
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.campaign_setup import SessionEnv
-    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ async def decompose_scan_baseline(
 ):
     """Restructure baseline instruction into PromptPotter's internal fields.
 
-    Delegates to ``promptpotter.services.search.scan_baseline.decompose_scan_baseline()``
+    Delegates to ``promptpotter.application.search.scan_baseline.decompose_scan_baseline()``
     and prints restructured fields + historical diagnostic.
 
     Returns:
@@ -178,7 +178,7 @@ def show_variant_library(
     Returns:
         The filtered rich variant dict (objects with ``text``/``source``/``year``).
     """
-    from promptpotter.services.search.smart_search import filter_variant_library_display
+    from promptpotter.application.search.smart_search import filter_variant_library_display
 
     from .display import BOLD, GREEN, YELLOW
 
@@ -234,7 +234,7 @@ def resolve_scan_variants(
     if pipeline_schema is None and session is not None:
         pipeline_schema = session.pipeline_schema
 
-    from promptpotter.services.search.scan_advisor import (
+    from promptpotter.application.search.scan_advisor import (
         flatten_scan_variants,
         rebuild_nested_resolved,
     )
@@ -889,7 +889,7 @@ def seed_campaign_from_scan(
 ):
     """Select scan winner, update pipeline_params, seed campaign_rounds.
 
-    Delegates to ``promptpotter.services.search.scan_results.seed_campaign_from_scan()``
+    Delegates to ``promptpotter.application.search.scan_results.seed_campaign_from_scan()``
     and prints summary + progress.
     """
     if scan_df is None or (hasattr(scan_df, "empty") and scan_df.empty):

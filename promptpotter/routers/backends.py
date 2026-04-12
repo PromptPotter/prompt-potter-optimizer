@@ -13,11 +13,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from promptpotter.application.pipeline_discovery import compute_pipeline_view
 from promptpotter.dependencies import StoreDep
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.backend.client import BackendClient
 from promptpotter.infrastructure.store.project_store import ProjectStore
-from promptpotter.services.pipeline_discovery import compute_pipeline_view
 
 logger = logging.getLogger(__name__)
 

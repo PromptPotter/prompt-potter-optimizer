@@ -30,8 +30,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from promptpotter.services.campaign.campaign_setup import SessionEnv
-    from promptpotter.services.campaign.config import CampaignConfig
+    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.config import CampaignConfig
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -85,8 +85,8 @@ async def _init_services(
     local_scoring_token: str | None = None,
 ) -> SessionEnv:
     """Initialize services (logging + service init)."""
+    from promptpotter.application.campaign.campaign_setup import init_services
     from promptpotter.config.logging import setup_logging
-    from promptpotter.services.campaign.campaign_setup import init_services
 
     setup_logging()
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -107,7 +107,7 @@ def _configure_pipeline(
     campaign_config: CampaignConfig,
 ) -> dict:
     """Configure pipeline, apply filtered schema to session. Returns pipeline_params."""
-    from promptpotter.services.campaign.config import configure_and_apply_pipeline
+    from promptpotter.application.campaign.config import configure_and_apply_pipeline
 
     return configure_and_apply_pipeline(session, campaign_config, log=logger.info)
 
@@ -120,7 +120,7 @@ async def _prepare_scoring_context(
     pipeline_params: dict | None = None,
 ):
     """Load baseline + dataset, optionally run baseline eval."""
-    from promptpotter.services.campaign.data import (
+    from promptpotter.application.campaign.data import (
         prepare_scoring_context as _svc_prepare,
     )
 
@@ -140,7 +140,7 @@ async def _prepare_scoring_context(
 
 async def cmd_init(args: argparse.Namespace) -> None:
     """Initialize services, load datasets, configure pipeline, create session."""
-    from promptpotter.services.campaign.data import (
+    from promptpotter.application.campaign.data import (
         prepare_datasets as _prepare_datasets,
     )
 
@@ -275,8 +275,8 @@ async def cmd_init(args: argparse.Namespace) -> None:
 
 async def cmd_task_context(args: argparse.Namespace) -> None:
     """Decompose task description into structured domain context."""
-    from promptpotter.services.campaign.config import create_llm_client
-    from promptpotter.services.optimizer.pipeline import (
+    from promptpotter.application.campaign.config import create_llm_client
+    from promptpotter.application.optimization.pipeline import (
         decompose_task_context as _svc_decompose,
     )
 
@@ -314,8 +314,8 @@ async def cmd_task_context(args: argparse.Namespace) -> None:
 
 async def cmd_scan(args: argparse.Namespace) -> None:
     """Run sensitivity scan with provided variants."""
-    from promptpotter.services.campaign.campaign_setup import load_baseline_prompt
-    from promptpotter.services.search.scan_advisor import resolve_schema_axes
+    from promptpotter.application.campaign.campaign_setup import load_baseline_prompt
+    from promptpotter.application.search.scan_advisor import resolve_schema_axes
     from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
     ctx = _load_session(args)
@@ -327,7 +327,7 @@ async def cmd_scan(args: argparse.Namespace) -> None:
 
     session = await _init_services(**ctx.state["init_params"])
 
-    from promptpotter.services.search.scan_advisor import flatten_scan_variants
+    from promptpotter.application.search.scan_advisor import flatten_scan_variants
 
     flat_for_resolve = flatten_scan_variants(scan_variants)
     resolve_schema_axes(flat_for_resolve, session.pipeline_schema)
@@ -339,7 +339,7 @@ async def cmd_scan(args: argparse.Namespace) -> None:
         len(node_axes),
     )
 
-    from promptpotter.services.campaign.campaign_setup import run_scan_and_persist
+    from promptpotter.application.campaign.campaign_setup import run_scan_and_persist
 
     _pn = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     baseline = load_baseline_prompt(session.experiment_extract, prompt_node_names=_pn)
@@ -375,8 +375,8 @@ async def cmd_scan(args: argparse.Namespace) -> None:
 
 async def cmd_scan_results(args: argparse.Namespace) -> None:
     """Show scan analytics and seed campaign from scan winner."""
-    from promptpotter.services.campaign.campaign_setup import load_baseline_prompt
-    from promptpotter.services.search.scan_results import (
+    from promptpotter.application.campaign.campaign_setup import load_baseline_prompt
+    from promptpotter.application.search.scan_results import (
         seed_campaign_from_scan as _seed_campaign_from_scan,
     )
 
@@ -424,7 +424,7 @@ async def cmd_scan_results(args: argparse.Namespace) -> None:
 
 async def cmd_optimize(args: argparse.Namespace) -> None:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
-    from promptpotter.services.campaign.campaign_setup import load_scan_brief
+    from promptpotter.application.campaign.campaign_setup import load_scan_brief
 
     ctx = _load_session(args)
     campaign_config = ctx.state["campaign_config"]
@@ -456,21 +456,21 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     ctx.save_phase("optimizing")
 
     # Bidirectional control — CLI provides CampaignControlReader as on_checkpoint
-    from promptpotter.services.campaign.control import CampaignControlReader
-    from promptpotter.services.campaign.state import RunCallbacks
+    from promptpotter.infrastructure.persistence.control import CampaignControlReader
+    from promptpotter.infrastructure.persistence.state import RunCallbacks
 
     session_dir = session.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
     control = CampaignControlReader(session_dir)
     control_cb = RunCallbacks(on_checkpoint=control.check)
 
     # Round recorder — write rounds/round_NNN.json with full action traces
-    from promptpotter.services.campaign.round_recorder import RoundRecorder
-    from promptpotter.services.optimizer.pipeline import set_round_recorder
+    from promptpotter.application.optimization.pipeline import set_round_recorder
+    from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
     recorder = RoundRecorder(session_dir / "rounds")
     set_round_recorder(recorder)
 
-    from promptpotter.services.campaign.runner import (
+    from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
 
@@ -525,8 +525,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
 async def cmd_control(args: argparse.Namespace) -> None:
     """Write control signals to campaign_control.json (bidirectional dashboard)."""
+    from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
     from promptpotter.infrastructure.store.base import write_json
-    from promptpotter.services.campaign.control import CONTROL_FILENAME
 
     ctx = _load_session(args)
     session_dir = ctx.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
@@ -594,7 +594,7 @@ async def cmd_profile(args: argparse.Namespace) -> None:
 
 async def cmd_results(args: argparse.Namespace) -> None:
     """Show campaign results, optionally save winner."""
-    from promptpotter.services.campaign.mgmt import save_campaign_winner
+    from promptpotter.application.campaign.mgmt import save_campaign_winner
 
     ctx = _load_session(args)
     session = await _init_services(**ctx.state["init_params"])
@@ -717,7 +717,7 @@ async def cmd_results(args: argparse.Namespace) -> None:
 
 async def cmd_status(args: argparse.Namespace) -> None:
     """Print live dashboard from campaign_state.json (or session state if idle)."""
-    from promptpotter.services.campaign.control import CONTROL_FILENAME
+    from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
 
     ctx = _load_session(args)
     session_dir = ctx.store.sessions._session_dir(ctx.backend_id, ctx.session_id)

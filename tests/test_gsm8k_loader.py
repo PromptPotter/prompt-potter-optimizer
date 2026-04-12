@@ -1,6 +1,6 @@
 """Tests for GSM8K answer extraction in dataset_builder."""
 
-from promptpotter.services.dataset_builder import _GSM8K_ANSWER_RE
+from promptpotter.application.datasets.builder import _GSM8K_ANSWER_RE
 
 
 def _extract(text: str) -> str:

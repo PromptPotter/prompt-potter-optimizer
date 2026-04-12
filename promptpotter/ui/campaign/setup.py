@@ -5,29 +5,29 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from promptpotter.application.campaign.campaign_setup import (
+    SessionEnv,
+)
+from promptpotter.application.campaign.campaign_setup import (
+    init_services as _init_services,
+)
+from promptpotter.application.campaign.config import (
+    create_llm_client as setup_llm,
+)
+from promptpotter.application.campaign.data import (
+    build_all_index_terms,
+)
+from promptpotter.application.campaign.mgmt import (
+    save_campaign_winner,
+)
+from promptpotter.application.search import load_variant_library
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.project_store import ProjectStore
-from promptpotter.services.campaign.campaign_setup import (
-    SessionEnv,
-)
-from promptpotter.services.campaign.campaign_setup import (
-    init_services as _init_services,
-)
-from promptpotter.services.campaign.config import (
-    create_llm_client as setup_llm,
-)
-from promptpotter.services.campaign.data import (
-    build_all_index_terms,
-)
-from promptpotter.services.campaign.mgmt import (
-    save_campaign_winner,
-)
-from promptpotter.services.search import load_variant_library
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.infrastructure.llm.client import LLMClientBase
-    from promptpotter.services.campaign.config import CampaignConfig
 
 __all__ = [
     "build_all_index_terms",
@@ -71,10 +71,10 @@ async def decompose_task_context(
 ) -> TaskDecomposition:
     """Decompose TASK_DESCRIPTION into structured domain context fields via LLM.
 
-    Delegates to ``promptpotter.services.optimizer.pipeline.decompose_task_context()``
+    Delegates to ``promptpotter.application.optimization.pipeline.decompose_task_context()``
     and prints the decomposed fields for visibility.
     """
-    from promptpotter.services.optimizer.pipeline import (
+    from promptpotter.application.optimization.pipeline import (
         decompose_task_context as _decompose_task_context,
     )
 
@@ -121,24 +121,24 @@ def dev_reload() -> None:
     for mod in [
         # Service layer — safe to reload (no Pydantic model classes)
         "promptpotter.shared.hashing",
-        "promptpotter.services.campaign.config",
-        "promptpotter.services.campaign.lifecycle",
-        "promptpotter.services.campaign.nodes.escalation",
-        "promptpotter.services.campaign.nodes.layer_transitions",
-        "promptpotter.services.campaign.nodes.critique",
-        "promptpotter.services.campaign.nodes.round_execution",
-        "promptpotter.services.campaign.runner",
+        "promptpotter.application.campaign.config",
+        "promptpotter.application.campaign.lifecycle",
+        "promptpotter.application.optimization.nodes.escalation",
+        "promptpotter.application.optimization.nodes.layer_transitions",
+        "promptpotter.application.optimization.nodes.critique",
+        "promptpotter.application.optimization.nodes.round_execution",
+        "promptpotter.application.campaign.runner",
         "promptpotter.infrastructure.store.dataset_run_store",
-        "promptpotter.services.scoring.stale_data",
-        "promptpotter.services.scoring.sample_measurement",
+        "promptpotter.application.scoring.stale_data",
+        "promptpotter.application.scoring.sample_measurement",
         "promptpotter.services.dataset_scoring",
-        "promptpotter.services.campaign.nodes.generate",
-        "promptpotter.services.campaign.nodes.score",
-        "promptpotter.services.campaign.nodes.formatting",
-        "promptpotter.services.search.smart_search",
-        "promptpotter.services.search.sensitivity_scanner",
-        "promptpotter.services.search.scan_baseline",
-        "promptpotter.services.campaign.campaign_setup",
+        "promptpotter.application.optimization.nodes.generate",
+        "promptpotter.application.optimization.nodes.score",
+        "promptpotter.application.optimization.nodes.formatting",
+        "promptpotter.application.search.smart_search",
+        "promptpotter.application.search.sensitivity_scanner",
+        "promptpotter.application.search.scan_baseline",
+        "promptpotter.application.campaign.campaign_setup",
         # Display layer — safe to reload (no model classes)
         "promptpotter.ui.campaign.display",
         "promptpotter.ui.campaign.phase_display",
@@ -199,7 +199,7 @@ def configure_pipeline(session: SessionEnv, campaign_config: CampaignConfig) -> 
 
     Delegates to shared orchestration and adds display-specific tags.
     """
-    from promptpotter.services.campaign.config import configure_and_apply_pipeline
+    from promptpotter.application.campaign.config import configure_and_apply_pipeline
 
     from .display import set_display_tags
 
@@ -329,7 +329,7 @@ async def prepare_scoring_context(
 
     Delegates to shared orchestration with notebook display.
     """
-    from promptpotter.services.campaign.data import (
+    from promptpotter.application.campaign.data import (
         prepare_scoring_context as _svc_prepare,
     )
 
@@ -357,9 +357,9 @@ def prepare_datasets(
     """Load/create datasets, build session terms, and display summary.
 
     Thin display wrapper around
-    ``promptpotter.services.campaign.data.prepare_datasets()``.
+    ``promptpotter.application.campaign.data.prepare_datasets()``.
     """
-    from promptpotter.services.campaign.data import (
+    from promptpotter.application.campaign.data import (
         prepare_datasets as _prepare_datasets,
     )
 

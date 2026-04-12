@@ -1,10 +1,10 @@
 """Tests for failure group sensitivity analysis and SearchMemory integration."""
 
-from promptpotter.services.search.failure_group_analysis import (
+from promptpotter.application.search.failure_group_analysis import (
     FailureGroupResult,
     failure_group_sensitivity,
 )
-from promptpotter.services.search.search_memory import SearchMemory
+from promptpotter.application.search.search_memory import SearchMemory
 
 
 class _FakeCluster:

@@ -12,12 +12,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from promptpotter.services.campaign.state import PhaseEvent
+from promptpotter.infrastructure.persistence.state import PhaseEvent
 
 if TYPE_CHECKING:
-    from promptpotter.services.search.scan_results import ScanBrief
+    from promptpotter.application.search.scan_results import ScanBrief
 
-from promptpotter.services.search.failure_group_analysis import (
+from promptpotter.application.search.failure_group_analysis import (
     min_detectable_effect,
     proportion_test,
 )

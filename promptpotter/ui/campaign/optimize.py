@@ -4,24 +4,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.services.campaign.campaign_setup import (
+from promptpotter.application.campaign.campaign_setup import (
     resolve_campaign_id as _resolve_campaign_id,
 )
-from promptpotter.services.campaign.data import (
+from promptpotter.application.campaign.data import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
-from promptpotter.services.campaign.state import (
+from promptpotter.application.search.failure_group_analysis import (
+    min_detectable_effect,
+    proportion_test,
+    wilson_ci,
+)
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.persistence.state import (
     CampaignPhase,
     PhaseEvent,
     RoundResult,
     RunResult,
-)
-from promptpotter.services.search.failure_group_analysis import (
-    min_detectable_effect,
-    proportion_test,
-    wilson_ci,
 )
 from promptpotter.shared.errors import is_error_result
 
@@ -56,11 +56,11 @@ from .phase_display import (
 )
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.config import CampaignConfig
+    from promptpotter.application.search.scan_results import ScanBrief
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.services.campaign.campaign_setup import SessionEnv
-    from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.campaign.state import RunCallbacks
-    from promptpotter.services.search.scan_results import ScanBrief
+    from promptpotter.infrastructure.persistence.state import RunCallbacks
 
 __all__ = [
     # stats
@@ -107,13 +107,13 @@ def show_feedback_preflight(
     Returns:
         ScanBrief (or None) for passing to the run cell.
     """
-    from promptpotter.services.campaign.config import LoopConfig
+    from promptpotter.application.campaign.config import LoopConfig
 
     # Build scan context from scan data when available
     scan_brief = None
     if scan_df is not None and axis_profiles is not None and scan_variants is not None:
-        from promptpotter.services.search import prepare_scan_brief
-        from promptpotter.services.search.scan_results import compute_difficulty_summary
+        from promptpotter.application.search import prepare_scan_brief
+        from promptpotter.application.search.scan_results import compute_difficulty_summary
 
         baseline_acc = 0.0
         if campaign_rounds:
@@ -160,7 +160,7 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     instruction = bl["instruction"]
     baseline_results = bl["baseline_results"]
 
-    from promptpotter.services.campaign.config import compute_preflight_metrics
+    from promptpotter.application.campaign.config import compute_preflight_metrics
 
     _instr_preview = (instruction[:80] + "...") if len(instruction) > 80 else instruction
     _instr_preview = _instr_preview or "(empty)"
@@ -206,7 +206,7 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, scan
     print(f"     Accuracy: {baseline_acc:.1%}  |  Prior results: {n_prior}")
 
     # Step 2: Failure analysis
-    from promptpotter.services.metrics import count_failures
+    from promptpotter.application.scoring.metrics import count_failures
 
     n_failures = count_failures(baseline_results) if baseline_results else 0
     print(f"  {CYAN}2. FAILURE ANALYSIS{RESET}")
@@ -355,7 +355,7 @@ async def run_optimization_notebook(
     Returns:
         Tuple of (campaign_rounds, RunResult or None if interrupted).
     """
-    from promptpotter.services.campaign.config import LoopConfig
+    from promptpotter.application.campaign.config import LoopConfig
 
     # Session-derived locals for display closures
     store = session.store if session else None
@@ -546,11 +546,11 @@ async def run_optimization_notebook(
             try:
                 from collections import Counter
 
-                from promptpotter.services.campaign.nodes.critique import (
+                from promptpotter.application.optimization.nodes.critique import (
                     candidate_keys_from_schema,
                     get_candidates,
                 )
-                from promptpotter.services.metrics import find_rank
+                from promptpotter.application.scoring.metrics import find_rank
 
                 _ck = candidate_keys_from_schema(config.pipeline_schema)
 
@@ -639,10 +639,10 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
-    from promptpotter.services.campaign.runner import (
+    from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
-    from promptpotter.services.campaign.state import RunCallbacks, chain_callbacks
+    from promptpotter.infrastructure.persistence.state import RunCallbacks, chain_callbacks
 
     notebook_display_cb = RunCallbacks(
         on_round_complete=_on_round,
@@ -720,10 +720,10 @@ async def run_optimization_notebook(
 # ---------------------------------------------------------------------------
 # Baseline eval wrapper (from eval.py)
 # ---------------------------------------------------------------------------
-from promptpotter.services.campaign.campaign_setup import (  # noqa: E402
+from promptpotter.application.campaign.campaign_setup import (  # noqa: E402
     load_baseline_prompt,
 )
-from promptpotter.services.campaign.data import (  # noqa: E402
+from promptpotter.application.campaign.data import (  # noqa: E402
     run_baseline_scoring as _run_baseline_scoring,
 )
 
