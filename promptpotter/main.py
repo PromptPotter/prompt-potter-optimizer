@@ -14,7 +14,7 @@ from scalar_fastapi import get_scalar_api_reference
 
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import APP_VERSION, settings
-from promptpotter.routers import backends, campaigns
+from promptpotter.presentation.api import backends, campaigns
 
 setup_logging()
 logger = logging.getLogger(__name__)

@@ -61,10 +61,20 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`. All mus
 
 ### Mental Model
 
-Four entry points — see § Four Entry Points (Maturity Order). One service core in `promptpotter/services/`. All entry points produce identical persistent artifacts via the three-layer I/O architecture.
+Hexagonal layout: `domain/` (pure models) → `application/` (use cases) → `infrastructure/` (I/O adapters) → `presentation/` (entry points), plus leaf `shared/` and `config/`. Four entry points — see § Four Entry Points (Maturity Order). All entry points produce identical persistent artifacts via the three-layer I/O architecture.
+
+```
+promptpotter/
+├── domain/          # JobSearchPoint, OptSearchPoint, PipelineSchema, ScoringEnv, TenantContext — pure, no I/O
+├── application/     # campaign/, optimization/ (+ nodes/), search/, scoring/, datasets/, pipeline_discovery.py
+├── infrastructure/  # store/, backend/, llm/, tracing/, persistence/ (state, control, session_emitter, round_recorder)
+├── presentation/    # cli/, api/, ui/ — thin adapters per surface
+├── shared/          # leaf utilities (errors, constants, scoring formula compiler)
+└── config/          # settings, APP_VERSION, logging
+```
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter`. Entry points MUST NOT write campaign artifacts directly. New artifacts → `CAMPAIGN_SESSION_ARTIFACTS` in `campaign/state.py`; `tests/test_artifact_parity.py` enforces.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts → `CAMPAIGN_SESSION_ARTIFACTS` in `infrastructure/persistence/state.py`; `tests/test_artifact_parity.py` enforces.
 - **Display** (per-entry-point) — caller passes `RunCallbacks`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
@@ -89,7 +99,7 @@ Every state traced at **both** layers independently:
 
 ### Scoring Pipeline
 
-`score_search_point()` (in `scoring/search_point_scorer.py`) is the single gateway for scoring, archival, and observability. Caching is addressed by a single node chain (`PipelineSchema.prefix_keys()` → `[(node_name, chained_hash), ...]`). `sp_hash` = terminal element of the chain (no separate hash computation). Two cache tiers use the same chain: (1) `find_by_prefix_chain()` in `dataset_run_store` matches prior runs by exact or partial prefix for result-level reuse, (2) `IntermediateCache.walk_prefix()` reuses per-node outputs for novel searchpoints. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
+`score_search_point()` (in `application/scoring/search_point_scorer.py`) is the single gateway for scoring, archival, and observability. Caching is addressed by a single node chain (`PipelineSchema.prefix_keys()` → `[(node_name, chained_hash), ...]`). `sp_hash` = terminal element of the chain (no separate hash computation). Two cache tiers use the same chain: (1) `find_by_prefix_chain()` in `dataset_run_store` matches prior runs by exact or partial prefix for result-level reuse, (2) `IntermediateCache.walk_prefix()` reuses per-node outputs for novel searchpoints. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
 
 ### Pipeline Params — Two Namespaces
 
@@ -103,12 +113,10 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 
 Features land left → right. Notebook is the daily driver and the testing ground; the webapp is a polish layer on top of whatever the first three surfaces expose. When adding a feature, prove it in the notebook first, then the CLI, then the API, then the webapp. Do not invert this order.
 
-1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/ui/campaign/` is pure UI, delegates to services. Most features land here first.
-2. **CLI**: `python -m promptpotter` — scripted and local workflows. `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
-3. **FastAPI REST API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`. Programmatic access for automation and the webapp.
-4. **Next.js webapp** (planned, M9 → M11): browser surface, consumes the FastAPI API. Reads the M9 file-directory view model. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
-
-> ⚠️ **TEMPORARY (delete after M9 Track 2 lands):** Today's `services/` mixes orchestration, display, and I/O. This makes CLI and API handlers *look* like they duplicate each other — they don't, they both reach into the same tangled `services/` tree and untangle it locally. The fix is the hexagonal hierarchy refactor in M9 Track 2 (see [`docs/specs/m9-hierarchy-refactor.md`](docs/specs/m9-hierarchy-refactor.md)), after which every entry point is a thin adapter over `application/`. See [`docs/architecture/overview.md`](docs/architecture/overview.md) § "Entry Points: One Core, Four Adapters" for the post-refactor shape. Delete this warning once M9 Track 2 ships.
+1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/presentation/ui/campaign/` is pure display, delegates to `application/`. Most features land here first.
+2. **CLI**: `python -m promptpotter` — scripted and local workflows. `init → [set-task] → [scan] → [show-scan] → optimize → show-results`. Lives at `presentation/cli/`.
+3. **FastAPI REST API**: `promptpotter/main.py` mounts routers from `presentation/api/` — `/api/v1/backends`, `/api/v1/campaigns`. Programmatic access for automation and the webapp.
+4. **Next.js webapp** (planned, M10 → M11): browser surface, consumes the FastAPI API. Reads the M9 file-directory view model. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
 **Active session pointer** (`.promptpotter/active_session.json`): Stores `{backend_id, session_id}` of the current campaign. Written by `init`, read by every other command. Works like a browser's active tab — `optimize`, `show-status`, `show-results` etc. all operate on the active session automatically. `--session <id>` overrides it. `init` always creates a new session and overwrites the pointer. When `--backend-id` is not passed, `init` derives it from `dataset_name` in the config.
 
@@ -116,11 +124,11 @@ Features land left → right. Notebook is the daily driver and the testing groun
 
 ### Key Patterns
 
-- **Store**: `ProjectStore` facade over focused stores in `services/store/`.
+- **Store**: `ProjectStore` facade over focused stores in `infrastructure/store/`.
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation signals flow via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. No completed work discarded.
 - **HITL mode**: `RunConfig.pause_before_scoring` raises `PauseForReviewError` between L1 generate and score. Candidates persisted to `round_NNNN_candidates.json` before pause.
-- **Optimizer LLM calls**: All go through `llm_call()` in `services/optimizer/pipeline.py`, not `chat()` directly.
+- **Optimizer LLM calls**: All go through `llm_call()` in `application/optimization/pipeline.py`, not `chat()` directly.
 - **`shared/`**: Leaf-level utilities only — no domain model or service dependencies allowed.
 
 ## Design Principles

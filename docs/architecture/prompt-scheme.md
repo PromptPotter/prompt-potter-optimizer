@@ -135,4 +135,4 @@ Index 1 variants are a provisional starting point for new campaigns. For product
 | Field constants | `promptpotter/shared/constants.py` |
 | OptSearchPoint (render, derive, project) | `promptpotter/domain/opt_search_point.py` |
 | Variant library | `promptpotter/config/prompt_variants.json` |
-| Variant filtering | `promptpotter/services/search/smart_search.py` |
+| Variant filtering | `promptpotter/application/search/smart_search.py` |

@@ -114,7 +114,7 @@ Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx,
 
 ## Pipeline Declaration Format
 
-Both pipeline backends and PromptPotter declare their pipelines using the same JSON format. The backend's `GET /pipeline` returns a pipeline config; the optimizer declares its pipeline in `promptpotter/services/optimizer/optimizer_pipeline.json`.
+Both pipeline backends and PromptPotter declare their pipelines using the same JSON format. The backend's `GET /pipeline` returns a pipeline config; the optimizer declares its pipeline in `promptpotter/application/optimization/optimizer_pipeline.json`.
 
 ```json
 {
@@ -178,5 +178,5 @@ Shared primitives: `llm_call()` (config + runtime overrides), `get_node_config()
 ## Reference
 
 - **Backend pipeline config:** `GET /pipeline` endpoint
-- **Optimizer pipeline config:** [`promptpotter/services/optimizer/optimizer_pipeline.json`](../promptpotter/services/optimizer/optimizer_pipeline.json)
+- **Optimizer pipeline config:** [`promptpotter/application/optimization/optimizer_pipeline.json`](../promptpotter/application/optimization/optimizer_pipeline.json)
 - **Observability:** [`observability.md`](../observability.md) — node tracing via `observed_node`

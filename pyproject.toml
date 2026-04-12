@@ -129,7 +129,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*.ipynb" = ["F403", "F405"]  # star imports are intentional in notebooks
-"promptpotter/ui/campaign/__init__.py" = ["F401"]  # pure re-export hub for notebook
+"promptpotter/presentation/ui/campaign/__init__.py" = ["F401"]  # pure re-export hub for notebook
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15

@@ -140,13 +140,13 @@ def dev_reload() -> None:
         "promptpotter.application.search.scan_baseline",
         "promptpotter.application.campaign.campaign_setup",
         # Display layer — safe to reload (no model classes)
-        "promptpotter.ui.campaign.display",
-        "promptpotter.ui.campaign.phase_display",
-        "promptpotter.ui.campaign.optimize",
-        "promptpotter.ui.campaign.setup",
-        "promptpotter.ui.campaign.campaigns",
-        "promptpotter.ui.campaign.search",
-        "promptpotter.ui.campaign.search_scan",
+        "promptpotter.presentation.ui.campaign.display",
+        "promptpotter.presentation.ui.campaign.phase_display",
+        "promptpotter.presentation.ui.campaign.optimize",
+        "promptpotter.presentation.ui.campaign.setup",
+        "promptpotter.presentation.ui.campaign.campaigns",
+        "promptpotter.presentation.ui.campaign.search",
+        "promptpotter.presentation.ui.campaign.search_scan",
         # NOTE: Do NOT reload promptpotter.domain.* or dataclass modules —
         # Pydantic/dataclass classes break when reloaded (existing
         # instances fail type checks).  scan_results.py has ScanBrief

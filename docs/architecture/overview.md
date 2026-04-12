@@ -2,25 +2,31 @@
 
 ## System Overview
 
-Four entry points, shared service core:
+Four entry points over a shared hexagonal core (`domain/` → `application/` → `infrastructure/` → `presentation/`):
 
-1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `promptpotter/ui/campaign/` (display layer wrapping services). No business logic in the notebook layer.
-2. **CLI** — `promptpotter/cli/campaign_runner.py` — terminal-based HITL workflow: `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
-3. **FastAPI API** (`promptpotter/main.py`) — REST at `/api/v1/`. Routers: `backends`, `campaigns`.
-4. **Next.js webapp** *(planned, M9 → M11)* — browser surface consuming the FastAPI API, reading the M9 file-directory view model.
+1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `promptpotter/presentation/ui/campaign/` (display layer wrapping `application/`). No business logic in the notebook layer.
+2. **CLI** — `promptpotter/presentation/cli/campaign_runner.py` — terminal-based HITL workflow: `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
+3. **FastAPI API** (`promptpotter/main.py` mounts `presentation/api/`) — REST at `/api/v1/`. Routers: `backends`, `campaigns`.
+4. **Next.js webapp** *(planned, M10 → M11)* — browser surface consuming the FastAPI API, reading the M9 file-directory view model.
 
-All core logic lives in `promptpotter/services/` (post-M9: `promptpotter/application/`).
+Layer contents:
+
+- **`domain/`** — `JobSearchPoint`, `OptSearchPoint`, `PipelineSchema`, `ScoringEnv`, `TenantContext`. Pure, no I/O, no logging.
+- **`application/`** — `campaign/`, `optimization/` (+ `nodes/`), `search/`, `scoring/`, `datasets/`, `pipeline_discovery.py`. Orchestration and use cases.
+- **`infrastructure/`** — `store/`, `backend/`, `llm/`, `tracing/`, `persistence/` (state, control, session_emitter, round_recorder). Every I/O adapter lives here.
+- **`presentation/`** — `cli/`, `api/`, `ui/`. Thin per-surface adapters.
+- Leaf: `shared/` (errors, constants, scorer compiler) and `config/` (settings, logging).
 
 ## Entry Points: One Core, Four Adapters
 
-The four entry points all consume the same `application/` core (post-M9 hexagonal layout). They do **not** share render code:
+The four entry points all consume the same `application/` core. They do **not** share render code:
 
 - **CLI** prints to stdout via rich/plain text.
 - **FastAPI** returns JSON.
 - **Notebook** renders inline HTML + ipywidgets.
 - **Webapp** renders React on top of FastAPI's JSON.
 
-Each render layer is ~50 lines per verb. The *logic* lives in exactly one place (`application/<domain>/<verb>.py`); each surface adapts it to its native ergonomics. This is why maintaining four surfaces is cheap: what gets duplicated is ~20 lines of adapter boilerplate per verb, not business logic. The "duplication" people sometimes see between CLI and API today is an artifact of pre-M9 `services/` mixing orchestration with display and I/O — not a real architectural cost.
+Each render layer is ~50 lines per verb. The *logic* lives in exactly one place (`application/<domain>/<verb>.py`); each surface adapts it to its native ergonomics. This is why maintaining four surfaces is cheap: what gets duplicated is ~20 lines of adapter boilerplate per verb, not business logic.
 
 **Maturity order** (features land left → right): Notebook > CLI > FastAPI > webapp. Notebook is the daily driver; the webapp is a polish layer on top of what the other surfaces already expose. Do not invert this order.
 
@@ -79,7 +85,7 @@ SearchPoint (base)           — abstract base, "a point in a search space"
 
 **PipelineSchema** / **PipelineNode** — the node coordinate system for each dataset's pipeline. Nodes are the topmost lookup dimension: O(1) position, membership, and param-ownership queries. `prefix_keys()` computes chained cache keys; `sp_hash()` returns the terminal element (unified identity — no separate hash scheme). `prefix_through()` / `exclude()` slice valid sub-pipelines. Both pipeline backends and the optimizer pipeline parse into PipelineSchema.
 
-**ScoringEnv** — infrastructure bundle for scoring calls (`backend_client`, `store`, `pipeline_schema`, `obs`, `scorer`, stale data protocol config). Defined in `models/scoring.py`.
+**ScoringEnv** — infrastructure bundle for scoring calls (`backend_client`, `store`, `pipeline_schema`, `obs`, `scorer`, stale data protocol config). Defined in `domain/scoring.py`.
 
 **SearchMemory** — Materialized view over `dataset_runs/`. Three pillars: parameter impact, query patterns, failure modes. Atomic accessors, no formatting. See [design doc](../research/search-memory-intelligence.md).
 
@@ -241,7 +247,7 @@ Per-query / per-candidate / per-round detail lives in `campaign_output.log` (app
 
 Cross-campaign intelligence layer. Materialized view over `dataset_runs/`, persisted at `{backend_id}/search_memory.json`, refreshed incrementally via watermark. Three pillars: parameter impact, query patterns, failure modes. Atomic data accessors only — each consumer composes its own prompt section.
 
-Full design, accessors, and consumer matrix: [`docs/research/search-memory-intelligence.md`](../research/search-memory-intelligence.md). Implementation: `services/search/search_memory.py`.
+Full design, accessors, and consumer matrix: [`docs/research/search-memory-intelligence.md`](../research/search-memory-intelligence.md). Implementation: `application/search/search_memory.py`.
 
 ### Node-Level Cache
 
@@ -337,7 +343,7 @@ SessionEnv (dataclass)                       ← session-scoped infra bundle
 | **CampaignConfig** | `campaign/config.py` | User (notebook/CLI) | Session | Yes (`configure_pipeline` sets `pipeline_params`) | No (stored in campaign metadata) |
 | **RunConfig** | `campaign/config.py` | `from_campaign_config()` | Campaign | No (immutable Pydantic model) | No |
 | **SessionEnv** | `campaign/campaign_setup.py` | `init_services()` | Session | Rarely (`pipeline_schema` filtered) | No |
-| **ScoringEnv** | `models/scoring.py` | `init_cycle_state()` | Cycle | `stale_data_observations` per eval | No |
+| **ScoringEnv** | `domain/scoring.py` | `init_cycle_state()` | Cycle | `stale_data_observations` per eval | No |
 | **LoopState** | `campaign/state.py` | `cycle_init._build_baseline_state()` | Cycle | Intensely (every round) | Yes (`opt_sp` + escalation) |
 | **CritiqueContext** | `campaign/nodes/critique.py` | `execute_round()` | Per-round | No (read-only stats) | No |
 | **ContextData** | `campaign/nodes/formatting.py` | `l1_generate()` | Per-generation | No (formatting input) | No |
