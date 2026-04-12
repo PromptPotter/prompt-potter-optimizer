@@ -19,7 +19,6 @@ def test_derivation_methods():
         nodes=[
             PipelineNode(
                 name="search",
-                runtime="backend",
                 param_keys={"max_results"},
                 observation_name="search",
                 observation_mappings=[
@@ -29,7 +28,6 @@ def test_derivation_methods():
             ),
             PipelineNode(
                 name="rank",
-                runtime="backend",
                 param_keys={"temperature"},
                 observation_name="rank",
                 observation_mappings=[
@@ -39,7 +37,6 @@ def test_derivation_methods():
             ),
             PipelineNode(
                 name="cache",
-                runtime="frontend",
                 langfuse_type="span",
             ),
         ],
@@ -57,13 +54,6 @@ def test_derivation_methods():
     assert set(obs_map.keys()) == {"search", "rank"}
     assert obs_map["search"][0].pipeline_key == "results"
     assert obs_map["rank"][0].is_llm is True
-
-    # langfuse_type_map
-    assert schema.langfuse_type_map() == {
-        "search": "tool",
-        "rank": "generation",
-        "cache": "span",
-    }
 
 
 class TestParsePipelineResponse:
@@ -142,14 +132,12 @@ class TestParsePipelineResponse:
 
         # Cache step
         cache = schema.nodes[0]
-        assert cache.runtime == "frontend"
         assert cache.short_circuit is True
         assert cache.node_type == "cache"
         assert cache.langfuse_type == "span"
 
         # Web search step — full optimizer metadata
         ws = schema.nodes[1]
-        assert ws.runtime == "backend"
         assert ws.node_type == "enricher"
         assert ws.param_keys == {"max_sites", "num_results"}
         assert ws.observation_name == "web_search"
@@ -228,7 +216,6 @@ class TestParsePipelineResponse:
 
         step_a = schema.nodes[0]
         assert step_a.output_schema is not None
-        assert step_a.output_schema.family == "my_schema"
         assert step_a.output_schema.fields == ["field1", "field2"]
         assert step_a.output_schema.field_descriptions == {"field1": "First field"}
         assert step_a.prompt_meta is not None
@@ -344,16 +331,6 @@ class TestCoordinateLookups:
         assert schema.has_node("b")
         assert not schema.has_node("z")
 
-    def test_all_param_keys(self):
-        schema = _three_node_schema()
-        assert schema.all_param_keys == {"max_results", "temperature"}
-
-    def test_has_prompt_nodes(self):
-        schema = _three_node_schema()
-        assert schema.has_prompt_nodes is True
-        no_prompt = PipelineSchema(nodes=[PipelineNode(name="x")])
-        assert no_prompt.has_prompt_nodes is False
-
     def test_exclude(self):
         schema = _three_node_schema()
         reduced = schema.exclude({"b"})
@@ -405,18 +382,3 @@ class TestCoordinateLookups:
         h1 = schema.sp_hash({"a": {"max_results": 5}})
         h2 = schema.sp_hash({"a": {"max_results": 10}})
         assert h1 != h2
-
-    def test_excluded_nodes(self):
-        schema = _three_node_schema()
-        pp = {"steps": ["a", "c"]}
-        assert schema.excluded_nodes(pp) == {"b"}
-
-    def test_excluded_nodes_no_steps(self):
-        """No 'steps' key → all nodes assumed active → empty set."""
-        schema = _three_node_schema()
-        assert schema.excluded_nodes({"a": {"max_results": 5}}) == set()
-
-    def test_excluded_nodes_all_active(self):
-        schema = _three_node_schema()
-        pp = {"steps": ["a", "b", "c"]}
-        assert schema.excluded_nodes(pp) == set()

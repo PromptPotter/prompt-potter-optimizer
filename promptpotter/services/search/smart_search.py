@@ -405,7 +405,7 @@ def filter_variant_library(
         return variant_library
 
     # Schema is pre-filtered to active nodes — use it directly
-    active_param_keys = schema.all_param_keys
+    active_param_keys: set[str] = {p for n in schema.nodes for p in n.param_keys}
 
     # Filter pipeline_params to only active-step keys
     filtered_pp: dict[str, list] = {}
@@ -415,7 +415,7 @@ def filter_variant_library(
 
     # Drop prompt_fields when no active step has a prompt template
     filtered_pf = variant_library.get("prompt_fields", {})
-    if not schema.has_prompt_nodes:
+    if not any(n.prompt_meta is not None for n in schema.nodes):
         filtered_pf = {}
 
     result: dict = {}

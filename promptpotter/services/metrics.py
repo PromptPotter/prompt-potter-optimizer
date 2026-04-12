@@ -9,6 +9,8 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel
+
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
@@ -19,11 +21,51 @@ if TYPE_CHECKING:
         QueryDifficulty,
     )
     from promptpotter.models.pipeline_schema import (
-        IntermediateMetric,
         PipelineNode,
         PipelineSchema,
     )
     from promptpotter.models.scoring import QueryResult
+
+
+class IntermediateMetric(BaseModel):
+    """A metric derived from a pipeline node's type."""
+
+    model_config = {"frozen": True}
+
+    name: str
+    node_type: str
+    pipeline_data_key: str
+    description: str = ""
+    default_weight: float = 0.0  # 0 = display-only
+
+
+NODE_TYPE_METRICS: dict[str, list[IntermediateMetric]] = {
+    "candidate_source": [
+        IntermediateMetric(
+            name="source_recall",
+            node_type="candidate_source",
+            pipeline_data_key="candidate_ranking",
+            description="Fraction of queries where ground truth appears in candidate list",
+        ),
+    ],
+    "ranker": [
+        IntermediateMetric(
+            name="candidate_recall",
+            node_type="ranker",
+            pipeline_data_key="final_ranking",
+            description="Fraction of LLM-ranked queries where ground truth was available",
+        ),
+    ],
+    "cache": [
+        IntermediateMetric(
+            name="cache_hit_rate",
+            node_type="cache",
+            pipeline_data_key="step_timings",
+            description="Fraction of queries resolved by cache",
+        ),
+    ],
+    "enricher": [],
+}
 
 
 __all__ = [
@@ -163,8 +205,6 @@ def extract_sample_diagnostics(
     nodes share a type, bare ``{metric}`` otherwise (same convention as
     ``compute_pipeline_metrics``).
     """
-    from promptpotter.models.pipeline_schema import NODE_TYPE_METRICS
-
     pd = result.get("pipeline_data") or {}
     gt = result.get("ground_truth", "")
     diag: dict[str, float | bool | int | str | None] = {}
@@ -227,8 +267,6 @@ def _diag_candidate_source(
     pd: Mapping[str, Any],
     gt: str,
 ) -> dict[str, float | bool | int | str | None]:
-    from promptpotter.models.pipeline_schema import NODE_TYPE_METRICS
-
     metrics = NODE_TYPE_METRICS.get("candidate_source", [])
     key = metrics[0].pipeline_data_key if metrics else "candidate_ranking"
     candidates = pd.get(key, [])
@@ -245,8 +283,6 @@ def _diag_ranker(
     pd: Mapping[str, Any],
     gt: str,
 ) -> dict[str, float | bool | int | str | None]:
-    from promptpotter.models.pipeline_schema import NODE_TYPE_METRICS
-
     metrics = NODE_TYPE_METRICS.get("ranker", [])
     key = metrics[0].pipeline_data_key if metrics else "final_ranking"
     candidates = pd.get(key, [])
@@ -307,8 +343,6 @@ def compute_pipeline_metrics(
 
     Returns dict with per-metric values and a weighted ``composite`` score.
     """
-    from promptpotter.models.pipeline_schema import NODE_TYPE_METRICS
-
     base = _compute_accuracy(results)
     accuracy = base["accuracy"]
     weights = dict(metric_weights or {})

@@ -661,7 +661,7 @@ def _resolve_excluded_nodes(
         return set(exclude_nodes) if exclude_nodes else None
     if not pipeline_params or "steps" not in pipeline_params:
         return None
-    excluded = schema.excluded_nodes(pipeline_params)
+    excluded = set(schema.active_steps) - set(pipeline_params["steps"])
     return excluded or None
 
 

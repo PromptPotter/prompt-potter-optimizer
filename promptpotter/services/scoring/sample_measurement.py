@@ -140,12 +140,14 @@ def _parse_backend_response(
         if val is not None:
             pd[key] = val
 
-    # Determine terminating step: explicit from backend takes priority
+    # Determine terminating step: explicit from backend takes priority;
+    # otherwise the last pipeline-ordered node with a non-None timing.
     terminated_at = backend_data.get("terminated_at")
     if terminated_at is None:
-        st = pd.get("step_timings")
-        if st:
-            terminated_at = pipeline_schema.infer_terminating_node(st)
+        st = pd.get("step_timings") or {}
+        for node in pipeline_schema.nodes:
+            if st.get(node.name) is not None:
+                terminated_at = node.name
     if terminated_at is not None:
         pd["terminated_at"] = terminated_at
 

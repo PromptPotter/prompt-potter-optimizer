@@ -8,7 +8,6 @@ instead of hardcoding backend-specific constants.
 Derivation methods:
   node_param_keys()       → node name → param keys
   obs_extraction_map()    → observation name → extraction rules
-  langfuse_type_map()     → node name → Langfuse as_type
 """
 
 import enum
@@ -73,8 +72,6 @@ class NodeOutputSchema(BaseModel):
 
     model_config = {"frozen": True}
 
-    family: str = ""
-    version: int | None = None
     fields: list[str] = Field(default_factory=list)
     field_descriptions: dict[str, str] = Field(default_factory=dict)
     json_schema: dict = Field(default_factory=dict)
@@ -90,17 +87,8 @@ class NodePromptMeta(BaseModel):
     model_config = {"frozen": True}
 
     family: str = ""
-    version: int | None = None
     template_variables: list[str] = Field(default_factory=list)
     description: str = ""
-
-
-WIRE_TYPE_TAGS: dict[str, str] = {
-    "generation": "ai",
-    "retriever": "retr",
-    "tool": "tool",
-    "cache": "cach",
-}
 
 
 class PipelineNode(BaseModel):
@@ -110,13 +98,10 @@ class PipelineNode(BaseModel):
 
     name: str
     wire_type: str = ""  # Raw type from connector (e.g., "generation", "retriever")
-    display_tag: str = ""  # Optional short display tag override from connector config
-    runtime: str = "backend"
     short_circuit: bool = False
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
-    input_keys: list[str] = Field(default_factory=list)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"
@@ -133,47 +118,6 @@ class PipelineNode(BaseModel):
     def is_llm(self) -> bool:
         """Whether this node makes an LLM call (any mapping has ``is_llm``)."""
         return any(m.is_llm for m in self.observation_mappings)
-
-
-class IntermediateMetric(BaseModel):
-    """A metric derived from a pipeline node's type."""
-
-    model_config = {"frozen": True}
-
-    name: str
-    node_type: str
-    pipeline_data_key: str
-    description: str = ""
-    default_weight: float = 0.0  # 0 = display-only
-
-
-NODE_TYPE_METRICS: dict[str, list[IntermediateMetric]] = {
-    "candidate_source": [
-        IntermediateMetric(
-            name="source_recall",
-            node_type="candidate_source",
-            pipeline_data_key="candidate_ranking",
-            description="Fraction of queries where ground truth appears in candidate list",
-        ),
-    ],
-    "ranker": [
-        IntermediateMetric(
-            name="candidate_recall",
-            node_type="ranker",
-            pipeline_data_key="final_ranking",
-            description="Fraction of LLM-ranked queries where ground truth was available",
-        ),
-    ],
-    "cache": [
-        IntermediateMetric(
-            name="cache_hit_rate",
-            node_type="cache",
-            pipeline_data_key="step_timings",
-            description="Fraction of queries resolved by cache",
-        ),
-    ],
-    "enricher": [],
-}
 
 
 class PipelineSchema(BaseModel):
@@ -214,12 +158,6 @@ class PipelineSchema(BaseModel):
     def active_steps(self) -> tuple[str, ...]:
         """Node names in pipeline order (schema is pre-filtered to active nodes)."""
         return tuple(n.name for n in self.nodes)
-
-    @property
-    def prompt_node(self) -> str:
-        """First prompt-bearing node, or ``""`` if none."""
-        names = self.prompt_node_names()
-        return names[0] if names else ""
 
     def to_pipeline_params(self) -> dict:
         """Build initial pipeline_params dict from this schema.
@@ -264,16 +202,6 @@ class PipelineSchema(BaseModel):
         """Find a node by name (O(1)), or None if not found."""
         idx = self._node_map.get(name)  # type: ignore[attr-defined]
         return self.nodes[idx] if idx is not None else None
-
-    @property
-    def all_param_keys(self) -> set[str]:
-        """Union of every node's ``param_keys``."""
-        return set(self._param_map)  # type: ignore[attr-defined]
-
-    @property
-    def has_prompt_nodes(self) -> bool:
-        """Whether any node has ``prompt_meta`` set."""
-        return any(n.prompt_meta is not None for n in self.nodes)
 
     def filter_to_steps(self, steps: list[str]) -> "PipelineSchema":
         """Return a copy with only nodes present in *steps*, preserving schema order."""
@@ -326,56 +254,6 @@ class PipelineSchema(BaseModel):
         chain = self.prefix_keys(pipeline_params)
         return chain[-1][1] if chain else ""
 
-    def excluded_nodes(self, pipeline_params: dict[str, Any]) -> set[str]:
-        """Nodes in this schema but absent from ``pipeline_params["steps"]``.
-
-        Returns empty set when ``steps`` is missing (all nodes assumed active).
-        """
-        steps = pipeline_params.get("steps")
-        if steps is None:
-            return set()
-        return set(self.active_steps) - set(steps)
-
-    def build_display_tags(self) -> dict[str, str]:
-        """Compute display tag map ``{node_name: tag}`` with auto-enumeration.
-
-        Resolution: node.display_tag → WIRE_TYPE_TAGS[wire_type] → name[:4].
-        When multiple nodes resolve to the same base tag, append ``_1``, ``_2``, ...
-        """
-        from collections import Counter
-
-        # Resolve base tag per node
-        base_tags: list[tuple[str, str]] = []  # [(name, base_tag), ...]
-        for node in self.nodes:
-            tag = node.display_tag or WIRE_TYPE_TAGS.get(node.wire_type, "") or node.name[:4]
-            base_tags.append((node.name, tag))
-
-        # Count occurrences
-        tag_counts = Counter(tag for _, tag in base_tags)
-
-        # Enumerate duplicates
-        tag_seq: dict[str, int] = {}
-        result: dict[str, str] = {}
-        for name, tag in base_tags:
-            if tag_counts[tag] > 1:
-                tag_seq[tag] = tag_seq.get(tag, 0) + 1
-                result[name] = f"{tag}_{tag_seq[tag]}"
-            else:
-                result[name] = tag
-        return result
-
-    def infer_terminating_node(self, step_timings: dict[str, float | None]) -> str | None:
-        """Infer which pipeline step produced the final result.
-
-        Walks steps in pipeline order. The last step with a non-None timing
-        is the one that produced the result.
-        """
-        last_executed: str | None = None
-        for step in self.nodes:
-            if step_timings.get(step.name) is not None:
-                last_executed = step.name
-        return last_executed
-
     # -------------------------------------------------------------------
     # Derivation methods
     # -------------------------------------------------------------------
@@ -394,13 +272,6 @@ class PipelineSchema(BaseModel):
             for step in self.nodes
             if step.observation_name and step.observation_mappings
         }
-
-    def langfuse_type_map(self) -> dict[str, str]:
-        """Map step name → Langfuse ``as_type``.
-
-        Replaces the implicit mapping in ``pipeline_nodes.py``.
-        """
-        return {step.name: step.langfuse_type for step in self.nodes}
 
     def prompt_node_names(self) -> list[str]:
         """Node names whose output is affected by the prompt text.
@@ -422,28 +293,3 @@ class PipelineSchema(BaseModel):
                 if mapping.is_llm:
                     return mapping.pipeline_key
         return ""
-
-
-def load_pipeline_from_dict(data: dict) -> PipelineSchema:
-    """Load a PipelineSchema from a raw dict (e.g., optimizer_pipeline.json).
-
-    Accepts the standard ``{nodes: {...}, pipelines: {...}}`` format used
-    by both the target backend and the optimizer pipeline declarations.
-    """
-    nodes = []
-    for name, node_data in data.get("nodes", {}).items():
-        opt = node_data.get("optimizer", {})
-        pk = set(opt.get("param_keys", []))
-        nodes.append(
-            PipelineNode(
-                name=name,
-                current_config=node_data.get("config", {}),
-                param_keys=pk,
-                input_keys=opt.get("input_keys", []),
-            )
-        )
-    return PipelineSchema(
-        name=data.get("name", ""),
-        version=data.get("version", ""),
-        nodes=nodes,
-    )

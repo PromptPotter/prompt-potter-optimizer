@@ -49,10 +49,22 @@ _PIPELINE_PATH = Path(__file__).parent / "optimizer_pipeline.json"
 @functools.lru_cache(maxsize=1)
 def get_optimizer_schema() -> PipelineSchema:
     """Load optimizer_pipeline.json as PipelineSchema (cached)."""
-    from promptpotter.models.pipeline_schema import load_pipeline_from_dict
+    from promptpotter.models.pipeline_schema import PipelineNode
 
     data = json.loads(_PIPELINE_PATH.read_text())
-    return load_pipeline_from_dict(data)
+    nodes = [
+        PipelineNode(
+            name=name,
+            current_config=node_data.get("config", {}),
+            param_keys=set(node_data.get("optimizer", {}).get("param_keys", [])),
+        )
+        for name, node_data in data.get("nodes", {}).items()
+    ]
+    return PipelineSchema(
+        name=data.get("name", ""),
+        version=data.get("version", ""),
+        nodes=nodes,
+    )
 
 
 _LLM_DEFAULTS = {"temperature": 0.0, "max_tokens": 1000, "output_format": "text"}

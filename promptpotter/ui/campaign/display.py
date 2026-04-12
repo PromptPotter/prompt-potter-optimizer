@@ -236,14 +236,44 @@ def _print_interrupt_banner(
     print(f"{'=' * 70}")
 
 
-# Display tags — populated from PipelineSchema.build_display_tags() at init.
+# Display tags — populated from _build_display_tags() at init.
 _DISPLAY_TAGS: dict[str, str] = {}
+
+_WIRE_TYPE_TAGS: dict[str, str] = {
+    "generation": "ai",
+    "retriever": "retr",
+    "tool": "tool",
+    "cache": "cach",
+}
+
+
+def _build_display_tags(schema) -> dict[str, str]:
+    """Compute ``{node_name: tag}`` with auto-enumeration for duplicates.
+
+    Resolution: ``_WIRE_TYPE_TAGS[node.wire_type]`` → ``node.name[:4]``.
+    When multiple nodes resolve to the same base tag, append ``_1``, ``_2``, …
+    """
+    from collections import Counter
+
+    base_tags: list[tuple[str, str]] = [
+        (n.name, _WIRE_TYPE_TAGS.get(n.wire_type, "") or n.name[:4]) for n in schema.nodes
+    ]
+    tag_counts = Counter(tag for _, tag in base_tags)
+    tag_seq: dict[str, int] = {}
+    result: dict[str, str] = {}
+    for name, tag in base_tags:
+        if tag_counts[tag] > 1:
+            tag_seq[tag] = tag_seq.get(tag, 0) + 1
+            result[name] = f"{tag}_{tag_seq[tag]}"
+        else:
+            result[name] = tag
+    return result
 
 
 def set_display_tags(schema) -> None:
     """Set display tags from a PipelineSchema. Call once at pipeline init."""
     global _DISPLAY_TAGS
-    _DISPLAY_TAGS = schema.build_display_tags() if schema else {}
+    _DISPLAY_TAGS = _build_display_tags(schema) if schema else {}
 
 
 def _step_tag(step_name: str | None) -> str:

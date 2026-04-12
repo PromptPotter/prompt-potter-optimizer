@@ -41,8 +41,6 @@ def _parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
         k: v.get("description", "") for k, v in props.items() if v.get("description")
     }
     return NodeOutputSchema(
-        family=resolved.get("family", ""),
-        version=resolved.get("version"),
         fields=fields,
         field_descriptions=field_descriptions,
         json_schema=json_schema,
@@ -53,7 +51,6 @@ def _parse_resolved_prompt(resolved: dict[str, Any]) -> NodePromptMeta:
     """Convert a resolved prompt dict from the enriched response."""
     return NodePromptMeta(
         family=resolved.get("family", ""),
-        version=resolved.get("version"),
         template_variables=resolved.get("template_variables", []),
         description=resolved.get("description", ""),
     )
@@ -132,12 +129,10 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "name": name,
             "wire_type": node.get("type", ""),
             "display_tag": opt.get("display_tag", ""),
-            "runtime": node.get("runtime", "backend"),
             "short_circuit": node.get("short_circuit", False),
             "node_type": node.get("node_role", ""),
             "param_keys": pk,
             "param_descriptions": opt.get("param_descriptions", {}),
-            "input_keys": opt.get("input_keys", []),
             "langfuse_type": opt.get("langfuse_type", "span"),
             "current_config": {k: v for k, v in nc.items() if k in pk},
         }

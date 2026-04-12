@@ -283,7 +283,8 @@ class OptSearchPoint(PromptTemplate):
 
         pp = copy.deepcopy(base_pipeline_params or {})
         active_steps = schema.active_steps if schema else ()
-        prompt_node = schema.prompt_node if schema else ""
+        prompt_nodes = schema.prompt_node_names() if schema else []
+        prompt_node = prompt_nodes[0] if prompt_nodes else ""
         if active_steps:
             pp["steps"] = list(active_steps)
         rendered = self.render()
