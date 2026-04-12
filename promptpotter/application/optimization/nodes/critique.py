@@ -93,7 +93,7 @@ class RoundSnapshot:
         """
         from promptpotter.application.optimization.nodes.formatting import (
             build_cross_candidate_diff,
-            classify_trajectory,
+            build_trajectory_report,
         )
 
         # Enrich SM context with cross-candidate diff + trajectory
@@ -103,10 +103,10 @@ class RoundSnapshot:
             cast("dict[str, list[dict]]", scoring_result.all_candidate_results),
             scoring_result.candidate_scores,
         )
-        trajectory = classify_trajectory(state.rounds)
+        trajectory = build_trajectory_report(state.rounds)
         traj_str = (
-            f"{trajectory['classification']}: {trajectory['description']}"
-            if trajectory and trajectory["classification"] != "healthy"
+            f"{trajectory.classification}: {trajectory.description}"
+            if trajectory and trajectory.classification != "healthy"
             else None
         )
         if diff or traj_str:

@@ -20,10 +20,7 @@ from promptpotter.application.optimization.nodes.critique import (
     sample_thinking_styles,
     update_query_tracker,
 )
-from promptpotter.application.optimization.nodes.formatting import (
-    build_critique_search_memory_digest,
-    candidate_summaries,
-)
+from promptpotter.application.optimization.nodes.formatting import candidate_summaries
 from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
 from promptpotter.application.optimization.results import RoundResult
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -124,10 +121,9 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    from promptpotter.application.optimization.nodes.formatting import build_l1_search_memory_digest
     from promptpotter.application.optimization.nodes.generate import l1_generate
 
-    sm_ctx = build_l1_search_memory_digest(search_memory)
+    sm_ctx = search_memory.to_l1_digest() if search_memory else None
 
     client = _llm_client.get_llm_client()
     async with observed_node(f"l1_generate_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
@@ -187,7 +183,9 @@ async def _run_critique(
         scoring_result,
         config,
         round_num=round_num,
-        search_memory_digest=build_critique_search_memory_digest(state.search_memory),
+        search_memory_digest=(
+            state.search_memory.to_critique_digest() if state.search_memory else None
+        ),
     )
     result = await agent.run(cctx)
     return format_critique_for_prompt(result)

@@ -20,18 +20,15 @@ if TYPE_CHECKING:
 __all__ = [
     "L1PromptData",
     "L2IntelligenceData",
+    "TrajectoryReport",
     "assess_candidate_diversity",
     "build_candidate_comparison",
-    "build_critique_search_memory_digest",
-    "build_l1_search_memory_digest",
-    "build_round_trajectory",
-    "build_strategic_search_memory_digest",
+    "build_trajectory_report",
     "candidate_summaries",
-    "classify_trajectory",
     "format_context_sections",
     "format_l2_intelligence",
-    "format_l3_intelligence",
     "format_pipeline_section",
+    "format_search_memory_block",
     "summarize_warning_inventory",
     "warning_summary",
 ]
@@ -65,28 +62,6 @@ def format_pipeline_section(
     return "\n".join(lines) + "\n"
 
 
-def format_l3_intelligence(sm_digest: dict | None) -> str:
-    """Build the HISTORICAL INTELLIGENCE section for L3 modify_plan prompts.
-
-    Symmetric with ``format_l2_intelligence`` but pulls the strategic
-    picture variant (axis rankings, bottlenecks, failure clusters,
-    persistent failures). Returns empty string when no data is available.
-    """
-    if not sm_digest:
-        return ""
-    lines = ["HISTORICAL INTELLIGENCE:"]
-    for key, label in (
-        ("axis_rankings", "Axis impact rankings"),
-        ("bottleneck_distribution", "Bottleneck distribution"),
-        ("failure_clusters", "Failure clusters"),
-        ("persistent_failures", "Persistent failures"),
-    ):
-        val = sm_digest.get(key)
-        if val:
-            lines.append(f"  {label}: {val}")
-    return "\n".join(lines) if len(lines) > 1 else ""
-
-
 @dataclass
 class L1PromptData:
     """Data bundle for ``format_context_sections()``."""
@@ -106,7 +81,7 @@ class L1PromptData:
     pipeline_schema_text: str = ""
 
 
-def _format_search_memory_block(sm_digest: dict | None, key_labels: dict[str, str]) -> str:
+def format_search_memory_block(sm_digest: dict | None, key_labels: dict[str, str]) -> str:
     """Build HISTORICAL INTELLIGENCE block from search memory digest dict."""
     if not sm_digest:
         return ""
@@ -167,7 +142,7 @@ def format_context_sections(ctx: L1PromptData) -> str:
         sections.append("\n".join(fa_lines))
 
     # Historical intelligence from SearchMemory (Wave 3c)
-    hi = _format_search_memory_block(
+    hi = format_search_memory_block(
         ctx.search_memory_digest,
         {
             "failure_clusters": "Common failure patterns",
@@ -272,8 +247,7 @@ class L2IntelligenceData:
     critique_text: str = ""
     l2_directive: str = ""
     search_memory_digest: dict | None = None
-    round_trajectory: str | None = None
-    trajectory_classification: dict | None = None
+    trajectory: TrajectoryReport | None = None
     candidate_comparison: str | None = None
     diversity_alert: str | None = None
 
@@ -307,17 +281,15 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
     if ctx.l2_directive:
         sections.append("PREVIOUS DIRECTIVE:\n" + ctx.l2_directive)
 
-    # Round trajectory — how the campaign is progressing
-    if ctx.round_trajectory:
-        sections.append(f"CAMPAIGN TRAJECTORY:\n  {ctx.round_trajectory}")
-
-    # Trajectory classification — actionable diagnosis
-    tc = ctx.trajectory_classification
-    if tc and tc.get("classification") != "healthy":
-        sections.append(
-            f"TRAJECTORY DIAGNOSIS: [{tc['classification'].upper()}] "
-            f"{tc['description']}\n  Recommended: {tc['recommended_action']}"
-        )
+    # Round trajectory — progression summary + classification when unhealthy
+    tr = ctx.trajectory
+    if tr:
+        sections.append(f"CAMPAIGN TRAJECTORY:\n  {tr.text}")
+        if tr.classification != "healthy":
+            sections.append(
+                f"TRAJECTORY DIAGNOSIS: [{tr.classification.upper()}] "
+                f"{tr.description}\n  Recommended: {tr.recommended_action}"
+            )
 
     # Candidate comparison — what was tried last round
     if ctx.candidate_comparison:
@@ -328,7 +300,7 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
         sections.append(f"DIVERSITY ALERT:\n  {ctx.diversity_alert}")
 
     # Historical intelligence from SearchMemory
-    hi = _format_search_memory_block(
+    hi = format_search_memory_block(
         ctx.search_memory_digest,
         {
             "axis_rankings": "Axis impact rankings",
@@ -344,257 +316,27 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
     return "\n\n".join(sections)
 
 
-def build_l1_search_memory_digest(search_memory: Any) -> dict | None:
-    """Build SearchMemory context dict for L1 generation prompt."""
-    if search_memory is None:
-        return None
+@dataclass
+class TrajectoryReport:
+    """Unified campaign-trajectory view derived from round accuracies.
 
-    ctx: dict[str, str] = {}
-
-    clusters = search_memory.failure_clusters(3)
-    if clusters:
-        ctx["failure_clusters"] = "; ".join(
-            f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)" for c in clusters
-        )
-
-    dead = search_memory.dead_queries()
-    if dead:
-        ctx["dead_queries"] = f"{len(dead)} queries never hit"
-
-    rankings = search_memory.axis_rankings()[:3]
-    if rankings:
-        ctx["top_axes"] = "; ".join(
-            f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})" for a in rankings
-        )
-        # Top values for the highest-impact axis
-        top_vals = search_memory.top_k_values(rankings[0].axis, k=3)
-        if top_vals:
-            ctx["top_values"] = "; ".join(
-                f"{v.value_preview} (acc={v.mean_accuracy:.1%})" for v in top_vals
-            )
-
-    return ctx if ctx else None
-
-
-def build_critique_search_memory_digest(search_memory: Any) -> dict[str, str] | None:
-    """Build SearchMemory context dict for the critique agent.
-
-    Surfaces discriminating queries, failure clusters, tractability profiles,
-    exhausted axes, value trends, and improvement attribution.
+    ``text`` is the compact L2 trend summary. The remaining fields classify
+    the trajectory and suggest an action. ``classification`` is one of
+    ``healthy``, ``plateau``, ``oscillating``, ``ceiling``.
     """
-    if search_memory is None:
-        return None
 
-    ctx: dict[str, str] = {}
-
-    disc = search_memory.discriminating_queries()
-    if disc:
-        ctx["discriminating_queries"] = f"{len(disc)} queries vary across configs"
-
-    fc = search_memory.failure_clusters(3)
-    if fc:
-        ctx["failure_clusters"] = "; ".join(f"{c.failure_mode} ({c.fraction:.0%})" for c in fc)
-
-    persistent = search_memory.persistent_failures(min_streak=3)
-    if persistent:
-        intractable = [q for q in persistent if q.hit_rate == 0]
-        chronic = [q for q in persistent if q.hit_rate > 0]
-        parts = []
-        if intractable:
-            parts.append(f"{len(intractable)} intractable (never hit in any config)")
-        if chronic:
-            parts.append(f"{len(chronic)} chronic (recently failing but hit_rate > 0)")
-        ctx["tractability"] = "; ".join(parts)
-
-    exhausted = search_memory.exhausted_axes()
-    if exhausted:
-        ctx["exhausted_axes"] = "; ".join(
-            f"{a.axis} ({search_memory.values_tested_count(a.axis)} values tested, "
-            f"effect={a.effect_size:.3f})"
-            for a in exhausted[:5]
-        )
-
-    rankings = search_memory.axis_rankings()[:3]
-    trend_parts = []
-    for a in rankings:
-        trend = search_memory.axis_value_trend(a.axis)
-        if trend not in ("flat", "non_numeric"):
-            trend_parts.append(f"{a.axis}: {trend}")
-    if trend_parts:
-        ctx["value_trends"] = "; ".join(trend_parts)
-
-    attributions = search_memory.format_recent_attributions(limit=3)
-    if attributions:
-        ctx["improvement_attribution"] = attributions
-
-    return ctx if ctx else None
+    text: str
+    classification: str
+    description: str
+    recommended_action: str
 
 
-def build_strategic_search_memory_digest(
-    search_memory: Any,
-    *,
-    include_correlations: bool = False,
-    include_clusters: bool = False,
-) -> dict | None:
-    """Build SearchMemory context dict for L2/L3 strategic prompts.
+def build_trajectory_report(rounds: list[Any]) -> TrajectoryReport | None:
+    """Compute the unified trajectory report for L2 / critique.
 
-    Base: axis rankings, bottleneck distribution, persistent failures.
-    L2 adds: failure group × axis correlations, volatile queries.
-    L3 adds: failure clusters.
-    """
-    if search_memory is None:
-        return None
-
-    ctx: dict[str, str] = {}
-
-    rankings = search_memory.axis_rankings()[:5]
-    if rankings:
-        ctx["axis_rankings"] = "; ".join(
-            f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})" for a in rankings
-        )
-
-    bottleneck = search_memory.bottleneck_distribution()
-    if bottleneck:
-        ctx["bottleneck_distribution"] = "; ".join(
-            f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
-        )
-
-    persistent = search_memory.persistent_failures(min_streak=3)
-    if persistent:
-        intractable = [q for q in persistent if q.hit_rate == 0]
-        chronic = [q for q in persistent if q.hit_rate > 0]
-        parts = []
-        if intractable:
-            parts.append(f"{len(intractable)} intractable (never hit)")
-        if chronic:
-            parts.append(f"{len(chronic)} chronic failures")
-        ctx["persistent_failures"] = "; ".join(parts)
-
-    if include_clusters:
-        clusters = search_memory.failure_clusters(3)
-        if clusters:
-            ctx["failure_clusters"] = "; ".join(
-                f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)" for c in clusters
-            )
-
-    if include_correlations and rankings:
-        fg_lines = []
-        for a in rankings[:3]:
-            corr = search_memory.parameter_failure_correlation(a.axis)
-            if corr:
-                parts = [
-                    f"{mode}: {delta:+.0%}"
-                    for mode, delta in sorted(
-                        corr.items(),
-                        key=lambda x: -abs(x[1]),
-                    )[:3]
-                ]
-                fg_lines.append(f"{a.axis} → {', '.join(parts)}")
-        if fg_lines:
-            ctx["failure_group_insights"] = "; ".join(fg_lines)
-
-        # Volatile queries — frequent hit/miss flips signal optimizer oscillation
-        flips = search_memory.query_flip_history(limit=50)
-        if flips:
-            from collections import Counter
-
-            flip_counts = Counter(f["query"] for f in flips)
-            volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
-            if volatile:
-                ctx["volatile_queries"] = "; ".join(f"{q[:50]} ({n} flips)" for q, n in volatile)
-
-    return ctx if ctx else None
-
-
-def classify_trajectory(rounds: list[Any]) -> dict | None:
-    """Classify the campaign trajectory deterministically.
-
-    Returns a dict with:
-    - classification: "healthy" | "plateau" | "oscillating" | "ceiling"
-    - description: human-readable summary
-    - recommended_action: what to do about it
-
-    Returns None if insufficient data (< 3 rounds).
-    """
-    if not rounds or len(rounds) < 3:
-        return None
-
-    accuracies = [r.accuracy for r in rounds]
-    best_acc = max(accuracies)
-    current_acc = accuracies[-1]
-
-    # Compute deltas
-    deltas = [accuracies[i] - accuracies[i - 1] for i in range(1, len(accuracies))]
-    recent = deltas[-5:]
-
-    # Count patterns in recent deltas
-    improvements = sum(1 for d in recent if d > 0.005)
-    regressions = sum(1 for d in recent if d < -0.005)
-    flat = len(recent) - improvements - regressions
-
-    # Consecutive stall (< 1% change)
-    stall_streak = 0
-    for d in reversed(deltas):
-        if abs(d) < 0.01:
-            stall_streak += 1
-        else:
-            break
-
-    # Best unchanged for N rounds
-    best_round = accuracies.index(best_acc)
-    rounds_since_best = len(accuracies) - 1 - best_round
-
-    # Classify
-    if improvements >= len(recent) * 0.5 and regressions <= 1:
-        return {
-            "classification": "healthy",
-            "description": (f"Improving — {improvements}/{len(recent)} recent rounds improved"),
-            "recommended_action": "continue current approach",
-        }
-
-    if rounds_since_best >= 5 and stall_streak >= 3:
-        return {
-            "classification": "ceiling",
-            "description": (
-                f"Hard ceiling at {best_acc:.1%} (round {best_round}) — "
-                f"{rounds_since_best} rounds without new best"
-            ),
-            "recommended_action": "escalate — try fundamentally different axes or strategy",
-        }
-
-    if improvements > 0 and regressions > 0 and abs(improvements - regressions) <= 1:
-        return {
-            "classification": "oscillating",
-            "description": (
-                f"Oscillating — {improvements} improvements, {regressions} regressions "
-                f"in last {len(recent)} rounds"
-            ),
-            "recommended_action": "narrow search space — candidates are exploring unstable region",
-        }
-
-    if flat >= len(recent) * 0.6 or stall_streak >= 3:
-        gap = best_acc - current_acc
-        return {
-            "classification": "plateau",
-            "description": (
-                f"Plateau — {stall_streak} consecutive rounds with < 1% change, "
-                f"gap to best: {gap:.1%}"
-            ),
-            "recommended_action": "widen search — try different axes or larger parameter ranges",
-        }
-
-    return {
-        "classification": "healthy",
-        "description": "Mixed progress — no clear pattern",
-        "recommended_action": "continue current approach",
-    }
-
-
-def build_round_trajectory(rounds: list[Any]) -> str | None:
-    """Compile a compact round trajectory summary for L2.
-
-    Returns a structured summary of the campaign trajectory:
-    accuracy trend, stall count, best-ever vs current, last N deltas.
+    Single pass over the accuracy history derives: trend direction, stall
+    streak, last 5 deltas, classification, and recommended action. Returns
+    ``None`` when fewer than 2 rounds are available.
     """
     if not rounds or len(rounds) < 2:
         return None
@@ -604,37 +346,81 @@ def build_round_trajectory(rounds: list[Any]) -> str | None:
     best_round = accuracies.index(best_acc)
     current_acc = accuracies[-1]
     gap = best_acc - current_acc
+    rounds_since_best = len(accuracies) - 1 - best_round
 
-    # Last N deltas
     deltas = [accuracies[i] - accuracies[i - 1] for i in range(1, len(accuracies))]
-    recent_deltas = deltas[-5:]
+    recent = deltas[-5:]
+    improvements = sum(1 for d in recent if d > 0.005)
+    regressions = sum(1 for d in recent if d < -0.005)
+    flat = len(recent) - improvements - regressions
 
-    # Stall: consecutive rounds with < 1% improvement
     stall = 0
     for d in reversed(deltas):
-        if d < 0.01:
+        if abs(d) < 0.01:
             stall += 1
         else:
             break
 
-    # Trend direction
-    positive = sum(1 for d in recent_deltas if d > 0.005)
-    negative = sum(1 for d in recent_deltas if d < -0.005)
-    if positive > len(recent_deltas) * 0.6:
+    if improvements > len(recent) * 0.6:
         direction = "improving"
-    elif negative > len(recent_deltas) * 0.6:
+    elif regressions > len(recent) * 0.6:
         direction = "degrading"
     elif stall >= 3:
         direction = "stalled"
     else:
         direction = "oscillating"
 
-    delta_str = ", ".join(f"{d:+.1%}" for d in recent_deltas)
-    return (
+    delta_str = ", ".join(f"{d:+.1%}" for d in recent)
+    text = (
         f"Trend: {direction} | "
         f"Current: {current_acc:.1%} | Best: {best_acc:.1%} (round {best_round}) | "
         f"Gap: {gap:.1%} | Stall: {stall} rounds | "
         f"Recent deltas: [{delta_str}]"
+    )
+
+    # Need ≥ 3 rounds to classify; fall back to healthy/mixed otherwise.
+    if len(rounds) < 3:
+        return TrajectoryReport(
+            text=text,
+            classification="healthy",
+            description="Too few rounds to classify",
+            recommended_action="continue current approach",
+        )
+
+    if improvements >= len(recent) * 0.5 and regressions <= 1:
+        classification = "healthy"
+        description = f"Improving — {improvements}/{len(recent)} recent rounds improved"
+        action = "continue current approach"
+    elif rounds_since_best >= 5 and stall >= 3:
+        classification = "ceiling"
+        description = (
+            f"Hard ceiling at {best_acc:.1%} (round {best_round}) — "
+            f"{rounds_since_best} rounds without new best"
+        )
+        action = "escalate — try fundamentally different axes or strategy"
+    elif improvements > 0 and regressions > 0 and abs(improvements - regressions) <= 1:
+        classification = "oscillating"
+        description = (
+            f"Oscillating — {improvements} improvements, {regressions} regressions "
+            f"in last {len(recent)} rounds"
+        )
+        action = "narrow search space — candidates are exploring unstable region"
+    elif flat >= len(recent) * 0.6 or stall >= 3:
+        classification = "plateau"
+        description = (
+            f"Plateau — {stall} consecutive rounds with < 1% change, gap to best: {gap:.1%}"
+        )
+        action = "widen search — try different axes or larger parameter ranges"
+    else:
+        classification = "healthy"
+        description = "Mixed progress — no clear pattern"
+        action = "continue current approach"
+
+    return TrajectoryReport(
+        text=text,
+        classification=classification,
+        description=description,
+        recommended_action=action,
     )
 
 

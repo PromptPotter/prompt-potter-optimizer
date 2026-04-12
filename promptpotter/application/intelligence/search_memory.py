@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -142,13 +142,6 @@ class SearchMemory:
         records.sort(key=lambda r: -r.mean_accuracy)
         return records[:k]
 
-    def axis_impact(self, axis: str) -> AxisImpact | None:
-        """Return impact summary for a single axis."""
-        values = self._axis_values.get(axis, {})
-        if not values:
-            return None
-        return self._compute_axis_impact(axis, values)
-
     # --- Query Patterns ---
 
     def query_tractability(self) -> list[QueryRecord]:
@@ -225,8 +218,6 @@ class SearchMemory:
         mode_queries: dict[str, list[str]] = defaultdict(list)
         for query, modes in self._query_failure_modes.items():
             if modes:
-                from collections import Counter
-
                 dominant = Counter(modes).most_common(1)[0][0]
                 mode_queries[dominant].append(query)
 
@@ -405,9 +396,6 @@ class SearchMemory:
 
         Returns True if correlations were updated.
         """
-        # Build failure groups from query_failure_modes
-        from collections import Counter
-
         clusters = self.failure_clusters(5)
         if not clusters:
             return False
@@ -466,6 +454,131 @@ class SearchMemory:
             self._query_axis_sensitivity = new_sensitivity
             return True
         return False
+
+    # --- Prompt digests ---
+
+    def to_l1_digest(self) -> dict[str, str] | None:
+        """SearchMemory context dict for the L1 generation prompt."""
+        ctx: dict[str, str] = {}
+
+        clusters = self.failure_clusters(3)
+        if clusters:
+            ctx["failure_clusters"] = _fmt_clusters(clusters, with_counts=True)
+
+        dead = self.dead_queries()
+        if dead:
+            ctx["dead_queries"] = f"{len(dead)} queries never hit"
+
+        rankings = self.axis_rankings()[:3]
+        if rankings:
+            ctx["top_axes"] = _fmt_axis_rankings(rankings)
+            top_vals = self.top_k_values(rankings[0].axis, k=3)
+            if top_vals:
+                ctx["top_values"] = "; ".join(
+                    f"{v.value_preview} (acc={v.mean_accuracy:.1%})" for v in top_vals
+                )
+
+        return ctx or None
+
+    def to_critique_digest(self) -> dict[str, str] | None:
+        """SearchMemory context dict for the critique agent.
+
+        Surfaces discriminating queries, failure clusters, tractability profiles,
+        exhausted axes, value trends, and improvement attribution.
+        """
+        ctx: dict[str, str] = {}
+
+        disc = self.discriminating_queries()
+        if disc:
+            ctx["discriminating_queries"] = f"{len(disc)} queries vary across configs"
+
+        fc = self.failure_clusters(3)
+        if fc:
+            ctx["failure_clusters"] = _fmt_clusters(fc, with_counts=False)
+
+        persistent = self.persistent_failures(min_streak=3)
+        if persistent:
+            ctx["tractability"] = _fmt_persistent_failures(persistent)
+
+        exhausted = self.exhausted_axes()
+        if exhausted:
+            ctx["exhausted_axes"] = "; ".join(
+                f"{a.axis} ({self.values_tested_count(a.axis)} values tested, "
+                f"effect={a.effect_size:.3f})"
+                for a in exhausted[:5]
+            )
+
+        rankings = self.axis_rankings()[:3]
+        trend_parts = []
+        for a in rankings:
+            trend = self.axis_value_trend(a.axis)
+            if trend not in ("flat", "non_numeric"):
+                trend_parts.append(f"{a.axis}: {trend}")
+        if trend_parts:
+            ctx["value_trends"] = "; ".join(trend_parts)
+
+        attributions = self.format_recent_attributions(limit=3)
+        if attributions:
+            ctx["improvement_attribution"] = attributions
+
+        return ctx or None
+
+    def to_strategic_digest(
+        self,
+        *,
+        include_correlations: bool = False,
+        include_clusters: bool = False,
+    ) -> dict[str, str] | None:
+        """SearchMemory context dict for L2/L3 strategic prompts.
+
+        Base: axis rankings, bottleneck distribution, persistent failures.
+        L2 opts in via ``include_correlations`` (failure-group × axis, volatile queries).
+        L3 opts in via ``include_clusters`` (failure clusters with counts).
+        """
+        ctx: dict[str, str] = {}
+
+        rankings = self.axis_rankings()[:5]
+        if rankings:
+            ctx["axis_rankings"] = _fmt_axis_rankings(rankings)
+
+        bottleneck = self.bottleneck_distribution()
+        if bottleneck:
+            ctx["bottleneck_distribution"] = "; ".join(
+                f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
+            )
+
+        persistent = self.persistent_failures(min_streak=3)
+        if persistent:
+            ctx["persistent_failures"] = _fmt_persistent_failures(persistent, terse=True)
+
+        if include_clusters:
+            clusters = self.failure_clusters(3)
+            if clusters:
+                ctx["failure_clusters"] = _fmt_clusters(clusters, with_counts=True)
+
+        if include_correlations and rankings:
+            fg_lines = []
+            for a in rankings[:3]:
+                corr = self.parameter_failure_correlation(a.axis)
+                if corr:
+                    parts = [
+                        f"{mode}: {delta:+.0%}"
+                        for mode, delta in sorted(corr.items(), key=lambda x: -abs(x[1]))[:3]
+                    ]
+                    fg_lines.append(f"{a.axis} → {', '.join(parts)}")
+            if fg_lines:
+                ctx["failure_group_insights"] = "; ".join(fg_lines)
+
+            flips = self.query_flip_history(limit=50)
+            if flips:
+                flip_counts = Counter(f["query"] for f in flips)
+                volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
+                if volatile:
+                    ctx["volatile_queries"] = "; ".join(
+                        f"{q[:50]} ({n} flips)" for q, n in volatile
+                    )
+
+        return ctx or None
 
     # --- Lifecycle ---
 
@@ -710,8 +823,6 @@ class SearchMemory:
         modes = self._query_failure_modes.get(query, [])
         if not modes:
             return ""
-        from collections import Counter
-
         return Counter(modes).most_common(1)[0][0]
 
     def _build_query_records(self) -> list[QueryRecord]:
@@ -738,3 +849,31 @@ def _value_preview(value: Any) -> str:
     """Short string preview of an axis value for grouping."""
     s = str(value)
     return s[:80] if len(s) > 80 else s
+
+
+def _fmt_axis_rankings(rankings: list[AxisImpact]) -> str:
+    """Format axis impacts as ``axis (effect=X.XXX, classification)`` joined by ``; ``."""
+    return "; ".join(f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})" for a in rankings)
+
+
+def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
+    """Format failure clusters, optionally with query counts."""
+    if with_counts:
+        return "; ".join(
+            f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)" for c in clusters
+        )
+    return "; ".join(f"{c.failure_mode} ({c.fraction:.0%})" for c in clusters)
+
+
+def _fmt_persistent_failures(persistent: list[QueryRecord], *, terse: bool = False) -> str:
+    """Split persistent failures into intractable (hit_rate==0) vs chronic (>0)."""
+    intractable = [q for q in persistent if q.hit_rate == 0]
+    chronic = [q for q in persistent if q.hit_rate > 0]
+    parts: list[str] = []
+    if intractable:
+        suffix = "(never hit)" if terse else "(never hit in any config)"
+        parts.append(f"{len(intractable)} intractable {suffix}")
+    if chronic:
+        suffix = "failures" if terse else "(recently failing but hit_rate > 0)"
+        parts.append(f"{len(chronic)} chronic {suffix}")
+    return "; ".join(parts)

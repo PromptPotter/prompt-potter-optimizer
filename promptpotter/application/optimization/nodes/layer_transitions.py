@@ -22,12 +22,10 @@ from promptpotter.application.optimization.nodes.formatting import (
     L2IntelligenceData,
     assess_candidate_diversity,
     build_candidate_comparison,
-    build_round_trajectory,
-    build_strategic_search_memory_digest,
-    classify_trajectory,
+    build_trajectory_report,
     format_l2_intelligence,
-    format_l3_intelligence,
     format_pipeline_section,
+    format_search_memory_block,
 )
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -35,6 +33,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
+    from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.llm.client import LLMClientBase
 
@@ -193,7 +192,7 @@ async def refine_strategy(
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
     escalation_check_result: dict | None = None,
-    search_memory: object | None = None,
+    search_memory: SearchMemory | None = None,
     rounds: list | None = None,
     candidate_scores: list[dict] | None = None,
 ) -> TransitionResult:
@@ -226,12 +225,12 @@ async def refine_strategy(
             warning_inventory=opt_sp.warning_inventory or None,
             critique_text=opt_sp.critique_text,
             l2_directive=opt_sp.l2_directive,
-            search_memory_digest=build_strategic_search_memory_digest(
-                search_memory,
-                include_correlations=True,
+            search_memory_digest=(
+                search_memory.to_strategic_digest(include_correlations=True)
+                if search_memory is not None
+                else None
             ),
-            round_trajectory=build_round_trajectory(rounds) if rounds else None,
-            trajectory_classification=classify_trajectory(rounds) if rounds else None,
+            trajectory=build_trajectory_report(rounds) if rounds else None,
             candidate_comparison=(
                 build_candidate_comparison(candidate_scores) if candidate_scores else None
             ),
@@ -263,7 +262,7 @@ async def modify_plan(
     temperature: float = 0.5,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
-    search_memory: object | None = None,
+    search_memory: SearchMemory | None = None,
 ) -> TransitionResult:
     """LLM-driven L3 adjustment: suggest a new strategic plan.
 
@@ -283,8 +282,16 @@ async def modify_plan(
         "l2_summary": l2_summary,
         "rendered_prompt": opt_sp.render(),
         "pipeline_section": format_pipeline_section(pipeline_params, pipeline_schema),
-        "intelligence_section": format_l3_intelligence(
-            build_strategic_search_memory_digest(search_memory, include_clusters=True)
+        "intelligence_section": format_search_memory_block(
+            search_memory.to_strategic_digest(include_clusters=True)
+            if search_memory is not None
+            else None,
+            {
+                "axis_rankings": "Axis impact rankings",
+                "bottleneck_distribution": "Bottleneck distribution",
+                "failure_clusters": "Failure clusters",
+                "persistent_failures": "Persistent failures",
+            },
         ),
     }
 
