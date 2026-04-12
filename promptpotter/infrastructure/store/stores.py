@@ -10,9 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from promptpotter.domain.backend import BackendConnection, Execution
 from promptpotter.infrastructure.store.base import (
@@ -24,6 +25,24 @@ from promptpotter.infrastructure.store.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ReusablePlanMatch:
+    """Result of a smart-search plan reuse lookup.
+
+    ``data`` is the raw on-disk plan dict (ready for ``deserialize_smart_search_plan``).
+    ``kind`` tells the caller how to post-process it:
+
+    - ``complete``  — scan finished; reuse ``scan_results.axis_profiles`` directly.
+    - ``partial``   — scan interrupted; caller rebuilds profiles from ``scan_results.rows``.
+    - ``sibling``   — another plan with matching variant_library_hash had scan data;
+                       reuse its baseline/diagnostic/profiles under the current ``plan_id``.
+    - ``diagnostic_only`` — plan existed but has no usable scan data.
+    """
+
+    kind: Literal["complete", "partial", "sibling", "diagnostic_only"]
+    data: dict[str, Any]
 
 
 class PlanStore(EntityStore):
@@ -53,6 +72,49 @@ class PlanStore(EntityStore):
                 }
             )
         return results
+
+    def find_reusable_plan(self, backend_id: str, plan_id: str) -> ReusablePlanMatch | None:
+        """Look up a reusable plan for ``plan_id``.
+
+        Preference order: complete scan for this exact plan_id → partial scan
+        for this plan_id → sibling plan with matching ``variant_library_hash``
+        and scan data → diagnostic-only fallback. Returns ``None`` if no plan
+        is on disk for ``plan_id``.
+        """
+        existing = self.load(backend_id, plan_id)
+        if existing is None:
+            return None
+
+        status = existing.get("status", "?")
+        scan = existing.get("scan_results") or {}
+        if status in ("scan_complete", "search_complete") and scan:
+            return ReusablePlanMatch(kind="complete", data=existing)
+        if status == "scan_partial" and scan:
+            return ReusablePlanMatch(kind="partial", data=existing)
+
+        # diagnostic_built → prefer a sibling plan that already has scan data
+        vl_hash = existing.get("variant_library_hash", "")
+        current_n_diag = existing.get("config", {}).get("n_diagnostic", 6)
+        siblings = [
+            s
+            for s in self.list_all(backend_id)
+            if s["plan_id"] != plan_id
+            and s["status"] in ("scan_complete", "search_complete")
+            and s.get("variant_library_hash") == vl_hash
+            and s.get("n_axis_profiles", 0) > 0
+        ]
+        if siblings:
+            siblings.sort(
+                key=lambda s: (
+                    s.get("n_diagnostic") != current_n_diag,
+                    s["status"] != "scan_complete",
+                )
+            )
+            sib_data = self.load(backend_id, siblings[0]["plan_id"])
+            if sib_data is not None:
+                return ReusablePlanMatch(kind="sibling", data=sib_data)
+
+        return ReusablePlanMatch(kind="diagnostic_only", data=existing)
 
 
 class BackendStore:

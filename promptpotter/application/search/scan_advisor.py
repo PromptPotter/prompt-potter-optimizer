@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import functools
 import json
 import logging
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -27,6 +29,19 @@ from promptpotter.domain.pipeline_schema import NodeOutputSchema, PipelineNode, 
 from promptpotter.domain.search_point import TaskDecomposition
 
 logger = logging.getLogger(__name__)
+
+
+_PROMPT_DIR = Path(__file__).parent / "prompts"
+
+
+@functools.lru_cache(maxsize=8)
+def _load_prompt(name: str) -> str:
+    """Load a scan-advisor prompt section from ``prompts/<name>.md``.
+
+    Trailing newlines are stripped so the loaded text matches the original
+    triple-quoted-string form (which had no trailing newline).
+    """
+    return (_PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8").rstrip("\n")
 
 
 _TYPE_MAP: dict[str, dict] = {
@@ -346,19 +361,6 @@ def build_llm_context(
     return context
 
 
-def _advisor_system_section(pipeline_description: str) -> str:
-    """Role definition and constraints."""
-    return (
-        "You are an expert prompt optimization advisor. Recommend which axes "
-        "(parameters and prompt fields) to prioritize in a sensitivity scan.\n\n"
-        "## Constraints (apply strictly)\n"
-        "- Do NOT recommend *_model axes — place them in axes_to_skip.\n"
-        "- Response must fit within 1500 tokens. Be terse.\n\n"
-        f"## Pipeline: {pipeline_description or 'No description available.'}\n"
-        "Nodes execute sequentially — each node's output feeds the next:"
-    )
-
-
 def _advisor_task_context_section(task_description: str | dict | TaskDecomposition) -> str:
     """Optional task context from user description or structured TaskDecomposition."""
     if isinstance(task_description, TaskDecomposition):
@@ -375,89 +377,6 @@ def _advisor_task_context_section(task_description: str | dict | TaskDecompositi
     return ""
 
 
-def _advisor_llm_context_section(llm_context: list[dict]) -> str:
-    """LLM node output schema and prompt metadata."""
-    if not llm_context:
-        return ""
-    return (
-        "\n## LLM Node Details\n"
-        "Output schema fields and prompt metadata for LLM-driven nodes:\n"
-        f"{json.dumps(llm_context, indent=2)}\n"
-    )
-
-
-_ADVISOR_ANALYSIS_APPROACH = """\
-## Analysis Approach
-Work through these analysis steps before producing your recommendation:
-1. Trace data flow: UPSTREAM parameters have multiplier effects — poor upstream \
-data cannot be compensated by downstream tuning.
-2. Flag high-impact targets: empty or default string params (prefixes, suffixes, \
-query modifiers) that shape what data enters the pipeline.
-3. For *_schema axes: identify output fields that are redundant or missing for \
-downstream consumption. Suggest mutations relative to the current output_schema \
-shown in LLM Node Details.
-4. Skip axes unlikely to affect accuracy. Prioritize axes with the highest \
-expected impact on end-to-end accuracy.
-5. Estimate a diagnostic budget (queries per axis)."""
-
-
-_ADVISOR_OUTPUT_FORMAT = """\
-## Output Format
-For pipeline_param axes, suggest concrete values that meaningfully differ from \
-current_values. For prompt_field axes, just flag them — the variant library \
-already has values.
-
-Return a JSON object with this structure:
-{{
-  "priority_axes": [
-    {{
-      "axis": "<param_name>",
-      "source": "pipeline_param",
-      "node": "<node_name>",
-      "rationale": "...",
-      "suggested_values": ["<val>", "..."],
-      "importance": "<high|medium|low>"
-    }},
-    {{
-      "axis": "<field_name>",
-      "source": "prompt_field",
-      "rationale": "...",
-      "importance": "<high|medium|low>"
-    }}
-  ],
-  "suggested_n_diagnostic": 6,
-  "axes_to_skip": [
-    {{"axis": "<name>", "reason": "..."}}
-  ],
-  "budget_breakdown": {{
-    "<axis_name>": <n_queries>,
-    "total": <sum>
-  }},
-  "reasoning": "Overall strategy explanation..."
-}}
-
-Rules:
-- rationale: max 15 words
-- reasoning: max 2 sentences
-- axes_to_skip reason: max 10 words
-- suggested_values: 2-4 values, numbers or short strings only
-- importance: "high", "medium", or "low"
-- source: "pipeline_param" or "prompt_field"
-- For pipeline_param axes: include "node" and "suggested_values"
-- CRITICAL: For pipeline_param axes, "axis" must be an EXACT key from the \
-Tunable Parameters param_keys above. Do NOT invent names or combine node \
-names with param names — copy the key exactly as listed.
-- For prompt_field axes: omit "node" and "suggested_values"
-- *_schema mutations: each suggested_value is a JSON array of mutation arrays. \
-Ops: ["-","path"] remove | ["+","path","type",required,"desc"] add | \
-["~","old","new","type",required,"desc"] replace. \
-Types: string|array|integer|number|boolean|object. required: true|false. \
-Baseline included automatically — do NOT include it. \
-Keep each variant to 1-2 mutations so individual effects are measurable.
-
-Return ONLY the JSON object, no markdown fences or extra text."""
-
-
 def _build_advisor_prompt(
     pipeline_overview: list[dict],
     tunable_params: list[dict],
@@ -469,11 +388,27 @@ def _build_advisor_prompt(
 ) -> str:
     """Build the LLM prompt for scan configuration advice.
 
-    Assembles from section helpers: system → pipeline → task context →
-    params → prompt fields → LLM details → analysis → output format.
+    Assembles: system → pipeline → task context → params → prompt fields →
+    LLM details → search memory → analysis → output format.
     """
+    system = (
+        "You are an expert prompt optimization advisor. Recommend which axes "
+        "(parameters and prompt fields) to prioritize in a sensitivity scan.\n\n"
+        "## Constraints (apply strictly)\n"
+        "- Do NOT recommend *_model axes — place them in axes_to_skip.\n"
+        "- Response must fit within 1500 tokens. Be terse.\n\n"
+        f"## Pipeline: {pipeline_description or 'No description available.'}\n"
+        "Nodes execute sequentially — each node's output feeds the next:"
+    )
+    llm_details = (
+        "\n## LLM Node Details\n"
+        "Output schema fields and prompt metadata for LLM-driven nodes:\n"
+        f"{json.dumps(llm_context, indent=2)}\n"
+        if llm_context
+        else ""
+    )
     sections = [
-        _advisor_system_section(pipeline_description),
+        system,
         json.dumps(pipeline_overview, indent=2),
         _advisor_task_context_section(task_description),
         f"## Tunable Parameters (per node)\n{json.dumps(tunable_params, indent=2)}",
@@ -482,10 +417,10 @@ def _build_advisor_prompt(
             "Prompt template fields that can be varied (variant library has pre-defined values):\n"
             f"{json.dumps(prompt_field_axes, indent=2)}"
         ),
-        _advisor_llm_context_section(llm_context),
+        llm_details,
         search_memory_section,
-        _ADVISOR_ANALYSIS_APPROACH,
-        _ADVISOR_OUTPUT_FORMAT,
+        _load_prompt("scan_advisor_analysis"),
+        _load_prompt("scan_advisor_output_format"),
     ]
     return "\n\n".join(s for s in sections if s)
 

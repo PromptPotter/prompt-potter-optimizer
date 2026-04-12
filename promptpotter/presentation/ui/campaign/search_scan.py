@@ -396,7 +396,7 @@ async def run_sensitivity_scan(
     """
     from .search import decompose_scan_baseline
 
-    scan_baseline_sp, search_baseline, _scan_diag = await decompose_scan_baseline(
+    scan_baseline_sp, search_baseline = await decompose_scan_baseline(
         baseline,
         campaign_config,
         session=session,

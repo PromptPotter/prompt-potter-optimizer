@@ -13,9 +13,8 @@ from pathlib import Path
 
 # coverage
 from promptpotter.application.search.coverage import (
-    assess_scan_coverage,
-    build_data_inventory,
-    build_prompt_result_index,
+    CoverageEstimate,
+    estimate_scan_coverage,
 )
 
 # scan_advisor
@@ -75,17 +74,16 @@ def load_variant_library_rich() -> dict:
 
 
 __all__ = [
+    "CoverageEstimate",
     "adaptive_search",
     "advise_scan_config",
-    "assess_scan_coverage",
-    "build_data_inventory",
     "build_diagnostic_set",
     "build_llm_context",
     "build_pipeline_overview",
-    "build_prompt_result_index",
     "build_tunable_params",
     "convert_advisory_to_scan_variants",
     "decompose_scan_baseline",
+    "estimate_scan_coverage",
     "load_filtered_variant_library",
     "load_variant_library",
     "load_variant_library_rich",

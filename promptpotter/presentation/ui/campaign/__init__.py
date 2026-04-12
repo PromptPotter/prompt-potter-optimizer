@@ -17,9 +17,6 @@ from promptpotter.application.search import (
     build_pipeline_overview,
     build_tunable_params,
 )
-from promptpotter.application.search import (
-    build_prompt_result_index as build_historical_index,
-)
 
 # -- Campaigns (list, load, diff, overrides) ----------------------------------
 from .campaigns import (
@@ -64,9 +61,8 @@ from .optimize import (
     wilson_ci,
 )
 
-# -- Search: Advisor, Baseline, Coverage, Results, Variants -------------------
+# -- Search: Advisor, Baseline, Results, Variants -----------------------------
 from .search import (
-    audit_historical_data,
     convert_advisory_to_scan_variants,
     decompose_scan_baseline,
     load_task_description,
@@ -77,9 +73,7 @@ from .search import (
     scan_advisor,
     seed_campaign_from_scan,
     select_scan_winner_notebook,
-    show_data_inventory,
     show_scan_analytics,
-    show_scan_coverage,
     show_variant_library,
 )
 from .search_scan import (

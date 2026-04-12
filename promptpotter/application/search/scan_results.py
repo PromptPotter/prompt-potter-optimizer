@@ -8,6 +8,7 @@ Pure functions for working with scan results — no backend calls, no eval
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -34,10 +35,8 @@ class ScanBaselineResult:
 
     baseline_jsp: JobSearchPoint
     search_baseline: OptSearchPoint
-    scan_diag: dict | None
     was_cached: bool
     restructured_fields: dict[str, str]
-    prompt_index: dict | None = field(default=None)
 
 
 async def decompose_scan_baseline(
@@ -110,17 +109,10 @@ async def decompose_scan_baseline(
         schema=pipeline_schema,
     )
 
-    # Historical data diagnostic via sp_hash matching
-    scan_diag = None
-    prompt_index = None
+    # Register semantic equivalence between the raw and restructured prompts
+    # so downstream cache lookups can find archived results under either form.
     if can_cache:
         assert store is not None
-        from promptpotter.application.search.coverage import (
-            build_prompt_result_index,
-            diagnose_scan_variants,
-        )
-
-        # Register semantic equivalence
         restructured_hash = hashlib.sha256(
             search_baseline.render().encode(),
         ).hexdigest()[:16]
@@ -130,24 +122,11 @@ async def decompose_scan_baseline(
             restructured_hash,
         )
 
-        prompt_index = build_prompt_result_index(store, backend_id)
-
-        if scan_variants:
-            scan_diag = diagnose_scan_variants(
-                store,
-                backend_id,
-                scan_variants,
-                baseline_jsp,
-                pipeline_schema=pipeline_schema,
-            )
-
     return ScanBaselineResult(
         baseline_jsp=baseline_jsp,
         search_baseline=search_baseline,
-        scan_diag=scan_diag,
         was_cached=was_cached,
         restructured_fields=restructured_fields,
-        prompt_index=prompt_index,
     )
 
 
@@ -175,6 +154,26 @@ class DiagnosticResult:
     axis_profiles: list
 
 
+def _partial_profiles_from_rows(
+    scan_results: dict,
+    diagnostic_len: int,
+) -> list:
+    """Rebuild axis profiles from the rows of a partial scan."""
+    from promptpotter.application.search import load_variant_library
+    from promptpotter.application.search.smart_search import build_axis_profiles
+
+    vl = load_variant_library()
+    axes: list[tuple[str, str, list]] = []
+    for name, vals in vl.get("prompt_fields", {}).items():
+        if len(vals) > 1:
+            axes.append((name, "prompt_field", vals))
+    for name, vals in vl.get("pipeline_params", {}).items():
+        if len(vals) > 1:
+            axes.append((name, "pipeline_param", vals))
+    rows = scan_results.get("rows", [])
+    return build_axis_profiles(rows, axes, diagnostic_len)
+
+
 async def resume_or_build_diagnostic(
     campaign_config: CampaignConfig,
     baseline: OptSearchPoint,
@@ -186,22 +185,16 @@ async def resume_or_build_diagnostic(
     dataset: list,
     variant_library: dict | None = None,
 ) -> DiagnosticResult:
-    """Resume or build smart search diagnostic set.
+    """Resume or build a smart-search diagnostic set.
 
-    Returns:
-        (plan_id, search_baseline, diagnostic, diag_summary, axis_profiles_or_empty)
-
-    If a plan already exists on disk, skips LLM restructure and diagnostic
-    building. If the plan status is ``scan_complete`` or later, also returns
-    cached axis profiles.
+    Asks ``store.smart_search.find_reusable_plan`` for an on-disk match. On a
+    hit, post-processes the match according to its ``kind`` (complete / partial
+    / sibling / diagnostic_only). On a miss, runs the LLM restructure + builds
+    a fresh diagnostic set and saves the new plan.
     """
-    import hashlib as _hashlib
-    import json as _json
-
     from promptpotter.application.optimization.pipeline import decompose_prompt_fields
     from promptpotter.application.search import load_variant_library
     from promptpotter.application.search.smart_search import (
-        build_axis_profiles,
         build_diagnostic_set,
         deserialize_smart_search_plan,
         serialize_smart_search_plan,
@@ -219,96 +212,40 @@ async def resume_or_build_diagnostic(
         seed=ss.get("seed", 42),
     )
 
-    existing = store.smart_search.load(backend_id, plan_id)
-    if existing:
-        status = existing.get("status", "?")
-        plan = deserialize_smart_search_plan(existing)
-
-        if plan["scan_results"] and status in ("scan_complete", "search_complete"):
-            cached_profiles = plan["scan_results"].get("axis_profiles", [])
+    match = store.smart_search.find_reusable_plan(backend_id, plan_id)
+    if match is not None:
+        plan = deserialize_smart_search_plan(match.data)
+        scan_results = plan.get("scan_results") or {}
+        if match.kind == "complete":
+            profiles = scan_results.get("axis_profiles", [])
             logger.info("Scan complete in plan %s, reusing profiles", plan_id)
-            return DiagnosticResult(
-                plan_id=plan_id,
-                search_baseline=plan["search_baseline_ps"],
-                diagnostic=plan["diagnostic"],
-                summary=plan["diag_summary"],
-                axis_profiles=cached_profiles,
-            )
-        if plan["scan_results"] and status == "scan_partial":
-            partial_rows = plan["scan_results"].get("rows", [])
-            partial_completed = plan["scan_results"].get("completed_axes", [])
-            # Rebuild axes list to compute partial profiles
-            _vl = load_variant_library()
-            _axes: list[tuple[str, str, list]] = []
-            for name, vals in _vl.get("prompt_fields", {}).items():
-                if len(vals) > 1:
-                    _axes.append((name, "prompt_field", vals))
-            for name, vals in _vl.get("pipeline_params", {}).items():
-                if len(vals) > 1:
-                    _axes.append((name, "pipeline_param", vals))
-            partial_profiles = build_axis_profiles(
-                partial_rows,
-                _axes,
-                len(plan["diagnostic"]),
-            )
+        elif match.kind == "partial":
+            profiles = _partial_profiles_from_rows(scan_results, len(plan["diagnostic"]))
             logger.info(
                 "Scan partial in plan %s: %d axes done, %d profiles",
                 plan_id,
-                len(partial_completed),
-                len(partial_profiles),
+                len(scan_results.get("completed_axes", [])),
+                len(profiles),
             )
-            return DiagnosticResult(
-                plan_id=plan_id,
-                search_baseline=plan["search_baseline_ps"],
-                diagnostic=plan["diagnostic"],
-                summary=plan["diag_summary"],
-                axis_profiles=partial_profiles,
-            )
-
-        # diagnostic_built -> reuse saved baseline; prefer sibling with scan data
-        siblings = [
-            s
-            for s in store.smart_search.list_all(backend_id)
-            if s["plan_id"] != plan_id
-            and s["status"] in ("scan_complete", "search_complete")
-            and s.get("variant_library_hash") == existing.get("variant_library_hash", "")
-            and s.get("n_axis_profiles", 0) > 0
-        ]
-        if siblings:
-            current_n_diag = plan.get("config", {}).get("n_diagnostic", 6)
-            siblings.sort(
-                key=lambda s: (
-                    s.get("n_diagnostic") != current_n_diag,
-                    s["status"] != "scan_complete",
-                )
-            )
-            sib_data = store.smart_search.load(backend_id, siblings[0]["plan_id"])
-            assert sib_data is not None
-            sib_plan = deserialize_smart_search_plan(sib_data)
-            sib_profiles = (sib_plan.get("scan_results") or {}).get("axis_profiles", [])
+        elif match.kind == "sibling":
+            profiles = scan_results.get("axis_profiles", [])
             logger.info(
                 "Adopting scan data from sibling plan %s (%d profiles)",
-                siblings[0]["plan_id"],
-                len(sib_profiles),
+                plan["plan_id"],
+                len(profiles),
             )
-            return DiagnosticResult(
-                plan_id=plan_id,
-                search_baseline=sib_plan["search_baseline_ps"],
-                diagnostic=sib_plan["diagnostic"],
-                summary=sib_plan["diag_summary"],
-                axis_profiles=sib_profiles,
-            )
-
-        logger.info("Plan %s (status: %s), reusing saved diagnostic", plan_id, status)
+        else:  # diagnostic_only
+            profiles = []
+            logger.info("Plan %s (status: %s), reusing saved diagnostic", plan_id, plan["status"])
         return DiagnosticResult(
             plan_id=plan_id,
             search_baseline=plan["search_baseline_ps"],
             diagnostic=plan["diagnostic"],
             summary=plan["diag_summary"],
-            axis_profiles=[],
+            axis_profiles=profiles,
         )
 
-    # Build new plan: LLM restructure + diagnostic set
+    # No reusable plan — build from scratch.
     logger.info("Building new smart search plan: %s", plan_id)
     layer1_fields = await decompose_prompt_fields(
         baseline.instruction,
@@ -319,17 +256,12 @@ async def resume_or_build_diagnostic(
         **{k: v for k, v in layer1_fields.items() if v},
         changes_description="search_baseline (decomposed)",
     )
-
     diagnostic, diag_summary = build_diagnostic_set(
         dataset,
         baseline_results,
         n_queries=ss.get("n_diagnostic", 6),
     )
-
-    # Compute a short hash of the full variant library for traceability
-    vl_json = _json.dumps(variant_library, sort_keys=True)
-    vl_hash = _hashlib.sha256(vl_json.encode()).hexdigest()[:12]
-
+    vl_hash = hashlib.sha256(json.dumps(variant_library, sort_keys=True).encode()).hexdigest()[:12]
     config = {
         "n_diagnostic": ss.get("n_diagnostic", 6),
         "max_rounds": ss.get("max_rounds", 3),
