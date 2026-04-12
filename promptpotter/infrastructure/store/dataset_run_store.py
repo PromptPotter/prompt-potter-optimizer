@@ -14,6 +14,7 @@ Prompt alias groups are used by ``scan_baseline.py`` and
 ``optimization_loop.py`` for SearchMemory historical linking.
 """
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from promptpotter.shared.constants import (
     DEFAULT_CONNECTOR_TYPE,
     LOCK_TIMEOUT,
 )
+from promptpotter.shared.hashing import HASH_TRUNCATE
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +230,26 @@ class DatasetRunStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         write_json(path, data)
         self._alias_cache.pop(backend_id, None)
+
+    def register_prompt_alias(
+        self,
+        backend_id: str,
+        raw_text: str,
+        canonical_text: str,
+    ) -> None:
+        """Alias a raw prompt string to its restructured/canonical form.
+
+        Hashes both sides and calls :meth:`register_alias`.  No-ops when
+        either side is empty or both hash to the same value.
+        """
+        if not (raw_text and canonical_text):
+            return
+        raw_hash = hashlib.sha256(raw_text.encode()).hexdigest()[:HASH_TRUNCATE]
+        canonical_hash = hashlib.sha256(canonical_text.encode()).hexdigest()[:HASH_TRUNCATE]
+        if raw_hash == canonical_hash:
+            return
+        self.register_alias(backend_id, raw_hash, canonical_hash)
+        logger.info("Registered prompt alias: %s ↔ %s", raw_hash[:8], canonical_hash[:8])
 
     def resolve_aliases(self, backend_id: str, rp_hash: str) -> set[str]:
         """Return all hashes equivalent to *rp_hash* (including itself)."""

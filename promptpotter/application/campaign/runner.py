@@ -20,11 +20,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.campaign.campaign_setup import SessionEnv
 from promptpotter.application.campaign.config import LoopConfig
 from promptpotter.application.campaign.data import extract_campaign_baseline
-from promptpotter.application.campaign.lifecycle import (
-    build_persistence_emitter,
-    finalize_campaign,
-    init_cycle_state,
-)
+from promptpotter.application.campaign.lifecycle import finalize_campaign, init_cycle_state
 from promptpotter.application.optimization.nodes.escalation import escalate_l2
 from promptpotter.application.optimization.nodes.round_execution import (
     PauseForReviewError,
@@ -33,6 +29,7 @@ from promptpotter.application.optimization.nodes.round_execution import (
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
 from promptpotter.infrastructure.persistence.state import (
     CampaignPhase,
     LoopState,
@@ -543,7 +540,7 @@ async def _run_optimization_core(
         session,
         started_at,
     )
-    _emitter = build_persistence_emitter(config, baseline_accuracy, state.cycle_id)
+    _emitter = CampaignPersistenceEmitter.for_session(config, baseline_accuracy, state.cycle_id)
 
     # Chain persistence callbacks (fires first) with caller display callbacks
     if _emitter:

@@ -21,7 +21,9 @@ from promptpotter.domain.search_point import JobSearchPoint
 if TYPE_CHECKING:
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
     from promptpotter.domain.analysis import FailureAnalysis
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import ScoringEnv
+    from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
@@ -294,6 +296,57 @@ class LoopState:
     # Checkpoint schema version — incremented when LoopState/OptSearchPoint
     # fields change, so resume can detect stale checkpoints.
     state_version: int = 1
+
+    # -- Construction / restore --------------------------------------------
+
+    @classmethod
+    def from_baseline(
+        cls,
+        baseline_osp: OptSearchPoint,
+        baseline_accuracy: float,
+        baseline_composite: float,
+        *,
+        task_context: TaskDecomposition,
+        schema: PipelineSchema | None,
+        baseline_results: list[dict] | None = None,
+    ) -> LoopState:
+        """Construct a fresh LoopState from an evaluated baseline searchpoint.
+
+        Caller owns composite-score computation (it requires a pipeline-schema
+        context that this module deliberately doesn't depend on).
+        """
+        opt_sp = baseline_osp.model_copy(
+            update={
+                "task_context": task_context,
+                "optimizer_params": dict(baseline_osp.optimizer_params),
+            }
+        )
+        baseline_sp = opt_sp.to_job_search_point(
+            base_pipeline_params=schema.to_pipeline_params() if schema else None,
+            schema=schema,
+        )
+        return cls(
+            current_sp=baseline_sp,
+            current_accuracy=baseline_accuracy,
+            current_composite=baseline_composite,
+            current_results=baseline_results or [],
+            best_accuracy=baseline_accuracy,
+            best_composite=baseline_composite,
+            best_sp=baseline_sp,
+            opt_sp=opt_sp,
+        )
+
+    def restore_from_trial(self, trial: dict[str, Any]) -> None:
+        """Restore optimizer state from a campaign checkpoint dict (in-place).
+
+        Mutates ``opt_sp``, ``escalation``, and ``stall_count`` from the
+        latest trial written by the optimizer.  Any schema mismatch
+        surfaces as a hard error — we deliberately don't filter unknown
+        fields here because that would hide drift.
+        """
+        self.opt_sp = OptSearchPoint(**trial["opt_search_point"])
+        self.escalation = EscalationCounters.from_checkpoint_dict(trial)
+        self.stall_count = trial["stall_count"]
 
     # -- State transition methods ------------------------------------------
 

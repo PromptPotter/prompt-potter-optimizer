@@ -129,6 +129,47 @@ class ScoringEnv:
     # Per-dataset scoring formula (compiled callable from shared/scoring.py)
     scorer: Scorer | None = None
 
+    @classmethod
+    def for_loop(
+        cls,
+        backend_client: QueryRunner,
+        store: ProjectStore | None,
+        backend_id: str,
+        pipeline_schema: PipelineSchema | None,
+        obs: ObsLogger | None,
+        experiment_id: str,
+        cycle_id: str | None,
+        *,
+        max_consecutive_errors: int,
+        stale_data_load_protocol: list[str] | None,
+        stale_data_observations: dict[str, int | dict] | None,
+        scoring_formula: str | None,
+    ) -> ScoringEnv:
+        """Build a ScoringEnv for an optimization-loop run.
+
+        Owns the derived ``experiment_id`` fallback (short cycle-id prefix
+        when not explicitly set) and the scoring-formula compilation so the
+        caller just hands over raw config.
+        """
+        from promptpotter.shared.scoring import compile_scorer
+
+        derived_experiment_id = experiment_id or (
+            cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
+        )
+        return cls(
+            backend_client=backend_client,
+            store=store,
+            backend_id=backend_id,
+            pipeline_schema=pipeline_schema,
+            obs=obs,
+            source="optimization_loop",
+            experiment_id=derived_experiment_id,
+            max_consecutive_errors=max_consecutive_errors,
+            stale_data_load_protocol=stale_data_load_protocol,
+            stale_data_observations=stale_data_observations,
+            scorer=compile_scorer(scoring_formula),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Ground truth comparison

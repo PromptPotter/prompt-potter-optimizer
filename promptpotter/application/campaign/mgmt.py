@@ -191,7 +191,7 @@ def resolve_active_campaign_id(
     notebook/CLI configuration.
     """
     from promptpotter.application.campaign.config import LoopConfig
-    from promptpotter.application.campaign.lifecycle import cycle_config_identity
+    from promptpotter.domain.cycle_identity import cycle_config_identity
     from promptpotter.domain.opt_search_point import OptSearchPoint
 
     try:

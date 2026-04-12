@@ -17,6 +17,7 @@ layer — see CLAUDE.md § Three-layer I/O architecture.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
@@ -50,6 +51,41 @@ class CampaignPersistenceEmitter:
     See ``docs/architecture/overview.md § Persistence Architecture`` for the
     full two-tier layout and resume flow.
     """
+
+    @classmethod
+    def for_session(
+        cls,
+        config: LoopConfig,
+        baseline_accuracy: float,
+        cycle_id: str | None,
+    ) -> CampaignPersistenceEmitter | None:
+        """Build the emitter for an optimization-loop session, or ``None``.
+
+        Returns ``None`` when ``project_root``/``backend_id``/``session_id``
+        are missing — those three fields are the ingredients for a session
+        directory.
+
+        UI counter continuity on resume is cosmetic: we read the prior
+        ``campaign_state.json`` off disk (if it exists) and hand the dict
+        to ``__init__``'s ``resume_from`` parameter after overriding the
+        baseline to the current value.  Optimizer resume is a separate
+        concern that flows through ``LoopState.restore_from_trial()``.
+        """
+        if not (config.project_root and config.backend_id and config.session_id):
+            return None
+
+        session_dir = Path(config.project_root) / config.backend_id / "sessions" / config.session_id
+
+        resume_from: dict[str, Any] | None = None
+        prior_state = session_dir / "campaign_state.json"
+        if prior_state.exists():
+            try:
+                resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
+                resume_from["baseline"] = baseline_accuracy
+            except (json.JSONDecodeError, OSError):
+                resume_from = None
+
+        return cls(session_dir, config, resume_from=resume_from, cycle_id=cycle_id)
 
     def __init__(
         self,

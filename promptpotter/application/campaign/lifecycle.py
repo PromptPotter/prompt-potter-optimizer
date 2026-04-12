@@ -1,23 +1,18 @@
-"""Campaign lifecycle — identity hashing, initialization, resume, finalization.
+"""Campaign lifecycle — initialization, resume, finalization.
 
-Combines cycle configuration identity (``TUNING_KEYS``,
-``cycle_config_identity``), campaign create/resume (``init_campaign``),
-cycle state initialization (``init_cycle_state``), and campaign
-finalization (``finalize_campaign``) into a single module.
+Campaign create/resume (``init_campaign``), cycle state initialization
+(``init_cycle_state``), and campaign finalization (``finalize_campaign``).
+Cycle-identity hashing lives in :mod:`promptpotter.domain.cycle_identity`.
 """
 
 from __future__ import annotations
 
 __all__ = [
-    "TUNING_KEYS",
-    "build_persistence_emitter",
-    "cycle_config_identity",
     "finalize_campaign",
     "init_campaign",
     "init_cycle_state",
 ]
 
-import hashlib
 import json
 import logging
 from collections.abc import Callable
@@ -30,221 +25,59 @@ from promptpotter.application.datasets.builder import sample_dataset
 from promptpotter.application.optimization.nodes.critique import sample_thinking_styles
 from promptpotter.application.scoring.metrics import compute_composite_score
 from promptpotter.application.search.search_memory import SearchMemory
+from promptpotter.domain.cycle_identity import TUNING_KEYS, cycle_config_identity
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.persistence.state import (
     CampaignPhase,
-    EscalationCounters,
     LoopState,
     PhaseEvent,
     emit_phase,
 )
 from promptpotter.shared.constants import DATASET_NAME
 from promptpotter.shared.errors import graceful
-from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.backend.client import BackendClient
-    from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
     from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 
 
-def _build_baseline_state(
+def _parse_and_build_baseline(
     config: LoopConfig,
     baseline_prompt_fields: dict | None,
     baseline_accuracy: float,
     baseline_results: list | None,
 ) -> tuple[LoopState, OptSearchPoint]:
-    """Construct LoopState from baseline config and prompt fields.
-
-    Returns:
-        (state, baseline_osp) — the initial loop state and the parsed
-        baseline OptSearchPoint (needed by caller for resume/alias logic).
-    """
+    """Parse prompt fields, compute composite, delegate to ``LoopState.from_baseline``."""
     if baseline_prompt_fields is None:
         raise ValueError(
             "baseline_prompt_fields is required. Run baseline evaluation in the "
             "notebook before starting the feedback cycle.",
         )
-    baseline_osp = (
-        OptSearchPoint.from_prompt_fields(baseline_prompt_fields)
-        if isinstance(baseline_prompt_fields, dict)
-        else baseline_prompt_fields
-    )
-    current_results: list = baseline_results or []
+    baseline_osp = OptSearchPoint.from_prompt_fields(baseline_prompt_fields)
     logger.debug("Using provided baseline (acc=%.3f)", baseline_accuracy)
 
-    if current_results:
+    if baseline_results:
         assert config.pipeline_schema is not None, "pipeline_schema required for composite score"
-        _bl_composite = compute_composite_score(
-            current_results,
+        baseline_composite = compute_composite_score(
+            baseline_results,
             config.pipeline_schema,
         )["composite"]
     else:
-        _bl_composite = baseline_accuracy
+        baseline_composite = baseline_accuracy
 
-    opt_sp = OptSearchPoint(
+    state = LoopState.from_baseline(
+        baseline_osp,
+        baseline_accuracy,
+        baseline_composite,
         task_context=config.task_context or TaskDecomposition(),
-        persona=baseline_osp.persona,
-        task_intent=baseline_osp.task_intent,
-        problem_description=baseline_osp.problem_description,
-        instruction=baseline_osp.instruction,
-        thinking_style=baseline_osp.thinking_style,
-        answer_format=baseline_osp.answer_format,
-        plan=baseline_osp.plan,
-        optimizer_params=dict(baseline_osp.optimizer_params),
-    )
-    schema = config.pipeline_schema
-    baseline_sp = opt_sp.to_job_search_point(
-        base_pipeline_params=schema.to_pipeline_params() if schema else None,
-        schema=schema,
-    )
-    state = LoopState(
-        current_sp=baseline_sp,
-        current_accuracy=baseline_accuracy,
-        current_composite=_bl_composite,
-        current_results=current_results,
-        best_accuracy=baseline_accuracy,
-        best_composite=_bl_composite,
-        best_sp=baseline_sp,
-        opt_sp=opt_sp,
+        schema=config.pipeline_schema,
+        baseline_results=baseline_results,
     )
     return state, baseline_osp
-
-
-def _restore_from_checkpoint(
-    state: LoopState,
-    config: LoopConfig,
-    campaign_store: CampaignStore,
-    cycle_id: str,
-    resumed_from_round: int,
-) -> None:
-    """Restore optimizer state from a campaign checkpoint (in-place).
-
-    Only called when ``resumed_from_round > 0``.
-    """
-    _latest_trial = campaign_store.load_trial(
-        config.backend_id,
-        cycle_id,
-        resumed_from_round - 1,
-    )
-    if _latest_trial:
-        _osp = _latest_trial["opt_search_point"]
-        known = {k: v for k, v in _osp.items() if k in OptSearchPoint.model_fields}
-        missing = set(OptSearchPoint.model_fields) - set(_osp)
-        if missing:
-            logger.debug(
-                "Checkpoint missing %d OptSearchPoint field(s): %s "
-                "(using defaults — checkpoint predates schema change)",
-                len(missing),
-                ", ".join(sorted(missing)),
-            )
-        state.opt_sp = OptSearchPoint(**known)
-        state.escalation = EscalationCounters.from_checkpoint_dict(_latest_trial)
-        state.stall_count = _latest_trial["stall_count"]
-        logger.debug(
-            "Restored optimizer state from round %d "
-            "(critique=%d chars, task_context=%d keys, "
-            "escalation_journal=%d entries, l2_round=%d)",
-            resumed_from_round - 1,
-            len(state.opt_sp.critique_text),
-            len(state.opt_sp.task_context),
-            len(state.opt_sp.escalation_journal),
-            state.escalation.l2_round,
-        )
-
-
-def _wire_scoring_env(
-    state: LoopState,
-    config: LoopConfig,
-    backend_client: BackendClient,
-    obs: Any,
-    experiment_id: str,
-    cycle_id: str | None,
-    session: SessionEnv,
-) -> None:
-    """Construct ScoringEnv and attach it to ``state.scoring_ctx``."""
-    from promptpotter.shared.scoring import compile_scorer
-
-    state.scoring_ctx = ScoringEnv(
-        backend_client=backend_client,
-        store=session.store,
-        backend_id=config.backend_id,
-        pipeline_schema=config.pipeline_schema,
-        obs=obs,
-        source="optimization_loop",
-        experiment_id=experiment_id or (cycle_id.replace("cycle_", "")[:12] if cycle_id else ""),
-        max_consecutive_errors=config.max_consecutive_errors,
-        stale_data_load_protocol=config.stale_data_load_protocol,
-        stale_data_observations=state.opt_sp.stale_data_observations,
-        scorer=compile_scorer(config.scoring_formula),
-    )
-
-
-def _register_baseline_alias(
-    store: Any,
-    backend_id: str,
-    instruction: str,
-    baseline_osp: OptSearchPoint,
-) -> None:
-    """Link the raw instruction hash to the restructured baseline hash.
-
-    Lets historical ``dataset_runs`` results written under the raw prompt
-    hash be discovered via the restructured form and vice versa.
-    """
-    if not (store and backend_id and instruction):
-        return
-    raw_hash = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
-    restructured_hash = hashlib.sha256(baseline_osp.render().encode()).hexdigest()[:HASH_TRUNCATE]
-    if raw_hash == restructured_hash:
-        return
-    store.dataset_runs.register_alias(backend_id, raw_hash, restructured_hash)
-    logger.info("Registered prompt alias: %s ↔ %s", raw_hash[:8], restructured_hash[:8])
-
-
-def build_persistence_emitter(
-    config: LoopConfig,
-    baseline_accuracy: float,
-    cycle_id: str | None,
-) -> CampaignPersistenceEmitter | None:
-    """Build the session-directory persistence emitter, if configured.
-
-    Returns ``None`` when any of ``project_root``/``backend_id``/``session_id``
-    is missing — those are the three ingredients for a session directory.
-
-    UI counter continuity on resume is cosmetic: we hand the prior
-    ``campaign_state.json`` dict to the emitter verbatim so it can pluck out
-    the counters it cares about. Optimizer resume lives in ``trial_NNNN.json``
-    and flows through ``_restore_from_checkpoint`` — not this path.
-    """
-    if not (config.project_root and config.backend_id and config.session_id):
-        return None
-
-    from promptpotter.infrastructure.persistence.session_emitter import (
-        CampaignPersistenceEmitter,
-    )
-
-    session_dir = Path(config.project_root) / config.backend_id / "sessions" / config.session_id
-
-    resume_from: dict[str, Any] | None = None
-    prior_state = session_dir / "campaign_state.json"
-    if prior_state.exists():
-        try:
-            resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
-            resume_from["baseline"] = baseline_accuracy
-        except (json.JSONDecodeError, OSError):
-            resume_from = None
-
-    return CampaignPersistenceEmitter(
-        session_dir,
-        config,
-        resume_from=resume_from,
-        cycle_id=cycle_id,
-    )
 
 
 async def init_cycle_state(
@@ -304,7 +137,7 @@ async def init_cycle_state(
     scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest, config.seed)
 
     # 1. Build baseline state
-    state, baseline_osp = _build_baseline_state(
+    state, baseline_osp = _parse_and_build_baseline(
         config,
         baseline_prompt_fields,
         baseline_accuracy,
@@ -323,36 +156,39 @@ async def init_cycle_state(
         langfuse_session_id=langfuse_session_id,
     )
     if resumed_from_round > 0 and campaign_store and cycle_id:
-        _restore_from_checkpoint(
-            state,
-            config,
-            campaign_store,
-            cycle_id,
-            resumed_from_round,
-        )
+        trial = campaign_store.load_trial(config.backend_id, cycle_id, resumed_from_round - 1)
+        if trial:
+            state.restore_from_trial(trial)
     else:
         # thinking_styles is part of OptSearchPoint.MEMORY_FIELDS — only sample
         # on fresh init, otherwise _restore_from_checkpoint's restored value wins.
         state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
     # 3. Eval context + escalation checks + baseline alias
-    _wire_scoring_env(state, config, _bc, obs, experiment_id, cycle_id, session)
-    _register_baseline_alias(session.store, config.backend_id, instruction, baseline_osp)
+    state.scoring_ctx = ScoringEnv.for_loop(
+        _bc,
+        session.store,
+        config.backend_id,
+        config.pipeline_schema,
+        obs,
+        experiment_id,
+        cycle_id,
+        max_consecutive_errors=config.max_consecutive_errors,
+        stale_data_load_protocol=config.stale_data_load_protocol,
+        stale_data_observations=state.opt_sp.stale_data_observations,
+        scoring_formula=config.scoring_formula,
+    )
+    if session.store:
+        session.store.dataset_runs.register_prompt_alias(
+            config.backend_id, instruction, baseline_osp.render()
+        )
 
     from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
 
     degradation_checks = build_degradation_checks(config)
 
     # 4. SearchMemory — load + refresh from historical data
-    search_memory: SearchMemory | None = None
-    _store = state.scoring_ctx.store if state.scoring_ctx else None
-    if _store and config.backend_id:
-        _sm_path = Path(_store.base_dir) / config.backend_id / "search_memory.json"
-        search_memory = SearchMemory.load(_sm_path)
-        if search_memory.refresh(_store, config.backend_id):
-            search_memory.save(_sm_path)
-
-    # Wire SearchMemory onto state (single wiring point)
+    search_memory = SearchMemory.ensure_for(session.store, config.backend_id)
     state.search_memory = search_memory
     if state.scoring_ctx and search_memory:
         state.scoring_ctx.search_memory = search_memory
@@ -389,95 +225,6 @@ async def init_cycle_state(
     state.resumed_from_round = resumed_from_round
 
     return state
-
-
-# ---------------------------------------------------------------------------
-# Cycle identity — determines whether two runs share cached candidates
-# ---------------------------------------------------------------------------
-
-# Tuning keys — excluded from cycle identity in experiment mode.
-#
-# These control *how* the optimizer runs, not *what problem* it solves.
-# In experiment mode (default), changing any of these between runs does NOT
-# create a new cycle — cached candidates and dataset_run results carry over.
-#
-# In strict mode (for publication), all params are included in the hash so
-# any deviation creates a distinct experiment for reproducibility.
-#
-# Also used by resume logic to hot-update stored configs on existing cycles.
-TUNING_KEYS = frozenset(
-    {
-        # Loop control — how long/aggressively the loop runs
-        "max_rounds",
-        "l1_patience",
-        "l2_patience",
-        "l3_patience",
-        "degradation_threshold",
-        # Optimization strategy — tweakable between runs
-        "model",
-        "n_variants",
-        "creativity",
-        "improvement_threshold",
-        "sp_budget_ttest",
-        "seed",
-    }
-)
-
-
-def cycle_config_identity(
-    config: LoopConfig,
-    baseline_rendered: str,
-    dataset: list[dict],
-    *,
-    strict: bool = False,
-) -> str:
-    """Compute a stable identity hash for a feedback cycle configuration.
-
-    Two-tier system:
-
-    **Experiment mode** (``strict=False``, default):
-        Cycle identity is based only on what defines the *problem*:
-        active pipeline steps, baseline prompt, and dataset.  Everything
-        else — optimizer model, seed, n_variants, creativity, patience,
-        thresholds — is excluded (see ``TUNING_KEYS``).  This means you
-        can freely tweak optimization strategy, switch between ``--round``
-        and full loop, change the optimizer model, or interrupt and resume
-        without creating a new cycle.  Cached candidates and dataset_run
-        results carry over across invocations.
-
-    **Strict mode** (``strict=True``):
-        Every parameter is included in the identity hash.  Changing
-        anything — even ``max_rounds`` — creates a new cycle with fresh
-        candidates.  Use this only for publication experiments where exact
-        reproducibility is required — the same config must always produce the
-        same cycle, and any deviation must be flagged as a distinct experiment.
-        Enable via ``"strict_cycle_identity": true`` in campaign.json.
-
-    Infrastructure fields (backend_url, project_root, etc.) are always
-    excluded in both modes.
-    """
-    payload_dict: dict[str, Any] = {
-        "max_rounds": config.max_rounds,
-        "l1_patience": config.l1_patience,
-        "n_variants": config.n_variants,
-        "creativity": config.creativity,
-        "improvement_threshold": config.improvement_threshold,
-        "model": config.model,
-        "sp_budget_ttest": config.sp_budget_ttest,
-        "seed": config.seed,
-        "l2_patience": config.l2_patience,
-        "l3_patience": config.l3_patience,
-        "degradation_threshold": config.degradation_threshold,
-        "active_steps": list(config.pipeline_schema.active_steps) if config.pipeline_schema else [],
-        "baseline_rendered": baseline_rendered,
-        "dataset_pairs": sorted((d.get("query", ""), d.get("ground_truth", "")) for d in dataset),
-    }
-    if not strict:
-        for k in TUNING_KEYS:
-            payload_dict.pop(k, None)
-    payload = json.dumps(payload_dict, sort_keys=True)
-    digest = hashlib.sha256(payload.encode()).hexdigest()[:12]
-    return f"cycle_{digest}"
 
 
 # ---------------------------------------------------------------------------

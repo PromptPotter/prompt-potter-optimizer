@@ -507,6 +507,26 @@ class SearchMemory:
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @classmethod
+    def ensure_for(
+        cls,
+        store: ProjectStore | None,
+        backend_id: str,
+    ) -> SearchMemory | None:
+        """Load, refresh from historical data, and persist if changed.
+
+        Returns ``None`` when ``store`` or ``backend_id`` is missing —
+        SearchMemory requires both to exist.  Callers wire the result onto
+        ``LoopState.search_memory`` and ``ScoringEnv.search_memory``.
+        """
+        if not (store and backend_id):
+            return None
+        path = Path(store.base_dir) / backend_id / "search_memory.json"
+        mem = cls.load(path)
+        if mem.refresh(store, backend_id):
+            mem.save(path)
+        return mem
+
+    @classmethod
     def load(cls, path: Path) -> SearchMemory:
         """Load from disk, or return empty instance if file doesn't exist."""
         mem = cls()
