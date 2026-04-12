@@ -21,7 +21,25 @@ logger = logging.getLogger(__name__)
 
 CONTROL_FILENAME = "campaign_control.json"
 
-__all__ = ["CONTROL_FILENAME", "CampaignControlReader"]
+__all__ = ["CONTROL_FILENAME", "CampaignControlReader", "ensure_control_file"]
+
+
+def ensure_control_file(session_dir: Path, *, pause_before_scoring: bool) -> None:
+    """Seed ``campaign_control.json`` with defaults if it doesn't exist.
+
+    A lingering pause from a previous session survives ``init`` — the file
+    is only written when missing, never overwritten.
+    """
+    path = session_dir / CONTROL_FILENAME
+    if path.exists():
+        return
+    write_json(
+        path,
+        {
+            "requested_state": "running",
+            "pause_before_l2_scoring": pause_before_scoring,
+        },
+    )
 
 
 class CampaignControlReader:

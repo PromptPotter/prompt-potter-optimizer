@@ -1,39 +1,32 @@
 """Campaign session emitter — writes the live dashboard + audit log.
 
-``CampaignPersistenceEmitter`` owns two session artifacts:
-
-- ``campaign_state.json`` — the live UI dashboard, atomically rewritten on
-  every phase / sample / candidate / round event.  Consumed by
-  ``show-status``, the webapp, and the parity test.
-- ``campaign_output.log`` — append-only query-by-query audit trail.
-
-It also seeds ``campaign_control.json`` (the HITL control surface) with
-defaults on init, but never touches it afterwards — see ``control.py``.
-
-Auto-created by ``run_optimization()`` so every entry point (notebook, CLI,
-web app) produces identical persistent artifacts.  Display is a separate
-layer — see CLAUDE.md § Three-layer I/O architecture.
+Owns the per-session artifacts in ``CAMPAIGN_SESSION_ARTIFACTS`` (see
+``docs/architecture/overview.md § Persistence Architecture`` for the
+canonical file-role table and M9 Track 4 future direction).  Instantiated
+by ``run_optimization()`` so every entry point produces identical artifacts.
 """
 
 from __future__ import annotations
 
 import json
-import logging
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, TypedDict, cast
+from typing import IO, TYPE_CHECKING, Any
 
-from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
+from promptpotter.infrastructure.persistence.control import ensure_control_file
 from promptpotter.infrastructure.persistence.state import CampaignPhase
 from promptpotter.infrastructure.store.base import write_json
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import LoopConfig
-    from promptpotter.infrastructure.persistence.state import PhaseEvent, RoundResult
+    from promptpotter.infrastructure.persistence.state import (
+        PhaseEvent,
+        RoundResult,
+        RunCallbacks,
+    )
 
-logger = logging.getLogger(__name__)
-
-__all__ = ["CAMPAIGN_SESSION_ARTIFACTS", "CampaignPersistenceEmitter", "CampaignStateSchema"]
+__all__ = ["CAMPAIGN_SESSION_ARTIFACTS", "CampaignPersistenceEmitter"]
 
 
 CAMPAIGN_SESSION_ARTIFACTS = {
@@ -45,65 +38,117 @@ CAMPAIGN_SESSION_ARTIFACTS = {
 }
 
 
-class CampaignStateSchema(TypedDict):
-    """On-disk shape of ``campaign_state.json`` — scalar-only, emitter-owned."""
+def _make_initial_state(
+    config: LoopConfig,
+    resume_from: dict[str, Any] | None,
+    cycle_id: str | None,
+    patience_max: int,
+) -> dict[str, Any]:
+    """Build the scalar-only dashboard dict. Resume keys carry across cycles."""
+    r = resume_from or {}
+    return {
+        # Execution
+        "workflow": "optimize",
+        "phase": "init",
+        "round": 0,
+        "max_rounds": config.max_rounds or 999,
+        "candidate": "",
+        "query": "",
+        "patience": f"0/{patience_max}",
+        "layer": "L1",
+        "baseline": r.get("baseline", 0.0),
+        "best": r.get("best", 0.0),
+        "current_acc": 0.0,
+        "cycle_id": cycle_id,
+        "stop_reason": None,
+        "pause_point": None,
+        # Timing
+        "elapsed_s": 0.0,
+        "round_elapsed_s": 0.0,
+        "avg_query_time_s": 0.0,
+        "eta_s": 0.0,
+        # Pipeline
+        "active_nodes": list(config.pipeline_schema.active_steps) if config.pipeline_schema else [],
+        "excluded_nodes": [],
+        "terminated_at": None,
+        "cache_hit_rate": 0.0,
+        # Quality
+        "hit_rate": 0.0,
+        "degraded_count": 0,
+        "error_count": 0,
+        "best_round": r.get("best_round", 0),
+        "improvement_streak": 0,
+        # Historical (carried across resumes for display continuity)
+        "rounds_completed": r.get("rounds_completed", 0),
+        "total_queries_scored": r.get("total_queries_scored", 0),
+        "total_backend_calls": r.get("total_backend_calls", 0),
+        # Config
+        "model": config.model or "",
+        "n_variants": config.n_variants,
+        "sp_budget_ttest": config.sp_budget_ttest,
+    }
 
-    # Execution
-    workflow: str
-    phase: str
-    round: int
-    max_rounds: int
-    candidate: str
-    query: str
-    patience: str
-    layer: str
-    baseline: float
-    best: float
-    current_acc: float
-    cycle_id: str | None
-    stop_reason: str | None
-    pause_point: str | None
-    # Timing
-    elapsed_s: float
-    round_elapsed_s: float
-    avg_query_time_s: float
-    eta_s: float
-    # Pipeline
-    active_nodes: list[str]
-    excluded_nodes: list[str]
-    terminated_at: str | None
-    cache_hit_rate: float
-    # Quality
-    hit_rate: float
-    degraded_count: int
-    error_count: int
-    best_round: int
-    improvement_streak: int
-    # Historical
-    rounds_completed: int
-    total_queries_scored: int
-    total_backend_calls: int
-    # Config
-    model: str
-    n_variants: int
-    sp_budget_ttest: int
+
+@dataclass
+class _RoundCounters:
+    """Round-scoped counters — reset on each L1_GENERATE enter event."""
+
+    query_times: list[float] = field(default_factory=list)
+    cache_hits: int = 0
+    queries: int = 0
+    degraded: int = 0
+    candidate_hits: int = 0
+
+    def reset(self) -> None:
+        self.query_times.clear()
+        self.cache_hits = 0
+        self.queries = 0
+        self.degraded = 0
+        self.candidate_hits = 0
 
 
 class CampaignPersistenceEmitter:
-    """Writes ``campaign_state.json`` + ``campaign_output.log`` during optimization.
+    """Writes session dashboard + audit log. Not an optimizer checkpoint —
+    resume uses ``campaigns/{cycle_id}/trial_NNNN.json``; counters here are
+    display continuity only."""
 
-    Instantiated by the optimization loop — entry points never create this
-    directly.  All persistent campaign dashboard artifacts flow through here.
+    def __init__(
+        self,
+        session_dir: Path,
+        config: LoopConfig,
+        *,
+        resume_from: dict[str, Any] | None = None,
+        cycle_id: str | None = None,
+    ) -> None:
+        self.state_path = session_dir / "campaign_state.json"
+        self.log_path = session_dir / "campaign_output.log"
+        self.log_md_path = session_dir / "campaign_log.md"
 
-    **Not an optimizer checkpoint.**  Optimizer resume uses trial files in
-    the campaign store (``campaigns/{cycle_id}/trial_NNNN.json``) via
-    ``_restore_from_checkpoint()`` in ``cycle_init.py``.  The counters here
-    (``rounds_completed``, ``best``, etc.) are for display continuity only —
-    see ``load_resume_state()``.
+        self._patience_max: int = config.l1_patience
+        self._state: dict[str, Any] = _make_initial_state(
+            config, resume_from, cycle_id, self._patience_max
+        )
+        self._workflow_start = time.monotonic()
+        self._round_start = time.monotonic()
+        self._rc = _RoundCounters()
 
-    See ``docs/architecture/overview.md § Persistence Architecture`` for the
-    full two-tier layout and resume flow.
-    """
+        write_json(self.state_path, self._state, default=str)
+        ensure_control_file(session_dir, pause_before_scoring=config.pause_before_scoring)
+
+        # Append-only log — hold one handle for the emitter's lifetime so
+        # 100+ writes/round don't each open() the file.  Closed in ``finalize``.
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._log_fh: IO[str] = open(  # noqa: SIM115
+            self.log_path, "a", encoding="utf-8", buffering=1
+        )
+        if resume_from:
+            r = resume_from
+            self._log_fh.write(
+                f"\n{'=' * 70}\n"
+                f"  RESUMED — prior: {r.get('rounds_completed', 0)} rounds, "
+                f"best={r.get('best', 0):.1%}\n"
+                f"{'=' * 70}\n\n"
+            )
 
     @classmethod
     def for_session(
@@ -112,17 +157,11 @@ class CampaignPersistenceEmitter:
         baseline_accuracy: float,
         cycle_id: str | None,
     ) -> CampaignPersistenceEmitter | None:
-        """Build the emitter for an optimization-loop session, or ``None``.
+        """Construct the emitter for a run, or ``None`` if session_dir is unknown.
 
-        Returns ``None`` when ``project_root``/``backend_id``/``session_id``
-        are missing — those three fields are the ingredients for a session
-        directory.
-
-        UI counter continuity on resume is cosmetic: we read the prior
-        ``campaign_state.json`` off disk (if it exists) and hand the dict
-        to ``__init__``'s ``resume_from`` parameter after overriding the
-        baseline to the current value.  Optimizer resume is a separate
-        concern that flows through ``LoopState.restore_from_trial()``.
+        Reads the prior ``campaign_state.json`` (if present) to carry UI
+        counters across resumes — optimizer resume is a separate concern
+        via ``LoopState.restore_from_trial``.
         """
         if not (config.project_root and config.backend_id and config.session_id):
             return None
@@ -140,101 +179,16 @@ class CampaignPersistenceEmitter:
 
         return cls(session_dir, config, resume_from=resume_from, cycle_id=cycle_id)
 
-    def __init__(
-        self,
-        session_dir: Path,
-        config: LoopConfig,
-        *,
-        resume_from: dict[str, Any] | None = None,
-        cycle_id: str | None = None,
-    ) -> None:
-        self.state_path = session_dir / "campaign_state.json"
-        self.control_path = session_dir / CONTROL_FILENAME
-        self.log_path = session_dir / "campaign_output.log"
-        self.log_md_path = session_dir / "campaign_log.md"
+    def as_callbacks(self) -> RunCallbacks:
+        """Return a ``RunCallbacks`` with this emitter's 4 dispatch methods wired."""
+        from promptpotter.infrastructure.persistence.state import RunCallbacks
 
-        self._patience_max: int = config.l1_patience
-
-        r = resume_from or {}
-
-        self._state: CampaignStateSchema = {
-            # Execution
-            "workflow": "optimize",
-            "phase": "init",
-            "round": 0,
-            "max_rounds": config.max_rounds or 999,
-            "candidate": "",
-            "query": "",
-            "patience": f"0/{self._patience_max}",
-            "layer": "L1",
-            "baseline": r.get("baseline", 0.0),
-            "best": r.get("best", 0.0),
-            "current_acc": 0.0,
-            "cycle_id": cycle_id,
-            "stop_reason": None,
-            "pause_point": None,
-            # Timing
-            "elapsed_s": 0.0,
-            "round_elapsed_s": 0.0,
-            "avg_query_time_s": 0.0,
-            "eta_s": 0.0,
-            # Pipeline
-            "active_nodes": list(config.pipeline_schema.active_steps)
-            if config.pipeline_schema
-            else [],
-            "excluded_nodes": [],
-            "terminated_at": None,
-            "cache_hit_rate": 0.0,
-            # Quality
-            "hit_rate": 0.0,
-            "degraded_count": 0,
-            "error_count": 0,
-            "best_round": r.get("best_round", 0),
-            "improvement_streak": 0,
-            # Historical (carried over across cycles)
-            "rounds_completed": r.get("rounds_completed", 0),
-            "total_queries_scored": r.get("total_queries_scored", 0),
-            "total_backend_calls": r.get("total_backend_calls", 0),
-            # Config
-            "model": config.model or "",
-            "n_variants": config.n_variants,
-            "sp_budget_ttest": config.sp_budget_ttest,
-        }
-
-        self._workflow_start = time.monotonic()
-        self._round_start = time.monotonic()
-        self._query_times: list[float] = []
-        self._round_cache_hits = 0
-        self._round_queries = 0
-        self._round_degraded = 0
-        self._candidate_hits = 0
-
-        self._flush()
-        # Seed the control surface.  Only write if missing so a user edit
-        # made between runs (or a lingering pause from a previous session)
-        # survives the next ``init``.
-        if not self.control_path.exists():
-            write_json(
-                self.control_path,
-                {
-                    "requested_state": "running",
-                    "pause_before_l2_scoring": config.pause_before_scoring,
-                },
-            )
-
-        # Append-only log — hold one handle for the emitter's lifetime so
-        # 100+ writes/round don't each open() the file.  Closed in
-        # ``finalize()``.  ``buffering=1`` = line-buffered so tails are fresh.
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        self._log_fh: IO[str] | None = open(  # noqa: SIM115
-            self.log_path, "a", encoding="utf-8", buffering=1
+        return RunCallbacks(
+            on_phase=self.on_phase,
+            on_sample_scored=self.on_sample_scored,
+            on_candidate_scored=self.on_candidate_scored,
+            on_round_complete=self.on_round_complete,
         )
-        if resume_from:
-            self._log(f"\n{'=' * 70}")
-            self._log(
-                f"  RESUMED — prior: {r.get('rounds_completed', 0)} rounds, best={r.get('best', 0):.1%}"
-            )
-            self._log(f"{'=' * 70}\n")
 
     # -- Callbacks -------------------------------------------------------------
 
@@ -255,10 +209,7 @@ class CampaignPersistenceEmitter:
         elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             s["round"] = data.get("round", s["round"])
             self._round_start = time.monotonic()
-            self._round_cache_hits = 0
-            self._round_queries = 0
-            self._round_degraded = 0
-            self._candidate_hits = 0
+            self._rc.reset()
             s["degraded_count"] = 0
             s["round_elapsed_s"] = 0.0
         elif phase == CampaignPhase.REFINE_STRATEGY:
@@ -266,8 +217,8 @@ class CampaignPersistenceEmitter:
         elif phase == CampaignPhase.MODIFY_PLAN:
             s["layer"] = "L3"
 
-        self._log(f"--- {event.phase} {event.event} (round {event.round}) ---")
-        self._flush()
+        self._log_fh.write(f"--- {event.phase} {event.event} (round {event.round}) ---\n")
+        write_json(self.state_path, self._state, default=str)
 
     def on_sample_scored(
         self,
@@ -278,23 +229,25 @@ class CampaignPersistenceEmitter:
         result: dict,
     ) -> None:
         s = self._state
+        rc = self._rc
+
         candidate_label = f"C{ci + 1}/{ct}"
         if s["candidate"] != candidate_label:
-            self._candidate_hits = 0
+            rc.candidate_hits = 0
             s["candidate"] = candidate_label
         s["query"] = f"{qi + 1}/{qt}"
 
         pd = result.get("pipeline_data") or {}
-        query_time = cast(float, pd.get("total_time", 0.0) or 0.0)
+        query_time = float(pd.get("total_time", 0.0) or 0.0)
         hit = bool(result.get("hit"))
-        is_cached = result.get("cached", False)
+        is_cached = bool(result.get("cached", False))
         terminated = pd.get("terminated_at") or ""
 
         # Timing
-        self._query_times.append(query_time)
-        avg = sum(self._query_times) / len(self._query_times)
+        rc.query_times.append(query_time)
+        avg = sum(rc.query_times) / len(rc.query_times)
         s["avg_query_time_s"] = round(avg, 2)
-        s["elapsed_s"] = self._elapsed()
+        s["elapsed_s"] = round(time.monotonic() - self._workflow_start, 1)
         s["round_elapsed_s"] = round(time.monotonic() - self._round_start, 1)
         remaining = (qt - qi - 1) + (ct - ci - 1) * qt
         s["eta_s"] = round(remaining * avg, 1)
@@ -302,20 +255,20 @@ class CampaignPersistenceEmitter:
         # Pipeline
         if terminated:
             s["terminated_at"] = terminated
-        self._round_queries += 1
+        rc.queries += 1
         if is_cached:
-            self._round_cache_hits += 1
-        s["cache_hit_rate"] = round(self._round_cache_hits / self._round_queries, 3)
+            rc.cache_hits += 1
+        s["cache_hit_rate"] = round(rc.cache_hits / rc.queries, 3)
 
         # Quality
         if hit:
-            self._candidate_hits += 1
-        s["hit_rate"] = round(self._candidate_hits / (qi + 1), 3)
+            rc.candidate_hits += 1
+        s["hit_rate"] = round(rc.candidate_hits / (qi + 1), 3)
         if result.get("error") or pd.get("error"):
             s["error_count"] += 1
         if pd.get("diagnostics"):
-            self._round_degraded += 1
-            s["degraded_count"] = self._round_degraded
+            rc.degraded += 1
+            s["degraded_count"] = rc.degraded
 
         # Historical
         s["total_queries_scored"] += 1
@@ -326,11 +279,11 @@ class CampaignPersistenceEmitter:
         pred = (result.get("prediction") or "")[:35]
         mark = "HIT" if hit else "MISS"
         cache_mark = " CACHED" if is_cached else ""
-        self._log(
+        self._log_fh.write(
             f"  [{s['total_queries_scored']:>3d}] {query_time:5.1f}s "
-            f"{mark}{cache_mark} {q_text} -> {pred}"
+            f"{mark}{cache_mark} {q_text} -> {pred}\n"
         )
-        self._flush()
+        write_json(self.state_path, self._state, default=str)
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         s = self._state
@@ -341,11 +294,11 @@ class CampaignPersistenceEmitter:
 
         s["current_acc"] = round(acc, 4)
         s["hit_rate"] = 0.0
-        self._candidate_hits = 0
+        self._rc.candidate_hits = 0
 
         comp_str = f"  composite={comp:.3f}" if comp is not None else ""
-        self._log(f"  === C{idx + 1}/{total}: {acc:.1%} ({hits}/{n}){comp_str} ===")
-        self._flush()
+        self._log_fh.write(f"  === C{idx + 1}/{total}: {acc:.1%} ({hits}/{n}){comp_str} ===\n")
+        write_json(self.state_path, self._state, default=str)
 
     def on_round_complete(self, round_result: RoundResult, stall_count: int) -> None:
         s = self._state
@@ -360,15 +313,15 @@ class CampaignPersistenceEmitter:
         s["patience"] = f"{stall_count}/{self._patience_max}"
         s["layer"] = "L1"
         s["rounds_completed"] = round_result.round
-        s["elapsed_s"] = self._elapsed()
+        s["elapsed_s"] = round(time.monotonic() - self._workflow_start, 1)
 
         mark = "IMPROVED" if improved else "no improvement"
-        self._log(
+        self._log_fh.write(
             f"\n  >>> Round {round_result.round}: "
             f"{round_result.label} {acc:.1%} — {mark} "
-            f"(patience {stall_count}) <<<\n",
+            f"(patience {stall_count}) <<<\n\n"
         )
-        self._flush()
+        write_json(self.state_path, self._state, default=str)
 
         self._append_log_md(
             f"## Round {round_result.round} — Evaluated\n"
@@ -382,7 +335,7 @@ class CampaignPersistenceEmitter:
         self._state["stop_reason"] = reason
         self._state["pause_point"] = pause_point
         self._state["workflow"] = "idle"
-        self._flush()
+        write_json(self.state_path, self._state, default=str)
 
     def finalize(
         self,
@@ -392,45 +345,19 @@ class CampaignPersistenceEmitter:
         stop_reason: str,
         cycle_id: str | None = None,
     ) -> None:
-        """Write final summary to campaign_log.md, set stop reason, close log handle."""
+        """Write final summary, set stop reason, close log handle."""
         self.set_stop_reason(stop_reason)
-        self._append_log_md(
-            f"## Optimization Complete\n"
-            f"- Rounds: {n_rounds}, best: {best_accuracy:.1%} (round {best_round})\n"
-            f"- Stop reason: {stop_reason}\n"
-            f"- Cycle ID: {cycle_id or 'N/A'}"
-        )
-        self._close_log()
+        if n_rounds > 0:
+            self._append_log_md(
+                f"## Optimization Complete\n"
+                f"- Rounds: {n_rounds}, best: {best_accuracy:.1%} (round {best_round})\n"
+                f"- Stop reason: {stop_reason}\n"
+                f"- Cycle ID: {cycle_id or 'N/A'}"
+            )
+        self._log_fh.close()
 
     # -- Internal --------------------------------------------------------------
 
-    def _elapsed(self) -> float:
-        return round(time.monotonic() - self._workflow_start, 1)
-
-    def _flush(self) -> None:
-        """Atomically write state to disk.
-
-        The control surface lives in its own file (``campaign_control.json``),
-        so the emitter writes ``_state`` straight through without any
-        read-merge-write dance.
-        """
-        write_json(self.state_path, self._state, default=str)
-
-    def _log(self, line: str) -> None:
-        if self._log_fh is None:
-            # Already finalized — fall back to append so stray late writes
-            # from interrupt handlers don't silently drop.
-            with self.log_path.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
-            return
-        self._log_fh.write(line + "\n")
-
-    def _close_log(self) -> None:
-        if self._log_fh is not None:
-            self._log_fh.close()
-            self._log_fh = None
-
     def _append_log_md(self, section: str) -> None:
-        self.log_md_path.parent.mkdir(parents=True, exist_ok=True)
         with self.log_md_path.open("a", encoding="utf-8") as f:
             f.write(section + "\n\n")

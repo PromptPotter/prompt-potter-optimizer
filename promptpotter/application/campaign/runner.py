@@ -482,12 +482,7 @@ async def run_optimization(
 
     emitter = CampaignPersistenceEmitter.for_session(config, baseline.baseline_acc, state.cycle_id)
     if emitter:
-        cb = RunCallbacks(
-            on_phase=emitter.on_phase,
-            on_sample_scored=emitter.on_sample_scored,
-            on_candidate_scored=emitter.on_candidate_scored,
-            on_round_complete=emitter.on_round_complete,
-        ).merge(cb)
+        cb = emitter.as_callbacks().merge(cb)
 
     stop_reason = await _run_round_loop(state, dataset, config, cb)
 

@@ -185,6 +185,22 @@ Two independent persistence tiers with different lifecycles:
 
 Session state survives interrupts for display continuity but is **not** the source of truth for resume.
 
+**Canonical file roles.** The file set is declared in `CAMPAIGN_SESSION_ARTIFACTS` at `promptpotter/infrastructure/persistence/session_emitter.py:39-45`; `tests/test_artifact_parity.py` enforces parity across entry points.
+
+| File | Role | Write mode |
+|---|---|---|
+| `session.json` | Init params, `campaign_config`, `task_context`, `cycle_id` | rewrite |
+| `campaign_state.json` | **Canonical live dashboard** (atomically rewritten on every event) | atomic rewrite |
+| `campaign_control.json` | HITL pause/resume flag | seed-once |
+| `campaign_log.md` | Human-readable round-by-round log | append |
+| `campaign_output.log` | Raw query audit trail | append |
+| `optimize_result.json` | Final summary written by `cmd_optimize` at `campaign_runner.py:335-338` | rewrite on finalize |
+| `rounds/round_NNN.json` | Per-round trial checkpoint (resume source) | rewrite per round |
+
+`campaign_state.json` is the single source of truth for live state. `campaign_log.md`, `campaign_output.log`, and `optimize_result.json` are **derived, human-readable views** — any of them can be regenerated from `campaign_state.json` + `rounds/`. Do not add a new writer that competes with `campaign_state.json` for live dashboard data.
+
+**Future direction (M9 Track 4 — `docs/specs/m9-stable-config-and-scaffolding.md:78-92`):** the notebook, CLI, FastAPI, and webapp will all read from a shared file-directory *view model* under `sessions/{session_id}/views/` — small JSON files for structured data + pre-rendered Markdown snippets for human display. `show-status` becomes a thin renderer over that directory; the notebook renders from the same files, closing the notebook↔CLI parity gap; the M10 webapp reads the same view via the FastAPI API. *"Thin pixel layer on top of a flat data layer — no duplication of render logic."* Exact layout is intentionally left open and decided while writing it. Cleanup work in the meantime should (a) not add new duplication, (b) leave `campaign_state.json` as the single source of truth, (c) be cheap to throw away once Track 4 lands.
+
 ### Tier 2 — Campaign Store (source of truth for resume)
 
 ```

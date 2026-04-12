@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
@@ -47,7 +46,7 @@ async def cmd_task_context(args: argparse.Namespace) -> CommandResult:
     ctx.state["task_context"] = result.task_context.to_dict()
     ctx.save_phase(
         "task-context",
-        log=f"## Task Context\n{json.dumps(result.task_context.to_dict(), indent=2)}",
+        log=f"## Task Context\n- {len(result.task_context)} fields — see session.json",
     )
     return CommandResult(
         data={"task_context": result.task_context.to_dict(), "cached": result.was_cached}
