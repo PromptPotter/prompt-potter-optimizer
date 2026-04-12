@@ -10,6 +10,7 @@ from __future__ import annotations
 
 __all__ = [
     "TUNING_KEYS",
+    "build_persistence_emitter",
     "cycle_config_identity",
     "finalize_campaign",
     "init_campaign",
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.backend.client import BackendClient
     from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
+    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 
@@ -131,20 +133,19 @@ def _restore_from_checkpoint(
         resumed_from_round - 1,
     )
     if _latest_trial:
-        _osp = _latest_trial.get("opt_search_point", {})
-        if _osp:
-            known = {k: v for k, v in _osp.items() if k in OptSearchPoint.model_fields}
-            missing = set(OptSearchPoint.model_fields) - set(_osp)
-            if missing:
-                logger.debug(
-                    "Checkpoint missing %d OptSearchPoint field(s): %s "
-                    "(using defaults — checkpoint predates schema change)",
-                    len(missing),
-                    ", ".join(sorted(missing)),
-                )
-            state.opt_sp = OptSearchPoint(**known)
+        _osp = _latest_trial["opt_search_point"]
+        known = {k: v for k, v in _osp.items() if k in OptSearchPoint.model_fields}
+        missing = set(OptSearchPoint.model_fields) - set(_osp)
+        if missing:
+            logger.debug(
+                "Checkpoint missing %d OptSearchPoint field(s): %s "
+                "(using defaults — checkpoint predates schema change)",
+                len(missing),
+                ", ".join(sorted(missing)),
+            )
+        state.opt_sp = OptSearchPoint(**known)
         state.escalation = EscalationCounters.from_checkpoint_dict(_latest_trial)
-        state.stall_count = _latest_trial.get("stall_count", 0)
+        state.stall_count = _latest_trial["stall_count"]
         logger.debug(
             "Restored optimizer state from round %d "
             "(critique=%d chars, task_context=%d keys, "
@@ -157,28 +158,21 @@ def _restore_from_checkpoint(
         )
 
 
-def _setup_scoring_context(
+def _wire_scoring_env(
     state: LoopState,
     config: LoopConfig,
-    instruction: str,
-    baseline_osp: OptSearchPoint,
     backend_client: BackendClient,
     obs: Any,
     experiment_id: str,
     cycle_id: str | None,
-    session: SessionEnv | None = None,
-) -> list:
-    """Wire up ScoringEnv on state and build escalation checks.
-
-    Returns:
-        degradation_checks list.
-    """
+    session: SessionEnv,
+) -> None:
+    """Construct ScoringEnv and attach it to ``state.scoring_ctx``."""
     from promptpotter.shared.scoring import compile_scorer
 
-    _store = session.store if session else None
     state.scoring_ctx = ScoringEnv(
         backend_client=backend_client,
-        store=_store,
+        store=session.store,
         backend_id=config.backend_id,
         pipeline_schema=config.pipeline_schema,
         obs=obs,
@@ -190,27 +184,67 @@ def _setup_scoring_context(
         scorer=compile_scorer(config.scoring_formula),
     )
 
-    # Alias: raw instruction ↔ restructured baseline
-    if _store and config.backend_id and instruction:
-        _raw_hash = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
-        _restructured_hash = hashlib.sha256(
-            baseline_osp.render().encode(),
-        ).hexdigest()[:HASH_TRUNCATE]
-        if _raw_hash != _restructured_hash:
-            _store.dataset_runs.register_alias(
-                config.backend_id,
-                _raw_hash,
-                _restructured_hash,
-            )
-            logger.info(
-                "Registered prompt alias: %s ↔ %s",
-                _raw_hash[:8],
-                _restructured_hash[:8],
-            )
 
-    from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
+def _register_baseline_alias(
+    store: Any,
+    backend_id: str,
+    instruction: str,
+    baseline_osp: OptSearchPoint,
+) -> None:
+    """Link the raw instruction hash to the restructured baseline hash.
 
-    return build_degradation_checks(config)
+    Lets historical ``dataset_runs`` results written under the raw prompt
+    hash be discovered via the restructured form and vice versa.
+    """
+    if not (store and backend_id and instruction):
+        return
+    raw_hash = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
+    restructured_hash = hashlib.sha256(baseline_osp.render().encode()).hexdigest()[:HASH_TRUNCATE]
+    if raw_hash == restructured_hash:
+        return
+    store.dataset_runs.register_alias(backend_id, raw_hash, restructured_hash)
+    logger.info("Registered prompt alias: %s ↔ %s", raw_hash[:8], restructured_hash[:8])
+
+
+def build_persistence_emitter(
+    config: LoopConfig,
+    baseline_accuracy: float,
+    cycle_id: str | None,
+) -> CampaignPersistenceEmitter | None:
+    """Build the session-directory persistence emitter, if configured.
+
+    Returns ``None`` when any of ``project_root``/``backend_id``/``session_id``
+    is missing — those are the three ingredients for a session directory.
+
+    UI counter continuity on resume is cosmetic: we hand the prior
+    ``campaign_state.json`` dict to the emitter verbatim so it can pluck out
+    the counters it cares about. Optimizer resume lives in ``trial_NNNN.json``
+    and flows through ``_restore_from_checkpoint`` — not this path.
+    """
+    if not (config.project_root and config.backend_id and config.session_id):
+        return None
+
+    from promptpotter.infrastructure.persistence.session_emitter import (
+        CampaignPersistenceEmitter,
+    )
+
+    session_dir = Path(config.project_root) / config.backend_id / "sessions" / config.session_id
+
+    resume_from: dict[str, Any] | None = None
+    prior_state = session_dir / "campaign_state.json"
+    if prior_state.exists():
+        try:
+            resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
+            resume_from["baseline"] = baseline_accuracy
+        except (json.JSONDecodeError, OSError):
+            resume_from = None
+
+    return CampaignPersistenceEmitter(
+        session_dir,
+        config,
+        resume_from=resume_from,
+        cycle_id=cycle_id,
+    )
 
 
 async def init_cycle_state(
@@ -226,13 +260,14 @@ async def init_cycle_state(
     experiment_id: str,
     session: SessionEnv | None,
     started_at: str,
-) -> tuple[LoopState, CampaignPersistenceEmitter | None]:
+) -> LoopState:
     """Initialize all cycle state: baseline, resume, obs, eval context.
 
-    Returns ``(state, emitter)``. ``state`` is fully wired with infrastructure
-    fields (campaign_store, cycle_id, scoring_dataset, etc.). ``emitter`` is
-    kept out of ``LoopState`` so the mutation contract stays tight — the
-    caller wires it onto the user's callbacks directly.
+    Returns a ``LoopState`` fully wired with infrastructure fields
+    (``campaign_store``, ``cycle_id``, ``scoring_dataset``, …). The caller is
+    responsible for building the persistence emitter via
+    ``build_persistence_emitter`` — keeping it out of ``init_cycle_state``
+    means the function only mutates ``LoopState``.
     """
     emit_phase(
         on_phase,
@@ -295,27 +330,23 @@ async def init_cycle_state(
             cycle_id,
             resumed_from_round,
         )
-    state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
+    else:
+        # thinking_styles is part of OptSearchPoint.MEMORY_FIELDS — only sample
+        # on fresh init, otherwise _restore_from_checkpoint's restored value wins.
+        state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
-    # 3. Eval context + escalation checks
-    degradation_checks = _setup_scoring_context(
-        state,
-        config,
-        instruction,
-        baseline_osp,
-        _bc,
-        obs,
-        experiment_id,
-        cycle_id,
-        session=session,
-    )
+    # 3. Eval context + escalation checks + baseline alias
+    _wire_scoring_env(state, config, _bc, obs, experiment_id, cycle_id, session)
+    _register_baseline_alias(session.store, config.backend_id, instruction, baseline_osp)
+
+    from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
+
+    degradation_checks = build_degradation_checks(config)
 
     # 4. SearchMemory — load + refresh from historical data
     search_memory: SearchMemory | None = None
     _store = state.scoring_ctx.store if state.scoring_ctx else None
     if _store and config.backend_id:
-        from pathlib import Path
-
         _sm_path = Path(_store.base_dir) / config.backend_id / "search_memory.json"
         search_memory = SearchMemory.load(_sm_path)
         if search_memory.refresh(_store, config.backend_id):
@@ -349,39 +380,6 @@ async def init_cycle_state(
         restored_state=_restored,
     )
 
-    # 5. Persistence emitter — auto-created for all entry points
-    persistence_emitter = None
-    if config.project_root and config.backend_id and config.session_id:
-        from pathlib import Path
-
-        from promptpotter.infrastructure.persistence.session_emitter import (
-            CampaignPersistenceEmitter,
-        )
-
-        _session_dir = (
-            Path(config.project_root) / config.backend_id / "sessions" / config.session_id
-        )
-
-        # UI counter continuity on resume — cosmetic only. Optimizer resume
-        # lives in trial_NNNN.json via _restore_from_checkpoint. Emitter picks
-        # out the counters it cares about via .get() with defaults, so we can
-        # just hand it the prior dict verbatim (baseline override excepted).
-        resume_from: dict[str, Any] | None = None
-        _prior_state = _session_dir / "campaign_state.json"
-        if _prior_state.exists():
-            try:
-                resume_from = json.loads(_prior_state.read_text(encoding="utf-8"))
-                resume_from["baseline"] = baseline_accuracy
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        persistence_emitter = CampaignPersistenceEmitter(
-            _session_dir,
-            config,
-            resume_from=resume_from,
-            cycle_id=cycle_id,
-        )
-
     # Populate infrastructure fields on state
     state.campaign_store = campaign_store
     state.cycle_id = cycle_id
@@ -390,7 +388,7 @@ async def init_cycle_state(
     state.degradation_checks = degradation_checks
     state.resumed_from_round = resumed_from_round
 
-    return state, persistence_emitter
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +495,7 @@ def init_campaign(
     *,
     cycle_id_override: str | None = None,
     langfuse_session_id: str | None = None,
-) -> tuple[Any | None, str | None, int, Any | None, str]:
+) -> tuple[CampaignStore | None, str | None, int, ObsLogger | None, str]:
     """Resume/create campaign + init observability in one call.
 
     Returns:
@@ -536,7 +534,6 @@ def init_campaign(
                 if cycle_id_override:
                     stored_cfg = existing.get("config", {})
                     if stored_cfg:
-                        _validate_config_match(config, stored_cfg, cycle_id)
                         current_cfg = config.model_dump(mode="json")
                         cfg_updated = False
                         for k in TUNING_KEYS:
@@ -567,8 +564,6 @@ def init_campaign(
                         "baseline_accuracy": baseline_accuracy,
                     },
                 )
-        except ValueError:
-            raise
         except (OSError, json.JSONDecodeError, KeyError):
             logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
             campaign_store, cycle_id, resumed_from_round = None, None, 0
@@ -604,46 +599,19 @@ def init_campaign(
     return campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id
 
 
-def _validate_config_match(
-    config: LoopConfig,
-    stored_cfg: dict,
-    cycle_id: str,
-) -> None:
-    """Validate current config matches stored campaign config."""
-    check_keys = [
-        "n_variants",
-        "creativity",
-        "improvement_threshold",
-        "model",
-        "sp_budget_ttest",
-    ]
-    mismatches = []
-    for k in check_keys:
-        cv = getattr(config, k, None)
-        sv = stored_cfg.get(k)
-        if cv != sv:
-            mismatches.append(f"  {k}: stored={sv} vs current={cv}")
-    if mismatches:
-        raise ValueError(
-            f"Config mismatch for experiment {cycle_id}.\n"
-            f"Set EXPERIMENT_ID = None to start a new experiment, "
-            f"or update campaign_config to match.\n" + "\n".join(mismatches)
-        )
-
-
 # ---------------------------------------------------------------------------
 # Campaign finalization
 # ---------------------------------------------------------------------------
 
 
 def finalize_campaign(
-    campaign_store,
+    campaign_store: CampaignStore | None,
     cycle_id: str | None,
     config: LoopConfig,
     state: LoopState,
     stop_reason: str,
     finished_at: str,
-    obs,
+    obs: ObsLogger | None,
     obs_campaign_id: str,
     *,
     status: str = "completed",

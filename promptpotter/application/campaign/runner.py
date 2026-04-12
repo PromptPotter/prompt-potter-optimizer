@@ -20,7 +20,11 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.campaign.campaign_setup import SessionEnv
 from promptpotter.application.campaign.config import LoopConfig
 from promptpotter.application.campaign.data import extract_campaign_baseline
-from promptpotter.application.campaign.lifecycle import finalize_campaign, init_cycle_state
+from promptpotter.application.campaign.lifecycle import (
+    build_persistence_emitter,
+    finalize_campaign,
+    init_cycle_state,
+)
 from promptpotter.application.optimization.nodes.escalation import escalate_l2
 from promptpotter.application.optimization.nodes.round_execution import (
     PauseForReviewError,
@@ -525,7 +529,7 @@ async def _run_optimization_core(
     cb = callbacks or RunCallbacks()
 
     # -- Init --
-    state, _emitter = await init_cycle_state(
+    state = await init_cycle_state(
         instruction,
         dataset,
         config,
@@ -539,6 +543,7 @@ async def _run_optimization_core(
         session,
         started_at,
     )
+    _emitter = build_persistence_emitter(config, baseline_accuracy, state.cycle_id)
 
     # Chain persistence callbacks (fires first) with caller display callbacks
     if _emitter:
