@@ -468,6 +468,23 @@ async def run_optimization_notebook(
         _query_counter[0] = 0
         _ds.stall_count = stall_count
 
+        # Append to notebook-local display list (runner no longer mutates it)
+        campaign_rounds.append(
+            {
+                "round": len(campaign_rounds),
+                "label": round_result.label,
+                "accuracy": round_result.accuracy,
+                "composite": round_result.composite,
+                "hits": round_result.hits,
+                "total": round_result.total,
+                "improved": round_result.improved,
+                "prompt_fields": OptSearchPoint.from_prompt_fields(round_result.prompt_fields),
+                "results": round_result.results,
+                "candidates_scored": round_result.candidates_scored,
+                "candidate_scores": list(round_result.candidate_scores),
+            }
+        )
+
         rn = _ds.round_num + 1
 
         # --- ROUND SUMMARY node ---
@@ -644,7 +661,7 @@ async def run_optimization_notebook(
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
-    from promptpotter.infrastructure.persistence.state import RunCallbacks, chain_callbacks
+    from promptpotter.infrastructure.persistence.state import RunCallbacks
 
     notebook_display_cb = RunCallbacks(
         on_round_complete=_on_round,
@@ -653,16 +670,14 @@ async def run_optimization_notebook(
         on_phase=_on_phase,
     )
     callbacks = (
-        chain_callbacks(notebook_display_cb, display_callbacks)
-        if display_callbacks
-        else notebook_display_cb
+        notebook_display_cb.merge(display_callbacks) if display_callbacks else notebook_display_cb
     )
 
     assert session is not None, "session (SessionEnv) required for optimization"
     result = await _orch_run_optimization(
-        campaign_rounds,
         dataset,
         campaign_config,
+        baseline=_bl,
         session=session,
         scan_brief=scan_brief,
         experiment_id=experiment_id,

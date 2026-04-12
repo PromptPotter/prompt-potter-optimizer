@@ -302,7 +302,7 @@ async def _do_l2_transition(
     from promptpotter.application.optimization.nodes.layer_transitions import TransitionAction
 
     if transition.action == TransitionAction.PROBE:
-        state.enter_probe_mode()
+        state.probe_next_round = True
         logger.debug("L2 requested probe — next round uses warned queries")
 
     logger.debug(

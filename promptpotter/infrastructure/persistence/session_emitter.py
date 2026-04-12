@@ -21,10 +21,10 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, cast
+from typing import IO, TYPE_CHECKING, Any, TypedDict, cast
 
 from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
-from promptpotter.infrastructure.persistence.state import CampaignPhase, CampaignStateSchema
+from promptpotter.infrastructure.persistence.state import CampaignPhase
 from promptpotter.infrastructure.store.base import write_json
 
 if TYPE_CHECKING:
@@ -33,7 +33,60 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CampaignPersistenceEmitter"]
+__all__ = ["CAMPAIGN_SESSION_ARTIFACTS", "CampaignPersistenceEmitter", "CampaignStateSchema"]
+
+
+CAMPAIGN_SESSION_ARTIFACTS = {
+    "campaign_state.json",
+    "campaign_control.json",
+    "campaign_output.log",
+    "campaign_log.md",
+    "session.json",
+}
+
+
+class CampaignStateSchema(TypedDict):
+    """On-disk shape of ``campaign_state.json`` — scalar-only, emitter-owned."""
+
+    # Execution
+    workflow: str
+    phase: str
+    round: int
+    max_rounds: int
+    candidate: str
+    query: str
+    patience: str
+    layer: str
+    baseline: float
+    best: float
+    current_acc: float
+    cycle_id: str | None
+    stop_reason: str | None
+    pause_point: str | None
+    # Timing
+    elapsed_s: float
+    round_elapsed_s: float
+    avg_query_time_s: float
+    eta_s: float
+    # Pipeline
+    active_nodes: list[str]
+    excluded_nodes: list[str]
+    terminated_at: str | None
+    cache_hit_rate: float
+    # Quality
+    hit_rate: float
+    degraded_count: int
+    error_count: int
+    best_round: int
+    improvement_streak: int
+    # Historical
+    rounds_completed: int
+    total_queries_scored: int
+    total_backend_calls: int
+    # Config
+    model: str
+    n_variants: int
+    sp_budget_ttest: int
 
 
 class CampaignPersistenceEmitter:

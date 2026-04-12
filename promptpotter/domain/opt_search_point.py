@@ -225,6 +225,34 @@ class OptSearchPoint(PromptTemplate):
         "stale_data_observations",
     )
 
+    def record_escalation_event(
+        self,
+        round_num: int,
+        check_result: dict[str, Any],
+        current_pipeline_params: dict | None,
+    ) -> None:
+        """Append a degradation escalation entry to the journal.
+
+        Also fills the outcome of the previous entry if pending.
+        """
+        journal = self.escalation_journal
+        if journal and journal[-1].get("outcome_degraded_rate") is None:
+            journal[-1]["outcome_degraded_rate"] = check_result.get("degraded_rate", 0)
+
+        dominant = check_result.get("dominant_warning", "unknown:unknown")
+        problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
+        step_cfg = (current_pipeline_params or {}).get(problem_step, {})
+        journal.append(
+            {
+                "round": round_num,
+                "degraded_rate": check_result.get("degraded_rate", 0),
+                "problem_step": problem_step,
+                "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
+                "warning_types": check_result.get("warning_types", {}),
+                "outcome_degraded_rate": None,
+            }
+        )
+
     def inherit_memory(self, source: OptSearchPoint) -> None:
         """Copy optimization memory from *source* into this instance.
 

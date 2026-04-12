@@ -76,6 +76,43 @@ class CampaignStore(EntityStore):
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(path, data)
 
+    @classmethod
+    def bootstrap_cycle(
+        cls,
+        config: Any,
+        baseline_render: str,
+        baseline_accuracy: float,
+        dataset: list[dict[str, Any]],
+        cycle_id_override: str | None,
+    ) -> tuple["CampaignStore | None", str | None, int]:
+        """Open the store and resume/create the cycle in one shot.
+
+        Returns ``(store, cycle_id, resumed_from_round)``.  All-None on
+        missing project_root/backend_id or any resume failure.
+        """
+        import json as _json
+
+        from promptpotter.domain.cycle_identity import TUNING_KEYS, cycle_config_identity
+
+        if not (config.project_root and config.backend_id):
+            return None, None, 0
+        try:
+            store = cls(Path(config.project_root))
+            resolved = cycle_id_override or cycle_config_identity(
+                config, baseline_render, dataset, strict=config.strict_cycle_identity
+            )
+            resumed_from = store.resume_or_create(
+                config.backend_id,
+                resolved,
+                config_snapshot=config.model_dump(mode="json"),
+                baseline_accuracy=baseline_accuracy,
+                hot_update_keys=TUNING_KEYS if cycle_id_override else frozenset(),
+            )
+            return store, resolved, resumed_from
+        except (OSError, _json.JSONDecodeError, KeyError):
+            logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
+            return None, None, 0
+
     def resume_or_create(
         self,
         backend_id: str,

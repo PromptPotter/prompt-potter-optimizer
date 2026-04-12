@@ -1,7 +1,7 @@
 """Campaign types — outcome models, callbacks, mutable loop state.
 
-PhaseEvent, StopReason, RoundResult, RunResult, RunCallbacks,
-EscalationCounters, LoopState, and the session artifact manifest.
+PhaseEvent, StopReason, StopLoop, RoundResult, RunResult, RunCallbacks,
+EscalationCounters, LoopState.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from pydantic import BaseModel, Field
 
@@ -29,9 +29,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "CAMPAIGN_SESSION_ARTIFACTS",
     "CampaignPhase",
-    "CampaignStateSchema",
     "EscalationCounters",
     "LoopState",
     "OnCandidateScored",
@@ -43,61 +41,10 @@ __all__ = [
     "RoundResult",
     "RunCallbacks",
     "RunResult",
+    "StopLoop",
     "StopReason",
-    "chain_callbacks",
     "emit_phase",
-    "get_obs_trace",
 ]
-
-
-class CampaignStateSchema(TypedDict):
-    """On-disk shape of ``campaign_state.json``.
-
-    Scalar-only, emitter-owned.  Readers (``show-status``, webapp, parity
-    test) should treat this as the source of truth for field names.  Live
-    per-query / per-candidate / per-round detail lives in
-    ``campaign_output.log`` and ``rounds/round_NNN.json`` — not here.
-    """
-
-    # Execution
-    workflow: str
-    phase: str
-    round: int
-    max_rounds: int
-    candidate: str
-    query: str
-    patience: str
-    layer: str
-    baseline: float
-    best: float
-    current_acc: float
-    cycle_id: str | None
-    stop_reason: str | None
-    pause_point: str | None
-    # Timing
-    elapsed_s: float
-    round_elapsed_s: float
-    avg_query_time_s: float
-    eta_s: float
-    # Pipeline
-    active_nodes: list[str]
-    excluded_nodes: list[str]
-    terminated_at: str | None
-    cache_hit_rate: float
-    # Quality
-    hit_rate: float
-    degraded_count: int
-    error_count: int
-    best_round: int
-    improvement_streak: int
-    # Historical (carried over across cycles)
-    rounds_completed: int
-    total_queries_scored: int
-    total_backend_calls: int
-    # Config
-    model: str
-    n_variants: int
-    sp_budget_ttest: int
 
 
 class CampaignPhase(enum.StrEnum):
@@ -110,15 +57,6 @@ class CampaignPhase(enum.StrEnum):
     MODIFY_PLAN = "modify_plan"
     ESCALATION = "escalation"
     BACKEND_WARNING = "backend_warning"
-
-
-CAMPAIGN_SESSION_ARTIFACTS = {
-    "campaign_state.json",
-    "campaign_control.json",
-    "campaign_output.log",
-    "campaign_log.md",
-    "session.json",
-}
 
 
 class StopReason(enum.StrEnum):
@@ -135,6 +73,19 @@ class StopReason(enum.StrEnum):
     PAUSED_FOR_REVIEW = "paused_for_review"
     USER_PAUSED = "user_paused"
     USER_STOPPED = "user_stopped"
+
+
+class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
+    """Internal signal to exit the optimization round loop with a reason.
+
+    Raised by helpers that decide the loop must stop — caught exactly once
+    at the top of ``_run_round_loop``.  Lets helpers stay ``-> None`` and
+    eliminates the ``Optional[StopReason]`` bubble-up pattern.
+    """
+
+    def __init__(self, reason: StopReason) -> None:
+        self.reason = reason
+        super().__init__(reason.value)
 
 
 class RoundResult(BaseModel):
@@ -174,14 +125,14 @@ class RunResult(BaseModel):
     resumed_from_round: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Escalation counters — L2/L3 stall tracking
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class EscalationCounters:
-    """L2/L3 escalation tracking — stall counts, round counters, entry baselines.
-
-    Extracted from LoopState to make the three-layer escalation semantics
-    explicit.  Accessed primarily by ``escalation.py`` and serialized at
-    checkpoint time by ``optimization_loop.py``.
-    """
+    """L2/L3 escalation tracking — stall counts, round counters, entry baselines."""
 
     l2_stall_count: int = 0
     l3_stall_count: int = 0
@@ -193,38 +144,32 @@ class EscalationCounters:
     best_composite_at_l3_entry: float = 0.0
 
     def record_l2_outcome(self, best_composite: float) -> bool:
-        """Update L2 stall count. Returns True if L2 is stalled."""
         improved = best_composite > self.best_composite_at_l2_entry
         self.l2_stall_count = 0 if improved or self.l2_round == 0 else self.l2_stall_count + 1
         return not improved and self.l2_round > 0
 
     def record_l3_outcome(self, best_composite: float) -> bool:
-        """Update L3 stall count. Returns True if L3 is stalled."""
         improved = best_composite > self.best_composite_at_l3_entry
         self.l3_stall_count = 0 if improved or self.l3_round == 0 else self.l3_stall_count + 1
         return not improved and self.l3_round > 0
 
     def reset_for_l3(self, best_accuracy: float, best_composite: float) -> None:
-        """Reset L2 counters when L3 takes over."""
         self.l2_stall_count = 0
         self.l2_round = 0
         self.best_accuracy_at_l2_entry = best_accuracy
         self.best_composite_at_l2_entry = best_composite
 
     def record_l2_entry(self, best_accuracy: float, best_composite: float) -> None:
-        """Record baseline at L2 transition."""
         self.l2_round += 1
         self.best_accuracy_at_l2_entry = best_accuracy
         self.best_composite_at_l2_entry = best_composite
 
     def record_l3_entry(self, best_accuracy: float, best_composite: float) -> None:
-        """Record baseline at L3 transition."""
         self.l3_round += 1
         self.best_accuracy_at_l3_entry = best_accuracy
         self.best_composite_at_l3_entry = best_composite
 
     def to_checkpoint_dict(self) -> dict[str, int | float]:
-        """Serialize for checkpoint persistence."""
         return {
             "l2_round": self.l2_round,
             "l3_round": self.l3_round,
@@ -234,7 +179,6 @@ class EscalationCounters:
 
     @classmethod
     def from_checkpoint_dict(cls, d: dict) -> EscalationCounters:
-        """Deserialize from checkpoint."""
         return cls(
             l2_round=d.get("l2_round", 0),
             l3_round=d.get("l3_round", 0),
@@ -243,19 +187,17 @@ class EscalationCounters:
         )
 
 
+# ---------------------------------------------------------------------------
+# Loop state
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class LoopState:
     """Mutable state threaded through the feedback cycle round loop.
 
     Optimizer-level state (critique, thinking_styles, task_context,
-    escalation_journal, warning_inventory) lives on ``opt_sp``
-    — a mutable ``OptSearchPoint`` that is serialized at checkpoint
-    time and hydrated on resume.
-
-    **Mutation contract:** All mutations to ``opt_sp`` must occur within
-    the sequential round loop body (round_execution, critique, escalation).
-    The optimization loop is single-threaded — no concurrent access.
-    State transitions should use the named methods below.
+    escalation_journal, warning_inventory) lives on ``opt_sp``.
     """
 
     rounds: list[RoundResult] = field(default_factory=list)
@@ -270,22 +212,14 @@ class LoopState:
     stall_count: int = 0
     scoring_ctx: ScoringEnv | None = None
 
-    # Optimizer state — single source of truth for all meta-level fields
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
 
-    # Probe round flag (set by L2 action="probe", reset after probe round)
     probe_next_round: bool = False
-
-    # Failure analysis from previous round (ephemeral, not checkpointed)
     failure_analysis: FailureAnalysis | None = None
-
-    # SearchMemory instance (M8 Wave 3c — not checkpointed, rebuilt from disk)
     search_memory: Any = None
-
-    # L2/L3 escalation counters
     escalation: EscalationCounters = field(default_factory=EscalationCounters)
 
-    # -- Infrastructure (populated by _init_optimization, threaded through loop) --
+    # -- Infrastructure (populated by init, threaded through loop) --
     campaign_store: CampaignStore | None = None
     cycle_id: str | None = None
     obs_campaign_id: str = ""
@@ -293,62 +227,80 @@ class LoopState:
     degradation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
 
-    # Checkpoint schema version — incremented when LoopState/OptSearchPoint
-    # fields change, so resume can detect stale checkpoints.
     state_version: int = 1
 
-    # -- Construction / restore --------------------------------------------
+    # -- Construction / restore ------------------------------------------------
 
     @classmethod
     def from_baseline(
         cls,
         baseline_osp: OptSearchPoint,
         baseline_accuracy: float,
-        baseline_composite: float,
         *,
         task_context: TaskDecomposition,
         schema: PipelineSchema | None,
         baseline_results: list[dict] | None = None,
     ) -> LoopState:
-        """Construct a fresh LoopState from an evaluated baseline searchpoint.
+        """Construct a fresh LoopState from an evaluated baseline.
 
-        Caller owns composite-score computation (it requires a pipeline-schema
-        context that this module deliberately doesn't depend on).
+        Composite is derived from ``baseline_results`` when a schema is
+        present; otherwise falls back to ``baseline_accuracy``.
         """
+        from promptpotter.application.scoring.metrics import compute_composite_score
+
+        composite = (
+            compute_composite_score(baseline_results, schema)["composite"]  # type: ignore[arg-type]
+            if baseline_results and schema is not None
+            else baseline_accuracy
+        )
         opt_sp = baseline_osp.model_copy(
             update={
                 "task_context": task_context,
                 "optimizer_params": dict(baseline_osp.optimizer_params),
             }
         )
-        baseline_sp = opt_sp.to_job_search_point(
+        sp = opt_sp.to_job_search_point(
             base_pipeline_params=schema.to_pipeline_params() if schema else None,
             schema=schema,
         )
         return cls(
-            current_sp=baseline_sp,
+            current_sp=sp,
             current_accuracy=baseline_accuracy,
-            current_composite=baseline_composite,
+            current_composite=composite,
             current_results=baseline_results or [],
             best_accuracy=baseline_accuracy,
-            best_composite=baseline_composite,
-            best_sp=baseline_sp,
+            best_composite=composite,
+            best_sp=sp,
             opt_sp=opt_sp,
         )
 
-    def restore_from_trial(self, trial: dict[str, Any]) -> None:
-        """Restore optimizer state from a campaign checkpoint dict (in-place).
+    def build_trial_entry(self, round_result: RoundResult, round_num: int) -> dict[str, Any]:
+        """Build the trial checkpoint dict for ``campaign_store.add_trial``."""
+        return {
+            "trial_id": f"round_{round_num}",
+            "round": round_num,
+            "label": round_result.label,
+            "accuracy": round_result.accuracy,
+            "composite": round_result.composite,
+            "hits": round_result.hits,
+            "total": round_result.total,
+            "improved": round_result.improved,
+            "prompt_fields": round_result.prompt_fields,
+            "results": round_result.results,
+            "candidates_scored": round_result.candidates_scored,
+            "candidate_scores": list(round_result.candidate_scores),
+            "stall_count": self.stall_count,
+            **self.escalation.to_checkpoint_dict(),
+            "opt_search_point": self.opt_sp.model_dump(),
+        }
 
-        Mutates ``opt_sp``, ``escalation``, and ``stall_count`` from the
-        latest trial written by the optimizer.  Any schema mismatch
-        surfaces as a hard error — we deliberately don't filter unknown
-        fields here because that would hide drift.
-        """
+    def restore_from_trial(self, trial: dict[str, Any]) -> None:
+        """Restore optimizer state from a campaign checkpoint dict (in-place)."""
         self.opt_sp = OptSearchPoint(**trial["opt_search_point"])
         self.escalation = EscalationCounters.from_checkpoint_dict(trial)
         self.stall_count = trial["stall_count"]
 
-    # -- State transition methods ------------------------------------------
+    # -- State transition methods ----------------------------------------------
 
     def record_round_outcome(self, improved: bool) -> None:
         """Update stall count after a round completes."""
@@ -358,24 +310,13 @@ class LoopState:
         """Reset stall count (e.g. after L2/L3 changes prompt)."""
         self.stall_count = 0
 
-    def enter_probe_mode(self) -> None:
-        """Flag next round as a probe round (L2 action="probe")."""
-        self.probe_next_round = True
-
-    def exit_probe_mode(self) -> None:
-        """Clear probe flag after a probe round completes."""
-        self.probe_next_round = False
-
     def update_current(
         self,
         rr: RoundResult,
         search_point: JobSearchPoint,
         round_num: int,
     ) -> None:
-        """Apply a round result to current/best tracking.
-
-        Call after ``update_round_state()`` syncs prompt fields.
-        """
+        """Apply a round result to current/best tracking."""
         self.current_sp = search_point
         self.current_accuracy = rr.accuracy
         self.current_composite = rr.composite
@@ -386,13 +327,28 @@ class LoopState:
             self.best_round = round_num
             self.best_sp = self.current_sp
 
+    def eval_data_for_round(
+        self,
+        full_dataset: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[DegradationCheck] | None]:
+        """Return (eval_data, degradation_checks) for the next round.
+
+        Probe rounds score only warned queries and skip degradation checks;
+        normal rounds use the scoring dataset and the configured checks.
+        """
+        if not self.probe_next_round:
+            return self.scoring_dataset, self.degradation_checks
+        warned = {q for q, e in self.opt_sp.warning_inventory.items() if e.get("warnings")}
+        return [d for d in full_dataset if d.get("query") in warned], None
+
+
+# ---------------------------------------------------------------------------
+# Phase events + callbacks
+# ---------------------------------------------------------------------------
+
 
 class PhaseEvent(BaseModel):
-    """Emitted at phase boundaries during the feedback cycle.
-
-    Phases: init, l1_generate, l1_score, refine_strategy, modify_plan.
-    Each phase emits an "enter" and "exit" event with phase-specific data.
-    """
+    """Emitted at phase boundaries during the feedback cycle."""
 
     model_config = {"frozen": True}
 
@@ -400,55 +356,75 @@ class PhaseEvent(BaseModel):
     event: str
     round: int | None = None
     data: dict[str, Any] = Field(default_factory=dict)
-    timestamp: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat(),
-    )
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
-# (round_result, round_number)
 OnRoundComplete: TypeAlias = Callable[["RoundResult", int], None]
-# (candidate_index, total_candidates, scores_dict)
 OnCandidateScored: TypeAlias = Callable[[int, int, dict], None]
-# (candidate_index, total_candidates, query_index, total_queries, result_dict)
 OnSampleScored: TypeAlias = Callable[[int, int, int, int, dict], None]
-# (phase_event)
 OnPhase: TypeAlias = Callable[[PhaseEvent], None]
-# (checkpoint_name) -> "pause" | "stop" | None
 OnCheckpoint: TypeAlias = Callable[[str], str | None]
 
 
-@dataclass
 class RunCallbacks:
-    """Optional progress callbacks for the feedback cycle."""
+    """Multicast progress callbacks for the feedback cycle.
 
-    on_round_complete: OnRoundComplete | None = None
-    on_candidate_scored: OnCandidateScored | None = None
-    on_sample_scored: OnSampleScored | None = None
-    on_phase: OnPhase | None = None
-    on_checkpoint: OnCheckpoint | None = None
-
-
-def chain_callbacks(a: RunCallbacks, b: RunCallbacks) -> RunCallbacks:
-    """Compose two RunCallbacks so both fire on every event.
-
-    ``a`` fires first (typically persistence), ``b`` second (typically display).
-    For ``on_checkpoint``, returns the first non-None result (``None`` is
-    falsy, so the ``or`` short-circuits naturally).
+    Each channel is a list of listeners; ``merge()`` concatenates two
+    callback bundles.  Dispatch methods are always safe to call — no
+    None guards needed at callsites.  ``on_checkpoint`` short-circuits
+    on the first non-None result.
     """
 
-    def side(x: Callable | None, y: Callable | None) -> Callable | None:
-        return (lambda *args, **kw: (x(*args, **kw), y(*args, **kw))) if x and y else (x or y)
+    def __init__(
+        self,
+        *,
+        on_round_complete: OnRoundComplete | None = None,
+        on_candidate_scored: OnCandidateScored | None = None,
+        on_sample_scored: OnSampleScored | None = None,
+        on_phase: OnPhase | None = None,
+        on_checkpoint: OnCheckpoint | None = None,
+    ) -> None:
+        def _wrap(fn: Any) -> list:
+            return [fn] if fn else []
 
-    def checkpoint(x: Callable | None, y: Callable | None) -> Callable | None:
-        return (lambda name: x(name) or y(name)) if x and y else (x or y)
+        self._round = _wrap(on_round_complete)
+        self._candidate = _wrap(on_candidate_scored)
+        self._sample = _wrap(on_sample_scored)
+        self._phase = _wrap(on_phase)
+        self._checkpoint = _wrap(on_checkpoint)
 
-    return RunCallbacks(
-        on_round_complete=side(a.on_round_complete, b.on_round_complete),
-        on_candidate_scored=side(a.on_candidate_scored, b.on_candidate_scored),
-        on_sample_scored=side(a.on_sample_scored, b.on_sample_scored),
-        on_phase=side(a.on_phase, b.on_phase),
-        on_checkpoint=checkpoint(a.on_checkpoint, b.on_checkpoint),
-    )
+    def merge(self, other: RunCallbacks) -> RunCallbacks:
+        """Return a new RunCallbacks with self's listeners first, then other's."""
+        merged = RunCallbacks()
+        merged._round = self._round + other._round
+        merged._candidate = self._candidate + other._candidate
+        merged._sample = self._sample + other._sample
+        merged._phase = self._phase + other._phase
+        merged._checkpoint = self._checkpoint + other._checkpoint
+        return merged
+
+    def on_round_complete(self, rr: RoundResult, stall_count: int) -> None:
+        for fn in self._round:
+            fn(rr, stall_count)
+
+    def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
+        for fn in self._candidate:
+            fn(idx, total, scores)
+
+    def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
+        for fn in self._sample:
+            fn(ci, ct, qi, qt, result)
+
+    def on_phase(self, event: PhaseEvent) -> None:
+        for fn in self._phase:
+            fn(event)
+
+    def on_checkpoint(self, name: str) -> str | None:
+        for fn in self._checkpoint:
+            result = fn(name)
+            if result:
+                return result
+        return None
 
 
 def emit_phase(
@@ -459,18 +435,11 @@ def emit_phase(
     round: int | None = None,
     **data: Any,
 ) -> None:
-    """Construct a PhaseEvent and call the callback if set."""
+    """Construct a PhaseEvent and call the callback if set.
+
+    Accepts a plain callable (e.g. ``cb.on_phase`` — a bound dispatcher
+    method from ``RunCallbacks``) or ``None``.
+    """
     if on_phase is None:
         return
-    pe = PhaseEvent(phase=phase, event=event, round=round, data=data)
-    on_phase(pe)
-
-
-def get_obs_trace(
-    state: LoopState,
-    obs_campaign_id: str,
-) -> tuple[Any | None, str | None]:
-    """Extract obs logger and trace_id from loop state."""
-    obs = state.scoring_ctx.obs if state.scoring_ctx else None
-    trace_id = obs.get_file_trace_id(obs_campaign_id) if obs else None
-    return obs, trace_id
+    on_phase(PhaseEvent(phase=phase, event=event, round=round, data=data))

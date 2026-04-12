@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from promptpotter.infrastructure.persistence.state import CAMPAIGN_SESSION_ARTIFACTS
+from promptpotter.infrastructure.persistence.session_emitter import CAMPAIGN_SESSION_ARTIFACTS
 
 
 @pytest.fixture

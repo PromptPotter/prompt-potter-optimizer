@@ -489,6 +489,64 @@ class SearchMemory:
         )
         return True
 
+    def on_round_complete(
+        self,
+        state: Any,
+        config: Any,
+        round_num: int,
+        full_dataset: list[dict[str, Any]],
+    ) -> None:
+        """Per-round hook: refresh from disk, persist, recompute correlations,
+        and adapt the scoring dataset via query-difficulty analysis.
+
+        Owns the round-boundary work that used to live in the runner.
+        """
+        from promptpotter.application.optimization.nodes.round_execution import adapt_eval_set
+        from promptpotter.application.scoring.metrics import compile_query_difficulty
+
+        # Refresh + correlations + save
+        store = state.scoring_ctx.store if state.scoring_ctx else None
+        if store and self.refresh(store, config.backend_id):
+            if round_num > 0 and round_num % 5 == 0 and self.recompute_failure_group_correlations():
+                logger.info(
+                    "SearchMemory: recomputed failure group correlations at round %d",
+                    round_num,
+                )
+            self.save(Path(store.base_dir) / config.backend_id / "search_memory.json")
+
+        # Adaptive eval-set swap (needs 3+ rounds of history)
+        if round_num < 2:
+            return
+        hist = [r.results for r in state.rounds if r.results]
+        if len(hist) < 3:
+            return
+        qd = compile_query_difficulty(hist)
+        state.scoring_dataset, adapt_info = adapt_eval_set(
+            state.scoring_dataset,
+            qd,
+            full_dataset,
+            seed=config.seed + round_num,
+        )
+        if not adapt_info.get("unchanged"):
+            logger.info("Adaptive eval: %s", adapt_info)
+
+    def record_flips_from_rounds(self, rounds: list[Any], round_num: int) -> None:
+        """Record query flips between the last two rounds."""
+        if len(rounds) < 2:
+            return
+        prev_round = rounds[-2]
+        curr_round = rounds[-1]
+        if not prev_round.results or not curr_round.results:
+            return
+        desc = (
+            curr_round.candidate_scores[0].get("changes_description", "")
+            if curr_round.candidate_scores
+            else ""
+        )
+        flips = self.record_query_flips(round_num, desc, prev_round.results, curr_round.results)
+        if flips:
+            logger.debug("Round %d: %d query flips recorded", round_num, flips)
+
     def save(self, path: Path) -> None:
         """Persist to disk."""
         data = {

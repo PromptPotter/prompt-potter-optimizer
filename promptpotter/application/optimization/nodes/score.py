@@ -184,7 +184,7 @@ async def _score_candidates(
     ctx: ScoringEnv,
     *,
     degradation_checks: list | None = None,
-    callbacks: RunCallbacks | None = None,
+    callbacks: RunCallbacks,
     elimination_n_min: int = 20,
     elimination_alpha: float = 0.05,
 ) -> tuple[dict[str, list[dict]], list[dict], dict | None]:
@@ -207,11 +207,9 @@ async def _score_candidates(
     )
 
     for idx, osp_c in enumerate(osp_candidates):
-        _on_result = None
-        if callbacks and callbacks.on_sample_scored:
 
-            def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
-                callbacks.on_sample_scored(_ci, _ct, qi, qt, result)
+        def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
+            callbacks.on_sample_scored(_ci, _ct, qi, qt, result)
 
         sp = osp_c.to_job_search_point(
             base_pipeline_params=merged_pp[idx],
@@ -253,8 +251,7 @@ async def _score_candidates(
                 resumed_from_cache=True,
             )
             candidate_scores.append(report)
-            if callbacks and callbacks.on_candidate_scored:
-                callbacks.on_candidate_scored(idx, n_candidates, report)
+            callbacks.on_candidate_scored(idx, n_candidates, report)
             continue
 
         escalation_signal = scores.pop("escalation_signal", None)
@@ -280,8 +277,7 @@ async def _score_candidates(
             elimination_stopped=elimination_stopped,
         )
         candidate_scores.append(report)
-        if callbacks and callbacks.on_candidate_scored:
-            callbacks.on_candidate_scored(idx, n_candidates, report)
+        callbacks.on_candidate_scored(idx, n_candidates, report)
 
         if escalation_signal:
             if elimination_stopped:
@@ -300,7 +296,7 @@ async def l1_score(
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
-    callbacks: RunCallbacks | None = None,
+    callbacks: RunCallbacks,
     degradation_checks: list | None = None,
     elimination_n_min: int = 20,
     elimination_alpha: float = 0.05,

@@ -470,15 +470,18 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
     recorder = RoundRecorder(session_dir / "rounds")
     set_round_recorder(recorder)
 
+    from promptpotter.application.campaign.data import extract_campaign_baseline
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
 
+    baseline = extract_campaign_baseline(campaign_rounds)
+
     try:
         cycle_result = await _orch_run_optimization(
-            campaign_rounds,
             dataset,
             campaign_config,
+            baseline=baseline,
             session=session,
             scan_brief=scan_brief,
             experiment_id=ctx.state.get("experiment_id"),
@@ -501,26 +504,22 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             except (json.JSONDecodeError, OSError):
                 pass
 
-    if cycle_result:
-        ctx.state["cycle_id"] = cycle_result.cycle_id
-        ctx.state["best_accuracy"] = cycle_result.best_accuracy
+    ctx.state["cycle_id"] = cycle_result.cycle_id
+    ctx.state["best_accuracy"] = cycle_result.best_accuracy
     ctx.save_phase("optimize")
 
     # Write structured result for AI/machine consumption
     result_path = session_dir / "optimize_result.json"
-    if cycle_result:
-        result_path.write_text(
-            json.dumps(cycle_result.model_dump(), indent=2, default=str),
-            encoding="utf-8",
-        )
+    result_path.write_text(
+        json.dumps(cycle_result.model_dump(), indent=2, default=str),
+        encoding="utf-8",
+    )
 
     if getattr(args, "json_output", False):
-        _summary = cycle_result.model_dump() if cycle_result else {"status": "interrupted"}
-        print(json.dumps(_summary, indent=2, default=str))
+        print(json.dumps(cycle_result.model_dump(), indent=2, default=str))
     else:
         print(f"Dashboard: {_state_path}")
-        if cycle_result:
-            print(f"Result: {result_path}")
+        print(f"Result: {result_path}")
 
 
 async def cmd_control(args: argparse.Namespace) -> None:

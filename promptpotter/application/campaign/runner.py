@@ -1,38 +1,35 @@
-"""
-Optimization loop orchestrator for iterative prompt optimization.
+"""Optimization loop orchestrator.
 
-Runs ``l1_generate()`` → ``l1_score()`` in a
-counter-based loop.  Each round generates Layer 1 variants and evaluates
-them against the current best.
+Runs L1 generate → L1 score in a counter-based loop; each round generates
+Layer 1 variants and evaluates them against the current best.
 
-Stopping conditions:
-- ``max_rounds`` reached
-- ``patience`` consecutive non-improving rounds exhausted
-- ``winner_accuracy >= 1.0`` (perfect score)
+Stopping: ``max_rounds``, ``patience`` exhausted, or perfect score.
 """
+
+from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.campaign_setup import SessionEnv
 from promptpotter.application.campaign.config import LoopConfig
-from promptpotter.application.campaign.data import extract_campaign_baseline
+from promptpotter.application.campaign.data import CampaignBaseline
 from promptpotter.application.datasets.builder import sample_dataset
 from promptpotter.application.optimization.nodes.critique import sample_thinking_styles
-from promptpotter.application.optimization.nodes.escalation import escalate_l2
+from promptpotter.application.optimization.nodes.escalation import (
+    EscalationTarget,
+    build_degradation_checks,
+    escalate_l2,
+)
 from promptpotter.application.optimization.nodes.round_execution import (
     PauseForReviewError,
     execute_round,
     update_round_state,
 )
-from promptpotter.application.scoring.metrics import compute_composite_score
+from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.search.search_memory import SearchMemory
-from promptpotter.domain.cycle_identity import TUNING_KEYS, cycle_config_identity
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.domain.search_point import TaskDecomposition
@@ -40,106 +37,67 @@ from promptpotter.infrastructure.persistence.session_emitter import CampaignPers
 from promptpotter.infrastructure.persistence.state import (
     CampaignPhase,
     LoopState,
-    PhaseEvent,
     RoundResult,
     RunCallbacks,
     RunResult,
+    StopLoop,
     StopReason,
     emit_phase,
-    get_obs_trace,
 )
+from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.search.scan_results import ScanBrief
-    from promptpotter.infrastructure.store.campaign_store import CampaignStore
-    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_optimization"]
 
 
+_CAMPAIGN_STATUS_BY_STOP: dict[StopReason, str] = {
+    StopReason.PAUSED_FOR_REVIEW: "paused",
+    StopReason.USER_PAUSED: "paused",
+    StopReason.USER_STOPPED: "stopped",
+    StopReason.INTERRUPTED: "interrupted",
+}
+
+
 # ---------------------------------------------------------------------------
-# Round bookkeeping — query flips, SearchMemory refresh, adaptive eval
+# Escalation dispatch
 # ---------------------------------------------------------------------------
 
 
-def record_query_flips(state: LoopState, round_num: int) -> None:
-    """Record query flips into SearchMemory for improvement attribution."""
-    if not state.search_memory or len(state.rounds) < 2:
-        return
-    prev_round = state.rounds[-2]
-    curr_round = state.rounds[-1]
-    if not prev_round.results or not curr_round.results:
-        return
-    desc = (
-        curr_round.candidate_scores[0].get("changes_description", "")
-        if curr_round.candidate_scores
-        else ""
-    )
-    _flips = state.search_memory.record_query_flips(
+async def _try_escalate_l2(
+    state: LoopState,
+    config: LoopConfig,
+    round_num: int,
+    cb: RunCallbacks,
+    *,
+    from_degradation: bool = False,
+    esc_check_result: dict | None = None,
+) -> None:
+    """Single entry point for all ``escalate_l2`` calls.
+
+    Raises ``StopLoop`` if L2/L3 says to stop.
+    """
+    obs = state.scoring_ctx.obs if state.scoring_ctx else None
+    trace_id = obs.get_file_trace_id(state.obs_campaign_id) if obs else None
+    stop = await escalate_l2(
+        state,
+        config,
         round_num,
-        desc,
-        prev_round.results,
-        curr_round.results,
+        cb.on_phase,
+        on_checkpoint=cb.on_checkpoint,
+        obs=obs,
+        trace_id=trace_id,
+        from_degradation=from_degradation,
+        escalation_check_result=esc_check_result,
     )
-    if _flips:
-        logger.debug("Round %d: %d query flips recorded", round_num, _flips)
-
-
-def refresh_search_memory(
-    state: LoopState,
-    config: LoopConfig,
-    round_num: int,
-) -> None:
-    """Refresh SearchMemory from latest dataset runs, save, recompute correlations."""
-    if not state.search_memory or not state.scoring_ctx or not state.scoring_ctx.store:
-        return
-
-    from pathlib import Path
-
-    _sm_store = state.scoring_ctx.store
-    if state.search_memory.refresh(_sm_store, config.backend_id):
-        # Periodically recompute failure group correlations
-        if (
-            round_num > 0
-            and round_num % 5 == 0
-            and state.search_memory.recompute_failure_group_correlations()
-        ):
-            logger.info(
-                "SearchMemory: recomputed failure group correlations at round %d",
-                round_num,
-            )
-        _sm_path = Path(_sm_store.base_dir) / config.backend_id / "search_memory.json"
-        state.search_memory.save(_sm_path)
-
-
-def try_adapt_eval_set(
-    state: LoopState,
-    full_dataset: list,
-    config: LoopConfig,
-    round_num: int,
-) -> None:
-    """Swap dead queries for discriminating ones based on round history."""
-    if round_num < 2:
-        return
-    _hist = [r.results for r in state.rounds if r.results]
-    if len(_hist) < 3:
-        return
-    from promptpotter.application.optimization.nodes.round_execution import adapt_eval_set
-    from promptpotter.application.scoring.metrics import compile_query_difficulty
-
-    _qd = compile_query_difficulty(_hist)
-    state.scoring_dataset, _adapt = adapt_eval_set(
-        state.scoring_dataset,
-        _qd,
-        full_dataset,
-        seed=config.seed + round_num,
-    )
-    if not _adapt.get("unchanged"):
-        logger.info("Adaptive eval: %s", _adapt)
+    if stop:
+        raise StopLoop(stop)
 
 
 async def _handle_escalation_signal(
@@ -147,20 +105,13 @@ async def _handle_escalation_signal(
     config: LoopConfig,
     round_result: RoundResult,
     round_num: int,
-    on_phase: Callable[[PhaseEvent], None] | None,
-    obs_campaign_id: str,
-    campaign_store: "CampaignStore | None",
-    cycle_id: str | None,
-    on_checkpoint: Callable[[str], str | None] | None = None,
-) -> StopReason | None:
-    """Handle a degradation escalation signal from a round result.
-
-    Returns a StopReason if the cycle should stop, None to continue.
-    """
+    cb: RunCallbacks,
+) -> None:
+    """Handle a degradation escalation signal from a round result."""
     signal = round_result.escalation_signal
     assert signal is not None
     emit_phase(
-        on_phase,
+        cb.on_phase,
         CampaignPhase.ESCALATION,
         "enter",
         round=round_num,
@@ -169,143 +120,96 @@ async def _handle_escalation_signal(
         degraded_rate=signal["context"].get("degraded_rate"),
         warning_types=signal["context"].get("warning_types"),
     )
-    logger.debug(
-        "Escalation '%s' at round %d — target=%s, degraded_rate=%.1f%%",
-        signal["check_name"],
-        round_num,
-        signal["target"],
-        signal["context"].get("degraded_rate", 0) * 100,
-    )
 
     esc_check_result = signal["check_result"]
 
-    from promptpotter.application.optimization.nodes.escalation import EscalationTarget
-
-    # Dispatch by target
     if signal["target"] in (EscalationTarget.L2, EscalationTarget.L3) and config.enable_l2:
-        # Fill outcome of previous journal entry (if any)
-        journal = state.opt_sp.escalation_journal
-        if journal and journal[-1].get("outcome_degraded_rate") is None:
-            journal[-1]["outcome_degraded_rate"] = esc_check_result.get("degraded_rate", 0)
-
-        # Record journal entry BEFORE L2 so L2 sees the current event
-        # in the journal (not just history). Also ensures the entry is
-        # persisted even if L2 returns a stop signal.
-        dominant = esc_check_result.get("dominant_warning", "unknown:unknown")
-        problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
-        step_cfg = ((state.current_sp.pipeline_params if state.current_sp else None) or {}).get(
-            problem_step, {}
+        state.opt_sp.record_escalation_event(
+            round_num,
+            esc_check_result,
+            state.current_sp.pipeline_params if state.current_sp else None,
         )
-        state.opt_sp.escalation_journal.append(
-            {
-                "round": round_num,
-                "degraded_rate": esc_check_result.get("degraded_rate", 0),
-                "problem_step": problem_step,
-                "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
-                "warning_types": esc_check_result.get("warning_types", {}),
-                "outcome_degraded_rate": None,
-            }
-        )
-
-        _obs, _tid = get_obs_trace(state, obs_campaign_id)
         try:
-            l2_stop = await escalate_l2(
+            await _try_escalate_l2(
                 state,
                 config,
                 round_num,
-                on_phase,
-                on_checkpoint=on_checkpoint,
-                obs=_obs,
-                trace_id=_tid,
+                cb,
                 from_degradation=True,
-                escalation_check_result=esc_check_result,
+                esc_check_result=esc_check_result,
             )
+        except StopLoop:
+            raise
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
         except Exception:
             logger.warning("L2 escalation failed", exc_info=True)
-            l2_stop = None
-        if l2_stop:
-            return l2_stop
     elif signal["target"] == EscalationTarget.ABORT:
-        return StopReason.ABORT
+        raise StopLoop(StopReason.ABORT)
 
     # Common escalation exit (L2 continued, retry, or L2 disabled)
-    if campaign_store and cycle_id:
-        campaign_store.delete_round_candidates(
+    if state.campaign_store and state.cycle_id:
+        state.campaign_store.delete_round_candidates(
             config.backend_id,
-            cycle_id,
+            state.cycle_id,
             round_num + 1,
         )
-    emit_phase(on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
-    return None
+    emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
 
 
-def _checkpoint_round(
-    campaign_store: "CampaignStore",
-    cycle_id: str,
-    config: LoopConfig,
+# ---------------------------------------------------------------------------
+# Round loop
+# ---------------------------------------------------------------------------
+
+
+async def _post_round(
     state: LoopState,
     round_result: RoundResult,
     round_num: int,
-) -> None:
-    """Persist round results to the campaign store."""
-    with graceful("Round checkpoint failed"):
-        campaign_store.add_trial(
-            config.backend_id,
-            cycle_id,
-            {
-                "trial_id": f"round_{round_num}",
-                "round": round_num,
-                "label": round_result.label,
-                "accuracy": round_result.accuracy,
-                "composite": round_result.composite,
-                "hits": round_result.hits,
-                "total": round_result.total,
-                "improved": round_result.improved,
-                "prompt_fields": round_result.prompt_fields,
-                "results": round_result.results,
-                "candidates_scored": round_result.candidates_scored,
-                "candidate_scores": list(round_result.candidate_scores),
-                "stall_count": state.stall_count,
-                **state.escalation.to_checkpoint_dict(),
-                "opt_search_point": state.opt_sp.model_dump(),
-            },
-        )
-
-
-async def _check_stopping_conditions(
-    state: LoopState,
     config: LoopConfig,
-    round_num: int,
-    on_phase: Callable[[PhaseEvent], None] | None,
-    obs_campaign_id: str,
-    on_checkpoint: Callable[[str], str | None] | None = None,
-) -> StopReason | None:
-    """Check patience, max_rounds, and perfect score.
+    dataset: list[dict[str, Any]],
+    cb: RunCallbacks,
+) -> None:
+    """Normal-path bookkeeping after a non-escalation round.
 
-    Returns a StopReason if the cycle should stop, None to continue.
+    Raises ``StopLoop`` if any stopping condition fires.
     """
-    if state.current_accuracy >= 1.0:
-        return StopReason.PERFECT
-    if state.stall_count >= config.l1_patience:
-        if config.enable_l2:
-            _obs, _tid = get_obs_trace(state, obs_campaign_id)
-            _l2_stop = await escalate_l2(
-                state,
-                config,
-                round_num,
-                on_phase,
-                on_checkpoint=on_checkpoint,
-                obs=_obs,
-                trace_id=_tid,
+    state.record_round_outcome(round_result.improved)
+    if round_result.improved:
+        state.opt_sp.l2_directive = ""  # L2 directive is one-round only
+
+    cb.on_round_complete(round_result, state.stall_count)
+
+    if state.campaign_store and state.cycle_id:
+        with graceful("Round checkpoint failed"):
+            state.campaign_store.add_trial(
+                config.backend_id,
+                state.cycle_id,
+                state.build_trial_entry(round_result, round_num),
             )
-            if _l2_stop:
-                return _l2_stop
-            state.reset_stall_count()  # L2/L3 changed prompt — fresh window
-        else:
-            return StopReason.PATIENCE
-    return None
+
+    _rr = get_round_recorder()
+    if _rr:
+        _rr.flush()
+
+    # Bidirectional control — user may pause/stop via dashboard
+    _ctrl = cb.on_checkpoint("after_round")
+    if _ctrl == "pause":
+        raise PauseForReviewError([], round_num, pause_point="user_pause")
+    if _ctrl == "stop":
+        raise StopLoop(StopReason.USER_STOPPED)
+
+    if state.search_memory:
+        state.search_memory.on_round_complete(state, config, round_num, dataset)
+
+    # Stopping conditions
+    if state.current_accuracy >= 1.0:
+        raise StopLoop(StopReason.PERFECT)
+    if state.stall_count >= config.l1_patience:
+        if not config.enable_l2:
+            raise StopLoop(StopReason.PATIENCE)
+        await _try_escalate_l2(state, config, round_num, cb)
+        state.reset_stall_count()  # L2/L3 changed prompt — fresh window
 
 
 async def _run_round_loop(
@@ -314,38 +218,19 @@ async def _run_round_loop(
     config: LoopConfig,
     cb: RunCallbacks,
 ) -> StopReason:
-    """Execute the round loop: generate → score → escalate → stop.
-
-    Reads infrastructure from *state* (campaign_store, cycle_id, etc.).
-    Returns the ``StopReason`` that ended the loop.
-    """
-    stop_reason: StopReason | None = None
+    """Execute the round loop: generate → score → escalate → stop."""
     hard_cap = config.hard_cap
+    round_num = state.resumed_from_round
+    clean_rounds = state.resumed_from_round
+    max_rounds = config.max_rounds or 999
 
     try:
-        round_num = state.resumed_from_round
-        clean_rounds = state.resumed_from_round
-        max_rounds = config.max_rounds or 999
-
         while clean_rounds < max_rounds and round_num < hard_cap:
-            # --- Probe vs normal round data ---
             is_probe = state.probe_next_round
-            if is_probe:
-                warned = {q for q, e in state.opt_sp.warning_inventory.items() if e.get("warnings")}
-                round_eval_data = [d for d in dataset if d.get("query") in warned]
-                _round_checks = None  # no escalation checks during probe
-                logger.debug(
-                    "PROBE round %d: %d warned queries (from %d tracked)",
-                    round_num,
-                    len(round_eval_data),
-                    len(warned),
-                )
-            else:
-                round_eval_data = state.scoring_dataset
-                _round_checks = state.degradation_checks
+            round_eval_data, round_checks = state.eval_data_for_round(dataset)
 
             logger.debug(
-                "Optimization round %d (clean=%d/%d, acc=%.3f, stall=%d/%d%s)",
+                "Round %d (clean=%d/%d, acc=%.3f, stall=%d/%d%s)",
                 round_num,
                 clean_rounds,
                 max_rounds,
@@ -354,9 +239,6 @@ async def _run_round_loop(
                 config.l1_patience,
                 ", PROBE" if is_probe else "",
             )
-
-            # Round recorder: begin new round
-            from promptpotter.application.optimization.pipeline import get_round_recorder
 
             _rr = get_round_recorder()
             if _rr:
@@ -371,238 +253,94 @@ async def _run_round_loop(
                 state.campaign_store,
                 state.cycle_id,
                 cb,
-                degradation_checks=_round_checks,
+                degradation_checks=round_checks,
                 search_memory=state.search_memory,
             )
-            update_round_state(
-                state,
-                round_result,
-                round_num,
-                schema=config.pipeline_schema,
-            )
+            update_round_state(state, round_result, round_num, schema=config.pipeline_schema)
 
-            record_query_flips(state, round_num)
+            if state.search_memory and len(state.rounds) >= 2:
+                state.search_memory.record_flips_from_rounds(state.rounds, round_num)
 
-            # --- After probe round: reset flag + force L2 ---
             if is_probe:
-                state.exit_probe_mode()
-                probe_stop = None
+                state.probe_next_round = False
                 if config.enable_l2:
-                    _obs, _tid = get_obs_trace(state, state.obs_campaign_id)
-                    probe_stop = await escalate_l2(
-                        state,
-                        config,
-                        round_num,
-                        cb.on_phase,
-                        on_checkpoint=cb.on_checkpoint,
-                        obs=_obs,
-                        trace_id=_tid,
-                    )
-                if probe_stop:
-                    stop_reason = probe_stop
-                    break
+                    await _try_escalate_l2(state, config, round_num, cb)
                 round_num += 1
                 clean_rounds += 1
-                continue  # skip normal escalation/stopping — L2 handled it
-
-            # --- Escalation path ---
-            if round_result.escalation_signal:
-                esc_stop = await _handle_escalation_signal(
-                    state,
-                    config,
-                    round_result,
-                    round_num,
-                    cb.on_phase,
-                    state.obs_campaign_id,
-                    state.campaign_store,
-                    state.cycle_id,
-                    on_checkpoint=cb.on_checkpoint,
-                )
-                if esc_stop:
-                    stop_reason = esc_stop
-                    break
-                # Degradation rounds don't count toward max_rounds
-                round_num += 1
                 continue
 
-            # --- Normal path (no escalation) ---
-            state.record_round_outcome(round_result.improved)
-            # L2 directive is valid for one round only — clear when L2 didn't fire
-            if round_result.improved:
-                state.opt_sp.l2_directive = ""
+            if round_result.escalation_signal:
+                await _handle_escalation_signal(state, config, round_result, round_num, cb)
+                round_num += 1  # degradation rounds don't count toward max_rounds
+                continue
 
-            if cb.on_round_complete:
-                cb.on_round_complete(round_result, state.stall_count)
-
-            # Checkpoint round to disk
-            if state.campaign_store and state.cycle_id:
-                _checkpoint_round(
-                    state.campaign_store,
-                    state.cycle_id,
-                    config,
-                    state,
-                    round_result,
-                    round_num,
-                )
-
-            # Round recorder: flush the round's LLM call audit trail.
-            # Round outcome (accuracy/hits/opt_sp) is already in trial_NNNN.json
-            # via _checkpoint_round above.
-            _rr = get_round_recorder()
-            if _rr:
-                _rr.flush()
-
-            # Bidirectional control checkpoint — user may pause/stop via dashboard
-            if cb.on_checkpoint:
-                _ctrl = cb.on_checkpoint("after_round")
-                if _ctrl == "pause":
-                    raise PauseForReviewError([], round_num, pause_point="user_pause")
-                if _ctrl == "stop":
-                    stop_reason = StopReason.USER_STOPPED
-                    break
-
-            refresh_search_memory(state, config, round_num)
-
-            if not is_probe:
-                try_adapt_eval_set(state, dataset, config, round_num)
-
-            # Stopping conditions
-            _stop = await _check_stopping_conditions(
-                state,
-                config,
-                round_num,
-                cb.on_phase,
-                state.obs_campaign_id,
-                on_checkpoint=cb.on_checkpoint,
-            )
-            if _stop:
-                stop_reason = _stop
-                break
-
+            await _post_round(state, round_result, round_num, config, dataset, cb)
             round_num += 1
             clean_rounds += 1
 
-        # Loop completed without break
-        if stop_reason is None:
-            stop_reason = StopReason.HARD_CAP if round_num >= hard_cap else StopReason.MAX_ROUNDS
+        return StopReason.HARD_CAP if round_num >= hard_cap else StopReason.MAX_ROUNDS
 
+    except StopLoop as sl:
+        return sl.reason
     except PauseForReviewError as pause:
-        stop_reason = (
+        logger.info("HITL: paused at %s (round %d).", pause.pause_point, pause.round_num)
+        return (
             StopReason.USER_PAUSED
             if pause.pause_point == "user_pause"
             else StopReason.PAUSED_FOR_REVIEW
         )
-        logger.info(
-            "HITL: paused at %s (round %d, %d candidates).",
-            pause.pause_point,
-            pause.round_num,
-            len(pause.candidates),
-        )
     except (KeyboardInterrupt, asyncio.CancelledError):
-        stop_reason = StopReason.INTERRUPTED
-        logger.warning(
-            "Optimization interrupted at round %d. Completed rounds are checkpointed.",
-            len(state.rounds),
-        )
+        logger.warning("Optimization interrupted at round %d.", len(state.rounds))
+        return StopReason.INTERRUPTED
 
-    # Cleanup round recorder
-    from promptpotter.application.optimization.pipeline import set_round_recorder
 
-    set_round_recorder(None)
-
-    assert stop_reason is not None
-    return stop_reason
+# ---------------------------------------------------------------------------
+# Init: cycle resume, obs, scoring env, search memory
+# ---------------------------------------------------------------------------
 
 
 async def _init_optimization(
-    instruction: str,
+    baseline: CampaignBaseline,
     dataset: list[dict[str, Any]],
     config: LoopConfig,
     *,
-    baseline_prompt_fields: dict | None,
-    baseline_accuracy: float,
-    baseline_results: list | None,
-    on_phase: Callable[[PhaseEvent], None] | None,
+    cb: RunCallbacks,
     langfuse_session_id: str | None,
     cycle_id: str | None,
     experiment_id: str,
     session: SessionEnv,
     started_at: str,
 ) -> LoopState:
-    """Build LoopState: baseline, cycle resume, obs, scoring env, search memory.
-
-    All mutation lives here; the loop body can then run against a fully
-    wired ``LoopState``.  See ``docs/architecture/overview.md § Persistence
-    Architecture`` for the two-tier resume flow this function sets up.
-    """
-    from promptpotter.infrastructure.store.campaign_store import CampaignStore
-    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
-
-    emit_phase(on_phase, CampaignPhase.INIT, "enter", config=config, dataset=dataset)
+    """Build LoopState: baseline, cycle resume, obs, scoring env, search memory."""
+    emit_phase(cb.on_phase, CampaignPhase.INIT, "enter", config=config, dataset=dataset)
 
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)
+    if baseline.baseline_ps is None:
+        raise ValueError("baseline.baseline_ps is required; run baseline evaluation first.")
 
-    scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest, config.seed)
-
-    # --- 1. Baseline LoopState --------------------------------------------
-    if baseline_prompt_fields is None:
-        raise ValueError(
-            "baseline_prompt_fields is required. Run baseline evaluation in the "
-            "notebook before starting the feedback cycle.",
-        )
-    baseline_osp = OptSearchPoint.from_prompt_fields(baseline_prompt_fields)
-    logger.debug("Using provided baseline (acc=%.3f)", baseline_accuracy)
-    if baseline_results:
-        assert config.pipeline_schema is not None, "pipeline_schema required for composite score"
-        baseline_composite = compute_composite_score(baseline_results, config.pipeline_schema)[
-            "composite"
-        ]
-    else:
-        baseline_composite = baseline_accuracy
+    baseline_osp = OptSearchPoint.from_prompt_fields(baseline.baseline_ps)
     state = LoopState.from_baseline(
         baseline_osp,
-        baseline_accuracy,
-        baseline_composite,
+        baseline.baseline_acc,
         task_context=config.task_context or TaskDecomposition(),
         schema=config.pipeline_schema,
-        baseline_results=baseline_results,
+        baseline_results=baseline.baseline_results,
     )
 
-    # --- 2. Cycle resume / create + observability -------------------------
-    campaign_store: CampaignStore | None = None
-    resolved_cycle_id: str | None = None
-    resumed_from_round = 0
-    if config.project_root and config.backend_id:
-        try:
-            campaign_store = CampaignStore(Path(config.project_root))
-            resolved_cycle_id = cycle_id or cycle_config_identity(
-                config, baseline_osp.render(), dataset, strict=config.strict_cycle_identity
-            )
-            logger.debug("Cycle identity: %s", resolved_cycle_id)
-            resumed_from_round = campaign_store.resume_or_create(
-                config.backend_id,
-                resolved_cycle_id,
-                config_snapshot=config.model_dump(mode="json"),
-                baseline_accuracy=baseline_accuracy,
-                hot_update_keys=TUNING_KEYS if cycle_id else frozenset(),
-            )
-        except (OSError, json.JSONDecodeError, KeyError):
-            logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
-            campaign_store, resolved_cycle_id, resumed_from_round = None, None, 0
+    campaign_store, resolved_cycle_id, resumed_from_round = CampaignStore.bootstrap_cycle(
+        config, baseline_osp.render(), baseline.baseline_acc, dataset, cycle_id
+    )
 
-    if not langfuse_session_id and resolved_cycle_id:
-        langfuse_session_id = resolved_cycle_id
     obs_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
-
     obs = ObsLogger.start_campaign(
         config.project_root,
         config.backend_id,
         config_snapshot=config.model_dump(mode="json"),
-        baseline_accuracy=baseline_accuracy,
+        baseline_accuracy=baseline.baseline_acc,
         dataset=dataset,
         obs_campaign_id=obs_campaign_id,
-        langfuse_session_id=langfuse_session_id,
+        langfuse_session_id=langfuse_session_id or resolved_cycle_id,
     )
 
     if resumed_from_round > 0 and campaign_store and resolved_cycle_id:
@@ -616,7 +354,6 @@ async def _init_optimization(
         # sample on fresh init so restore_from_trial's value wins on resume.
         state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
-    # --- 3. Scoring env, baseline alias, degradation checks --------------
     state.scoring_ctx = ScoringEnv.for_loop(
         session.backend_client,
         session.store,
@@ -632,45 +369,38 @@ async def _init_optimization(
     )
     if session.store:
         session.store.dataset_runs.register_prompt_alias(
-            config.backend_id, instruction, baseline_osp.render()
+            config.backend_id, baseline.instruction, baseline_osp.render()
         )
 
-    from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
-
-    degradation_checks = build_degradation_checks(config)
-
-    # --- 4. SearchMemory --------------------------------------------------
     search_memory = SearchMemory.ensure_for(session.store, config.backend_id)
     state.search_memory = search_memory
     if state.scoring_ctx and search_memory:
         state.scoring_ctx.search_memory = search_memory
 
-    # --- 5. Wire infrastructure fields on state before INIT:exit ---------
     state.campaign_store = campaign_store
     state.cycle_id = resolved_cycle_id
     state.obs_campaign_id = obs_campaign_id
-    state.scoring_dataset = scoring_dataset
-    state.degradation_checks = degradation_checks
+    state.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest, config.seed)
+    state.degradation_checks = build_degradation_checks(config)
     state.resumed_from_round = resumed_from_round
 
-    emit_phase(on_phase, CampaignPhase.INIT, "exit", state=state, config=config, dataset=dataset)
+    emit_phase(cb.on_phase, CampaignPhase.INIT, "exit", state=state, config=config, dataset=dataset)
     return state
 
 
-def _finalize_optimization(
+def _finalize_run(
     state: LoopState,
     config: LoopConfig,
-    *,
-    stop_reason: str,
+    emitter: CampaignPersistenceEmitter | None,
+    stop_reason: StopReason,
     finished_at: str,
-    campaign_status: str,
-) -> None:
-    """Mark the campaign on disk and finalize observability."""
+) -> str | None:
+    """Finalize store, obs logger, and emitter; return cloud trace id (or None)."""
     if state.campaign_store and state.cycle_id:
         state.campaign_store.mark_finished(
             config.backend_id,
             state.cycle_id,
-            status=campaign_status,
+            status=_CAMPAIGN_STATUS_BY_STOP.get(stop_reason, "completed"),
             stop_reason=stop_reason,
             best_accuracy=state.best_accuracy,
             best_round=state.best_round,
@@ -686,142 +416,29 @@ def _finalize_optimization(
             stop_reason=stop_reason,
             best_round=state.best_round,
         )
-
-
-async def _run_optimization_core(
-    instruction: str,
-    dataset: list[dict[str, Any]],
-    config: LoopConfig,
-    *,
-    baseline_prompt_fields: dict | None = None,
-    baseline_accuracy: float = 0.0,
-    baseline_results: list | None = None,
-    callbacks: RunCallbacks | None = None,
-    langfuse_session_id: str | None = None,
-    cycle_id: str | None = None,
-    experiment_id: str = "",
-    session: SessionEnv | None = None,
-) -> RunResult:
-    """Core optimization loop: init → round loop → finalize."""
-    if session is None:
-        raise ValueError("session (SessionEnv) is required for _run_optimization_core")
-    started_at = datetime.now(UTC).isoformat()
-
-    cb = callbacks or RunCallbacks()
-
-    # -- Init --
-    state = await _init_optimization(
-        instruction,
-        dataset,
-        config,
-        baseline_prompt_fields=baseline_prompt_fields,
-        baseline_accuracy=baseline_accuracy,
-        baseline_results=baseline_results,
-        on_phase=cb.on_phase,
-        langfuse_session_id=langfuse_session_id,
-        cycle_id=cycle_id,
-        experiment_id=experiment_id,
-        session=session,
-        started_at=started_at,
-    )
-    _emitter = CampaignPersistenceEmitter.for_session(config, baseline_accuracy, state.cycle_id)
-
-    # Chain persistence callbacks (fires first) with caller display callbacks
-    if _emitter:
-        from promptpotter.infrastructure.persistence.state import chain_callbacks
-
-        cb = chain_callbacks(
-            RunCallbacks(
-                on_phase=_emitter.on_phase,
-                on_sample_scored=_emitter.on_sample_scored,
-                on_candidate_scored=_emitter.on_candidate_scored,
-                on_round_complete=_emitter.on_round_complete,
-            ),
-            cb,
-        )
-
-    stop_reason = await _run_round_loop(state, dataset, config, cb)
-
-    # -- Finalize --
-    finished_at = datetime.now(UTC).isoformat()
-    obs = state.scoring_ctx.obs if state.scoring_ctx else None
-    campaign_status = (
-        "paused"
-        if stop_reason in (StopReason.PAUSED_FOR_REVIEW, StopReason.USER_PAUSED)
-        else "stopped"
-        if stop_reason == StopReason.USER_STOPPED
-        else "interrupted"
-        if stop_reason == StopReason.INTERRUPTED
-        else "completed"
-    )
-    _finalize_optimization(
-        state,
-        config,
-        stop_reason=stop_reason,
-        finished_at=finished_at,
-        campaign_status=campaign_status,
-    )
-
-    # Persistence emitter: finalize artifacts
-    if _emitter:
-        _emitter.finalize(
+    if emitter:
+        emitter.finalize(
             n_rounds=len(state.rounds),
             best_accuracy=state.best_accuracy,
             best_round=state.best_round,
             stop_reason=stop_reason,
             cycle_id=state.cycle_id,
         )
-
-    cloud_trace_id = (
-        None
-        if stop_reason in (StopReason.INTERRUPTED, StopReason.PAUSED_FOR_REVIEW)
-        else (obs.get_cloud_trace_id(state.obs_campaign_id) if obs else None)
-    )
-
-    return RunResult(
-        rounds=state.rounds,
-        n_rounds=len(state.rounds),
-        best_accuracy=state.best_accuracy,
-        best_round=state.best_round,
-        baseline_accuracy=(state.rounds[0].accuracy if state.rounds else state.current_accuracy),
-        winner_prompt_fields=state.opt_sp.prompt_field_dict() if state.best_sp else {},
-        winner_pipeline_params=state.best_sp.pipeline_params if state.best_sp else None,
-        stop_reason=stop_reason,
-        started_at=started_at,
-        finished_at=finished_at,
-        langfuse_trace_id=cloud_trace_id,
-        cycle_id=state.cycle_id,
-        resumed_from_round=state.resumed_from_round,
-    )
+    if stop_reason in (StopReason.INTERRUPTED, StopReason.PAUSED_FOR_REVIEW) or obs is None:
+        return None
+    return obs.get_cloud_trace_id(state.obs_campaign_id)
 
 
 # ---------------------------------------------------------------------------
-# Campaign-level entry point (config assembly + callback chaining)
+# Public entry point
 # ---------------------------------------------------------------------------
-
-
-def _make_round_append_callback(
-    campaign_rounds: list,
-) -> Callable:
-    """Build the round-entry append callback shared by all entry points."""
-
-    def _on_round(round_result: Any, stall_count: int) -> None:
-        round_entry = round_result.model_dump()
-        ps_raw = round_entry.get("prompt_fields", {})
-        round_entry["prompt_fields"] = (
-            OptSearchPoint.from_prompt_fields(ps_raw) if isinstance(ps_raw, dict) else ps_raw
-        )
-        round_entry["round"] = len(campaign_rounds)
-        campaign_rounds.append(round_entry)
-
-    return _on_round
 
 
 async def run_optimization(
-    campaign_rounds: list,
-    dataset: list,
+    dataset: list[dict[str, Any]],
     campaign_config: CampaignConfig,
     *,
+    baseline: CampaignBaseline,
     session: SessionEnv,
     scan_brief: ScanBrief | None = None,
     experiment_id: str | None = None,
@@ -831,19 +448,15 @@ async def run_optimization(
     langfuse_session_id: str | None = None,
     cycle_id: str | None = None,
     max_rounds_override: int | None = None,
-) -> RunResult | None:
-    """Build config, extract baseline, wire round-append callback, and run loop.
+) -> RunResult:
+    """Run the full optimization loop from a prepared baseline.
 
-    Callers pass display-specific callbacks via *callbacks*; the round-entry
-    append is handled internally and chained before the caller's
-    ``on_round_complete``.
-
-    *max_rounds_override* caps ``max_rounds`` without mutating
-    *campaign_config* — used by ``--round`` to run a single round
-    ephemerally.
-
-    Returns ``RunResult`` (or ``None`` if interrupted before any rounds).
+    Callers must provide an already-scored ``baseline`` (see
+    ``run_baseline_scoring``).  Returns ``RunResult`` — never None; any
+    interrupt is reflected in ``stop_reason``.
     """
+    started_at = datetime.now(UTC).isoformat()
+
     config = LoopConfig.from_campaign_config(
         campaign_config,
         backend_id=session.backend_id,
@@ -856,37 +469,46 @@ async def run_optimization(
     if max_rounds_override is not None:
         config = config.model_copy(update={"max_rounds": max_rounds_override})
 
-    bl = extract_campaign_baseline(campaign_rounds)
+    cb = callbacks or RunCallbacks()
 
-    # Chain: round-append fires first, then caller's display callback
-    append_cb = _make_round_append_callback(campaign_rounds)
-    caller_cb = callbacks or RunCallbacks()
-
-    original_on_round = caller_cb.on_round_complete
-
-    def _chained_on_round(round_result: Any, stall_count: int) -> None:
-        append_cb(round_result, stall_count)
-        if original_on_round:
-            original_on_round(round_result, stall_count)
-
-    merged_cb = RunCallbacks(
-        on_round_complete=_chained_on_round,
-        on_candidate_scored=caller_cb.on_candidate_scored,
-        on_sample_scored=caller_cb.on_sample_scored,
-        on_phase=caller_cb.on_phase,
-        on_checkpoint=caller_cb.on_checkpoint,
-    )
-
-    return await _run_optimization_core(
-        bl.instruction,
+    state = await _init_optimization(
+        baseline,
         dataset,
         config,
-        baseline_prompt_fields=bl.baseline_ps,
-        baseline_accuracy=bl.baseline_acc,
-        baseline_results=bl.baseline_results,
-        callbacks=merged_cb,
+        cb=cb,
         langfuse_session_id=langfuse_session_id,
         cycle_id=cycle_id,
         experiment_id=experiment_id or "",
         session=session,
+        started_at=started_at,
+    )
+
+    emitter = CampaignPersistenceEmitter.for_session(config, baseline.baseline_acc, state.cycle_id)
+    if emitter:
+        cb = RunCallbacks(
+            on_phase=emitter.on_phase,
+            on_sample_scored=emitter.on_sample_scored,
+            on_candidate_scored=emitter.on_candidate_scored,
+            on_round_complete=emitter.on_round_complete,
+        ).merge(cb)
+
+    stop_reason = await _run_round_loop(state, dataset, config, cb)
+
+    finished_at = datetime.now(UTC).isoformat()
+    cloud_trace_id = _finalize_run(state, config, emitter, stop_reason, finished_at)
+
+    return RunResult(
+        rounds=state.rounds,
+        n_rounds=len(state.rounds),
+        best_accuracy=state.best_accuracy,
+        best_round=state.best_round,
+        baseline_accuracy=baseline.baseline_acc,
+        winner_prompt_fields=state.opt_sp.prompt_field_dict() if state.best_sp else {},
+        winner_pipeline_params=state.best_sp.pipeline_params if state.best_sp else None,
+        stop_reason=stop_reason,
+        started_at=started_at,
+        finished_at=finished_at,
+        langfuse_trace_id=cloud_trace_id,
+        cycle_id=state.cycle_id,
+        resumed_from_round=state.resumed_from_round,
     )
