@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.store.project_store import ProjectStore
 from promptpotter.services.campaign.campaign_setup import (
     SessionEnv,
 )
@@ -22,12 +23,11 @@ from promptpotter.services.campaign.data import (
 from promptpotter.services.campaign.mgmt import (
     save_campaign_winner,
 )
-from promptpotter.services.project_store import ProjectStore
 from promptpotter.services.search import load_variant_library
 
 if TYPE_CHECKING:
+    from promptpotter.infrastructure.llm.client import LLMClientBase
     from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.llm_client import LLMClientBase
 
 __all__ = [
     "build_all_index_terms",
@@ -128,7 +128,7 @@ def dev_reload() -> None:
         "promptpotter.services.campaign.nodes.critique",
         "promptpotter.services.campaign.nodes.round_execution",
         "promptpotter.services.campaign.runner",
-        "promptpotter.services.store.dataset_run_store",
+        "promptpotter.infrastructure.store.dataset_run_store",
         "promptpotter.services.scoring.stale_data",
         "promptpotter.services.scoring.sample_measurement",
         "promptpotter.services.dataset_scoring",
@@ -394,7 +394,7 @@ def configure_langfuse(
 ) -> None:
     """Configure Langfuse settings at runtime from a notebook cell."""
     from promptpotter.config.settings import settings
-    from promptpotter.services.tracing.langfuse_client import LangfuseLogger
+    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
     changed = False
     if enabled is not None:
@@ -426,7 +426,7 @@ def sync_langfuse(
     reset: bool = False,
 ) -> dict | None:
     """Configure Langfuse dataset name and optionally push all runs."""
-    from promptpotter.services.tracing.langfuse_push import sync_langfuse_runs
+    from promptpotter.infrastructure.tracing.langfuse_push import sync_langfuse_runs
 
     result = sync_langfuse_runs(
         store,
@@ -446,7 +446,7 @@ def sync_langfuse(
 
 def push_langfuse(store, backend_id: str) -> dict:
     """Push all historical dataset_runs to cloud Langfuse (dataset-first)."""
-    from promptpotter.services.tracing.langfuse_push import push_all_runs
+    from promptpotter.infrastructure.tracing.langfuse_push import push_all_runs
 
     summaries = store.dataset_runs.list_all(backend_id)
 

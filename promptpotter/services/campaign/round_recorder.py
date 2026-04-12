@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from promptpotter.services.store.base import write_json
+from promptpotter.infrastructure.store.base import write_json
 
 logger = logging.getLogger(__name__)
 

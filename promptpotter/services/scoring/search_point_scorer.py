@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.analysis import EscalationSignal
     from promptpotter.domain.scoring import QueryRunner, ScoringEnv
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.infrastructure.store.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -490,7 +490,7 @@ async def score_search_point(
     # --- finalize: save complete run + observability ---
     _save_run(results, scores)
     if store and backend_id:
-        from promptpotter.services.tracing.observability_logger import log_scoring_to_obs
+        from promptpotter.infrastructure.tracing.observability_logger import log_scoring_to_obs
 
         log_scoring_to_obs(
             store.base_dir,

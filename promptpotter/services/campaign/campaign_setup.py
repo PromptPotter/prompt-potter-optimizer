@@ -26,8 +26,8 @@ from promptpotter.config.settings import (
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.tenant import TenantContext
-from promptpotter.services.backend_client import BackendClient
-from promptpotter.services.project_store import ProjectStore
+from promptpotter.infrastructure.backend.client import BackendClient
+from promptpotter.infrastructure.store.project_store import ProjectStore
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -130,7 +130,7 @@ def _create_llm_only_client(project_root: Path, dataset_name: str | None) -> Any
     """Build an :class:`LLMOnlyAdapter` from the dataset's pipeline.json config."""
     import json
 
-    from promptpotter.services.llm_client import LLMOnlyAdapter
+    from promptpotter.infrastructure.llm.client import LLMOnlyAdapter
 
     config: dict[str, Any] = {}
     if dataset_name:

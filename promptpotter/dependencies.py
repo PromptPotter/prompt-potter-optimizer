@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from promptpotter.services.project_store import ProjectStore
+from promptpotter.infrastructure.store.project_store import ProjectStore
 
 
 def get_store() -> ProjectStore:

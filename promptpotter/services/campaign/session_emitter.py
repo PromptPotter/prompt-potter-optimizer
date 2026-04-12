@@ -22,9 +22,9 @@ import time
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, cast
 
+from promptpotter.infrastructure.store.base import write_json
 from promptpotter.services.campaign.control import CONTROL_FILENAME
 from promptpotter.services.campaign.state import CampaignPhase, CampaignStateSchema
-from promptpotter.services.store.base import write_json
 
 if TYPE_CHECKING:
     from promptpotter.services.campaign.config import LoopConfig

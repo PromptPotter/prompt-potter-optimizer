@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.infrastructure.store.project_store import ProjectStore
     from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.project_store import ProjectStore
 
 
 __all__ = [

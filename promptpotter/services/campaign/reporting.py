@@ -33,7 +33,7 @@ from promptpotter.services.search.failure_group_analysis import proportion_test,
 if TYPE_CHECKING:
     from promptpotter.domain.analysis import FailureAnalysis, QueryDifficulty
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.infrastructure.store.project_store import ProjectStore
     from promptpotter.services.search.search_memory import SearchMemory
 
 logger = logging.getLogger(__name__)

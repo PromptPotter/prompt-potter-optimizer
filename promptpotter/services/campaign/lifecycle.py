@@ -44,9 +44,9 @@ from promptpotter.shared.errors import graceful
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
-    from promptpotter.services.backend_client import BackendClient
+    from promptpotter.infrastructure.backend.client import BackendClient
+    from promptpotter.infrastructure.store.campaign_store import CampaignStore
     from promptpotter.services.campaign.session_emitter import CampaignPersistenceEmitter
-    from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
 
@@ -501,7 +501,9 @@ def init_campaign(
     Returns:
         (campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id)
     """
-    from promptpotter.services.tracing.observability_logger import ObsLogger  # lazy: heavy dep
+    from promptpotter.infrastructure.tracing.observability_logger import (
+        ObsLogger,  # lazy: heavy dep
+    )
 
     # --- Resume detection ---
     campaign_store = None
@@ -510,7 +512,7 @@ def init_campaign(
 
     if config.project_root and config.backend_id:
         try:
-            from promptpotter.services.store.campaign_store import CampaignStore
+            from promptpotter.infrastructure.store.campaign_store import CampaignStore
 
             store_base = Path(config.project_root)
             campaign_store = CampaignStore(store_base)

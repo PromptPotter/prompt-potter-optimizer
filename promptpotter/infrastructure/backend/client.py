@@ -16,7 +16,7 @@ import httpx
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
-    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.infrastructure.store.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 

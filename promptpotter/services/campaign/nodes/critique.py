@@ -23,9 +23,9 @@ from promptpotter.shared.errors import is_error_result
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryResult
+    from promptpotter.infrastructure.llm.client import LLMClientBase
     from promptpotter.services.campaign.config import LoopConfig
     from promptpotter.services.campaign.state import LoopState
-    from promptpotter.services.llm_client import LLMClientBase
 
     from .score import L1ScoringResult
 

@@ -4,8 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from promptpotter.dependencies import get_store
+from promptpotter.infrastructure.store.project_store import ProjectStore
 from promptpotter.main import app
-from promptpotter.services.project_store import ProjectStore
 
 
 @pytest.fixture

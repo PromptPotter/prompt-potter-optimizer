@@ -20,7 +20,7 @@ from typing import Any
 
 from filelock import FileLock
 
-from promptpotter.services.store.base import (
+from promptpotter.infrastructure.store.base import (
     read_json,
     read_json_optional,
     validate_path_component,

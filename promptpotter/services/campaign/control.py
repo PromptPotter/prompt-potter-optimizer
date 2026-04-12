@@ -15,7 +15,7 @@ import json
 import logging
 from pathlib import Path
 
-from promptpotter.services.store.base import write_json
+from promptpotter.infrastructure.store.base import write_json
 
 logger = logging.getLogger(__name__)
 

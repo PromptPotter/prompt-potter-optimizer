@@ -29,9 +29,9 @@ from promptpotter.services.metrics import count_degraded_queries
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
     from promptpotter.services.campaign.config import LoopConfig
     from promptpotter.services.campaign.state import LoopState, StopReason
-    from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 
@@ -235,10 +235,10 @@ async def _do_l2_transition(
     escalation_check_result: dict | None = None,
 ) -> Any:
     """Perform L2 refine_strategy transition. Updates state in-place."""
-    from promptpotter.services import llm_client as _llm_client
+    from promptpotter.infrastructure.llm import client as _llm_client
+    from promptpotter.infrastructure.tracing.observability_logger import observed_node
     from promptpotter.services.campaign.nodes import layer_transitions
     from promptpotter.services.campaign.nodes.formatting import warning_summary
-    from promptpotter.services.tracing.observability_logger import observed_node
 
     assert state.current_sp is not None
     current_pp = state.current_sp.pipeline_params
@@ -322,9 +322,9 @@ async def _do_l3_transition(
     trace_id: str | None = None,
 ) -> Any:
     """Perform L3 modify_plan transition. Updates state in-place."""
-    from promptpotter.services import llm_client as _llm_client
+    from promptpotter.infrastructure.llm import client as _llm_client
+    from promptpotter.infrastructure.tracing.observability_logger import observed_node
     from promptpotter.services.campaign.nodes import layer_transitions
-    from promptpotter.services.tracing.observability_logger import observed_node
 
     assert state.current_sp is not None
     current_pp = state.current_sp.pipeline_params

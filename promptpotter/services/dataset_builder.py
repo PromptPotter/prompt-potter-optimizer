@@ -19,7 +19,7 @@ from promptpotter.shared.hashing import HASH_TRUNCATE
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.infrastructure.store.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 

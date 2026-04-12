@@ -20,10 +20,10 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.infrastructure.llm.client import LLMClientBase
+    from promptpotter.infrastructure.store.project_store import ProjectStore
     from promptpotter.services.campaign.campaign_setup import SessionEnv
     from promptpotter.services.campaign.config import CampaignConfig
-    from promptpotter.services.llm_client import LLMClientBase
-    from promptpotter.services.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 

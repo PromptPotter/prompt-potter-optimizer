@@ -21,8 +21,8 @@ from promptpotter.domain.search_point import JobSearchPoint
 if TYPE_CHECKING:
     from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.domain.scoring import ScoringEnv
+    from promptpotter.infrastructure.store.campaign_store import CampaignStore
     from promptpotter.services.campaign.nodes.escalation import DegradationCheck
-    from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
 

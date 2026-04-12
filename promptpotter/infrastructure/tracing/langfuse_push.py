@@ -16,7 +16,7 @@ re-running only pushes new runs.
 
 Usage::
 
-    from promptpotter.services.tracing.langfuse_push import push_all_runs
+    from promptpotter.infrastructure.tracing.langfuse_push import push_all_runs
     stats = push_all_runs(store, backend_id)
 """
 
@@ -27,8 +27,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.services.project_store import ProjectStore
-from promptpotter.services.store.base import read_json_optional, write_json
+from promptpotter.infrastructure.store.base import read_json_optional, write_json
+from promptpotter.infrastructure.store.project_store import ProjectStore
 from promptpotter.shared.constants import DATASET_NAME as _DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:
@@ -437,7 +437,7 @@ def push_all_runs(
         Stats dict with keys: total_on_disk, new_runs, already_done,
         origins (per-origin breakdown), error (if Langfuse disabled).
     """
-    from promptpotter.services.tracing.langfuse_client import LangfuseLogger
+    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
     lf = LangfuseLogger.get_instance()
     if not lf.enabled:

@@ -20,8 +20,8 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.services.search.scan_results import ScanBrief
 
 if TYPE_CHECKING:
+    from promptpotter.infrastructure.llm.client import LLMClientBase
     from promptpotter.services.campaign.campaign_setup import SessionEnv
-    from promptpotter.services.llm_client import LLMClientBase
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +353,7 @@ def configure_and_apply_pipeline(
 
     Returns ``pipeline_params`` dict ready for evaluation.
     """
-    from promptpotter.services.backend_client import extract_pipeline_config
+    from promptpotter.infrastructure.backend.client import extract_pipeline_config
 
     pipeline_schema = session.pipeline_schema
     experiment_extract: dict | None = getattr(session, "experiment_extract", None)
@@ -416,7 +416,7 @@ def create_llm_client(
     Returns:
         Tuple of (llm_client, model_name).
     """
-    from promptpotter.services.llm_client import get_llm_client
+    from promptpotter.infrastructure.llm.client import get_llm_client
 
     optimizer_llm = campaign_config["optimizer_llm"]
     return get_llm_client(optimizer_llm["provider"]), optimizer_llm["model"]

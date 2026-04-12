@@ -43,9 +43,9 @@ from promptpotter.services.campaign.state import (
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.infrastructure.store.campaign_store import CampaignStore
     from promptpotter.services.campaign.config import CampaignConfig
     from promptpotter.services.search.scan_results import ScanBrief
-    from promptpotter.services.store.campaign_store import CampaignStore
 
 logger = logging.getLogger(__name__)
 

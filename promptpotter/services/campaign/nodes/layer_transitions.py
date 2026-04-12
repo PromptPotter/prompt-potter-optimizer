@@ -32,7 +32,7 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import PromptTemplate
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.services.llm_client import LLMClientBase
+    from promptpotter.infrastructure.llm.client import LLMClientBase
 
 logger = logging.getLogger(__name__)
 

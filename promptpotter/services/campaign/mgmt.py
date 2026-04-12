@@ -16,7 +16,7 @@ from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.infrastructure.store.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 

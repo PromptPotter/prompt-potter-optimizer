@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.infrastructure.llm.client import LLMClientBase
 from promptpotter.services.campaign.nodes.formatting import (
     L1PromptData,
     format_context_sections,
 )
-from promptpotter.services.llm_client import LLMClientBase
 from promptpotter.services.optimizer.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.llm_parsing import extract_parsed_json

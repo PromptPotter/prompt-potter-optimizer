@@ -17,8 +17,8 @@ from promptpotter.services.scoring.sample_measurement import measure_sample
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryRunner
+    from promptpotter.infrastructure.store.stores import IntermediateCache
     from promptpotter.services.search.search_memory import SearchMemory
-    from promptpotter.services.store.stores import IntermediateCache
 
 logger = logging.getLogger(__name__)
 

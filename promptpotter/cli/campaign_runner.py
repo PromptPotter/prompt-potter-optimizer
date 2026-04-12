@@ -43,7 +43,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
-from promptpotter.services.project_store import ProjectStore
+from promptpotter.infrastructure.store.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -525,8 +525,8 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
 
 async def cmd_control(args: argparse.Namespace) -> None:
     """Write control signals to campaign_control.json (bidirectional dashboard)."""
+    from promptpotter.infrastructure.store.base import write_json
     from promptpotter.services.campaign.control import CONTROL_FILENAME
-    from promptpotter.services.store.base import write_json
 
     ctx = _load_session(args)
     session_dir = ctx.store.sessions._session_dir(ctx.backend_id, ctx.session_id)

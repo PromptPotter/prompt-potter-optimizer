@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
-from promptpotter.services import llm_client as _llm_client
+from promptpotter.infrastructure.llm import client as _llm_client
+from promptpotter.infrastructure.tracing.observability_logger import observed_node
 from promptpotter.services.campaign.config import LoopConfig
 from promptpotter.services.campaign.nodes.critique import (
     CritiqueAgent,
@@ -33,17 +34,16 @@ from promptpotter.services.campaign.state import (
     RunCallbacks,
     emit_phase,
 )
-from promptpotter.services.tracing.observability_logger import observed_node
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.domain.analysis import QueryDifficulty
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.infrastructure.store.campaign_store import CampaignStore
+    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
     from promptpotter.services.campaign.nodes.escalation import DegradationCheck
     from promptpotter.services.campaign.nodes.score import L1ScoringResult
-    from promptpotter.services.store.campaign_store import CampaignStore
-    from promptpotter.services.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 

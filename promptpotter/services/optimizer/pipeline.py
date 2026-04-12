@@ -32,8 +32,8 @@ if TYPE_CHECKING:
 
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.services.llm_client import LLMClientBase, LLMResponse
-from promptpotter.services.store.base import (
+from promptpotter.infrastructure.llm.client import LLMClientBase, LLMResponse
+from promptpotter.infrastructure.store.base import (
     read_json_optional,
     validate_path_component,
     write_json,
@@ -193,7 +193,7 @@ def _try_langfuse(name: str) -> PromptTemplate | None:
         if not settings.LANGFUSE_PROMPTS_ENABLED:
             return None
 
-        from promptpotter.services.tracing.langfuse_client import LangfuseLogger
+        from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
         lf = LangfuseLogger.get_instance()
         if not lf.enabled or not lf.client:
@@ -236,7 +236,7 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
 
     Returns ``{name: success_bool}`` mapping.
     """
-    from promptpotter.services.tracing.langfuse_client import LangfuseLogger
+    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
     lf = LangfuseLogger.get_instance()
     if not lf.enabled or not lf.client:

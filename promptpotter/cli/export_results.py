@@ -22,7 +22,7 @@ import argparse
 import json
 from pathlib import Path
 
-from promptpotter.services.project_store import ProjectStore
+from promptpotter.infrastructure.store.project_store import ProjectStore
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

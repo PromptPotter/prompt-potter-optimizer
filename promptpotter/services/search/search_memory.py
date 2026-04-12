@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.services.project_store import ProjectStore
+    from promptpotter.infrastructure.store.project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
 

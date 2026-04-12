@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.backend import BackendConnection, Execution
-from promptpotter.services.store.base import (
+from promptpotter.infrastructure.store.base import (
     EntityStore,
     read_json,
     read_json_optional,

@@ -31,7 +31,7 @@ from promptpotter.shared.scoring import Scorer
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryRunner
-    from promptpotter.services.store.stores import IntermediateCache
+    from promptpotter.infrastructure.store.stores import IntermediateCache
 
 _comparator = ExactMatchComparator({"strip": True})
 

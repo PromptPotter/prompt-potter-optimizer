@@ -36,7 +36,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.services.store.base import (
+from promptpotter.infrastructure.store.base import (
     append_jsonl,
     append_text,
     write_json,
@@ -46,7 +46,7 @@ from promptpotter.services.store.base import (
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.services.tracing.langfuse_client import LangfuseLogger
+    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ class ObsLogger:
 
         if langfuse is _UNSET:
             with graceful("Cloud backend init failed; file-only mode", level=logging.DEBUG):
-                from promptpotter.services.tracing.langfuse_client import LangfuseLogger
+                from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
                 lf = LangfuseLogger.get_instance()
                 if lf.enabled:

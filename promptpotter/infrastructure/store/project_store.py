@@ -28,9 +28,9 @@ Layout on disk::
 
 from pathlib import Path
 
-from promptpotter.services.store.campaign_store import CampaignStore
-from promptpotter.services.store.dataset_run_store import DatasetRunStore
-from promptpotter.services.store.stores import (
+from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.store.dataset_run_store import DatasetRunStore
+from promptpotter.infrastructure.store.stores import (
     BackendStore,
     IntermediateCache,
     PlanStore,

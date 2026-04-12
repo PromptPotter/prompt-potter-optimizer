@@ -2,7 +2,7 @@
 
 import pytest
 
-from promptpotter.services.tracing.langfuse_client import LangfuseLogger
+from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 
 @pytest.fixture(autouse=True)
