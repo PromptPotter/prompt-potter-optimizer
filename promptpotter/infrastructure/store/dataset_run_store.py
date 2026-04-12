@@ -196,6 +196,45 @@ class DatasetRunStore:
         scored.sort(key=lambda t: (t[1], t[0].get("item_count", 0)), reverse=True)
         return scored
 
+    def load_reusable_results(
+        self,
+        backend_id: str,
+        prefix_chain: list[tuple[str, str]],
+    ) -> dict[str, dict[str, Any]]:
+        """Build per-query cache from prior dataset_runs sharing *prefix_chain*.
+
+        Exact matches (``match_length == len(prefix_chain)``) reuse every
+        non-error item.  Partial matches reuse only items whose
+        ``pipeline_data.terminated_at`` falls within the shared prefix —
+        the query short-circuited before the diverging node.
+
+        Later runs overwrite earlier ones for the same query.
+        """
+        if not prefix_chain:
+            return {}
+        chain_len = len(prefix_chain)
+        cache: dict[str, dict[str, Any]] = {}
+
+        for entry, match_length in self.find_by_prefix_chain(backend_id, prefix_chain):
+            detail = self.load_by_id(backend_id, entry["run_id"])
+            if not detail:
+                continue
+            is_full_match = match_length >= chain_len
+            trusted_nodes: set[str] = (
+                set() if is_full_match else {prefix_chain[i][0] for i in range(match_length)}
+            )
+            for item in detail.get("dataset_run_items", []):
+                q = item.get("query", "")
+                if not q or item.get("predicted") == "ERROR":
+                    continue
+                if is_full_match:
+                    cache[q] = item
+                    continue
+                terminated_at = (item.get("pipeline_data") or {}).get("terminated_at", "")
+                if terminated_at and terminated_at in trusted_nodes:
+                    cache[q] = item
+        return cache
+
     # -- prompt alias groups ---------------------------------------------------
 
     def _alias_path(self, backend_id: str) -> Path:

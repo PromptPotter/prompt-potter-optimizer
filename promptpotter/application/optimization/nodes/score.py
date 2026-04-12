@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +36,7 @@ class L1ScoringResult(BaseModel):
     candidates_scored: int
     candidate_scores: list[dict[str, Any]]
     winner_results: list[QueryResult]
-    all_candidate_results: dict[str, list[dict]] = Field(default_factory=dict)
+    all_candidate_results: dict[str, list[QueryResult]] = Field(default_factory=dict)
     escalation_signal: dict[str, Any] | None = None
     degraded_queries: int = 0
 
@@ -47,7 +47,7 @@ class L1ScoringResult(BaseModel):
 
 def _select_round_winner(
     candidates: list[OptSearchPoint],
-    all_candidate_results: dict[str, list[dict]],
+    all_candidate_results: dict[str, list[QueryResult]],
     current_best: dict[str, Any],
     improvement_threshold: float,
     pipeline_schema: PipelineSchema | None = None,
@@ -60,9 +60,7 @@ def _select_round_winner(
 
     # Score each candidate once, reuse for selection and display
     candidate_scores = {
-        c.id: compute_composite_score(
-            cast(list[QueryResult], all_candidate_results[c.id]), pipeline_schema
-        )
+        c.id: compute_composite_score(all_candidate_results[c.id], pipeline_schema)
         for c in candidates
     }
 
@@ -187,7 +185,7 @@ async def _score_candidates(
     callbacks: RunCallbacks,
     elimination_n_min: int = 20,
     elimination_alpha: float = 0.05,
-) -> tuple[dict[str, list[dict]], list[dict], dict | None]:
+) -> tuple[dict[str, list[QueryResult]], list[dict], dict | None]:
     """Evaluate each candidate against the dataset.
 
     Returns (all_candidate_results, candidate_scores, escalation_signal).
@@ -195,7 +193,7 @@ async def _score_candidates(
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.application.search.failure_group_analysis import EliminationCheck
 
-    all_candidate_results: dict[str, list[dict]] = {}
+    all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[dict] = []
     escalation_signal = None
     n_candidates = len(osp_candidates)

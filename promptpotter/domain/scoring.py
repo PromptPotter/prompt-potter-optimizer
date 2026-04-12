@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
@@ -128,6 +129,8 @@ class ScoringEnv:
     stale_data_observations: dict[str, int | dict] | None = None
     # Per-dataset scoring formula (compiled callable from shared/scoring.py)
     scorer: Scorer | None = None
+    # Graceful-stop hook: scorer checks between queries; caller owns the flag source.
+    stop_check: Callable[[], bool] | None = None
 
     @classmethod
     def for_loop(

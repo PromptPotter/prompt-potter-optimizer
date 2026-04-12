@@ -100,7 +100,7 @@ class RoundSnapshot:
         sm_ctx = search_memory_digest
         diff = build_cross_candidate_diff(
             cast(list[dict], scoring_result.winner_results),
-            scoring_result.all_candidate_results,
+            cast("dict[str, list[dict]]", scoring_result.all_candidate_results),
             scoring_result.candidate_scores,
         )
         trajectory = classify_trajectory(state.rounds)
