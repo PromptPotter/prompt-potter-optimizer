@@ -116,7 +116,7 @@ All methods evaluated under identical conditions:
 | DSPy Bootstrap | DSPy's bootstrap few-shot optimizer | [DSPy library](https://github.com/stanfordnlp/dspy) |
 | MIPROv2 | DSPy's MIPRO v2 instruction + demo optimizer (cited) | [Opsahl-Ong et al., 2024](https://arxiv.org/abs/2406.11695) |
 | GEPA | Reflective prompt evolution with trajectory feedback (cited) | [GEPA, 2025](https://github.com/stanfordnlp/dspy) |
-| Promptomatix | Meta-prompt + DSPy compiler, cost-aware (cited) | [Salesforce, 2025](https://arxiv.org/abs/2507.00000) |
+| Promptomatix | Meta-prompt + DSPy compiler, cost-aware (cited) | Salesforce, 2025 (arXiv ID TODO) |
 | adv-CoT | Adversarial generator-discriminator for reasoning (cited) | [adv-CoT, 2025](https://www.mdpi.com/) |
 | PromptWizard | Critique-guided prompt optimization (cited) | [Microsoft, 2024](https://arxiv.org/abs/2405.18369) |
 | PromptPotter (L1 only) | L1 generate + evaluate, no L2/L3 | This work |
@@ -172,12 +172,16 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 
 ## Reference Papers
 
+**Positioning.** PromptPotter's core loop is a direct descendant of **PromptWizard** (Microsoft, 2024) — critique-guided generation with mutate/score/refine cycles. Where PromptWizard stops at a single-prompt optimizer, PromptPotter absorbs the strongest idea from each subsequent line of work and lifts them onto a pipeline-aware substrate: **MIPROv2**'s joint instruction-and-demo search becomes our 8-field decomposition + per-node `pipeline_params`; **GEPA**'s reflective trajectory feedback becomes our L2 directive bridge; **Promptomatix**'s cost-aware objectives become our `sp_budget_ttest` + sequential elimination; **adv-CoT**'s adversarial refinement maps onto our L3 replan escalation. The goal is not to out-benchmark DSPy on its own turf — it's to overshadow PromptWizard by being what PromptWizard would have been if it had shipped after 2025's ideas landed.
+
 | Paper | Affiliation | Year | Datasets | Key Result |
 |-------|-------------|------|----------|------------|
-| PromptWizard | Microsoft Research | 2024 | GSM8K, others | Critique-guided generation; cost-efficient; PromptPotter's primary inspiration |
+| PromptWizard | Microsoft Research | 2024 | GSM8K, others | **PromptPotter's direct ancestor** — critique-guided mutate/score/refine loop. PromptPotter extends it with pipeline-awareness, L2/L3 escalation, and cross-run SearchMemory. |
 | MIPROv2 | Stanford NLP (DSPy) | 2024 | GSM8K, HotPotQA | Up to 13% accuracy gains on Llama-3-8B; Bayesian optimization over instructions + demos |
 | GEPA | Stanford NLP (DSPy) | 2025 | HotPotQA, AIME, IFBench, HoVer | +12% over MIPROv2 on AIME-2025; reflective prompt evolution |
 | CAPO | AutoML Freiburg (DSPy) | 2025 | GSM8K, others | Evolutionary prompt optimization; paired t-test racing |
 | Promptomatix | Salesforce AI Research | 2025 | GSM8K, SQuAD_2, CommonGen, AG News, XSum | Cost-aware optimization; competitive performance with reduced compute |
 | adv-CoT | — | 2025 | 12 datasets (commonsense + arithmetic) | +4.44% on GPT-3.5-turbo, +1.08% on GPT-4o-mini; adversarial refinement |
 | PromptPotter | Independent | 2025 | TermNorm, AIME 2025, BBEH | Critique-guided L1→L2→L3 loop; pipeline-aware optimization |
+
+**When to use what.** *DSPy / MIPROv2* — you need a full programming framework for compound LLM systems and are willing to learn it. *GEPA* — you want state-of-the-art optimization quality in very few rollouts and are already inside DSPy. *Promptomatix* — you care most about optimizer cost. *PromptWizard* — you want a simple, cost-efficient single-prompt optimizer. *PromptPotter* — you have a multi-node pipeline (prompts + node params), you need cross-run learning, and you want the critique-guided quality of PromptWizard without being locked to a single LLM call.
