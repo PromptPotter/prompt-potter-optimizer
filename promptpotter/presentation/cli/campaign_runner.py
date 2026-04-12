@@ -12,7 +12,7 @@ Usage:
     python -m promptpotter task-context --task-file PATH
     python -m promptpotter scan --variants-file PATH
     python -m promptpotter scan-results
-    python -m promptpotter optimize [--round]
+    python -m promptpotter optimize
     python -m promptpotter control --pause | --resume | --stop
     python -m promptpotter results [--save]
     python -m promptpotter status
@@ -89,7 +89,7 @@ async def _init_services(
     from promptpotter.config.logging import setup_logging
 
     setup_logging()
-    project_root = Path(__file__).resolve().parent.parent.parent
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
     return await init_services(
         backend_url=backend_url,
         backend_id=backend_id,
@@ -488,7 +488,6 @@ async def cmd_optimize(args: argparse.Namespace) -> None:
             task_context=ctx.state.get("task_context"),
             session_id=ctx.session_id,
             callbacks=control_cb,
-            max_rounds_override=1 if args.round else None,
         )
     finally:
         set_round_recorder(None)
@@ -831,8 +830,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("show-scan", help="Show scan analytics and seed campaign")
 
-    p_opt = sub.add_parser("optimize", help="Run optimization loop")
-    p_opt.add_argument("--round", action="store_true", help="Complete one round then stop")
+    sub.add_parser("optimize", help="Run optimization loop")
 
     p_ctl = sub.add_parser("control", help="Write control signals to dashboard")
     ctl_mode = p_ctl.add_mutually_exclusive_group(required=True)

@@ -26,8 +26,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.pipeline_schema import PipelineSchema
+
 if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
 from promptpotter.domain.opt_search_point import PromptTemplate

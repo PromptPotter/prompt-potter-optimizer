@@ -20,7 +20,7 @@ All commands: `python -m promptpotter <cmd> [flags]`
 | `set-task` | Decompose task description into structured context | `--task-file`, `--task-text` |
 | `scan` | Run sensitivity scan over parameter variants | `--variants-file` (required), `--sample-size` |
 | `show-scan` | Show scan analytics, seed campaign from winner | — |
-| `optimize` | Run L1/L2/L3 optimization cycle | `--round` (one round then stop); default: full loop |
+| `optimize` | Run L1/L2/L3 optimization cycle | — (full loop; interrupt with `control --stop` or Ctrl+C) |
 | `control` | Pause/resume/stop a running campaign | `--pause`, `--resume`, `--stop`, `--pause-before-l2` |
 | `show-status` | Print live dashboard + session state | — |
 | `show-results` | Show campaign summary | `--save` (persist winner to backend) |
@@ -28,14 +28,6 @@ All commands: `python -m promptpotter <cmd> [flags]`
 Export: `python -m promptpotter export <format> --backend-id <id> -o <file>`
 
 **Global flags on all commands**: `--session <id>` (target specific session).
-
-### CRITICAL: `--round` flag behavior
-
-`--round` sets `max_rounds=1` **absolute** (not relative). This means:
-- First run: `--round` → runs round 0, then stops (`max_rounds=1`, `resumed_from_round=0`, loop runs once)
-- **Resume after round 0 completed**: `--round` → does NOTHING (`resumed_from_round=1 >= max_rounds=1`, loop never enters)
-- **To continue after `--round` completed a round**: use `optimize` without `--round` (uses `max_rounds=15` from config)
-- `--round` is only useful for the FIRST round of a fresh campaign. After that, use `optimize` (full loop) and interrupt with `control --stop` or timeout when you want to stop.
 
 ---
 
@@ -232,36 +224,7 @@ Report which axes showed sensitivity and the recommended starting point.
 ---
 
 ## Phase 4: Optimize
-
-### How Evaluation Works
-
-Each round generates a few candidates (default: `n_variants=3`) and evaluates them via **sequential elimination**:
-- The first candidate evaluates the full eval set (e.g., 30 queries).
-- Subsequent candidates are tested query-by-query. After 20 queries (`elimination_n_min`), a Welch's t-test runs after each query. Inferior candidates are eliminated early.
-- Typical round cost is well below `n_variants × eval_size` — most candidates don't run to completion.
-
-No pre-run cost confirmation is needed. The protocol is inherently bounded.
-
-### Default: Round-by-Round with Critique Reporting
-
-**Always default to `--round` mode** — run one round at a time, report critique + results after each round, then ask to continue. Only switch to full loop if the user explicitly requests it (e.g., "go auto", "run all rounds", "full auto").
-
-```bash
-# Default — one round, then report back
-python -m promptpotter optimize --round
-
-# Only if user explicitly asks for autonomous mode (no flag = full loop)
-python -m promptpotter optimize
-```
-
-**After each round completes**, read and present:
-
-1. **Read `campaign_log.md`** — find the latest round section (last `## Round N` block). Extract:
-   - Winner candidate and its accuracy
-   - Critique text (the `CRITIQUE:` section — what failed, patterns, recommendations)
-   - L2 directive if present
-2. **Read `campaign_state.json`** — extract: round number, layer, patience counters, best accuracy, stop_reason
-3. **Present a round summary** to the user:
+### Reporting and Critique-Nose output
 
 ```
 ROUND {N} COMPLETE
@@ -274,27 +237,6 @@ CRITIQUE
 
 NEXT: {what the optimizer plans to do — continue L1 / escalate to L2 / etc.}
 ```
-
-4. **Ask**: "Continue next round?" — user can say "continue", "go auto" (switch to full loop via `optimize`), or "stop"
-
-- **Foreground only**, never background — these make API calls that cost money.
-- **Timeout**: 30s default. NEVER exceed 60s without explicit user permission. For long runs, use `--round` repeatedly.
-- Graceful stop: first Ctrl+C saves state, second force-quits.
-
-### Benchmark Datasets (GSM8K, HotPotQA, etc.)
-
-Benchmark datasets use only the backend's `llm_only` step — optimization surface is prompt quality only (no pipeline params to tune). See `reference/benchmark-datasets.md` for readiness checklist and cost model.
-
-### Understanding the Optimization Loop
-
-The optimizer runs a 3-layer escalation model. Briefly:
-
-- **L1 Generate**: every round — generates N candidate variants, evaluates them, selects the best. A critique agent analyzes results and guides the next round.
-- **L2 Refine Context**: triggers when L1 stalls (`patience` rounds without improvement) — refines task_context and meta-settings, produces an `l2_directive` that steers L1 differently.
-- **L3 Modify Plan**: triggers when L2 stalls — rewrites the strategic optimization plan.
-
-Read `reference/optimization-layers.md` for the full escalation model, configuration knobs, and what to tell the user when each layer activates.
-
 ### Monitoring During Optimization
 
 While `optimize` runs, you can monitor progress:
@@ -313,52 +255,17 @@ python -m promptpotter control --resume    # resume paused campaign
 python -m promptpotter control --stop      # stop gracefully
 ```
 
-You can also edit `campaign_control.json` directly: set `requested_state` to `"pause"`, `"resume"`, or `"stop"`.
+You can also edit `campaign_control.json` directly: set `requested_state` to `"pause"`, `"resume"`, or `"stop"`.**The user runs `python -m promptpotter optimize` themselves** in their own terminal — real campaigns take minutes to hours and don't fit the 60s ceiling. Your job is to prep the session (phases 0–3), then let them launch it. After rounds complete, they can ask you to read `campaign_log.md` + `campaign_state.json` and report winner, critique, layer, and patience.
+
+Monitor / control from any terminal via `show-status`, `control --pause|--resume|--stop`, or `campaign_log.md` (best diagnostic). Escalation model details: `reference/optimization-layers.md`, `docs/architecture/optimization.md`.
 
 ---
 
 ## Phase 5: Results
 
-```bash
-python -m promptpotter show-results
-```
+`show-results` reports best vs baseline, rounds run, L1/L2/L3 activations, winner config. `show-results --save` persists the winner to the backend. `optimize_result.json` has the `stop_reason` — consult `reference/troubleshooting.md` if recovery guidance is needed.
 
-Report: best vs baseline accuracy, rounds run, L1/L2/L3 activations, winner config. Offer `show-results --save` to persist the winner to the backend.
-
-### Interpreting stop_reason
-
-If `optimize_result.json` exists, read it for the final summary. The `stop_reason` tells you why the campaign ended:
-
-| Stop Reason | Meaning | What to Do |
-|-------------|---------|------------|
-| `patience_exhausted` | Normal convergence — L1/L2/L3 all exhausted | Review results. This is usually a good outcome. |
-| `perfect_score` | 100% accuracy | Done. Run `results --save`. |
-| `max_rounds` | Hit round limit | May need more rounds or different scan axes. |
-| `interrupted` | Ctrl+C during optimization | Resume with `optimize` (or `--round` for one round). |
-| `escalation_abort` | Backend degradation too severe | Read `campaign_log.md` for degradation details. |
-| `l2_patience_exhausted` | L2 couldn't unlock further L1 improvement | Consider manual task_context changes. |
-| `l3_patience_exhausted` | All three layers exhausted | Optimization converged. Review best achieved. |
-| `user_paused` / `user_stopped` | User sent control signal | Resume or review results. |
-
-Read `reference/troubleshooting.md` for recovery strategies when optimization stalls or errors occur.
-
----
-
-## Phase 6: Export & Post-Analysis
-
-After a successful campaign, export results for documentation or papers:
-
-```bash
-# Supplemental materials as markdown (tables, CI, significance, reproducibility)
-python -m promptpotter export supplemental --backend-id local -o supplemental.md
-
-# Structured JSON for paper repositories
-python -m promptpotter export json --backend-id local -o paper_results.json
-
-# Export specific campaigns only
-python -m promptpotter export supplemental \
-    --backend-id local --campaigns campaign_001,campaign_002 -o supplemental.md
-```
+For post-campaign exports (supplemental markdown, JSON for papers): `python -m promptpotter export <format> --backend-id <id> -o <file>`.
 
 ---
 
@@ -370,7 +277,7 @@ python -m promptpotter export supplemental \
 - **Always read `dataset.md` before `init`** — it has the exact init flags including `--backend-id`. Never guess or omit flags.
 - **Skip baseline by default** — always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists AND the user requests it.
 - **Data-driven start** — Phase 0.5 assesses existing data. Minimal data (< 50 queries, < 5 runs) → go straight to optimize from config defaults. Substantial data → show leaderboard via existing CLI commands (`show-results`, `show-scan`), propose best-known config as starting point.
-- **Round-by-round critique is the default** — always use `--round`, read `campaign_log.md` + `campaign_state.json` after each round, present the critique summary, and ask before continuing. Only use full loop (`optimize` without `--round`) when the user explicitly requests it.
+- **Round-by-round critique reporting** — the user runs `optimize` in their own terminal; when they come back, read `campaign_log.md` + `campaign_state.json`, present the per-round critique summary, and ask before they resume.
 - **Incremental persistence**: Every backend query result is saved to `dataset_runs/` immediately (not batched at end). This means:
   - Hard kills (timeout, taskkill, crash) lose zero completed query results
   - Resume automatically cache-hits all prior query results (shows `0.0s MISS CACHED` in output)

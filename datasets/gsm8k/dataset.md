@@ -4,11 +4,6 @@
 
 `backend` — uses the `llm_only` step for LLM-based evaluation.
 
-## Prerequisites
-
-- Pipeline backend must be running: `curl -s http://127.0.0.1:8000/status`
-- If backend is down, tell the user: "Start the backend first, then re-run `/potter-run`"
-
 ## Init Flags
 
 ```
@@ -23,10 +18,6 @@
 - Source: OpenAI GSM8K (grade school math, ~8.5K train / 1,319 test)
 - Format: word problem -> numeric answer in `#### N` format
 - campaign.json uses `sp_budget_ttest: 30`
-
-## Cycle Identity
-
-Default campaign.json uses experiment mode (no `strict_cycle_identity`). You can freely switch between `--round` and full loop, adjust patience, and interrupt/resume without losing campaign history. For publication runs, add `"strict_cycle_identity": true` to `campaign.json` to lock all parameters into the cycle identity.
 
 ## Pipeline Notes
 

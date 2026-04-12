@@ -30,8 +30,7 @@ python -m promptpotter init --backend-url http://127.0.0.1:8000 --config dataset
 python -m promptpotter set-task --task-file datasets/lca-termnorm/task_description.md
 python -m promptpotter scan --variants-file datasets/lca-termnorm/scan_variants.json
 python -m promptpotter show-scan
-python -m promptpotter optimize             # full loop (default)
-python -m promptpotter optimize --round     # one round → stop
+python -m promptpotter optimize             # full loop
 python -m promptpotter show-results
 python -m promptpotter show-status          # live dashboard
 ```

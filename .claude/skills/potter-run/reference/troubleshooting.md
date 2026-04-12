@@ -19,12 +19,12 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 | `patience_exhausted` | L1 stalled, L2/L3 couldn't improve further | Normal convergence. Check results — this is usually a good outcome. |
 | `perfect_score` | 100% accuracy achieved | Done. Run `results --save` to persist the winner. |
 | `max_rounds` | Hit maximum round limit | May need more rounds (`max_rounds` in config) or L2/L3 intervention. |
-| `interrupted` | Ctrl+C during optimization | Resume with `optimize` (or `--round`). State was checkpointed. |
+| `interrupted` | Ctrl+C during optimization | Resume with `optimize`. State was checkpointed. |
 | `escalation_abort` | Backend degradation too severe for L2 to fix | Read `campaign_log.md` for degradation details. May need backend fix. |
 | `l2_patience_exhausted` | L2 tried `l2_patience` times, no improvement | Consider manual task_context changes or different scan axes. |
 | `l3_patience_exhausted` | All three layers exhausted | Optimization has converged. Review results for best achieved. |
 | `hard_cap_reached` | Hit absolute round limit (100) | Very rare. Review if L2/L3 is cycling without progress. |
-| `paused_for_review` | `--round` mode paused after L1 generate | Review candidates, then `optimize` to continue. |
+| `paused_for_review` | HITL pause after L1 generate | Review candidates, then `optimize` to continue. |
 | `user_paused` | User sent `control --pause` | `control --resume` to continue, `control --stop` to end. |
 | `user_stopped` | User sent `control --stop` | Campaign ended. Run `results` to see what was achieved. |
 

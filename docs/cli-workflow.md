@@ -79,20 +79,11 @@ Displays scan results leaderboard and seeds the optimization campaign with the b
 
 ### optimize
 
-Three modes for different workflows:
-
 ```bash
-# Generate candidates, then pause for human review
-python -m promptpotter optimize --round
-
-# Resume evaluation of reviewed candidates
-python -m promptpotter optimize --evaluate
-
-# Full autonomous loop (L1→L2→L3 until convergence — default)
 python -m promptpotter optimize
 ```
 
-The `--round` / `--evaluate` split enables HITL: after `--round`, candidates are persisted to `round_NNNN_candidates.json`. You can inspect, edit, or approve them before running `--evaluate`.
+Runs the full autonomous loop (L1 → L2 → L3 until convergence or `max_rounds`). Use `control --stop` or Ctrl+C to pause gracefully — state is checkpointed between rounds and resumes from the last completed round.
 
 ### show-results
 

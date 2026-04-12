@@ -447,7 +447,6 @@ async def run_optimization(
     callbacks: RunCallbacks | None = None,
     langfuse_session_id: str | None = None,
     cycle_id: str | None = None,
-    max_rounds_override: int | None = None,
 ) -> RunResult:
     """Run the full optimization loop from a prepared baseline.
 
@@ -466,8 +465,6 @@ async def run_optimization(
         pipeline_schema=session.pipeline_schema,
         task_context=task_context,
     )
-    if max_rounds_override is not None:
-        config = config.model_copy(update={"max_rounds": max_rounds_override})
 
     cb = callbacks or RunCallbacks()
 
