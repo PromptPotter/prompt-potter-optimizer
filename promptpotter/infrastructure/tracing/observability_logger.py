@@ -677,6 +677,85 @@ class ObsLogger:
             logger.warning("ObsLogger.log_dataset_run failed", exc_info=True)
             return None
 
+    @classmethod
+    def start_campaign(
+        cls,
+        project_root: str | Path | None,
+        backend_id: str | None,
+        *,
+        config_snapshot: dict[str, Any],
+        baseline_accuracy: float,
+        dataset: list[dict[str, Any]],
+        obs_campaign_id: str,
+        langfuse_session_id: str | None,
+    ) -> ObsLogger | None:
+        """Construct an ObsLogger, log campaign start, and register the dataset.
+
+        Every sub-step is wrapped in :func:`graceful` — a tracing failure
+        must never kill the optimization loop.  Returns ``None`` when
+        ``project_root``/``backend_id`` are missing or logger construction
+        fails.
+        """
+        from promptpotter.shared.constants import DATASET_NAME
+        from promptpotter.shared.errors import graceful
+
+        if not (project_root and backend_id):
+            return None
+
+        obs: ObsLogger | None = None
+        with graceful("Failed to create ObsLogger"):
+            obs = cls(project_root, backend_id)
+
+        if obs is None:
+            return None
+
+        with graceful("ObsLogger.log_campaign_start failed"):
+            obs.log_campaign_start(
+                campaign_id=obs_campaign_id,
+                config=config_snapshot,
+                baseline_accuracy=baseline_accuracy,
+                session_id=langfuse_session_id,
+            )
+        with graceful("Dataset registration failed"):
+            dataset_item_map = obs.register_dataset(DATASET_NAME, dataset)
+            if dataset_item_map:
+                logger.debug(
+                    "Registered %d dataset items for '%s'",
+                    len(dataset_item_map),
+                    DATASET_NAME,
+                )
+        return obs
+
+    def end_campaign(
+        self,
+        obs_campaign_id: str,
+        *,
+        best_accuracy: float,
+        n_rounds: int,
+        stop_reason: str,
+        best_round: int,
+    ) -> str | None:
+        """Log campaign end, flush, return the cloud trace id.
+
+        Wraps the sequence in :func:`graceful` so the caller never sees
+        observability errors.  Returns the cloud Langfuse trace id (or
+        ``None`` if obs is file-only or the flush failed).
+        """
+        from promptpotter.shared.errors import graceful
+
+        cloud_trace_id: str | None = None
+        with graceful("ObsLogger campaign end failed"):
+            self.log_campaign_end(
+                campaign_id=obs_campaign_id,
+                best_accuracy=best_accuracy,
+                n_rounds=n_rounds,
+                stop_reason=stop_reason,
+                best_round=best_round,
+            )
+            self.flush()
+            cloud_trace_id = self.get_cloud_trace_id(obs_campaign_id)
+        return cloud_trace_id
+
     def log_campaign_start(
         self,
         campaign_id: str,

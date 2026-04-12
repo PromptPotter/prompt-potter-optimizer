@@ -323,64 +323,74 @@ def _print_sp_diff(
 
 
 def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
-    state.max_rounds = d.get("max_rounds", 0)
-    state.patience = d.get("patience", 0)
-    state.baseline_accuracy = d.get("baseline_accuracy", 0.0)
-    state.original_sp_flat = _flatten_sp_summary(
-        d.get("pipeline_params"),
-    )
-    state.node_param_keys = d.get("node_param_keys")
+    config = d["config"]
+    dataset = d["dataset"]
+    schema = config.pipeline_schema
 
-    model = d.get("model", "(default)")
-    l2 = "enabled" if d.get("enable_l2") else "disabled"
-    l3 = "enabled" if d.get("enable_l3") else "disabled"
-    scan = "YES" if d.get("has_scan_brief") else "NO"
+    state.max_rounds = config.max_rounds or 0
+    state.patience = config.l1_patience
+    state.original_sp_flat = _flatten_sp_summary(
+        schema.to_pipeline_params() if schema else None,
+    )
+    state.node_param_keys = (
+        {s: sorted(k) for s, k in schema.node_param_keys().items()} if schema else None
+    )
+
+    model = config.model or "(default)"
+    l2 = "enabled" if config.enable_l2 else "disabled"
+    l3 = "enabled" if config.enable_l3 else "disabled"
+    scan = "YES" if config.scan_brief is not None else "NO"
+    sample = config.sp_budget_ttest
+    state.baseline_total = sample
 
     print()
     print(_dbox_top())
     print(_dbox_line(f"{BOLD}FEEDBACK CYCLE STARTING{RESET}"))
     print(_dbox_sep())
-    print(_dbox_line(f"Baseline       {d.get('baseline_accuracy', 0):.1%}"))
     print(
         _dbox_line(f"Max rounds     {state.max_rounds or 999!s:<15s}Patience    {state.patience}")
     )
-    print(_dbox_line(f"Candidates     {d.get('n_variants', 0)}"))
-    sample = d.get("sp_budget_ttest", 20)
-    total = d.get("dataset_count", 0)
-    state.baseline_total = sample
-    sample_label = f"{sample} of {total}"
+    print(_dbox_line(f"Candidates     {config.n_variants}"))
+    sample_label = f"{sample} of {len(dataset)}"
     mde = min_detectable_effect(sample)
     print(_dbox_line(f"Sample size    {sample_label}"))
     print(_dbox_line(f"Min detectable {YELLOW}\u00b1{mde:.1%}{RESET} (\u03b1=0.05, 80% power)"))
     print(_dbox_line(f"Model          {model}"))
     print(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
     print(_dbox_line(f"Scan context   {scan}"))
-    critique = "enabled" if d.get("enable_critique") else "disabled"
+    critique = "enabled" if config.enable_critique else "disabled"
     print(_dbox_line(f"Critique       {critique}"))
     print(_dbox_bottom())
 
 
 def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
-    cycle_id = d.get("cycle_id", "?")[:12]
-    samples = d.get("sample_count", "?")
-    obs = "ON" if d.get("obs_enabled") else "OFF"
-    print(f"  {GREEN}✓{RESET} Initialized  cycle={cycle_id}  samples={samples}  obs={obs}")
-    crit = d.get("critique_text", "")
+    loop_state = d["state"]
+    state.baseline_accuracy = loop_state.current_accuracy
+    cycle_id = (loop_state.cycle_id or "?")[:12]
+    samples = len(loop_state.scoring_dataset)
+    obs = "ON" if (loop_state.scoring_ctx and loop_state.scoring_ctx.obs) else "OFF"
+    print(
+        f"  {GREEN}\u2713{RESET} Initialized  baseline={loop_state.current_accuracy:.1%}  "
+        f"cycle={cycle_id}  samples={samples}  obs={obs}"
+    )
+    crit = loop_state.opt_sp.critique_text
     if crit:
         preview = crit.replace("\n", " ").strip()
         if len(preview) > 80:
             preview = preview[:77] + "..."
         print(f"    {CYAN}Bootstrap critique:{RESET} {preview}")
-    resumed = d.get("resumed_from_round", 0)
+    resumed = loop_state.resumed_from_round
     if resumed > 0:
-        rs = d.get("restored_state", {})
         state_parts = []
-        if rs.get("critique_chars"):
-            state_parts.append(f"critique={rs['critique_chars']} chars")
-        if rs.get("task_context_keys"):
-            state_parts.append(f"task_context={rs['task_context_keys']} keys")
-        if rs.get("l2_round"):
-            state_parts.append(f"l2_round={rs['l2_round']}")
+        critique_chars = len(loop_state.opt_sp.critique_text)
+        task_context_keys = len(loop_state.opt_sp.task_context)
+        l2_round = loop_state.escalation.l2_round
+        if critique_chars:
+            state_parts.append(f"critique={critique_chars} chars")
+        if task_context_keys:
+            state_parts.append(f"task_context={task_context_keys} keys")
+        if l2_round:
+            state_parts.append(f"l2_round={l2_round}")
         state_suffix = f"  ({', '.join(state_parts)})" if state_parts else ""
         print(f"    Resumed from round {resumed} ({resumed} rounds cached){state_suffix}")
     else:

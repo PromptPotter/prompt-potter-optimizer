@@ -37,22 +37,24 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     must produce all CAMPAIGN_SESSION_ARTIFACTS."""
     from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
-    from promptpotter.infrastructure.persistence.state import PhaseEvent, RoundResult
+    from promptpotter.infrastructure.persistence.state import LoopState, PhaseEvent, RoundResult
 
     config = LoopConfig(
         backend_id="test_backend",
         session_id="test_session",
         max_rounds=5,
+        l1_patience=3,
     )
     emitter = CampaignPersistenceEmitter(session_dir, config)
 
     # Simulate a single round lifecycle
+    init_state = LoopState(current_accuracy=0.5, cycle_id="cycle_test_001")
     emitter.on_phase(
         PhaseEvent(
             phase="init",
             event="exit",
             round=0,
-            data={"cycle_id": "cycle_test_001", "baseline_accuracy": 0.5, "patience": 3},
+            data={"state": init_state, "config": config},
         )
     )
     emitter.on_phase(

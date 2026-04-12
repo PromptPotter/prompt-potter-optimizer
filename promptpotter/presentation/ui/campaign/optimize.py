@@ -395,10 +395,12 @@ async def run_optimization_notebook(
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             _query_counter[0] = 0
         # On resume: clear stale optimization rounds before replay re-appends them
-        if event.phase == CampaignPhase.INIT and event.event == "exit":
-            resumed = event.data.get("resumed_from_round", 0)
-            if resumed > 0:
-                del campaign_rounds[initial_len:]
+        if (
+            event.phase == CampaignPhase.INIT
+            and event.event == "exit"
+            and event.data["state"].resumed_from_round > 0
+        ):
+            del campaign_rounds[initial_len:]
 
     def _on_query(
         cand_idx: int, n_cands: int, query_idx: int, n_queries: int, result: dict

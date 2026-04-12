@@ -35,8 +35,6 @@ from promptpotter.infrastructure.persistence.state import (
     PhaseEvent,
     emit_phase,
 )
-from promptpotter.shared.constants import DATASET_NAME
-from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
@@ -102,30 +100,7 @@ async def init_cycle_state(
     ``build_persistence_emitter`` — keeping it out of ``init_cycle_state``
     means the function only mutates ``LoopState``.
     """
-    emit_phase(
-        on_phase,
-        CampaignPhase.INIT,
-        "enter",
-        max_rounds=config.max_rounds,
-        patience=config.l1_patience,
-        n_variants=config.n_variants,
-        model=config.model or "(default)",
-        sample_size=config.sp_budget_ttest,
-        enable_l2=config.enable_l2,
-        enable_l3=config.enable_l3,
-        dataset_count=len(dataset),
-        baseline_accuracy=baseline_accuracy,
-        has_scan_brief=config.scan_brief is not None,
-        enable_critique=config.enable_critique,
-        pipeline_params=config.pipeline_schema.to_pipeline_params()
-        if config.pipeline_schema
-        else None,
-        node_param_keys=(
-            {s: sorted(k) for s, k in config.pipeline_schema.node_param_keys().items()}
-            if config.pipeline_schema
-            else None
-        ),
-    )
+    emit_phase(on_phase, CampaignPhase.INIT, "enter", config=config, dataset=dataset)
 
     if session is None:
         raise ValueError("session (SessionEnv) is required for init_cycle_state")
@@ -148,8 +123,7 @@ async def init_cycle_state(
     campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id = init_campaign(
         config,
         dataset,
-        baseline_osp.prompt_field_dict(),
-        baseline_prompt_fields,
+        baseline_osp,
         baseline_accuracy,
         started_at,
         cycle_id_override=cycle_id,
@@ -193,30 +167,9 @@ async def init_cycle_state(
     if state.scoring_ctx and search_memory:
         state.scoring_ctx.search_memory = search_memory
 
-    # Build restored state summary for display
-    _restored = {}
-    if resumed_from_round:
-        _restored = {
-            "critique_chars": len(state.opt_sp.critique_text),
-            "task_context_keys": len(state.opt_sp.task_context),
-            "escalation_journal_entries": len(state.opt_sp.escalation_journal),
-            "l2_round": state.escalation.l2_round,
-        }
-
-    emit_phase(
-        on_phase,
-        CampaignPhase.INIT,
-        "exit",
-        cycle_id=cycle_id,
-        resumed_from_round=resumed_from_round,
-        baseline_accuracy=baseline_accuracy,
-        obs_enabled=obs is not None,
-        sample_count=len(scoring_dataset),
-        enable_critique=config.enable_critique,
-        restored_state=_restored,
-    )
-
-    # Populate infrastructure fields on state
+    # Populate infrastructure fields on state before INIT:exit so that
+    # downstream phase consumers (display, persistence emitter) can read
+    # cycle_id / scoring_dataset / resumed_from_round off the state ref.
     state.campaign_store = campaign_store
     state.cycle_id = cycle_id
     state.obs_campaign_id = obs_campaign_id
@@ -224,6 +177,14 @@ async def init_cycle_state(
     state.degradation_checks = degradation_checks
     state.resumed_from_round = resumed_from_round
 
+    emit_phase(
+        on_phase,
+        CampaignPhase.INIT,
+        "exit",
+        state=state,
+        config=config,
+        dataset=dataset,
+    )
     return state
 
 
@@ -235,8 +196,7 @@ async def init_cycle_state(
 def init_campaign(
     config: LoopConfig,
     dataset: list[dict],
-    current_ps: dict,
-    baseline_prompt_fields: dict | None,
+    baseline_osp: OptSearchPoint,
     baseline_accuracy: float,
     started_at: str,
     *,
@@ -245,15 +205,11 @@ def init_campaign(
 ) -> tuple[CampaignStore | None, str | None, int, ObsLogger | None, str]:
     """Resume/create campaign + init observability in one call.
 
-    Returns:
-        (campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id)
+    Returns ``(campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id)``.
     """
-    from promptpotter.infrastructure.tracing.observability_logger import (
-        ObsLogger,  # lazy: heavy dep
-    )
+    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
 
-    # --- Resume detection ---
-    campaign_store = None
+    campaign_store: CampaignStore | None = None
     cycle_id: str | None = None
     resumed_from_round = 0
 
@@ -261,88 +217,35 @@ def init_campaign(
         try:
             from promptpotter.infrastructure.store.campaign_store import CampaignStore
 
-            store_base = Path(config.project_root)
-            campaign_store = CampaignStore(store_base)
-
-            if cycle_id_override:
-                cycle_id = cycle_id_override
-            else:
-                bl_ps = baseline_prompt_fields if baseline_prompt_fields is not None else current_ps
-                bl_osp = (
-                    OptSearchPoint.from_prompt_fields(bl_ps) if isinstance(bl_ps, dict) else bl_ps
-                )
-                cycle_id = cycle_config_identity(
-                    config, bl_osp.render(), dataset, strict=config.strict_cycle_identity
-                )
+            campaign_store = CampaignStore(Path(config.project_root))
+            cycle_id = cycle_id_override or cycle_config_identity(
+                config, baseline_osp.render(), dataset, strict=config.strict_cycle_identity
+            )
             logger.debug("Cycle identity: %s", cycle_id)
-
-            existing = campaign_store.load(config.backend_id, cycle_id)
-            if existing is not None:
-                if cycle_id_override:
-                    stored_cfg = existing.get("config", {})
-                    if stored_cfg:
-                        current_cfg = config.model_dump(mode="json")
-                        cfg_updated = False
-                        for k in TUNING_KEYS:
-                            if stored_cfg.get(k) != current_cfg.get(k):
-                                stored_cfg[k] = current_cfg.get(k)
-                                cfg_updated = True
-                        if cfg_updated:
-                            campaign_store.update(
-                                config.backend_id,
-                                cycle_id,
-                                {"config": stored_cfg},
-                            )
-                            logger.info("Updated loop-control config for %s", cycle_id)
-                resumed_from_round = len(existing.get("trials", []))
-                if resumed_from_round:
-                    logger.debug(
-                        "Resuming cycle %s — %d prior round(s) on disk",
-                        cycle_id,
-                        resumed_from_round,
-                    )
-            else:
-                campaign_store.create(
-                    config.backend_id,
-                    cycle_id,
-                    {
-                        "type": "optimization_loop",
-                        "config": config.model_dump(mode="json"),
-                        "baseline_accuracy": baseline_accuracy,
-                    },
-                )
+            resumed_from_round = campaign_store.resume_or_create(
+                config.backend_id,
+                cycle_id,
+                config_snapshot=config.model_dump(mode="json"),
+                baseline_accuracy=baseline_accuracy,
+                hot_update_keys=TUNING_KEYS if cycle_id_override else frozenset(),
+            )
         except (OSError, json.JSONDecodeError, KeyError):
             logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
             campaign_store, cycle_id, resumed_from_round = None, None, 0
 
-    # --- Derive obs campaign ID ---
     if not langfuse_session_id and cycle_id:
         langfuse_session_id = cycle_id
     obs_campaign_id = cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
 
-    # --- Observability init ---
-    obs: ObsLogger | None = None
-    if config.project_root and config.backend_id:
-        with graceful("Failed to create ObsLogger"):
-            obs = ObsLogger(config.project_root, config.backend_id)
-
-    if obs:
-        with graceful("ObsLogger.log_campaign_start failed"):
-            obs.log_campaign_start(
-                campaign_id=obs_campaign_id,
-                config=config.model_dump(mode="json"),
-                baseline_accuracy=baseline_accuracy,
-                session_id=langfuse_session_id,
-            )
-        with graceful("Dataset registration failed"):
-            dataset_item_map = obs.register_dataset(DATASET_NAME, dataset)
-            if dataset_item_map:
-                logger.debug(
-                    "Registered %d dataset items for '%s'",
-                    len(dataset_item_map),
-                    DATASET_NAME,
-                )
-
+    obs = ObsLogger.start_campaign(
+        config.project_root,
+        config.backend_id,
+        config_snapshot=config.model_dump(mode="json"),
+        baseline_accuracy=baseline_accuracy,
+        dataset=dataset,
+        obs_campaign_id=obs_campaign_id,
+        langfuse_session_id=langfuse_session_id,
+    )
     return campaign_store, cycle_id, resumed_from_round, obs, obs_campaign_id
 
 
@@ -363,37 +266,24 @@ def finalize_campaign(
     *,
     status: str = "completed",
 ) -> str | None:
-    """Mark campaign on disk and finalize observability.
-
-    Returns:
-        Cloud Langfuse trace ID (or None).
-    """
+    """Mark campaign on disk and finalize observability. Returns cloud trace id."""
     if campaign_store and cycle_id:
-        with graceful("Campaign completion update failed"):
-            campaign_store.update(
-                config.backend_id,
-                cycle_id,
-                {
-                    "status": status,
-                    "stop_reason": stop_reason,
-                    "best_accuracy": state.best_accuracy,
-                    "best_round": state.best_round,
-                    "n_rounds": len(state.rounds),
-                    "finished_at": finished_at,
-                },
-            )
-
-    cloud_trace_id: str | None = None
+        campaign_store.mark_finished(
+            config.backend_id,
+            cycle_id,
+            status=status,
+            stop_reason=stop_reason,
+            best_accuracy=state.best_accuracy,
+            best_round=state.best_round,
+            n_rounds=len(state.rounds),
+            finished_at=finished_at,
+        )
     if obs:
-        with graceful("ObsLogger campaign end failed"):
-            obs.log_campaign_end(
-                campaign_id=obs_campaign_id,
-                best_accuracy=state.best_accuracy,
-                n_rounds=len(state.rounds),
-                stop_reason=stop_reason,
-                best_round=state.best_round,
-            )
-            obs.flush()
-            cloud_trace_id = obs.get_cloud_trace_id(obs_campaign_id)
-
-    return cloud_trace_id
+        return obs.end_campaign(
+            obs_campaign_id,
+            best_accuracy=state.best_accuracy,
+            n_rounds=len(state.rounds),
+            stop_reason=stop_reason,
+            best_round=state.best_round,
+        )
+    return None

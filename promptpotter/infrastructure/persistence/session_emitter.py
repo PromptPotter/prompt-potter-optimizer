@@ -193,9 +193,11 @@ class CampaignPersistenceEmitter:
 
         phase, data = event.phase, event.data
         if phase == CampaignPhase.INIT and event.event == "exit":
-            s["cycle_id"] = data.get("cycle_id")
-            s["baseline"] = data.get("baseline_accuracy", 0.0)
-            self._patience_max = int(data.get("patience", self._patience_max))
+            loop_state = data["state"]
+            config = data["config"]
+            s["cycle_id"] = loop_state.cycle_id
+            s["baseline"] = loop_state.current_accuracy
+            self._patience_max = config.l1_patience
             s["patience"] = f"0/{self._patience_max}"
         elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             s["round"] = data.get("round", s["round"])

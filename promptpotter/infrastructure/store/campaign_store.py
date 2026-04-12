@@ -76,6 +76,88 @@ class CampaignStore(EntityStore):
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(path, data)
 
+    def resume_or_create(
+        self,
+        backend_id: str,
+        cycle_id: str,
+        *,
+        config_snapshot: dict[str, Any],
+        baseline_accuracy: float,
+        hot_update_keys: frozenset[str] = frozenset(),
+    ) -> int:
+        """Resume an existing cycle or create a new one.
+
+        Returns ``resumed_from_round`` — the number of trial files already
+        on disk (0 for a fresh cycle).  If the cycle exists and
+        ``hot_update_keys`` is non-empty, merge those keys from
+        ``config_snapshot`` into the stored config before returning.
+        """
+        existing = self.load(backend_id, cycle_id)
+        if existing is not None:
+            if hot_update_keys:
+                stored_cfg = existing.get("config", {})
+                if stored_cfg:
+                    cfg_updated = False
+                    for k in hot_update_keys:
+                        if stored_cfg.get(k) != config_snapshot.get(k):
+                            stored_cfg[k] = config_snapshot.get(k)
+                            cfg_updated = True
+                    if cfg_updated:
+                        self.update(backend_id, cycle_id, {"config": stored_cfg})
+                        logger.info("Updated loop-control config for %s", cycle_id)
+            resumed_from_round = len(existing.get("trials", []))
+            if resumed_from_round:
+                logger.debug(
+                    "Resuming cycle %s — %d prior round(s) on disk",
+                    cycle_id,
+                    resumed_from_round,
+                )
+            return resumed_from_round
+
+        self.create(
+            backend_id,
+            cycle_id,
+            {
+                "type": "optimization_loop",
+                "config": config_snapshot,
+                "baseline_accuracy": baseline_accuracy,
+            },
+        )
+        return 0
+
+    def mark_finished(
+        self,
+        backend_id: str,
+        cycle_id: str,
+        *,
+        status: str,
+        stop_reason: str,
+        best_accuracy: float,
+        best_round: int,
+        n_rounds: int,
+        finished_at: str,
+    ) -> None:
+        """Write the terminal status/stop_reason + outcome summary to disk.
+
+        Wraps the underlying :meth:`update` in :func:`graceful` so finalize
+        paths never raise on store I/O errors.
+        """
+        from promptpotter.shared.errors import graceful
+
+        with graceful("Campaign completion update failed"):
+            self.update(
+                backend_id,
+                cycle_id,
+                {
+                    "status": status,
+                    "stop_reason": stop_reason,
+                    "best_accuracy": best_accuracy,
+                    "best_round": best_round,
+                    "n_rounds": n_rounds,
+                    "finished_at": finished_at,
+                },
+            )
+
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return summary for every campaign under *backend_id*."""
         campaigns_dir = self._entity_dir(backend_id)
