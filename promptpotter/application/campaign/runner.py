@@ -393,7 +393,6 @@ async def _init_optimization(
         resolved_cycle_id,
         max_consecutive_errors=config.max_consecutive_errors,
         stale_data_load_protocol=config.stale_data_load_protocol,
-        stale_data_observations=state.opt_sp.stale_data_observations,
         scoring_formula=config.scoring_formula,
     )
     if session.store:

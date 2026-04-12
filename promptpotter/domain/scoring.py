@@ -62,7 +62,6 @@ class QueryResultFull(QueryResult, total=False):
     degraded_observed: bool
     degraded_obs_count: int
     degraded_obs_threshold: int
-    rerun_prior_outcome: dict[str, Any] | None
     switched_out: bool
     persistently_degraded: bool
 
@@ -125,8 +124,6 @@ class ScoringEnv:
     # Stale data load protocol — optimizer pipeline node sequence
     stale_data_load_protocol: list[str] | None = None
     search_memory: SearchMemory | None = None
-    # Mutable dict extracted from opt_sp.stale_data_observations — updated during eval
-    stale_data_observations: dict[str, int | dict] | None = None
     # Per-dataset scoring formula (compiled callable from shared/scoring.py)
     scorer: Scorer | None = None
     # Graceful-stop hook: scorer checks between queries; caller owns the flag source.
@@ -145,7 +142,6 @@ class ScoringEnv:
         *,
         max_consecutive_errors: int,
         stale_data_load_protocol: list[str] | None,
-        stale_data_observations: dict[str, int | dict] | None,
         scoring_formula: str | None,
     ) -> ScoringEnv:
         """Build a ScoringEnv for an optimization-loop run.
@@ -169,7 +165,6 @@ class ScoringEnv:
             experiment_id=derived_experiment_id,
             max_consecutive_errors=max_consecutive_errors,
             stale_data_load_protocol=stale_data_load_protocol,
-            stale_data_observations=stale_data_observations,
             scorer=compile_scorer(scoring_formula),
         )
 

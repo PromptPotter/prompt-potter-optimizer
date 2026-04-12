@@ -359,7 +359,7 @@ SessionEnv (dataclass)                       ← session-scoped infra bundle
 | **CampaignConfig** | `campaign/config.py` | User (notebook/CLI) | Session | Yes (`configure_pipeline` sets `pipeline_params`) | No (stored in campaign metadata) |
 | **RunConfig** | `campaign/config.py` | `from_campaign_config()` | Campaign | No (immutable Pydantic model) | No |
 | **SessionEnv** | `campaign/campaign_setup.py` | `init_services()` | Session | Rarely (`pipeline_schema` filtered) | No |
-| **ScoringEnv** | `domain/scoring.py` | `init_cycle_state()` | Cycle | `stale_data_observations` per eval | No |
+| **ScoringEnv** | `domain/scoring.py` | `init_cycle_state()` | Cycle | No (pure infra bundle) | No |
 | **LoopState** | `campaign/state.py` | `cycle_init._build_baseline_state()` | Cycle | Intensely (every round) | Yes (`opt_sp` + escalation) |
 | **CritiqueContext** | `campaign/nodes/critique.py` | `execute_round()` | Per-round | No (read-only stats) | No |
 | **ContextData** | `campaign/nodes/formatting.py` | `l1_generate()` | Per-generation | No (formatting input) | No |

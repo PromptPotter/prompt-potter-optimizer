@@ -206,10 +206,6 @@ class OptSearchPoint(PromptTemplate):
         False,
         description="One-shot flag — True after backend warning has been emitted.",
     )
-    stale_data_observations: dict[str, int | dict] = Field(
-        default_factory=dict,
-        description="Per-query degradation state {query: {obs_count, last_rerun} | int}.",
-    )
 
     # Canonical list of optimization memory fields.
     # derive_candidate() intentionally omits these (L1 candidates start fresh).
@@ -222,7 +218,6 @@ class OptSearchPoint(PromptTemplate):
         "l2_directive",
         "degradation_reset_count",
         "backend_warning_emitted",
-        "stale_data_observations",
     )
 
     def record_escalation_event(

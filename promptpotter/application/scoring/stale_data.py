@@ -71,7 +71,6 @@ async def execute_stale_data_protocol(
     intermediate_cache: IntermediateCache | None = None,
     backend_id: str = "",
     search_memory: SearchMemory | None = None,
-    stale_data_observations: dict[str, int | dict] | None = None,
     stop_check: Callable[[], bool] | None = None,
     scorer: Callable[[dict], float] | None = None,
 ) -> tuple[dict[str, Any], str]:
@@ -81,6 +80,10 @@ async def execute_stale_data_protocol(
     ``optimizer_pipeline.json``.  The protocol step list and all thresholds
     live on that single node — tunable via ``param_keys`` when PromptPotter
     self-optimizes.
+
+    Observation counts come from SearchMemory (``query_degradation_count``),
+    which ingests from dataset_runs at round boundaries. Within a round the
+    count is constant; no mutable state is passed through the scorer.
 
     Returns ``(result_dict, step_taken)`` where *step_taken* is the step
     that resolved the query, or ``"exhausted"``.
@@ -98,22 +101,17 @@ async def execute_stale_data_protocol(
             return {**result, "cached": result.get("cached", False)}, "interrupted"
         if step == "rerun":
             trigger_count = cfg.get("rerun_trigger_count", 3)
-            obs_entry = (stale_data_observations or {}).get(query, 0)
-            obs_count = obs_entry.get("obs_count", 0) if isinstance(obs_entry, dict) else obs_entry
-            last_rerun = obs_entry.get("last_rerun") if isinstance(obs_entry, dict) else None
-            if obs_count < trigger_count:
-                if stale_data_observations is not None:
-                    stale_data_observations[query] = {
-                        "obs_count": obs_count + 1,
-                        "last_rerun": last_rerun,
-                    }
+            # Historical count through last SearchMemory refresh (previous round).
+            # The current observation bumps the effective count by 1.
+            historical = search_memory.query_degradation_count(query) if search_memory else 0
+            effective_count = historical + 1
+            if effective_count < trigger_count:
                 return {
                     **cached_result,
                     "cached": cached_result.get("cached", False),
                     "degraded_observed": True,
-                    "degraded_obs_count": obs_count + 1,
+                    "degraded_obs_count": effective_count,
                     "degraded_obs_threshold": trigger_count,
-                    "rerun_prior_outcome": last_rerun,
                 }, "below_threshold"
 
             result = dict(
@@ -127,17 +125,9 @@ async def execute_stale_data_protocol(
                     scorer=scorer,
                 )
             )
-            comparison = compare_rerun(cached_result, result)
             result["retry_of_degraded"] = True
-            result["rerun_comparison"] = comparison
-            if stale_data_observations is not None:
-                stale_data_observations[query] = {
-                    "obs_count": obs_count,
-                    "last_rerun": comparison,
-                }
+            result["rerun_comparison"] = compare_rerun(cached_result, result)
             if not is_degraded(result):
-                if stale_data_observations is not None:
-                    stale_data_observations.pop(query, None)
                 return result, "rerun"
 
         elif step == "samplescan":

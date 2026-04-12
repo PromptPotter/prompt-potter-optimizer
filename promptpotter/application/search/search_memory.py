@@ -202,6 +202,10 @@ class SearchMemory:
             return 0.0
         return self._query_degradation_counts.get(query, 0) / n_measurements
 
+    def query_degradation_count(self, query: str) -> int:
+        """Return total number of past evaluations where *query* was degraded."""
+        return self._query_degradation_counts.get(query, 0)
+
     # --- Failure Modes ---
 
     def bottleneck_distribution(self) -> dict[str, float]:

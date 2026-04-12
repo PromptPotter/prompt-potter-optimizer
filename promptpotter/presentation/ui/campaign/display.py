@@ -389,13 +389,9 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     elif r.get("degraded_observed"):
         obs = r.get("degraded_obs_count", "?")
         threshold = r.get("degraded_obs_threshold", "?")
-        prior = r.get("rerun_prior_outcome")
-        prior_str = ""
-        if prior:
-            prior_str = f" | prior rerun: {prior['hit_change']}"
-            if prior.get("rank_change"):
-                prior_str += f" rank {prior['rank_change']}"
-        line += f"\n{_ann_indent}{DIM}\u21a9 degraded observed ({obs}/{threshold} toward rerun){prior_str}{RESET}"
+        line += (
+            f"\n{_ann_indent}{DIM}\u21a9 degraded observed ({obs}/{threshold} toward rerun){RESET}"
+        )
 
     return line
 

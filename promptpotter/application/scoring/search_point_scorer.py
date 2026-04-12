@@ -122,7 +122,6 @@ async def _run_query_loop(
                     intermediate_cache=intermediate_cache,
                     backend_id=ctx.backend_id,
                     search_memory=ctx.search_memory,
-                    stale_data_observations=ctx.stale_data_observations,
                     scorer=ctx.scorer,
                     stop_check=ctx.stop_check,
                 )

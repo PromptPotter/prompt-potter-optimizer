@@ -278,7 +278,7 @@ When a cached eval result is degraded (non-empty `diagnostics.warnings`), the pr
 | **samplescan** | Re-evaluate with default params | Default-config not degraded |
 | **sampleswitch** | Check SearchMemory degradation rate | Rate exceeds threshold → exclude |
 
-If all steps fail, result is marked `persistently_degraded` and passed through. Observation counts persisted on `OptSearchPoint.stale_data_observations`.
+If all steps fail, result is marked `persistently_degraded` and passed through. Observation counts come from `SearchMemory.query_degradation_count`, which is populated at round boundaries by ingesting `dataset_runs/`.
 
 ---
 
